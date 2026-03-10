@@ -5,6 +5,8 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
+from flask import current_app
+
 from .constants import (
     HOUSEKEEPING_STATUS_CODES,
     PERMISSION_SEEDS,
@@ -32,7 +34,13 @@ from .settings import APP_SETTINGS_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOC
 
 
 def seed_all(inventory_days: int = 730) -> None:
-    seed_roles_permissions()
+    seed_reference_data(sync_existing_roles=True)
+    bootstrap_inventory_horizon(date.today(), inventory_days)
+    db.session.commit()
+
+
+def seed_reference_data(*, sync_existing_roles: bool = False) -> None:
+    seed_roles_permissions(sync_existing_roles=sync_existing_roles)
     seed_housekeeping_statuses()
     room_types = seed_room_types()
     seed_rooms(room_types)
@@ -42,11 +50,9 @@ def seed_all(inventory_days: int = 730) -> None:
     seed_notification_templates()
     seed_initial_admin()
     db.session.commit()
-    bootstrap_inventory_horizon(date.today(), inventory_days)
-    db.session.commit()
 
 
-def seed_roles_permissions() -> None:
+def seed_roles_permissions(*, sync_existing_roles: bool = True) -> None:
     for code, name, description, module in PERMISSION_SEEDS:
         permission = Permission.query.filter_by(code=code).first()
         if not permission:
@@ -62,6 +68,7 @@ def seed_roles_permissions() -> None:
     permissions = {permission.code: permission for permission in Permission.query.all()}
     for code, name, description, is_system_role, sort_order in ROLE_SEEDS:
         role = Role.query.filter_by(code=code).first()
+        role_created = False
         if not role:
             role = Role(
                 code=code,
@@ -72,7 +79,9 @@ def seed_roles_permissions() -> None:
             )
             db.session.add(role)
             db.session.flush()
-        role.permissions = [permissions[item] for item in ROLE_PERMISSION_SEEDS[code]]
+            role_created = True
+        if role_created or sync_existing_roles:
+            role.permissions = [permissions[item] for item in ROLE_PERMISSION_SEEDS[code]]
 
 
 def seed_housekeeping_statuses() -> None:
@@ -203,8 +212,10 @@ def seed_app_settings() -> None:
 
 
 def seed_initial_admin() -> None:
-    admin_email = os.getenv("ADMIN_EMAIL", "admin@sandbox.local")
-    admin_password = os.getenv("ADMIN_PASSWORD", "sandbox-admin-123")
+    admin_email = str(current_app.config.get("ADMIN_EMAIL") or os.getenv("ADMIN_EMAIL") or "").strip()
+    admin_password = str(current_app.config.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or "")
+    if not admin_email or not admin_password.strip():
+        raise RuntimeError("ADMIN_EMAIL and ADMIN_PASSWORD are required to bootstrap the initial admin account.")
     user = User.query.filter_by(email=admin_email).first()
     if user:
         return

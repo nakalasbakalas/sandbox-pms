@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 from datetime import date, timedelta
 from pathlib import Path
@@ -25,6 +26,7 @@ from pms.models import (
     StaffNotification,
 )
 from pms.seeds import seed_all
+from pms.services.payment_integration_service import create_or_reuse_deposit_request
 from pms.services.public_booking_service import (
     HoldRequestPayload,
     PublicBookingPayload,
@@ -342,7 +344,30 @@ def test_multilingual_content_renders_for_booking_flow(app_factory):
     client = app.test_client()
     response = client.get("/availability?lang=zh-Hans")
     assert response.status_code == 200
-    assert "查询可订房型" in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert "查询可订房型" in body
+    assert "实时房态" in body
+    assert "入住日期" in body
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_snippets"),
+    [
+        ("/?lang=zh-Hans", ["房型", "官网直订", "预订协助"]),
+        ("/booking/cancel?lang=zh-Hans", ["客人自助服务", "取消申请", "提交申请"]),
+        ("/booking/modify?lang=zh-Hans", ["客人自助服务", "修改申请", "提交申请"]),
+    ],
+)
+def test_guest_self_service_pages_render_translated_copy(app_factory, path, expected_snippets):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get(path)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    for snippet in expected_snippets:
+        assert snippet in body
 
 
 def test_booking_source_tracking_is_persisted(app_factory):
@@ -448,7 +473,112 @@ def test_confirmation_page_uses_reservation_language_without_query_string(app_fa
     )
 
     assert response.status_code == 200
-    assert '<html lang="zh-Hans">' in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert '<html lang="zh-Hans">' in body
+    assert "客人" in body
+    assert "申请修改" in body
+
+
+def test_public_booking_form_renders_translated_labels(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+
+    response = post_form(
+        client,
+        "/booking/hold",
+        data={
+            "room_type_id": str(twin.id),
+            "check_in_date": str(date.today() + timedelta(days=7)),
+            "check_out_date": str(date.today() + timedelta(days=9)),
+            "adults": "2",
+            "children": "0",
+            "language": "zh-Hans",
+            "source_channel": "direct_web",
+            "idempotency_key": "route-hold-zh-form",
+            "email": "route-zh@example.com",
+        },
+        follow_redirects=True,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "最后一步" in body
+    assert "手机号码" in body
+    assert "预订条款" in body
+
+
+def test_public_payment_return_renders_translated_labels(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(
+            make_hold_payload(
+                twin.id,
+                language="zh-Hans",
+                idempotency_key="zh-payment-hold",
+                guest_email="zh-payment@example.com",
+            )
+        )
+        reservation = confirm_public_booking(
+            make_booking_payload(
+                hold.hold_code,
+                idempotency_key="zh-payment-hold",
+                language="zh-Hans",
+                email="zh-payment@example.com",
+            )
+        )
+        request_row = create_or_reuse_deposit_request(
+            reservation.id,
+            actor_user_id=None,
+            send_email=False,
+            language="zh-Hans",
+            source="test",
+        )
+
+    response = client.get(
+        f"/payments/return/{request_row.request_code}?reservation_code={reservation.reservation_code}&token={reservation.public_confirmation_token}"
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert '<html lang="zh-Hans">' in body
+    assert "付款状态" in body
+    assert "押金" in body
+
+
+def test_public_pages_use_token_free_og_url(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get("/availability?lang=en&utm_source=google_business")
+    body = response.get_data(as_text=True)
+    og_url_match = re.search(r'<meta property="og:url" content="([^"]+)">', body)
+    canonical_match = re.search(r'<link rel="canonical" href="([^"]+)">', body)
+
+    assert response.status_code == 200
+    assert og_url_match is not None
+    assert og_url_match.group(1).endswith("/availability")
+    assert "?" not in og_url_match.group(1)
+    assert canonical_match is not None
+    assert canonical_match.group(1).endswith("/availability")
+    assert "?" not in canonical_match.group(1)
+
+
+@pytest.mark.parametrize("path", ["/booking/cancel?lang=en", "/booking/modify?lang=en"])
+def test_sensitive_guest_pages_suppress_social_metadata(app_factory, path):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get(path)
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'property="og:type"' not in body
+    assert 'property="og:title"' not in body
+    assert 'property="og:url"' not in body
 
 
 def test_homepage_does_not_render_guest_booking_data(app_factory):

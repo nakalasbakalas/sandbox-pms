@@ -6,8 +6,8 @@
   {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
   <form class="stack-form" method="post">
     {{ csrf_input() }}
-    <label><span>Email or username</span><input type="text" name="username" required></label>
-    <label><span>Password</span><input type="password" name="password" required></label>
+    <label><span>Email or username</span><input type="text" name="username" autocomplete="username" required></label>
+    <label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
     <button class="button" type="submit">Sign in</button>
   </form>
   <div class="actions">

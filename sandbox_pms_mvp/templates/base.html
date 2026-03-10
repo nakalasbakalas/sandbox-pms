@@ -1,15 +1,27 @@
 <!doctype html>
 <html lang="{{ current_language }}">
 <head>
+  {% set suppress_social_metadata = request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="{{ hotel_name }} direct booking with live availability, secure confirmation, and guest self-service support.">
+  <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
   <meta name="theme-color" content="#11324d">
-  <meta name="robots" content="{% if request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}noindex, nofollow{% else %}index, follow{% endif %}">
+  <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
+  <link rel="icon" href="{{ hotel_logo_url or url_for('static', filename='favicon.ico') }}">
+  {% if not suppress_social_metadata %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ hotel_name }}">
+  <meta property="og:title" content="{% block og_title %}{{ hotel_name }}{% endblock %}">
+  <meta property="og:description" content="{{ hotel_name }} {{ t('meta_description') }}">
+  {% if hotel_logo_url %}<meta property="og:image" content="{{ hotel_logo_url }}">{% endif %}
+  <meta property="og:url" content="{{ request.base_url }}">
+  {% endif %}
+  <link rel="canonical" href="{{ request.base_url }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
+  <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
   <header class="site-header">
     <div class="container topbar">
       <a class="brand" href="{{ url_for('index', lang=current_language) }}">
@@ -25,8 +37,8 @@
       </a>
       <nav class="topnav">
         <a href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
-        <a href="{{ url_for('booking_cancel_request', lang=current_language) }}">Cancel</a>
-        <a href="{{ url_for('booking_modify_request', lang=current_language) }}">Modify</a>
+        <a href="{{ url_for('booking_cancel_request', lang=current_language) }}">{{ t('nav_cancel') }}</a>
+        <a href="{{ url_for('booking_modify_request', lang=current_language) }}">{{ t('nav_modify') }}</a>
         {% if staff_logged_in %}
           <a href="{{ url_for('staff_dashboard') }}">Staff</a>
           {% if can('reservation.view') %}<a href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
@@ -35,14 +47,14 @@
           {% if admin_sections %}<a href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
           {% if can('reports.view') %}<a href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
           <a href="{{ url_for('staff_security') }}">Security</a>
-          <a href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>
+          {% if can('reservation.view') %}<a href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
           <span class="pill subtle">{{ current_staff_user.full_name }}</span>
           <form method="post" action="{{ url_for('staff_logout') }}" class="inline-form">
             {{ csrf_input() }}
             <button type="submit" class="pill subtle button-link">Sign out</button>
           </form>
         {% else %}
-          <a class="pill subtle" href="{{ url_for('staff_login') }}">Staff sign in</a>
+          <a class="pill subtle" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
         {% endif %}
         {% for code, label in language_labels.items() %}
           <a class="pill subtle" href="{{ make_lang_url(code) }}">{{ label }}</a>
@@ -51,10 +63,10 @@
     </div>
   </header>
 
-  <main class="container shell">
+  <main id="main-content" class="container shell">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="flash-stack">
+        <div class="flash-stack" aria-live="polite" aria-atomic="false">
           {% for category, message in messages %}
             <div class="flash {{ category }}">{{ message }}</div>
           {% endfor %}

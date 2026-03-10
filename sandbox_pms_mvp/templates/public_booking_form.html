@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
-{% block title %}Complete booking | {{ hotel_name }}{% endblock %}
+{% block title %}{{ t('complete_booking_title') }} | {{ hotel_name }}{% endblock %}
 {% block content %}
 <section class="grid two gap-lg">
   <article class="card">
-    <div class="card-head"><div><p class="eyebrow">Final step</p><h1>{{ room_type.name }}</h1></div></div>
+    <div class="card-head"><div><p class="eyebrow">{{ t('final_step') }}</p><h1>{{ room_type.name }}</h1></div></div>
     <p>{{ t('checkin_summary') }}</p>
-    <p class="muted">Hold {{ hold.hold_code }} expires at {{ hold.expires_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    <p class="muted">{{ t('hold_expires_at', hold_code=hold.hold_code, expires_at=hold.expires_at.strftime('%Y-%m-%d %H:%M')) }}</p>
     <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post">
       {{ csrf_input() }}
       <input type="hidden" name="hold_code" value="{{ hold.hold_code }}">
@@ -13,30 +13,30 @@
       <input type="hidden" name="language" value="{{ current_language }}">
       <input type="hidden" name="source_channel" value="{{ hold.source_channel }}">
       <div class="grid two">
-        <label><span>First name</span><input type="text" name="first_name" maxlength="120" autocomplete="given-name" required></label>
-        <label><span>Last name</span><input type="text" name="last_name" maxlength="120" autocomplete="family-name" required></label>
+        <label><span>{{ t('label_first_name') }}</span><input type="text" name="first_name" maxlength="120" autocomplete="given-name" required></label>
+        <label><span>{{ t('label_last_name') }}</span><input type="text" name="last_name" maxlength="120" autocomplete="family-name" required></label>
       </div>
       <div class="grid two">
-        <label><span>Mobile phone</span><input type="tel" name="phone" maxlength="30" autocomplete="tel" inputmode="tel" required></label>
-        <label><span>Email</span><input type="email" name="email" value="{{ hold.guest_email or '' }}" maxlength="255" autocomplete="email" inputmode="email" required></label>
+        <label><span>{{ t('label_mobile_phone') }}</span><input type="tel" name="phone" maxlength="30" autocomplete="tel" inputmode="tel" required></label>
+        <label><span>{{ t('label_email') }}</span><input type="email" name="email" value="{{ hold.guest_email or '' }}" maxlength="255" autocomplete="email" inputmode="email" required></label>
       </div>
-      <label><span>Special requests</span><textarea name="special_requests" rows="4" maxlength="500"></textarea></label>
+      <label><span>{{ t('label_special_requests') }}</span><textarea name="special_requests" rows="4" maxlength="500"></textarea></label>
       <label class="toggle-row"><span>{{ t('terms_acknowledgement') }}</span><input type="checkbox" name="accept_terms" required></label>
       <button class="button" type="submit">{{ t('book_now') }}</button>
     </form>
   </article>
   <article class="card">
-    <div class="card-head"><div><p class="eyebrow">Summary</p><h2>{{ room_type.name }}</h2></div></div>
+    <div class="card-head"><div><p class="eyebrow">{{ t('summary_title') }}</p><h2>{{ room_type.name }}</h2></div></div>
     <div class="metric-strip">
-      <div><small>Stay</small><strong>{{ hold.check_in_date }} to {{ hold.check_out_date }}</strong></div>
-      <div><small>Occupancy</small><strong>{{ hold.adults }} adults / {{ hold.children }} children</strong></div>
-      <div><small>Room total</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
-      <div><small>Tax</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
-      <div><small>Grand total</small><strong>{{ currency }} {{ hold.quoted_grand_total|money }}</strong></div>
-      <div><small>Terms version</small><strong>{{ published_terms_version }}</strong></div>
+      <div><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=hold.check_in_date, end=hold.check_out_date) }}</strong></div>
+      <div><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</strong></div>
+      <div><small>{{ t('room_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
+      <div><small>{{ t('tax_label') }}</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
+      <div><small>{{ t('grand_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_grand_total|money }}</strong></div>
+      <div><small>{{ t('terms_version_label') }}</small><strong>{{ published_terms_version }}</strong></div>
     </div>
     <div class="subsection">
-      <h3>Booking terms</h3>
+      <h3>{{ t('booking_terms_title') }}</h3>
       <ul class="checklist compact">
         <li>{{ policy_documents.cancellation }}</li>
         <li>{{ policy_documents.extra_guest }}</li>

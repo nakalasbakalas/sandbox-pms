@@ -15,6 +15,8 @@ def _normalize_database_url(value: str | None) -> str:
         return f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}"
     if candidate.startswith("postgres://"):
         return "postgresql+psycopg://" + candidate[len("postgres://") :]
+    if candidate.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + candidate[len("postgresql+psycopg2://") :]
     if candidate.startswith("postgresql://") and not candidate.startswith("postgresql+"):
         return "postgresql+psycopg://" + candidate[len("postgresql://") :]
     return candidate
@@ -62,6 +64,8 @@ class Config:
     AUTO_SEED_REFERENCE_DATA = os.getenv("AUTO_SEED_REFERENCE_DATA", "0") == "1"
     INVENTORY_BOOTSTRAP_DAYS = int(os.getenv("INVENTORY_BOOTSTRAP_DAYS", "730"))
     RESERVATION_CODE_PREFIX = os.getenv("RESERVATION_CODE_PREFIX", "SBX")
+    ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip()
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
     AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "sbx_staff_session")
     AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "1") == "1"
     AUTH_COOKIE_HTTPONLY = True

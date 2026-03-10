@@ -1,26 +1,26 @@
 {% extends 'base.html' %}
-{% block title %}Sandbox Hotel{% endblock %}
+{% block title %}{{ hotel_name }}{% endblock %}
 {% block content %}
 <section class="hero card">
   <div>
-    <p class="eyebrow">Sandbox Hotel</p>
+    <p class="eyebrow">{{ hotel_name }}</p>
     <h1>{{ t('search_title') }}</h1>
     <p class="lead">{{ t('policy_summary') }}</p>
     <form class="stack-form" action="{{ url_for('availability') }}" method="get">
       <input type="hidden" name="lang" value="{{ current_language }}">
       <div class="grid two">
-        <label><span>Check-in</span><input type="date" name="check_in" required></label>
-        <label><span>Check-out</span><input type="date" name="check_out" required></label>
+        <label><span>{{ t('label_check_in') }}</span><input type="date" name="check_in" required></label>
+        <label><span>{{ t('label_check_out') }}</span><input type="date" name="check_out" required></label>
       </div>
       <div class="grid three">
-        <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="2" required></label>
-        <label><span>Children</span><input type="number" name="children" min="0" max="2" value="0" required></label>
+        <label><span>{{ t('label_adults') }}</span><input type="number" name="adults" min="1" max="3" value="2" required></label>
+        <label><span>{{ t('label_children') }}</span><input type="number" name="children" min="0" max="2" value="0" required></label>
         <label><span>&nbsp;</span><button class="button" type="submit">{{ t('search_title') }}</button></label>
       </div>
     </form>
   </div>
   <div class="card inset">
-    <h3>Policies</h3>
+    <h3>{{ t('home_policies_title') }}</h3>
     <ul class="checklist compact">
       <li>{{ t('checkin_summary') }}</li>
       <li>{{ t('extra_guest_summary') }}</li>
@@ -31,7 +31,7 @@
 
 <section class="grid two">
   <article class="card">
-    <div class="card-head"><div><p class="eyebrow">Room types</p><h2>Direct booking</h2></div></div>
+    <div class="card-head"><div><p class="eyebrow">{{ t('home_room_types_eyebrow') }}</p><h2>{{ t('home_direct_booking_title') }}</h2></div></div>
     <div class="room-type-stack">
       {% for room_type in room_types %}
         <div class="room-type-row">
@@ -39,20 +39,20 @@
             <strong>{{ room_type.name }}</strong>
             <p>{{ room_type.description }}</p>
           </div>
-          <span class="status confirmed">Max {{ room_type.max_occupancy }}</span>
+          <span class="status confirmed">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
         </div>
       {% endfor %}
     </div>
   </article>
   <article class="card">
-    <div class="card-head"><div><p class="eyebrow">Book direct</p><h2>Guest booking support</h2></div></div>
+    <div class="card-head"><div><p class="eyebrow">{{ t('home_book_direct_eyebrow') }}</p><h2>{{ t('home_guest_support_title') }}</h2></div></div>
     <ul class="checklist compact">
       <li>{{ t('policy_summary') }}</li>
       <li>{{ t('checkin_summary') }}</li>
       <li>{{ t('extra_guest_summary') }}</li>
-      <li>Secure confirmation and self-service request links are provided after booking.</li>
+      <li>{{ t('home_secure_links_note') }}</li>
     </ul>
-    <p class="muted">Need help before you book? Contact {{ hotel_contact_phone }} or {{ hotel_contact_email }}.</p>
+    <p class="muted">{{ t('home_prebooking_help', phone=hotel_contact_phone, email=hotel_contact_email) }}</p>
   </article>
 </section>
 {% endblock %}

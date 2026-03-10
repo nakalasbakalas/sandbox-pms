@@ -92,6 +92,42 @@ def test_production_config_rejects_insecure_defaults(app_factory):
         )
 
 
+def test_production_config_requires_admin_bootstrap_credentials(app_factory):
+    with pytest.raises(RuntimeError, match="ADMIN_EMAIL is required in production."):
+        app_factory(
+            config={
+                "APP_ENV": "production",
+                "APP_BASE_URL": "https://hotel.example",
+                "PAYMENT_BASE_URL": "https://payments.example.com",
+                "FORCE_HTTPS": True,
+                "AUTH_COOKIE_SECURE": True,
+                "SESSION_COOKIE_SECURE": True,
+                "AUTH_SHOW_RESET_LINKS": False,
+                "SECRET_KEY": "production-secret-key-1234567890abcdef",
+                "AUTH_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+                "ADMIN_EMAIL": "",
+                "ADMIN_PASSWORD": "password-manager-generated-secret",
+            }
+        )
+
+    with pytest.raises(RuntimeError, match="ADMIN_PASSWORD is required in production."):
+        app_factory(
+            config={
+                "APP_ENV": "production",
+                "APP_BASE_URL": "https://hotel.example",
+                "PAYMENT_BASE_URL": "https://payments.example.com",
+                "FORCE_HTTPS": True,
+                "AUTH_COOKIE_SECURE": True,
+                "SESSION_COOKIE_SECURE": True,
+                "AUTH_SHOW_RESET_LINKS": False,
+                "SECRET_KEY": "production-secret-key-1234567890abcdef",
+                "AUTH_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+                "ADMIN_EMAIL": "admin@hotel.example",
+                "ADMIN_PASSWORD": "",
+            }
+        )
+
+
 def test_render_database_url_is_normalized_for_psycopg(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.example.com:5432/hotel")
     reloaded = importlib.reload(config_module)

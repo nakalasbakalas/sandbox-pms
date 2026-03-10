@@ -149,6 +149,8 @@ def _validate_runtime_configuration(app: Flask) -> None:
         )
 
     auth_encryption_key = str(app.config.get("AUTH_ENCRYPTION_KEY") or "").strip()
+    admin_email = str(app.config.get("ADMIN_EMAIL") or "").strip()
+    admin_password = str(app.config.get("ADMIN_PASSWORD") or "")
     if auth_encryption_key:
         try:
             Fernet(auth_encryption_key.encode("utf-8"))
@@ -171,6 +173,10 @@ def _validate_runtime_configuration(app: Flask) -> None:
         raise RuntimeError("SECRET_KEY must be at least 32 characters in production.")
     if not auth_encryption_key:
         raise RuntimeError("AUTH_ENCRYPTION_KEY is required in production.")
+    if not admin_email:
+        raise RuntimeError("ADMIN_EMAIL is required in production.")
+    if not admin_password.strip():
+        raise RuntimeError("ADMIN_PASSWORD is required in production.")
     if not bool(app.config.get("AUTH_COOKIE_SECURE")):
         raise RuntimeError("AUTH_COOKIE_SECURE must be enabled in production.")
     if not bool(app.config.get("SESSION_COOKIE_SECURE")):

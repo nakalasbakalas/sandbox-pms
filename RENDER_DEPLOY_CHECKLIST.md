@@ -48,6 +48,8 @@ Recommended minimum:
 - random, not memorable
 - not reused anywhere else
 
+The service will not boot in production if either `ADMIN_EMAIL` or `ADMIN_PASSWORD` is missing.
+
 ## 3. Deploy
 
 Approve the Blueprint creation.
@@ -60,13 +62,23 @@ Render will then:
 
 ```text
 flask --app app db upgrade
-flask --app app seed-reference-data
 ```
 
 4. start Gunicorn
 5. health check `GET /health`
 
-## 4. First login
+## 4. Bootstrap data once
+
+On a brand-new database, open a Render Shell for the web service and run:
+
+```text
+flask --app app seed-reference-data
+flask --app app bootstrap-inventory
+```
+
+Run `flask --app app sync-role-permissions` only when you intentionally want to apply seeded permission changes to existing system roles.
+
+## 5. First login
 
 After deploy completes:
 
@@ -75,7 +87,7 @@ After deploy completes:
 3. Sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you provided.
 4. Immediately change the admin password from the staff security area.
 
-## 5. Post-deploy settings
+## 6. Post-deploy settings
 
 If you stay on the default Render hostname, the app can use Render's `RENDER_EXTERNAL_URL` automatically.
 
@@ -105,7 +117,7 @@ hotel.example.com,sandbox-hotel-pms.onrender.com
 
 Use the actual Render hostname shown in your dashboard if it differs.
 
-## 6. Optional production email/payment setup
+## 7. Optional production email/payment setup
 
 Leave these disabled until you have real providers ready:
 
@@ -124,7 +136,7 @@ When enabling them later, set:
 - `STRIPE_SECRET_KEY`
 - `STRIPE_WEBHOOK_SECRET`
 
-## 7. Smoke test after deploy
+## 8. Smoke test after deploy
 
 Check all of these manually:
 
@@ -134,9 +146,9 @@ Check all of these manually:
 4. booking hold page opens
 5. staff login works
 6. admin pages load
-7. database-backed content exists after seed
+7. database-backed content exists after manual bootstrap
 
-## 8. Important note
+## 9. Important note
 
 Do not upload [sandboxhotel-render.env](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/sandboxhotel-render.env) to Render.
 Use Render-managed environment variables only.

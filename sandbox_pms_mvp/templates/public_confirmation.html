@@ -5,28 +5,28 @@
   <p class="eyebrow">{{ t('confirmation_title') }}</p>
   <h1>{{ reservation.reservation_code }}</h1>
   <div class="metric-grid grid three">
-    <article class="metric-card"><small>Guest</small><strong>{{ guest.full_name }}</strong></article>
-    <article class="metric-card"><small>Stay</small><strong>{{ reservation.check_in_date }} to {{ reservation.check_out_date }}</strong></article>
-    <article class="metric-card"><small>Status</small><strong>{{ reservation.current_status }}</strong></article>
-    <article class="metric-card"><small>Room type</small><strong>{{ reservation.room_type.name }}</strong></article>
-    <article class="metric-card"><small>Occupancy</small><strong>{{ reservation.adults }} adults / {{ reservation.children }} children</strong></article>
-    <article class="metric-card"><small>Total</small><strong>{{ currency }} {{ reservation.quoted_grand_total|money }}</strong></article>
+    <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name }}</strong></article>
+    <article class="metric-card"><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=reservation.check_in_date, end=reservation.check_out_date) }}</strong></article>
+    <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('reservation_status_' ~ reservation.current_status) }}</strong></article>
+    <article class="metric-card"><small>{{ t('room_type_label') }}</small><strong>{{ reservation.room_type.name }}</strong></article>
+    <article class="metric-card"><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=reservation.adults, children=reservation.children) }}</strong></article>
+    <article class="metric-card"><small>{{ t('total_label') }}</small><strong>{{ currency }} {{ reservation.quoted_grand_total|money }}</strong></article>
   </div>
   {% if reservation.deposit_required_amount and reservation.deposit_required_amount > 0 %}
   <section class="subsection">
     <h2>{{ t('payment_return_title') }}</h2>
     <div class="metric-grid grid three">
-      <article class="metric-card"><small>Deposit required</small><strong>{{ currency }} {{ reservation.deposit_required_amount|money }}</strong></article>
-      <article class="metric-card"><small>Deposit received</small><strong>{{ currency }} {{ reservation.deposit_received_amount|money }}</strong></article>
-      <article class="metric-card"><small>Payment status</small><strong>{{ payment_request.status.replace('_', ' ') if payment_request else t('payment_pending') }}</strong></article>
-      {% if payment_request %}<article class="metric-card"><small>Payment request</small><strong>{{ payment_request.request_code }}</strong></article>{% endif %}
+      <article class="metric-card"><small>{{ t('deposit_required_label') }}</small><strong>{{ currency }} {{ reservation.deposit_required_amount|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('deposit_received_label') }}</small><strong>{{ currency }} {{ reservation.deposit_received_amount|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('payment_status_label') }}</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request and payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') if payment_request else t('payment_pending') }}</strong></article>
+      {% if payment_request %}<article class="metric-card"><small>{{ t('payment_request_label') }}</small><strong>{{ payment_request.request_code }}</strong></article>{% endif %}
     </div>
     {% if payment_request and payment_request.status == 'pending' %}
     <div class="actions">
       <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}">{{ t('payment_pay_deposit') }}</a>
     </div>
     {% elif not payment_request %}
-    <p class="muted">The deposit link is not ready yet. Please contact {{ hotel_contact_phone }} or {{ hotel_contact_email }} for assistance.</p>
+    <p class="muted">{{ t('payment_link_contact_help', phone=hotel_contact_phone, email=hotel_contact_email) }}</p>
     {% endif %}
   </section>
   {% endif %}
@@ -34,11 +34,11 @@
     <li>{{ t('policy_summary') }}</li>
     <li>{{ t('checkin_summary') }}</li>
     <li>{{ t('extra_guest_summary') }}</li>
-    <li>For changes or cancellation, use the links in this booking flow or contact the hotel directly.</li>
+    <li>{{ t('confirmation_change_help') }}</li>
   </ul>
   <div class="actions">
-    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">Request modification</a>
-    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">Request cancellation</a>
+    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_modification') }}</a>
+    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_cancellation') }}</a>
   </div>
 </section>
 {% endblock %}

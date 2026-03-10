@@ -5,9 +5,9 @@
   <p class="eyebrow">{{ t('payment_return_title') }}</p>
   <h1>{{ reservation.reservation_code }}</h1>
   <div class="metric-grid grid three">
-    <article class="metric-card"><small>Guest</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
-    <article class="metric-card"><small>Deposit</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
-    <article class="metric-card"><small>Status</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</strong></article>
+    <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
+    <article class="metric-card"><small>{{ t('deposit_label') }}</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
+    <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</strong></article>
   </div>
   <p>
     {% if payment_request.status == 'paid' %}

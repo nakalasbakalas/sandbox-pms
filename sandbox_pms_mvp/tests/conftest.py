@@ -23,6 +23,8 @@ def app_factory(tmp_path):
             "AUTO_BOOTSTRAP_SCHEMA": False,
             "AUTO_SEED_REFERENCE_DATA": False,
             "INVENTORY_BOOTSTRAP_DAYS": 30,
+            "ADMIN_EMAIL": "admin@sandbox.local",
+            "ADMIN_PASSWORD": "sandbox-admin-123",
         }
         if config:
             app_config.update(config)

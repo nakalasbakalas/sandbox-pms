@@ -57,7 +57,7 @@ from .models import (
 )
 from .pricing import get_setting_value
 from .security import configure_app_security, public_error_message, request_client_ip
-from .seeds import bootstrap_inventory_horizon, seed_all
+from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .services.admin_service import (
     BlackoutPayload,
@@ -68,6 +68,7 @@ from .services.admin_service import (
     RoomPayload,
     RoomTypePayload,
     create_inventory_override,
+    policy_text,
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
@@ -349,8 +350,14 @@ def register_cli(app: Flask) -> None:
 
     @app.cli.command("seed-reference-data")
     def seed_reference_data_command() -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        print("Reference data seeded.")
+        seed_reference_data(sync_existing_roles=False)
+        print("Reference data seeded without rewriting existing role permissions or inventory.")
+
+    @app.cli.command("sync-role-permissions")
+    def sync_role_permissions_command() -> None:
+        seed_roles_permissions(sync_existing_roles=True)
+        db.session.commit()
+        print("Seeded role permissions synchronized.")
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:
@@ -381,7 +388,15 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/health")
     def health():
+        try:
+            db.session.execute(sa.text("SELECT 1"))
+        except Exception:  # noqa: BLE001
+            return jsonify({"status": "db_error"}), 503
         return jsonify({"status": "ok"})
+
+    @app.route("/robots.txt")
+    def robots_txt():
+        return app.send_static_file("robots.txt")
 
     @app.route("/availability")
     def availability():

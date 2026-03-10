@@ -4,7 +4,7 @@ Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed Post
 
 Deployment note: this app is designed for a Python application host such as Render. It is not a GitHub Pages-compatible static site.
 
-The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml). It deploys the web service from [sandbox_pms_mvp](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp), runs migrations plus `seed-reference-data` before release, and provisions a managed PostgreSQL database. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/RENDER_DEPLOY_CHECKLIST.md).
+The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml). It deploys the web service from [sandbox_pms_mvp](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/RENDER_DEPLOY_CHECKLIST.md).
 
 ## Stack
 
@@ -770,12 +770,12 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Seeded admin defaults:
+Seeded admin bootstrap credentials:
 
-- email: `admin@sandbox.local`
-- password: `sandbox-admin-123`
+- set `ADMIN_EMAIL` before running any seed command that creates the initial admin
+- set `ADMIN_PASSWORD` before running any seed command that creates the initial admin
 
-Override these with `ADMIN_EMAIL` and `ADMIN_PASSWORD` in real environments.
+There are no built-in fallback admin credentials anymore.
 
 ## Migrations
 
@@ -800,10 +800,22 @@ Remove-Item .\sandbox_pms.db -ErrorAction SilentlyContinue
 
 ## Seed Commands
 
-Load Phase 2 reference data and bootstrap the inventory horizon:
+Load missing reference data without rewriting existing role permissions or extending inventory:
+
+```powershell
+.\.venv\Scripts\flask.exe --app app seed-reference-data
+```
+
+Load the full local bootstrap, including initial inventory:
 
 ```powershell
 .\.venv\Scripts\flask.exe --app app seed-phase2
+```
+
+Explicitly synchronize seeded permissions onto existing system roles:
+
+```powershell
+.\.venv\Scripts\flask.exe --app app sync-role-permissions
 ```
 
 Extend nightly inventory rows only:
@@ -812,7 +824,8 @@ Extend nightly inventory rows only:
 .\.venv\Scripts\flask.exe --app app bootstrap-inventory
 ```
 
-The seed path is safe to rerun for reference data in non-production environments.
+Use `seed-reference-data` for production-safe inserts of missing reference records.
+Use `seed-phase2` only for local/dev bootstrap where creating inventory rows and refreshing seeded role permissions is intentional.
 
 ## Backup and Restore
 
@@ -1038,11 +1051,12 @@ Recommended production setup:
 
 1. Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SECRET_KEY`, and `AUTH_ENCRYPTION_KEY`.
 2. Run migrations against PostgreSQL.
-3. Run `flask --app app seed-phase2`.
-4. Sign in as the seeded admin.
-5. Create real staff accounts from `/staff/users`.
-6. Require new staff to complete the password reset flow before daily use.
-7. Encourage or require MFA for admin and manager accounts from `/staff/security`.
+3. Run `flask --app app seed-reference-data`.
+4. Run `flask --app app bootstrap-inventory`.
+5. Sign in as the seeded admin.
+6. Create real staff accounts from `/staff/users`.
+7. Require new staff to complete the password reset flow before daily use.
+8. Encourage or require MFA for admin and manager accounts from `/staff/security`.
 
 ## Runnable App
 
