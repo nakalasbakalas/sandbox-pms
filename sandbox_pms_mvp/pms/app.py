@@ -1758,6 +1758,7 @@ def register_routes(app: Flask) -> None:
                     apply_early_fee=request.form.get("apply_early_fee") == "on",
                     waive_early_fee=request.form.get("waive_early_fee") == "on",
                     waiver_reason=request.form.get("waiver_reason"),
+                    action_at=action_datetime_for_form_date("check_in_date"),
                 ),
                 actor_user_id=user.id,
             )
@@ -1803,6 +1804,7 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_check_in(reservation_id):
         user = require_permission("reservation.check_in")
         collect_payment_amount = Decimal(request.form.get("collect_payment_amount") or "0.00")
+        action_at = action_datetime_for_form_date("business_date")
         if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
             abort(403)
         if request.form.get("apply_early_fee") == "on" and not user.has_permission("folio.charge_add"):
@@ -1834,6 +1836,7 @@ def register_routes(app: Flask) -> None:
                     waive_early_fee=request.form.get("waive_early_fee") == "on",
                     waiver_reason=request.form.get("waiver_reason"),
                     override_payment=request.form.get("override_payment") == "on",
+                    action_at=action_at,
                 ),
                 actor_user_id=user.id,
             )
@@ -1846,6 +1849,7 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_check_out(reservation_id):
         user = require_permission("reservation.check_out")
         collect_payment_amount = Decimal(request.form.get("collect_payment_amount") or "0.00")
+        action_at = action_datetime_for_form_date("business_date")
         if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
             abort(403)
         if request.form.get("apply_late_fee") == "on" and not user.has_permission("folio.charge_add"):
@@ -1863,6 +1867,7 @@ def register_routes(app: Flask) -> None:
                     override_balance=request.form.get("override_balance") == "on",
                     process_refund=request.form.get("process_refund") == "on",
                     refund_note=request.form.get("refund_note"),
+                    action_at=action_at,
                 ),
                 actor_user_id=user.id,
             )
@@ -1879,7 +1884,10 @@ def register_routes(app: Flask) -> None:
         try:
             process_no_show(
                 reservation_id,
-                NoShowPayload(reason=request.form.get("reason")),
+                NoShowPayload(
+                    reason=request.form.get("reason"),
+                    action_at=action_datetime_for_form_date("business_date"),
+                ),
                 actor_user_id=user.id,
             )
             flash("Reservation marked as no-show.", "success")
@@ -2495,6 +2503,26 @@ def parse_optional_date(value: str | None) -> date | None:
     if not candidate:
         return None
     return date.fromisoformat(candidate)
+
+
+def parse_request_form_date(name: str, *, default: date | None) -> date | None:
+    candidate = (request.form.get(name) or "").strip()
+    if not candidate:
+        return default
+    try:
+        return date.fromisoformat(candidate)
+    except ValueError:
+        abort(400, description=f"Invalid {name} form value.")
+
+
+def action_datetime_for_form_date(name: str, *, default: date | None = None) -> datetime:
+    business_date = parse_request_form_date(name, default=default or date.today())
+    now = datetime.now(timezone.utc)
+    return datetime.combine(
+        business_date,
+        now.time().replace(tzinfo=None),
+        tzinfo=timezone.utc,
+    )
 
 
 def parse_request_date_arg(name: str, *, default: date | None) -> date | None:
