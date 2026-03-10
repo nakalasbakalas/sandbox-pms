@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+RUNNING_ON_RENDER = os.getenv("RENDER", "").strip().lower() == "true"
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
 
 
 class Config:
@@ -22,7 +24,7 @@ class Config:
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "https")
     APPLICATION_ROOT = os.getenv("APPLICATION_ROOT", "/")
     FORCE_HTTPS = os.getenv("FORCE_HTTPS", "1" if APP_ENV == "production" else "0") == "1"
-    TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0"))
+    TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "1" if RUNNING_ON_RENDER else "0"))
     _trusted_hosts_raw = [item.strip().lower() for item in os.getenv("TRUSTED_HOSTS", "").split(",") if item.strip()]
     TRUSTED_HOSTS = _trusted_hosts_raw or None
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -47,7 +49,7 @@ class Config:
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     TEST_HOSTED_PAYMENT_SECRET = os.getenv("TEST_HOSTED_PAYMENT_SECRET", "sandbox-test-hosted-secret")
-    APP_BASE_URL = os.getenv("APP_BASE_URL", "https://sandbox-hotel.local")
+    APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://sandbox-hotel.local")
     AUTO_BOOTSTRAP_SCHEMA = os.getenv("AUTO_BOOTSTRAP_SCHEMA", "0") == "1"
     AUTO_SEED_REFERENCE_DATA = os.getenv("AUTO_SEED_REFERENCE_DATA", "0") == "1"
     INVENTORY_BOOTSTRAP_DAYS = int(os.getenv("INVENTORY_BOOTSTRAP_DAYS", "730"))

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup
 
 from .activity import write_activity_log
@@ -56,7 +56,7 @@ from .models import (
     UserSession,
 )
 from .pricing import get_setting_value
-from .security import configure_app_security, public_error_message
+from .security import configure_app_security, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .services.admin_service import (
@@ -269,6 +269,7 @@ def register_auth_hooks(app: Flask) -> None:
                 httponly=app.config["AUTH_COOKIE_HTTPONLY"],
                 secure=app.config["AUTH_COOKIE_SECURE"],
                 samesite=app.config["AUTH_COOKIE_SAMESITE"],
+                max_age=app.config["SESSION_ABSOLUTE_HOURS"] * 3600,
                 path="/",
             )
         elif getattr(g, "clear_auth_cookie", False):
@@ -296,6 +297,25 @@ def register_template_helpers(app: Flask) -> None:
         hotel_address = str(get_setting_value("hotel.address", "Sandbox Hotel"))
         hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
         hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
+
+        def _make_lang_url(lang_code: str) -> str:
+            try:
+                args = dict(request.view_args or {})
+                for key, value in request.args.items():
+                    if key == "lang":
+                        continue
+                    if key == "back":
+                        safe_back = safe_back_path(value, "")
+                        if not safe_back:
+                            continue
+                        args[key] = safe_back
+                        continue
+                    args[key] = value
+                args["lang"] = lang_code
+                return url_for(request.endpoint, **args)
+            except Exception:  # noqa: BLE001
+                return url_for("index", lang=lang_code)
+
         return {
             "hotel_name": hotel_name,
             "currency": hotel_currency,
@@ -317,6 +337,7 @@ def register_template_helpers(app: Flask) -> None:
             "csrf_input": lambda: Markup(
                 f'<input type="hidden" name="csrf_token" value="{ensure_csrf_token()}">'
             ),
+            "make_lang_url": _make_lang_url,
         }
 
 
@@ -325,6 +346,11 @@ def register_cli(app: Flask) -> None:
     def seed_phase2_command() -> None:
         seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
         print("Phase 2 seed completed.")
+
+    @app.cli.command("seed-reference-data")
+    def seed_reference_data_command() -> None:
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        print("Reference data seeded.")
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:
@@ -351,13 +377,7 @@ def register_cli(app: Flask) -> None:
 def register_routes(app: Flask) -> None:
     @app.route("/")
     def index():
-        upcoming = (
-            Reservation.query.filter(Reservation.created_from_public_booking_flow.is_(True))
-            .order_by(Reservation.booked_at.desc())
-            .limit(5)
-            .all()
-        )
-        return render_template("index.html", upcoming=upcoming, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
+        return render_template("index.html", room_types=RoomType.query.order_by(RoomType.code.asc()).all())
 
     @app.route("/health")
     def health():
@@ -389,7 +409,10 @@ def register_routes(app: Flask) -> None:
                 results = search_public_availability(payload)
             except Exception as exc:  # noqa: BLE001
                 error = public_error_message(exc)
-        return render_template("availability.html", results=results, form_data=form_data, error=error, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
+        if not session.get("_booking_nonce"):
+            session["_booking_nonce"] = secrets.token_hex(8)
+        booking_nonce = session["_booking_nonce"]
+        return render_template("availability.html", results=results, form_data=form_data, error=error, room_types=RoomType.query.order_by(RoomType.code.asc()).all(), booking_nonce=booking_nonce)
 
     @app.route("/booking/hold", methods=["POST"])
     def booking_hold():
@@ -407,13 +430,16 @@ def register_routes(app: Flask) -> None:
                     language=language,
                     source_channel=request.form.get("source_channel", "direct_web"),
                     source_metadata=source_metadata_from_request(language),
-                    request_ip=request.remote_addr,
+                    request_ip=request_client_ip(),
                     user_agent=request.user_agent.string,
                     extra_guests=int(request.form.get("extra_guests", 0)),
                 )
             )
             room_type = db.session.get(RoomType, hold.room_type_id)
-            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
+            return render_template(
+                "public_booking_form.html",
+                **public_booking_form_context(hold, room_type),
+            )
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
             return redirect(
@@ -431,6 +457,8 @@ def register_routes(app: Flask) -> None:
     @app.route("/booking/confirm", methods=["POST"])
     def booking_confirm():
         language = normalize_language(request.form.get("language"))
+        settings = current_settings()
+        published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
         try:
             reservation = confirm_public_booking(
                 PublicBookingPayload(
@@ -445,10 +473,7 @@ def register_routes(app: Flask) -> None:
                     source_channel=request.form.get("source_channel", "direct_web"),
                     source_metadata=source_metadata_from_request(language),
                     terms_accepted=request.form.get("accept_terms") == "on",
-                    terms_version=(
-                        request.form.get("terms_version")
-                        or current_settings().get("booking.terms_version", {}).get("value", "2026-03")
-                    ),
+                    terms_version=published_terms_version,
                 )
             )
             if payments_enabled() and Decimal(str(reservation.deposit_required_amount or "0.00")) > Decimal("0.00"):
@@ -460,13 +485,28 @@ def register_routes(app: Flask) -> None:
                         language=language,
                         source="public_confirmation",
                     )
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    current_app.logger.exception(
+                        "Failed to create deposit request for reservation %s",
+                        reservation.reservation_code,
+                    )
+                    write_activity_log(
+                        actor_user_id=None,
+                        event_type="payment.deposit_request_failed",
+                        entity_table="reservations",
+                        entity_id=str(reservation.id),
+                        metadata={
+                            "reservation_code": reservation.reservation_code,
+                            "error": str(exc)[:255],
+                        },
+                    )
+                    flash(t(language, "payment_link_unavailable"), "warning")
             return redirect(
                 url_for(
                     "booking_confirmation",
                     reservation_code=reservation.reservation_code,
                     token=reservation.public_confirmation_token,
+                    lang=language,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -475,13 +515,17 @@ def register_routes(app: Flask) -> None:
             if not hold:
                 return redirect(url_for("availability", lang=language))
             room_type = db.session.get(RoomType, hold.room_type_id)
-            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
+            return render_template(
+                "public_booking_form.html",
+                **public_booking_form_context(hold, room_type, settings=settings),
+            )
 
     @app.route("/booking/confirmation/<reservation_code>")
     def booking_confirmation(reservation_code):
         reservation = load_public_confirmation(reservation_code, request.args.get("token", ""))
         if not reservation:
             abort(404)
+        g.public_language = reservation.booking_language
         payment_request = (
             PaymentRequest.query.filter_by(reservation_id=reservation.id)
             .order_by(PaymentRequest.created_at.desc())
@@ -519,6 +563,7 @@ def register_routes(app: Flask) -> None:
             )
         except LookupError:
             abort(404)
+        g.public_language = context["reservation"].booking_language
         return render_template("public_payment_return.html", **context)
 
     @app.route("/webhooks/payments/<provider_name>", methods=["POST"])
@@ -538,42 +583,92 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/booking/cancel", methods=["GET", "POST"])
     def booking_cancel_request():
+        language = current_language()
         request_row = None
+        form_defaults = {
+            "booking_reference": (request.args.get("booking_reference") or "").strip(),
+            "contact_value": (request.args.get("contact_value") or "").strip(),
+            "reason": "",
+        }
         if request.method == "POST":
+            form_defaults.update(
+                {
+                    "booking_reference": request.form["booking_reference"].strip(),
+                    "contact_value": request.form["contact_value"].strip(),
+                    "reason": request.form.get("reason", ""),
+                }
+            )
             payload = VerificationRequestPayload(
-                booking_reference=request.form["booking_reference"].strip(),
-                contact_value=request.form["contact_value"].strip(),
-                language=current_language(),
+                booking_reference=form_defaults["booking_reference"],
+                contact_value=form_defaults["contact_value"],
+                language=language,
                 reason=request.form.get("reason"),
-                request_ip=request.remote_addr,
+                request_ip=request_client_ip(),
                 user_agent=request.user_agent.string,
             )
             request_row = submit_cancellation_request(payload)
-            flash(t(current_language(), "cancellation_received"), "success")
-        return render_template("public_cancel_request.html", request_row=request_row)
+            if request_row:
+                flash(t(language, "cancellation_received"), "success")
+            else:
+                flash(t(language, "booking_lookup_not_found"), "error")
+        return render_template(
+            "public_cancel_request.html",
+            request_row=request_row,
+            form_defaults=form_defaults,
+        )
 
     @app.route("/booking/modify", methods=["GET", "POST"])
     def booking_modify_request():
+        language = current_language()
         request_row = None
+        form_defaults = {
+            "booking_reference": (request.args.get("booking_reference") or "").strip(),
+            "contact_value": (request.args.get("contact_value") or "").strip(),
+            "requested_check_in": request.args.get("requested_check_in", ""),
+            "requested_check_out": request.args.get("requested_check_out", ""),
+            "requested_adults": request.args.get("requested_adults", ""),
+            "requested_children": request.args.get("requested_children", ""),
+            "contact_correction": request.args.get("contact_correction", ""),
+            "special_requests": request.args.get("special_requests", ""),
+        }
         if request.method == "POST":
+            form_defaults.update(
+                {
+                    "booking_reference": request.form["booking_reference"].strip(),
+                    "contact_value": request.form["contact_value"].strip(),
+                    "requested_check_in": request.form.get("requested_check_in", ""),
+                    "requested_check_out": request.form.get("requested_check_out", ""),
+                    "requested_adults": request.form.get("requested_adults", ""),
+                    "requested_children": request.form.get("requested_children", ""),
+                    "contact_correction": request.form.get("contact_correction", ""),
+                    "special_requests": request.form.get("special_requests", ""),
+                }
+            )
             payload = VerificationRequestPayload(
-                booking_reference=request.form["booking_reference"].strip(),
-                contact_value=request.form["contact_value"].strip(),
-                language=current_language(),
+                booking_reference=form_defaults["booking_reference"],
+                contact_value=form_defaults["contact_value"],
+                language=language,
                 requested_changes={
-                    "requested_check_in": request.form.get("requested_check_in"),
-                    "requested_check_out": request.form.get("requested_check_out"),
-                    "requested_adults": request.form.get("requested_adults"),
-                    "requested_children": request.form.get("requested_children"),
-                    "contact_correction": request.form.get("contact_correction"),
-                    "special_requests": request.form.get("special_requests"),
+                    "requested_check_in": form_defaults["requested_check_in"],
+                    "requested_check_out": form_defaults["requested_check_out"],
+                    "requested_adults": form_defaults["requested_adults"],
+                    "requested_children": form_defaults["requested_children"],
+                    "contact_correction": form_defaults["contact_correction"],
+                    "special_requests": form_defaults["special_requests"],
                 },
-                request_ip=request.remote_addr,
+                request_ip=request_client_ip(),
                 user_agent=request.user_agent.string,
             )
             request_row = submit_modification_request(payload)
-            flash(t(current_language(), "modification_received"), "success")
-        return render_template("public_modify_request.html", request_row=request_row)
+            if request_row:
+                flash(t(language, "modification_received"), "success")
+            else:
+                flash(t(language, "booking_lookup_not_found"), "error")
+        return render_template(
+            "public_modify_request.html",
+            request_row=request_row,
+            form_defaults=form_defaults,
+        )
 
     @app.route("/staff/login", methods=["GET", "POST"])
     def staff_login():
@@ -583,7 +678,7 @@ def register_routes(app: Flask) -> None:
             result = login_with_password(
                 identifier,
                 password,
-                ip_address=request.remote_addr,
+                ip_address=request_client_ip(),
                 user_agent=request.user_agent.string,
             )
             if result.success:
@@ -618,7 +713,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/forgot-password", methods=["GET", "POST"])
     def staff_forgot_password():
         if request.method == "POST":
-            request_password_reset(request.form.get("identifier", ""), ip_address=request.remote_addr)
+            request_password_reset(request.form.get("identifier", ""), ip_address=request_client_ip())
             flash("If the account exists, a reset link has been sent.", "success")
             return redirect(url_for("staff_login"))
         return render_template("staff_forgot_password.html")
@@ -676,7 +771,7 @@ def register_routes(app: Flask) -> None:
                     if getattr(g, "current_auth_session", None):
                         revoke_session(g.current_auth_session)
                     db.session.commit()
-                    result = login_with_password(user.email, new_password, ip_address=request.remote_addr, user_agent=request.user_agent.string)
+                    result = login_with_password(user.email, new_password, ip_address=request_client_ip(), user_agent=request.user_agent.string)
                     session.clear()
                     rotate_csrf_token()
                     g.auth_cookie_value = result.cookie_value
@@ -1351,9 +1446,10 @@ def register_routes(app: Flask) -> None:
         if not notification:
             abort(404)
         notification.status = "read"
-        notification.read_at = datetime.utcnow()
+        notification.read_at = datetime.now(timezone.utc)
         db.session.commit()
-        return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
+        safe_back = safe_back_path(request.form.get("back_url"), url_for("staff_dashboard"))
+        return redirect(safe_back)
 
     @app.route("/staff/housekeeping")
     def staff_housekeeping():
@@ -1392,7 +1488,10 @@ def register_routes(app: Flask) -> None:
             "housekeeping_room_detail.html",
             detail=detail,
             business_date=business_date,
-            back_url=request.args.get("back") or url_for("staff_housekeeping", date=business_date.isoformat()),
+            back_url=safe_back_path(
+                request.args.get("back"),
+                url_for("staff_housekeeping", date=business_date.isoformat()),
+            ),
             housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
             room_note_types=ROOM_NOTE_TYPES,
             can_manage_controls=user.primary_role in {"admin", "manager"},
@@ -1595,7 +1694,7 @@ def register_routes(app: Flask) -> None:
             "front_desk_detail.html",
             detail=detail,
             checkout_prep=checkout_prep,
-            back_url=request.args.get("back") or url_for("staff_front_desk"),
+            back_url=safe_back_path(request.args.get("back"), url_for("staff_front_desk")),
             business_date=business_date,
             can_folio=can("folio.view"),
             can_charge=can("folio.charge_add"),
@@ -1717,7 +1816,10 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "cashier_folio.html",
             detail=detail,
-            back_url=request.args.get("back") or url_for("staff_reservation_detail", reservation_id=reservation_id),
+            back_url=safe_back_path(
+                request.args.get("back"),
+                url_for("staff_reservation_detail", reservation_id=reservation_id),
+            ),
             can_adjust=can("folio.adjust"),
             can_charge=can("folio.charge_add"),
             can_payment=can("payment.create"),
@@ -1990,7 +2092,7 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "reservation_detail.html",
             detail=detail,
-            back_url=request.args.get("back") or url_for("staff_reservations"),
+            back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations")),
             today=date.today(),
             can_folio=can("folio.view"),
         )
@@ -2114,7 +2216,7 @@ def register_routes(app: Flask) -> None:
             action = request.form["action"]
             if action == "reviewed":
                 entry.review_status = "reviewed"
-                entry.reviewed_at = datetime.now()
+                entry.reviewed_at = datetime.now(timezone.utc)
                 entry.reviewed_by_user_id = user.id
             elif action == "needs_follow_up":
                 entry.review_status = "needs_follow_up"
@@ -2123,7 +2225,7 @@ def register_routes(app: Flask) -> None:
             elif action == "resolved":
                 entry.review_status = "resolved"
             elif action == "contacted":
-                entry.contacted_at = datetime.now()
+                entry.contacted_at = datetime.now(timezone.utc)
             entry.internal_note = request.form.get("internal_note") or entry.internal_note
             db.session.commit()
             return redirect(url_for("staff_review_queue"))
@@ -2146,7 +2248,7 @@ def register_routes(app: Flask) -> None:
 
 
 def current_language() -> str:
-    return normalize_language(request.args.get("lang") or request.form.get("language") or "th")
+    return normalize_language(request.args.get("lang") or request.form.get("language") or getattr(g, "public_language", None) or "th")
 
 
 def ensure_csrf_token() -> str:
@@ -2183,6 +2285,23 @@ def source_metadata_from_request(language: str) -> dict:
         "device_class": "mobile" if "Mobile" in request.user_agent.string else "desktop",
         "language": language,
         "created_from_public_booking_flow": True,
+    }
+
+
+def public_booking_form_context(hold: ReservationHold, room_type: RoomType, *, settings: dict[str, dict] | None = None) -> dict:
+    resolved_settings = settings or current_settings()
+    language = normalize_language(getattr(hold, "booking_language", None) or current_language())
+    return {
+        "hold": hold,
+        "room_type": room_type,
+        "settings": resolved_settings,
+        "published_terms_version": resolved_settings.get("booking.terms_version", {}).get("value", "2026-03"),
+        "policy_documents": {
+            "cancellation": policy_text("cancellation_policy", language, t(language, "policy_summary")),
+            "extra_guest": policy_text("child_extra_guest_policy", language, t(language, "extra_guest_summary")),
+            "check_in": policy_text("check_in_policy", language, t(language, "checkin_summary")),
+            "privacy": policy_text("privacy_notice", language, ""),
+        },
     }
 
 
@@ -2239,6 +2358,13 @@ def parse_optional_uuid(value: str | None) -> UUID | None:
     if not candidate:
         return None
     return UUID(candidate)
+
+
+def safe_back_path(value: str | None, fallback: str) -> str:
+    candidate = (value or "").strip()
+    if candidate.startswith("/") and not candidate.startswith("//"):
+        return candidate
+    return fallback
 
 
 def parse_optional_date(value: str | None) -> date | None:
@@ -2378,4 +2504,3 @@ def available_admin_sections() -> list[dict[str, str]]:
             {"key": "audit", "label": "Audit", "endpoint": "staff_admin_audit", "description": "Configuration and system history"}
         )
     return sections
-

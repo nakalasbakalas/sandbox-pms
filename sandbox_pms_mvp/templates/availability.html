@@ -52,7 +52,7 @@
         <input type="hidden" name="children" value="{{ form_data.children }}">
         <input type="hidden" name="language" value="{{ current_language }}">
         <input type="hidden" name="source_channel" value="{{ request.args.get('utm_source', 'direct_web') if request.args.get('utm_source') in ['google_business','facebook','line','whatsapp','qr','referral'] else 'direct_web' }}">
-        <input type="hidden" name="idempotency_key" value="{{ [item.room_type.id, form_data.check_in, form_data.check_out, form_data.adults, form_data.children]|join('-') }}">
+        <input type="hidden" name="idempotency_key" value="{{ [booking_nonce, item.room_type.id, form_data.check_in, form_data.check_out, form_data.adults, form_data.children]|join('-') }}">
         <label><span>Email for booking hold</span><input type="email" name="email" required></label>
         <button class="button" type="submit">{{ t('book_now') }}</button>
       </form>

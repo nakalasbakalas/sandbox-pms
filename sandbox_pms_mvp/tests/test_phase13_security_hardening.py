@@ -13,7 +13,14 @@ import pms.security as security_module
 from pms.audit import write_audit_log
 from pms.extensions import db
 from pms.models import AuditLog, Role, Room, User, UserSession
+from pms.models import Reservation, RoomType
 from pms.services.auth_service import hash_password
+from pms.services.public_booking_service import (
+    HoldRequestPayload,
+    PublicBookingPayload,
+    confirm_public_booking,
+    create_reservation_hold,
+)
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
 
 
@@ -269,6 +276,53 @@ def test_payment_admin_page_does_not_expose_secret_values(app_factory):
     assert response.status_code == 200
     assert b"sk_test_super_secret_value" not in response.data
     assert b"whsec_super_secret_value" not in response.data
+
+
+def test_staff_detail_pages_sanitize_back_links(app_factory):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(
+            HoldRequestPayload(
+                check_in_date=date.today() + timedelta(days=7),
+                check_out_date=date.today() + timedelta(days=9),
+                adults=2,
+                children=0,
+                room_type_id=twin.id,
+                guest_email="back-link@example.com",
+                idempotency_key="back-link-hold",
+                language="en",
+                source_channel="direct_web",
+                source_metadata={"utm_source": "direct_web"},
+                request_ip="127.0.0.1",
+                user_agent="pytest",
+            )
+        )
+        reservation = confirm_public_booking(
+            PublicBookingPayload(
+                hold_code=hold.hold_code,
+                idempotency_key="back-link-hold",
+                first_name="Back",
+                last_name="Link",
+                phone="+66800000011",
+                email="back-link@example.com",
+                special_requests=None,
+                language="en",
+                source_channel="direct_web",
+                source_metadata={"utm_source": "direct_web"},
+                terms_accepted=True,
+                terms_version="2026-03",
+            )
+        )
+
+    assert login(client, identifier="admin@sandbox.local", password="sandbox-admin-123").status_code == 302
+
+    response = client.get(f"/staff/reservations/{reservation.id}?back=//evil.example")
+
+    assert response.status_code == 200
+    assert b'//evil.example' not in response.data
+    assert b'/staff/reservations' in response.data
 
 
 def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path):

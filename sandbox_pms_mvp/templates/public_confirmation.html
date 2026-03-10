@@ -23,8 +23,10 @@
     </div>
     {% if payment_request and payment_request.status == 'pending' %}
     <div class="actions">
-      <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token) }}">{{ t('payment_pay_deposit') }}</a>
+      <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}">{{ t('payment_pay_deposit') }}</a>
     </div>
+    {% elif not payment_request %}
+    <p class="muted">The deposit link is not ready yet. Please contact {{ hotel_contact_phone }} or {{ hotel_contact_email }} for assistance.</p>
     {% endif %}
   </section>
   {% endif %}
@@ -35,8 +37,8 @@
     <li>For changes or cancellation, use the links in this booking flow or contact the hotel directly.</li>
   </ul>
   <div class="actions">
-    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language) }}">Request modification</a>
-    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language) }}">Request cancellation</a>
+    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">Request modification</a>
+    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">Request cancellation</a>
   </div>
 </section>
 {% endblock %}

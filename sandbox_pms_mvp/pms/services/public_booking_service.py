@@ -155,14 +155,18 @@ def cleanup_expired_holds() -> None:
     now = utc_now()
     expired_holds = (
         db.session.execute(
-            sa.select(ReservationHold).where(ReservationHold.status == "active").with_for_update()
+            sa.select(ReservationHold)
+            .where(
+                ReservationHold.status == "active",
+                ReservationHold.expires_at.is_not(None),
+                ReservationHold.expires_at <= now,
+            )
+            .with_for_update()
         )
         .scalars()
         .all()
     )
     for hold in expired_holds:
-        if not as_utc(hold.expires_at) or as_utc(hold.expires_at) > now:
-            continue
         hold.status = "expired"
         inventory_rows = (
             db.session.execute(
@@ -685,7 +689,7 @@ def submit_cancellation_request(payload: VerificationRequestPayload) -> Cancella
         user_agent=payload.user_agent,
     )
     db.session.add(request_row)
-    eligible = reservation.check_in_date > (date.today() + timedelta(hours=24 / 24))
+    eligible = utc_now() <= automatic_cancellation_deadline(reservation.check_in_date)
     previous_status = reservation.current_status
     if eligible and reservation.current_status in {"tentative", "confirmed"}:
         reservation.current_status = "cancelled"
@@ -744,6 +748,17 @@ def submit_cancellation_request(payload: VerificationRequestPayload) -> Cancella
     db.session.commit()
     dispatch_notification_deliveries(notification_delivery_ids)
     return request_row
+
+
+def automatic_cancellation_deadline(check_in_date: date) -> datetime:
+    cutoff_hours = int(get_setting_value("reservation.standard_cancellation_hours", 24) or 24)
+    check_in_time_value = str(get_setting_value("hotel.check_in_time", "14:00") or "14:00").strip()
+    try:
+        check_in_time = datetime.strptime(check_in_time_value, "%H:%M").time()
+    except ValueError:
+        check_in_time = datetime.strptime("14:00", "%H:%M").time()
+    arrival_at = datetime.combine(check_in_date, check_in_time, tzinfo=timezone.utc)
+    return arrival_at - timedelta(hours=cutoff_hours)
 
 
 def submit_modification_request(payload: VerificationRequestPayload) -> ModificationRequest | None:

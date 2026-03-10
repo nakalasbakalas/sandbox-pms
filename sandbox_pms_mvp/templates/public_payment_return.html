@@ -24,7 +24,7 @@
     {% if payment_request.status in ['pending', 'failed'] %}
     <a class="button" href="{{ payment_entry_url }}">{{ t('payment_pay_deposit') }}</a>
     {% endif %}
-    <a class="button secondary" href="{{ url_for('booking_confirmation', reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token) }}">{{ t('confirmation_title') }}</a>
+    <a class="button secondary" href="{{ url_for('booking_confirmation', reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}">{{ t('confirmation_title') }}</a>
   </div>
 </section>
 {% endblock %}

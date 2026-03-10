@@ -45,22 +45,14 @@
     </div>
   </article>
   <article class="card">
-    <div class="card-head"><div><p class="eyebrow">Recent</p><h2>New direct bookings</h2></div></div>
-    {% if upcoming %}
-      <div class="list-stack compact">
-        {% for reservation in upcoming %}
-          <div class="list-row no-link">
-            <div>
-              <strong>{{ reservation.reservation_code }}</strong>
-              <p>{{ reservation.primary_guest.full_name }} · {{ reservation.check_in_date }} to {{ reservation.check_out_date }}</p>
-            </div>
-            <span class="status {{ reservation.current_status }}">{{ reservation.current_status }}</span>
-          </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No public bookings yet.</p>
-    {% endif %}
+    <div class="card-head"><div><p class="eyebrow">Book direct</p><h2>Guest booking support</h2></div></div>
+    <ul class="checklist compact">
+      <li>{{ t('policy_summary') }}</li>
+      <li>{{ t('checkin_summary') }}</li>
+      <li>{{ t('extra_guest_summary') }}</li>
+      <li>Secure confirmation and self-service request links are provided after booking.</li>
+    </ul>
+    <p class="muted">Need help before you book? Contact {{ hotel_contact_phone }} or {{ hotel_contact_email }}.</p>
   </article>
 </section>
 {% endblock %}

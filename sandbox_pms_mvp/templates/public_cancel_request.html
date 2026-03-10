@@ -5,9 +5,9 @@
   <div class="card-head"><div><p class="eyebrow">Guest self-service</p><h1>Cancellation request</h1></div></div>
   <form class="stack-form" method="post">
     {{ csrf_input() }}
-    <label><span>Booking reference</span><input type="text" name="booking_reference" maxlength="20" required></label>
-    <label><span>Email or mobile phone</span><input type="text" name="contact_value" required></label>
-    <label><span>Reason</span><textarea name="reason" rows="4" maxlength="500"></textarea></label>
+    <label><span>Booking reference</span><input type="text" name="booking_reference" value="{{ form_defaults.booking_reference }}" maxlength="20" autocomplete="off" required></label>
+    <label><span>Email or mobile phone</span><input type="text" name="contact_value" value="{{ form_defaults.contact_value }}" autocomplete="email" required></label>
+    <label><span>Reason</span><textarea name="reason" rows="4" maxlength="500">{{ form_defaults.reason }}</textarea></label>
     <button class="button" type="submit">Submit request</button>
   </form>
   {% if request_row %}

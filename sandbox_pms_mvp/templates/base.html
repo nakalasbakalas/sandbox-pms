@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ hotel_name }} direct booking with live availability, secure confirmation, and guest self-service support.">
+  <meta name="theme-color" content="#11324d">
+  <meta name="robots" content="{% if request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
@@ -42,7 +45,7 @@
           <a class="pill subtle" href="{{ url_for('staff_login') }}">Staff sign in</a>
         {% endif %}
         {% for code, label in language_labels.items() %}
-          <a class="pill subtle" href="{{ request.path }}?{{ request.query_string.decode('utf-8') ~ ('&' if request.query_string else '') }}lang={{ code }}">{{ label }}</a>
+          <a class="pill subtle" href="{{ make_lang_url(code) }}">{{ label }}</a>
         {% endfor %}
       </nav>
     </div>

@@ -12,17 +12,16 @@
       <input type="hidden" name="idempotency_key" value="{{ hold.idempotency_key }}">
       <input type="hidden" name="language" value="{{ current_language }}">
       <input type="hidden" name="source_channel" value="{{ hold.source_channel }}">
-      <input type="hidden" name="terms_version" value="{{ settings['booking.terms_version']['value'] if settings.get('booking.terms_version') else '2026-03' }}">
       <div class="grid two">
-        <label><span>First name</span><input type="text" name="first_name" maxlength="120" required></label>
-        <label><span>Last name</span><input type="text" name="last_name" maxlength="120" required></label>
+        <label><span>First name</span><input type="text" name="first_name" maxlength="120" autocomplete="given-name" required></label>
+        <label><span>Last name</span><input type="text" name="last_name" maxlength="120" autocomplete="family-name" required></label>
       </div>
       <div class="grid two">
-        <label><span>Mobile phone</span><input type="tel" name="phone" maxlength="30" required></label>
-        <label><span>Email</span><input type="email" name="email" value="{{ hold.guest_email or '' }}" maxlength="255" required></label>
+        <label><span>Mobile phone</span><input type="tel" name="phone" maxlength="30" autocomplete="tel" inputmode="tel" required></label>
+        <label><span>Email</span><input type="email" name="email" value="{{ hold.guest_email or '' }}" maxlength="255" autocomplete="email" inputmode="email" required></label>
       </div>
       <label><span>Special requests</span><textarea name="special_requests" rows="4" maxlength="500"></textarea></label>
-      <label class="toggle-row"><span>{{ t('policy_summary') }} / {{ t('extra_guest_summary') }}</span><input type="checkbox" name="accept_terms" required></label>
+      <label class="toggle-row"><span>{{ t('terms_acknowledgement') }}</span><input type="checkbox" name="accept_terms" required></label>
       <button class="button" type="submit">{{ t('book_now') }}</button>
     </form>
   </article>
@@ -34,7 +33,16 @@
       <div><small>Room total</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
       <div><small>Tax</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
       <div><small>Grand total</small><strong>{{ currency }} {{ hold.quoted_grand_total|money }}</strong></div>
-      <div><small>Terms version</small><strong>{{ settings['booking.terms_version']['value'] if settings.get('booking.terms_version') else '2026-03' }}</strong></div>
+      <div><small>Terms version</small><strong>{{ published_terms_version }}</strong></div>
+    </div>
+    <div class="subsection">
+      <h3>Booking terms</h3>
+      <ul class="checklist compact">
+        <li>{{ policy_documents.cancellation }}</li>
+        <li>{{ policy_documents.extra_guest }}</li>
+        <li>{{ policy_documents.check_in }}</li>
+        <li>{{ policy_documents.privacy }}</li>
+      </ul>
     </div>
   </article>
 </section>

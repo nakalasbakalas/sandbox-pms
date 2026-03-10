@@ -418,6 +418,106 @@ def test_public_route_flow_creates_booking_and_confirmation_page(app_factory):
     assert "/booking/confirmation/" in response.headers["Location"]
 
 
+def test_public_confirmation_is_not_cacheable_or_indexable(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id))
+        reservation = confirm_public_booking(make_booking_payload(hold.hold_code))
+
+    response = client.get(
+        f"/booking/confirmation/{reservation.reservation_code}?token={reservation.public_confirmation_token}"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store, private, max-age=0"
+    assert response.headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
+
+
+def test_confirmation_page_uses_reservation_language_without_query_string(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id, language="zh-Hans"))
+        reservation = confirm_public_booking(make_booking_payload(hold.hold_code, language="zh-Hans"))
+
+    response = client.get(
+        f"/booking/confirmation/{reservation.reservation_code}?token={reservation.public_confirmation_token}"
+    )
+
+    assert response.status_code == 200
+    assert '<html lang="zh-Hans">' in response.get_data(as_text=True)
+
+
+def test_homepage_does_not_render_guest_booking_data(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id))
+        reservation = confirm_public_booking(make_booking_payload(hold.hold_code))
+        guest_name = reservation.primary_guest.full_name
+
+    response = client.get("/?lang=en")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert reservation.reservation_code not in body
+    assert guest_name not in body
+
+
+def test_cancel_request_shows_error_when_booking_cannot_be_verified(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = post_form(
+        client,
+        "/booking/cancel?lang=en",
+        data={
+            "booking_reference": "SBX-40440404",
+            "contact_value": "missing@example.com",
+            "reason": "Changed plans",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "We could not find a booking matching those details." in response.get_data(as_text=True)
+    with app.app_context():
+        assert CancellationRequest.query.count() == 0
+
+
+def test_booking_confirm_uses_published_terms_version(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="route-hold-terms"))
+
+    response = post_form(
+        client,
+        "/booking/confirm",
+        data={
+            "hold_code": hold.hold_code,
+            "idempotency_key": "route-hold-terms",
+            "first_name": "Route",
+            "last_name": "Guest",
+            "phone": "+66800000010",
+            "email": "route-terms@example.com",
+            "language": "en",
+            "source_channel": "direct_web",
+            "accept_terms": "on",
+            "terms_version": "tampered-version",
+        },
+    )
+
+    assert response.status_code == 302
+    with app.app_context():
+        reservation = Reservation.query.filter_by(reservation_code=response.headers["Location"].split("/booking/confirmation/", 1)[1].split("?", 1)[0]).one()
+        assert reservation.terms_version == "2026-03"
+
+
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is not configured for Postgres concurrency testing")
 def test_postgres_concurrent_last_room_hold_allows_only_one_success():
     app = postgres_seeded_app()

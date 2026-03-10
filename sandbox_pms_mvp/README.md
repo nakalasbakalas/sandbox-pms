@@ -2,6 +2,10 @@
 
 Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed PostgreSQL-first. The repo now includes the Phase 2 operating data layer, the Phase 3 staff authentication and authorization layer, the Phase 4 public booking flow, the Phase 5 staff reservations workspace, the Phase 6 front-desk check-in / check-out workspace, the Phase 7 housekeeping operations board, the Phase 8 cashier / folio module, the Phase 9 hosted deposit payment integration, the Phase 10 admin and hotel configuration panel, the Phase 11 notifications and communication layer, and the Phase 12 manager dashboard and reporting workspace on top of it.
 
+Deployment note: this app is designed for a Python application host such as Render. It is not a GitHub Pages-compatible static site.
+
+The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml). It deploys the web service from [sandbox_pms_mvp](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp), runs migrations plus `seed-reference-data` before release, and provisions a managed PostgreSQL database. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/RENDER_DEPLOY_CHECKLIST.md).
+
 ## Stack
 
 - Flask

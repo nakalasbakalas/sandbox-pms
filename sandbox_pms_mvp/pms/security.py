@@ -37,6 +37,13 @@ SENSITIVE_FIELD_FRAGMENTS = {
     "token",
     "webhook",
 }
+SENSITIVE_PUBLIC_ENDPOINTS = {
+    "booking_confirmation",
+    "booking_cancel_request",
+    "booking_modify_request",
+    "public_payment_return",
+    "public_payment_start",
+}
 
 
 def configure_app_security(app: Flask) -> None:
@@ -205,6 +212,11 @@ def _register_request_security_hooks(app: Flask) -> None:
         if getattr(g, "current_staff_user", None) is not None or getattr(g, "pending_mfa_user", None) is not None:
             response.headers["Cache-Control"] = "no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
+        elif request.endpoint in SENSITIVE_PUBLIC_ENDPOINTS:
+            response.headers["Cache-Control"] = "no-store, private, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
 
         if current_app.config.get("ENABLE_ACCESS_LOGGING", True):
             duration_ms = None
