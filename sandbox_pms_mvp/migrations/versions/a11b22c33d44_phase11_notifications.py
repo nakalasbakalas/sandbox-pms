@@ -116,7 +116,7 @@ def upgrade():
         unique=False,
     )
 
-    with op.batch_alter_table("notification_templates", recreate="always") as batch_op:
+    with op.batch_alter_table("notification_templates", recreate="auto") as batch_op:
         batch_op.drop_constraint("ck_notification_templates_key", type_="check")
         batch_op.drop_constraint("ck_notification_templates_channel", type_="check")
         batch_op.drop_constraint("ck_notification_templates_language", type_="check")
@@ -138,7 +138,7 @@ def upgrade():
 
 
 def downgrade():
-    with op.batch_alter_table("notification_templates", recreate="always") as batch_op:
+    with op.batch_alter_table("notification_templates", recreate="auto") as batch_op:
         batch_op.drop_constraint("ck_notification_templates_key", type_="check")
         batch_op.drop_constraint("ck_notification_templates_channel", type_="check")
         batch_op.drop_constraint("ck_notification_templates_language", type_="check")

@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    with op.batch_alter_table("inventory_days", recreate="always") as batch_op:
+    with op.batch_alter_table("inventory_days", recreate="auto") as batch_op:
         batch_op.add_column(sa.Column("is_blocked", sa.Boolean(), nullable=False, server_default=sa.false()))
         batch_op.add_column(sa.Column("blocked_reason", sa.String(length=255), nullable=True))
         batch_op.add_column(sa.Column("blocked_at", sa.DateTime(timezone=True), nullable=True))
@@ -112,7 +112,7 @@ def downgrade():
     op.drop_index("ix_room_notes_room_business_date", table_name="room_notes")
     op.drop_table("room_notes")
 
-    with op.batch_alter_table("inventory_days", recreate="always") as batch_op:
+    with op.batch_alter_table("inventory_days", recreate="auto") as batch_op:
         batch_op.drop_index("ix_inventory_days_maintenance_date")
         batch_op.drop_index("ix_inventory_days_blocked_date")
         batch_op.drop_constraint("fk_inventory_days_maintenance_flagged_by_user_id_users", type_="foreignkey")

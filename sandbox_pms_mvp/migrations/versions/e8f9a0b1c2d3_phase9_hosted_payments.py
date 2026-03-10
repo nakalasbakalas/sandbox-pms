@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    with op.batch_alter_table("payment_requests", recreate="always") as batch_op:
+    with op.batch_alter_table("payment_requests", recreate="auto") as batch_op:
         batch_op.add_column(sa.Column("request_code", sa.String(length=32), nullable=True))
         batch_op.add_column(sa.Column("provider_payment_reference", sa.String(length=255), nullable=True))
         batch_op.add_column(sa.Column("provider_status", sa.String(length=80), nullable=True))
@@ -47,7 +47,7 @@ def upgrade():
 def downgrade():
     op.drop_index("ix_payment_events_provider_event", table_name="payment_events")
 
-    with op.batch_alter_table("payment_requests", recreate="always") as batch_op:
+    with op.batch_alter_table("payment_requests", recreate="auto") as batch_op:
         batch_op.drop_constraint("uq_payment_requests_request_code", type_="unique")
         batch_op.drop_index("ix_payment_requests_provider_reference")
         batch_op.drop_index("ix_payment_requests_request_type_status")
