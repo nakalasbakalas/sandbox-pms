@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('payment_return_title') }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card success-panel">
+  <p class="eyebrow">{{ t('payment_return_title') }}</p>
+  <h1>{{ reservation.reservation_code }}</h1>
+  <div class="metric-grid grid three">
+    <article class="metric-card"><small>Guest</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
+    <article class="metric-card"><small>Deposit</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
+    <article class="metric-card"><small>Status</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</strong></article>
+  </div>
+  <p>
+    {% if payment_request.status == 'paid' %}
+      {{ t('payment_return_paid_body') }}
+    {% elif payment_request.status == 'failed' %}
+      {{ t('payment_return_failed_body') }}
+    {% elif payment_request.status == 'expired' %}
+      {{ t('payment_return_expired_body') }}
+    {% else %}
+      {{ t('payment_return_pending_body') }}
+    {% endif %}
+  </p>
+  <div class="actions">
+    {% if payment_request.status in ['pending', 'failed'] %}
+    <a class="button" href="{{ payment_entry_url }}">{{ t('payment_pay_deposit') }}</a>
+    {% endif %}
+    <a class="button secondary" href="{{ url_for('booking_confirmation', reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token) }}">{{ t('confirmation_title') }}</a>
+  </div>
+</section>
+{% endblock %}

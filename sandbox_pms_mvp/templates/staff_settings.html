@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Settings | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Settings</p>
+      <h1>Property settings</h1>
+    </div>
+  </div>
+  <div class="list-stack">
+    {% for setting in settings %}
+      <form class="list-row no-link" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="key" value="{{ setting.key }}">
+        <div class="grow">
+          <strong>{{ setting.key }}</strong>
+          <p>{{ setting.description or 'No description' }}</p>
+        </div>
+        <label class="grow"><span>Value</span><input type="text" name="value" value="{{ setting.value_json.get('value', setting.value_json) }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Save</button>{% endif %}
+      </form>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends 'base.html' %}
+{% block title %}Operations Settings | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Housekeeping defaults</p>
+        <h2>Readiness behavior</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="housekeeping_defaults">
+      <label class="toggle-row"><input type="checkbox" name="require_inspected_for_ready" {% if housekeeping_defaults.require_inspected_for_ready %}checked{% endif %}> <span>Require inspected status before a room is arrival-ready</span></label>
+      <label><span>Checkout dirty status</span><input type="text" name="checkout_dirty_status" value="{{ housekeeping_defaults.checkout_dirty_status }}" required></label>
+      {% if can('settings.edit') %}<button class="button" type="submit">Save housekeeping defaults</button>{% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Template preview</p>
+        <h2>Notification token validation</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="preview_template">
+      <div class="grid three">
+        <label><span>Template key</span><select name="template_key">{% for key in template_keys %}<option value="{{ key }}" {% if preview_key == key %}selected{% endif %}>{{ key }}</option>{% endfor %}</select></label>
+        <label><span>Channel</span><select name="channel"><option value="email" {% if preview_channel == 'email' %}selected{% endif %}>Email</option><option value="internal_notification" {% if preview_channel == 'internal_notification' %}selected{% endif %}>Internal notification</option><option value="line_staff_alert" {% if preview_channel == 'line_staff_alert' %}selected{% endif %}>LINE staff alert</option><option value="whatsapp_staff_alert" {% if preview_channel == 'whatsapp_staff_alert' %}selected{% endif %}>WhatsApp staff alert</option></select></label>
+        <label><span>Language</span><select name="language_code">{% for code, label in language_labels.items() %}<option value="{{ code }}" {% if preview_language == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+      </div>
+      <button class="button secondary" type="submit">Preview template</button>
+    </form>
+    <div class="subsection">
+      <h3>Rendered sample</h3>
+      <p><strong>Subject:</strong> {{ template_preview.subject or '-' }}</p>
+      <pre class="code-block">{{ template_preview.body or '-' }}</pre>
+      <p class="muted">Allowed placeholders: {{ template_placeholders.get(preview_key, [])|join(', ') }}</p>
+    </div>
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Hotel policies</p>
+      <h2>Multilingual operational policies</h2>
+    </div>
+  </div>
+  <div class="list-stack">
+    {% for code in policy_codes %}
+      {% set document = policy_documents.get(code) %}
+      <form class="card inset stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="policy">
+        <input type="hidden" name="code" value="{{ code }}">
+        <div class="split-row">
+          <div>
+            <strong>{{ document.name if document else code.replace('_', ' ').title() }}</strong>
+            <p>Policy code: {{ code }}</p>
+          </div>
+          <span class="status">{{ document.version if document else 'Seed default' }}</span>
+        </div>
+        <div class="grid two">
+          <label><span>Display name</span><input type="text" name="name" value="{{ document.name if document else code.replace('_', ' ').title() }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          <label><span>Version</span><input type="text" name="version" value="{{ document.version if document else '2026-03' }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        </div>
+        <div class="grid three">
+          <label><span>Thai</span><textarea name="content_th" rows="5" {% if not can('settings.edit') %}disabled{% endif %}>{{ (document.content_json.get('th') if document else '') or '' }}</textarea></label>
+          <label><span>English</span><textarea name="content_en" rows="5" {% if not can('settings.edit') %}disabled{% endif %}>{{ (document.content_json.get('en') if document else '') or '' }}</textarea></label>
+          <label><span>简体中文</span><textarea name="content_zh_hans" rows="5" {% if not can('settings.edit') %}disabled{% endif %}>{{ (document.content_json.get('zh-Hans') if document else '') or '' }}</textarea></label>
+        </div>
+        <label class="toggle-row"><input type="checkbox" name="is_active" {% if not document or document.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Save policy</button>{% endif %}
+      </form>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Notification templates</p>
+      <h2>Channel templates and language variants</h2>
+    </div>
+  </div>
+  <div class="list-stack">
+    {% for template in templates %}
+      <form class="card inset stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="notification_template">
+        <input type="hidden" name="template_id" value="{{ template.id }}">
+        <div class="split-row">
+          <div>
+            <strong>{{ template.template_key }}</strong>
+            <p>{{ language_labels.get(template.language_code, template.language_code) }} / {{ template.channel }}</p>
+          </div>
+          <span class="status">{{ 'Active' if template.is_active else 'Inactive' }}</span>
+        </div>
+        <div class="grid three">
+          <label><span>Template key</span><select name="template_key" {% if not can('settings.edit') %}disabled{% endif %}>{% for key in template_keys %}<option value="{{ key }}" {% if template.template_key == key %}selected{% endif %}>{{ key }}</option>{% endfor %}</select></label>
+          <label><span>Channel</span><select name="channel" {% if not can('settings.edit') %}disabled{% endif %}><option value="email" {% if template.channel == 'email' %}selected{% endif %}>Email</option><option value="internal_notification" {% if template.channel == 'internal_notification' %}selected{% endif %}>Internal notification</option><option value="line_staff_alert" {% if template.channel == 'line_staff_alert' %}selected{% endif %}>LINE staff alert</option><option value="whatsapp_staff_alert" {% if template.channel == 'whatsapp_staff_alert' %}selected{% endif %}>WhatsApp staff alert</option></select></label>
+          <label><span>Language</span><select name="language_code" {% if not can('settings.edit') %}disabled{% endif %}>{% for code, label in language_labels.items() %}<option value="{{ code }}" {% if template.language_code == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        </div>
+        <label><span>Description</span><input type="text" name="description" value="{{ template.description or '' }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        <label><span>Subject template</span><input type="text" name="subject_template" value="{{ template.subject_template }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        <label><span>Body template</span><textarea name="body_template" rows="6" {% if not can('settings.edit') %}disabled{% endif %}>{{ template.body_template }}</textarea></label>
+        <label class="toggle-row"><input type="checkbox" name="is_active" {% if template.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>
+        <p class="muted">Allowed placeholders: {{ template_placeholders.get(template.template_key, [])|join(', ') }}</p>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Save template</button>{% endif %}
+      </form>
+    {% else %}
+      <p class="muted">No notification templates are configured.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

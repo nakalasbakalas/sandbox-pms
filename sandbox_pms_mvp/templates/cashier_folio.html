@@ -1,0 +1,369 @@
+{% extends 'base.html' %}
+{% block title %}Cashier | {{ detail.reservation.reservation_code }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Cashier</p>
+      <h1>{{ detail.reservation.reservation_code }}</h1>
+      <p>{{ detail.reservation.primary_guest.full_name }} · {{ detail.reservation.primary_guest.phone }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back</a>
+      <a class="button secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
+      <span class="status {{ detail.summary.settlement_state }}">{{ detail.summary.settlement_state.replace('_', ' ') }}</span>
+      <span class="status {{ 'paid' if detail.summary.deposit_state in ['paid', 'not_required'] else 'pending' }}">{{ detail.summary.deposit_state.replace('_', ' ') }}</span>
+    </div>
+  </div>
+
+  <section class="grid four metric-grid">
+    <article class="metric-card"><small>Guest</small><strong>{{ detail.reservation.primary_guest.full_name }}</strong></article>
+    <article class="metric-card"><small>Room</small><strong>{{ detail.reservation.assigned_room.room_number if detail.reservation.assigned_room else 'Unassigned' }}</strong></article>
+    <article class="metric-card"><small>Stay</small><strong>{{ detail.reservation.check_in_date }} → {{ detail.reservation.check_out_date }}</strong></article>
+    <article class="metric-card"><small>Status</small><strong>{{ detail.reservation.current_status.replace('_', ' ') }}</strong></article>
+    <article class="metric-card"><small>Charges subtotal</small><strong>{{ currency }} {{ detail.summary.charges_subtotal|money }}</strong></article>
+    <article class="metric-card"><small>Discounts</small><strong>{{ currency }} {{ detail.summary.discounts_subtotal|money }}</strong></article>
+    <article class="metric-card"><small>Tax</small><strong>{{ currency }} {{ detail.summary.tax_subtotal|money }}</strong></article>
+    <article class="metric-card"><small>Credits</small><strong>{{ currency }} {{ detail.summary.credits_total|money }}</strong></article>
+    <article class="metric-card"><small>Deposit received</small><strong>{{ currency }} {{ detail.summary.deposit_received_amount|money }}</strong></article>
+    <article class="metric-card"><small>Deposit applied</small><strong>{{ currency }} {{ detail.summary.deposit_applied_amount|money }}</strong></article>
+    <article class="metric-card"><small>Unused deposit</small><strong>{{ currency }} {{ detail.summary.unused_deposit_amount|money }}</strong></article>
+    <article class="metric-card"><small>Balance / refund</small><strong>{{ currency }} {{ detail.summary.balance_due|money }}{% if detail.summary.refund_due > 0 %} / refund {{ detail.summary.refund_due|money }}{% endif %}</strong></article>
+  </section>
+
+  <div class="actions">
+    {% if detail.summary.pending_refund %}<span class="pill subtle">Refund pending</span>{% endif %}
+    {% if detail.summary.latest_payment_request_status %}<span class="pill subtle">Latest payment request {{ detail.summary.latest_payment_request_status.replace('_', ' ') }}</span>{% endif %}
+    {% if detail.summary.balance_due > 0 %}<span class="pill subtle">Outstanding balance</span>{% endif %}
+    {% if detail.summary.refund_due > 0 %}<span class="pill subtle">Refund due</span>{% endif %}
+  </div>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Actions</p>
+        <h2>Cashier controls</h2>
+      </div>
+    </div>
+
+    {% if can_charge %}
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_post_room_charges', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>Auto-post room charges</h3>
+          <p>Posts room revenue lines up to the selected service date, duplicate-safe by posting key.</p>
+        </div>
+        <button class="button" type="submit">Post room charges</button>
+      </div>
+      <label><span>Through date</span><input type="date" name="through_date" value="{{ detail.reservation.check_out_date.isoformat() }}" required></label>
+    </form>
+    {% endif %}
+
+    {% if can_charge or can_adjust %}
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_adjustment', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>Manual adjustment</h3>
+          <p>Post explicit charge, discount, or correction lines with required notes.</p>
+        </div>
+        <button class="button" type="submit">Post adjustment</button>
+      </div>
+      <div class="grid two">
+        <label><span>Adjustment type</span>
+          <select name="charge_type">
+            {% if can_charge %}<option value="manual_charge">Manual charge</option>{% endif %}
+            {% if can_adjust %}<option value="manual_discount">Manual discount</option><option value="correction">Correction</option>{% endif %}
+          </select>
+        </label>
+        <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
+      </div>
+      <div class="grid two">
+        <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
+        <label><span>Reference charge ID (optional for correction)</span><input type="text" name="reference_charge_id" placeholder="UUID of original line"></label>
+      </div>
+      <label><span>Description</span><input type="text" name="description" maxlength="255" required></label>
+      <label><span>Internal note / reason</span><textarea name="note" rows="2" maxlength="255" required></textarea></label>
+    </form>
+    {% endif %}
+
+    {% if can_payment %}
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_payment', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>Record payment or deposit</h3>
+          <p>Creates authoritative folio credit lines plus payment request/event history.</p>
+        </div>
+        <button class="button" type="submit">Record payment</button>
+      </div>
+      <div class="grid three">
+        <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
+        <label><span>Payment method</span><select name="payment_method"><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option><option value="front_desk">Front desk</option></select></label>
+        <label class="toggle-row"><span>Deposit receipt</span><input type="checkbox" name="is_deposit"></label>
+      </div>
+      <div class="grid two">
+        <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
+        <label><span>Note</span><input type="text" name="note" maxlength="255" placeholder="Deposit at check-in / balance collected"></label>
+      </div>
+    </form>
+    {% endif %}
+
+    {% if can_refund %}
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_refund', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>Refund or pending refund</h3>
+          <p>Records refund due handling without erasing prior payment history.</p>
+        </div>
+        <button class="button" type="submit">Record refund</button>
+      </div>
+      <div class="grid three">
+        <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
+        <label><span>Method</span><select name="payment_method"><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option><option value="front_desk">Front desk</option></select></label>
+        <label><span>Status</span><select name="processed"><option value="1">Processed now</option><option value="0">Pending approval / later payout</option></select></label>
+      </div>
+      <div class="grid two">
+        <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_out_date.isoformat() }}"></label>
+        <label><span>Reference charge ID (optional)</span><input type="text" name="reference_charge_id" placeholder="UUID of related charge"></label>
+      </div>
+      <label><span>Reason</span><textarea name="reason" rows="2" maxlength="255" required></textarea></label>
+    </form>
+    {% endif %}
+
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_issue_document', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>Issue invoice / receipt</h3>
+          <p>Allocates a stable document number and stores issuance in cashier history.</p>
+        </div>
+        <button class="button secondary" type="submit">Issue document</button>
+      </div>
+      <div class="grid two">
+        <label><span>Document type</span><select name="document_type"><option value="invoice">Invoice</option><option value="receipt">Receipt</option><option value="folio">Folio document</option></select></label>
+        <label><span>Issuance note</span><input type="text" name="note" maxlength="255" placeholder="Settlement copy / guest requested print"></label>
+      </div>
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Documents</p>
+        <h2>Printable outputs</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for document in detail.documents %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ document.document_type.title() }} {{ document.document_number }}</strong>
+          <p>{{ currency }} {{ document.total_amount|money }} · {{ document.status.replace('_', ' ') }}</p>
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ document.issued_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          <a class="button tiny secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type=document.document_type) }}" target="_blank" rel="noopener">Open print view</a>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No cashier documents have been issued yet.</p>
+      {% endfor %}
+    </div>
+
+    <div class="subsection">
+      <h3>Payment requests</h3>
+      {% if payments_enabled and can_payment_request %}
+      <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_payment_request', reservation_id=detail.reservation.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="back_url" value="{{ back_url }}">
+        <div class="split-row">
+          <label class="toggle-row"><span>Email guest now</span><input type="checkbox" name="send_email" checked></label>
+          <label class="toggle-row"><span>Force new link</span><input type="checkbox" name="force_new_link"></label>
+          <button class="button secondary" type="submit">Create deposit request</button>
+        </div>
+      </form>
+      {% endif %}
+      <div class="list-stack compact">
+        {% for request_item in detail.payment_requests %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ request_item.request_type.replace('_', ' ') }}</strong>
+            {% if request_item.request_code %}<p class="small muted">{{ request_item.request_code }}</p>{% endif %}
+            {% if request_item.provider_reference %}<p class="small muted">Provider ref {{ request_item.provider_reference }}</p>{% endif %}
+            <p>{{ request_item.provider }} · {{ request_item.status.replace('_', ' ') }}</p>
+          </div>
+          <div class="right-stack">
+            <strong>{{ currency }} {{ request_item.amount|money }}</strong>
+            <span class="small muted">{{ request_item.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            {% if can_payment_request and request_item.status != 'paid' %}
+            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_resend_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ back_url }}">
+              <label class="toggle-row"><span>New link</span><input type="checkbox" name="force_new_link"></label>
+              <button class="button tiny secondary" type="submit">Resend</button>
+            </form>
+            {% endif %}
+            {% if can('payment.read') %}
+            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_refresh_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ back_url }}">
+              <button class="button tiny secondary" type="submit">Refresh</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <p class="muted">No payment requests recorded.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>Payment events</h3>
+      <div class="list-stack compact">
+        {% for event in detail.payment_events %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ event.event_type.replace('_', ' ') }}</strong>
+            <p>{{ event.provider or 'front desk' }}</p>
+          </div>
+          <div class="right-stack">
+            {% if event.amount is not none %}<strong>{{ currency }} {{ event.amount|money }}</strong>{% endif %}
+            <span class="small muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          </div>
+        </div>
+        {% else %}
+        <p class="muted">No payment events recorded.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>Communication history</h3>
+      <div class="list-stack compact">
+        {% for delivery in detail.notification_history %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ delivery.event_type.replace('_', ' ') }}</strong>
+            <p>{{ delivery.channel }}{% if delivery.recipient_target %} · {{ delivery.recipient_target }}{% endif %}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ delivery.status }}">{{ delivery.status.replace('_', ' ') }}</span>
+            <span class="small muted">{{ delivery.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          </div>
+        </div>
+        {% else %}
+        <p class="muted">No payment or guest communication history recorded yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Ledger</p>
+        <h2>Folio lines</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Service date</th>
+            <th>Code</th>
+            <th>Type</th>
+            <th>Description</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Actor</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in detail.lines %}
+          <tr>
+            <td>{{ line.service_date }}</td>
+            <td><strong>{{ line.charge_code }}</strong></td>
+            <td>{{ line.charge_type.replace('_', ' ') }}</td>
+            <td>
+              <strong>{{ line.description }}</strong>
+              {% if line.metadata_json and line.metadata_json.note %}<div class="small muted">{{ line.metadata_json.note }}</div>{% endif %}
+              {% if line.void_reason %}<div class="small muted">Void reason: {{ line.void_reason }}</div>{% endif %}
+            </td>
+            <td>{{ currency }} {{ line.total_amount|money }}</td>
+            <td>
+              {% if line.voided_at %}
+              <span class="status cancelled">Voided</span>
+              {% elif line.is_reversal %}
+              <span class="status pending">Reversal</span>
+              {% else %}
+              <span class="status confirmed">Posted</span>
+              {% endif %}
+            </td>
+            <td>{{ line.posted_by_user.full_name if line.posted_by_user else 'system' }}<div class="small muted">{{ line.posted_at.strftime('%Y-%m-%d %H:%M') }}</div></td>
+            <td>
+              {% if can_adjust and not line.voided_at and not line.is_reversal %}
+              <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_void_charge', reservation_id=detail.reservation.id, charge_id=line.id) }}">
+                {{ csrf_input() }}
+                <input type="hidden" name="back_url" value="{{ back_url }}">
+                <input type="text" name="reason" maxlength="255" placeholder="Void reason" required>
+                <button class="button tiny secondary" type="submit">Void</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="center muted">No folio lines posted yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">History</p>
+        <h2>Cashier activity</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for event in detail.activity %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ event.event_type.replace('_', ' ') }}</strong>
+          {% if event.note %}<p>{{ event.note }}</p>{% endif %}
+          {% if event.metadata_json %}
+          <p class="small muted">
+            {% if event.metadata_json.document_number %}Document {{ event.metadata_json.document_number }}{% endif %}
+            {% if event.metadata_json.method %} · {{ event.metadata_json.method }}{% endif %}
+            {% if event.metadata_json.through_date %} · Through {{ event.metadata_json.through_date }}{% endif %}
+          </p>
+          {% endif %}
+        </div>
+        <div class="right-stack">
+          {% if event.amount is not none %}<strong>{{ currency }} {{ event.amount|money }}</strong>{% endif %}
+          <span class="small muted">{{ event.actor_user.full_name if event.actor_user else 'system' }}</span>
+          <span class="small muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No cashier activity recorded yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

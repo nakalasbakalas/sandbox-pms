@@ -1,0 +1,56 @@
+﻿{% extends 'base.html' %}
+{% block title %}{% if is_staff %}New Staff Reservation{% else %}Reserve a Stay{% endif %} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card form-card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">{% if is_staff %}Staff booking{% else %}Guest booking{% endif %}</p>
+      <h1>{% if is_staff %}Create reservation{% else %}Reserve your stay{% endif %}</h1>
+      <p>{% if is_staff %}Use this form for walk-ins, phone bookings, or controlled direct bookings.{% else %}This flow creates a tentative reservation and locks sellable inventory immediately.{% endif %}</p>
+    </div>
+  </div>
+  <form method="post" class="stack-form">
+    {{ csrf_input() }}
+    <div class="grid two">
+      <label><span>Guest name</span><input type="text" name="guest_name" value="{{ initial.guest_name or '' }}" required></label>
+      <label><span>Phone</span><input type="text" name="guest_phone" value="{{ initial.guest_phone or '' }}" required></label>
+    </div>
+    <div class="grid two">
+      <label><span>Email</span><input type="email" name="guest_email" value="{{ initial.guest_email or '' }}"></label>
+      <label><span>Source</span><input type="text" name="source" value="{{ initial.source or ('staff' if is_staff else 'direct_web') }}"></label>
+    </div>
+    <div class="grid four">
+      <label><span>Check-in</span><input type="date" name="check_in" value="{{ initial.check_in or '' }}" required></label>
+      <label><span>Check-out</span><input type="date" name="check_out" value="{{ initial.check_out or '' }}" required></label>
+      <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="{{ initial.adults or 2 }}"></label>
+      <label><span>Children</span><input type="number" name="children" min="0" max="2" value="{{ initial.children or 0 }}"></label>
+    </div>
+    <div class="grid two">
+      <label>
+        <span>Room type</span>
+        <select name="room_type_id" required>
+          <option value="">Select room type</option>
+          {% for room_type in room_types %}
+            <option value="{{ room_type.id }}" {% if (initial.room_type_id|string) == (room_type.id|string) %}selected{% endif %}>{{ room_type.name }} - Weekday {{ currency }} {{ room_type.weekday_rate|money }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if is_staff %}
+      <label>
+        <span>Initial status</span>
+        <select name="status">
+          {% for option in ['tentative', 'confirmed', 'house_use', 'waitlist'] %}
+            <option value="{{ option }}" {% if (initial.status or 'confirmed') == option %}selected{% endif %}>{{ option.replace('_', ' ').title() }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
+    <label><span>Notes</span><textarea name="notes" rows="4">{{ initial.notes or '' }}</textarea></label>
+    <div class="actions">
+      <button class="button" type="submit">{% if is_staff %}Create reservation{% else %}Lock stay{% endif %}</button>
+      <a class="button secondary" href="{{ url_for('availability') }}">Back to search</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

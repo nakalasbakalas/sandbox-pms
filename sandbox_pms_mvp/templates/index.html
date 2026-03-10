@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Sandbox Hotel{% endblock %}
+{% block content %}
+<section class="hero card">
+  <div>
+    <p class="eyebrow">Sandbox Hotel</p>
+    <h1>{{ t('search_title') }}</h1>
+    <p class="lead">{{ t('policy_summary') }}</p>
+    <form class="stack-form" action="{{ url_for('availability') }}" method="get">
+      <input type="hidden" name="lang" value="{{ current_language }}">
+      <div class="grid two">
+        <label><span>Check-in</span><input type="date" name="check_in" required></label>
+        <label><span>Check-out</span><input type="date" name="check_out" required></label>
+      </div>
+      <div class="grid three">
+        <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="2" required></label>
+        <label><span>Children</span><input type="number" name="children" min="0" max="2" value="0" required></label>
+        <label><span>&nbsp;</span><button class="button" type="submit">{{ t('search_title') }}</button></label>
+      </div>
+    </form>
+  </div>
+  <div class="card inset">
+    <h3>Policies</h3>
+    <ul class="checklist compact">
+      <li>{{ t('checkin_summary') }}</li>
+      <li>{{ t('extra_guest_summary') }}</li>
+      <li>{{ t('policy_summary') }}</li>
+    </ul>
+  </div>
+</section>
+
+<section class="grid two">
+  <article class="card">
+    <div class="card-head"><div><p class="eyebrow">Room types</p><h2>Direct booking</h2></div></div>
+    <div class="room-type-stack">
+      {% for room_type in room_types %}
+        <div class="room-type-row">
+          <div>
+            <strong>{{ room_type.name }}</strong>
+            <p>{{ room_type.description }}</p>
+          </div>
+          <span class="status confirmed">Max {{ room_type.max_occupancy }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+  <article class="card">
+    <div class="card-head"><div><p class="eyebrow">Recent</p><h2>New direct bookings</h2></div></div>
+    {% if upcoming %}
+      <div class="list-stack compact">
+        {% for reservation in upcoming %}
+          <div class="list-row no-link">
+            <div>
+              <strong>{{ reservation.reservation_code }}</strong>
+              <p>{{ reservation.primary_guest.full_name }} · {{ reservation.check_in_date }} to {{ reservation.check_out_date }}</p>
+            </div>
+            <span class="status {{ reservation.current_status }}">{{ reservation.current_status }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No public bookings yet.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

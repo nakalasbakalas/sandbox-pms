@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Audit | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Audit filters</p>
+      <h2>Configuration and system change history</h2>
+    </div>
+  </div>
+  <form class="stack-form" method="get">
+    <div class="grid four">
+      <label><span>Date from</span><input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+      <label><span>Date to</span><input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+      <label><span>Actor</span><select name="actor_user_id"><option value="">All actors</option>{% for user in users %}<option value="{{ user.id }}" {% if filters.actor_user_id == user.id|string %}selected{% endif %}>{{ user.full_name }}</option>{% endfor %}</select></label>
+      <label><span>Entity</span><select name="entity_table"><option value="">All entities</option>{% for item in entity_tables %}<option value="{{ item }}" {% if filters.entity_table == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    </div>
+    <div class="grid two">
+      <label><span>Action</span><select name="action"><option value="">All actions</option>{% for item in action_codes %}<option value="{{ item }}" {% if filters.action == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+      <div class="actions">
+        <button class="button secondary" type="submit">Apply filters</button>
+        <a class="button subtle" href="{{ url_for('staff_audit') }}">Reset</a>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="card subsection">
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Action</th>
+          <th>Entity</th>
+          <th>Actor</th>
+          <th>Summary</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+          <tr>
+            <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ entry.action }}</td>
+            <td>{{ entry.entity_table }} / {{ entry.entity_id }}</td>
+            <td>{{ entry.actor_user_id or '-' }}</td>
+            <td>{{ summarize_audit_entry(entry) or '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="muted center">No audit entries matched the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

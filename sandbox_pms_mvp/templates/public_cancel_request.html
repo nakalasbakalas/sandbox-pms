@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Cancellation request | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card narrow-card">
+  <div class="card-head"><div><p class="eyebrow">Guest self-service</p><h1>Cancellation request</h1></div></div>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <label><span>Booking reference</span><input type="text" name="booking_reference" maxlength="20" required></label>
+    <label><span>Email or mobile phone</span><input type="text" name="contact_value" required></label>
+    <label><span>Reason</span><textarea name="reason" rows="4" maxlength="500"></textarea></label>
+    <button class="button" type="submit">Submit request</button>
+  </form>
+  {% if request_row %}
+    <div class="subsection"><p>Request {{ request_row.request_code }} recorded.</p></div>
+  {% endif %}
+</section>
+{% endblock %}

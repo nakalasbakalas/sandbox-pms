@@ -1,0 +1,258 @@
+{% extends 'base.html' %}
+{% block title %}Room {{ detail.room.room_number }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% set summary = detail.summary %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Housekeeping Room Detail</p>
+      <h1>Room {{ detail.room.room_number }}</h1>
+      <p>{{ detail.room.room_type.code }} - {{ detail.room.room_type.name }} on floor {{ detail.room.floor_number }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back to board</a>
+      <span class="status {{ summary.housekeeping_status_code or 'pending' }}">{{ (summary.housekeeping_status_code or 'unknown').replace('_', ' ') }}</span>
+      <span class="status {{ summary.availability_status or 'pending' }}">{{ (summary.availability_status or summary.operational_state).replace('_', ' ') }}</span>
+    </div>
+  </div>
+
+  <section class="grid four metric-grid">
+    <article class="metric-card"><small>Business date</small><strong>{{ business_date.isoformat() }}</strong></article>
+    <article class="metric-card"><small>Priority</small><strong>{{ summary.priority_label }}</strong></article>
+    <article class="metric-card"><small>Sellable</small><strong>{{ 'Yes' if summary.is_sellable else 'No' }}</strong></article>
+    <article class="metric-card"><small>Notes</small><strong>{{ summary.note_count }}</strong></article>
+  </section>
+
+  <div class="actions">
+    {% if summary.arrival_today %}<span class="pill subtle">Arrival today</span>{% endif %}
+    {% if summary.departure_today %}<span class="pill subtle">Departure today</span>{% endif %}
+    {% if summary.in_house %}<span class="pill subtle">In house</span>{% endif %}
+    {% if summary.is_blocked %}<span class="pill subtle">Blocked</span>{% endif %}
+    {% if summary.maintenance_flag %}<span class="pill subtle">Maintenance flagged</span>{% endif %}
+  </div>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Operational summary</p>
+        <h2>Readiness context</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      <div class="list-row no-link">
+        <div><strong>Priority reason</strong><p>{{ summary.priority_reason }}</p></div>
+      </div>
+      <div class="list-row no-link">
+        <div><strong>Reservation context</strong><p>{% if summary.reservation_code %}{{ summary.reservation_code }}{% if summary.guest_name %} - {{ summary.guest_name }}{% endif %}{% else %}No active arrival/departure/in-house context on this date.{% endif %}</p></div>
+      </div>
+      <div class="list-row no-link">
+        <div><strong>Maintenance</strong><p>{{ summary.maintenance_note or ('Flagged' if summary.maintenance_flag else 'No active maintenance flag') }}</p></div>
+      </div>
+      <div class="list-row no-link">
+        <div><strong>Blocked state</strong><p>{{ summary.blocked_reason or ('Blocked' if summary.is_blocked else 'Not blocked') }}</p></div>
+      </div>
+      <div class="list-row no-link">
+        <div><strong>Cleaned / inspected</strong><p>{{ summary.cleaned_at.strftime('%Y-%m-%d %H:%M') if summary.cleaned_at else 'Not recorded' }} / {{ summary.inspected_at.strftime('%Y-%m-%d %H:%M') if summary.inspected_at else 'Not recorded' }}</p></div>
+      </div>
+    </div>
+  </article>
+
+  {% if can('housekeeping.status_change') %}
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Status control</p>
+        <h2>Update housekeeping state</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=detail.room.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <label><span>Housekeeping status</span><select name="status_code" required>
+        {% for status_code in housekeeping_statuses %}
+          {% if can_manage_controls or status_code not in ['out_of_order', 'out_of_service'] %}
+          <option value="{{ status_code }}" {% if summary.housekeeping_status_code == status_code %}selected{% endif %}>{{ status_code.replace('_', ' ') }}</option>
+          {% endif %}
+        {% endfor %}
+      </select></label>
+      <label><span>Reason / handoff note</span><textarea name="note" rows="3" placeholder="Arrival room cleaned / supervisor inspected / do not release yet"></textarea></label>
+      <button class="button" type="submit">Save room status</button>
+    </form>
+  </article>
+  {% endif %}
+</section>
+
+<section class="grid two gap-lg">
+  {% if can('housekeeping.status_change') %}
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Maintenance</p>
+        <h2>Flag or clear maintenance</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_maintenance', room_id=detail.room.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <label><span>Maintenance note</span><textarea name="note" rows="3" placeholder="Bathroom leak / AC issue / inspect before sale">{{ detail.inventory.maintenance_note or '' }}</textarea></label>
+      <div class="actions">
+        <button class="button" type="submit" name="enabled" value="1">Set maintenance flag</button>
+        <button class="button secondary" type="submit" name="enabled" value="0">Clear maintenance flag</button>
+      </div>
+    </form>
+  </article>
+  {% endif %}
+
+  {% if can_manage_controls %}
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Blocked room control</p>
+        <h2>Block or unblock room</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_block', room_id=detail.room.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <label><span>Blocked reason</span><textarea name="reason" rows="3" placeholder="Hold back for inspection / arrival recovery / short maintenance block">{{ detail.inventory.blocked_reason or '' }}</textarea></label>
+      <label><span>Blocked until</span><input type="datetime-local" name="blocked_until" value="{{ detail.inventory.blocked_until.strftime('%Y-%m-%dT%H:%M') if detail.inventory.blocked_until else '' }}"></label>
+      <div class="actions">
+        <button class="button" type="submit" name="blocked" value="1">Block room</button>
+        <button class="button secondary" type="submit" name="blocked" value="0">Unblock room</button>
+      </div>
+    </form>
+  </article>
+  {% endif %}
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Room notes</p>
+        <h2>Housekeeping notes</h2>
+      </div>
+    </div>
+    {% if can('housekeeping.status_change') %}
+    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_note', room_id=detail.room.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <label><span>Note</span><textarea name="note_text" rows="3" required placeholder="Extra cleaning required / guest left belongings / inspect before release"></textarea></label>
+      <div class="grid three">
+        <label><span>Type</span><select name="note_type">{% for note_type in room_note_types %}<option value="{{ note_type }}">{{ note_type.replace('_', ' ') }}</option>{% endfor %}</select></label>
+        <label><span>Visibility</span><select name="visibility_scope"><option value="all_staff">All staff</option><option value="front_desk">Front desk</option><option value="manager">Manager only</option></select></label>
+        <label class="toggle-row"><span>Important</span><input type="checkbox" name="is_important"></label>
+      </div>
+      <button class="button" type="submit">Add room note</button>
+    </form>
+    {% endif %}
+    <div class="list-stack compact subsection">
+      {% for note in detail.notes %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ note.note_type.replace('_', ' ').title() }}</strong>
+          <p>{{ note.note_text }}</p>
+          <p class="small muted">{{ note.visibility_scope.replace('_', ' ') }}</p>
+        </div>
+        <div class="right-stack">
+          {% if note.is_important %}<span class="status pending">Important</span>{% endif %}
+          <span class="small muted">{{ note.created_by_user.full_name if note.created_by_user else 'System' }}</span>
+          <span class="small muted">{{ note.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No housekeeping notes have been logged for this room/day yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Status history</p>
+        <h2>Operational timeline</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for event in detail.history %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ event.event_type.replace('_', ' ').title() }}</strong>
+          <p>
+            {% if event.previous_housekeeping_status or event.new_housekeeping_status %}
+            {{ event.previous_housekeeping_status.code if event.previous_housekeeping_status else 'none' }} -> {{ event.new_housekeeping_status.code if event.new_housekeeping_status else 'none' }}
+            {% else %}
+            {{ event.previous_availability_status or 'n/a' }} -> {{ event.new_availability_status or 'n/a' }}
+            {% endif %}
+          </p>
+          {% if event.note %}<p>{{ event.note }}</p>{% endif %}
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ event.changed_by_user.full_name if event.changed_by_user else 'System' }}</span>
+          <span class="small muted">{{ event.changed_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No room status history recorded yet for this day.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Activity log</p>
+        <h2>Front-line events</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for event in detail.activities %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ event.event_type.replace('.', ' ').replace('_', ' ').title() }}</strong>
+          <p>{{ event.metadata_json if event.metadata_json else 'Operational event recorded.' }}</p>
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No activity entries recorded for this room/day yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Audit trail</p>
+        <h2>Structured changes</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for audit in detail.audits %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ audit.action.replace('_', ' ').title() }}</strong>
+          <p class="small muted">Before: {{ audit.before_data if audit.before_data else '{}' }}</p>
+          <p class="small muted">After: {{ audit.after_data if audit.after_data else '{}' }}</p>
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ audit.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No structured audit rows recorded yet for this room/day.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

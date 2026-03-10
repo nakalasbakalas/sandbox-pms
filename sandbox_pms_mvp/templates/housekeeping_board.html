@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Housekeeping | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Housekeeping</p>
+      <h1>Daily housekeeping board</h1>
+      <p>Track room readiness, arrival pressure, blocked rooms, and maintenance risk from the operational source of truth.</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+      <a class="button secondary" href="{{ url_for('staff_front_desk', date=board.business_date.isoformat()) }}">Front desk</a>
+      <a class="pill {% if not filters.mobile %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today, blocked=filters.blocked, maintenance=filters.maintenance, notes=filters.notes) }}">Board</a>
+      <a class="pill {% if filters.mobile %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today, blocked=filters.blocked, maintenance=filters.maintenance, notes=filters.notes, view='mobile') }}">Mobile</a>
+    </div>
+  </div>
+
+  <section class="grid three metric-grid">
+    <article class="metric-card"><small>Dirty / pickup</small><strong>{{ board.counts.dirty }}</strong></article>
+    <article class="metric-card"><small>Arrival-ready</small><strong>{{ board.counts.clean + board.counts.inspected }}</strong></article>
+    <article class="metric-card"><small>Blocked / OOO / maintenance</small><strong>{{ board.counts.blocked + board.counts.out_of_order + board.counts.maintenance }}</strong></article>
+  </section>
+
+  <form class="toolbar" method="get">
+    <label><span>Business date</span><input type="date" name="date" value="{{ board.business_date.isoformat() }}"></label>
+    <label><span>Floor</span><select name="floor"><option value="">All floors</option><option value="2" {% if filters.floor == '2' %}selected{% endif %}>Floor 2</option><option value="3" {% if filters.floor == '3' %}selected{% endif %}>Floor 3</option></select></label>
+    <label><span>Status</span><select name="status"><option value="">All statuses</option>{% for status_code in housekeeping_statuses %}<option value="{{ status_code }}" {% if filters.status == status_code %}selected{% endif %}>{{ status_code.replace('_', ' ') }}</option>{% endfor %}</select></label>
+    <label><span>Priority</span><select name="priority"><option value="">All priorities</option><option value="urgent" {% if filters.priority == 'urgent' %}selected{% endif %}>Urgent</option><option value="high" {% if filters.priority == 'high' %}selected{% endif %}>High</option><option value="normal" {% if filters.priority == 'normal' %}selected{% endif %}>Normal</option><option value="blocked" {% if filters.priority == 'blocked' %}selected{% endif %}>Blocked</option></select></label>
+    <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+    <label><span>Arrival today</span><select name="arrival_today"><option value="">Any</option><option value="1" {% if filters.arrival_today == '1' %}selected{% endif %}>Arrival rooms only</option></select></label>
+    <label><span>Departure today</span><select name="departure_today"><option value="">Any</option><option value="1" {% if filters.departure_today == '1' %}selected{% endif %}>Departure rooms only</option></select></label>
+    <label><span>Blocked</span><select name="blocked"><option value="">Any</option><option value="1" {% if filters.blocked == '1' %}selected{% endif %}>Blocked only</option></select></label>
+    <label><span>Maintenance</span><select name="maintenance"><option value="">Any</option><option value="1" {% if filters.maintenance == '1' %}selected{% endif %}>Flagged only</option></select></label>
+    <label><span>Notes</span><select name="notes"><option value="">Any</option><option value="1" {% if filters.notes == '1' %}selected{% endif %}>Notes present</option></select></label>
+    {% if filters.mobile %}<input type="hidden" name="view" value="mobile">{% endif %}
+    <button class="button" type="submit">Refresh board</button>
+  </form>
+</section>
+
+{% if can('housekeeping.status_change') %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Bulk control</p>
+      <h2>Supervisor bulk updates</h2>
+      <p>Each selected room is validated individually. Closure and blocked-room actions still require manager or admin authority.</p>
+    </div>
+  </div>
+  <form id="bulk-housekeeping-form" class="stack-form" method="post" action="{{ url_for('staff_housekeeping_bulk') }}">
+    {{ csrf_input() }}
+    <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
+    {% if filters.mobile %}<input type="hidden" name="view" value="mobile">{% endif %}
+    <div class="grid four">
+      <label><span>Action</span><select name="action" required>
+        <option value="set_status">Set status</option>
+        <option value="add_note">Add note</option>
+        <option value="maintenance_on">Flag maintenance</option>
+        <option value="maintenance_off">Clear maintenance</option>
+        {% if can_manage_controls %}
+        <option value="block">Block room</option>
+        <option value="unblock">Unblock room</option>
+        {% endif %}
+      </select></label>
+      <label><span>Status code</span><select name="status_code">
+        <option value="">No status change</option>
+        {% for status_code in housekeeping_statuses %}
+          {% if can_manage_controls or status_code not in ['out_of_order', 'out_of_service'] %}
+          <option value="{{ status_code }}">{{ status_code.replace('_', ' ') }}</option>
+          {% endif %}
+        {% endfor %}
+      </select></label>
+      <label><span>Note type</span><select name="room_note_type">{% for note_type in room_note_types %}<option value="{{ note_type }}">{{ note_type.replace('_', ' ') }}</option>{% endfor %}</select></label>
+      <label><span>Blocked until</span><input type="datetime-local" name="blocked_until"></label>
+    </div>
+    <div class="grid two">
+      <label><span>Shared note / reason</span><textarea name="note" rows="2" placeholder="Turn these rooms first for arrivals / inspect before release / maintenance issue"></textarea></label>
+      <label class="toggle-row"><span>Mark note important</span><input type="checkbox" name="is_important"></label>
+    </div>
+    <div class="actions">
+      <button class="button" type="submit">Apply to selected rooms</button>
+      <span class="muted small">Use the checkboxes on room cards below to choose the rooms.</span>
+    </div>
+  </form>
+</section>
+{% endif %}
+
+<section class="room-board-grid {% if filters.mobile %}mobile{% endif %}">
+  {% for item in board["items"] %}
+  <article class="card room-board-card room-tile {{ item.housekeeping_status_code or 'unknown' }}">
+    <div class="room-board-top">
+      <div>
+        <p class="eyebrow">Floor {{ item.floor_number }}</p>
+        <h2>Room {{ item.room_number }}</h2>
+        <p>{{ item.room_type_code }} - {{ item.room_type_name }}</p>
+      </div>
+      <div class="right-stack">
+        {% if can('housekeeping.status_change') %}
+        <label class="bulk-check">
+          <input type="checkbox" name="room_ids" value="{{ item.room_id }}" form="bulk-housekeeping-form">
+          <span>Select</span>
+        </label>
+        {% endif %}
+        <span class="status {{ item.housekeeping_status_code or 'pending' }}">{{ (item.housekeeping_status_code or 'unknown').replace('_', ' ') }}</span>
+      </div>
+    </div>
+
+    <div class="status-pair room-badge-wrap">
+      <span class="status {{ 'confirmed' if item.priority in ['urgent', 'high'] else 'pending' }}">{{ item.priority_label }}</span>
+      <span class="status {{ item.availability_status or 'pending' }}">{{ (item.availability_status or item.operational_state).replace('_', ' ') }}</span>
+      {% if item.is_blocked %}<span class="status no_show">Blocked</span>{% endif %}
+      {% if item.maintenance_flag %}<span class="status house_use">Maintenance</span>{% endif %}
+      {% if item.arrival_today %}<span class="status confirmed">Arrival</span>{% endif %}
+      {% if item.departure_today %}<span class="status pending">Departure</span>{% endif %}
+      {% if item.in_house %}<span class="status checked_in">In house</span>{% endif %}
+      {% if item.note_count %}<span class="status house_use">{{ item.note_count }} note{{ '' if item.note_count == 1 else 's' }}</span>{% endif %}
+    </div>
+
+    <div class="room-board-body">
+      {% if item.reservation_code %}
+      <div class="room-board-line">
+        <strong>Stay context</strong>
+        <span>{{ item.reservation_code }}{% if item.guest_name %} - {{ item.guest_name }}{% endif %}</span>
+      </div>
+      {% endif %}
+      <div class="room-board-line">
+        <strong>Priority reason</strong>
+        <span>{{ item.priority_reason }}</span>
+      </div>
+      {% if item.blocked_reason %}
+      <div class="room-board-line">
+        <strong>Block reason</strong>
+        <span>{{ item.blocked_reason }}</span>
+      </div>
+      {% endif %}
+      {% if item.maintenance_note %}
+      <div class="room-board-line">
+        <strong>Maintenance note</strong>
+        <span>{{ item.maintenance_note }}</span>
+      </div>
+      {% endif %}
+      <div class="room-board-line">
+        <strong>Ready to sell</strong>
+        <span>{{ 'Yes' if item.is_sellable else 'No' }}</span>
+      </div>
+      <div class="room-board-line">
+        <strong>Updated</strong>
+        <span>{{ item.last_updated_at.strftime('%Y-%m-%d %H:%M') if item.last_updated_at else 'n/a' }}</span>
+      </div>
+    </div>
+
+    <div class="actions room-card-actions">
+      <a class="button tiny secondary" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Open detail</a>
+      {% if can('housekeeping.status_change') %}
+      <form method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
+        <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+        <input type="hidden" name="status_code" value="dirty">
+        <button class="button tiny secondary" type="submit">Dirty</button>
+      </form>
+      <form method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
+        <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+        <input type="hidden" name="status_code" value="clean">
+        <button class="button tiny secondary" type="submit">Clean</button>
+      </form>
+      <form method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
+        <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+        <input type="hidden" name="status_code" value="inspected">
+        <button class="button tiny" type="submit">Inspect</button>
+      </form>
+      {% endif %}
+    </div>
+  </article>
+  {% else %}
+  <section class="card center">
+    <h2>No rooms matched these housekeeping filters</h2>
+    <p class="muted">Adjust the board filters or change the business date to review a different operational day.</p>
+  </section>
+  {% endfor %}
+</section>
+{% endblock %}

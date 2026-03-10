@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Rates | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Rates</p>
+      <h1>Rate rules</h1>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Priority</th>
+          <th>Type</th>
+          <th>Adjustment</th>
+          <th>Value</th>
+          <th>Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rule in rate_rules %}
+          <tr>
+            <td>{{ rule.name }}</td>
+            <td>{{ rule.priority }}</td>
+            <td>{{ rule.rule_type }}</td>
+            <td>{{ rule.adjustment_type }}</td>
+            <td>{{ rule.adjustment_value|money }}</td>
+            <td><span class="status {{ 'confirmed' if rule.is_active else 'cancelled' }}">{{ 'Active' if rule.is_active else 'Inactive' }}</span></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

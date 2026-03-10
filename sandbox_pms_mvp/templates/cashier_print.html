@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ document.document_number if document else document_type|title }} | {{ hotel_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body class="print-page">
+    <main class="print-shell">
+      <section class="print-doc">
+        <header class="print-header">
+          <div>
+            <p class="eyebrow">Sandbox Hotel</p>
+            <h1>{{ document_type.replace('_', ' ').title() }}</h1>
+            <p>{{ document.document_number if document else 'Draft / preview' }}</p>
+          </div>
+          <div class="print-meta">
+            <strong>{{ detail.reservation.reservation_code }}</strong>
+            <span>Printed {{ printed_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            <span>Status {{ detail.summary.settlement_state.replace('_', ' ') }}</span>
+          </div>
+        </header>
+
+        <section class="print-grid">
+          <article>
+            <h2>Guest</h2>
+            <p>{{ detail.reservation.primary_guest.full_name }}</p>
+            <p>{{ detail.reservation.primary_guest.phone }}</p>
+            <p>{{ detail.reservation.primary_guest.email or '' }}</p>
+          </article>
+          <article>
+            <h2>Stay</h2>
+            <p>Room {{ detail.reservation.assigned_room.room_number if detail.reservation.assigned_room else 'Unassigned' }}</p>
+            <p>{{ detail.reservation.check_in_date }} → {{ detail.reservation.check_out_date }}</p>
+            <p>{{ detail.reservation.room_type.code }} · {{ detail.reservation.room_type.name }}</p>
+          </article>
+        </section>
+
+        <section class="print-section">
+          <h2>Line items</h2>
+          <table class="print-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Code</th>
+                <th>Description</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in detail.lines %}
+                {% if not line.voided_at %}
+              <tr>
+                <td>{{ line.service_date }}</td>
+                <td>{{ line.charge_code }}</td>
+                <td>{{ line.description }}</td>
+                <td>{{ currency }} {{ line.total_amount|money }}</td>
+              </tr>
+                {% endif %}
+              {% else %}
+              <tr><td colspan="4">No folio lines posted.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </section>
+
+        <section class="print-section">
+          <div class="print-totals">
+            <div><span>Charges subtotal</span><strong>{{ currency }} {{ detail.summary.charges_subtotal|money }}</strong></div>
+            <div><span>Discounts</span><strong>{{ currency }} {{ detail.summary.discounts_subtotal|money }}</strong></div>
+            <div><span>Tax</span><strong>{{ currency }} {{ detail.summary.tax_subtotal|money }}</strong></div>
+            <div><span>Credits</span><strong>{{ currency }} {{ detail.summary.credits_total|money }}</strong></div>
+            <div><span>Balance due</span><strong>{{ currency }} {{ detail.summary.balance_due|money }}</strong></div>
+            <div><span>Refund due</span><strong>{{ currency }} {{ detail.summary.refund_due|money }}</strong></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

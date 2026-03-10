@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Staff sign in | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card narrow-card">
+  <div class="card-head"><div><p class="eyebrow">Staff access</p><h1>Staff sign in</h1></div></div>
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <label><span>Email or username</span><input type="text" name="username" required></label>
+    <label><span>Password</span><input type="password" name="password" required></label>
+    <button class="button" type="submit">Sign in</button>
+  </form>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_for('staff_forgot_password') }}">Forgot password</a>
+  </div>
+</section>
+{% endblock %}

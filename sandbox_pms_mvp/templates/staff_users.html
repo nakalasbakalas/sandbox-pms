@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Users | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">User management</p>
+        <h1>Staff accounts</h1>
+      </div>
+    </div>
+    {% if can('user.create') %}
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="create">
+        <div class="grid two">
+          <label><span>Full name</span><input type="text" name="full_name" required></label>
+          <label><span>Email</span><input type="email" name="email" required></label>
+        </div>
+        <div class="grid two">
+          {% for role in roles %}
+            <label class="toggle-row"><input type="checkbox" name="role_codes" value="{{ role.code }}"> <span>{{ role.name }}</span></label>
+          {% endfor %}
+        </div>
+        <button class="button" type="submit">Create staff account</button>
+      </form>
+    {% else %}
+      <p class="muted">You can review staff accounts but cannot create them.</p>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Recent security activity</p>
+        <h2>Latest events</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for item in recent_activity %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ item.event_type }}</strong>
+            <p>{{ item.entity_table or 'system' }}{% if item.entity_id %} - {{ item.entity_id }}{% endif %}</p>
+          </div>
+          <span class="small">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      {% else %}
+        <p class="muted">No recent activity.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Accounts</p>
+      <h2>Current staff users</h2>
+    </div>
+  </div>
+  <div class="list-stack">
+    {% for user in users %}
+      <div class="card inset">
+        <form class="stack-form" method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="update">
+          <input type="hidden" name="user_id" value="{{ user.id }}">
+          <div class="split-row">
+            <div>
+              <strong>{{ user.email }}</strong>
+              <p>{{ user.username }} - {{ user.account_state }}</p>
+            </div>
+            <div class="status-pair">
+              {% for role in user.roles %}
+                <span class="status">{{ role.name }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="grid two">
+            <label><span>Full name</span><input type="text" name="full_name" value="{{ user.full_name }}" {% if not can('user.edit') %}disabled{% endif %}></label>
+            <label><span>Account state</span>
+              <select name="account_state" {% if not can('user.edit') %}disabled{% endif %}>
+                {% for state in account_states %}
+                  <option value="{{ state }}" {% if user.account_state == state %}selected{% endif %}>{{ state }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <div class="grid two">
+            {% for role in roles %}
+              <label class="toggle-row"><input type="checkbox" name="role_codes" value="{{ role.code }}" {% if role in user.roles %}checked{% endif %} {% if not can('user.edit') %}disabled{% endif %}> <span>{{ role.name }}</span></label>
+            {% endfor %}
+          </div>
+          <label class="toggle-row"><input type="checkbox" name="is_active" {% if user.is_active %}checked{% endif %} {% if not can('user.edit') %}disabled{% endif %}> <span>Active account</span></label>
+          {% if can('user.edit') %}<button class="button" type="submit">Save account</button>{% endif %}
+        </form>
+        <div class="actions">
+          {% if can('auth.reset_password_admin') %}
+            <form method="post">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="reset_password">
+              <input type="hidden" name="user_id" value="{{ user.id }}">
+              <button class="button secondary" type="submit">Force reset</button>
+            </form>
+          {% endif %}
+          {% if can('auth.manage_mfa') %}
+            <form method="post">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="disable_mfa">
+              <input type="hidden" name="user_id" value="{{ user.id }}">
+              <button class="button secondary" type="submit">Disable MFA</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

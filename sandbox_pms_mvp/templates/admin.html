@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Admin | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Overview</p>
+        <h2>Configuration modules</h2>
+      </div>
+    </div>
+    <div class="list-stack">
+      {% for section in admin_sections %}
+        <a class="list-row" href="{{ url_for(section.endpoint) }}">
+          <div>
+            <strong>{{ section.label }}</strong>
+            <p>{{ section.description }}</p>
+          </div>
+          <span class="pill subtle">Open</span>
+        </a>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Property state</p>
+        <h2>Current admin footprint</h2>
+      </div>
+    </div>
+    <div class="grid two">
+      <div class="status-card"><strong>{{ room_type_count }}</strong><span>Room types</span></div>
+      <div class="status-card"><strong>{{ room_count }}</strong><span>Rooms</span></div>
+      <div class="status-card"><strong>{{ active_override_count }}</strong><span>Active overrides</span></div>
+      <div class="status-card"><strong>{{ active_blackout_count }}</strong><span>Blackouts</span></div>
+      <div class="status-card"><strong>{{ policy_count }}</strong><span>Policies</span></div>
+      <div class="status-card"><strong>{{ template_count }}</strong><span>Templates</span></div>
+      <div class="status-card"><strong>{{ user_count }}</strong><span>Staff users</span></div>
+    </div>
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Recent change trail</p>
+      <h2>Latest admin audit entries</h2>
+    </div>
+  </div>
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Action</th>
+          <th>Entity</th>
+          <th>Actor</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in recent_audit %}
+          <tr>
+            <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ entry.action }}</td>
+            <td>{{ entry.entity_table }} / {{ entry.entity_id }}</td>
+            <td>{{ entry.actor_user_id or '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="muted center">No audit entries yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

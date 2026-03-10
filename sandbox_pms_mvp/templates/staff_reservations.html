@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% block title %}Reservations | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Reservations</p>
+      <h1>Staff reservations workspace</h1>
+      <p>Find, filter, and action arrivals, departures, and active stays from one screen.</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_reservation_arrivals') }}">Arrivals</a>
+      <a class="button secondary" href="{{ url_for('staff_reservation_departures') }}">Departures</a>
+      <a class="button secondary" href="{{ url_for('staff_reservation_in_house') }}">In-house</a>
+    </div>
+  </div>
+
+  <form class="toolbar" method="get">
+    <label class="grow"><span>Search</span><input type="text" name="q" value="{{ filters.q }}" placeholder="Guest, phone, code, or date"></label>
+    <label><span>Status</span><select name="status"><option value="">Active by default</option>{% for option in reservation_statuses %}<option value="{{ option }}" {% if filters.status == option %}selected{% endif %}>{{ option.replace('_', ' ').title() }}</option>{% endfor %}</select></label>
+    <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+    <label><span>Arrival</span><input type="date" name="arrival_date" value="{{ filters.arrival_date }}"></label>
+    <label><span>Departure</span><input type="date" name="departure_date" value="{{ filters.departure_date }}"></label>
+    <label><span>Payment</span><select name="payment_state"><option value="">All payment states</option><option value="missing" {% if filters.payment_state == 'missing' %}selected{% endif %}>Deposit missing</option><option value="partial" {% if filters.payment_state == 'partial' %}selected{% endif %}>Partial deposit</option><option value="paid" {% if filters.payment_state == 'paid' %}selected{% endif %}>Deposit paid</option><option value="failed" {% if filters.payment_state == 'failed' %}selected{% endif %}>Payment failed</option></select></label>
+    <label><span>Source</span><select name="booking_source"><option value="">All sources</option>{% for source in booking_sources %}<option value="{{ source }}" {% if filters.booking_source == source %}selected{% endif %}>{{ source.replace('_', ' ') }}</option>{% endfor %}</select></label>
+    <label><span>Review</span><select name="review_status"><option value="">All review states</option>{% for status in review_statuses %}<option value="{{ status }}" {% if filters.review_status == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>{% endfor %}</select></label>
+    <label><span>Room assignment</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if filters.assigned == 'assigned' %}selected{% endif %}>Assigned</option><option value="unassigned" {% if filters.assigned == 'unassigned' %}selected{% endif %}>Unassigned</option></select></label>
+    <label class="toggle-row"><span>Include closed</span><input type="checkbox" name="include_closed" value="1" {% if filters.include_closed %}checked{% endif %}></label>
+    <button class="button" type="submit">Apply</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>{{ result['total'] }} matching reservations</h2>
+      <p>Default ordering keeps today’s arrivals, departures, and in-house stays near the top.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Guest</th>
+          <th>Room</th>
+          <th>Stay</th>
+          <th>Status</th>
+          <th>Deposit</th>
+          <th>Source</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in result['items'] %}
+        <tr>
+          <td>
+            <strong>{{ item.reservation_code }}</strong>
+            {% if item.duplicate_suspected %}<div class="small muted">Duplicate flag</div>{% endif %}
+          </td>
+          <td>
+            <strong>{{ item.guest_name }}</strong>
+            <div class="small muted">{{ item.guest_phone }}</div>
+          </td>
+          <td>
+            {{ item.room_type_code }}
+            <div class="small muted">{{ item.assigned_room_number or 'Unassigned' }}</div>
+          </td>
+          <td>
+            {{ item.arrival_date }} -> {{ item.departure_date }}
+            <div class="small muted">{{ item.nights }} nights</div>
+          </td>
+          <td>
+            <span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+            {% if item.review_status %}<div class="small muted">{{ item.review_status.replace('_', ' ') }}</div>{% endif %}
+          </td>
+          <td>
+            {% if can_folio %}
+              <span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span>
+              <div class="small muted">Balance {{ currency }} {{ item.balance_due|money }}</div>
+            {% else %}
+              <span class="small muted">Restricted</span>
+            {% endif %}
+          </td>
+          <td>{{ item.source_channel.replace('_', ' ') }}</td>
+          <td><a class="button tiny" href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="center muted">No reservations matched the current search and filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if result['pages'] > 1 %}
+  <div class="footer-row">
+    <span>Page {{ result['page'] }} of {{ result['pages'] }}</span>
+    <div class="actions">
+      {% if result['page'] > 1 %}<a class="button secondary tiny" href="{{ url_for('staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', page=result['page']-1) }}">Previous</a>{% endif %}
+      {% if result['page'] < result['pages'] %}<a class="button secondary tiny" href="{{ url_for('staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', page=result['page']+1) }}">Next</a>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

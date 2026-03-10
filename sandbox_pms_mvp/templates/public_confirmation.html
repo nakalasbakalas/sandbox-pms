@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('confirmation_title') }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card success-panel">
+  <p class="eyebrow">{{ t('confirmation_title') }}</p>
+  <h1>{{ reservation.reservation_code }}</h1>
+  <div class="metric-grid grid three">
+    <article class="metric-card"><small>Guest</small><strong>{{ guest.full_name }}</strong></article>
+    <article class="metric-card"><small>Stay</small><strong>{{ reservation.check_in_date }} to {{ reservation.check_out_date }}</strong></article>
+    <article class="metric-card"><small>Status</small><strong>{{ reservation.current_status }}</strong></article>
+    <article class="metric-card"><small>Room type</small><strong>{{ reservation.room_type.name }}</strong></article>
+    <article class="metric-card"><small>Occupancy</small><strong>{{ reservation.adults }} adults / {{ reservation.children }} children</strong></article>
+    <article class="metric-card"><small>Total</small><strong>{{ currency }} {{ reservation.quoted_grand_total|money }}</strong></article>
+  </div>
+  {% if reservation.deposit_required_amount and reservation.deposit_required_amount > 0 %}
+  <section class="subsection">
+    <h2>{{ t('payment_return_title') }}</h2>
+    <div class="metric-grid grid three">
+      <article class="metric-card"><small>Deposit required</small><strong>{{ currency }} {{ reservation.deposit_required_amount|money }}</strong></article>
+      <article class="metric-card"><small>Deposit received</small><strong>{{ currency }} {{ reservation.deposit_received_amount|money }}</strong></article>
+      <article class="metric-card"><small>Payment status</small><strong>{{ payment_request.status.replace('_', ' ') if payment_request else t('payment_pending') }}</strong></article>
+      {% if payment_request %}<article class="metric-card"><small>Payment request</small><strong>{{ payment_request.request_code }}</strong></article>{% endif %}
+    </div>
+    {% if payment_request and payment_request.status == 'pending' %}
+    <div class="actions">
+      <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token) }}">{{ t('payment_pay_deposit') }}</a>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+  <ul class="checklist compact">
+    <li>{{ t('policy_summary') }}</li>
+    <li>{{ t('checkin_summary') }}</li>
+    <li>{{ t('extra_guest_summary') }}</li>
+    <li>For changes or cancellation, use the links in this booking flow or contact the hotel directly.</li>
+  </ul>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language) }}">Request modification</a>
+    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language) }}">Request cancellation</a>
+  </div>
+</section>
+{% endblock %}
