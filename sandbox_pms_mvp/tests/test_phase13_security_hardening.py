@@ -373,6 +373,30 @@ def test_staff_detail_pages_sanitize_back_links(app_factory):
     assert b'/staff/reservations' in response.data
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/staff/reservations?page=abc",
+        "/staff/reservations?arrival_date=not-a-date",
+        "/staff/reservations?room_type_id=not-a-uuid",
+        "/staff/front-desk?date=not-a-date",
+        "/staff/front-desk?room_type_id=not-a-uuid",
+        "/staff/housekeeping?date=not-a-date",
+        "/staff/reservations/arrivals?date=not-a-date",
+        "/staff/review-queue?arrival_date=not-a-date",
+    ],
+)
+def test_staff_views_reject_invalid_query_params(app_factory, path):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
+    client = app.test_client()
+
+    assert login(client, identifier="admin@sandbox.local", password="sandbox-admin-123").status_code == 302
+
+    response = client.get(path)
+
+    assert response.status_code == 400
+
+
 def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path):
     backup_dir = tmp_path / "backups"
     restore_log = tmp_path / "restore.log"

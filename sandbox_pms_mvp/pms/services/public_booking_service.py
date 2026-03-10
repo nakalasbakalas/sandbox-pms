@@ -616,7 +616,7 @@ def render_guest_confirmation_email(reservation: Reservation, guest_name: str, l
 
 def render_guest_confirmation_message(reservation: Reservation, guest_name: str, language: str) -> tuple[str, str]:
     context = {
-        "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
+        "hotel_name": str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))),
         "guest_name": guest_name,
         "reservation_code": reservation.reservation_code,
         "check_in_date": reservation.check_in_date.isoformat(),
@@ -625,12 +625,17 @@ def render_guest_confirmation_message(reservation: Reservation, guest_name: str,
         "grand_total": f"{Decimal(str(reservation.quoted_grand_total)):,.2f}",
         "deposit_amount": f"{Decimal(str(reservation.deposit_required_amount or 0)):,.2f}",
         "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-        "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
+        "contact_email": str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", ""))),
         "cancellation_policy": policy_text("cancellation_policy", language, t(language, "policy_summary")),
         "check_in_policy": policy_text("check_in_policy", language, t(language, "checkin_summary")),
         "check_out_policy": policy_text("check_out_policy", language, ""),
     }
-    fallback_subject = t(language, "guest_email_subject", reference=reservation.reservation_code)
+    fallback_subject = t(
+        language,
+        "guest_email_subject",
+        reference=reservation.reservation_code,
+        hotel_name=context["hotel_name"],
+    )
     fallback_body = "\n".join(
         [
             f"{context['hotel_name']} - {reservation.reservation_code}",

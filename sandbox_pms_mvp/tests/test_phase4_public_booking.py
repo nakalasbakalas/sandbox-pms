@@ -579,6 +579,41 @@ def test_sensitive_guest_pages_suppress_social_metadata(app_factory, path):
     assert 'property="og:type"' not in body
     assert 'property="og:title"' not in body
     assert 'property="og:url"' not in body
+    assert 'name="twitter:card"' not in body
+    assert 'application/ld+json' not in body
+
+
+def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory):
+    app = app_factory(seed=True, config={"APP_BASE_URL": "https://hotel.example"})
+    client = app.test_client()
+
+    response = client.get("/?lang=en")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'name="twitter:card"' in body
+    assert 'application/ld+json' in body
+    assert 'rel="icon"' in body
+    assert "favicon.svg" in body
+    assert "tel:" in body
+    assert "mailto:" in body
+    assert "https://hotel.example/static/favicon.svg" in body
+
+
+def test_sitemap_route_lists_public_guest_pages(app_factory):
+    app = app_factory(seed=True, config={"APP_BASE_URL": "https://hotel.example"})
+    client = app.test_client()
+
+    response = client.get("/sitemap.xml")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/xml"
+    assert "<urlset" in body
+    assert "https://hotel.example/" in body
+    assert "https://hotel.example/availability?lang=en" in body
+    assert "https://hotel.example/booking/cancel?lang=th" in body
+    assert "https://hotel.example/booking/modify?lang=zh-Hans" in body
 
 
 def test_homepage_does_not_render_guest_booking_data(app_factory):

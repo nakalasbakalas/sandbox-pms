@@ -18,6 +18,7 @@ from werkzeug.security import check_password_hash
 from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..extensions import db
+from ..pricing import get_setting_value
 from ..models import (
     ActivityLog,
     AuthAttempt,
@@ -756,16 +757,17 @@ def admin_disable_mfa(user_id, *, actor_user_id) -> User:
 
 def enqueue_password_reset_email(user: User, token: str) -> EmailOutbox:
     reset_url = f"{current_app.config['APP_BASE_URL'].rstrip('/')}/staff/reset-password/{token}"
+    hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
     entry = EmailOutbox(
         email_type="password_reset",
         reservation_id=None,
         recipient_email=user.email,
-        subject="Sandbox Hotel PMS password reset",
+        subject=f"{hotel_name} staff password reset",
         body_text="\n".join(
             [
                 f"Hello {user.full_name},",
                 "",
-                "A password reset was requested for your Sandbox Hotel PMS account.",
+                f"A password reset was requested for your {hotel_name} staff account.",
                 f"Reset link: {reset_url}",
                 f"This link expires in {current_app.config['PASSWORD_RESET_TTL_MINUTES']} minutes.",
             ]
@@ -779,16 +781,17 @@ def enqueue_password_reset_email(user: User, token: str) -> EmailOutbox:
 
 
 def enqueue_password_reset_completed_email(user: User) -> EmailOutbox:
+    hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
     entry = EmailOutbox(
         email_type="password_reset_completed",
         reservation_id=None,
         recipient_email=user.email,
-        subject="Sandbox Hotel PMS password changed",
+        subject=f"{hotel_name} staff password changed",
         body_text="\n".join(
             [
                 f"Hello {user.full_name},",
                 "",
-                "Your Sandbox Hotel PMS password was changed successfully.",
+                f"Your {hotel_name} staff password was changed successfully.",
                 "If you did not perform this change, contact an administrator immediately.",
             ]
         ),

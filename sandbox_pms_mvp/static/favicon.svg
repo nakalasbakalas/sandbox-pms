@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Hotel favicon</title>
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c57c35"/>
+      <stop offset="100%" stop-color="#9d5820"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#0b0d11"/>
+  <rect x="6" y="6" width="52" height="52" rx="14" fill="url(#g)"/>
+  <path d="M20 18h24v28H20z" fill="#fff" opacity="0.14"/>
+  <path d="M24 20h16v24H24z" fill="#fff"/>
+  <path d="M28 24h8v8h-8z" fill="#9d5820"/>
+  <path d="M31 36h4v8h-4z" fill="#9d5820"/>
+</svg>

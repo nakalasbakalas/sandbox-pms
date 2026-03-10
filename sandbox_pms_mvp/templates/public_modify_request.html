@@ -7,7 +7,7 @@
     {{ csrf_input() }}
     <div class="grid two">
       <label><span>{{ t('booking_reference_label') }}</span><input type="text" name="booking_reference" value="{{ form_defaults.booking_reference }}" maxlength="20" autocomplete="off" required></label>
-      <label><span>{{ t('contact_value_label') }}</span><input type="text" name="contact_value" value="{{ form_defaults.contact_value }}" autocomplete="email" required></label>
+      <label><span>{{ t('contact_value_label') }}</span><input type="text" name="contact_value" value="{{ form_defaults.contact_value }}" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
     </div>
     <div class="grid two">
       <label><span>{{ t('requested_check_in_label') }}</span><input type="date" name="requested_check_in" value="{{ form_defaults.requested_check_in }}"></label>

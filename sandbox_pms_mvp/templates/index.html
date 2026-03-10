@@ -52,7 +52,7 @@
       <li>{{ t('extra_guest_summary') }}</li>
       <li>{{ t('home_secure_links_note') }}</li>
     </ul>
-    <p class="muted">{{ t('home_prebooking_help', phone=hotel_contact_phone, email=hotel_contact_email) }}</p>
+    <p class="muted">{{ t('home_prebooking_help', phone=hotel_contact_phone_link, email=hotel_contact_email_link)|safe }}</p>
   </article>
 </section>
 {% endblock %}

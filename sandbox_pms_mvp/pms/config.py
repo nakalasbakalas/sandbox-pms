@@ -28,7 +28,7 @@ class Config:
     SQLALCHEMY_DATABASE_URI = _normalize_database_url(os.getenv("DATABASE_URL"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
-    HOTEL_NAME = "Sandbox Hotel"
+    HOTEL_NAME = os.getenv("HOTEL_NAME", "Hotel")
     DEFAULT_CURRENCY = "THB"
     SERVER_NAME = os.getenv("SERVER_NAME")
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "https")
@@ -85,7 +85,7 @@ class Config:
     LOGIN_LOCK_WINDOW_MINUTES = int(os.getenv("LOGIN_LOCK_WINDOW_MINUTES", "15"))
     LOGIN_LOCK_DURATION_MINUTES = int(os.getenv("LOGIN_LOCK_DURATION_MINUTES", "15"))
     MFA_VERIFY_WINDOW = int(os.getenv("MFA_VERIFY_WINDOW", "1"))
-    MFA_ISSUER = os.getenv("MFA_ISSUER", "Sandbox Hotel PMS")
+    MFA_ISSUER = os.getenv("MFA_ISSUER", f"{HOTEL_NAME} PMS")
     AUTH_SHOW_RESET_LINKS = os.getenv("AUTH_SHOW_RESET_LINKS", "0") == "1"
     ARGON2_TIME_COST = int(os.getenv("ARGON2_TIME_COST", "3"))
     ARGON2_MEMORY_COST = int(os.getenv("ARGON2_MEMORY_COST", "65536"))
@@ -100,7 +100,7 @@ class Config:
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") == "1"
-    MAIL_FROM = os.getenv("MAIL_FROM", "reservations@sandbox-hotel.local")
+    MAIL_FROM = os.getenv("MAIL_FROM", "reservations@example.com")
     STAFF_ALERT_EMAILS = [item.strip() for item in os.getenv("STAFF_ALERT_EMAILS", "").split(",") if item.strip()]
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")

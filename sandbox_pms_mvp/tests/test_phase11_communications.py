@@ -5,6 +5,8 @@ from datetime import date, timedelta, timezone
 
 from werkzeug.security import generate_password_hash
 
+import pms.services.communication_service as communication_service_module
+import pms.services.payment_integration_service as payment_integration_service_module
 from pms.extensions import db
 from pms.models import (
     EmailOutbox,
@@ -304,6 +306,49 @@ def test_failed_payment_reminder_runner_only_targets_unpaid_requests(app_factory
         assert result["queued"] == 1
         assert reminder.rendered_body and request_row.request_code in reminder.rendered_body
         assert EmailOutbox.query.filter_by(email_type="payment_failed", reservation_id=reservation.id).count() == 1
+
+
+def test_failed_payment_reminder_runner_logs_generation_failures(app_factory, monkeypatch):
+    app = app_factory(
+        seed=True,
+        config={
+            "PAYMENT_PROVIDER": "test_hosted",
+            "PAYMENT_BASE_URL": "https://hosted.test",
+            "PAYMENT_LINK_RESEND_COOLDOWN_SECONDS": 0,
+        },
+    )
+    logged_messages: list[str] = []
+    activity_events: list[dict] = []
+
+    with app.app_context():
+        reservation = create_public_reservation()
+        request_row = create_or_reuse_deposit_request(
+            reservation.id,
+            actor_user_id=None,
+            send_email=False,
+            language="en",
+            source="phase11",
+        )
+        request_row.status = "failed"
+        request_row.failed_at = request_row.updated_at - timedelta(hours=8)
+        request_row.last_sent_at = None
+        db.session.commit()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("simulated checkout refresh failure")
+
+        def fake_exception(message, *args, **kwargs):
+            logged_messages.append(message % args if args else str(message))
+
+        monkeypatch.setattr(payment_integration_service_module, "generate_or_refresh_hosted_checkout", boom)
+        monkeypatch.setattr(communication_service_module, "write_activity_log", lambda *args, **kwargs: activity_events.append(kwargs))
+        monkeypatch.setattr(app.logger, "exception", fake_exception)
+
+        result = send_due_failed_payment_reminders(actor_user_id=None)
+
+        assert result["failed"] == 1
+        assert logged_messages
+        assert any(event["event_type"] == "notification.failed_payment_reminder_failed" for event in activity_events)
 
 
 def test_optional_staff_alert_channel_failure_isolated_from_internal_alerts(app_factory):

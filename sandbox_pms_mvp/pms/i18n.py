@@ -361,4 +361,7 @@ def normalize_language(language: str | None) -> str:
 def t(language: str | None, key: str, **kwargs) -> str:
     lang = normalize_language(language)
     template = BOOKING_COPY.get(lang, BOOKING_COPY["th"]).get(key, BOOKING_COPY["en"].get(key, key))
+    hotel_name = kwargs.get("hotel_name")
+    if hotel_name:
+        template = template.replace("Sandbox Hotel", str(hotel_name))
     return template.format(**kwargs)

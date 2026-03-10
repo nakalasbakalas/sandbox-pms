@@ -7,8 +7,8 @@ from decimal import Decimal
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Flask, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
-from markupsafe import Markup
+from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
+from markupsafe import Markup, escape
 
 from .activity import write_activity_log
 from .config import Config
@@ -289,15 +289,49 @@ def register_template_helpers(app: Flask) -> None:
     @app.context_processor
     def inject_globals():
         language = current_language()
-        hotel_name = str(get_setting_value("hotel.name", "Sandbox Hotel"))
+        hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
         hotel_currency = str(get_setting_value("hotel.currency", "THB"))
         hotel_brand_mark = str(get_setting_value("hotel.brand_mark", "SBX"))
         hotel_logo_url = str(get_setting_value("hotel.logo_url", "") or "")
         hotel_contact_phone = str(get_setting_value("hotel.contact_phone", "+66 000 000 000"))
-        hotel_contact_email = str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local"))
-        hotel_address = str(get_setting_value("hotel.address", "Sandbox Hotel"))
+        hotel_contact_email = str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", "")))
+        hotel_address = str(get_setting_value("hotel.address", hotel_name))
         hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
         hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
+        site_base_url = public_base_url()
+        favicon_url = absolute_public_url(url_for("static", filename="favicon.svg"))
+        share_image_url = absolute_public_url(hotel_logo_url) if hotel_logo_url else favicon_url
+        hotel_contact_phone_href = phone_href(hotel_contact_phone)
+        hotel_contact_email_href = email_href(hotel_contact_email)
+        hotel_contact_phone_link = (
+            Markup(f'<a class="contact-link" href="{escape(hotel_contact_phone_href)}">{escape(hotel_contact_phone)}</a>')
+            if hotel_contact_phone_href
+            else escape(hotel_contact_phone)
+        )
+        hotel_contact_email_link = (
+            Markup(f'<a class="contact-link" href="{escape(hotel_contact_email_href)}">{escape(hotel_contact_email)}</a>')
+            if hotel_contact_email_href
+            else escape(hotel_contact_email)
+        )
+        hotel_structured_data: dict[str, object] = {
+            "@context": "https://schema.org",
+            "@type": "Hotel",
+            "name": hotel_name,
+            "url": site_base_url,
+            "telephone": hotel_contact_phone,
+            "email": hotel_contact_email,
+            "currenciesAccepted": hotel_currency,
+            "availableLanguage": list(LANGUAGE_LABELS.keys()),
+            "checkinTime": hotel_check_in_time,
+            "checkoutTime": hotel_check_out_time,
+        }
+        if share_image_url:
+            hotel_structured_data["image"] = share_image_url
+        if hotel_address:
+            hotel_structured_data["address"] = {
+                "@type": "PostalAddress",
+                "streetAddress": hotel_address,
+            }
 
         def _make_lang_url(lang_code: str) -> str:
             try:
@@ -324,9 +358,17 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_logo_url": hotel_logo_url,
             "hotel_contact_phone": hotel_contact_phone,
             "hotel_contact_email": hotel_contact_email,
+            "hotel_contact_phone_href": hotel_contact_phone_href,
+            "hotel_contact_email_href": hotel_contact_email_href,
+            "hotel_contact_phone_link": hotel_contact_phone_link,
+            "hotel_contact_email_link": hotel_contact_email_link,
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
+            "site_base_url": site_base_url,
+            "favicon_url": favicon_url,
+            "share_image_url": share_image_url,
+            "hotel_structured_data": hotel_structured_data,
             "staff_logged_in": current_user() is not None,
             "current_staff_user": current_user(),
             "current_language": language,
@@ -397,6 +439,32 @@ def register_routes(app: Flask) -> None:
     @app.route("/robots.txt")
     def robots_txt():
         return app.send_static_file("robots.txt")
+
+    @app.route("/favicon.ico")
+    def favicon_ico():
+        return redirect(url_for("static", filename="favicon.svg"), code=302)
+
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        public_pages = [
+            ("index", {}),
+            ("availability", {}),
+            ("booking_cancel_request", {}),
+            ("booking_modify_request", {}),
+        ]
+        urls: list[str] = []
+        for endpoint, values in public_pages:
+            urls.append(absolute_public_url(url_for(endpoint, **values)))
+            for language_code in LANGUAGE_LABELS:
+                urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
+        unique_urls = list(dict.fromkeys(url for url in urls if url))
+        body = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        ]
+        body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
+        body.append("</urlset>")
+        return Response("\n".join(body), mimetype="application/xml")
 
     @app.route("/availability")
     def availability():
@@ -839,11 +907,11 @@ def register_routes(app: Flask) -> None:
 
     def property_settings_context() -> dict[str, str]:
         return {
-            "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
+            "hotel_name": str(get_setting_value("hotel.name", app.config.get("HOTEL_NAME", "Hotel"))),
             "brand_mark": str(get_setting_value("hotel.brand_mark", "SBX")),
             "logo_url": str(get_setting_value("hotel.logo_url", "") or ""),
             "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-            "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
+            "contact_email": str(get_setting_value("hotel.contact_email", app.config.get("MAIL_FROM", ""))),
             "address": str(get_setting_value("hotel.address", "")),
             "currency": str(get_setting_value("hotel.currency", "THB")),
             "check_in_time": str(get_setting_value("hotel.check_in_time", "14:00")),
@@ -1469,7 +1537,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping")
     def staff_housekeeping():
         user = require_permission("housekeeping.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         filters = HousekeepingBoardFilters(
             business_date=target_date,
             floor=request.args.get("floor", ""),
@@ -1497,7 +1565,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping/rooms/<uuid:room_id>")
     def staff_housekeeping_room_detail(room_id):
         user = require_permission("housekeeping.view")
-        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        business_date = parse_request_date_arg("date", default=date.today())
         detail = get_housekeeping_room_detail(room_id, business_date=business_date, actor_user=user)
         return render_template(
             "housekeeping_room_detail.html",
@@ -1625,11 +1693,11 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk")
     def staff_front_desk():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         filters = FrontDeskFilters(
             business_date=target_date,
             mode=request.args.get("mode", "arrivals"),
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             assigned=request.args.get("assigned", ""),
             ready=request.args.get("ready", ""),
             payment_state=request.args.get("payment_state", ""),
@@ -1702,7 +1770,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/<uuid:reservation_id>")
     def staff_front_desk_detail(reservation_id):
         require_permission("reservation.view")
-        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        business_date = parse_request_date_arg("date", default=date.today())
         detail = get_front_desk_detail(reservation_id, business_date=business_date)
         checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
         return render_template(
@@ -2016,18 +2084,20 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations")
     def staff_reservations():
         require_permission("reservation.view")
+        arrival_date = parse_request_date_arg("arrival_date", default=None)
+        departure_date = parse_request_date_arg("departure_date", default=None)
         filters = ReservationWorkspaceFilters(
             q=(request.args.get("q") or "").strip(),
             status=request.args.get("status", ""),
-            room_type_id=request.args.get("room_type_id", ""),
-            arrival_date=request.args.get("arrival_date", ""),
-            departure_date=request.args.get("departure_date", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
+            arrival_date=arrival_date.isoformat() if arrival_date else "",
+            departure_date=departure_date.isoformat() if departure_date else "",
             payment_state=request.args.get("payment_state", ""),
             booking_source=request.args.get("booking_source", ""),
             review_status=request.args.get("review_status", ""),
             assigned=request.args.get("assigned", ""),
             include_closed=request.args.get("include_closed") == "1",
-            page=int(request.args.get("page", 1)),
+            page=parse_request_int_arg("page", default=1, minimum=1),
             per_page=25,
         )
         result = list_reservations(filters)
@@ -2046,10 +2116,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/arrivals")
     def staff_reservation_arrivals():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_arrivals(
             arrival_date=target_date,
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             payment_state=request.args.get("payment_state", ""),
             assigned=request.args.get("assigned", ""),
         )
@@ -2067,10 +2137,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/departures")
     def staff_reservation_departures():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_departures(
             departure_date=target_date,
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             payment_state=request.args.get("payment_state", ""),
         )
         return render_template(
@@ -2087,7 +2157,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/in-house")
     def staff_reservation_in_house():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_in_house(business_date=target_date)
         return render_template(
             "staff_operational_list.html",
@@ -2248,8 +2318,9 @@ def register_routes(app: Flask) -> None:
         query = ReservationReviewQueue.query.join(Reservation, Reservation.id == ReservationReviewQueue.reservation_id)
         if request.args.get("status"):
             query = query.filter(ReservationReviewQueue.review_status == request.args["status"])
-        if request.args.get("arrival_date"):
-            query = query.filter(Reservation.check_in_date == date.fromisoformat(request.args["arrival_date"]))
+        arrival_date = parse_request_date_arg("arrival_date", default=None)
+        if arrival_date:
+            query = query.filter(Reservation.check_in_date == arrival_date)
         if request.args.get("booking_source"):
             query = query.filter(Reservation.source_channel == request.args["booking_source"])
         if request.args.get("deposit_state"):
@@ -2382,11 +2453,81 @@ def safe_back_path(value: str | None, fallback: str) -> str:
     return fallback
 
 
+def public_base_url() -> str:
+    configured = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
+    if configured:
+        return configured
+    return request.url_root.rstrip("/")
+
+
+def absolute_public_url(value: str | None) -> str:
+    candidate = (value or "").strip()
+    if not candidate:
+        return ""
+    if candidate.startswith(("http://", "https://")):
+        return candidate
+    if not candidate.startswith("/"):
+        candidate = f"/{candidate.lstrip('/')}"
+    return f"{public_base_url()}{candidate}"
+
+
+def email_href(value: str | None) -> str:
+    candidate = (value or "").strip()
+    if not candidate:
+        return ""
+    return f"mailto:{candidate}"
+
+
+def phone_href(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    candidate = "".join(char for char in raw if char.isdigit() or char == "+")
+    if not candidate:
+        return ""
+    if "+" in candidate[1:]:
+        candidate = candidate.replace("+", "")
+    return f"tel:{candidate}"
+
+
 def parse_optional_date(value: str | None) -> date | None:
     candidate = (value or "").strip()
     if not candidate:
         return None
     return date.fromisoformat(candidate)
+
+
+def parse_request_date_arg(name: str, *, default: date | None) -> date | None:
+    candidate = (request.args.get(name) or "").strip()
+    if not candidate:
+        return default
+    try:
+        return date.fromisoformat(candidate)
+    except ValueError:
+        abort(400, description=f"Invalid {name} query parameter.")
+
+
+def parse_request_int_arg(name: str, *, default: int, minimum: int = 1, maximum: int | None = None) -> int:
+    candidate = (request.args.get(name) or "").strip()
+    if not candidate:
+        return default
+    try:
+        value = int(candidate)
+    except ValueError:
+        abort(400, description=f"Invalid {name} query parameter.")
+    if value < minimum or (maximum is not None and value > maximum):
+        abort(400, description=f"Invalid {name} query parameter.")
+    return value
+
+
+def parse_request_uuid_arg(name: str) -> str | None:
+    candidate = (request.args.get(name) or "").strip()
+    if not candidate:
+        return None
+    try:
+        return str(UUID(candidate))
+    except ValueError:
+        abort(400, description=f"Invalid {name} query parameter.")
 
 
 def parse_optional_datetime(value: str | None) -> datetime | None:

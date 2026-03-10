@@ -10,7 +10,7 @@
       <section class="print-doc">
         <header class="print-header">
           <div>
-            <p class="eyebrow">Sandbox Hotel</p>
+            <p class="eyebrow">{{ hotel_name }}</p>
             <h1>{{ document_type.replace('_', ' ').title() }}</h1>
             <p>{{ document.document_number if document else 'Draft / preview' }}</p>
           </div>

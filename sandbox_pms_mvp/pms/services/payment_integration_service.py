@@ -169,6 +169,7 @@ class StripeHostedPaymentProvider(PaymentProviderBase):
         secret_key = current_app.config.get("STRIPE_SECRET_KEY")
         if not secret_key:
             raise ValueError("Stripe secret key is not configured.")
+        hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
         payload = {
             "mode": "payment",
             "success_url": payment_return_url(payment_request, reservation, external=True),
@@ -180,7 +181,7 @@ class StripeHostedPaymentProvider(PaymentProviderBase):
             "metadata[reservation_code]": reservation.reservation_code,
             "line_items[0][price_data][currency]": payment_request.currency_code.lower(),
             "line_items[0][price_data][unit_amount]": str(int(money(payment_request.amount) * Decimal("100"))),
-            "line_items[0][price_data][product_data][name]": f"Sandbox Hotel deposit {reservation.reservation_code}",
+            "line_items[0][price_data][product_data][name]": f"{hotel_name} deposit {reservation.reservation_code}",
             "line_items[0][price_data][product_data][description]": f"Deposit for stay {reservation.check_in_date} to {reservation.check_out_date}",
             "line_items[0][quantity]": "1",
             "expires_at": str(int((utc_now() + timedelta(minutes=payment_link_ttl_minutes())).timestamp())),
@@ -757,16 +758,21 @@ def render_payment_request_message(
     payment_link: str,
 ) -> tuple[str, str]:
     context = {
-        "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
+        "hotel_name": str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))),
         "guest_name": guest_name,
         "reservation_code": reservation.reservation_code,
         "deposit_amount": f"{money(payment_request.amount):,.2f}",
         "payment_link": payment_link,
         "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-        "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
+        "contact_email": str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", ""))),
         "check_in_policy": policy_text("check_in_policy", language, t(language, "checkin_summary")),
     }
-    fallback_subject = t(language, "payment_email_subject", reference=reservation.reservation_code)
+    fallback_subject = t(
+        language,
+        "payment_email_subject",
+        reference=reservation.reservation_code,
+        hotel_name=context["hotel_name"],
+    )
     fallback_body = "\n".join(
         [
             f"{context['hotel_name']} - {reservation.reservation_code}",

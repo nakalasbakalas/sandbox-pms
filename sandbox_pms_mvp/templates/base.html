@@ -1,21 +1,28 @@
 <!doctype html>
 <html lang="{{ current_language }}">
 <head>
-  {% set suppress_social_metadata = request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
+  {% set suppress_social_metadata = (request.endpoint and request.endpoint.startswith('staff_')) or request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
   <meta name="theme-color" content="#11324d">
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
-  <link rel="icon" href="{{ hotel_logo_url or url_for('static', filename='favicon.ico') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
+  <link rel="alternate icon" href="{{ favicon_url }}">
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="{{ url_for('sitemap_xml') }}">
   {% if not suppress_social_metadata %}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ hotel_name }}">
   <meta property="og:title" content="{% block og_title %}{{ hotel_name }}{% endblock %}">
   <meta property="og:description" content="{{ hotel_name }} {{ t('meta_description') }}">
-  {% if hotel_logo_url %}<meta property="og:image" content="{{ hotel_logo_url }}">{% endif %}
+  <meta property="og:image" content="{{ share_image_url }}">
   <meta property="og:url" content="{{ request.base_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{% block twitter_title %}{{ hotel_name }}{% endblock %}">
+  <meta name="twitter:description" content="{{ hotel_name }} {{ t('meta_description') }}">
+  <meta name="twitter:image" content="{{ share_image_url }}">
+  <script type="application/ld+json">{{ hotel_structured_data | tojson }}</script>
   {% endif %}
   <link rel="canonical" href="{{ request.base_url }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
@@ -32,7 +39,7 @@
         {% endif %}
         <span>
           <strong>{{ hotel_name }}</strong>
-          <small>{{ hotel_contact_phone }}</small>
+          <small>{% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}</small>
         </span>
       </a>
       <nav class="topnav">
