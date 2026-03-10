@@ -6,15 +6,9 @@ services:
     plan: standard
     pythonVersion: 3.11
     
-    buildCommand: |
-      cd sandbox_pms_mvp &&
-      pip install --upgrade pip &&
-      pip install -r requirements.txt &&
-      flask db upgrade
+    buildCommand: "cd sandbox_pms_mvp && pip install --upgrade pip && pip install -r requirements.txt && flask db upgrade"
     
-    startCommand: |
-      cd sandbox_pms_mvp &&
-      gunicorn -w 4 -b 0.0.0.0:10000 -t 120 -k sync --access-logfile - --error-logfile - app:app
+    startCommand: "cd sandbox_pms_mvp && gunicorn -w 4 -b 0.0.0.0:10000 -t 120 -k sync --access-logfile - --error-logfile - app:app"
     
     envVars:
       - key: PYTHON_VERSION
