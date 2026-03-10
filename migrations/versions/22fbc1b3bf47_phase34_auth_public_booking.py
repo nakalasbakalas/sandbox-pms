@@ -287,7 +287,7 @@ def upgrade():
     op.execute(
         """
         UPDATE users
-        SET username = lower(substr(email, 1, CASE WHEN instr(email, '@') > 0 THEN instr(email, '@') - 1 ELSE length(email) END))
+        SET username = lower(substr(email, 1, CASE WHEN strpos(email, '@') > 0 THEN strpos(email, '@') - 1 ELSE length(email) END))
         WHERE username IS NULL
         """
     )
