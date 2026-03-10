@@ -1,0 +1,201 @@
+{% extends 'base.html' %}
+{% block title %}Rates and Inventory | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Deposit controls</p>
+        <h2>Reservation deposit policy</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="deposit_settings">
+      <div class="grid two">
+        <label><span>Deposit percentage</span><input type="number" step="0.01" min="0" max="100" name="deposit_percentage" value="{{ deposit_percentage }}" required></label>
+        <label class="toggle-row"><input type="checkbox" name="deposit_enabled" {% if deposit_enabled %}checked{% endif %}> <span>Enable hosted deposit requests</span></label>
+      </div>
+      {% if can('settings.edit') %}<button class="button" type="submit">Save deposit settings</button>{% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Inventory overrides</p>
+        <h2>Temporary sellability control</h2>
+      </div>
+    </div>
+    {% if can('settings.edit') %}
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="inventory_override">
+        <div class="grid two">
+          <label><span>Name</span><input type="text" name="name" required></label>
+          <label><span>Scope</span><select name="scope_type">{% for value in override_scope_types %}<option value="{{ value }}">{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="grid two">
+          <label><span>Room</span><select name="room_id"><option value="">Select room</option>{% for room in rooms %}<option value="{{ room.id }}">{{ room.room_number }}</option>{% endfor %}</select></label>
+          <label><span>Room type override scope</span><select name="override_room_type_id"><option value="">Select room type</option>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="grid two">
+          <label><span>Action</span><select name="override_action">{% for value in override_actions %}<option value="{{ value }}">{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+          <label><span>Expires at</span><input type="datetime-local" name="expires_at"></label>
+        </div>
+        <div class="grid two">
+          <label><span>Start date</span><input type="date" name="start_date" required></label>
+          <label><span>End date</span><input type="date" name="end_date" required></label>
+        </div>
+        <label><span>Reason</span><textarea name="reason" rows="2" required></textarea></label>
+        <button class="button secondary" type="submit">Create override</button>
+      </form>
+    {% endif %}
+    <div class="list-stack compact">
+      {% for override in overrides %}
+        <div class="list-row no-link">
+          <div class="grow">
+            <strong>{{ override.name }}</strong>
+            <p>{{ override.scope_type.replace('_', ' ') }} / {{ override.override_action }} / {{ override.start_date }} to {{ override.end_date }}</p>
+            <p class="muted">{{ override.reason }}</p>
+          </div>
+          <span class="status">{{ 'Active' if override.is_active else 'Released' }}</span>
+          {% if override.is_active and can('settings.edit') %}
+            <form method="post">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="release_override">
+              <input type="hidden" name="override_id" value="{{ override.id }}">
+              <button class="button secondary" type="submit">Release</button>
+            </form>
+          {% endif %}
+        </div>
+      {% else %}
+        <p class="muted">No inventory overrides yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Rate rules</p>
+      <h2>Pricing engine configuration</h2>
+    </div>
+  </div>
+  {% if can('rate_rule.edit') %}
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="rate_rule">
+      <div class="grid three">
+        <label><span>Name</span><input type="text" name="name" required></label>
+        <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }}</option>{% endfor %}</select></label>
+        <label><span>Priority</span><input type="number" name="priority" value="100" required></label>
+      </div>
+      <div class="grid three">
+        <label><span>Rule type</span><select name="rule_type">{% for value in rule_types %}<option value="{{ value }}">{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+        <label><span>Adjustment type</span><select name="adjustment_type">{% for value in adjustment_types %}<option value="{{ value }}">{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+        <label><span>Adjustment value</span><input type="number" step="0.01" name="adjustment_value" required></label>
+      </div>
+      <div class="grid four">
+        <label><span>Start date</span><input type="date" name="start_date"></label>
+        <label><span>End date</span><input type="date" name="end_date"></label>
+        <label><span>Min nights</span><input type="number" min="1" name="min_nights"></label>
+        <label><span>Max nights</span><input type="number" min="1" name="max_nights"></label>
+      </div>
+      <div class="grid three">
+        <label><span>Days of week</span><input type="text" name="days_of_week" placeholder="0,1,2"></label>
+        <label><span>Extra guest override</span><input type="number" step="0.01" name="extra_guest_fee_override"></label>
+        <label><span>Child fee override</span><input type="number" step="0.01" name="child_fee_override"></label>
+      </div>
+      <label class="toggle-row"><input type="checkbox" name="is_active" checked> <span>Active</span></label>
+      <button class="button" type="submit">Add rate rule</button>
+    </form>
+  {% endif %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Room type</th>
+          <th>Rule type</th>
+          <th>Priority</th>
+          <th>Window</th>
+          <th>Adjustment</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rule in rate_rules %}
+          <tr>
+            <td>{{ rule.name }}</td>
+            <td>{{ rule.room_type.code if rule.room_type else 'All' }}</td>
+            <td>{{ rule.rule_type.replace('_', ' ') }}</td>
+            <td>{{ rule.priority }}</td>
+            <td>{{ rule.start_date or '-' }} to {{ rule.end_date or '-' }}</td>
+            <td>{{ rule.adjustment_type }} / {{ rule.adjustment_value|money }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted center">No rate rules configured.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Blackout and closed dates</p>
+      <h2>Booking restrictions</h2>
+    </div>
+  </div>
+  {% if can('settings.edit') %}
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="blackout">
+      <div class="grid two">
+        <label><span>Name</span><input type="text" name="name" required></label>
+        <label><span>Type</span><select name="blackout_type">{% for value in blackout_types %}<option value="{{ value }}">{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+      </div>
+      <div class="grid two">
+        <label><span>Start date</span><input type="date" name="start_date" required></label>
+        <label><span>End date</span><input type="date" name="end_date" required></label>
+      </div>
+      <label><span>Reason</span><textarea name="reason" rows="2" required></textarea></label>
+      <label class="toggle-row"><input type="checkbox" name="is_active" checked> <span>Active</span></label>
+      <button class="button secondary" type="submit">Save blackout period</button>
+    </form>
+  {% endif %}
+  <div class="list-stack compact">
+    {% for blackout in blackouts %}
+      <form class="card inset stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="blackout">
+        <input type="hidden" name="blackout_id" value="{{ blackout.id }}">
+        <div class="split-row">
+          <div>
+            <strong>{{ blackout.name }}</strong>
+            <p>{{ blackout.blackout_type.replace('_', ' ') }} / {{ blackout.start_date }} to {{ blackout.end_date }}</p>
+          </div>
+          <span class="status">{{ 'Active' if blackout.is_active else 'Inactive' }}</span>
+        </div>
+        <div class="grid two">
+          <label><span>Name</span><input type="text" name="name" value="{{ blackout.name }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          <label><span>Type</span><select name="blackout_type" {% if not can('settings.edit') %}disabled{% endif %}>{% for value in blackout_types %}<option value="{{ value }}" {% if blackout.blackout_type == value %}selected{% endif %}>{{ value.replace('_', ' ') }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="grid two">
+          <label><span>Start date</span><input type="date" name="start_date" value="{{ blackout.start_date.isoformat() }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          <label><span>End date</span><input type="date" name="end_date" value="{{ blackout.end_date.isoformat() }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        </div>
+        <label><span>Reason</span><textarea name="reason" rows="2" {% if not can('settings.edit') %}disabled{% endif %}>{{ blackout.reason }}</textarea></label>
+        <label class="toggle-row"><input type="checkbox" name="is_active" {% if blackout.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Update blackout</button>{% endif %}
+      </form>
+    {% else %}
+      <p class="muted">No blackout periods configured.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

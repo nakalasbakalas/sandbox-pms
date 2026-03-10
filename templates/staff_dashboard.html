@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}Staff workspace | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="grid three metric-grid">
+  <article class="metric-card"><small>Today's arrivals</small><strong>{{ arrivals_count }}</strong></article>
+  <article class="metric-card"><small>Today's departures</small><strong>{{ departures_count }}</strong></article>
+  <article class="metric-card"><small>In-house now</small><strong>{{ in_house_count }}</strong></article>
+</section>
+
+<section class="grid three metric-grid">
+  <article class="metric-card"><small>Review queue</small><strong>{{ queue_entries|length }}</strong></article>
+  <article class="metric-card"><small>Unread alerts</small><strong>{{ notifications|length }}</strong></article>
+  <article class="metric-card"><small>Email outbox pending</small><strong>{{ pending_emails }}</strong></article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Reservation Workspace</p>
+        <h2>Front desk command center</h2>
+      </div>
+      <div class="actions">
+        <a class="button" href="{{ url_for('staff_front_desk') }}">Open front desk</a>
+        <a class="button secondary" href="{{ url_for('staff_reservations') }}">Open reservations</a>
+        {% if can('housekeeping.view') %}<a class="button secondary" href="{{ url_for('staff_housekeeping') }}">Open housekeeping</a>{% endif %}
+        <a class="button secondary" href="{{ url_for('staff_review_queue') }}">Open review queue</a>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      <a class="list-row" href="{{ url_for('staff_front_desk', mode='arrivals') }}">
+        <div><strong>Arrivals</strong><p>Prepare rooms, deposits, and special requests for today.</p></div>
+        <span class="status confirmed">{{ arrivals_count }}</span>
+      </a>
+      <a class="list-row" href="{{ url_for('staff_front_desk', mode='departures') }}">
+        <div><strong>Departures</strong><p>Review balances and checkout readiness for today.</p></div>
+        <span class="status pending">{{ departures_count }}</span>
+      </a>
+      <a class="list-row" href="{{ url_for('staff_front_desk', mode='in_house') }}">
+        <div><strong>In-house guests</strong><p>Track current rooms, notes, and folio risk at a glance.</p></div>
+        <span class="status checked_in">{{ in_house_count }}</span>
+      </a>
+      {% if can('housekeeping.view') %}
+      <a class="list-row" href="{{ url_for('staff_housekeeping') }}">
+        <div><strong>Housekeeping board</strong><p>See live room readiness, cleaning priorities, and blocked rooms.</p></div>
+        <span class="status house_use">Ready board</span>
+      </a>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">New Public Bookings</p>
+        <h2>Review queue</h2>
+      </div>
+    </div>
+    {% if queue_entries %}
+      <div class="list-stack compact">
+        {% for entry in queue_entries %}
+          <a class="list-row" href="{{ url_for('staff_reservation_detail', reservation_id=entry.reservation_id, back=url_for('staff_review_queue')) }}">
+            <div>
+              <strong>{{ entry.reservation_id }}</strong>
+              <p>{{ entry.review_status }}{% if entry.special_requests_present %} - special request{% endif %}</p>
+            </div>
+            <span class="status {{ entry.review_status }}">{{ entry.review_status }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No new public bookings waiting for review.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Operational alerts</p>
+      <h2>Unread staff notifications</h2>
+    </div>
+  </div>
+  {% if notifications %}
+    <div class="list-stack compact">
+      {% for notification in notifications %}
+        {% set payload = notification.payload_json or {} %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ payload.subject or notification.notification_type.replace('_', ' ') }}</strong>
+            <p>{{ payload.body or payload.summary or payload.reservation_code or 'Operational update' }}</p>
+          </div>
+          <div class="right-stack">
+            <span class="small muted">{{ notification.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_notification_read', notification_id=notification.id) }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ url_for('staff_dashboard') }}">
+              <button class="button tiny secondary" type="submit">Mark read</button>
+            </form>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No unread staff alerts.</p>
+  {% endif %}
+</section>
+{% endblock %}

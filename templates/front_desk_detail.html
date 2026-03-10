@@ -1,0 +1,270 @@
+{% extends 'base.html' %}
+{% block title %}Front Desk · {{ detail.reservation.reservation_code }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Front Office</p>
+      <h1>{{ detail.reservation.reservation_code }}</h1>
+      <p>{{ detail.guest_name }} · {{ detail.guest_phone }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back</a>
+      <a class="button secondary" href="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id, back=back_url) }}">Full reservation view</a>
+      {% if can_folio %}<a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
+      <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ') }}</span>
+      <span class="status {{ 'confirmed' if detail.front_desk.room_ready else 'pending' }}">{{ detail.front_desk.room_readiness_label.replace('_', ' ') }}</span>
+    </div>
+  </div>
+
+  <section class="grid four metric-grid">
+    <article class="metric-card"><small>Arrival</small><strong>{{ detail.arrival_date }}</strong></article>
+    <article class="metric-card"><small>Departure</small><strong>{{ detail.departure_date }}</strong></article>
+    <article class="metric-card"><small>Room</small><strong>{{ detail.assigned_room_number or 'Unassigned' }}</strong></article>
+    <article class="metric-card"><small>Occupancy</small><strong>{{ detail.reservation.adults }}A / {{ detail.reservation.children }}C / {{ detail.reservation.extra_guests }}X</strong></article>
+    <article class="metric-card"><small>Readiness</small><strong>{{ detail.front_desk.room_readiness_reason }}</strong></article>
+    <article class="metric-card"><small>Source</small><strong>{{ detail.source_channel.replace('_', ' ') }}</strong></article>
+    <article class="metric-card"><small>Deposit</small><strong>{% if can_folio %}{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }} / {{ detail.payment_summary.deposit_required_amount|money }}{% else %}Restricted{% endif %}</strong></article>
+    <article class="metric-card"><small>Balance / refund</small><strong>{% if can_folio %}{{ currency }} {{ detail.payment_summary.balance_due|money }}{% if detail.payment_summary.refund_due > 0 %} refund {{ detail.payment_summary.refund_due|money }}{% endif %}{% else %}Restricted{% endif %}</strong></article>
+  </section>
+
+  <div class="actions">
+    {% if detail.arrival_date == business_date %}<span class="pill subtle">Arrival today</span>{% endif %}
+    {% if detail.departure_date == business_date %}<span class="pill subtle">Departure today</span>{% endif %}
+    {% if detail.front_desk.early_check_in_requested %}<span class="pill subtle">Early arrival requested</span>{% endif %}
+    {% if detail.duplicate_suspected %}<span class="pill subtle">Duplicate suspicion</span>{% endif %}
+    {% if detail.pending_cancellation_requests %}<span class="pill subtle">Cancellation request pending</span>{% endif %}
+    {% if detail.pending_modification_requests %}<span class="pill subtle">Modification request pending</span>{% endif %}
+  </div>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head"><h2>Guest and arrival details</h2></div>
+    <div class="metric-strip">
+      <div><small>Name</small><strong>{{ detail.reservation.primary_guest.full_name }}</strong></div>
+      <div><small>Nationality</small><strong>{{ detail.reservation.primary_guest.nationality or 'Not recorded' }}</strong></div>
+      <div><small>ID</small><strong>{{ detail.reservation.primary_guest.id_document_type or 'Document' }} {{ detail.reservation.primary_guest.id_document_number or 'not recorded' }}</strong></div>
+      <div><small>Identity verified</small><strong>{{ detail.reservation.identity_verified_at.strftime('%Y-%m-%d %H:%M') if detail.reservation.identity_verified_at else 'Not yet' }}</strong></div>
+    </div>
+    <form class="stack-form" method="post" action="{{ url_for('staff_front_desk_assign_room', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+      <label><span>Assigned room / room move</span>
+        <select name="room_id" required>
+          {% for room in detail.eligible_rooms %}
+          <option value="{{ room.id }}" {% if room.id == detail.reservation.assigned_room_id %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label><span>Reason</span><input type="text" name="reason" value="{% if detail.status == 'checked_in' %}in_house_room_move{% else %}front_desk_assignment{% endif %}"></label>
+      {% if can('reservation.edit') %}<button class="button secondary" type="submit">{% if detail.status == 'checked_in' %}Move guest room{% else %}Update room assignment{% endif %}</button>{% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head"><h2>Folio and payment state</h2></div>
+    {% if can_folio %}
+    <div class="metric-strip">
+      <div><small>Quoted total</small><strong>{{ currency }} {{ detail.reservation.quoted_grand_total|money }}</strong></div>
+      <div><small>Deposit received</small><strong>{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }}</strong></div>
+      <div><small>Balance due</small><strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
+      <div><small>Refund due</small><strong>{{ currency }} {{ detail.payment_summary.refund_due|money }}</strong></div>
+    </div>
+    <div class="subsection">
+      <h3>Recent folio charges</h3>
+      <div class="list-stack compact">
+        {% for charge in detail.front_desk.folio_charges %}
+        <div class="list-row no-link">
+          <div><strong>{{ charge.charge_code }}</strong><p>{{ charge.description }}</p></div>
+          <div class="right-stack"><span class="small muted">{{ charge.service_date }}</span><strong>{{ currency }} {{ charge.total_amount|money }}</strong></div>
+        </div>
+        {% else %}
+        <p class="muted">No folio charges have been posted yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Full cashier view</a>
+      <a class="button secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
+    </div>
+    {% else %}
+    <p class="muted">Payment and folio visibility is restricted for your role.</p>
+    {% endif %}
+  </article>
+</section>
+
+{% if detail.status in ['tentative', 'confirmed'] %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Check-In</p>
+      <h2>Arrival completion</h2>
+      <p>Room readiness, identity capture, and deposit/payment checks are revalidated when this form submits.</p>
+    </div>
+  </div>
+  <form class="stack-form" method="post" action="{{ url_for('staff_front_desk_check_in', reservation_id=detail.reservation.id) }}">
+    {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ back_url }}">
+    <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+    <div class="grid two">
+      <label><span>First name</span><input type="text" name="first_name" value="{{ detail.reservation.primary_guest.first_name }}" required></label>
+      <label><span>Last name</span><input type="text" name="last_name" value="{{ detail.reservation.primary_guest.last_name }}" required></label>
+    </div>
+    <div class="grid two">
+      <label><span>Phone</span><input type="text" name="phone" value="{{ detail.reservation.primary_guest.phone }}" required></label>
+      <label><span>Email</span><input type="email" name="email" value="{{ detail.reservation.primary_guest.email or '' }}"></label>
+    </div>
+    <div class="grid two">
+      <label><span>Nationality</span><input type="text" name="nationality" value="{{ detail.reservation.primary_guest.nationality or '' }}"></label>
+      <label><span>Preferred language</span><input type="text" name="preferred_language" value="{{ detail.reservation.primary_guest.preferred_language or detail.reservation.booking_language or '' }}"></label>
+    </div>
+    <div class="grid two">
+      <label><span>ID / passport type</span><input type="text" name="id_document_type" value="{{ detail.reservation.primary_guest.id_document_type or '' }}"></label>
+      <label><span>ID / passport number</span><input type="text" name="id_document_number" value="{{ detail.reservation.primary_guest.id_document_number or '' }}"></label>
+    </div>
+    <div class="grid two">
+      <label><span>Assigned room</span><select name="room_id">{% for room in detail.eligible_rooms %}<option value="{{ room.id }}" {% if room.id == detail.reservation.assigned_room_id %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>{% endfor %}</select></label>
+      <label><span>Payment method</span><select name="payment_method"><option value="front_desk">Front desk</option><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option></select></label>
+    </div>
+    <div class="grid two">
+      {% if can_collect_payment %}
+      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="0.00"></label>
+      {% endif %}
+      <label><span>Arrival note</span><input type="text" name="arrival_note" placeholder="Called guest, arrived early, key issued at desk"></label>
+    </div>
+    <label><span>Notes summary</span><textarea name="notes_summary" rows="2">{{ detail.reservation.primary_guest.notes_summary or '' }}</textarea></label>
+    <div class="grid three">
+      <label class="toggle-row"><span>Identity verified</span><input type="checkbox" name="identity_verified" {% if detail.reservation.identity_verified_at %}checked{% endif %}></label>
+      {% if can_charge and detail.front_desk.early_fee.applies %}<label class="toggle-row"><span>Apply early fee ({{ currency }} {{ detail.front_desk.early_fee.amount|money }})</span><input type="checkbox" name="apply_early_fee"></label>{% endif %}
+      {% if detail.payment_summary.deposit_required_amount > detail.payment_summary.deposit_received_amount %}<label class="toggle-row"><span>Override missing deposit</span><input type="checkbox" name="override_payment"></label>{% endif %}
+    </div>
+    {% if detail.front_desk.early_fee.applies %}
+    <label><span>Waiver reason if early fee is not applied</span><input type="text" name="waiver_reason" placeholder="Manager goodwill / operational recovery"></label>
+    <label class="toggle-row"><span>Waive early fee</span><input type="checkbox" name="waive_early_fee"></label>
+    {% endif %}
+    {% if can('reservation.check_in') %}<button class="button" type="submit">Complete check-in</button>{% endif %}
+  </form>
+</section>
+{% endif %}
+
+{% if detail.status == 'checked_in' %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Check-Out</p>
+      <h2>Departure completion</h2>
+      <p>Checkout updates the reservation, payment state, and housekeeping handoff in one backend commit.</p>
+    </div>
+  </div>
+  <div class="metric-strip">
+    <div><small>Balance due</small><strong>{% if can_folio %}{{ currency }} {{ checkout_prep.checkout_payment_summary.balance_due|money }}{% else %}Restricted{% endif %}</strong></div>
+    <div><small>Refund due</small><strong>{% if can_folio %}{{ currency }} {{ checkout_prep.checkout_payment_summary.refund_due|money }}{% else %}Restricted{% endif %}</strong></div>
+    <div><small>Late fee</small><strong>{% if checkout_prep.checkout_fee.applies %}{{ currency }} {{ checkout_prep.checkout_fee.amount|money }}{% else %}Not applicable{% endif %}</strong></div>
+    <div><small>Turnover</small><strong>Dirty handoff to housekeeping</strong></div>
+  </div>
+  <form class="stack-form" method="post" action="{{ url_for('staff_front_desk_check_out', reservation_id=detail.reservation.id) }}">
+    {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ back_url }}">
+    <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+    <div class="grid two">
+      {% if can_collect_payment %}
+      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="0.00"></label>
+      {% endif %}
+      <label><span>Payment method</span><select name="payment_method"><option value="front_desk">Front desk</option><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option></select></label>
+    </div>
+    <label><span>Departure note</span><input type="text" name="departure_note" placeholder="Room checked, key returned, transfer arranged"></label>
+    {% if checkout_prep.checkout_fee.applies %}
+    <div class="grid three">
+      {% if can_charge %}<label class="toggle-row"><span>Apply late fee</span><input type="checkbox" name="apply_late_fee"></label>{% endif %}
+      <label class="toggle-row"><span>Waive late fee</span><input type="checkbox" name="waive_late_fee"></label>
+      {% if checkout_prep.checkout_payment_summary.balance_due > 0 %}<label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance"></label>{% endif %}
+    </div>
+    <label><span>Waiver reason</span><input type="text" name="waiver_reason" placeholder="Loyalty guest / service recovery"></label>
+    {% elif checkout_prep.checkout_payment_summary.balance_due > 0 %}
+    <label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance"></label>
+    {% endif %}
+    {% if checkout_prep.checkout_payment_summary.refund_due > 0 %}
+    <div class="grid two">
+      <label class="toggle-row"><span>Process refund now</span><input type="checkbox" name="process_refund"></label>
+      <label><span>Refund note</span><input type="text" name="refund_note" placeholder="Cash refund / bank transfer pending"></label>
+    </div>
+    {% endif %}
+    {% if can('reservation.check_out') %}<button class="button" type="submit">Complete check-out</button>{% endif %}
+  </form>
+</section>
+{% endif %}
+
+{% if detail.status in ['tentative', 'confirmed'] and business_date >= detail.arrival_date %}
+<section class="card">
+  <div class="card-head"><h2>No-show processing</h2></div>
+  <form class="inline-form" method="post" action="{{ url_for('staff_front_desk_no_show', reservation_id=detail.reservation.id) }}">
+    {{ csrf_input() }}
+    <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
+    <label class="grow"><span>Reason</span><input type="text" name="reason" placeholder="Did not arrive by cutoff"></label>
+    {% if can('reservation.check_in') or can('reservation.cancel') %}<button class="button secondary" type="submit">Process no-show</button>{% endif %}
+  </form>
+</section>
+{% endif %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head"><h2>Front-desk timeline</h2></div>
+    <div class="list-stack compact">
+      {% for event in detail.timeline %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ event.label }}</strong>
+          <p>{{ event.text }}</p>
+          {% if event.actor %}<p class="small muted">By {{ event.actor }}</p>{% endif %}
+        </div>
+        <div class="right-stack">
+          {% if event.important %}<span class="status pending">Attention</span>{% endif %}
+          <span class="small muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No front-desk activity has been recorded yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head"><h2>Recent payment events</h2></div>
+    <div class="list-stack compact">
+      {% for event in detail.front_desk.payment_events %}
+      <div class="list-row no-link">
+        <div><strong>{{ event.event_type.replace('_', ' ') }}</strong><p>{{ event.provider or 'front desk' }}</p></div>
+        <div class="right-stack">
+          {% if event.amount is not none %}<strong>{{ currency }} {{ event.amount|money }}</strong>{% endif %}
+          <span class="small muted">{{ event.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+      {% else %}
+      <p class="muted">No payment events recorded yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Communication history</h2></div>
+  <div class="list-stack compact">
+    {% for delivery in detail.communication_history %}
+    <div class="list-row no-link">
+      <div>
+        <strong>{{ delivery.event_type.replace('_', ' ') }}</strong>
+        <p>{{ delivery.channel }}{% if delivery.recipient_target %} · {{ delivery.recipient_target }}{% endif %}</p>
+      </div>
+      <div class="right-stack">
+        <span class="status {{ delivery.status }}">{{ delivery.status.replace('_', ' ') }}</span>
+        <span class="small muted">{{ delivery.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="muted">No communication history recorded yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

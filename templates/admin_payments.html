@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+{% block title %}Payments | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Hosted payment controls</p>
+        <h2>Operational payment configuration</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <div class="grid two">
+        <label><span>Active provider</span><select name="active_provider" {% if not can('settings.edit') %}disabled{% endif %}>
+          {% for provider in ['env', 'disabled', 'test_hosted', 'stripe'] %}
+            <option value="{{ provider }}" {% if payment_settings.active_provider == provider %}selected{% endif %}>{{ provider }}</option>
+          {% endfor %}
+        </select></label>
+        <label class="toggle-row"><input type="checkbox" name="deposit_enabled" {% if payment_settings.deposit_enabled %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Enable hosted deposit collection</span></label>
+      </div>
+      <div class="grid two">
+        <label><span>Link expiry minutes</span><input type="number" min="1" name="link_expiry_minutes" value="{{ payment_settings.link_expiry_minutes }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+        <label><span>Resend cooldown seconds</span><input type="number" min="0" name="link_resend_cooldown_seconds" value="{{ payment_settings.link_resend_cooldown_seconds }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+      </div>
+      {% if can('settings.edit') %}<button class="button" type="submit">Save payment configuration</button>{% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Environment health</p>
+        <h2>Provider secret status</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      <div class="list-row no-link"><strong>Runtime provider</strong><span class="status">{{ payment_settings.provider_runtime }}</span></div>
+      <div class="list-row no-link"><strong>Stripe secret key</strong><span class="status">{{ 'Configured' if payment_settings.stripe_secret_configured else 'Missing' }}</span></div>
+      <div class="list-row no-link"><strong>Stripe webhook secret</strong><span class="status">{{ 'Configured' if payment_settings.stripe_webhook_configured else 'Missing' }}</span></div>
+    </div>
+    <p class="muted">Provider secrets remain environment-managed and are never shown in plaintext here.</p>
+    {% if not is_super_admin %}
+      <p class="muted">Provider switching is restricted to admin users.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Recent payment requests</p>
+      <h2>Deposit collection visibility</h2>
+    </div>
+  </div>
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Request</th>
+          <th>Reservation</th>
+          <th>Status</th>
+          <th>Provider</th>
+          <th>Amount</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for request_row in recent_requests %}
+          <tr>
+            <td>{{ request_row.request_code or request_row.id }}</td>
+            <td>{{ request_row.reservation.reservation_code if request_row.reservation else '-' }}</td>
+            <td>{{ request_row.status }}</td>
+            <td>{{ request_row.provider }}</td>
+            <td>{{ request_row.amount|money }} {{ request_row.currency_code }}</td>
+            <td>{{ request_row.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6" class="muted center">No payment requests yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,178 @@
+{% extends 'base.html' %}
+{% block title %}Property Setup | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Branding and hotel info</p>
+        <h2>Property identity</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="save_branding">
+      <div class="grid two">
+        <label><span>Hotel name</span><input type="text" name="hotel_name" value="{{ property_settings.hotel_name }}" required></label>
+        <label><span>Brand mark</span><input type="text" name="brand_mark" value="{{ property_settings.brand_mark }}" maxlength="12"></label>
+      </div>
+      <div class="grid two">
+        <label><span>Logo URL</span><input type="url" name="logo_url" value="{{ property_settings.logo_url }}"></label>
+        <label><span>Currency</span><input type="text" name="currency" value="{{ property_settings.currency }}" maxlength="10" required></label>
+      </div>
+      <div class="grid two">
+        <label><span>Phone</span><input type="text" name="contact_phone" value="{{ property_settings.contact_phone }}"></label>
+        <label><span>Email</span><input type="email" name="contact_email" value="{{ property_settings.contact_email }}"></label>
+      </div>
+      <div class="grid two">
+        <label><span>Check-in time</span><input type="text" name="check_in_time" value="{{ property_settings.check_in_time }}" required></label>
+        <label><span>Check-out time</span><input type="text" name="check_out_time" value="{{ property_settings.check_out_time }}" required></label>
+      </div>
+      <label><span>Address</span><textarea name="address" rows="3">{{ property_settings.address }}</textarea></label>
+      <label><span>Tax or business ID</span><input type="text" name="tax_id" value="{{ property_settings.tax_id }}"></label>
+      {% if can('settings.edit') %}
+        <button class="button" type="submit">Save property details</button>
+      {% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Room types</p>
+        <h2>Create or update room types</h2>
+      </div>
+    </div>
+    {% if can('settings.edit') %}
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="room_type">
+        <div class="grid two">
+          <label><span>Code</span><input type="text" name="code" maxlength="20" required></label>
+          <label><span>Name</span><input type="text" name="name" required></label>
+        </div>
+        <div class="grid two">
+          <label><span>Standard occupancy</span><input type="number" min="1" name="standard_occupancy" value="2" required></label>
+          <label><span>Max occupancy</span><input type="number" min="1" name="max_occupancy" value="3" required></label>
+        </div>
+        <label><span>Description</span><textarea name="description" rows="2"></textarea></label>
+        <div class="grid two">
+          <label class="toggle-row"><input type="checkbox" name="extra_bed_allowed"> <span>Extra bed allowed</span></label>
+          <label class="toggle-row"><input type="checkbox" name="is_active" checked> <span>Active</span></label>
+        </div>
+        <button class="button" type="submit">Add room type</button>
+      </form>
+    {% endif %}
+    <div class="list-stack compact">
+      {% for room_type in room_types %}
+        <form class="card inset stack-form" method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="room_type">
+          <input type="hidden" name="room_type_id" value="{{ room_type.id }}">
+          <div class="split-row">
+            <div>
+              <strong>{{ room_type.code }}</strong>
+              <p>{{ room_type.name }}</p>
+            </div>
+            <span class="status">{{ 'Active' if room_type.is_active else 'Inactive' }}</span>
+          </div>
+          <div class="grid two">
+            <label><span>Code</span><input type="text" name="code" value="{{ room_type.code }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+            <label><span>Name</span><input type="text" name="name" value="{{ room_type.name }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          </div>
+          <div class="grid two">
+            <label><span>Standard occupancy</span><input type="number" min="1" name="standard_occupancy" value="{{ room_type.standard_occupancy }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+            <label><span>Max occupancy</span><input type="number" min="1" name="max_occupancy" value="{{ room_type.max_occupancy }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          </div>
+          <label><span>Description</span><textarea name="description" rows="2" {% if not can('settings.edit') %}disabled{% endif %}>{{ room_type.description or '' }}</textarea></label>
+          <div class="grid two">
+            <label class="toggle-row"><input type="checkbox" name="extra_bed_allowed" {% if room_type.extra_bed_allowed %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Extra bed allowed</span></label>
+            <label class="toggle-row"><input type="checkbox" name="is_active" {% if room_type.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>
+          </div>
+          {% if can('settings.edit') %}<button class="button secondary" type="submit">Save room type</button>{% endif %}
+        </form>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Rooms</p>
+      <h2>Room inventory master</h2>
+    </div>
+  </div>
+  {% if can('settings.edit') %}
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="room">
+      <div class="grid four">
+        <label><span>Room number</span><input type="text" name="room_number" required></label>
+        <label><span>Room type</span><select name="room_type_id" required>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+        <label><span>Floor</span><input type="number" name="floor_number" min="1" required></label>
+        <label><span>Default status</span><select name="default_operational_status">{% for status in room_statuses %}<option value="{{ status }}">{{ status.replace('_', ' ') }}</option>{% endfor %}</select></label>
+      </div>
+      <div class="grid two">
+        <label class="toggle-row"><input type="checkbox" name="is_active" checked> <span>Active</span></label>
+        <label class="toggle-row"><input type="checkbox" name="is_sellable" checked> <span>Sellable by default</span></label>
+      </div>
+      <label><span>Notes</span><input type="text" name="notes"></label>
+      <button class="button" type="submit">Add room</button>
+    </form>
+  {% endif %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Room</th>
+          <th>Type</th>
+          <th>Floor</th>
+          <th>Sellable</th>
+          <th>Active</th>
+          <th>Default status</th>
+          <th>Update</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for room in rooms %}
+          <tr>
+            <td>{{ room.room_number }}</td>
+            <td>{{ room.room_type.code }}</td>
+            <td>{{ room.floor_number }}</td>
+            <td>{{ 'Yes' if room.is_sellable else 'No' }}</td>
+            <td>{{ 'Yes' if room.is_active else 'No' }}</td>
+            <td>{{ room.default_operational_status.replace('_', ' ') }}</td>
+            <td>
+              <details>
+                <summary>Edit</summary>
+                <form class="stack-form compact" method="post">
+                  {{ csrf_input() }}
+                  <input type="hidden" name="action" value="room">
+                  <input type="hidden" name="room_id" value="{{ room.id }}">
+                  <div class="grid two">
+                    <label><span>Room number</span><input type="text" name="room_number" value="{{ room.room_number }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+                    <label><span>Room type</span><select name="room_type_id" {% if not can('settings.edit') %}disabled{% endif %}>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if room.room_type_id == room_type.id %}selected{% endif %}>{{ room_type.code }}</option>{% endfor %}</select></label>
+                  </div>
+                  <div class="grid two">
+                    <label><span>Floor</span><input type="number" name="floor_number" min="1" value="{{ room.floor_number }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+                    <label><span>Default status</span><select name="default_operational_status" {% if not can('settings.edit') %}disabled{% endif %}>{% for status in room_statuses %}<option value="{{ status }}" {% if room.default_operational_status == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>{% endfor %}</select></label>
+                  </div>
+                  <label><span>Notes</span><input type="text" name="notes" value="{{ room.notes or '' }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
+                  <div class="grid two">
+                    <label class="toggle-row"><input type="checkbox" name="is_active" {% if room.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>
+                    <label class="toggle-row"><input type="checkbox" name="is_sellable" {% if room.is_sellable %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Sellable</span></label>
+                  </div>
+                  {% if can('settings.edit') %}<button class="button secondary" type="submit">Save room</button>{% endif %}
+                </form>
+              </details>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

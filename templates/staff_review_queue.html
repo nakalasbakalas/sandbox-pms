@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block title %}Review queue | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head"><div><p class="eyebrow">Operations</p><h1>{{ t('review_queue') }}</h1></div></div>
+  <form class="toolbar" method="get">
+    <label><span>Arrival date</span><input type="date" name="arrival_date" value="{{ request.args.get('arrival_date', '') }}"></label>
+    <label><span>Status</span><input type="text" name="status" value="{{ request.args.get('status', '') }}"></label>
+    <label><span>Source</span><input type="text" name="booking_source" value="{{ request.args.get('booking_source', '') }}"></label>
+    <label><span>Deposit state</span><input type="text" name="deposit_state" value="{{ request.args.get('deposit_state', '') }}"></label>
+    <button class="button secondary" type="submit">Filter</button>
+  </form>
+</section>
+
+<section class="list-stack">
+  {% for entry in entries %}
+    <article class="card">
+      <div class="card-head split-row">
+        <div>
+          <h3>{{ entry.review_status }}</h3>
+          <p>Reservation {{ entry.reservation_id }} · created {{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+        </div>
+        <span class="status {{ entry.review_status }}">{{ entry.review_status }}</span>
+      </div>
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="entry_id" value="{{ entry.id }}">
+        <label><span>Internal note</span><textarea name="internal_note" rows="3">{{ entry.internal_note or '' }}</textarea></label>
+        <div class="actions">
+          <button class="button secondary" type="submit" name="action" value="reviewed">Mark reviewed</button>
+          <button class="button secondary" type="submit" name="action" value="contacted">Mark contacted</button>
+          <button class="button secondary" type="submit" name="action" value="needs_follow_up">Needs follow-up</button>
+          <button class="button secondary" type="submit" name="action" value="issue_flagged">Flag issue</button>
+          <button class="button" type="submit" name="action" value="resolved">Resolve</button>
+        </div>
+      </form>
+    </article>
+  {% else %}
+    <section class="card"><p class="muted">No reservations match the current filters.</p></section>
+  {% endfor %}
+</section>
+{% endblock %}

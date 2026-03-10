@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+{% block title %}Security | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Account</p>
+        <h1>{{ user.full_name }}</h1>
+        <p>{{ user.email }} · {{ user.account_state }}</p>
+      </div>
+      <span class="status {{ 'confirmed' if factor else 'pending' }}">{{ 'MFA enabled' if factor else 'Password only' }}</span>
+    </div>
+    <div class="metric-strip">
+      <div><small>Last login</small><strong>{{ user.last_login_at.strftime('%Y-%m-%d %H:%M') if user.last_login_at else 'Never' }}</strong></div>
+      <div><small>Password changed</small><strong>{{ user.password_changed_at.strftime('%Y-%m-%d %H:%M') if user.password_changed_at else 'Not yet' }}</strong></div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="change_password">
+      <label><span>Current password</span><input type="password" name="current_password" {% if not user.force_password_reset %}required{% endif %}></label>
+      <label><span>New password</span><input type="password" name="new_password" minlength="12" required></label>
+      <button class="button" type="submit">Change password</button>
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Multi-factor Authentication</p>
+        <h2>TOTP authenticator</h2>
+      </div>
+    </div>
+    {% if factor %}
+      <p>MFA is active. Recovery codes are only shown when MFA is first enabled.</p>
+      <form class="inline-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="disable_mfa">
+        <button class="button secondary" type="submit">Disable MFA</button>
+      </form>
+    {% elif pending_factor %}
+      <p>Enrollment is in progress. Add this account to an authenticator app, then verify the code.</p>
+      {% if provisioning_uri %}<p class="small"><strong>Provisioning URI</strong><br>{{ provisioning_uri }}</p>{% endif %}
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="confirm_mfa">
+        <input type="hidden" name="factor_id" value="{{ pending_factor.id }}">
+        <label><span>Verification code</span><input type="text" name="code" required></label>
+        <button class="button" type="submit">Confirm MFA</button>
+      </form>
+    {% else %}
+      <p>Enable a TOTP authenticator app for stronger staff account protection.</p>
+      <form method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="start_mfa">
+        <button class="button" type="submit">Start MFA setup</button>
+      </form>
+    {% endif %}
+    {% if recovery_codes %}
+      <div class="subsection">
+        <h3>Recovery codes</h3>
+        <p>Each code can be used once.</p>
+        <div class="list-stack compact">
+          {% for code in recovery_codes %}
+            <div class="list-row no-link"><strong>{{ code }}</strong></div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Sessions</p>
+      <h2>Active and historical sessions</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Created</th>
+          <th>Last activity</th>
+          <th>Expires</th>
+          <th>IP</th>
+          <th>User agent</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for auth_session in sessions %}
+          <tr>
+            <td>{{ auth_session.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ auth_session.last_activity_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ auth_session.expires_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ auth_session.ip_address or '-' }}</td>
+            <td class="small">{{ auth_session.user_agent or '-' }}</td>
+            <td><span class="status {{ 'cancelled' if auth_session.revoked_at else 'confirmed' }}">{{ 'Revoked' if auth_session.revoked_at else 'Active' }}</span></td>
+            <td>
+              {% if not auth_session.revoked_at %}
+                <form method="post">
+                  {{ csrf_input() }}
+                  <input type="hidden" name="action" value="revoke_session">
+                  <input type="hidden" name="session_id" value="{{ auth_session.id }}">
+                  <button class="button secondary tiny" type="submit">Revoke</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

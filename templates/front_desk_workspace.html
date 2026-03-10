@@ -1,0 +1,165 @@
+{% extends 'base.html' %}
+{% block title %}Front Desk | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% set mode = workspace.mode %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Front Office</p>
+      <h1>Front desk workspace</h1>
+      <p>Prepare arrivals, manage in-house guests, and complete departures from one operational screen.</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+      <a class="button secondary" href="{{ url_for('staff_reservations') }}">Reservations</a>
+    </div>
+  </div>
+
+  <section class="grid three metric-grid">
+    <article class="metric-card"><small>Arrivals</small><strong>{{ workspace.counts.arrivals }}</strong></article>
+    <article class="metric-card"><small>Departures</small><strong>{{ workspace.counts.departures }}</strong></article>
+    <article class="metric-card"><small>In-house</small><strong>{{ workspace.counts.in_house }}</strong></article>
+  </section>
+
+  <div class="status-actions front-desk-tabs">
+    <a class="pill {% if mode == 'arrivals' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='arrivals', date=workspace.business_date.isoformat()) }}">Arrivals</a>
+    <a class="pill {% if mode == 'departures' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='departures', date=workspace.business_date.isoformat()) }}">Departures</a>
+    <a class="pill {% if mode == 'in_house' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='in_house', date=workspace.business_date.isoformat()) }}">In-house</a>
+  </div>
+
+  <form class="toolbar subsection" method="get">
+    <input type="hidden" name="mode" value="{{ mode }}">
+    <label><span>Date</span><input type="date" name="date" value="{{ workspace.business_date.isoformat() }}"></label>
+    <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+    <label><span>Assigned</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if filters.assigned == 'assigned' %}selected{% endif %}>Assigned</option><option value="unassigned" {% if filters.assigned == 'unassigned' %}selected{% endif %}>Unassigned</option></select></label>
+    <label><span>Readiness</span><select name="ready"><option value="">Any</option><option value="ready" {% if filters.ready == 'ready' %}selected{% endif %}>Ready</option><option value="not_ready" {% if filters.ready == 'not_ready' %}selected{% endif %}>Not ready</option></select></label>
+    <label><span>Deposit</span><select name="payment_state"><option value="">Any</option><option value="missing" {% if filters.payment_state == 'missing' %}selected{% endif %}>Missing</option><option value="partial" {% if filters.payment_state == 'partial' %}selected{% endif %}>Partial</option><option value="paid" {% if filters.payment_state == 'paid' %}selected{% endif %}>Paid</option></select></label>
+    <label><span>Source</span><select name="booking_source"><option value="">Any source</option>{% for code in booking_sources %}<option value="{{ code }}" {% if filters.booking_source == code %}selected{% endif %}>{{ code.replace('_', ' ') }}</option>{% endfor %}</select></label>
+    <label><span>Issues</span><select name="flagged"><option value="">Any</option><option value="issues" {% if filters.flagged == 'issues' %}selected{% endif %}>Flagged only</option></select></label>
+    <button class="button" type="submit">Refresh</button>
+  </form>
+</section>
+
+<section class="grid {% if can_create and can_check_in %}two{% else %}one{% endif %} gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Operational List</p>
+        <h2>{% if mode == 'arrivals' %}Today's arrivals{% elif mode == 'departures' %}Today's departures{% else %}Current in-house guests{% endif %}</h2>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Reference</th>
+            <th>Guest</th>
+            <th>Room</th>
+            <th>Readiness</th>
+            <th>Status</th>
+            <th>Deposit</th>
+            <th>Flags</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in workspace['items'] %}
+          <tr>
+            <td><strong>{{ item.reservation_code }}</strong><div class="small muted">{{ item.source_channel.replace('_', ' ') }}</div></td>
+            <td><strong>{{ item.guest_name }}</strong><div class="small muted">{{ item.guest_phone }}</div></td>
+            <td>{{ item.assigned_room_number or 'Unassigned' }}<div class="small muted">{{ item.room_type_code }} · {{ item.arrival_date }} → {{ item.departure_date }}</div></td>
+            <td>
+              <span class="status {{ 'confirmed' if item.room_ready else 'pending' }}">{{ item.room_readiness_label.replace('_', ' ') }}</span>
+              <div class="small muted">{{ item.housekeeping_status_code or 'n/a' }}</div>
+            </td>
+            <td><span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span></td>
+            <td>
+              {% if can_folio %}
+              <span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span>
+              <div class="small muted">{{ currency }} {{ item.balance_due|money }}</div>
+              {% else %}
+              <span class="small muted">Restricted</span>
+              {% endif %}
+            </td>
+            <td>
+              <div class="status-pair">
+                {% if item.flagged_issue %}<span class="status pending">Issue</span>{% endif %}
+                {% if item.early_check_in_requested %}<span class="status house_use">Early</span>{% endif %}
+                {% if item.special_requests_present %}<span class="status house_use">Request</span>{% endif %}
+              </div>
+            </td>
+            <td>
+              <div class="right-stack">
+                <a class="button tiny" href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=workspace.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Open</a>
+                {% if can_check_in and item.status in ['tentative', 'confirmed'] %}
+                <span class="small muted">Ready for check-in</span>
+                {% elif can_check_out and item.status == 'checked_in' %}
+                <span class="small muted">Ready for checkout</span>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="center muted">No reservations matched this front-desk view.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  {% if can_create and can_check_in %}
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Walk-In</p>
+        <h2>Create and check in</h2>
+        <p>Use the same reservation and inventory logic as other stays.</p>
+      </div>
+    </div>
+    <form class="stack-form compact-form" method="post" action="{{ url_for('staff_front_desk_walk_in') }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_mode" value="{{ mode }}">
+      <input type="hidden" name="back_date" value="{{ workspace.business_date.isoformat() }}">
+      <div class="grid two">
+        <label><span>First name</span><input type="text" name="first_name" required></label>
+        <label><span>Last name</span><input type="text" name="last_name" required></label>
+      </div>
+      <div class="grid two">
+        <label><span>Phone</span><input type="text" name="phone" required></label>
+        <label><span>Email</span><input type="email" name="email"></label>
+      </div>
+      <div class="grid two">
+        <label><span>Room type</span><select name="room_type_id" required>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+        <label><span>Preferred language</span><select name="preferred_language"><option value="th">Thai</option><option value="en">English</option><option value="zh-Hans">Simplified Chinese</option></select></label>
+      </div>
+      <div class="grid two">
+        <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ workspace.business_date.isoformat() }}" required></label>
+        <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ walk_in_checkout_default.isoformat() }}" required></label>
+      </div>
+      <div class="grid three">
+        <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="2" required></label>
+        <label><span>Children</span><input type="number" name="children" min="0" max="3" value="0" required></label>
+        <label><span>Extra guests</span><input type="number" name="extra_guests" min="0" max="1" value="0" required></label>
+      </div>
+      <div class="grid two">
+        <label><span>Nationality</span><input type="text" name="nationality"></label>
+        <label><span>ID type / passport</span><input type="text" name="id_document_type"></label>
+      </div>
+      <div class="grid two">
+        <label><span>ID number</span><input type="text" name="id_document_number"></label>
+        {% if can_collect_payment %}
+        <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="0.00"></label>
+        {% endif %}
+      </div>
+      <label><span>Special requests</span><textarea name="special_requests" rows="2"></textarea></label>
+      <label><span>Internal note</span><textarea name="internal_notes" rows="2"></textarea></label>
+      <div class="grid two">
+        <label class="toggle-row"><span>Identity verified</span><input type="checkbox" name="identity_verified"></label>
+        {% if can_charge %}<label class="toggle-row"><span>Apply early check-in fee if due</span><input type="checkbox" name="apply_early_fee"></label>{% endif %}
+      </div>
+      <button class="button" type="submit">Create walk-in and check in</button>
+    </form>
+  </article>
+  {% endif %}
+</section>
+{% endblock %}

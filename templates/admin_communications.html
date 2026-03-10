@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Communications | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="grid three metric-grid">
+  <article class="metric-card"><small>Pending deliveries</small><strong>{{ communication_settings.pending_count }}</strong></article>
+  <article class="metric-card"><small>Failed deliveries</small><strong>{{ communication_settings.failed_count }}</strong></article>
+  <article class="metric-card"><small>Staff email alerts</small><strong>{{ 'Enabled' if communication_settings.staff_email_alerts_enabled else 'Disabled' }}</strong></article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Communication settings</p>
+        <h2>Delivery behavior</h2>
+      </div>
+    </div>
+    <form class="stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="save_settings">
+      <label><span>Sender name</span><input type="text" name="sender_name" value="{{ communication_settings.sender_name }}" required></label>
+      <div class="grid two">
+        <label class="toggle-row"><input type="checkbox" name="pre_arrival_enabled" {% if communication_settings.pre_arrival_enabled %}checked{% endif %}> <span>Enable pre-arrival reminders</span></label>
+        <label><span>Days before arrival</span><input type="number" min="0" max="14" name="pre_arrival_days_before" value="{{ communication_settings.pre_arrival_days_before }}" required></label>
+      </div>
+      <div class="grid two">
+        <label class="toggle-row"><input type="checkbox" name="failed_payment_reminder_enabled" {% if communication_settings.failed_payment_reminder_enabled %}checked{% endif %}> <span>Enable failed payment reminders</span></label>
+        <label><span>Reminder delay (hours)</span><input type="number" min="1" max="168" name="failed_payment_reminder_delay_hours" value="{{ communication_settings.failed_payment_reminder_delay_hours }}" required></label>
+      </div>
+      <label class="toggle-row"><input type="checkbox" name="staff_email_alerts_enabled" {% if communication_settings.staff_email_alerts_enabled %}checked{% endif %}> <span>Enable staff alert emails</span></label>
+      <label><span>Staff alert recipients</span><input type="text" name="staff_alert_recipients" value="{{ communication_settings.staff_alert_recipients }}" placeholder="desk@example.com, manager@example.com"></label>
+      <div class="grid two">
+        <label class="toggle-row"><input type="checkbox" name="line_staff_alert_enabled" {% if communication_settings.line_staff_alert_enabled %}checked{% endif %}> <span>Enable LINE staff alerts {% if not communication_settings.line_staff_alert_configured %}(webhook missing){% endif %}</span></label>
+        <label class="toggle-row"><input type="checkbox" name="whatsapp_staff_alert_enabled" {% if communication_settings.whatsapp_staff_alert_enabled %}checked{% endif %}> <span>Enable WhatsApp staff alerts {% if not communication_settings.whatsapp_staff_alert_configured %}(webhook missing){% endif %}</span></label>
+      </div>
+      {% if can('settings.edit') %}<button class="button" type="submit">Save communication settings</button>{% endif %}
+    </form>
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">Operations</p>
+        <h2>Queue and reminder runs</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      <form class="card inset inline-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="dispatch_queue">
+        <div class="grow">
+          <strong>Dispatch pending deliveries</strong>
+          <p class="muted">Retries queued and failed notification records through the configured channels.</p>
+        </div>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Run dispatcher</button>{% endif %}
+      </form>
+      <form class="card inset inline-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="run_pre_arrival">
+        <div class="grow">
+          <strong>Send due pre-arrival reminders</strong>
+          <p class="muted">Uses the current pre-arrival timing and eligible reservation statuses.</p>
+        </div>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Run reminders</button>{% endif %}
+      </form>
+      <form class="card inset inline-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="run_failed_payment">
+        <div class="grow">
+          <strong>Send due failed payment reminders</strong>
+          <p class="muted">Refreshes expired hosted links when needed, then sends follow-up communication.</p>
+        </div>
+        {% if can('settings.edit') %}<button class="button secondary" type="submit">Run payment follow-up</button>{% endif %}
+      </form>
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Delivery history</p>
+      <h2>Notification log</h2>
+    </div>
+  </div>
+  <form class="inline-form subsection" method="get">
+    <label><span>Status</span><select name="status"><option value="">All</option>{% for item in delivery_statuses %}<option value="{{ item }}" {% if filters.status == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Channel</span><select name="channel"><option value="">All</option>{% for item in delivery_channels %}<option value="{{ item }}" {% if filters.channel == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <label><span>Audience</span><select name="audience_type"><option value="">All</option>{% for item in audience_types %}<option value="{{ item }}" {% if filters.audience_type == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
+    <button class="button secondary" type="submit">Filter</button>
+  </form>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Created</th>
+          <th>Event</th>
+          <th>Audience</th>
+          <th>Channel</th>
+          <th>Recipient</th>
+          <th>Status</th>
+          <th>Reference</th>
+          <th>Failure</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for delivery in deliveries %}
+        <tr>
+          <td>{{ delivery.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><strong>{{ delivery.event_type }}</strong><div class="small muted">{{ delivery.template_key or '-' }}</div></td>
+          <td>{{ delivery.audience_type }}</td>
+          <td>{{ delivery.channel }}</td>
+          <td>{{ delivery.recipient_target or '-' }}</td>
+          <td><span class="status {{ delivery.status }}">{{ delivery.status.replace('_', ' ') }}</span></td>
+          <td>
+            {% if delivery.reservation and delivery.reservation.reservation_code %}{{ delivery.reservation.reservation_code }}{% elif delivery.payment_request and delivery.payment_request.request_code %}{{ delivery.payment_request.request_code }}{% else %}-{% endif %}
+          </td>
+          <td>{{ delivery.failure_category or '' }}{% if delivery.failure_reason %}<div class="small muted">{{ delivery.failure_reason }}</div>{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="center muted">No notification history matched the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

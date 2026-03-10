@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Operations</p>
+      <h1>{{ title }}</h1>
+      <p>{{ subtitle }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_reservations') }}">All reservations</a>
+      <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+    </div>
+  </div>
+
+  <form class="toolbar" method="get">
+    <label><span>Date</span><input type="date" name="date" value="{{ target_date }}"></label>
+    {% if mode != 'in_house' %}
+    <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if request.args.get('room_type_id') == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+    <label><span>Payment</span><select name="payment_state"><option value="">All payment states</option><option value="missing" {% if request.args.get('payment_state') == 'missing' %}selected{% endif %}>Deposit missing</option><option value="partial" {% if request.args.get('payment_state') == 'partial' %}selected{% endif %}>Partial deposit</option><option value="paid" {% if request.args.get('payment_state') == 'paid' %}selected{% endif %}>Deposit paid</option><option value="failed" {% if request.args.get('payment_state') == 'failed' %}selected{% endif %}>Payment failed</option></select></label>
+    {% endif %}
+    {% if mode == 'arrivals' %}
+    <label><span>Room assigned</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if request.args.get('assigned') == 'assigned' %}selected{% endif %}>Assigned</option><option value="unassigned" {% if request.args.get('assigned') == 'unassigned' %}selected{% endif %}>Unassigned</option></select></label>
+    {% endif %}
+    <button class="button" type="submit">Refresh</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Guest</th>
+          <th>Room</th>
+          <th>Stay</th>
+          <th>Status</th>
+          <th>Payment</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><strong>{{ item.reservation_code }}</strong></td>
+          <td><strong>{{ item.guest_name }}</strong><div class="small muted">{{ item.guest_phone }}</div></td>
+          <td>{{ item.assigned_room_number or 'Unassigned' }}<div class="small muted">{{ item.room_type_code }}</div></td>
+          <td>{{ item.arrival_date }} -> {{ item.departure_date }}</td>
+          <td><span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span></td>
+          <td>{% if can_folio %}<span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span><div class="small muted">{{ currency }} {{ item.balance_due|money }}</div>{% else %}<span class="small muted">Restricted</span>{% endif %}</td>
+          <td><a class="button tiny" href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="center muted">No reservations matched this operational view.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

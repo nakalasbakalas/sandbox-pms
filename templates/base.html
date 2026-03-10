@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="{{ current_language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container topbar">
+      <a class="brand" href="{{ url_for('index', lang=current_language) }}">
+        {% if hotel_logo_url %}
+          <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
+        {% else %}
+          <span class="brand-mark">{{ hotel_brand_mark }}</span>
+        {% endif %}
+        <span>
+          <strong>{{ hotel_name }}</strong>
+          <small>{{ hotel_contact_phone }}</small>
+        </span>
+      </a>
+      <nav class="topnav">
+        <a href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
+        <a href="{{ url_for('booking_cancel_request', lang=current_language) }}">Cancel</a>
+        <a href="{{ url_for('booking_modify_request', lang=current_language) }}">Modify</a>
+        {% if staff_logged_in %}
+          <a href="{{ url_for('staff_dashboard') }}">Staff</a>
+          {% if can('reservation.view') %}<a href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
+          {% if can('reservation.view') %}<a href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
+          {% if can('housekeeping.view') %}<a href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+          {% if admin_sections %}<a href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
+          {% if can('reports.view') %}<a href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+          <a href="{{ url_for('staff_security') }}">Security</a>
+          <a href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>
+          <span class="pill subtle">{{ current_staff_user.full_name }}</span>
+          <form method="post" action="{{ url_for('staff_logout') }}" class="inline-form">
+            {{ csrf_input() }}
+            <button type="submit" class="pill subtle button-link">Sign out</button>
+          </form>
+        {% else %}
+          <a class="pill subtle" href="{{ url_for('staff_login') }}">Staff sign in</a>
+        {% endif %}
+        {% for code, label in language_labels.items() %}
+          <a class="pill subtle" href="{{ request.path }}?{{ request.query_string.decode('utf-8') ~ ('&' if request.query_string else '') }}lang={{ code }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="container shell">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

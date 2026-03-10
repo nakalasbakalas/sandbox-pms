@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}Verify MFA | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card narrow-card">
+  <div class="card-head"><div><p class="eyebrow">Staff security</p><h1>Multi-factor verification</h1></div></div>
+  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+  <p>Enter the 6-digit code from your authenticator app or a one-time recovery code.</p>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <label><span>Verification code</span><input type="text" name="code" autocomplete="one-time-code" required></label>
+    <button class="button" type="submit">Verify</button>
+  </form>
+</section>
+{% endblock %}

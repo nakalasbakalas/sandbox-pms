@@ -1,0 +1,55 @@
+﻿{% extends 'base.html' %}
+{% block title %}Operations | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="grid three metric-grid">
+  <article class="metric-card"><small>Dirty rooms</small><strong>{{ housekeeping_summary.dirty }}</strong></article>
+  <article class="metric-card"><small>Inspected rooms</small><strong>{{ housekeeping_summary.inspected }}</strong></article>
+  <article class="metric-card"><small>OOO / OOS</small><strong>{{ housekeeping_summary.oos }}</strong></article>
+</section>
+
+<section class="card">
+  <div class="card-head split-row">
+    <div>
+      <p class="eyebrow">Housekeeping</p>
+      <h1>Operations board</h1>
+    </div>
+    <form method="get" class="inline-form slim">
+      <label class="grow"><span>Business date</span><input type="date" name="business_date" value="{{ business_date }}"></label>
+      <button class="button secondary" type="submit">Load day</button>
+    </form>
+  </div>
+
+  <div class="grid three gap-lg">
+    {% for room in rooms %}
+      {% set record = by_room.get(room.id) %}
+      <article class="room-tile card inset {{ record.status if record else '' }}">
+        <div class="split-row room-head">
+          <div>
+            <strong>{{ room.room_number }}</strong>
+            <p>{{ room.room_type.name }} - {{ room.operational_status.replace('_', ' ') }}</p>
+          </div>
+          <div class="right-stack">
+            {% if room.id in checked_in_room_ids %}
+              <span class="status checked_in">Occupied</span>
+            {% elif room.is_sellable %}
+              <span class="status confirmed">Sellable</span>
+            {% else %}
+              <span class="status cancelled">Control</span>
+            {% endif %}
+            {% if room.id in departures %}<span class="status tentative">Departure</span>{% endif %}
+            {% if room.id in arrivals %}<span class="status pending">Arrival</span>{% endif %}
+          </div>
+        </div>
+
+        <form method="post" class="stack-form compact-form">
+          {{ csrf_input() }}
+          <input type="hidden" name="room_id" value="{{ room.id }}">
+          <label><span>Status</span><select name="status">{% for option in housekeeping_statuses %}<option value="{{ option }}" {% if record and record.status == option %}selected{% endif %}>{{ option.replace('_', ' ').title() }}</option>{% endfor %}</select></label>
+          <label><span>Notes</span><input type="text" name="notes" value="{{ record.notes if record else '' }}"></label>
+          <button class="button tiny" type="submit">Save</button>
+        </form>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

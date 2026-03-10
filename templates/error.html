@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}{{ error_title }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p class="eyebrow">Security-safe error response</p>
+  <h1>{{ error_title }}</h1>
+  <p>{{ error_message }}</p>
+  <div class="report-summary-list">
+    <div><span>Status</span><strong>{{ status_code }}</strong></div>
+    {% if request_id %}
+      <div><span>Request ID</span><strong>{{ request_id }}</strong></div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
