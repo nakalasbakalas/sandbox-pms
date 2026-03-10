@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from datetime import date, timedelta
 from pathlib import Path
@@ -272,6 +273,10 @@ def test_payment_admin_page_does_not_expose_secret_values(app_factory):
 
 
 def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path):
+    pwsh_bin = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh_bin:
+        pytest.skip("PowerShell (pwsh/powershell) not available on this system")
+
     backup_dir = tmp_path / "backups"
     restore_log = tmp_path / "restore.log"
     verify_file = tmp_path / "verified.txt"
@@ -307,7 +312,7 @@ def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path
     restore_script = PROJECT_ROOT / "scripts" / "restore_db.ps1"
 
     subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(backup_script), "-BackupDir", str(backup_dir)],
+        [pwsh_bin, "-ExecutionPolicy", "Bypass", "-File", str(backup_script), "-BackupDir", str(backup_dir)],
         check=True,
         capture_output=True,
         text=True,
@@ -328,7 +333,7 @@ def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path
 
     subprocess.run(
         [
-            "powershell",
+            pwsh_bin,
             "-ExecutionPolicy",
             "Bypass",
             "-File",

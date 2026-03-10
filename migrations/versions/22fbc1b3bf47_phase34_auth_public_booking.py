@@ -284,13 +284,23 @@ def upgrade():
         batch_op.add_column(sa.Column('force_password_reset', sa.Boolean(), nullable=False, server_default=sa.false()))
         batch_op.add_column(sa.Column('password_changed_at', sa.DateTime(timezone=True), nullable=True))
         batch_op.add_column(sa.Column('mfa_required', sa.Boolean(), nullable=False, server_default=sa.false()))
-    op.execute(
-        """
-        UPDATE users
-        SET username = lower(substr(email, 1, CASE WHEN strpos(email, '@') > 0 THEN strpos(email, '@') - 1 ELSE length(email) END))
-        WHERE username IS NULL
-        """
-    )
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute(
+            """
+            UPDATE users
+            SET username = lower(substr(email, 1, CASE WHEN strpos(email, '@') > 0 THEN strpos(email, '@') - 1 ELSE length(email) END))
+            WHERE username IS NULL
+            """
+        )
+    else:
+        op.execute(
+            """
+            UPDATE users
+            SET username = lower(substr(email, 1, CASE WHEN instr(email, '@') > 0 THEN instr(email, '@') - 1 ELSE length(email) END))
+            WHERE username IS NULL
+            """
+        )
     with op.batch_alter_table('users', recreate='auto') as batch_op:
         batch_op.create_index('ix_users_active_username', ['username'], unique=False)
         batch_op.create_unique_constraint('uq_users_username', ['username'])
