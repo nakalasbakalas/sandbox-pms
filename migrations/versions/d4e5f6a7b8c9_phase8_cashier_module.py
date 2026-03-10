@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    with op.batch_alter_table("folio_charges", recreate="always") as batch_op:
+    with op.batch_alter_table("folio_charges", recreate="auto") as batch_op:
         batch_op.drop_constraint("ck_folio_charges_charge_code", type_="check")
         batch_op.drop_constraint("ck_folio_charges_tax_amount", type_="check")
         batch_op.add_column(sa.Column("posting_key", sa.String(length=160), nullable=True))
@@ -113,7 +113,7 @@ def downgrade():
 
     op.drop_table("cashier_document_sequences")
 
-    with op.batch_alter_table("folio_charges", recreate="always") as batch_op:
+    with op.batch_alter_table("folio_charges", recreate="auto") as batch_op:
         batch_op.drop_index("ix_folio_charges_service_date")
         batch_op.drop_constraint("uq_folio_charges_posting_key", type_="unique")
         batch_op.drop_constraint("ck_folio_charges_tax_amount", type_="check")
