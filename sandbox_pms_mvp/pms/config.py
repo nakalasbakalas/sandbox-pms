@@ -9,13 +9,21 @@ RUNNING_ON_RENDER = os.getenv("RENDER", "").strip().lower() == "true"
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
 
 
+def _normalize_database_url(value: str | None) -> str:
+    candidate = (value or "").strip()
+    if not candidate:
+        return f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}"
+    if candidate.startswith("postgres://"):
+        return "postgresql+psycopg://" + candidate[len("postgres://") :]
+    if candidate.startswith("postgresql://") and not candidate.startswith("postgresql+"):
+        return "postgresql+psycopg://" + candidate[len("postgresql://") :]
+    return candidate
+
+
 class Config:
     APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "sandbox-hotel-pms-dev-key")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}",
-    )
+    SQLALCHEMY_DATABASE_URI = _normalize_database_url(os.getenv("DATABASE_URL"))
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
     HOTEL_NAME = "Sandbox Hotel"

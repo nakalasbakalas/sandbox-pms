@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import subprocess
@@ -9,6 +10,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
+import pms.config as config_module
 import pms.security as security_module
 from pms.audit import write_audit_log
 from pms.extensions import db
@@ -88,6 +90,16 @@ def test_production_config_rejects_insecure_defaults(app_factory):
                 "AUTH_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
             }
         )
+
+
+def test_render_database_url_is_normalized_for_psycopg(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@db.example.com:5432/hotel")
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.SQLALCHEMY_DATABASE_URI == "postgresql+psycopg://user:pass@db.example.com:5432/hotel"
+
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    importlib.reload(config_module)
 
 
 def test_security_headers_and_session_cookie_flags_are_present(app_factory):
