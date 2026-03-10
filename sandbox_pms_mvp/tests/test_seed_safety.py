@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pms.extensions import db
-from pms.models import InventoryDay, Permission, Role
+from pms.models import InventoryDay, NotificationTemplate, Permission, Role
 from pms.seeds import seed_reference_data, seed_roles_permissions
 
 
@@ -57,3 +57,12 @@ def test_seeded_role_permissions_can_be_synchronized_explicitly(app_factory):
         admin_role = Role.query.filter_by(code="admin").first()
         assert admin_role is not None
         assert admin_role.permissions
+
+
+def test_notification_template_channel_schema_allows_internal_channels(app_factory):
+    app = app_factory(seed=False)
+
+    with app.app_context():
+        channel_column = NotificationTemplate.__table__.c.channel
+
+        assert getattr(channel_column.type, "length", None) >= len("internal_notification")

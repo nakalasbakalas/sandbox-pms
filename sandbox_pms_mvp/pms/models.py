@@ -1314,7 +1314,7 @@ class NotificationTemplate(AuditMixin, SoftDeleteMixin, db.Model):
     __tablename__ = "notification_templates"
 
     template_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
-    channel: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="email")
+    channel: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="email")
     language_code: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="th")
     description: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     subject_template: Mapped[str] = mapped_column(sa.Text, nullable=False)
