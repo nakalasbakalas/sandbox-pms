@@ -375,6 +375,26 @@ def register_routes(app: Flask) -> None:
         )
         return render_template("index.html", upcoming=upcoming, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
 
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        booking_base = booking_engine_base_url() or request.url_root.rstrip("/")
+        pages = [
+            "/",
+            "/availability",
+            "/booking/new",
+        ]
+        body = "".join(
+            f"<url><loc>{booking_base}{path}</loc></url>"
+            for path in pages
+        )
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f"{body}"
+            "</urlset>"
+        )
+        return app.response_class(xml, mimetype="application/xml")
+
     @app.route("/health")
     def health():
         return jsonify({"status": "ok"})
@@ -2394,4 +2414,3 @@ def available_admin_sections() -> list[dict[str, str]]:
             {"key": "audit", "label": "Audit", "endpoint": "staff_admin_audit", "description": "Configuration and system history"}
         )
     return sections
-
