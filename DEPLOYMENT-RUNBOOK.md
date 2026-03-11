@@ -37,6 +37,9 @@ Set at minimum:
 - `SECRET_KEY`
 - `AUTH_ENCRYPTION_KEY`
 
+Render-managed Postgres URLs may be provided as `postgres://` or `postgresql://`.
+The app normalizes those values to the SQLAlchemy `postgresql+psycopg://` driver automatically.
+
 ## Payment Provider Registration
 
 Register guest-facing payment URLs against the booking origin:

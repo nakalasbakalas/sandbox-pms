@@ -7,12 +7,25 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _normalize_database_uri(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    if raw.startswith("postgresql://"):
+        return f"postgresql+psycopg://{raw.removeprefix('postgresql://')}"
+    if raw.startswith("postgres://"):
+        return f"postgresql+psycopg://{raw.removeprefix('postgres://')}"
+    return raw
+
+
 class Config:
     APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "sandbox-hotel-pms-dev-key")
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}",
+    SQLALCHEMY_DATABASE_URI = _normalize_database_uri(
+        os.getenv(
+            "DATABASE_URL",
+            f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}",
+        )
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
@@ -120,3 +133,6 @@ def normalize_runtime_config(config: dict, *, override_keys: set[str] | None = N
         "STAFF_APP_URL" not in override_keys and {"APP_BASE_URL", "BOOKING_ENGINE_URL"}.intersection(override_keys)
     ):
         config["STAFF_APP_URL"] = booking_engine_url
+
+    if "SQLALCHEMY_DATABASE_URI" in config:
+        config["SQLALCHEMY_DATABASE_URI"] = _normalize_database_uri(config.get("SQLALCHEMY_DATABASE_URI"))
