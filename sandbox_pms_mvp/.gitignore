@@ -1,45 +1,10 @@
-# Environment variables
-.env
-*.env
-!.env.example
-!*.template.env
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-.pytest_cache/
 .venv/
-venv/
-ENV/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Database
+.pytest_cache/
+__pycache__/
+instance/
 *.db
 *.sqlite
-instance/
-
-# OS
-.DS_Store
-Thumbs.db
+*.sqlite3
+.coverage
+htmlcov/
+.vscode/

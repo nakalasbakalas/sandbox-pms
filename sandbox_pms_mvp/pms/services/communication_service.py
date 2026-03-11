@@ -14,7 +14,6 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
-from ..activity import write_activity_log
 from ..extensions import db
 from ..i18n import normalize_language
 from ..models import (
@@ -25,6 +24,7 @@ from ..models import (
     StaffNotification,
 )
 from ..pricing import get_setting_value
+from ..url_topology import build_booking_url
 from .admin_service import get_notification_template_variant, policy_text, render_notification_template
 from .notification_service import deliver_email_outbox_entry
 
@@ -79,15 +79,14 @@ def _staff_alert_recipients() -> list[str]:
 
 
 def _brand_context() -> dict[str, str]:
-    hotel_name = _string_setting("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))
     return {
-        "hotel_name": hotel_name,
+        "hotel_name": _string_setting("hotel.name", "Sandbox Hotel"),
         "hotel_logo_url": _string_setting("hotel.logo_url", ""),
-        "hotel_address": _string_setting("hotel.address", hotel_name),
+        "hotel_address": _string_setting("hotel.address", "Sandbox Hotel, Thailand"),
         "hotel_check_in_time": _string_setting("hotel.check_in_time", "14:00"),
         "hotel_check_out_time": _string_setting("hotel.check_out_time", "11:00"),
         "contact_phone": _string_setting("hotel.contact_phone", "+66 000 000 000"),
-        "contact_email": _string_setting("hotel.contact_email", current_app.config.get("MAIL_FROM", "")),
+        "contact_email": _string_setting("hotel.contact_email", "reservations@sandbox-hotel.local"),
     }
 
 
@@ -114,16 +113,13 @@ def _payment_state_for_reservation(reservation: Reservation) -> str:
 
 
 def _payment_entry_url(payment_request: PaymentRequest, reservation: Reservation) -> str:
-    base_url = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
-    if not base_url:
-        raise RuntimeError("APP_BASE_URL must be configured for guest payment links.")
     query = urllib.parse.urlencode(
         {
             "reservation_code": reservation.reservation_code,
             "token": reservation.public_confirmation_token,
         }
     )
-    return f"{base_url}/payments/request/{payment_request.request_code}?{query}"
+    return build_booking_url(f"/payments/request/{payment_request.request_code}", query_string=query)
 
 
 def _base_reservation_context(reservation: Reservation) -> dict[str, str]:
@@ -910,31 +906,6 @@ def _mark_delivery_failed(delivery: NotificationDelivery, *, category: str, reas
     delivery.failed_at = utc_now()
 
 
-def _record_delivery_failure(delivery: NotificationDelivery, *, detail: str) -> None:
-    message = (detail or delivery.failure_reason or "Notification delivery failed.")[:255]
-    current_app.logger.warning(
-        "Notification delivery failed: id=%s event=%s channel=%s reason=%s",
-        delivery.id,
-        delivery.event_type,
-        delivery.channel,
-        message,
-    )
-    write_activity_log(
-        actor_user_id=None,
-        event_type="notification.delivery_failed",
-        entity_table="notification_deliveries",
-        entity_id=str(delivery.id),
-        metadata={
-            "event_type": delivery.event_type,
-            "channel": delivery.channel,
-            "failure_category": delivery.failure_category,
-            "failure_reason": message,
-            "reservation_id": str(delivery.reservation_id) if delivery.reservation_id else None,
-            "payment_request_id": str(delivery.payment_request_id) if delivery.payment_request_id else None,
-        },
-    )
-
-
 def _dispatch_email(delivery: NotificationDelivery) -> str:
     if not delivery.email_outbox_id:
         _mark_delivery_failed(delivery, category="configuration", reason="Email outbox entry is missing.")
@@ -1085,7 +1056,6 @@ def dispatch_notification_deliveries(
             if outcome == "sent":
                 results["sent"] += 1
             elif outcome == "failed":
-                _record_delivery_failure(delivery, detail=delivery.failure_reason or "Notification delivery failed.")
                 results["failed"] += 1
             else:
                 results["skipped"] += 1
@@ -1094,11 +1064,6 @@ def dispatch_notification_deliveries(
             delivery = db.session.get(NotificationDelivery, delivery_id)
             if delivery:
                 _mark_delivery_failed(delivery, category="transport", reason=str(exc))
-                current_app.logger.exception(
-                    "Notification dispatch raised an exception for delivery %s",
-                    delivery_id,
-                )
-                _record_delivery_failure(delivery, detail=str(exc))
                 db.session.commit()
             results["processed"] += 1
             results["failed"] += 1
@@ -1197,19 +1162,8 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
                 manual=False,
             )
             db.session.commit()
-        except Exception as exc:
+        except Exception:
             db.session.rollback()
-            current_app.logger.exception(
-                "Failed payment reminder generation failed for payment request %s",
-                payment_request_id,
-            )
-            write_activity_log(
-                actor_user_id=actor_user_id,
-                event_type="notification.failed_payment_reminder_failed",
-                entity_table="payment_requests",
-                entity_id=str(payment_request_id),
-                metadata={"error": str(exc)[:255]},
-            )
             totals["failed"] += 1
             continue
         outcome = dispatch_notification_deliveries(delivery_ids)
@@ -1222,10 +1176,7 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
 
 def communication_settings_context() -> dict[str, object]:
     return {
-        "sender_name": _string_setting(
-            "notifications.sender_name",
-            _string_setting("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")),
-        ),
+        "sender_name": _string_setting("notifications.sender_name", "Sandbox Hotel"),
         "pre_arrival_enabled": _bool_setting("notifications.pre_arrival_enabled", True),
         "pre_arrival_days_before": _int_setting("notifications.pre_arrival_days_before", 1),
         "failed_payment_reminder_enabled": _bool_setting("notifications.failed_payment_reminder_enabled", True),

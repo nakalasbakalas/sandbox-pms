@@ -41,6 +41,7 @@ from ..models import (
 )
 from ..pricing import get_setting_value
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS, POLICY_DOCUMENTS_SEED
+from ..url_topology import build_booking_url
 
 
 ACTIVE_RESERVATION_STATUSES = {"tentative", "confirmed", "checked_in", "waitlist", "house_use"}
@@ -856,7 +857,7 @@ def summarize_audit_entry(entry: AuditLog) -> str:
 
 def sample_notification_context(language_code: str) -> dict[str, object]:
     return {
-        "hotel_name": str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))),
+        "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
         "guest_name": "Sample Guest",
         "reservation_code": "SBX-00009999",
         "check_in_date": "2026-04-01",
@@ -864,9 +865,9 @@ def sample_notification_context(language_code: str) -> dict[str, object]:
         "room_type_name": "Standard Double",
         "grand_total": "1500.00",
         "deposit_amount": "750.00",
-        "payment_link": f"{current_app.config.get('APP_BASE_URL', 'https://sandbox-hotel.local').rstrip('/')}/payments/request/PAY-SAMPLE",
+        "payment_link": build_booking_url("/payments/request/PAY-SAMPLE"),
         "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-        "contact_email": str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", ""))),
+        "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
         "cancellation_policy": policy_text("cancellation_policy", language_code, ""),
         "check_in_policy": policy_text("check_in_policy", language_code, ""),
         "check_out_policy": policy_text("check_out_policy", language_code, ""),

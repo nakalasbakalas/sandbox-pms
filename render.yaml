@@ -1,56 +1,58 @@
 services:
   - type: web
-    name: sandbox-hotel-pms
+    name: sandbox-pms
     runtime: python
     rootDir: sandbox_pms_mvp
-    region: oregon
     plan: starter
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    preDeployCommand: flask --app app db upgrade
-    startCommand: gunicorn --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-10000} --timeout 120 --worker-class sync --access-logfile - --error-logfile - app:app
+    autoDeployTrigger: checksPass
     healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    domains:
+      - book.sandboxhotel.com
+      - staff.sandboxhotel.com
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.11"
+        value: 3.12.8
       - key: APP_ENV
         value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db
-          property: connectionString
-      - key: SECRET_KEY
-        generateValue: true
-      - key: AUTH_ENCRYPTION_KEY
-        sync: false
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+      - key: PREFERRED_URL_SCHEME
+        value: https
       - key: FORCE_HTTPS
         value: "1"
-      - key: TRUST_PROXY_COUNT
+      - key: ENFORCE_CANONICAL_HOSTS
         value: "1"
       - key: AUTH_COOKIE_SECURE
         value: "1"
       - key: SESSION_COOKIE_SECURE
         value: "1"
-      - key: AUTH_SHOW_RESET_LINKS
-        value: "0"
-      - key: AUTO_BOOTSTRAP_SCHEMA
-        value: "0"
-      - key: AUTO_SEED_REFERENCE_DATA
-        value: "0"
-      - key: LOG_LEVEL
-        value: INFO
-      - key: WEB_CONCURRENCY
-        value: "2"
+      - key: MARKETING_SITE_URL
+        value: https://www.sandboxhotel.com
+      - key: BOOKING_ENGINE_URL
+        value: https://book.sandboxhotel.com
+      - key: STAFF_APP_URL
+        value: https://staff.sandboxhotel.com
+      - key: APP_BASE_URL
+        value: https://book.sandboxhotel.com
+      - key: TRUSTED_HOSTS
+        value: book.sandboxhotel.com,staff.sandboxhotel.com
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: AUTH_ENCRYPTION_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
       - key: PAYMENT_PROVIDER
-        value: disabled
-
-databases:
-  - name: sandbox-hotel-pms-db
-    plan: basic-256mb
-    region: oregon
-    databaseName: sandbox_hotel_pms
-    user: sandbox_hotel_pms
-    postgresMajorVersion: "17"
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
