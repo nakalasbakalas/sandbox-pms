@@ -20,6 +20,7 @@ Recommended domain topology:
 
 See [sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md](sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md) for the URL model, canonical-host behavior, and deployment runbook.
 For platform cutover steps, see [DEPLOYMENT-RUNBOOK.md](DEPLOYMENT-RUNBOOK.md).
+For hosted-payment provider setup on the live `book` origin, see [PAYMENT-CUTOVER-RUNBOOK.md](PAYMENT-CUTOVER-RUNBOOK.md).
 Production-oriented environment defaults for the live domain split are in [sandbox_pms_mvp/.env.production.example](sandbox_pms_mvp/.env.production.example).
 
 Repo layout:

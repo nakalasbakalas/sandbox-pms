@@ -50,6 +50,14 @@ Register guest-facing payment URLs against the booking origin:
 
 Do not use the brochure origin for payment return or webhook handling.
 
+Important detail:
+
+- the PMS generates hosted-checkout success and cancel return URLs dynamically per payment request
+- for Stripe-style hosted checkout, there is no separate brochure or staff callback to register
+- the fixed dashboard-side registration is the webhook endpoint on the `book` origin
+
+For the exact provider cutover checklist, see [PAYMENT-CUTOVER-RUNBOOK.md](PAYMENT-CUTOVER-RUNBOOK.md).
+
 ## DNS Checklist
 
 1. Create or update `www.sandboxhotel.com` to point at the Cloudflare brochure deployment.
