@@ -4,11 +4,12 @@ import hmac
 import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
 from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
-from markupsafe import Markup
+from markupsafe import Markup, escape
 
 from .activity import write_activity_log
 from .config import Config, normalize_runtime_config
@@ -302,13 +303,17 @@ def register_template_helpers(app: Flask) -> None:
         hotel_name = str(get_setting_value("hotel.name", "Sandbox Hotel"))
         hotel_currency = str(get_setting_value("hotel.currency", "THB"))
         hotel_brand_mark = str(get_setting_value("hotel.brand_mark", "SBX"))
-        hotel_logo_url = str(get_setting_value("hotel.logo_url", "") or "")
+        hotel_logo_url = _public_asset_url(str(get_setting_value("hotel.logo_url", "") or ""))
         hotel_contact_phone = str(get_setting_value("hotel.contact_phone", "+66 000 000 000"))
         hotel_contact_email = str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local"))
         hotel_address = str(get_setting_value("hotel.address", "Sandbox Hotel"))
         hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
         hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
         marketing_site_url = marketing_site_base_url(required=False)
+        favicon_url = hotel_logo_url or url_for("static", filename="favicon.svg", _external=True)
+        share_image_url = hotel_logo_url or favicon_url
+        hotel_contact_phone_href = _phone_href(hotel_contact_phone)
+        hotel_contact_email_href = _email_href(hotel_contact_email)
         return {
             "hotel_name": hotel_name,
             "currency": hotel_currency,
@@ -316,17 +321,33 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_logo_url": hotel_logo_url,
             "hotel_contact_phone": hotel_contact_phone,
             "hotel_contact_email": hotel_contact_email,
+            "hotel_contact_phone_href": hotel_contact_phone_href,
+            "hotel_contact_email_href": hotel_contact_email_href,
+            "hotel_contact_phone_link": _contact_link(hotel_contact_phone_href, hotel_contact_phone),
+            "hotel_contact_email_link": _contact_link(hotel_contact_email_href, hotel_contact_email),
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
             "marketing_site_url": marketing_site_url,
             "booking_engine_url": booking_engine_base_url(),
             "staff_app_url": staff_app_base_url(),
+            "favicon_url": favicon_url,
+            "share_image_url": share_image_url,
+            "hotel_structured_data": _hotel_structured_data(
+                hotel_name=hotel_name,
+                hotel_address=hotel_address,
+                hotel_contact_phone=hotel_contact_phone,
+                hotel_contact_email=hotel_contact_email,
+                hotel_check_in_time=hotel_check_in_time,
+                hotel_check_out_time=hotel_check_out_time,
+                share_image_url=share_image_url,
+            ),
             "staff_logged_in": current_user() is not None,
             "current_staff_user": current_user(),
             "current_language": language,
             "language_labels": LANGUAGE_LABELS,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
+            "make_lang_url": make_language_url,
             "can": can,
             "admin_sections": available_admin_sections(),
             "csrf_token": ensure_csrf_token,
@@ -2183,6 +2204,81 @@ def register_routes(app: Flask) -> None:
 
 def current_language() -> str:
     return normalize_language(request.args.get("lang") or request.form.get("language") or "th")
+
+
+def make_language_url(language_code: str) -> str:
+    args = request.args.to_dict(flat=False)
+    args["lang"] = [normalize_language(language_code)]
+    query_string = urlencode(args, doseq=True)
+    if query_string:
+        return f"{request.path}?{query_string}"
+    return request.path
+
+
+def _public_asset_url(value: str | None) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return ""
+    if candidate.startswith(("http://", "https://", "data:")):
+        return candidate
+    if candidate.startswith("/"):
+        return f"{request.url_root.rstrip('/')}{candidate}"
+    return f"{request.url_root.rstrip('/')}/{candidate.lstrip('/')}"
+
+
+def _phone_href(phone_number: str) -> str:
+    normalized = "".join(character for character in str(phone_number or "") if character.isdigit() or character == "+")
+    if not normalized:
+        return ""
+    return f"tel:{normalized}"
+
+
+def _email_href(email_address: str) -> str:
+    normalized = str(email_address or "").strip()
+    if not normalized:
+        return ""
+    return f"mailto:{normalized}"
+
+
+def _contact_link(href: str, label: str) -> Markup | str:
+    safe_label = escape(label or "")
+    if not href:
+        return safe_label
+    return Markup('<a class="contact-link subtle" href="{0}">{1}</a>').format(escape(href), safe_label)
+
+
+def _hotel_structured_data(
+    *,
+    hotel_name: str,
+    hotel_address: str,
+    hotel_contact_phone: str,
+    hotel_contact_email: str,
+    hotel_check_in_time: str,
+    hotel_check_out_time: str,
+    share_image_url: str,
+) -> dict[str, object]:
+    structured_data: dict[str, object] = {
+        "@context": "https://schema.org",
+        "@type": "Hotel",
+        "name": hotel_name,
+        "url": booking_engine_base_url(),
+    }
+    if hotel_address:
+        structured_data["address"] = {
+            "@type": "PostalAddress",
+            "streetAddress": hotel_address,
+        }
+    if hotel_contact_phone:
+        structured_data["telephone"] = hotel_contact_phone
+    if hotel_contact_email:
+        structured_data["email"] = hotel_contact_email
+    if hotel_check_in_time:
+        structured_data["checkinTime"] = hotel_check_in_time
+    if hotel_check_out_time:
+        structured_data["checkoutTime"] = hotel_check_out_time
+    if share_image_url:
+        structured_data["image"] = share_image_url
+    return structured_data
 
 
 def ensure_csrf_token() -> str:

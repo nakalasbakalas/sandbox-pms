@@ -135,11 +135,45 @@ def test_local_same_origin_topology_does_not_redirect(app_factory):
             "SESSION_COOKIE_SECURE": False,
         }
     )
-    app.add_url_rule("/sitemap.xml", "sitemap_xml", lambda: "")
-    app.jinja_env.globals["make_lang_url"] = lambda code: f"/?lang={code}"
     client = app.test_client()
 
     response = client.get("/staff", base_url="http://127.0.0.1:5000")
 
     assert response.status_code == 401
     assert "Location" not in response.headers
+
+
+def test_public_booking_host_renders_without_missing_template_globals(app_factory):
+    app = app_factory(
+        seed=True,
+        config={
+            "APP_BASE_URL": "https://book.example.com",
+            "BOOKING_ENGINE_URL": "https://book.example.com",
+            "STAFF_APP_URL": "https://staff.example.com",
+            "ENFORCE_CANONICAL_HOSTS": True,
+        },
+    )
+    client = app.test_client()
+
+    response = client.get("/", base_url="https://book.example.com")
+
+    assert response.status_code == 200
+    assert b"application/ld+json" in response.data
+    assert b"tel:" in response.data
+
+
+def test_staff_host_login_renders_without_missing_template_globals(app_factory):
+    app = app_factory(
+        config={
+            "APP_BASE_URL": "https://book.example.com",
+            "BOOKING_ENGINE_URL": "https://book.example.com",
+            "STAFF_APP_URL": "https://staff.example.com",
+            "ENFORCE_CANONICAL_HOSTS": True,
+        }
+    )
+    client = app.test_client()
+
+    response = client.get("/staff/login", base_url="https://staff.example.com")
+
+    assert response.status_code == 200
+    assert b"Staff sign in" in response.data
