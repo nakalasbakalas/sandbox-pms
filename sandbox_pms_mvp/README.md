@@ -1,10 +1,10 @@
 # Sandbox Hotel PMS
 
-Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed PostgreSQL-first. The repo now includes the Phase 2 operating data layer, the Phase 3 staff authentication and authorization layer, the Phase 4 public booking flow, the Phase 5 staff reservations workspace, the Phase 6 front-desk check-in / check-out workspace, the Phase 7 housekeeping operations board, the Phase 8 cashier / folio module, the Phase 9 hosted deposit payment integration, the Phase 10 admin and hotel configuration panel, the Phase 11 notifications and communication layer, and the Phase 12 manager dashboard and reporting workspace on top of it.
+Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed PostgreSQL-first. The repo now includes the Phase 2 operating data layer, the Phase 3 staff authentication and authorization layer, the Phase 4 public booking flow, the Phase 5 staff reservations workspace, the Phase 6 front-desk check-in / check-out workspace, the Phase 7 housekeeping operations board, the Phase 8 cashier / folio module, the Phase 9 hosted deposit payment integration, the Phase 10 admin and hotel configuration panel, the Phase 11 notifications and communication layer, the Phase 12 manager dashboard and reporting workspace, the Phase 13 security hardening layer, and the Phase 14 provider portal plus iCal availability sync layer on top of it.
 
 Deployment note: this app is designed for a Python application host such as Render. It is not a GitHub Pages-compatible static site.
 
-The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml). It deploys the web service from [sandbox_pms_mvp](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/RENDER_DEPLOY_CHECKLIST.md).
+The canonical Render Blueprint lives at [render.yaml](../render.yaml). It deploys the web service from [sandbox_pms_mvp](.), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](../RENDER_DEPLOY_CHECKLIST.md).
 
 ## Stack
 
@@ -16,7 +16,7 @@ The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/s
 
 ## What The Repo Implements
 
-- Deterministic Alembic baseline migration in [migrations/versions/20260307_01_phase2_baseline.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/migrations/versions/20260307_01_phase2_baseline.py)
+- Deterministic Alembic baseline migration in [migrations/versions/20260307_01_phase2_baseline.py](migrations/versions/20260307_01_phase2_baseline.py)
 - UUID-based business tables with audit fields on mutable records
 - RBAC tables: `users`, `roles`, `permissions`, `user_roles`, `role_permissions`
 - Staff auth security tables: `user_sessions`, `password_reset_tokens`, `auth_attempts`, `mfa_factors`, `mfa_recovery_codes`, `user_password_history`, `activity_log`
@@ -26,17 +26,19 @@ The canonical Render Blueprint lives at [render.yaml](C:/Users/nakal/Downloads/s
 - Public booking workflow: `reservation_holds`, `reservation_review_queue`, `staff_notifications`, `cancellation_requests`, `modification_requests`, `email_outbox`, `notification_deliveries`
 - Housekeeping operations: `room_notes`, `room_status_history`, extended `inventory_days` fields for block / maintenance / cleaned / inspected state
 - Admin configuration: `inventory_overrides`, `blackout_periods`, `policy_documents`, `notification_templates`
-- Notification orchestration service in [communication_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/communication_service.py)
-- Transaction-safe reservation create/cancel service in [reservation_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/reservation_service.py)
-- Transaction-safe public availability, hold, and booking confirmation flow in [public_booking_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/public_booking_service.py)
-- Staff reservations workspace query/mutation service in [staff_reservations_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/staff_reservations_service.py)
-- Front-desk arrivals / in-house / departures service in [front_desk_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/front_desk_service.py)
-- Housekeeping board, room detail, and status-control service in [housekeeping_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/housekeeping_service.py)
-- Hosted payment orchestration service in [payment_integration_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/payment_integration_service.py)
-- Admin configuration service in [admin_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/admin_service.py)
-- Manager dashboard and reporting service in [reporting_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/reporting_service.py)
-- Idempotent Phase 2 seed path in [seeds.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/seeds.py)
-- Backup and restore scripts under [scripts](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/scripts)
+- Notification orchestration service in [communication_service.py](pms/services/communication_service.py)
+- Transaction-safe reservation create/cancel service in [reservation_service.py](pms/services/reservation_service.py)
+- Transaction-safe public availability, hold, and booking confirmation flow in [public_booking_service.py](pms/services/public_booking_service.py)
+- Staff reservations workspace query/mutation service in [staff_reservations_service.py](pms/services/staff_reservations_service.py)
+- Front-desk arrivals / in-house / departures service in [front_desk_service.py](pms/services/front_desk_service.py)
+- Housekeeping board, room detail, and status-control service in [housekeeping_service.py](pms/services/housekeeping_service.py)
+- Hosted payment orchestration service in [payment_integration_service.py](pms/services/payment_integration_service.py)
+- Admin configuration service in [admin_service.py](pms/services/admin_service.py)
+- Manager dashboard and reporting service in [reporting_service.py](pms/services/reporting_service.py)
+- Provider booking and deposit portal service in [provider_portal_service.py](pms/services/provider_portal_service.py)
+- Private iCal export and external calendar sync service in [ical_service.py](pms/services/ical_service.py)
+- Idempotent Phase 2 seed path in [seeds.py](pms/seeds.py)
+- Backup and restore scripts under [scripts](scripts)
 - Integration tests for schema, seeds, reservation invariants, public booking reliability, staff workspace operations, audit, soft delete, and script artifacts
 
 ## Schema Summary
@@ -52,6 +54,7 @@ Core domains:
 - Public booking operations: `reservation_holds`, `reservation_review_queue`, `staff_notifications`, `cancellation_requests`, `modification_requests`, `email_outbox`, `notification_deliveries`
 - Housekeeping operations: `room_notes`, `room_status_history`, `inventory_days`
 - Admin and configuration: `inventory_overrides`, `blackout_periods`, `policy_documents`, `notification_templates`, `app_settings`
+- Provider calendar sync: `calendar_feeds`, `external_calendar_sources`, `external_calendar_blocks`, `external_calendar_sync_runs`
 - Billing and payments: `folio_charges`, `cashier_documents`, `cashier_document_sequences`, `cashier_activity_log`, `payment_requests`, `payment_events`
 - Audit: `audit_log`
 
@@ -66,7 +69,7 @@ Key integrity rules:
 
 ## Staff Authentication And Authorization
 
-The staff auth layer is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py) and [auth_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/auth_service.py).
+The staff auth layer is implemented in [app.py](pms/app.py) and [auth_service.py](pms/services/auth_service.py).
 
 Authentication model:
 
@@ -127,7 +130,7 @@ Permission strategy:
 
 ## Public Booking Architecture
 
-The public flow is implemented in [public_booking_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/public_booking_service.py) and the public/staff views in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py).
+The public flow is implemented in [public_booking_service.py](pms/services/public_booking_service.py) and the public/staff views in [app.py](pms/app.py).
 
 Flow:
 
@@ -149,7 +152,7 @@ Key reliability rules:
 
 The public flow supports:
 
-- Thai primary copy with English and Simplified Chinese in [i18n.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/i18n.py)
+- Thai primary copy with English and Simplified Chinese in [i18n.py](pms/i18n.py)
 - source tracking on public reservations through `source_channel` and `source_metadata_json`
 - cancellation requests and modification requests linked back to real reservations
 - a staff review queue for new public reservations and follow-up visibility
@@ -157,7 +160,7 @@ The public flow supports:
 
 ## Staff Reservations Workspace
 
-The staff workspace is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [staff_reservations_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/staff_reservations_service.py), and the staff templates under [templates](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates).
+The staff workspace is implemented in [app.py](pms/app.py), [staff_reservations_service.py](pms/services/staff_reservations_service.py), and the staff templates under [templates](templates).
 
 Key capabilities:
 
@@ -203,7 +206,7 @@ Primary workspace routes:
 
 ## Front-Desk Workspace
 
-The front-office workspace is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [front_desk_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/front_desk_service.py), and the dedicated templates [front_desk_workspace.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/front_desk_workspace.html) and [front_desk_detail.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/front_desk_detail.html).
+The front-office workspace is implemented in [app.py](pms/app.py), [front_desk_service.py](pms/services/front_desk_service.py), and the dedicated templates [front_desk_workspace.html](templates/front_desk_workspace.html) and [front_desk_detail.html](templates/front_desk_detail.html).
 
 Operational views:
 
@@ -258,7 +261,7 @@ Operational caveats:
 
 ## Cashier Module
 
-The cashier module is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [cashier_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/cashier_service.py), and the templates [cashier_folio.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/cashier_folio.html) and [cashier_print.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/cashier_print.html).
+The cashier module is implemented in [app.py](pms/app.py), [cashier_service.py](pms/services/cashier_service.py), and the templates [cashier_folio.html](templates/cashier_folio.html) and [cashier_print.html](templates/cashier_print.html).
 
 Authoritative folio model:
 
@@ -316,7 +319,7 @@ Operational caveats:
 
 ## Hosted Deposit Payments
 
-The hosted payment integration is implemented in [payment_integration_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/payment_integration_service.py), the payment routes in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), and the public/staff templates [public_confirmation.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/public_confirmation.html), [public_payment_return.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/public_payment_return.html), and [cashier_folio.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/cashier_folio.html).
+The hosted payment integration is implemented in [payment_integration_service.py](pms/services/payment_integration_service.py), the payment routes in [app.py](pms/app.py), and the public/staff templates [public_confirmation.html](templates/public_confirmation.html), [public_payment_return.html](templates/public_payment_return.html), and [cashier_folio.html](templates/cashier_folio.html).
 
 Architecture:
 
@@ -368,7 +371,7 @@ Operational caveats:
 
 ## Notifications And Communications
 
-The communication layer is implemented in [communication_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/communication_service.py), the notification-aware admin routes in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), and the admin/templates integration in [admin_communications.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_communications.html), [admin_operations.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_operations.html), [reservation_detail.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/reservation_detail.html), [front_desk_detail.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/front_desk_detail.html), [cashier_folio.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/cashier_folio.html), and [staff_dashboard.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/staff_dashboard.html).
+The communication layer is implemented in [communication_service.py](pms/services/communication_service.py), the notification-aware admin routes in [app.py](pms/app.py), and the admin/templates integration in [admin_communications.html](templates/admin_communications.html), [admin_operations.html](templates/admin_operations.html), [reservation_detail.html](templates/reservation_detail.html), [front_desk_detail.html](templates/front_desk_detail.html), [cashier_folio.html](templates/cashier_folio.html), and [staff_dashboard.html](templates/staff_dashboard.html).
 
 Architecture:
 
@@ -428,7 +431,7 @@ Operational caveats:
 
 ## Admin And Hotel Configuration Panel
 
-The admin control surface is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [admin_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/admin_service.py), and the templates [admin.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin.html), [admin_property.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_property.html), [admin_rates_inventory.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_rates_inventory.html), [admin_staff_access.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_staff_access.html), [admin_operations.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_operations.html), [admin_payments.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_payments.html), and [admin_audit.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/admin_audit.html).
+The admin control surface is implemented in [app.py](pms/app.py), [admin_service.py](pms/services/admin_service.py), and the templates [admin.html](templates/admin.html), [admin_property.html](templates/admin_property.html), [admin_rates_inventory.html](templates/admin_rates_inventory.html), [admin_staff_access.html](templates/admin_staff_access.html), [admin_operations.html](templates/admin_operations.html), [admin_payments.html](templates/admin_payments.html), and [admin_audit.html](templates/admin_audit.html).
 
 Configuration data model strategy:
 
@@ -480,7 +483,7 @@ Operational caveats:
 
 ## Manager Dashboard And Reporting
 
-The manager reporting workspace is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [reporting_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/reporting_service.py), and [staff_reports.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/staff_reports.html).
+The manager reporting workspace is implemented in [app.py](pms/app.py), [reporting_service.py](pms/services/reporting_service.py), and [staff_reports.html](templates/staff_reports.html).
 
 Architecture:
 
@@ -551,7 +554,7 @@ Operational caveats:
 
 ## Housekeeping Operations
 
-The housekeeping module is implemented in [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/app.py), [housekeeping_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/housekeeping_service.py), and the templates [housekeeping_board.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/housekeeping_board.html) and [housekeeping_room_detail.html](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/templates/housekeeping_room_detail.html).
+The housekeeping module is implemented in [app.py](pms/app.py), [housekeeping_service.py](pms/services/housekeeping_service.py), and the templates [housekeeping_board.html](templates/housekeeping_board.html) and [housekeeping_room_detail.html](templates/housekeeping_room_detail.html).
 
 Operational model:
 
@@ -643,7 +646,7 @@ Seeded roles:
 
 ## Reservation Transaction Flow
 
-The create path is implemented in [reservation_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/reservation_service.py).
+The create path is implemented in [reservation_service.py](pms/services/reservation_service.py).
 
 Flow:
 
@@ -682,7 +685,7 @@ Those tables use status transitions or append-only reversal patterns instead.
 
 ## Environment
 
-Example environment values are in [.env.example](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/.env.example).
+Example environment values are in [.env.example](.env.example).
 
 Important variables:
 
@@ -737,6 +740,8 @@ Important variables:
 - `PAYMENT_LINK_TTL_MINUTES`
 - `PAYMENT_LINK_RESEND_COOLDOWN_SECONDS`
 - `PAYMENT_WEBHOOK_TOLERANCE_SECONDS`
+- `ICAL_SYNC_HTTP_TIMEOUT_SECONDS`
+- `ICAL_SYNC_USER_AGENT`
 - `PG_DUMP_BIN`
 - `PG_RESTORE_BIN`
 - `BACKUP_RETENTION_DAYS`
@@ -882,7 +887,7 @@ Recommended production policy:
 
 ## Security And Compliance Hardening
 
-Phase 13 hardening is implemented in [security.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/security.py), [config.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/config.py), [auth_service.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/services/auth_service.py), [audit.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/audit.py), [activity.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/pms/activity.py), and the hardened backup scripts under [scripts](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/scripts).
+Phase 13 hardening is implemented in [security.py](pms/security.py), [config.py](pms/config.py), [auth_service.py](pms/services/auth_service.py), [audit.py](pms/audit.py), [activity.py](pms/activity.py), and the hardened backup scripts under [scripts](scripts).
 
 Security architecture:
 
@@ -949,6 +954,57 @@ Launch-readiness checklist:
 - review security, error, access, and audit logs as part of launch validation
 - run the full test suite plus the PostgreSQL-only integrations behind `TEST_DATABASE_URL`
 
+## Provider Portal And iCal Sync
+
+Phase 14 adds a provider-facing operating surface plus private iCal export and external calendar sync. The provider portal is implemented in [provider_portal_service.py](pms/services/provider_portal_service.py), [ical_service.py](pms/services/ical_service.py), the provider routes in [app.py](pms/app.py), and the templates [provider_dashboard.html](templates/provider_dashboard.html), [provider_bookings.html](templates/provider_bookings.html), [provider_booking_detail.html](templates/provider_booking_detail.html), and [provider_calendar.html](templates/provider_calendar.html).
+
+Provider role and scope:
+
+- seeded role `provider`
+- backend permissions `provider.dashboard.view`, `provider.booking.view`, `provider.booking.cancel`, `provider.payment_request.create`, `provider.calendar.view`, and `provider.calendar.manage`
+- current implementation is single-property scoped, so a provider user is limited by role and route permissions rather than a multi-property tenancy model
+- provider users do not receive admin, cashier, reporting, or broad staff-management access by default
+
+Provider routes:
+
+- `/provider`
+- `/provider/bookings`
+- `/provider/bookings/<reservation_id>`
+- `/provider/bookings/<reservation_id>/payment-requests`
+- `/provider/payment-requests/<payment_request_id>/resend`
+- `/provider/payment-requests/<payment_request_id>/refresh`
+- `/provider/bookings/<reservation_id>/cancel`
+- `/provider/calendar`
+- `/provider/calendar/feeds`
+- `/provider/calendar/feeds/<feed_id>/rotate`
+- `/provider/calendar/sources`
+- `/provider/calendar/sources/<source_id>/sync`
+- `/calendar/feed/<token>.ics`
+- CLI: `flask --app app sync-ical-sources`
+
+Provider dashboard behavior:
+
+- arrivals today, departures today, upcoming bookings, pending deposits, unpaid or partially paid stays, occupancy snapshot, recent activity, and calendar sync visibility
+- booking detail shows guest summary already stored in the PMS, stay dates, room assignment, booking total, required deposit, paid deposit, remaining balance, payment reference, and hosted-payment status
+- deposit creation, resend, and refresh all reuse the authoritative hosted-payment and folio path from Phase 9 and Phase 8 rather than a duplicate provider-only payment implementation
+
+iCal export and import behavior:
+
+- private export feeds use unpredictable tokenized URLs and do not expose guest names, reservation codes, email addresses, phone numbers, or internal note content
+- feeds support property scope and room scope
+- exported calendar events use stable UIDs and hotel-local date handling based on `hotel.timezone`
+- imported external events are stored as `external_calendar_blocks`, deduplicated by `(source_id, external_uid)`, and tracked through `external_calendar_sync_runs`
+- imported external blocks affect room availability and front-desk readiness checks so the PMS does not silently ignore third-party calendar occupancy
+- sync conflicts with internal reservations are preserved for review instead of overwriting authoritative internal stays
+- calendar sync and feed actions write audit and activity records
+
+Operational safety note:
+
+- external iCal import creates availability blocks, not confirmed guest reservations
+- those blocks are used to protect inventory selection and check-in readiness
+- repeated syncs are idempotent and do not create duplicate blocks
+- live payment capture was validated through the real hosted-payment code path using `test_hosted`; a true live card transaction still requires production provider credentials and webhook registration outside this repo
+
 ## Testing
 
 ```powershell
@@ -999,6 +1055,10 @@ Current automated coverage validates:
 - safe public payment return handling without trusting redirect alone
 - webhook-driven payment status sync and duplicate-safe folio deposit application
 - payment link resend flow and provider-reference reconciliation
+- provider dashboard RBAC and booking-detail visibility
+- provider-initiated deposit request creation and paid-deposit reflection through the real webhook-driven code path
+- private iCal feed generation with stable UIDs and no guest-identity leakage
+- external iCal sync idempotency, conflict detection, and live availability protection against imported blocks
 - notification delivery tracking, guest/staff template rendering, and communication-history surfaces
 - pre-arrival reminder dispatch and failed-payment reminder follow-up
 - optional staff alert channel isolation when LINE / WhatsApp webhooks fail
@@ -1060,8 +1120,10 @@ Recommended production setup:
 
 ## Runnable App
 
-The Flask entrypoint remains [app.py](/C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/app.py).
+The Flask entrypoint remains [app.py](app.py).
 
 ```powershell
 .\.venv\Scripts\flask.exe --app app run --debug
 ```
+
+

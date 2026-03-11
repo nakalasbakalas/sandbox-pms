@@ -560,11 +560,11 @@ def test_public_pages_use_token_free_og_url(app_factory):
 
     assert response.status_code == 200
     assert og_url_match is not None
-    assert og_url_match.group(1).endswith("/availability")
-    assert "?" not in og_url_match.group(1)
+    assert og_url_match.group(1).endswith("/availability?lang=en")
+    assert "utm_source" not in og_url_match.group(1)
     assert canonical_match is not None
-    assert canonical_match.group(1).endswith("/availability")
-    assert "?" not in canonical_match.group(1)
+    assert canonical_match.group(1).endswith("/availability?lang=en")
+    assert "utm_source" not in canonical_match.group(1)
 
 
 @pytest.mark.parametrize("path", ["/booking/cancel?lang=en", "/booking/modify?lang=en"])
@@ -595,9 +595,25 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert 'application/ld+json' in body
     assert 'rel="icon"' in body
     assert "favicon.svg" in body
+    assert 'hreflang="en"' in body
+    assert 'hreflang="th"' in body
+    assert 'hreflang="x-default"' in body
     assert "tel:" in body
     assert "mailto:" in body
-    assert "https://hotel.example/static/favicon.svg" in body
+    assert "https://hotel.example/static/hotel-share.svg" in body
+
+
+def test_robots_route_includes_dynamic_sitemap_url(app_factory):
+    app = app_factory(seed=True, config={"APP_BASE_URL": "https://hotel.example"})
+    client = app.test_client()
+
+    response = client.get("/robots.txt")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    assert "Disallow: /staff/" in body
+    assert "Sitemap: https://hotel.example/sitemap.xml" in body
 
 
 def test_sitemap_route_lists_public_guest_pages(app_factory):

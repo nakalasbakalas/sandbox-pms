@@ -5,6 +5,7 @@ import threading
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 import sqlalchemy as sa
@@ -38,10 +39,15 @@ from pms.services.staff_reservations_service import assign_room
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = PROJECT_ROOT / "migrations"
+HOTEL_TZ = ZoneInfo("Asia/Bangkok")
 
 
 def utc_dt(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour=hour, minute=minute), tzinfo=timezone.utc)
+
+
+def hotel_dt(day: date, hour: int, minute: int = 0) -> datetime:
+    return datetime.combine(day, time(hour=hour, minute=minute), tzinfo=HOTEL_TZ)
 
 
 def make_staff_user(role_code: str, email: str) -> User:
@@ -312,13 +318,39 @@ def test_early_and_late_fee_evaluation_use_operating_rules(app_factory):
             check_in_date=business_date,
             check_out_date=business_date + timedelta(days=1),
         )
-        early = evaluate_early_check_in(reservation, utc_dt(reservation.check_in_date, 10))
-        late = evaluate_late_check_out(reservation, utc_dt(reservation.check_out_date, 12))
+        early = evaluate_early_check_in(reservation, hotel_dt(reservation.check_in_date, 10))
+        late = evaluate_late_check_out(reservation, hotel_dt(reservation.check_out_date, 12))
 
         assert early["applies"] is True
         assert late["applies"] is True
         assert early["amount"] == Decimal("100.00")
         assert late["amount"] == Decimal("100.00")
+
+
+def test_fee_cutoffs_respect_hotel_timezone(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        business_date = date.today() + timedelta(days=1)
+        reservation = create_staff_reservation(
+            first_name="Timezone",
+            last_name="Guest",
+            phone="+66800000109",
+            room_type_code="DBL",
+            check_in_date=business_date,
+            check_out_date=business_date + timedelta(days=1),
+        )
+        early = evaluate_early_check_in(
+            reservation,
+            hotel_dt(reservation.check_in_date, 15),
+        )
+        late = evaluate_late_check_out(
+            reservation,
+            hotel_dt(reservation.check_out_date, 12),
+        )
+
+        assert early["cutoff"].tzinfo == HOTEL_TZ
+        assert early["applies"] is False
+        assert late["applies"] is True
 
 
 def test_walk_in_create_and_check_in_uses_authoritative_service_path(app_factory):
@@ -395,7 +427,7 @@ def test_checkout_prep_and_checkout_handoff_update_state_correctly(app_factory):
         mark_checked_in(reservation)
         actor = make_staff_user("front_desk", "fd5@example.com")
 
-        prep = prepare_checkout(reservation.id, action_at=utc_dt(check_out_date, 10))
+        prep = prepare_checkout(reservation.id, action_at=hotel_dt(check_out_date, 10))
         assert prep["checkout_payment_summary"]["balance_due"] == Decimal(str(reservation.quoted_grand_total))
 
         checked_out = complete_checkout(
@@ -403,10 +435,10 @@ def test_checkout_prep_and_checkout_handoff_update_state_correctly(app_factory):
             CheckoutPayload(
                 collect_payment_amount=Decimal(str(reservation.quoted_grand_total)),
                 departure_note="Guest settled balance and returned key",
-                action_at=utc_dt(check_out_date, 10),
-            ),
-            actor_user_id=actor.id,
-        )
+                    action_at=hotel_dt(check_out_date, 10),
+                ),
+                actor_user_id=actor.id,
+            )
 
         dirty = HousekeepingStatus.query.filter_by(code="dirty").one()
         turnover_row = InventoryDay.query.filter_by(room_id=reservation.assigned_room_id, business_date=check_out_date).one()
@@ -433,11 +465,11 @@ def test_checkout_blocks_when_financial_balance_remains(app_factory):
         actor = make_staff_user("front_desk", "fd6@example.com")
 
         with pytest.raises(ValueError, match="Outstanding balance remains"):
-            complete_checkout(
-                reservation.id,
-                CheckoutPayload(collect_payment_amount=Decimal("0.00"), action_at=utc_dt(check_out_date, 10)),
-                actor_user_id=actor.id,
-            )
+                complete_checkout(
+                    reservation.id,
+                    CheckoutPayload(collect_payment_amount=Decimal("0.00"), action_at=hotel_dt(check_out_date, 10)),
+                    actor_user_id=actor.id,
+                )
 
 
 def test_no_show_processing_updates_status_history_and_releases_inventory(app_factory):

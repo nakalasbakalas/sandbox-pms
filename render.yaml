@@ -45,7 +45,7 @@ services:
       - key: WEB_CONCURRENCY
         value: "2"
       - key: PAYMENT_PROVIDER
-        value: disabled
+        sync: false
 
 databases:
   - name: sandbox-hotel-pms-db

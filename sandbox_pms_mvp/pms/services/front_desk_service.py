@@ -26,6 +26,7 @@ from ..models import (
     User,
 )
 from ..pricing import get_setting_value, quote_reservation
+from .ical_service import calendar_timezone, room_has_external_block
 from .cashier_service import (
     ensure_room_charges_posted,
     PaymentPostingPayload,
@@ -719,6 +720,13 @@ def room_readiness_snapshot(reservation: Reservation, business_date: date) -> di
             "housekeeping_status_code": None,
         }
     housekeeping_code = _housekeeping_code(row.housekeeping_status_id)
+    if room_has_external_block(reservation.assigned_room_id, business_date, reservation.check_out_date):
+        return {
+            "is_ready": False,
+            "label": "calendar_conflict",
+            "reason": "Room is blocked by an external calendar sync.",
+            "housekeeping_status_code": housekeeping_code,
+        }
     if getattr(row, "is_blocked", False):
         return {
             "is_ready": False,
@@ -861,6 +869,8 @@ def _locked_room_readiness(reservation: Reservation, room: Room, business_date: 
         return {"is_ready": False, "label": "missing_inventory", "reason": "Inventory is missing for this room and date."}
     first_row = rows[0]
     housekeeping_code = _housekeeping_code(first_row.housekeeping_status_id)
+    if room_has_external_block(room.id, business_date, reservation.check_out_date, for_update=True):
+        return {"is_ready": False, "label": "calendar_conflict", "reason": "Assigned room is blocked by an external calendar sync."}
     if getattr(first_row, "is_blocked", False):
         return {"is_ready": False, "label": "blocked", "reason": first_row.blocked_reason or "Assigned room is blocked."}
     if housekeeping_code not in _ready_housekeeping_codes():
@@ -889,6 +899,8 @@ def _locked_room_readiness_for_new_stay(room: Room, check_in_date: date, check_o
         return {"is_ready": False, "reason": "Inventory is missing for the requested walk-in stay."}
     first_row = rows[0]
     housekeeping_code = _housekeeping_code(first_row.housekeeping_status_id)
+    if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
+        return {"is_ready": False, "reason": "Selected room is blocked by an external calendar sync."}
     if getattr(first_row, "is_blocked", False):
         return {"is_ready": False, "reason": first_row.blocked_reason or "Selected room is blocked."}
     if housekeeping_code not in _ready_housekeeping_codes():
@@ -1047,6 +1059,8 @@ def _no_show_charge_amount(reservation: Reservation) -> Decimal:
 
 
 def _allocate_room_for_new_checked_in_reservation(reservation: Reservation, room: Room, nightly_rates: list[tuple[date, Decimal]], *, actor_user_id: uuid.UUID) -> None:
+    if room_has_external_block(room.id, reservation.check_in_date, reservation.check_out_date, for_update=True):
+        raise ValueError("Selected room is blocked by an external calendar sync.")
     rows = _lock_inventory_rows(room.id, reservation.check_in_date, reservation.check_out_date)
     rate_lookup = {business_date: nightly_rate for business_date, nightly_rate in nightly_rates}
     if len(rows) != len(rate_lookup):
@@ -1089,11 +1103,11 @@ def _setting_time(key: str, default: str) -> time:
 
 
 def _combine_local(day: date, wall_clock: time) -> datetime:
-    return datetime.combine(day, wall_clock, tzinfo=timezone.utc)
+    return datetime.combine(day, wall_clock, tzinfo=calendar_timezone())
 
 
 def _current_time() -> time:
-    now = utc_now()
+    now = datetime.now(calendar_timezone())
     return time(hour=now.hour, minute=now.minute)
 
 

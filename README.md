@@ -18,9 +18,9 @@ flask run
 This repository is a server-rendered Flask application and requires a Python host with a database.
 It is not deployable to GitHub Pages as a static site without a separate export/build step.
 
-Render is now configured through the root [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml) Blueprint. It provisions:
+Render is now configured through the root [render.yaml](render.yaml) Blueprint. It provisions:
 
-- a Python web service rooted at [sandbox_pms_mvp](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp)
+- a Python web service rooted at [sandbox_pms_mvp](sandbox_pms_mvp)
 - a managed PostgreSQL database
 - predeploy schema migration only
 - a `/health` health check
@@ -39,4 +39,5 @@ Set `APP_BASE_URL` and `TRUSTED_HOSTS` only after your custom domain or final ho
 For the first production bootstrap on an empty database, run `flask --app app seed-reference-data` and then
 `flask --app app bootstrap-inventory` manually from a Render shell or one-off job after the service is up.
 
-For a step-by-step dashboard checklist, use [RENDER_DEPLOY_CHECKLIST.md](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/RENDER_DEPLOY_CHECKLIST.md).
+For a step-by-step dashboard checklist, use [RENDER_DEPLOY_CHECKLIST.md](RENDER_DEPLOY_CHECKLIST.md).
+

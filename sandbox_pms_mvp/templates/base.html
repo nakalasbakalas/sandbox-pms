@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="{{ current_language }}">
 <head>
-  {% set suppress_social_metadata = (request.endpoint and request.endpoint.startswith('staff_')) or request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
+  {% set suppress_social_metadata = (request.endpoint and (request.endpoint.startswith('staff_') or request.endpoint.startswith('provider_'))) or request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
@@ -11,46 +11,54 @@
   <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
   <link rel="alternate icon" href="{{ favicon_url }}">
   <link rel="sitemap" type="application/xml" title="Sitemap" href="{{ url_for('sitemap_xml') }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  {% for code, href in language_alternate_urls.items() %}
+  <link rel="alternate" hreflang="{{ code }}" href="{{ href }}">
+  {% endfor %}
+  {% if language_alternate_urls %}
+  <link rel="alternate" hreflang="x-default" href="{{ site_base_url }}">
+  {% endif %}
   {% if not suppress_social_metadata %}
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ hotel_name }}">
   <meta property="og:title" content="{% block og_title %}{{ hotel_name }}{% endblock %}">
   <meta property="og:description" content="{{ hotel_name }} {{ t('meta_description') }}">
   <meta property="og:image" content="{{ share_image_url }}">
-  <meta property="og:url" content="{{ request.base_url }}">
+  <meta property="og:url" content="{{ canonical_url }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{% block twitter_title %}{{ hotel_name }}{% endblock %}">
   <meta name="twitter:description" content="{{ hotel_name }} {{ t('meta_description') }}">
   <meta name="twitter:image" content="{{ share_image_url }}">
   <script type="application/ld+json">{{ hotel_structured_data | tojson }}</script>
   {% endif %}
-  <link rel="canonical" href="{{ request.base_url }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
   <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
   <header class="site-header">
     <div class="container topbar">
-      <a class="brand" href="{{ url_for('index', lang=current_language) }}">
-        {% if hotel_logo_url %}
-          <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
-        {% else %}
-          <span class="brand-mark">{{ hotel_brand_mark }}</span>
-        {% endif %}
-        <span>
-          <strong>{{ hotel_name }}</strong>
-          <small>{% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}</small>
-        </span>
-      </a>
+      <div class="brand-shell">
+        <a class="brand" href="{{ url_for('index', lang=current_language) }}">
+          {% if hotel_logo_url %}
+            <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
+          {% else %}
+            <span class="brand-mark">{{ hotel_brand_mark }}</span>
+          {% endif %}
+          <span><strong>{{ hotel_name }}</strong></span>
+        </a>
+        <small class="brand-contact">{% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}</small>
+      </div>
       <nav class="topnav">
         <a href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
         <a href="{{ url_for('booking_cancel_request', lang=current_language) }}">{{ t('nav_cancel') }}</a>
         <a href="{{ url_for('booking_modify_request', lang=current_language) }}">{{ t('nav_modify') }}</a>
         {% if staff_logged_in %}
-          <a href="{{ url_for('staff_dashboard') }}">Staff</a>
+          {% if can('reservation.view') %}<a href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
+          {% if can('provider.dashboard.view') %}<a href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
           {% if can('reservation.view') %}<a href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
           {% if can('reservation.view') %}<a href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
           {% if can('housekeeping.view') %}<a href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+          {% if can('provider.calendar.view') %}<a href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
           {% if admin_sections %}<a href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
           {% if can('reports.view') %}<a href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
           <a href="{{ url_for('staff_security') }}">Security</a>
