@@ -1,0 +1,8 @@
+interface:
+  display_name: "Sandbox UI Polish"
+  short_description: "Refine hotel UI for cleaner hierarchy, conversion, and mobile polish."
+  brand_color: "#C2410C"
+  default_prompt: "Polish this Sandbox UI with cleaner navigation, stronger hierarchy, less clutter, and better mobile conversion clarity."
+
+policy:
+  allow_implicit_invocation: true

@@ -18,8 +18,10 @@ from ..models import (
     Room,
     RoomType,
     User,
+    utc_now,
 )
-from .cashier_service import folio_summary, money
+from ..pricing import money
+from .cashier_service import folio_summary
 from .front_desk_service import FrontDeskFilters, list_front_desk_arrivals, list_front_desk_departures, list_front_desk_in_house
 from .housekeeping_service import HousekeepingBoardFilters, list_housekeeping_board
 from .staff_reservations_service import build_reservation_summary, reservation_attribution_summary
@@ -44,10 +46,6 @@ ADMIN_AUDIT_ENTITIES = {
 }
 RESERVATION_AUDIT_ENTITIES = {"reservations", "reservation_status_history", "reservation_review_queue", "guests"}
 CASHIER_AUDIT_ENTITIES = {"folio_charges", "cashier_documents", "payment_requests", "payment_events"}
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def report_metric_definitions() -> dict[str, str]:

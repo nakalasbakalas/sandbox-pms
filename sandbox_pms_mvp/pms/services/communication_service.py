@@ -24,19 +24,12 @@ from ..models import (
     PaymentRequest,
     Reservation,
     StaffNotification,
+    utc_now,
 )
-from ..pricing import get_setting_value
+from ..pricing import get_setting_value, money
 from ..url_topology import build_booking_url
 from .admin_service import get_notification_template_variant, policy_text, render_notification_template
 from .notification_service import deliver_email_outbox_entry
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def money(value) -> Decimal:
-    return Decimal(str(value or "0.00")).quantize(Decimal("0.01"))
 
 
 def _string_setting(key: str, default: str) -> str:

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Deploy Env Safety"
+  short_description: "Handle deployment and environment work with explicit production-safe guardrails."
+  brand_color: "#92400E"
+  default_prompt: "Inspect deployment and environment safety, separate local repo work from platform actions, and identify any credential or production risks."
+
+policy:
+  allow_implicit_invocation: false

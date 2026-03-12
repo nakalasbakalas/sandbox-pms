@@ -32,6 +32,10 @@ def get_setting_value(key: str, default):
     return setting.value_json.get("value", default)
 
 
+def money(value) -> Decimal:
+    return Decimal(str(value or "0.00")).quantize(Decimal("0.01"))
+
+
 def quote_reservation(
     *,
     room_type: RoomType,

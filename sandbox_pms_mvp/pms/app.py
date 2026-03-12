@@ -67,6 +67,7 @@ from .models import (
     StaffNotification,
     User,
     UserSession,
+    utc_now,
 )
 from .pricing import get_setting_value
 from .security import configure_app_security, public_error_message, request_client_ip
@@ -1656,7 +1657,7 @@ def register_routes(app: Flask) -> None:
         if not notification:
             abort(404)
         notification.status = "read"
-        notification.read_at = datetime.utcnow()
+        notification.read_at = utc_now()
         db.session.commit()
         return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
 
@@ -2734,7 +2735,7 @@ def register_routes(app: Flask) -> None:
             action = request.form["action"]
             if action == "reviewed":
                 entry.review_status = "reviewed"
-                entry.reviewed_at = datetime.now()
+                entry.reviewed_at = utc_now()
                 entry.reviewed_by_user_id = user.id
             elif action == "needs_follow_up":
                 entry.review_status = "needs_follow_up"
@@ -2743,7 +2744,7 @@ def register_routes(app: Flask) -> None:
             elif action == "resolved":
                 entry.review_status = "resolved"
             elif action == "contacted":
-                entry.contacted_at = datetime.now()
+                entry.contacted_at = utc_now()
             entry.internal_note = request.form.get("internal_note") or entry.internal_note
             db.session.commit()
             return redirect(url_for("staff_review_queue"))

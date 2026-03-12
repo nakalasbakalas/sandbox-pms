@@ -29,6 +29,7 @@ from ..models import (
     ReservationStatusHistory,
     Room,
     RoomType,
+    utc_now,
 )
 from ..pricing import QuoteResult, get_setting_value, quote_reservation
 from .admin_service import assert_blackout_allows_booking, policy_text, render_notification_template
@@ -54,10 +55,6 @@ from .reservation_service import (
     next_reservation_code,
     validate_occupancy,
 )
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -760,12 +757,6 @@ def _release_hold_inventory(hold: ReservationHold) -> None:
         row.availability_status = "available"
         row.hold_id = None
         row.nightly_rate = None
-
-
-def render_guest_confirmation_email(reservation: Reservation, guest_name: str, language: str) -> str:
-    return render_guest_confirmation_message(reservation, guest_name, language)[1]
-
-
 def render_guest_confirmation_message(reservation: Reservation, guest_name: str, language: str) -> tuple[str, str]:
     branding = branding_settings_context()
     context = {

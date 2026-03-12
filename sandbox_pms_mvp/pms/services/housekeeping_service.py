@@ -21,6 +21,7 @@ from ..models import (
     RoomStatusHistory,
     RoomType,
     User,
+    utc_now,
 )
 from .staff_reservations_service import clean_optional
 
@@ -39,10 +40,6 @@ OPERABLE_HOUSEKEEPING_CODES = {
     "out_of_order",
 }
 CLOSURE_STATUS_CODES = {"out_of_order", "out_of_service"}
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 @dataclass

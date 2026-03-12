@@ -1,0 +1,28 @@
+# Sandbox Hotel PMS Codex project config
+# Keep commands aligned with the repo's actual Python toolchain.
+
+project_root_markers = [".git"]
+
+[ui]
+hide_agent_reasoning = true
+
+[history]
+persist = true
+
+[tools]
+web_search = true
+
+[commands]
+test = "python -m pytest"
+
+[profiles.default]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[profiles.review]
+approval_policy = "on-request"
+sandbox_mode = "read-only"
+
+[profiles.refactor]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"

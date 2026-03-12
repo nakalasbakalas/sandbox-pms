@@ -24,6 +24,7 @@ from ..models import (
     Room,
     RoomType,
     User,
+    utc_now,
 )
 from ..pricing import get_setting_value, quote_reservation
 from .ical_service import calendar_timezone, room_has_external_block
@@ -58,10 +59,6 @@ from .staff_reservations_service import (
 
 
 READY_HOUSEKEEPING_CODES = {"clean", "inspected"}
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 @dataclass

@@ -13,7 +13,8 @@ from ..audit import write_audit_log
 from ..constants import BOOKING_EXTRA_PRICING_MODES
 from ..extensions import db
 from ..models import BookingExtra, FolioCharge, Reservation, ReservationExtra
-from .cashier_service import money, post_fee_charge
+from ..pricing import money
+from .cashier_service import post_fee_charge
 
 
 @dataclass

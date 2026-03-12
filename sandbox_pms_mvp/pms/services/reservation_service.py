@@ -23,16 +23,13 @@ from ..models import (
     ReservationStatusHistory,
     Room,
     RoomType,
+    utc_now,
 )
 from ..pricing import get_setting_value, quote_reservation
 from .admin_service import assert_blackout_allows_booking
 from .ical_service import room_has_external_block
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}$")
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 @dataclass

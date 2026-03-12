@@ -28,8 +28,9 @@ from ..models import (
     Room,
     RoomType,
     User,
+    utc_now,
 )
-from ..pricing import quote_reservation
+from ..pricing import money, quote_reservation
 from .communication_service import (
     dispatch_notification_deliveries,
     query_notification_history,
@@ -45,10 +46,6 @@ from .extras_service import (
 )
 from .ical_service import room_has_external_block
 from .reservation_service import calculate_deposit_required, reservation_snapshot, validate_occupancy
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 @dataclass
@@ -250,7 +247,7 @@ def build_reservation_summary(reservation: Reservation) -> dict:
 
 
 def payment_summary(reservation: Reservation) -> dict:
-    from .cashier_service import folio_summary, money
+    from .cashier_service import folio_summary
 
     summary = folio_summary(reservation)
     lines = [

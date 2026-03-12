@@ -1,0 +1,8 @@
+interface:
+  display_name: "Security Surface Check"
+  short_description: "Audit practical auth, validation, session, and secret-exposure risks."
+  brand_color: "#991B1B"
+  default_prompt: "Review this code for practical security issues around auth, validation, sessions, secrets, and exposed admin surfaces."
+
+policy:
+  allow_implicit_invocation: true

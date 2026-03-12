@@ -1,0 +1,8 @@
+interface:
+  display_name: "Repo Audit Cleanup"
+  short_description: "Audit, prune, and simplify the repo before more feature work."
+  brand_color: "#B45309"
+  default_prompt: "Audit this repository, remove stale or dirty parts, condense overlapping systems, and keep behavior stable."
+
+policy:
+  allow_implicit_invocation: true

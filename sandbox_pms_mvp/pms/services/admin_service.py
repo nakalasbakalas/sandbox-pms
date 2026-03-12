@@ -39,6 +39,7 @@ from ..models import (
     Role,
     Room,
     RoomType,
+    utc_now,
 )
 from ..pricing import get_setting_value
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS, POLICY_DOCUMENTS_SEED
@@ -46,10 +47,6 @@ from ..url_topology import build_booking_url
 
 
 ACTIVE_RESERVATION_STATUSES = {"tentative", "confirmed", "checked_in", "waitlist", "house_use"}
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def clean_optional(value: str | None, *, limit: int) -> str | None:

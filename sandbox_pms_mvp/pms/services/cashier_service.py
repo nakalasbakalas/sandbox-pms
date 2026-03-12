@@ -20,8 +20,9 @@ from ..models import (
     PaymentRequest,
     Reservation,
     RoomType,
+    utc_now,
 )
-from ..pricing import get_setting_value, quote_reservation
+from ..pricing import get_setting_value, money, quote_reservation
 
 
 DOCUMENT_PREFIXES = {"folio": "FOL", "invoice": "INV", "receipt": "RCT"}
@@ -32,14 +33,6 @@ PAYMENT_METHOD_CODES = {
     "bank": "PMT-BANK",
     "front_desk": "PMT-CASH",
 }
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def money(value) -> Decimal:
-    return Decimal(str(value or "0.00")).quantize(Decimal("0.01"))
 
 
 @dataclass

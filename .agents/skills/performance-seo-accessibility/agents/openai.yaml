@@ -1,0 +1,8 @@
+interface:
+  display_name: "Performance SEO Accessibility"
+  short_description: "Improve speed, semantics, metadata, and accessibility without harming UX."
+  brand_color: "#7C2D12"
+  default_prompt: "Improve this front end for speed, SEO, and accessibility while preserving the intended design and conversion flow."
+
+policy:
+  allow_implicit_invocation: true

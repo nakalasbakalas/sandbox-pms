@@ -1,0 +1,8 @@
+interface:
+  display_name: "DB Schema Migration Review"
+  short_description: "Review schema and migration changes for safety, integrity, and rollback risk."
+  brand_color: "#78350F"
+  default_prompt: "Review these schema and migration changes for safety, data integrity, rollout risk, and rollback viability."
+
+policy:
+  allow_implicit_invocation: false

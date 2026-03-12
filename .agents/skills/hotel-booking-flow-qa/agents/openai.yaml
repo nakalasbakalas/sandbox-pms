@@ -1,0 +1,8 @@
+interface:
+  display_name: "Hotel Booking Flow QA"
+  short_description: "Audit and protect guest booking and admin reflection flows."
+  brand_color: "#EA580C"
+  default_prompt: "Audit the booking journey end to end, find risky or broken states, and harden validation and confirmation behavior."
+
+policy:
+  allow_implicit_invocation: true

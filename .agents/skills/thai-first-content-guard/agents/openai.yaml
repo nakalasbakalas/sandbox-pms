@@ -1,0 +1,8 @@
+interface:
+  display_name: "Thai-First Content Guard"
+  short_description: "Keep Thai-first multilingual guest copy aligned, accurate, and conversion-ready."
+  brand_color: "#BE123C"
+  default_prompt: "Review this guest-facing multilingual content for Thai-first alignment, accuracy, contact consistency, and cleaner conversion-focused wording."
+
+policy:
+  allow_implicit_invocation: true

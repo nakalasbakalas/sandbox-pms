@@ -19,7 +19,7 @@ from ..audit import write_audit_log
 from ..branding import branding_settings_context, resolve_public_base_url
 from ..extensions import db
 from ..i18n import normalize_language, t
-from ..pricing import get_setting_value
+from ..pricing import get_setting_value, money
 from ..url_topology import build_booking_url
 from ..models import (
     EmailOutbox,
@@ -29,6 +29,7 @@ from ..models import (
     Reservation,
     ReservationReviewQueue,
     ReservationStatusHistory,
+    utc_now,
 )
 from .communication_service import (
     dispatch_notification_deliveries,
@@ -38,11 +39,7 @@ from .communication_service import (
     query_notification_history,
 )
 from .admin_service import policy_text, render_notification_template
-from .cashier_service import PaymentPostingPayload, money, record_payment
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+from .cashier_service import PaymentPostingPayload, record_payment
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -734,16 +731,6 @@ def payment_return_url(payment_request: PaymentRequest, reservation: Reservation
         token=reservation.public_confirmation_token,
         external=external,
     )
-
-
-def render_payment_request_email(
-    reservation: Reservation,
-    guest_name: str,
-    payment_request: PaymentRequest,
-    language: str,
-    payment_link: str,
-) -> str:
-    return render_payment_request_message(reservation, guest_name, payment_request, language, payment_link)[1]
 
 
 def render_payment_request_message(
