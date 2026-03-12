@@ -107,6 +107,23 @@ def test_staff_routes_redirect_to_staff_host_when_enforced(app_factory):
     assert response.headers["Location"] == "https://staff.example.com/staff/login"
 
 
+def test_provider_routes_redirect_to_staff_host_when_enforced(app_factory):
+    app = app_factory(
+        config={
+            "APP_BASE_URL": "https://book.example.com",
+            "BOOKING_ENGINE_URL": "https://book.example.com",
+            "STAFF_APP_URL": "https://staff.example.com",
+            "ENFORCE_CANONICAL_HOSTS": True,
+        }
+    )
+    client = app.test_client()
+
+    response = client.get("/provider/calendar", base_url="https://book.example.com")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "https://staff.example.com/provider/calendar"
+
+
 def test_public_routes_redirect_to_booking_host_when_enforced(app_factory):
     app = app_factory(
         config={

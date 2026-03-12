@@ -14,6 +14,7 @@ BOOKING_CANONICAL_EXACT_PATHS = {
 }
 BOOKING_CANONICAL_PREFIXES = ("/booking/", "/payments/")
 STAFF_CANONICAL_PREFIX = "/staff"
+PROVIDER_CANONICAL_PREFIX = "/provider"
 SKIP_CANONICAL_PREFIXES = ("/webhooks/",)
 SKIP_CANONICAL_PATHS = {"/health"}
 
@@ -82,7 +83,7 @@ def canonical_redirect_url() -> str | None:
 
 def route_audience_for_path(path: str) -> str | None:
     normalized = "/" + str(path or "").lstrip("/")
-    if normalized.startswith(STAFF_CANONICAL_PREFIX):
+    if normalized.startswith(STAFF_CANONICAL_PREFIX) or normalized.startswith(PROVIDER_CANONICAL_PREFIX):
         return "staff"
     if normalized in BOOKING_CANONICAL_EXACT_PATHS:
         return "booking"
