@@ -833,7 +833,8 @@ def render_notification_template(
         if not extra_lines:
             return body_text
         separator = "" if not body_text else "\n"
-        return f"{body_text}{separator}{'\n'.join(extra_lines)}"
+        footer_text = "\n".join(extra_lines)
+        return f"{body_text}{separator}{footer_text}"
 
     template = get_notification_template_variant(template_key, language_code, channel=channel)
     if not template:
