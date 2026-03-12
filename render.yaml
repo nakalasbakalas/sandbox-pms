@@ -1,20 +1,20 @@
 services:
   - type: web
-    name: sandbox-pms
+    name: sandbox-hotel-pms-v43m
     runtime: python
     rootDir: sandbox_pms_mvp
     plan: starter
-    autoDeployTrigger: checksPass
+    autoDeployTrigger: commit
     healthCheckPath: /health
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     preDeployCommand: flask --app app db upgrade
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+    startCommand: gunicorn --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-10000} --timeout 120 --worker-class sync --access-logfile - --error-logfile - app:app
     domains:
       - book.sandboxhotel.com
       - staff.sandboxhotel.com
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.8
+        value: 3.11.11
       - key: APP_ENV
         value: production
       - key: PREFERRED_URL_SCHEME
@@ -38,10 +38,24 @@ services:
       - key: APP_BASE_URL
         value: https://book.sandboxhotel.com
       - key: TRUSTED_HOSTS
-        value: book.sandboxhotel.com,staff.sandboxhotel.com
+        value: book.sandboxhotel.com,staff.sandboxhotel.com,sandbox-hotel-pms-v43m.onrender.com
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: AUTO_BOOTSTRAP_SCHEMA
+        value: "0"
+      - key: AUTO_SEED_REFERENCE_DATA
+        value: "0"
+      - key: AUTH_SHOW_RESET_LINKS
+        value: "0"
+      - key: MAIL_FROM
+        value: reservations@sandboxhotel.com
+      - key: PAYMENT_PROVIDER
+        value: disabled
       - key: DATABASE_URL
         fromDatabase:
-          name: sandbox-hotel-pms-db
+          name: sandbox-hotel-pms-db-v43m
           property: connectionString
       - key: SECRET_KEY
         sync: false
@@ -57,17 +71,13 @@ services:
         sync: false
       - key: SMTP_PASSWORD
         sync: false
-      - key: MAIL_FROM
-        sync: false
-      - key: PAYMENT_PROVIDER
-        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
 
 databases:
-  - name: sandbox-hotel-pms-db
+  - name: sandbox-hotel-pms-db-v43m
     plan: basic-256mb
     region: oregon
     databaseName: sandbox_hotel_pms
