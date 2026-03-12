@@ -85,11 +85,16 @@ RATE_RULE_TYPES = [
 ]
 
 RATE_ADJUSTMENT_TYPES = ["fixed", "amount_delta", "percent_delta"]
+BOOKING_EXTRA_PRICING_MODES = ["per_stay", "per_night"]
 
 GUEST_NOTE_TYPES = ["general", "vip", "warning", "billing", "operations"]
 ROOM_NOTE_TYPES = ["housekeeping", "maintenance", "supervisor", "lost_and_found", "warning"]
 
 NOTE_VISIBILITY_SCOPES = ["front_desk", "manager", "all_staff"]
+
+CALENDAR_FEED_SCOPE_TYPES = ["property", "room"]
+EXTERNAL_CALENDAR_SOURCE_STATUSES = ["never_synced", "success", "failed", "conflict", "disabled"]
+EXTERNAL_CALENDAR_SYNC_RUN_STATUSES = ["success", "failed", "conflict"]
 
 FOLIO_CHARGE_CODES = [
     "RM",
@@ -107,6 +112,7 @@ FOLIO_CHARGE_CODES = [
     "LND",
     "SNK",
     "TEL",
+    "XTR",
     "ADJ_POS",
     "ADJ_NEG",
     "CORR",
@@ -198,6 +204,12 @@ PERMISSION_SEEDS = [
     ("payment.create", "Record payments", "Payments", "payment"),
     ("payment.refund", "Refund payments", "Payments", "payment"),
     ("payment_request.create", "Create payment requests", "Payments", "payment_request"),
+    ("provider.dashboard.view", "View provider dashboard", "Provider Portal", "provider"),
+    ("provider.booking.view", "View provider bookings", "Provider Portal", "provider"),
+    ("provider.booking.cancel", "Cancel provider bookings", "Provider Portal", "provider"),
+    ("provider.payment_request.create", "Create provider payment requests", "Provider Portal", "provider"),
+    ("provider.calendar.view", "View provider calendar sync", "Provider Portal", "provider"),
+    ("provider.calendar.manage", "Manage provider calendar sync", "Provider Portal", "provider"),
     ("housekeeping.view", "View housekeeping", "Housekeeping", "housekeeping"),
     ("housekeeping.status_change", "Change housekeeping status", "Housekeeping", "housekeeping"),
     ("reports.view", "View reports", "Reports", "reports"),
@@ -217,6 +229,7 @@ ROLE_SEEDS = [
     ("manager", "Manager", "Hotel operations manager", True, 2),
     ("front_desk", "Front Desk", "Front desk operations", True, 3),
     ("housekeeping", "Housekeeping", "Housekeeping operations", True, 4),
+    ("provider", "Provider", "Provider portal access", True, 5),
 ]
 
 ROLE_PERMISSION_SEEDS = {
@@ -237,6 +250,12 @@ ROLE_PERMISSION_SEEDS = {
         "payment.create",
         "payment.refund",
         "payment_request.create",
+        "provider.dashboard.view",
+        "provider.booking.view",
+        "provider.booking.cancel",
+        "provider.payment_request.create",
+        "provider.calendar.view",
+        "provider.calendar.manage",
         "housekeeping.view",
         "housekeeping.status_change",
         "reports.view",
@@ -268,5 +287,13 @@ ROLE_PERMISSION_SEEDS = {
         "reservation.view",
         "housekeeping.view",
         "housekeeping.status_change",
+    ],
+    "provider": [
+        "provider.dashboard.view",
+        "provider.booking.view",
+        "provider.booking.cancel",
+        "provider.payment_request.create",
+        "provider.calendar.view",
+        "provider.calendar.manage",
     ],
 }

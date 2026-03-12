@@ -14,8 +14,21 @@ from werkzeug.security import generate_password_hash
 
 from pms.app import create_app
 from pms.extensions import db
-from pms.models import ActivityLog, HousekeepingStatus, InventoryDay, PaymentRequest, Reservation, ReservationStatusHistory, Role, Room, RoomType, User
+from pms.models import (
+    ActivityLog,
+    BookingExtra,
+    HousekeepingStatus,
+    InventoryDay,
+    PaymentRequest,
+    Reservation,
+    ReservationStatusHistory,
+    Role,
+    Room,
+    RoomType,
+    User,
+)
 from pms.seeds import seed_all
+from pms.services.extras_service import attach_extras_quote_to_reservation, post_reservation_extras_to_folio, quote_booking_extras
 from pms.services.front_desk_service import (
     CheckInPayload,
     CheckoutPayload,
@@ -103,6 +116,21 @@ def create_staff_reservation(
             source_channel=source_channel,
         )
     )
+
+
+def create_booking_extra(*, code: str, name: str, pricing_mode: str, unit_price: str) -> BookingExtra:
+    extra = BookingExtra(
+        code=code,
+        name=name,
+        pricing_mode=pricing_mode,
+        unit_price=Decimal(unit_price),
+        is_active=True,
+        is_public=True,
+        sort_order=10,
+    )
+    db.session.add(extra)
+    db.session.commit()
+    return extra
 
 
 def mark_checked_in(reservation: Reservation) -> None:
@@ -565,6 +593,43 @@ def test_front_desk_routes_render_and_show_operational_data(app_factory):
     assert "Front desk workspace" in workspace_response.get_data(as_text=True)
     assert detail_response.status_code == 200
     assert reservation.reservation_code in detail_response.get_data(as_text=True)
+
+
+def test_front_desk_detail_shows_booked_extras(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Front",
+            last_name="Extras",
+            phone="+66800000170",
+            room_type_code="TWN",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        transfer = create_booking_extra(
+            code="TRNS",
+            name="Airport transfer",
+            pricing_mode="per_stay",
+            unit_price="900.00",
+        )
+        extras_quote = quote_booking_extras(
+            [transfer],
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+        )
+        attach_extras_quote_to_reservation(reservation, extras_quote, actor_user_id=None, source="public_booking")
+        post_reservation_extras_to_folio(reservation, actor_user_id=None)
+        db.session.commit()
+        user = make_staff_user("front_desk", "fd-extras@example.com")
+    login_as(client, user)
+
+    response = client.get(f"/staff/front-desk/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Booked extras" in body
+    assert "Airport transfer" in body
 
 
 def test_check_in_route_updates_guest_identity_fields(app_factory):

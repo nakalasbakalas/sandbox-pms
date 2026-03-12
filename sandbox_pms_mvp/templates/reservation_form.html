@@ -1,55 +1,77 @@
-﻿{% extends 'base.html' %}
-{% block title %}{% if is_staff %}New Staff Reservation{% else %}Reserve a Stay{% endif %} | {{ hotel_name }}{% endblock %}
+{% extends 'base.html' %}
+{% block title %}New Staff Reservation | {{ hotel_name }}{% endblock %}
 {% block content %}
 <section class="card form-card">
   <div class="card-head">
     <div>
-      <p class="eyebrow">{% if is_staff %}Staff booking{% else %}Guest booking{% endif %}</p>
-      <h1>{% if is_staff %}Create reservation{% else %}Reserve your stay{% endif %}</h1>
-      <p>{% if is_staff %}Use this form for walk-ins, phone bookings, or controlled direct bookings.{% else %}This flow creates a tentative reservation and locks sellable inventory immediately.{% endif %}</p>
+      <p class="eyebrow">Staff booking</p>
+      <h1>Create reservation</h1>
+      <p>Use this flow for manual bookings, board-launched reservations, and non-walk-in front desk entries.</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back</a>
     </div>
   </div>
+
   <form method="post" class="stack-form">
     {{ csrf_input() }}
+    <input type="hidden" name="back" value="{{ back_url }}">
+
     <div class="grid two">
-      <label><span>Guest name</span><input type="text" name="guest_name" value="{{ initial.guest_name or '' }}" required></label>
+      <label><span>First name</span><input type="text" name="first_name" value="{{ initial.first_name or '' }}" required></label>
+      <label><span>Last name</span><input type="text" name="last_name" value="{{ initial.last_name or '' }}" required></label>
+    </div>
+
+    <div class="grid two">
       <label><span>Phone</span><input type="text" name="guest_phone" value="{{ initial.guest_phone or '' }}" required></label>
-    </div>
-    <div class="grid two">
       <label><span>Email</span><input type="email" name="guest_email" value="{{ initial.guest_email or '' }}"></label>
-      <label><span>Source</span><input type="text" name="source" value="{{ initial.source or ('staff' if is_staff else 'direct_web') }}"></label>
     </div>
-    <div class="grid four">
-      <label><span>Check-in</span><input type="date" name="check_in" value="{{ initial.check_in or '' }}" required></label>
-      <label><span>Check-out</span><input type="date" name="check_out" value="{{ initial.check_out or '' }}" required></label>
-      <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="{{ initial.adults or 2 }}"></label>
-      <label><span>Children</span><input type="number" name="children" min="0" max="2" value="{{ initial.children or 0 }}"></label>
-    </div>
-    <div class="grid two">
+
+    <div class="grid three">
+      <label>
+        <span>Source channel</span>
+        <select name="source_channel">
+          {% for source in booking_sources %}
+            <option value="{{ source }}" {% if (initial.source_channel or 'admin_manual') == source %}selected{% endif %}>{{ source.replace('_', ' ') }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Initial status</span>
+        <select name="status">
+          {% for option in staff_status_options %}
+            <option value="{{ option }}" {% if (initial.status or 'confirmed') == option %}selected{% endif %}>{{ option.replace('_', ' ').title() }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label>
         <span>Room type</span>
         <select name="room_type_id" required>
           <option value="">Select room type</option>
           {% for room_type in room_types %}
-            <option value="{{ room_type.id }}" {% if (initial.room_type_id|string) == (room_type.id|string) %}selected{% endif %}>{{ room_type.name }} - Weekday {{ currency }} {{ room_type.weekday_rate|money }}</option>
+            <option value="{{ room_type.id }}" {% if (initial.room_type_id|string) == (room_type.id|string) %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>
           {% endfor %}
         </select>
       </label>
-      {% if is_staff %}
-      <label>
-        <span>Initial status</span>
-        <select name="status">
-          {% for option in ['tentative', 'confirmed', 'house_use', 'waitlist'] %}
-            <option value="{{ option }}" {% if (initial.status or 'confirmed') == option %}selected{% endif %}>{{ option.replace('_', ' ').title() }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      {% endif %}
     </div>
-    <label><span>Notes</span><textarea name="notes" rows="4">{{ initial.notes or '' }}</textarea></label>
+
+    <div class="grid four">
+      <label><span>Check-in</span><input type="date" name="check_in" value="{{ initial.check_in or '' }}" required></label>
+      <label><span>Check-out</span><input type="date" name="check_out" value="{{ initial.check_out or '' }}" required></label>
+      <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="{{ initial.adults or 2 }}" required></label>
+      <label><span>Children</span><input type="number" name="children" min="0" max="3" value="{{ initial.children or 0 }}" required></label>
+    </div>
+
+    <div class="grid two">
+      <label><span>Extra guests</span><input type="number" name="extra_guests" min="0" max="1" value="{{ initial.extra_guests or 0 }}" required></label>
+      <label><span>Special requests</span><input type="text" name="special_requests" value="{{ initial.special_requests or '' }}" placeholder="Late arrival / airport transfer / joining room"></label>
+    </div>
+
+    <label><span>Internal notes</span><textarea name="internal_notes" rows="4">{{ initial.internal_notes or '' }}</textarea></label>
+
     <div class="actions">
-      <button class="button" type="submit">{% if is_staff %}Create reservation{% else %}Lock stay{% endif %}</button>
-      <a class="button secondary" href="{{ url_for('availability') }}">Back to search</a>
+      <button class="button" type="submit">Create reservation</button>
+      <a class="button secondary" href="{{ back_url }}">Cancel</a>
     </div>
   </form>
 </section>

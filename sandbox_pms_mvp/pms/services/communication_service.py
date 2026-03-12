@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from ..activity import write_activity_log
+from ..branding import branding_settings_context, resolve_public_base_url
 from ..extensions import db
 from ..i18n import normalize_language
 from ..models import (
@@ -79,15 +80,17 @@ def _staff_alert_recipients() -> list[str]:
 
 
 def _brand_context() -> dict[str, str]:
-    hotel_name = _string_setting("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))
+    branding = branding_settings_context()
     return {
-        "hotel_name": hotel_name,
-        "hotel_logo_url": _string_setting("hotel.logo_url", ""),
-        "hotel_address": _string_setting("hotel.address", hotel_name),
-        "hotel_check_in_time": _string_setting("hotel.check_in_time", "14:00"),
-        "hotel_check_out_time": _string_setting("hotel.check_out_time", "11:00"),
-        "contact_phone": _string_setting("hotel.contact_phone", "+66 000 000 000"),
-        "contact_email": _string_setting("hotel.contact_email", current_app.config.get("MAIL_FROM", "")),
+        "hotel_name": branding["hotel_name"],
+        "hotel_logo_url": branding["logo_url"],
+        "hotel_address": branding["address"],
+        "hotel_check_in_time": branding["check_in_time"],
+        "hotel_check_out_time": branding["check_out_time"],
+        "contact_phone": branding["contact_phone"],
+        "contact_email": branding["contact_email"],
+        "support_contact_text": branding["support_contact_text"],
+        "public_booking_url": branding["public_base_url"],
     }
 
 
@@ -114,7 +117,7 @@ def _payment_state_for_reservation(reservation: Reservation) -> str:
 
 
 def _payment_entry_url(payment_request: PaymentRequest, reservation: Reservation) -> str:
-    base_url = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
+    base_url = resolve_public_base_url()
     if not base_url:
         raise RuntimeError("APP_BASE_URL must be configured for guest payment links.")
     query = urllib.parse.urlencode(

@@ -22,7 +22,7 @@ from ..models import (
 from .cashier_service import folio_summary, money
 from .front_desk_service import FrontDeskFilters, list_front_desk_arrivals, list_front_desk_departures, list_front_desk_in_house
 from .housekeeping_service import HousekeepingBoardFilters, list_housekeeping_board
-from .staff_reservations_service import build_reservation_summary
+from .staff_reservations_service import build_reservation_summary, reservation_attribution_summary
 
 
 CONSUMING_INVENTORY_STATUSES = {"reserved", "occupied", "house_use"}
@@ -93,6 +93,10 @@ def report_metric_definitions() -> dict[str, str]:
         "audit_activity": (
             "Audit activity summarizes authoritative audit log entries inside the selected reporting range, grouped for operational review."
         ),
+        "booking_attribution": (
+            "Booking attribution summarizes first-touch source metadata captured during the public booking flow. "
+            "Counts use reservations booked inside the selected reporting range."
+        ),
     }
 
 
@@ -121,6 +125,7 @@ def build_manager_dashboard(
         "room_type_performance": room_type_performance_report(date_from, date_to),
         "cancellation_summary": cancellation_summary_report(date_from, date_to),
         "no_show_summary": no_show_summary_report(date_from, date_to),
+        "booking_attribution": booking_attribution_report(date_from, date_to),
     }
     if include_housekeeping:
         dashboard["housekeeping"] = housekeeping_room_status_summary_report(business_date)
@@ -227,6 +232,72 @@ def confirmed_reservations_report(date_from: date, date_to: date, *, limit: int 
         "count": total,
         "public_booking_count": sum(1 for item in rows if item["created_from_public_booking_flow"]),
         "deposit_pending_count": sum(1 for item in rows if item["deposit_state"] in {"missing", "partial"}),
+        "items": rows,
+    }
+
+
+def booking_attribution_report(date_from: date, date_to: date, *, limit: int = 10) -> dict:
+    start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
+    end_dt = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    reservations = (
+        _reservation_listing_query()
+        .filter(
+            Reservation.created_from_public_booking_flow.is_(True),
+            Reservation.booked_at >= start_dt,
+            Reservation.booked_at < end_dt,
+        )
+        .order_by(Reservation.booked_at.desc())
+        .all()
+    )
+
+    source_counts: dict[str, int] = {}
+    campaign_counts: dict[str, int] = {}
+    rows: list[dict] = []
+    campaign_tagged_count = 0
+    direct_or_unknown_count = 0
+
+    for reservation in reservations:
+        attribution = reservation_attribution_summary(reservation)
+        source_label = str(attribution["source_label"] or "direct")
+        source_counts[source_label] = source_counts.get(source_label, 0) + 1
+        if attribution["utm_campaign"]:
+            campaign = str(attribution["utm_campaign"])
+            campaign_counts[campaign] = campaign_counts.get(campaign, 0) + 1
+            campaign_tagged_count += 1
+        else:
+            direct_or_unknown_count += 1
+        if len(rows) >= limit:
+            continue
+        rows.append(
+            {
+                "reservation_id": reservation.id,
+                "reservation_code": reservation.reservation_code,
+                "booked_at": reservation.booked_at,
+                "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "Unknown guest",
+                "source_channel": reservation.source_channel,
+                "source_label": source_label,
+                "utm_campaign": attribution["utm_campaign"],
+                "utm_medium": attribution["utm_medium"],
+                "entry_page": attribution["entry_page"],
+                "entry_cta_source": attribution["entry_cta_source"],
+            }
+        )
+
+    top_sources = [
+        {"label": label, "count": count}
+        for label, count in sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    ]
+    top_campaigns = [
+        {"label": label, "count": count}
+        for label, count in sorted(campaign_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+    ]
+    return {
+        "count": len(reservations),
+        "campaign_tagged_count": campaign_tagged_count,
+        "direct_or_unknown_count": direct_or_unknown_count,
+        "top_source_label": top_sources[0]["label"] if top_sources else None,
+        "top_sources": top_sources,
+        "top_campaigns": top_campaigns,
         "items": rows,
     }
 

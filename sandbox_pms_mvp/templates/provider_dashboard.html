@@ -1,0 +1,203 @@
+{% extends 'base.html' %}
+{% block title %}Provider Dashboard | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card report-hero">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Provider Workspace</p>
+      <h1>Operational overview</h1>
+      <p class="lead">Arrivals, departures, deposit follow-up, occupancy, and calendar sync status in one place.</p>
+    </div>
+    <div class="actions">
+      <span class="pill subtle">Business date {{ target_date.strftime('%d %b %Y') }}</span>
+      <a class="button secondary" href="{{ url_for('provider_bookings') }}">Open bookings</a>
+      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider_calendar') }}">Open calendars</a>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="grid four metric-grid">
+  <article class="metric-card"><small>Arrivals today</small><strong>{{ dashboard.arrivals.count }}</strong></article>
+  <article class="metric-card"><small>Departures today</small><strong>{{ dashboard.departures.count }}</strong></article>
+  <article class="metric-card"><small>Occupancy today</small><strong>{{ '%.2f'|format(dashboard.occupancy.occupancy_percentage) }}%</strong></article>
+  <article class="metric-card"><small>Upcoming bookings</small><strong>{{ dashboard.upcoming_bookings|length }}</strong></article>
+  <article class="metric-card"><small>Pending deposits</small><strong>{{ dashboard.pending_deposit_count }}</strong></article>
+  <article class="metric-card"><small>Unpaid / partial</small><strong>{{ dashboard.unpaid_count }}</strong></article>
+  <article class="metric-card"><small>Calendar conflicts</small><strong>{{ dashboard.calendar_conflict_count }}</strong></article>
+  <article class="metric-card"><small>Calendar errors</small><strong>{{ dashboard.calendar_error_count }}</strong></article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Arrivals today</h2>
+        <p>Live arrival list from the PMS front-desk data.</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('provider_bookings', date_from=target_date.isoformat(), date_to=target_date.isoformat()) }}">View bookings</a>
+    </div>
+    <div class="metric-strip">
+      <div><small>No room assigned</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
+      <div><small>Not ready</small><strong>{{ dashboard.arrivals.not_ready_count }}</strong></div>
+      <div><small>Deposit missing</small><strong>{{ dashboard.arrivals.deposit_missing_count }}</strong></div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Guest</th>
+            <th>Room</th>
+            <th>Readiness</th>
+            <th>Deposit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.arrivals["items"][:8] %}
+            <tr>
+              <td><a href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td>{{ item.guest_name }}</td>
+              <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
+              <td><span class="status {{ item.room_readiness_label }}">{{ item.room_readiness_label|replace('_', ' ') }}</span></td>
+              <td><span class="status {{ item.payment_summary.deposit_state }}">{{ item.payment_summary.deposit_state|replace('_', ' ') }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">No arrivals due today.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Departures today</h2>
+        <p>Current departure and folio attention list.</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('provider_bookings') }}">View bookings</a>
+    </div>
+    <div class="metric-strip">
+      <div><small>Outstanding balances</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
+      <div><small>Pending checkout</small><strong>{{ dashboard.departures.pending_checkout_count }}</strong></div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Guest</th>
+            <th>Room</th>
+            <th>Balance</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.departures["items"][:8] %}
+            <tr>
+              <td><a href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td>{{ item.guest_name }}</td>
+              <td>{{ item.assigned_room_number or '-' }}</td>
+              <td>{{ currency }} {{ item.payment_summary.balance_due|money }}</td>
+              <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">No departures due today.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Pending deposit follow-up</h2>
+        <p>Bookings still missing a full deposit.</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('provider_bookings', deposit_state='missing') }}">Open unpaid</a>
+    </div>
+    <div class="list-stack compact">
+      {% for item in dashboard.pending_deposit_bookings %}
+        <a class="list-row" href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">
+          <div>
+            <strong>{{ item.reservation_code }} · {{ item.guest_name }}</strong>
+            <p>{{ item.arrival_date }} to {{ item.departure_date }} · {{ item.room_type_name }}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ item.deposit_state }}">{{ item.deposit_state|replace('_', ' ') }}</span>
+            <span class="small muted">{{ currency }} {{ item.deposit_received_amount|money }} / {{ item.deposit_required_amount|money }}</span>
+          </div>
+        </a>
+      {% else %}
+        <p class="empty-state">No deposit follow-up is currently needed.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Calendar sync status</h2>
+        <p>Private feed export plus external iCal sync health.</p>
+      </div>
+      {% if can('provider.calendar.view') %}<a class="button secondary tiny" href="{{ url_for('provider_calendar') }}">Manage calendars</a>{% endif %}
+    </div>
+    <div class="metric-strip">
+      <div><small>Private feeds</small><strong>{{ dashboard.calendar.room_feeds|length + (1 if dashboard.calendar.property_feed else 0) }}</strong></div>
+      <div><small>External sources</small><strong>{{ dashboard.calendar.sources|length }}</strong></div>
+      <div><small>Conflicts</small><strong>{{ dashboard.calendar_conflict_count }}</strong></div>
+      <div><small>Errors</small><strong>{{ dashboard.calendar_error_count }}</strong></div>
+    </div>
+    <div class="list-stack compact">
+      {% for source in dashboard.calendar.sources[:6] %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ source.name }}</strong>
+            <p>Room {{ source.room_number or '-' }} · {{ source.feed_url_hint }}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ source.last_status }}">{{ source.last_status|replace('_', ' ') }}</span>
+            <span class="small muted">
+              {% if source.last_successful_sync_at %}
+                {{ source.last_successful_sync_at.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                Never synced
+              {% endif %}
+            </span>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No external calendar sources configured yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Recent activity</h2>
+      <p>Recent payment, booking, and calendar actions visible to the provider portal.</p>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for item in dashboard.recent_activity %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ item.event_type.replace('.', ' ') }}</strong>
+          <p>{{ item.metadata.get('reservation_code') or item.metadata.get('request_code') or item.metadata.get('room_id') or item.entity_table }}</p>
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ item.actor_name }}</span>
+          <span class="small muted">{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No recent activity is available yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

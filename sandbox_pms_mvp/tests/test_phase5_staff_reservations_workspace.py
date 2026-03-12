@@ -13,8 +13,22 @@ from werkzeug.security import generate_password_hash
 
 from pms.app import create_app
 from pms.extensions import db
-from pms.models import AuditLog, EmailOutbox, InventoryDay, PaymentRequest, Reservation, ReservationNote, Role, Room, RoomType, User
+from pms.models import (
+    AuditLog,
+    BookingExtra,
+    EmailOutbox,
+    FolioCharge,
+    InventoryDay,
+    PaymentRequest,
+    Reservation,
+    ReservationNote,
+    Role,
+    Room,
+    RoomType,
+    User,
+)
 from pms.seeds import seed_all
+from pms.services.extras_service import attach_extras_quote_to_reservation, post_reservation_extras_to_folio, quote_booking_extras
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
 from pms.services.staff_reservations_service import (
     GuestUpdatePayload,
@@ -99,6 +113,21 @@ def create_staff_reservation(
             source_channel=source_channel,
         )
     )
+
+
+def create_booking_extra(*, code: str, name: str, pricing_mode: str, unit_price: str) -> BookingExtra:
+    extra = BookingExtra(
+        code=code,
+        name=name,
+        pricing_mode=pricing_mode,
+        unit_price=Decimal(unit_price),
+        is_active=True,
+        is_public=True,
+        sort_order=10,
+    )
+    db.session.add(extra)
+    db.session.commit()
+    return extra
 
 
 def mark_checked_in(reservation: Reservation) -> None:
@@ -239,6 +268,88 @@ def test_reservation_detail_view_returns_correct_data(app_factory):
         assert detail["room_type_code"] == "DBL"
 
 
+def test_reservation_detail_includes_selected_extras(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Extras",
+            last_name="Guest",
+            phone="+66800000071",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=2),
+            check_out_date=date.today() + timedelta(days=4),
+        )
+        extra = create_booking_extra(
+            code="TRNS",
+            name="Airport transfer",
+            pricing_mode="per_stay",
+            unit_price="900.00",
+        )
+        extras_quote = quote_booking_extras(
+            [extra],
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+        )
+        attach_extras_quote_to_reservation(reservation, extras_quote, actor_user_id=None, source="public_booking")
+        post_reservation_extras_to_folio(reservation, actor_user_id=None)
+        db.session.commit()
+
+        detail = get_reservation_detail(reservation.id)
+        user = make_staff_user("front_desk", "detail-extras@example.com")
+
+        assert detail["extras"][0]["name"] == "Airport transfer"
+        assert detail["payment_summary"]["balance_due"] == Decimal(str(reservation.quoted_grand_total))
+
+    login_as(client, user)
+    response = client.get(f"/staff/reservations/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Selected extras" in body
+    assert "Airport transfer" in body
+
+
+def test_reservation_detail_includes_attribution_summary(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Attribution",
+            last_name="Guest",
+            phone="+66800000052",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=2),
+            check_out_date=date.today() + timedelta(days=4),
+            source_channel="referral",
+        )
+        reservation.created_from_public_booking_flow = True
+        reservation.source_metadata_json = {
+            "source_label": "google_ads",
+            "utm_source": "google",
+            "utm_medium": "cpc",
+            "utm_campaign": "summer_push",
+            "entry_page": "/",
+            "entry_cta_source": "home_search",
+            "referrer_host": "partner.example",
+        }
+        db.session.commit()
+        user = make_staff_user("front_desk", "detail-attribution@example.com")
+        detail = get_reservation_detail(reservation.id)
+        assert detail["attribution"]["source_label"] == "google_ads"
+        assert detail["attribution"]["utm_campaign"] == "summer_push"
+
+    login_as(client, user)
+    response = client.get(f"/staff/reservations/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Attribution" in body
+    assert "google_ads" in body
+    assert "summer_push" in body
+    assert "partner.example" in body
+
+
 def test_authorized_user_can_edit_guest_details(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
@@ -354,6 +465,61 @@ def test_stay_date_change_revalidates_availability_and_reprices(app_factory):
                 ),
                 actor_user_id=make_staff_user("manager", "manager2@example.com").id,
             )
+
+
+def test_stay_date_change_reprices_per_night_extras_and_syncs_folio(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        start = next_weekday(0)
+        reservation = create_staff_reservation(
+            first_name="Extra",
+            last_name="Reprice",
+            phone="+66800000072",
+            room_type_code="TWN",
+            check_in_date=start,
+            check_out_date=start + timedelta(days=2),
+        )
+        breakfast = create_booking_extra(
+            code="BFST",
+            name="Daily breakfast",
+            pricing_mode="per_night",
+            unit_price="350.00",
+        )
+        extras_quote = quote_booking_extras(
+            [breakfast],
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+        )
+        attach_extras_quote_to_reservation(reservation, extras_quote, actor_user_id=None, source="public_booking")
+        post_reservation_extras_to_folio(reservation, actor_user_id=None)
+        db.session.commit()
+
+        change_stay_dates(
+            reservation.id,
+            StayDateChangePayload(
+                check_in_date=start,
+                check_out_date=start + timedelta(days=3),
+                adults=2,
+                children=0,
+                extra_guests=0,
+            ),
+            actor_user_id=make_staff_user("manager", "manager-extras@example.com").id,
+        )
+
+        refreshed = db.session.get(Reservation, reservation.id)
+        extra_lines = [
+            line
+            for line in FolioCharge.query.filter_by(reservation_id=reservation.id, charge_code="XTR")
+            .order_by(FolioCharge.posted_at.asc())
+            .all()
+            if line.voided_at is None
+        ]
+
+        assert refreshed.extras[0].quantity == 3
+        assert refreshed.extras[0].total_amount == Decimal("1050.00")
+        assert refreshed.quoted_extras_total == Decimal("1050.00")
+        assert sum((Decimal(str(line.total_amount)) for line in extra_lines), Decimal("0.00")) == Decimal("1050.00")
+        assert any(Decimal(str(line.total_amount)) == Decimal("350.00") for line in extra_lines)
 
 
 def test_room_assignment_only_shows_eligible_rooms_and_prevents_double_booking(app_factory):

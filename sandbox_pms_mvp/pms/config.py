@@ -60,6 +60,8 @@ class Config:
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     TEST_HOSTED_PAYMENT_SECRET = os.getenv("TEST_HOSTED_PAYMENT_SECRET", "sandbox-test-hosted-secret")
     APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://sandbox-hotel.local")
+    ICAL_SYNC_HTTP_TIMEOUT_SECONDS = int(os.getenv("ICAL_SYNC_HTTP_TIMEOUT_SECONDS", "15"))
+    ICAL_SYNC_USER_AGENT = os.getenv("ICAL_SYNC_USER_AGENT", "SandboxHotelPMS/1.0")
     AUTO_BOOTSTRAP_SCHEMA = os.getenv("AUTO_BOOTSTRAP_SCHEMA", "0") == "1"
     AUTO_SEED_REFERENCE_DATA = os.getenv("AUTO_SEED_REFERENCE_DATA", "0") == "1"
     INVENTORY_BOOTSTRAP_DAYS = int(os.getenv("INVENTORY_BOOTSTRAP_DAYS", "730"))

@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block title %}Provider Calendars | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Provider Workspace</p>
+      <h1>Calendar sync</h1>
+      <p>Private iCal exports and external room-calendar imports for operational blocking.</p>
+    </div>
+    <div class="actions">
+      <span class="pill subtle">Timezone {{ calendar.timezone_name }}</span>
+      <a class="button secondary" href="{{ url_for('provider_dashboard') }}">Back to dashboard</a>
+    </div>
+  </div>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <h2>Private export feeds</h2>
+        <p>Share these private URLs with external calendar systems. They do not expose guest names.</p>
+      </div>
+    </div>
+
+    {% if calendar.property_feed %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ calendar.property_feed.name }}</strong>
+          <p>Property availability feed · Token {{ calendar.property_feed.token_hint }}</p>
+        </div>
+        <div class="right-stack">
+          <a class="button secondary tiny" href="{{ calendar.property_feed.export_url }}" target="_blank" rel="noopener">Open</a>
+          {% if can_manage_calendar %}
+            <form method="post" action="{{ url_for('provider_calendar_feed_rotate', feed_id=calendar.property_feed.id) }}" class="inline-form">
+              {{ csrf_input() }}
+              <button class="button secondary tiny" type="submit">Rotate</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+      <label class="top-gap">
+        <span>Property feed URL</span>
+        <input type="text" readonly value="{{ calendar.property_feed.export_url }}">
+      </label>
+    {% elif can_manage_calendar %}
+      <form method="post" action="{{ url_for('provider_calendar_feed_create') }}" class="stack-form">
+        {{ csrf_input() }}
+        <input type="hidden" name="scope_type" value="property">
+        <label><span>Feed name</span><input type="text" name="name" value="{{ hotel_name }} availability"></label>
+        <button class="button" type="submit">Create property feed</button>
+      </form>
+    {% else %}
+      <p class="empty-state">No property feed is configured yet.</p>
+    {% endif %}
+
+    <div class="list-stack compact top-gap">
+      {% for feed in calendar.room_feeds %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ feed.name }}</strong>
+            <p>Room {{ feed.room_number }} · Token {{ feed.token_hint }}</p>
+          </div>
+          <div class="right-stack">
+            <a class="button secondary tiny" href="{{ feed.export_url }}" target="_blank" rel="noopener">Open</a>
+            {% if can_manage_calendar %}
+              <form method="post" action="{{ url_for('provider_calendar_feed_rotate', feed_id=feed.id) }}" class="inline-form">
+                {{ csrf_input() }}
+                <button class="button secondary tiny" type="submit">Rotate</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No room feeds have been created yet.</p>
+      {% endfor %}
+    </div>
+
+    {% if can_manage_calendar and calendar.rooms_without_feed %}
+      <form method="post" action="{{ url_for('provider_calendar_feed_create') }}" class="stack-form top-gap">
+        {{ csrf_input() }}
+        <input type="hidden" name="scope_type" value="room">
+        <label>
+          <span>Room</span>
+          <select name="room_id" required>
+            {% for room in calendar.rooms_without_feed %}
+              <option value="{{ room.id }}">Room {{ room.room_number }} · {{ room.room_type.code }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Feed name</span><input type="text" name="name" placeholder="Sandbox Hotel room feed"></label>
+        <button class="button" type="submit">Create room feed</button>
+      </form>
+    {% endif %}
+  </article>
+
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <h2>External iCal imports</h2>
+        <p>Block rooms safely from third-party calendars. Repeated syncs are de-duplicated and conflicts are flagged.</p>
+      </div>
+    </div>
+
+    {% if can_manage_calendar %}
+      <form method="post" action="{{ url_for('provider_calendar_source_create') }}" class="stack-form">
+        {{ csrf_input() }}
+        <label>
+          <span>Room</span>
+          <select name="room_id" required>
+            {% for room in rooms %}
+              <option value="{{ room.id }}">Room {{ room.room_number }} · {{ room.room_type.code }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Source name</span><input type="text" name="name" placeholder="Airbnb room calendar" required></label>
+        <label><span>Feed URL</span><input type="url" name="feed_url" placeholder="https://..." required></label>
+        <label class="toggle-row"><span>Sync immediately</span><input type="checkbox" name="sync_now" checked></label>
+        <button class="button" type="submit">Add external calendar</button>
+      </form>
+    {% endif %}
+
+    <div class="list-stack compact top-gap">
+      {% for source in calendar.sources %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ source.name }}</strong>
+            <p>Room {{ source.room_number }} · {{ source.feed_url_hint }}</p>
+            {% if source.last_error %}<p class="small muted">{{ source.last_error }}</p>{% endif %}
+          </div>
+          <div class="right-stack">
+            <span class="status {{ source.last_status }}">{{ source.last_status|replace('_', ' ') }}</span>
+            <span class="small muted">
+              {% if source.last_successful_sync_at %}
+                {{ source.last_successful_sync_at.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                Never synced
+              {% endif %}
+            </span>
+            <span class="small muted">{{ source.conflict_count }} conflict{{ '' if source.conflict_count == 1 else 's' }}</span>
+            {% if can_manage_calendar %}
+              <form method="post" action="{{ url_for('provider_calendar_source_sync', source_id=source.id) }}" class="inline-form">
+                {{ csrf_input() }}
+                <button class="button secondary tiny" type="submit">Sync now</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No external calendar imports configured yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Recent conflicts</h2>
+      <p>External calendar events that overlap internal PMS reservations.</p>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for item in calendar.recent_conflicts %}
+      <div class="list-row no-link">
+        <div>
+          <strong>Room {{ item.room_number }} · {{ item.summary or 'External block' }}</strong>
+          <p>{{ item.starts_on }} to {{ item.ends_on }}</p>
+        </div>
+        <div class="right-stack">
+          <span class="status warning">Conflict</span>
+          <span class="small muted">{{ item.reservation_code or item.conflict_reason }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No calendar conflicts are currently flagged.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -362,6 +362,76 @@
   </article>
 </section>
 
+{% if can_reservation %}
+  <section class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Booking attribution snapshot</h2>
+        <p>{{ dashboard.definitions.booking_attribution }}</p>
+      </div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Public bookings</small><strong>{{ dashboard.booking_attribution.count }}</strong></div>
+      <div><small>Campaign tagged</small><strong>{{ dashboard.booking_attribution.campaign_tagged_count }}</strong></div>
+      <div><small>Direct / untagged</small><strong>{{ dashboard.booking_attribution.direct_or_unknown_count }}</strong></div>
+      <div><small>Top source</small><strong>{{ dashboard.booking_attribution.top_source_label or 'n/a' }}</strong></div>
+    </div>
+    <div class="grid two report-subgrid">
+      <div>
+        <h3>Top sources</h3>
+        {% if dashboard.booking_attribution.top_sources %}
+          <div class="report-summary-list">
+            {% for item in dashboard.booking_attribution.top_sources %}
+              <div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty-state">No public bookings were captured in this reporting range.</p>
+        {% endif %}
+        <h3>Top campaigns</h3>
+        {% if dashboard.booking_attribution.top_campaigns %}
+          <div class="report-summary-list">
+            {% for item in dashboard.booking_attribution.top_campaigns %}
+              <div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty-state">No campaign-tagged bookings were captured in this range.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h3>Recent attributed bookings</h3>
+        {% if dashboard.booking_attribution["items"] %}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Source</th>
+                  <th>Campaign</th>
+                  <th>Entry</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.booking_attribution["items"] %}
+                  <tr>
+                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td>{{ item.source_label }}<div class="small muted">{{ item.source_channel }}</div></td>
+                    <td>{{ item.utm_campaign or 'untagged' }}<div class="small muted">{{ item.utm_medium or 'n/a' }}</div></td>
+                    <td>{{ item.entry_page or '/' }}<div class="small muted">{{ item.entry_cta_source or 'n/a' }}</div></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="empty-state">No attributed public bookings fell inside this range.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+{% endif %}
+
 {% if can_folio %}
   <section class="grid two gap-lg">
     <article class="card inset">

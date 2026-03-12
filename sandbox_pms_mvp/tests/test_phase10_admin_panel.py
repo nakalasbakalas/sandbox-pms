@@ -7,7 +7,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import AuditLog, HousekeepingStatus, InventoryDay, NotificationTemplate, Role, Room, RoomType, User
+from pms.models import AuditLog, BookingExtra, HousekeepingStatus, InventoryDay, NotificationTemplate, Role, Room, RoomType, User
 from pms.pricing import get_setting_value
 from pms.services.admin_service import (
     BlackoutPayload,
@@ -143,6 +143,39 @@ def test_room_type_and_room_manager_updates_persist_and_audit(app_factory):
         assert updated_room.notes == "Swing room reserved for admin maintenance planning"
         assert AuditLog.query.filter_by(action="room_type_upserted", entity_table="room_types").count() >= 1
         assert AuditLog.query.filter_by(action="room_upserted", entity_table="rooms").count() >= 1
+
+
+def test_booking_extra_manager_updates_persist_and_audit(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+
+    login_as(client, admin)
+    response = post_form(
+        client,
+        "/staff/settings",
+        data={
+            "action": "booking_extra",
+            "code": "BFST",
+            "name": "Daily breakfast",
+            "description": "Buffet breakfast for each morning of the stay",
+            "pricing_mode": "per_night",
+            "unit_price": "350.00",
+            "sort_order": "15",
+            "is_public": "on",
+            "is_active": "on",
+        },
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        extra = BookingExtra.query.filter_by(code="BFST").one()
+        assert extra.name == "Daily breakfast"
+        assert extra.pricing_mode == "per_night"
+        assert extra.unit_price == Decimal("350.00")
+        assert extra.is_public is True
+        assert AuditLog.query.filter_by(action="booking_extra_upserted", entity_table="booking_extras").count() >= 1
 
 
 def test_rate_rule_conflicts_and_blackouts_are_enforced(app_factory):
@@ -289,9 +322,13 @@ def test_deposit_settings_and_branding_flow_into_live_behavior(app_factory):
             "currency": "THB",
             "contact_phone": "+66 12 345 6789",
             "contact_email": "frontdesk@sandbox-hotel.example",
+            "support_contact_text": "Questions before you book? Our Sandbox team is here to help.",
+            "accent_color": "#B86E2E",
+            "accent_color_soft": "#E9C29F",
             "check_in_time": "14:00",
             "check_out_time": "11:00",
             "address": "123 Beach Road, Bangkok",
+            "public_base_url": "https://book.sandboxhotel.example",
             "tax_id": "TAX-0001",
         },
     )
@@ -305,10 +342,53 @@ def test_deposit_settings_and_branding_flow_into_live_behavior(app_factory):
         )
         assert deposit_required == Decimal("350.00")
         assert str(get_setting_value("hotel.name", "")) == "Sandbox Hotel HQ"
+        assert str(get_setting_value("hotel.support_contact_text", "")) == "Questions before you book? Our Sandbox team is here to help."
+        assert str(get_setting_value("hotel.accent_color", "")) == "#B86E2E"
+        assert str(get_setting_value("hotel.public_base_url", "")) == "https://book.sandboxhotel.example"
 
     home = client.get("/")
     assert home.status_code == 200
     assert b"Sandbox Hotel HQ" in home.data
+    assert b"Our Sandbox team is here to help" in home.data
+    assert b'meta name="theme-color" content="#B86E2E"' in home.data
+    assert b"https://book.sandboxhotel.example" in home.data
+
+
+def test_branding_validation_rejects_missing_guest_contact_methods(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+        original_name = str(get_setting_value("hotel.name", ""))
+
+    login_as(client, admin)
+    response = post_form(
+        client,
+        "/staff/settings",
+        data={
+            "action": "save_branding",
+            "hotel_name": "Broken Branding",
+            "brand_mark": "SBX",
+            "logo_url": "https://example.com/logo.png",
+            "currency": "THB",
+            "contact_phone": "",
+            "contact_email": "",
+            "support_contact_text": "Call us anytime.",
+            "accent_color": "#C57C35",
+            "accent_color_soft": "#F0C89A",
+            "check_in_time": "14:00",
+            "check_out_time": "11:00",
+            "address": "Bangkok",
+            "public_base_url": "https://book.sandboxhotel.example",
+            "tax_id": "TAX-0001",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Provide at least one guest-facing contact method" in response.data
+
+    with app.app_context():
+        assert str(get_setting_value("hotel.name", "")) == original_name
 
 
 def test_staff_user_manager_and_role_permissions_change_backend_authorization(app_factory):

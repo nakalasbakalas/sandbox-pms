@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% block title %}{{ detail.reservation.reservation_code }} | Provider | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Provider Booking</p>
+      <h1>{{ detail.reservation.reservation_code }}</h1>
+      <p>{{ detail.summary.guest_name }} · {{ detail.summary.guest_phone }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back to bookings</a>
+      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+      <span class="status {{ detail.summary.status }}">{{ detail.summary.status|replace('_', ' ') }}</span>
+      <span class="status {{ detail.summary.deposit_state }}">{{ detail.summary.deposit_state|replace('_', ' ') }}</span>
+    </div>
+  </div>
+
+  <section class="grid four metric-grid">
+    <article class="metric-card"><small>Arrival</small><strong>{{ detail.summary.arrival_date }}</strong></article>
+    <article class="metric-card"><small>Departure</small><strong>{{ detail.summary.departure_date }}</strong></article>
+    <article class="metric-card"><small>Room</small><strong>{{ detail.summary.assigned_room_number or 'Unassigned' }}</strong></article>
+    <article class="metric-card"><small>Room type</small><strong>{{ detail.summary.room_type_name }}</strong></article>
+    <article class="metric-card"><small>Booking total</small><strong>{{ currency }} {{ detail.summary.booking_total|money }}</strong></article>
+    <article class="metric-card"><small>Deposit required</small><strong>{{ currency }} {{ detail.summary.deposit_required_amount|money }}</strong></article>
+    <article class="metric-card"><small>Deposit received</small><strong>{{ currency }} {{ detail.summary.deposit_received_amount|money }}</strong></article>
+    <article class="metric-card"><small>Balance remaining</small><strong>{{ currency }} {{ detail.summary.remaining_balance|money }}</strong></article>
+  </section>
+
+  <div class="actions">
+    {% if detail.summary.special_requests_present %}<span class="pill subtle">Special request</span>{% endif %}
+    {% if detail.summary.duplicate_suspected %}<span class="pill subtle">Duplicate suspicion</span>{% endif %}
+    {% if detail.calendar_conflicts %}<span class="pill subtle">Calendar conflict</span>{% endif %}
+    {% if detail.latest_payment_request and detail.latest_payment_request.paid_at %}<span class="pill subtle">Deposit paid {{ detail.latest_payment_request.paid_at.strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+  </div>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head"><h2>Guest and stay</h2></div>
+    <div class="list-stack compact">
+      <div class="list-row no-link"><div><strong>Guest</strong><p>{{ detail.summary.guest_name }}</p></div><div class="right-stack"><span class="small muted">{{ detail.summary.guest_email or 'No email' }}</span></div></div>
+      <div class="list-row no-link"><div><strong>Phone</strong><p>{{ detail.summary.guest_phone }}</p></div><div class="right-stack"><span class="small muted">{{ detail.reservation.booking_language }}</span></div></div>
+      <div class="list-row no-link"><div><strong>Stay</strong><p>{{ detail.summary.arrival_date }} to {{ detail.summary.departure_date }}</p></div><div class="right-stack"><span class="small muted">{{ detail.summary.nights }} nights</span></div></div>
+      <div class="list-row no-link"><div><strong>Source</strong><p>{{ detail.summary.source_channel.replace('_', ' ') }}</p></div><div class="right-stack"><span class="small muted">{{ detail.reservation.booked_at.strftime('%Y-%m-%d %H:%M') if detail.reservation.booked_at else '' }}</span></div></div>
+      {% if detail.reservation.special_requests %}
+        <div class="list-row no-link"><div><strong>Special requests</strong><p>{{ detail.reservation.special_requests }}</p></div></div>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head"><h2>Deposit and payment</h2></div>
+    <div class="metric-strip">
+      <div><small>Settlement state</small><strong>{{ detail.folio_summary.settlement_state.replace('_', ' ') }}</strong></div>
+      <div><small>Deposit state</small><strong>{{ detail.payment_summary.deposit_state.replace('_', ' ') }}</strong></div>
+      <div><small>Payment state</small><strong>{{ detail.payment_summary.payment_state.replace('_', ' ') }}</strong></div>
+      <div><small>Unused deposit</small><strong>{{ currency }} {{ detail.folio_summary.unused_deposit_amount|money }}</strong></div>
+    </div>
+
+    {% if can_manage_payments %}
+      <form class="inline-form top-gap" method="post" action="{{ url_for('provider_booking_payment_request', reservation_id=detail.reservation.id) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="back_url" value="{{ back_url }}">
+        <button class="button" type="submit">Create or reuse deposit request</button>
+      </form>
+    {% endif %}
+
+    <div class="list-stack compact top-gap">
+      {% for item in detail.payment_requests %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ item.request_code or 'Payment request' }}</strong>
+            <p>{{ currency }} {{ item.amount|money }} · {{ item.provider }}{% if item.provider_payment_reference %} · {{ item.provider_payment_reference }}{% endif %}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span>
+            <span class="small muted">
+              {% if item.paid_at %}
+                {{ item.paid_at.strftime('%Y-%m-%d %H:%M') }}
+              {% elif item.expires_at %}
+                Expires {{ item.expires_at.strftime('%Y-%m-%d %H:%M') }}
+              {% else %}
+                {{ item.created_at.strftime('%Y-%m-%d %H:%M') }}
+              {% endif %}
+            </span>
+            {% if can_manage_payments %}
+              <form method="post" action="{{ url_for('provider_payment_request_refresh', payment_request_id=item.id) }}" class="inline-form">
+                {{ csrf_input() }}
+                <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
+                <input type="hidden" name="back_url" value="{{ back_url }}">
+                <button class="button secondary tiny" type="submit">Refresh</button>
+              </form>
+              <form method="post" action="{{ url_for('provider_payment_request_resend', payment_request_id=item.id) }}" class="inline-form">
+                {{ csrf_input() }}
+                <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
+                <input type="hidden" name="back_url" value="{{ back_url }}">
+                <button class="button secondary tiny" type="submit">Resend</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No deposit request has been created yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card">
+    <div class="card-head"><h2>Communication history</h2></div>
+    <div class="list-stack compact">
+      {% for delivery in detail.communication_history %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ delivery.event_type.replace('_', ' ') }}</strong>
+            <p>{{ delivery.channel }}{% if delivery.recipient_target %} · {{ delivery.recipient_target }}{% endif %}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ delivery.status }}">{{ delivery.status|replace('_', ' ') }}</span>
+            <span class="small muted">{{ delivery.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No communication records yet.</p>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="card">
+    <div class="card-head"><h2>Calendar conflicts</h2></div>
+    <div class="list-stack compact">
+      {% for item in detail.calendar_conflicts %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ item.summary or 'External block' }}</strong>
+            <p>{{ item.starts_on }} to {{ item.ends_on }}</p>
+          </div>
+          <div class="right-stack">
+            <span class="status warning">Conflict</span>
+            <span class="small muted">{{ item.conflict_reason }}</span>
+          </div>
+        </div>
+      {% else %}
+        <p class="empty-state">No external calendar conflicts on this stay.</p>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+
+{% if can_cancel and detail.summary.status in ['tentative', 'confirmed'] %}
+<section class="card">
+  <div class="card-head"><h2>Cancel booking</h2></div>
+  <form class="inline-form" method="post" action="{{ url_for('provider_booking_cancel', reservation_id=detail.reservation.id) }}">
+    {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ back_url }}">
+    <label class="grow"><span>Reason</span><input type="text" name="reason" placeholder="Guest cancelled / payment not received" required></label>
+    <button class="button secondary" type="submit">Cancel booking</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

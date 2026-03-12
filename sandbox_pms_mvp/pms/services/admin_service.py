@@ -11,6 +11,7 @@ from flask import current_app
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
+from ..branding import branding_settings_context
 from ..constants import (
     BLACKOUT_TYPES,
     BOOKING_LANGUAGES,
@@ -781,14 +782,28 @@ def render_notification_template(
     fallback_body: str,
     channel: str = "email",
 ) -> tuple[str, str]:
+    def _append_guest_branding_footer(body_text: str) -> str:
+        if channel != "email" or template_key.startswith("internal_"):
+            return body_text
+        extra_lines: list[str] = []
+        support_contact_text = str(context.get("support_contact_text") or "").strip()
+        public_booking_url = str(context.get("public_booking_url") or "").strip()
+        if support_contact_text and support_contact_text not in body_text:
+            extra_lines.append(support_contact_text)
+        if public_booking_url and public_booking_url not in body_text:
+            extra_lines.append(public_booking_url)
+        if not extra_lines:
+            return body_text
+        separator = "" if not body_text else "\n"
+        return f"{body_text}{separator}{'\n'.join(extra_lines)}"
+
     template = get_notification_template_variant(template_key, language_code, channel=channel)
     if not template:
-        return fallback_subject, fallback_body
+        return fallback_subject, _append_guest_branding_footer(fallback_body)
     allowed_tokens = set(NOTIFICATION_TEMPLATE_PLACEHOLDERS.get(template_key, []))
-    return (
-        _render_template_text(template.subject_template, context, allowed_tokens) or fallback_subject,
-        _render_template_text(template.body_template, context, allowed_tokens) or fallback_body,
-    )
+    subject = _render_template_text(template.subject_template, context, allowed_tokens) or fallback_subject
+    body = _render_template_text(template.body_template, context, allowed_tokens) or fallback_body
+    return subject, _append_guest_branding_footer(body)
 
 
 def update_role_permissions(role_id: uuid.UUID, permission_codes: list[str], *, actor_user_id: uuid.UUID) -> Role:
@@ -855,8 +870,11 @@ def summarize_audit_entry(entry: AuditLog) -> str:
 
 
 def sample_notification_context(language_code: str) -> dict[str, object]:
+    branding = branding_settings_context()
     return {
-        "hotel_name": str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))),
+        "hotel_name": branding["hotel_name"],
+        "hotel_logo_url": branding["logo_url"],
+        "hotel_address": branding["address"],
         "guest_name": "Sample Guest",
         "reservation_code": "SBX-00009999",
         "check_in_date": "2026-04-01",
@@ -864,9 +882,11 @@ def sample_notification_context(language_code: str) -> dict[str, object]:
         "room_type_name": "Standard Double",
         "grand_total": "1500.00",
         "deposit_amount": "750.00",
-        "payment_link": f"{current_app.config.get('APP_BASE_URL', 'https://sandbox-hotel.local').rstrip('/')}/payments/request/PAY-SAMPLE",
-        "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-        "contact_email": str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", ""))),
+        "payment_link": f"{branding['public_base_url']}/payments/request/PAY-SAMPLE" if branding["public_base_url"] else "/payments/request/PAY-SAMPLE",
+        "contact_phone": branding["contact_phone"],
+        "contact_email": branding["contact_email"],
+        "support_contact_text": branding["support_contact_text"],
+        "public_booking_url": branding["public_base_url"],
         "cancellation_policy": policy_text("cancellation_policy", language_code, ""),
         "check_in_policy": policy_text("check_in_policy", language_code, ""),
         "check_out_policy": policy_text("check_out_policy", language_code, ""),

@@ -338,6 +338,70 @@ def test_dashboard_operational_reports_return_expected_reservations(app_factory)
         assert dashboard["checked_in_guests"]["items"][0]["reservation_code"] == dataset["in_house"].reservation_code
 
 
+def test_booking_attribution_report_summarizes_public_booking_sources(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        today = date.today()
+        first = create_staff_reservation(
+            first_name="Source",
+            last_name="One",
+            phone="+66839990001",
+            room_type_code="TWN",
+            check_in_date=today + timedelta(days=2),
+            check_out_date=today + timedelta(days=4),
+            source_channel="referral",
+        )
+        second = create_staff_reservation(
+            first_name="Source",
+            last_name="Two",
+            phone="+66839990002",
+            room_type_code="DBL",
+            check_in_date=today + timedelta(days=3),
+            check_out_date=today + timedelta(days=5),
+            source_channel="direct_web",
+        )
+        first.created_from_public_booking_flow = True
+        first.booked_at = datetime.now(timezone.utc)
+        first.source_metadata_json = {
+            "source_label": "google_ads",
+            "utm_source": "google",
+            "utm_medium": "cpc",
+            "utm_campaign": "summer_push",
+            "entry_page": "/",
+            "entry_cta_source": "home_search",
+        }
+        second.created_from_public_booking_flow = True
+        second.booked_at = datetime.now(timezone.utc)
+        second.source_metadata_json = {
+            "source_label": "direct",
+            "entry_page": "/availability",
+            "entry_cta_source": "availability_search",
+        }
+        db.session.commit()
+
+        dashboard = build_manager_dashboard(
+            business_date=today,
+            date_from=today,
+            date_to=today + timedelta(days=1),
+        )
+        manager = make_staff_user("manager", "report-attribution@example.com")
+
+        assert dashboard["booking_attribution"]["count"] == 2
+        assert dashboard["booking_attribution"]["campaign_tagged_count"] == 1
+        assert dashboard["booking_attribution"]["top_source_label"] == "direct" or dashboard["booking_attribution"]["top_source_label"] == "google_ads"
+        assert any(item["label"] == "google_ads" for item in dashboard["booking_attribution"]["top_sources"])
+        assert any(item["label"] == "summer_push" for item in dashboard["booking_attribution"]["top_campaigns"])
+
+    login_as(client, manager)
+    response = client.get("/staff/reports?preset=today")
+
+    assert response.status_code == 200
+    assert b"Booking attribution snapshot" in response.data
+    assert b"google_ads" in response.data
+    assert b"summer_push" in response.data
+
+
 def test_occupancy_reports_are_authoritative_and_exclude_tentative_sold_nights(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     with app.app_context():

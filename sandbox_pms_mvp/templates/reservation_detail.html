@@ -36,6 +36,23 @@
   </div>
 </section>
 
+<section class="card">
+  <div class="card-head"><h2>Attribution</h2></div>
+  <div class="metric-strip">
+    <div><small>Source channel</small><strong>{{ detail.source_channel.replace('_', ' ') }}</strong></div>
+    <div><small>Source label</small><strong>{{ detail.attribution.source_label or 'direct' }}</strong></div>
+    <div><small>Campaign</small><strong>{{ detail.attribution.utm_campaign or 'untagged' }}</strong></div>
+    <div><small>Entry page</small><strong>{{ detail.attribution.entry_page or '/' }}</strong></div>
+  </div>
+  <div class="grid four metric-grid">
+    <article class="metric-card"><small>UTM source</small><strong>{{ detail.attribution.utm_source or 'n/a' }}</strong></article>
+    <article class="metric-card"><small>UTM medium</small><strong>{{ detail.attribution.utm_medium or 'n/a' }}</strong></article>
+    <article class="metric-card"><small>UTM content</small><strong>{{ detail.attribution.utm_content or 'n/a' }}</strong></article>
+    <article class="metric-card"><small>CTA source</small><strong>{{ detail.attribution.entry_cta_source or 'n/a' }}</strong></article>
+  </div>
+  <p class="muted">Referrer host: {{ detail.attribution.referrer_host or 'direct / unavailable' }}</p>
+</section>
+
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head"><h2>Guest details</h2></div>
@@ -80,9 +97,27 @@
       <div class="metric-strip">
         <div><small>Quoted room total</small><strong>{{ currency }} {{ detail.reservation.quoted_room_total|money }}</strong></div>
         <div><small>Quoted tax total</small><strong>{{ currency }} {{ detail.reservation.quoted_tax_total|money }}</strong></div>
+        <div><small>Quoted extras total</small><strong>{{ currency }} {{ detail.reservation.quoted_extras_total|money }}</strong></div>
         <div><small>Quoted grand total</small><strong>{{ currency }} {{ detail.reservation.quoted_grand_total|money }}</strong></div>
         <div><small>Payment state</small><strong>{{ detail.payment_summary.payment_state.replace('_', ' ') }}</strong></div>
       </div>
+      {% if detail.extras %}
+      <div class="subsection">
+        <h3>Selected extras</h3>
+        <div class="list-stack compact">
+          {% for extra in detail.extras %}
+          <div class="list-row no-link">
+            <div>
+              <strong>{{ extra.name }}</strong>
+              <p class="small muted">{{ extra.pricing_label }}{% if extra.pricing_mode == 'per_night' %} · {{ extra.quantity }} {{ 'night' if extra.quantity == 1 else 'nights' }}{% endif %}</p>
+              {% if extra.description %}<p class="small muted">{{ extra.description }}</p>{% endif %}
+            </div>
+            <strong>{{ currency }} {{ extra.total_amount|money }}</strong>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
       {% if can('reservation.edit') %}<button class="button" type="submit">Reprice and save dates</button>{% endif %}
     </form>
   </article>

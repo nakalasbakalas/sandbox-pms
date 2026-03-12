@@ -95,10 +95,15 @@ def post_fee_charge(
     description: str,
     amount: Decimal,
     service_date: date,
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
     metadata: dict | None = None,
+    posting_key: str | None = None,
     commit: bool = True,
 ) -> FolioCharge:
+    if posting_key:
+        existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+        if existing:
+            return existing
     reservation = _load_reservation_for_update(reservation_id)
     if not reservation:
         raise ValueError("Reservation not found.")
@@ -111,6 +116,7 @@ def post_fee_charge(
         service_date=service_date,
         actor_user_id=actor_user_id,
         metadata=metadata,
+        posting_key=posting_key,
     )
     _log_cashier_event(
         reservation_id=reservation.id,

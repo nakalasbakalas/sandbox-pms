@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
-  <meta name="theme-color" content="#11324d">
+  <meta name="theme-color" content="{{ hotel_theme_color }}">
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
@@ -32,53 +32,73 @@
   <script type="application/ld+json">{{ hotel_structured_data | tojson }}</script>
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    :root {
+      --accent: {{ hotel_accent_color }};
+      --accent-soft: {{ hotel_accent_color_soft }};
+      --accent-dark: {{ hotel_accent_color_dark }};
+      --accent-rgb: {{ hotel_accent_rgb }};
+      --accent-soft-rgb: {{ hotel_accent_soft_rgb }};
+    }
+  </style>
 </head>
-<body>
+<body class="{% if is_public_site %}public-site{% endif %}{% if request.endpoint %} route-{{ request.endpoint|replace('.', '-')|replace('_', '-') }}{% endif %}">
   <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
-  <header class="site-header">
-    <div class="container topbar">
-      <div class="brand-shell">
-        <a class="brand" href="{{ url_for('index', lang=current_language) }}">
+  <header class="site-header{% if is_public_site %} public-header{% endif %}">
+    <div class="container topbar{% if is_public_site %} public-topbar{% endif %}">
+      <div class="brand-shell{% if is_public_site %} public-brand-shell{% endif %}">
+        <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ url_for('index', lang=current_language) }}">
           {% if hotel_logo_url %}
             <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
           {% else %}
             <span class="brand-mark">{{ hotel_brand_mark }}</span>
           {% endif %}
-          <span><strong>{{ hotel_name }}</strong></span>
+          <span class="brand-copy">
+            <strong>{{ hotel_name }}</strong>
+            {% if is_public_site and hotel_address %}<small class="brand-location">{{ hotel_address }}</small>{% endif %}
+          </span>
         </a>
-        <small class="brand-contact">{% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}</small>
+        <small class="brand-contact">
+          {% if hotel_contact_phone %}
+            {% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}
+          {% endif %}
+          {% if hotel_contact_phone and hotel_contact_email %}<span class="contact-separator">/</span>{% endif %}
+          {% if hotel_contact_email %}
+            {% if hotel_contact_email_href %}<a class="contact-link subtle" href="{{ hotel_contact_email_href }}">{{ hotel_contact_email }}</a>{% else %}{{ hotel_contact_email }}{% endif %}
+          {% endif %}
+        </small>
       </div>
-      <nav class="topnav">
-        <a href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
-        <a href="{{ url_for('booking_cancel_request', lang=current_language) }}">{{ t('nav_cancel') }}</a>
-        <a href="{{ url_for('booking_modify_request', lang=current_language) }}">{{ t('nav_modify') }}</a>
+      <nav class="topnav{% if is_public_site %} public-topnav{% endif %}">
+        <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}">{{ t('nav_cancel') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}">{{ t('nav_modify') }}</a>
         {% if staff_logged_in %}
-          {% if can('reservation.view') %}<a href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
-          {% if can('provider.dashboard.view') %}<a href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
-          {% if can('reservation.view') %}<a href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
-          {% if can('reservation.view') %}<a href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
-          {% if can('housekeeping.view') %}<a href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
-          {% if can('provider.calendar.view') %}<a href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
-          {% if admin_sections %}<a href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
-          {% if can('reports.view') %}<a href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
-          <a href="{{ url_for('staff_security') }}">Security</a>
-          {% if can('reservation.view') %}<a href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
-          <span class="pill subtle">{{ current_staff_user.full_name }}</span>
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
+          {% if can('provider.dashboard.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
+          {% if can('housekeeping.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+          {% if can('provider.calendar.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+          {% if admin_sections %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
+          {% if can('reports.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+          <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_security') }}">Security</a>
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+          <span class="pill subtle{% if is_public_site %} nav-chip nav-chip-static{% endif %}">{{ current_staff_user.full_name }}</span>
           <form method="post" action="{{ url_for('staff_logout') }}" class="inline-form">
             {{ csrf_input() }}
-            <button type="submit" class="pill subtle button-link">Sign out</button>
+            <button type="submit" class="pill subtle button-link{% if is_public_site %} nav-chip nav-chip-button{% endif %}">Sign out</button>
           </form>
         {% else %}
-          <a class="pill subtle" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
+          <a class="pill subtle{% if is_public_site %} nav-chip{% endif %}" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
         {% endif %}
         {% for code, label in language_labels.items() %}
-          <a class="pill subtle" href="{{ make_lang_url(code) }}">{{ label }}</a>
+          <a class="pill subtle{% if is_public_site %} nav-chip nav-chip-small{% endif %}" href="{{ make_lang_url(code) }}">{{ label }}</a>
         {% endfor %}
       </nav>
     </div>
   </header>
 
-  <main id="main-content" class="container shell">
+  <main id="main-content" class="container shell{% if is_public_site %} public-shell{% endif %}">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-stack" aria-live="polite" aria-atomic="false">
@@ -90,5 +110,40 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+  {% if is_public_site %}
+  <footer class="site-footer{% if is_public_site %} public-footer{% endif %}">
+    <div class="container footer-shell{% if is_public_site %} public-footer-shell{% endif %}">
+      <div class="footer-copy">
+        <strong>{{ hotel_name }}</strong>
+        <p>{{ hotel_support_contact_text }}</p>
+        {% if hotel_address %}<p class="footer-meta">{{ hotel_address }}</p>{% endif %}
+        {% if is_public_site %}
+        <div class="actions footer-actions">
+          <a class="button" href="{{ url_for('availability', lang=current_language) }}">{{ t('search_title') }}</a>
+        </div>
+        {% endif %}
+      </div>
+      <div class="footer-links">
+        {% if hotel_contact_phone %}
+          {% if hotel_contact_phone_href %}
+            <a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>
+          {% else %}
+            <span>{{ hotel_contact_phone }}</span>
+          {% endif %}
+        {% endif %}
+        {% if hotel_contact_email %}
+          {% if hotel_contact_email_href %}
+            <a class="contact-link subtle" href="{{ hotel_contact_email_href }}">{{ hotel_contact_email }}</a>
+          {% else %}
+            <span>{{ hotel_contact_email }}</span>
+          {% endif %}
+        {% endif %}
+        {% if site_base_url %}
+          <a class="contact-link subtle" href="{{ site_base_url }}">{{ site_base_url }}</a>
+        {% endif %}
+      </div>
+    </div>
+  </footer>
+  {% endif %}
 </body>
 </html>

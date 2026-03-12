@@ -4,6 +4,7 @@ import hmac
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from urllib.parse import urlparse
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -11,9 +12,18 @@ from flask import Flask, Response, abort, current_app, flash, g, jsonify, redire
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
+from .branding import (
+    absolute_public_url as branding_absolute_public_url,
+    branding_settings_context,
+    clean_branding_form,
+    email_href as branding_email_href,
+    phone_href as branding_phone_href,
+    resolve_public_base_url,
+)
 from .config import Config
 from .constants import (
     BLACKOUT_TYPES,
+    BOOKING_EXTRA_PRICING_MODES,
     BOOKING_SOURCE_CHANNELS,
     INVENTORY_OVERRIDE_ACTIONS,
     INVENTORY_OVERRIDE_SCOPE_TYPES,
@@ -127,6 +137,14 @@ from .services.communication_service import (
     send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
+from .services.extras_service import (
+    BookingExtraPayload,
+    list_booking_extras,
+    quote_booking_extras,
+    reservation_extra_summary,
+    resolve_booking_extras,
+    upsert_booking_extra,
+)
 from .services.front_desk_service import (
     CheckInPayload,
     CheckoutPayload,
@@ -222,6 +240,21 @@ from .services.staff_reservations_service import (
 )
 
 
+BOOKING_ATTRIBUTION_SESSION_KEY = "_booking_attribution"
+BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "source_label",
+    "referrer_host",
+    "entry_page",
+    "landing_path",
+    "entry_cta_source",
+}
+BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {"index", "availability", "booking_hold", "booking_confirm"}
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__, template_folder="../templates", static_folder="../static")
     app.config.from_object(Config)
@@ -253,6 +286,9 @@ def register_auth_hooks(app: Flask) -> None:
         g.current_auth_session = None
         g.auth_cookie_value = None
         g.clear_auth_cookie = False
+        g.booking_attribution = {}
+
+        capture_public_booking_attribution()
 
         cookie_value = request.cookies.get(app.config["AUTH_COOKIE_NAME"])
         auth_session, user = load_session_from_cookie(cookie_value)
@@ -316,16 +352,17 @@ def register_template_helpers(app: Flask) -> None:
     @app.context_processor
     def inject_globals():
         language = current_language()
-        hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
-        hotel_currency = str(get_setting_value("hotel.currency", "THB"))
-        hotel_brand_mark = str(get_setting_value("hotel.brand_mark", "SBX"))
-        hotel_logo_url = str(get_setting_value("hotel.logo_url", "") or "")
-        hotel_contact_phone = str(get_setting_value("hotel.contact_phone", "+66 000 000 000"))
-        hotel_contact_email = str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", "")))
-        hotel_address = str(get_setting_value("hotel.address", hotel_name))
-        hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
-        hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
-        site_base_url = public_base_url()
+        branding = branding_settings_context()
+        hotel_name = branding["hotel_name"]
+        hotel_currency = branding["currency"]
+        hotel_brand_mark = branding["brand_mark"]
+        hotel_logo_url = branding["logo_url"]
+        hotel_contact_phone = branding["contact_phone"]
+        hotel_contact_email = branding["contact_email"]
+        hotel_address = branding["address"]
+        hotel_check_in_time = branding["check_in_time"]
+        hotel_check_out_time = branding["check_out_time"]
+        site_base_url = branding["public_base_url"]
         favicon_url = absolute_public_url(url_for("static", filename="favicon.svg"))
         default_share_image_url = absolute_public_url(url_for("static", filename="hotel-share.svg"))
         share_image_url = absolute_public_url(hotel_logo_url) if hotel_logo_url else default_share_image_url
@@ -390,12 +427,19 @@ def register_template_helpers(app: Flask) -> None:
                 code: absolute_public_url(_language_url(code, preserve_query=False))
                 for code in LANGUAGE_LABELS
             }
+        is_public_site = bool(
+            request.endpoint
+            and request.endpoint != "static"
+            and not request.endpoint.startswith("staff_")
+            and not request.endpoint.startswith("provider_")
+        )
 
         return {
             "hotel_name": hotel_name,
             "currency": hotel_currency,
             "hotel_brand_mark": hotel_brand_mark,
             "hotel_logo_url": hotel_logo_url,
+            "hotel_support_contact_text": branding["support_contact_text"],
             "hotel_contact_phone": hotel_contact_phone,
             "hotel_contact_email": hotel_contact_email,
             "hotel_contact_phone_href": hotel_contact_phone_href,
@@ -405,15 +449,23 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
+            "hotel_accent_color": branding["accent_color"],
+            "hotel_accent_color_soft": branding["accent_color_soft"],
+            "hotel_accent_color_dark": branding["accent_color_dark"],
+            "hotel_accent_rgb": branding["accent_rgb"],
+            "hotel_accent_soft_rgb": branding["accent_soft_rgb"],
+            "hotel_theme_color": branding["accent_color"],
             "site_base_url": site_base_url,
             "canonical_url": canonical_url,
             "favicon_url": favicon_url,
             "share_image_url": share_image_url,
             "hotel_structured_data": hotel_structured_data,
+            "is_public_site": is_public_site,
             "staff_logged_in": current_user() is not None,
             "provider_logged_in": bool(current_user() and current_user().has_permission("provider.dashboard.view")),
             "current_staff_user": current_user(),
             "current_language": language,
+            "booking_attribution": current_booking_attribution(),
             "language_labels": LANGUAGE_LABELS,
             "language_alternate_urls": language_alternate_urls,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
@@ -558,6 +610,7 @@ def register_routes(app: Flask) -> None:
     def booking_hold():
         language = normalize_language(request.form.get("language"))
         try:
+            attribution = source_metadata_from_request(language)
             hold = create_reservation_hold(
                 HoldRequestPayload(
                     check_in_date=date.fromisoformat(request.form["check_in_date"]),
@@ -568,8 +621,8 @@ def register_routes(app: Flask) -> None:
                     guest_email=request.form.get("email"),
                     idempotency_key=request.form["idempotency_key"],
                     language=language,
-                    source_channel=request.form.get("source_channel", "direct_web"),
-                    source_metadata=source_metadata_from_request(language),
+                    source_channel=resolve_booking_source_channel(request.form.get("source_channel"), attribution),
+                    source_metadata=attribution,
                     request_ip=request_client_ip(),
                     user_agent=request.user_agent.string,
                     extra_guests=int(request.form.get("extra_guests", 0)),
@@ -599,7 +652,10 @@ def register_routes(app: Flask) -> None:
         language = normalize_language(request.form.get("language"))
         settings = current_settings()
         published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
+        selected_extra_ids: tuple[UUID, ...] = ()
         try:
+            selected_extra_ids = parse_booking_extra_ids(request.form.getlist("extra_ids"))
+            attribution = source_metadata_from_request(language)
             reservation = confirm_public_booking(
                 PublicBookingPayload(
                     hold_code=request.form["hold_code"],
@@ -610,10 +666,11 @@ def register_routes(app: Flask) -> None:
                     email=request.form["email"].strip(),
                     special_requests=request.form.get("special_requests"),
                     language=language,
-                    source_channel=request.form.get("source_channel", "direct_web"),
-                    source_metadata=source_metadata_from_request(language),
+                    source_channel=resolve_booking_source_channel(request.form.get("source_channel"), attribution),
+                    source_metadata=attribution,
                     terms_accepted=request.form.get("accept_terms") == "on",
                     terms_version=published_terms_version,
+                    extra_ids=selected_extra_ids,
                 )
             )
             if payments_enabled() and Decimal(str(reservation.deposit_required_amount or "0.00")) > Decimal("0.00"):
@@ -657,7 +714,19 @@ def register_routes(app: Flask) -> None:
             room_type = db.session.get(RoomType, hold.room_type_id)
             return render_template(
                 "public_booking_form.html",
-                **public_booking_form_context(hold, room_type, settings=settings),
+                **public_booking_form_context(
+                    hold,
+                    room_type,
+                    settings=settings,
+                    selected_extra_ids=selected_extra_ids,
+                    form_values={
+                        "first_name": request.form.get("first_name", ""),
+                        "last_name": request.form.get("last_name", ""),
+                        "phone": request.form.get("phone", ""),
+                        "email": request.form.get("email", hold.guest_email or ""),
+                        "special_requests": request.form.get("special_requests", ""),
+                    },
+                ),
             )
 
     @app.route("/booking/confirmation/<reservation_code>")
@@ -676,6 +745,7 @@ def register_routes(app: Flask) -> None:
             reservation=reservation,
             guest=reservation.primary_guest,
             payment_request=payment_request,
+            extras_summary=reservation_extra_summary(reservation),
         )
 
     @app.route("/payments/request/<request_code>")
@@ -977,18 +1047,7 @@ def register_routes(app: Flask) -> None:
         return grouped
 
     def property_settings_context() -> dict[str, str]:
-        return {
-            "hotel_name": str(get_setting_value("hotel.name", app.config.get("HOTEL_NAME", "Hotel"))),
-            "brand_mark": str(get_setting_value("hotel.brand_mark", "SBX")),
-            "logo_url": str(get_setting_value("hotel.logo_url", "") or ""),
-            "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-            "contact_email": str(get_setting_value("hotel.contact_email", app.config.get("MAIL_FROM", ""))),
-            "address": str(get_setting_value("hotel.address", "")),
-            "currency": str(get_setting_value("hotel.currency", "THB")),
-            "check_in_time": str(get_setting_value("hotel.check_in_time", "14:00")),
-            "check_out_time": str(get_setting_value("hotel.check_out_time", "11:00")),
-            "tax_id": str(get_setting_value("hotel.tax_id", "") or ""),
-        }
+        return branding_settings_context()
 
     def payment_settings_context() -> dict[str, object]:
         return {
@@ -1125,18 +1184,23 @@ def register_routes(app: Flask) -> None:
                     flash("Setting updated.", "success")
                 elif action == "save_branding":
                     actor = require_permission("settings.edit")
+                    branding = clean_branding_form(request.form)
                     upsert_settings_bundle(
                         [
-                            {"key": "hotel.name", "value": request.form.get("hotel_name"), "value_type": "string", "description": "Hotel display name", "is_public": True, "sort_order": 10},
-                            {"key": "hotel.brand_mark", "value": request.form.get("brand_mark"), "value_type": "string", "description": "Brand monogram", "is_public": True, "sort_order": 11},
-                            {"key": "hotel.logo_url", "value": request.form.get("logo_url"), "value_type": "string", "description": "Hotel logo URL", "is_public": True, "sort_order": 12},
-                            {"key": "hotel.contact_phone", "value": request.form.get("contact_phone"), "value_type": "string", "description": "Primary phone", "is_public": True, "sort_order": 13},
-                            {"key": "hotel.contact_email", "value": request.form.get("contact_email"), "value_type": "string", "description": "Primary contact email", "is_public": True, "sort_order": 14},
-                            {"key": "hotel.address", "value": request.form.get("address"), "value_type": "string", "description": "Property address", "is_public": True, "sort_order": 15},
-                            {"key": "hotel.currency", "value": request.form.get("currency"), "value_type": "string", "description": "Hotel currency", "is_public": True, "sort_order": 16},
-                            {"key": "hotel.check_in_time", "value": request.form.get("check_in_time"), "value_type": "string", "description": "Standard check-in time", "is_public": True, "sort_order": 17},
-                            {"key": "hotel.check_out_time", "value": request.form.get("check_out_time"), "value_type": "string", "description": "Standard check-out time", "is_public": True, "sort_order": 18},
-                            {"key": "hotel.tax_id", "value": request.form.get("tax_id"), "value_type": "string", "description": "Business tax identifier", "is_public": False, "sort_order": 19},
+                            {"key": "hotel.name", "value": branding["hotel_name"], "value_type": "string", "description": "Hotel display name", "is_public": True, "sort_order": 10},
+                            {"key": "hotel.brand_mark", "value": branding["brand_mark"], "value_type": "string", "description": "Brand monogram", "is_public": True, "sort_order": 11},
+                            {"key": "hotel.logo_url", "value": branding["logo_url"], "value_type": "string", "description": "Hotel logo URL", "is_public": True, "sort_order": 12},
+                            {"key": "hotel.contact_phone", "value": branding["contact_phone"], "value_type": "string", "description": "Primary phone", "is_public": True, "sort_order": 13},
+                            {"key": "hotel.contact_email", "value": branding["contact_email"], "value_type": "string", "description": "Primary contact email", "is_public": True, "sort_order": 14},
+                            {"key": "hotel.address", "value": branding["address"], "value_type": "string", "description": "Property address", "is_public": True, "sort_order": 15},
+                            {"key": "hotel.currency", "value": branding["currency"], "value_type": "string", "description": "Hotel currency", "is_public": True, "sort_order": 16},
+                            {"key": "hotel.check_in_time", "value": branding["check_in_time"], "value_type": "string", "description": "Standard check-in time", "is_public": True, "sort_order": 17},
+                            {"key": "hotel.check_out_time", "value": branding["check_out_time"], "value_type": "string", "description": "Standard check-out time", "is_public": True, "sort_order": 18},
+                            {"key": "hotel.tax_id", "value": branding["tax_id"], "value_type": "string", "description": "Business tax identifier", "is_public": False, "sort_order": 19},
+                            {"key": "hotel.support_contact_text", "value": branding["support_contact_text"], "value_type": "string", "description": "Guest support message", "is_public": True, "sort_order": 20},
+                            {"key": "hotel.accent_color", "value": branding["accent_color"], "value_type": "string", "description": "Primary accent color", "is_public": True, "sort_order": 21},
+                            {"key": "hotel.accent_color_soft", "value": branding["accent_color_soft"], "value_type": "string", "description": "Secondary accent color", "is_public": True, "sort_order": 22},
+                            {"key": "hotel.public_base_url", "value": branding["public_base_url"], "value_type": "string", "description": "Canonical public booking base URL", "is_public": True, "sort_order": 23},
                         ],
                         actor_user_id=actor.id,
                     )
@@ -1173,6 +1237,23 @@ def register_routes(app: Flask) -> None:
                         actor_user_id=actor.id,
                     )
                     flash("Room saved.", "success")
+                elif action == "booking_extra":
+                    actor = require_permission("settings.edit")
+                    upsert_booking_extra(
+                        parse_optional_uuid(request.form.get("booking_extra_id")),
+                        BookingExtraPayload(
+                            code=request.form.get("code", ""),
+                            name=request.form.get("name", ""),
+                            description=request.form.get("description"),
+                            pricing_mode=request.form.get("pricing_mode", "per_stay"),
+                            unit_price=parse_decimal(request.form.get("unit_price"), default="0.00"),
+                            is_active=truthy_setting(request.form.get("is_active")),
+                            is_public=truthy_setting(request.form.get("is_public")),
+                            sort_order=int(request.form.get("sort_order", 100)),
+                        ),
+                        actor_user_id=actor.id,
+                    )
+                    flash("Booking extra saved.", "success")
                 else:
                     abort(400)
             except Exception as exc:  # noqa: BLE001
@@ -1188,6 +1269,8 @@ def register_routes(app: Flask) -> None:
             room_types=room_types,
             rooms=rooms,
             room_statuses=ROOM_OPERATIONAL_STATUSES,
+            booking_extras=list_booking_extras(include_inactive=True),
+            booking_extra_pricing_modes=BOOKING_EXTRA_PRICING_MODES,
         )
 
     @app.route("/staff/admin/rates-inventory", methods=["GET", "POST"], endpoint="staff_admin_rates_inventory")
@@ -2748,25 +2831,288 @@ def validate_csrf_request() -> None:
         abort(400, description="CSRF validation failed.")
 
 
-def source_metadata_from_request(language: str) -> dict:
-    return {
-        "utm_source": request.values.get("utm_source"),
-        "utm_campaign": request.values.get("utm_campaign"),
-        "landing_path": request.path,
-        "referrer": request.referrer,
-        "device_class": "mobile" if "Mobile" in request.user_agent.string else "desktop",
-        "language": language,
-        "created_from_public_booking_flow": True,
+def capture_public_booking_attribution() -> None:
+    existing = dict(session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
+    if not _should_track_booking_attribution():
+        g.booking_attribution = existing
+        return
+
+    incoming = booking_attribution_from_request()
+    if incoming:
+        base = {} if booking_request_starts_new_attribution() else existing
+        merged = merge_booking_attribution(base, incoming)
+    elif existing:
+        merged = existing
+    else:
+        merged = default_booking_attribution()
+
+    if merged:
+        merged["source_channel"] = resolve_booking_source_channel(merged.get("source_channel"), merged)
+        if merged != existing:
+            session[BOOKING_ATTRIBUTION_SESSION_KEY] = merged
+            session.modified = True
+        g.booking_attribution = merged
+        return
+
+    g.booking_attribution = {}
+
+
+def current_booking_attribution() -> dict:
+    return dict(getattr(g, "booking_attribution", None) or session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
+
+
+def booking_attribution_from_request() -> dict:
+    if not _should_track_booking_attribution():
+        return {}
+
+    referrer_host = external_referrer_host()
+    entry_page = clean_public_path(request.values.get("entry_page")) or clean_public_path(request.path)
+    source_label = derive_source_label(
+        request.values.get("source_label"),
+        request.values.get("utm_source"),
+        referrer_host,
+        request.values.get("source_channel"),
+    )
+    entry_cta_source = clean_tracking_value(request.values.get("cta_source") or request.values.get("entry_cta_source"))
+    incoming = {
+        "utm_source": clean_tracking_value(request.values.get("utm_source")),
+        "utm_medium": clean_tracking_value(request.values.get("utm_medium")),
+        "utm_campaign": clean_tracking_value(request.values.get("utm_campaign")),
+        "utm_content": clean_tracking_value(request.values.get("utm_content")),
+        "source_label": source_label,
+        "referrer_host": referrer_host or clean_tracking_value(request.values.get("referrer_host")),
+        "entry_page": entry_page,
+        "landing_path": clean_public_path(request.values.get("landing_path")) or entry_page,
+        "entry_cta_source": entry_cta_source,
+        "source_channel": clean_tracking_value(request.values.get("source_channel"), limit=40),
     }
+    return {key: value for key, value in incoming.items() if value not in {None, ""}}
 
 
-def public_booking_form_context(hold: ReservationHold, room_type: RoomType, *, settings: dict[str, dict] | None = None) -> dict:
+def booking_request_starts_new_attribution() -> bool:
+    if request.method != "GET":
+        return False
+    if clean_public_path(request.args.get("entry_page")):
+        return False
+    if any(
+        clean_tracking_value(request.args.get(key))
+        for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
+    ):
+        return True
+    return bool(external_referrer_host() and request.endpoint in {"index", "availability"})
+
+
+def default_booking_attribution() -> dict:
+    if request.method != "GET" or request.endpoint not in {"index", "availability"}:
+        return {}
+    entry_page = clean_public_path(request.path)
+    referrer_host = external_referrer_host()
+    default = {
+        "source_label": derive_source_label(None, None, referrer_host, "direct_web"),
+        "referrer_host": referrer_host,
+        "entry_page": entry_page,
+        "landing_path": entry_page,
+        "entry_cta_source": clean_tracking_value(request.args.get("cta_source") or request.args.get("entry_cta_source")),
+        "source_channel": "direct_web",
+    }
+    return {key: value for key, value in default.items() if value not in {None, ""}}
+
+
+def merge_booking_attribution(base: dict | None, incoming: dict | None) -> dict:
+    merged = dict(base or {})
+    for key, value in (incoming or {}).items():
+        if value in {None, ""}:
+            continue
+        if key in BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS and merged.get(key):
+            continue
+        merged[key] = value
+    return merged
+
+
+def clean_tracking_value(value: str | None, *, limit: int = 120) -> str | None:
+    cleaned = " ".join((value or "").strip().split())
+    if not cleaned:
+        return None
+    return cleaned[:limit]
+
+
+def clean_public_path(value: str | None) -> str | None:
+    candidate = (value or "").strip()
+    if not candidate:
+        return None
+    parsed = urlparse(candidate)
+    path = parsed.path or "/"
+    if not path.startswith("/"):
+        path = f"/{path.lstrip('/')}"
+    return path[:200]
+
+
+def normalize_tracking_slug(value: str | None) -> str | None:
+    cleaned = clean_tracking_value(value)
+    if not cleaned:
+        return None
+    return cleaned.lower().replace(" ", "_").replace("-", "_")
+
+
+def external_referrer_host() -> str | None:
+    referrer = (request.referrer or "").strip()
+    if not referrer:
+        return None
+    try:
+        host = (urlparse(referrer).hostname or "").lower()
+    except ValueError:
+        return None
+    if not host:
+        return None
+    request_host = (request.host.split(":", 1)[0] or "").lower()
+    app_base_url = str(current_app.config.get("APP_BASE_URL") or "").strip()
+    app_base_host = (urlparse(app_base_url).hostname or "").lower() if app_base_url else ""
+    if host in {request_host, app_base_host}:
+        return None
+    return host[:120]
+
+
+def derive_source_label(
+    explicit_source_label: str | None,
+    utm_source: str | None,
+    referrer_host: str | None,
+    source_channel: str | None,
+) -> str:
+    explicit = clean_tracking_value(explicit_source_label)
+    if explicit:
+        return explicit
+    utm = clean_tracking_value(utm_source)
+    if utm:
+        return utm
+    host = clean_tracking_value(referrer_host)
+    if host:
+        return referrer_source_label(host)
+    channel = normalize_tracking_slug(source_channel)
+    if channel in BOOKING_SOURCE_CHANNELS:
+        return "direct" if channel == "direct_web" else channel
+    return "direct"
+
+
+def referrer_source_label(referrer_host: str) -> str:
+    normalized = normalize_tracking_slug(referrer_host) or "referral"
+    if "google" in normalized:
+        return "google"
+    if "facebook" in normalized or normalized.startswith("fb"):
+        return "facebook"
+    if "instagram" in normalized:
+        return "instagram"
+    if "line" in normalized:
+        return "line"
+    if "whatsapp" in normalized:
+        return "whatsapp"
+    if "tiktok" in normalized:
+        return "tiktok"
+    labels = [part for part in referrer_host.split(".") if part and part not in {"www", "m", "l"}]
+    return labels[0][:80] if labels else referrer_host[:80]
+
+
+def resolve_booking_source_channel(explicit_source_channel: str | None, attribution: dict | None = None) -> str:
+    explicit = normalize_tracking_slug(explicit_source_channel)
+    if explicit in BOOKING_SOURCE_CHANNELS:
+        return explicit
+
+    attribution = attribution or {}
+    candidates = [
+        normalize_tracking_slug(attribution.get("source_label")),
+        normalize_tracking_slug(attribution.get("utm_source")),
+        normalize_tracking_slug(attribution.get("referrer_host")),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate in {"direct", "direct_web"}:
+            return "direct_web"
+        if candidate in {"google_business", "gmb"}:
+            return "google_business"
+        if candidate in {"facebook", "fb"}:
+            return "facebook"
+        if "line" == candidate:
+            return "line"
+        if "whatsapp" == candidate:
+            return "whatsapp"
+        if candidate in {"qr", "qr_code"}:
+            return "qr"
+        if candidate in {"referral", "partner", "affiliate"}:
+            return "referral"
+        return "referral"
+    return "direct_web"
+
+
+def _should_track_booking_attribution() -> bool:
+    if request.endpoint in {None, "static", "payment_webhook"}:
+        return False
+    if request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_"):
+        return False
+    return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
+
+
+def source_metadata_from_request(language: str) -> dict:
+    metadata = merge_booking_attribution(current_booking_attribution(), booking_attribution_from_request())
+    if not metadata:
+        metadata = default_booking_attribution()
+    if not metadata.get("entry_page"):
+        metadata["entry_page"] = clean_public_path(request.path) or "/"
+    if not metadata.get("landing_path"):
+        metadata["landing_path"] = metadata["entry_page"]
+    if not metadata.get("source_label"):
+        metadata["source_label"] = derive_source_label(
+            None,
+            metadata.get("utm_source"),
+            metadata.get("referrer_host"),
+            metadata.get("source_channel"),
+        )
+    metadata["device_class"] = "mobile" if "Mobile" in request.user_agent.string else "desktop"
+    metadata["language"] = language
+    metadata["created_from_public_booking_flow"] = True
+    return {key: value for key, value in metadata.items() if value not in {None, ""}}
+
+
+def public_booking_form_context(
+    hold: ReservationHold,
+    room_type: RoomType,
+    *,
+    settings: dict[str, dict] | None = None,
+    selected_extra_ids: list[UUID] | tuple[UUID, ...] | None = None,
+    form_values: dict[str, str] | None = None,
+) -> dict:
     resolved_settings = settings or current_settings()
     language = normalize_language(getattr(hold, "booking_language", None) or current_language())
+    try:
+        selected_extras = resolve_booking_extras(selected_extra_ids or [], public_only=True)
+    except ValueError:
+        selected_extras = []
+    extras_quote = quote_booking_extras(
+        selected_extras,
+        check_in_date=hold.check_in_date,
+        check_out_date=hold.check_out_date,
+    )
     return {
         "hold": hold,
         "room_type": room_type,
         "settings": resolved_settings,
+        "booking_extras": list_booking_extras(public_only=True),
+        "selected_extra_ids": {str(item.id) for item in selected_extras},
+        "selected_extras_quote": [
+            {
+                "id": str(line.booking_extra_id),
+                "name": line.name,
+                "description": line.description,
+                "pricing_mode": line.pricing_mode,
+                "pricing_label": "Per night" if line.pricing_mode == "per_night" else "Per stay",
+                "quantity": line.quantity,
+                "unit_price": line.unit_price,
+                "total_amount": line.total_amount,
+            }
+            for line in extras_quote.lines
+        ],
+        "extras_total": extras_quote.total_amount,
+        "grand_total_with_extras": Decimal(str(hold.quoted_grand_total)) + extras_quote.total_amount,
+        "form_values": form_values or {},
         "published_terms_version": resolved_settings.get("booking.terms_version", {}).get("value", "2026-03"),
         "policy_documents": {
             "cancellation": policy_text("cancellation_policy", language, t(language, "policy_summary")),
@@ -2842,6 +3188,19 @@ def parse_optional_uuid(value: str | None) -> UUID | None:
     return UUID(candidate)
 
 
+def parse_booking_extra_ids(values: list[str] | tuple[str, ...] | None) -> tuple[UUID, ...]:
+    parsed: list[UUID] = []
+    for raw_value in values or []:
+        candidate = (raw_value or "").strip()
+        if not candidate:
+            continue
+        try:
+            parsed.append(UUID(candidate))
+        except ValueError as exc:
+            raise ValueError("One or more selected extras are invalid.") from exc
+    return tuple(parsed)
+
+
 def safe_back_path(value: str | None, fallback: str) -> str:
     candidate = (value or "").strip()
     if candidate.startswith("/") and not candidate.startswith("//"):
@@ -2892,40 +3251,19 @@ def hydrate_front_desk_board_urls(board: dict, *, back_url: str, board_date: dat
 
 
 def public_base_url() -> str:
-    configured = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
-    if configured:
-        return configured
-    return request.url_root.rstrip("/")
+    return resolve_public_base_url()
 
 
 def absolute_public_url(value: str | None) -> str:
-    candidate = (value or "").strip()
-    if not candidate:
-        return ""
-    if candidate.startswith(("http://", "https://")):
-        return candidate
-    if not candidate.startswith("/"):
-        candidate = f"/{candidate.lstrip('/')}"
-    return f"{public_base_url()}{candidate}"
+    return branding_absolute_public_url(value)
 
 
 def email_href(value: str | None) -> str:
-    candidate = (value or "").strip()
-    if not candidate:
-        return ""
-    return f"mailto:{candidate}"
+    return branding_email_href(value)
 
 
 def phone_href(value: str | None) -> str:
-    raw = (value or "").strip()
-    if not raw:
-        return ""
-    candidate = "".join(char for char in raw if char.isdigit() or char == "+")
-    if not candidate:
-        return ""
-    if "+" in candidate[1:]:
-        candidate = candidate.replace("+", "")
-    return f"tel:{candidate}"
+    return branding_phone_href(value)
 
 
 def parse_optional_date(value: str | None) -> date | None:

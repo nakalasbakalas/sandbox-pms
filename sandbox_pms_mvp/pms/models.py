@@ -11,11 +11,15 @@ from .constants import (
     AUTH_FAILURE_REASONS,
     BLACKOUT_TYPES,
     BOOKING_LANGUAGES,
+    BOOKING_EXTRA_PRICING_MODES,
     BOOKING_SOURCE_CHANNELS,
     CASHIER_DOCUMENT_STATUSES,
     CASHIER_DOCUMENT_TYPES,
+    CALENDAR_FEED_SCOPE_TYPES,
     CANCELLATION_REQUEST_STATUSES,
     EMAIL_OUTBOX_STATUSES,
+    EXTERNAL_CALENDAR_SOURCE_STATUSES,
+    EXTERNAL_CALENDAR_SYNC_RUN_STATUSES,
     FOLIO_CHARGE_CODES,
     FOLIO_CHARGE_TYPES,
     GUEST_NOTE_TYPES,
@@ -554,6 +558,7 @@ class Reservation(AuditMixin, db.Model):
     internal_notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     quoted_room_total: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     quoted_tax_total: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
+    quoted_extras_total: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     quoted_grand_total: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     deposit_required_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     deposit_received_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
@@ -588,6 +593,7 @@ class Reservation(AuditMixin, db.Model):
         back_populates="reservation",
         order_by="ReservationNote.created_at.desc()",
     )
+    extras = relationship("ReservationExtra", back_populates="reservation", lazy="select")
 
     __table_args__ = (
         CheckConstraint("check_in_date < check_out_date", name="ck_reservation_dates"),
@@ -596,6 +602,7 @@ class Reservation(AuditMixin, db.Model):
         CheckConstraint("extra_guests >= 0", name="ck_reservations_extra_guests"),
         CheckConstraint("quoted_room_total >= 0", name="ck_reservations_room_total"),
         CheckConstraint("quoted_tax_total >= 0", name="ck_reservations_tax_total"),
+        CheckConstraint("quoted_extras_total >= 0", name="ck_reservations_extras_total"),
         CheckConstraint("quoted_grand_total >= 0", name="ck_reservations_grand_total"),
         CheckConstraint("deposit_required_amount >= 0", name="ck_reservations_deposit_required"),
         CheckConstraint("deposit_received_amount >= 0", name="ck_reservations_deposit_received"),
@@ -675,6 +682,46 @@ class ReservationNote(db.Model):
             name="ck_reservation_notes_visibility_scope",
         ),
         Index("ix_reservation_notes_reservation_created", "reservation_id", "created_at"),
+    )
+
+
+class ReservationExtra(AuditMixin, db.Model):
+    __tablename__ = "reservation_extras"
+
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="CASCADE"), nullable=False
+    )
+    booking_extra_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("booking_extras.id", ondelete="SET NULL"), nullable=True
+    )
+    posted_folio_charge_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("folio_charges.id", ondelete="SET NULL"), nullable=True
+    )
+    extra_code: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    extra_name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    pricing_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="per_stay")
+    quantity: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    unit_price: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
+    total_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=100)
+    source: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="public_booking")
+
+    reservation = relationship("Reservation", back_populates="extras")
+    booking_extra = relationship("BookingExtra", back_populates="reservation_extras")
+    posted_folio_charge = relationship("FolioCharge", foreign_keys=[posted_folio_charge_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"pricing_mode IN ({', '.join(repr(v) for v in BOOKING_EXTRA_PRICING_MODES)})",
+            name="ck_reservation_extras_pricing_mode",
+        ),
+        CheckConstraint("quantity >= 1", name="ck_reservation_extras_quantity"),
+        CheckConstraint("unit_price >= 0", name="ck_reservation_extras_unit_price"),
+        CheckConstraint("total_amount >= 0", name="ck_reservation_extras_total_amount"),
+        CheckConstraint("sort_order >= 0", name="ck_reservation_extras_sort_order"),
+        Index("ix_reservation_extras_reservation_id", "reservation_id"),
+        Index("ix_reservation_extras_booking_extra_id", "booking_extra_id"),
     )
 
 
@@ -982,6 +1029,31 @@ class RateRule(AuditMixin, SoftDeleteMixin, db.Model):
         CheckConstraint("adjustment_value >= 0 OR adjustment_type != 'fixed'", name="ck_rate_rules_adjustment_value"),
         Index("ix_rate_rules_room_type_active", "room_type_id", "is_active"),
         Index("ix_rate_rules_date_window", "start_date", "end_date"),
+    )
+
+
+class BookingExtra(AuditMixin, db.Model):
+    __tablename__ = "booking_extras"
+
+    code: Mapped[str] = mapped_column(sa.String(40), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    pricing_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="per_stay")
+    unit_price: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    is_public: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=100)
+
+    reservation_extras = relationship("ReservationExtra", back_populates="booking_extra", lazy="select")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"pricing_mode IN ({', '.join(repr(v) for v in BOOKING_EXTRA_PRICING_MODES)})",
+            name="ck_booking_extras_pricing_mode",
+        ),
+        CheckConstraint("unit_price >= 0", name="ck_booking_extras_unit_price"),
+        CheckConstraint("sort_order >= 0", name="ck_booking_extras_sort_order"),
+        Index("ix_booking_extras_public_active", "is_public", "is_active", "sort_order"),
     )
 
 
@@ -1422,6 +1494,136 @@ class AppSetting(AuditMixin, SoftDeleteMixin, db.Model):
     sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
 
 
+class CalendarFeed(AuditMixin, db.Model):
+    __tablename__ = "calendar_feeds"
+
+    scope_type: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="property")
+    room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    token_hash: Mapped[str] = mapped_column(sa.String(255), nullable=False, unique=True)
+    token_encrypted: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    token_hint: Mapped[str | None] = mapped_column(sa.String(24), nullable=True)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_rotated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    room = relationship("Room", foreign_keys=[room_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"scope_type IN ({', '.join(repr(v) for v in CALENDAR_FEED_SCOPE_TYPES)})",
+            name="ck_calendar_feeds_scope_type",
+        ),
+        CheckConstraint(
+            "((scope_type = 'property' AND room_id IS NULL) OR (scope_type = 'room' AND room_id IS NOT NULL))",
+            name="ck_calendar_feeds_scope_target",
+        ),
+        Index("ix_calendar_feeds_scope_active", "scope_type", "is_active"),
+        Index("ix_calendar_feeds_room_active", "room_id", "is_active"),
+    )
+
+
+class ExternalCalendarSource(AuditMixin, SoftDeleteMixin, db.Model):
+    __tablename__ = "external_calendar_sources"
+
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    feed_url_encrypted: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    feed_url_hint: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    external_reference: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_successful_sync_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="never_synced")
+    last_error: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
+    room = relationship("Room", foreign_keys=[room_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"last_status IN ({', '.join(repr(v) for v in EXTERNAL_CALENDAR_SOURCE_STATUSES)})",
+            name="ck_external_calendar_sources_last_status",
+        ),
+        Index("ix_external_calendar_sources_room_active", "room_id", "is_active"),
+        Index("ix_external_calendar_sources_status", "last_status"),
+    )
+
+
+class ExternalCalendarBlock(AuditMixin, db.Model):
+    __tablename__ = "external_calendar_blocks"
+
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("external_calendar_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    external_uid: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    summary: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    starts_on: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    ends_on: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    event_created_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    event_updated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    raw_status: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    is_conflict: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    conflict_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    conflict_reservation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="SET NULL"), nullable=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
+
+    source = relationship("ExternalCalendarSource", foreign_keys=[source_id])
+    room = relationship("Room", foreign_keys=[room_id])
+    conflict_reservation = relationship("Reservation", foreign_keys=[conflict_reservation_id])
+
+    __table_args__ = (
+        CheckConstraint("starts_on < ends_on", name="ck_external_calendar_blocks_dates"),
+        UniqueConstraint("source_id", "external_uid", name="uq_external_calendar_blocks_source_uid"),
+        Index("ix_external_calendar_blocks_room_dates", "room_id", "starts_on", "ends_on"),
+        Index("ix_external_calendar_blocks_source_seen", "source_id", "last_seen_at"),
+        Index("ix_external_calendar_blocks_conflict", "is_conflict", "starts_on"),
+    )
+
+
+class ExternalCalendarSyncRun(AuditMixin, db.Model):
+    __tablename__ = "external_calendar_sync_runs"
+
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("external_calendar_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="success")
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    fetched_event_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    upserted_block_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    duplicate_event_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    released_block_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    conflict_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    error_message: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONType, nullable=True)
+
+    source = relationship("ExternalCalendarSource", foreign_keys=[source_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in EXTERNAL_CALENDAR_SYNC_RUN_STATUSES)})",
+            name="ck_external_calendar_sync_runs_status",
+        ),
+        CheckConstraint("fetched_event_count >= 0", name="ck_external_calendar_sync_runs_fetched"),
+        CheckConstraint("upserted_block_count >= 0", name="ck_external_calendar_sync_runs_upserted"),
+        CheckConstraint("duplicate_event_count >= 0", name="ck_external_calendar_sync_runs_duplicates"),
+        CheckConstraint("released_block_count >= 0", name="ck_external_calendar_sync_runs_released"),
+        CheckConstraint("conflict_count >= 0", name="ck_external_calendar_sync_runs_conflicts"),
+        Index("ix_external_calendar_sync_runs_source_started", "source_id", "started_at"),
+        Index("ix_external_calendar_sync_runs_status_started", "status", "started_at"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -1452,6 +1654,10 @@ for model in (
     NotificationTemplate,
     NotificationDelivery,
     AppSetting,
+    CalendarFeed,
+    ExternalCalendarSource,
+    ExternalCalendarBlock,
+    ExternalCalendarSyncRun,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
 
