@@ -143,10 +143,11 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             "visible_blocks": [],
             "lane_count": 1,
             "track_height": 74,
-            "search_text": " ".join(
-                part.lower()
-                for part in [room.room_number, group["room_type_code"], group["room_type_name"], str(room.floor_number)]
-                if part
+            "search_text": _search_text(
+                room.room_number,
+                group["room_type_code"],
+                group["room_type_name"],
+                room.floor_number,
             ),
         }
         group["rows"].append(row)
@@ -471,7 +472,7 @@ def _ensure_unallocated_row(group: dict[str, Any]) -> dict[str, Any]:
         "visible_blocks": [],
         "lane_count": 1,
         "track_height": 74,
-        "search_text": f"unallocated {group['room_type_code'].lower()} {group['room_type_name'].lower()}",
+        "search_text": _search_text("unallocated", group["room_type_code"], group["room_type_name"]),
     }
     group["rows"].append(row)
     return row
@@ -834,6 +835,7 @@ def _base_block(
     grid_span = max((visible_end - visible_start).days, 1)
     clipped_start = start_date < window_start
     clipped_end = end_date > window_end
+    search_text = _search_text(*search_parts)
     block = {
         "id": block_id,
         "kind": source_type,
@@ -883,8 +885,8 @@ def _base_block(
         "clipped_start": clipped_start,
         "clippedEnd": clipped_end,
         "clipped_end": clipped_end,
-        "searchText": " ".join(str(part).lower() for part in search_parts if part),
-        "search_text": " ".join(str(part).lower() for part in search_parts if part),
+        "searchText": search_text,
+        "search_text": search_text,
         "laneIndex": 1,
         "lane_index": 1,
         "detailUrl": None,
@@ -937,12 +939,18 @@ def _assign_block_lanes(blocks: list[dict[str, Any]]) -> int:
         for lane_index, lane_end in enumerate(lane_end_dates, start=1):
             if block_start >= lane_end:
                 block["laneIndex"] = lane_index
+                block["lane_index"] = lane_index
                 lane_end_dates[lane_index - 1] = block_end
                 break
         else:
             lane_end_dates.append(block_end)
             block["laneIndex"] = len(lane_end_dates)
+            block["lane_index"] = len(lane_end_dates)
     return max(len(lane_end_dates), 1)
+
+
+def _search_text(*parts: Any) -> str:
+    return " ".join(str(part).lower() for part in parts if part is not None and str(part).strip())
 
 
 def _serialize_value(value: Any) -> Any:

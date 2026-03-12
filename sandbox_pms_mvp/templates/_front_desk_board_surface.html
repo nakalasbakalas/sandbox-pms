@@ -11,7 +11,7 @@
     <div class="planning-board-room heading">Rooms</div>
     <div class="planning-board-days">
       {% for day in board.headers %}
-      <div class="planning-board-day {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}">
+      <div class="planning-board-day {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}" {% if day.is_today %}aria-current="date"{% endif %}>
         <span>{{ day.day_label }}</span>
         <strong>{{ day.day_number }}</strong>
         <small>{{ day.month_label }}</small>
@@ -34,10 +34,11 @@
         data-lane-kind="{{ row.laneKind }}"
         data-anchor-id="{{ row.anchor_id }}"
         data-has-today="{{ 'true' if board.todayOffset else 'false' }}"
+        aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
       >
         {% for day in board.headers %}
-        <div class="planning-board-cell {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}"></div>
+        <div class="planning-board-cell {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}" aria-hidden="true"></div>
         {% endfor %}
         {% for block in row.visible_blocks %}
         <details
@@ -52,6 +53,7 @@
           data-end-date="{{ block.endDateExclusive }}"
           data-grid-start="{{ block.gridStart }}"
           data-grid-span="{{ block.gridSpan }}"
+          data-allocation-state="{{ block.allocationState }}"
           data-draggable="{{ 'true' if block.draggable else 'false' }}"
           data-resizable="{{ 'true' if block.resizable else 'false' }}"
           data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
@@ -59,7 +61,11 @@
           data-resize-url="{{ block.resizeUrl or '' }}"
           style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
         >
-          <summary data-block-handle>
+          <summary
+            data-block-handle
+            aria-label="{{ block.label }}{% if block.subtitle %}, {{ block.subtitle }}{% endif %}, {{ block.startDate }} to {{ block.endDate }}, {{ block.status.replace('_', ' ') }}"
+            title="{{ block.label }} · {{ block.startDate }} to {{ block.endDate }}"
+          >
             {% if block.resizable %}<span class="planning-board-resize-handle start" data-resize-handle="start" aria-hidden="true"></span>{% endif %}
             <span class="planning-board-block-copy">
               <strong>{{ block.label }}</strong>

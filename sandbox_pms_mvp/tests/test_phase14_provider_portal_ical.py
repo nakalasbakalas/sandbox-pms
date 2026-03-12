@@ -332,6 +332,7 @@ def test_ical_metadata_parsing_and_staging_report_preserve_x_properties_and_vali
         ).encode("utf-8")
         report = stage_ical_import(staging_payload, known_uids={"known-duplicate"})
 
+        assert report["summary"]["parsed_count"] == 3
         assert report["summary"]["accepted_count"] == 1
         assert report["summary"]["rejected_count"] == 2
         assert report["summary"]["duplicate_uid_count"] == 1
@@ -339,3 +340,8 @@ def test_ical_metadata_parsing_and_staging_report_preserve_x_properties_and_vali
         assert report["timezone_issues"][0]["uid"] == "known-duplicate"
         assert report["missing_fields"][0]["fields"] == ["UID"]
         assert report["invalid_dates"] == [{"uid": "bad-dates", "summary": "Invalid dates"}]
+
+        invalid_report = stage_ical_import(b"not a calendar payload")
+        assert invalid_report["summary"]["parsed_count"] == 0
+        assert invalid_report["summary"]["rejected_count"] == 1
+        assert "Invalid iCalendar payload" in invalid_report["rejected_events"][0]["reason"]

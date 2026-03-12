@@ -6,9 +6,6 @@
   id="board-top"
   data-front-desk-board
   data-fragment-url="{{ board_fragment_url }}"
-  data-data-url="{{ board_data_url }}"
-  data-rooms-url="{{ board_rooms_url }}"
-  data-current-url="{{ board_current_url }}"
   data-csrf-token="{{ csrf_token() }}"
   data-can-edit="{{ 'true' if can_edit else 'false' }}"
 >
@@ -113,10 +110,10 @@
     </div>
   </div>
 
-  <p class="small muted planning-board-feedback" data-board-feedback aria-live="polite"></p>
+  <p class="small muted planning-board-feedback" data-board-feedback role="status" aria-live="polite" aria-atomic="true" hidden></p>
 </section>
 
-<div id="front-desk-board-surface">
+<div id="front-desk-board-surface" aria-busy="false">
   {% include '_front_desk_board_surface.html' %}
 </div>
 {% endblock %}

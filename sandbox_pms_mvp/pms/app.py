@@ -2105,9 +2105,9 @@ def register_routes(app: Flask) -> None:
             current = db.session.get(Reservation, reservation_id)
             if not current:
                 raise ValueError("Reservation not found.")
-            requested_room_id = parse_optional_uuid(payload.get("room_id") or payload.get("roomId"))
-            new_check_in = date.fromisoformat(payload["check_in_date"] if "check_in_date" in payload else payload["checkInDate"])
-            new_check_out = date.fromisoformat(payload["check_out_date"] if "check_out_date" in payload else payload["checkOutDate"])
+            requested_room_id = parse_board_room_id(payload, required=False)
+            new_check_in = parse_board_date(payload, "check-in date", "check_in_date", "checkInDate")
+            new_check_out = parse_board_date(payload, "check-out date", "check_out_date", "checkOutDate")
             room_changed = requested_room_id != current.assigned_room_id
             date_changed = new_check_in != current.check_in_date or new_check_out != current.check_out_date
             if requested_room_id is None and current.assigned_room_id is not None:
@@ -2141,9 +2141,20 @@ def register_routes(app: Flask) -> None:
                 reservation_id,
                 requested_room_id,
                 actor_user_id=user.id,
-                reason=payload.get("reason") or payload.get("moveReason") or "front_desk_board_drag_move",
+                reason=parse_board_reason(payload) or "front_desk_board_drag_move",
             )
             return jsonify({"ok": True, "message": "Room assignment updated."})
+        except BoardMutationRequestError as exc:
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_move_invalid_request",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
+            return jsonify({"ok": False, "error": str(exc)}), 400
         except Exception as exc:  # noqa: BLE001
             record_board_mutation_rejection(
                 actor_user_id=user.id,
@@ -2170,8 +2181,8 @@ def register_routes(app: Flask) -> None:
             result = change_stay_dates(
                 reservation_id,
                 StayDateChangePayload(
-                    check_in_date=date.fromisoformat(payload["check_in_date"] if "check_in_date" in payload else payload["checkInDate"]),
-                    check_out_date=date.fromisoformat(payload["check_out_date"] if "check_out_date" in payload else payload["checkOutDate"]),
+                    check_in_date=parse_board_date(payload, "check-in date", "check_in_date", "checkInDate"),
+                    check_out_date=parse_board_date(payload, "check-out date", "check_out_date", "checkOutDate"),
                     adults=current.adults,
                     children=current.children,
                     extra_guests=current.extra_guests,
@@ -2185,6 +2196,17 @@ def register_routes(app: Flask) -> None:
                     "message": f"Stay resized. New total {result['new_total']:.2f} THB.",
                 }
             )
+        except BoardMutationRequestError as exc:
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_resize_invalid_request",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
+            return jsonify({"ok": False, "error": str(exc)}), 400
         except Exception as exc:  # noqa: BLE001
             record_board_mutation_rejection(
                 actor_user_id=user.id,
@@ -2201,10 +2223,13 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_board_create_closure():
         user = require_permission("settings.edit")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
-        room_id = UUID(request.form["room_id"])
-        room = db.session.get(Room, room_id)
-        closure_name = (request.form.get("name") or "").strip() or f"Room {room.room_number if room else ''} closure".strip()
+        payload = request.form.to_dict()
         try:
+            room_id = parse_board_room_id(payload, required=True)
+            room = db.session.get(Room, room_id)
+            if not room:
+                raise ValueError("Selected room was not found.")
+            closure_name = (payload.get("name") or "").strip() or f"Room {room.room_number} closure"
             create_inventory_override(
                 InventoryOverridePayload(
                     name=closure_name,
@@ -2212,15 +2237,24 @@ def register_routes(app: Flask) -> None:
                     override_action="close",
                     room_id=room_id,
                     room_type_id=None,
-                    start_date=date.fromisoformat(request.form["start_date"]),
-                    end_date=date.fromisoformat(request.form["end_date"]),
-                    reason=request.form.get("reason", ""),
-                    expires_at=parse_optional_datetime(request.form.get("expires_at")),
+                    start_date=parse_board_date(payload, "closure start date", "start_date"),
+                    end_date=parse_board_date(payload, "closure end date", "end_date"),
+                    reason=payload.get("reason", ""),
+                    expires_at=parse_optional_datetime(payload.get("expires_at")),
                 ),
                 actor_user_id=user.id,
             )
             flash("Room closure created from the planning board.", "success")
         except Exception as exc:  # noqa: BLE001
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="inventory_overrides",
+                entity_id=str(payload.get("room_id") or "new"),
+                action="front_desk_board_closure_create_rejected",
+                before_data=None,
+                payload=payload,
+                reason=str(exc),
+            )
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
 
@@ -2229,10 +2263,18 @@ def register_routes(app: Flask) -> None:
         user = require_permission("settings.edit")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
         override = db.session.get(InventoryOverride, override_id)
-        room_id = UUID(request.form["room_id"]) if request.form.get("room_id") else override.room_id if override else None
-        room = db.session.get(Room, room_id) if room_id else None
-        closure_name = (request.form.get("name") or "").strip() or f"Room {room.room_number if room else ''} closure".strip()
+        payload = request.form.to_dict()
+        before_data = _inventory_override_snapshot_for_audit(override_id)
         try:
+            room_id = parse_board_room_id(payload, required=False)
+            if room_id is None:
+                room_id = override.room_id if override else None
+            if room_id is None:
+                raise ValueError("Selected room was not found.")
+            room = db.session.get(Room, room_id)
+            if not room:
+                raise ValueError("Selected room was not found.")
+            closure_name = (payload.get("name") or "").strip() or f"Room {room.room_number} closure"
             update_inventory_override(
                 override_id,
                 InventoryOverridePayload(
@@ -2241,15 +2283,24 @@ def register_routes(app: Flask) -> None:
                     override_action="close",
                     room_id=room_id,
                     room_type_id=None,
-                    start_date=date.fromisoformat(request.form["start_date"]),
-                    end_date=date.fromisoformat(request.form["end_date"]),
-                    reason=request.form.get("reason", ""),
-                    expires_at=parse_optional_datetime(request.form.get("expires_at")),
+                    start_date=parse_board_date(payload, "closure start date", "start_date"),
+                    end_date=parse_board_date(payload, "closure end date", "end_date"),
+                    reason=payload.get("reason", ""),
+                    expires_at=parse_optional_datetime(payload.get("expires_at")),
                 ),
                 actor_user_id=user.id,
             )
             flash("Room closure updated.", "success")
         except Exception as exc:  # noqa: BLE001
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="inventory_overrides",
+                entity_id=str(override_id),
+                action="front_desk_board_closure_update_rejected",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
 
@@ -2257,10 +2308,21 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_board_release_closure(override_id):
         user = require_permission("settings.edit")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
+        payload = request.form.to_dict()
+        before_data = _inventory_override_snapshot_for_audit(override_id)
         try:
             release_inventory_override(override_id, actor_user_id=user.id)
             flash("Room closure released.", "success")
         except Exception as exc:  # noqa: BLE001
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="inventory_overrides",
+                entity_id=str(override_id),
+                action="front_desk_board_closure_release_rejected",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
 
@@ -3675,6 +3737,10 @@ def _front_desk_filters_payload(filters: FrontDeskBoardFilters) -> dict[str, str
     }
 
 
+class BoardMutationRequestError(ValueError):
+    """Raised when a planning-board request payload is malformed."""
+
+
 def board_request_payload() -> dict:
     if request.is_json:
         payload = request.get_json(silent=True) or {}
@@ -3682,6 +3748,47 @@ def board_request_payload() -> dict:
             return payload
         abort(400, description="Invalid JSON payload.")
     return request.form.to_dict()
+
+
+def parse_board_date(payload: dict, label: str, *field_names: str) -> date:
+    candidate = _first_board_payload_value(payload, *field_names)
+    if not candidate:
+        raise BoardMutationRequestError(f"{label.capitalize()} is required.")
+    try:
+        return date.fromisoformat(str(candidate))
+    except ValueError as exc:
+        raise BoardMutationRequestError(f"{label.capitalize()} must be a valid ISO date.") from exc
+
+
+def parse_board_room_id(payload: dict, *, required: bool) -> UUID | None:
+    candidate = _first_board_payload_value(payload, "room_id", "roomId")
+    if candidate is None:
+        if required:
+            raise BoardMutationRequestError("Room is required.")
+        return None
+    candidate_text = str(candidate).strip()
+    if not candidate_text or candidate_text.lower() == "null":
+        if required:
+            raise BoardMutationRequestError("Room is required.")
+        return None
+    try:
+        return UUID(candidate_text)
+    except ValueError as exc:
+        raise BoardMutationRequestError("Room identifier is invalid.") from exc
+
+
+def parse_board_reason(payload: dict) -> str | None:
+    candidate = _first_board_payload_value(payload, "reason", "moveReason")
+    if candidate is None:
+        return None
+    return str(candidate).strip() or None
+
+
+def _first_board_payload_value(payload: dict, *field_names: str):
+    for field_name in field_names:
+        if field_name in payload:
+            return payload.get(field_name)
+    return None
 
 
 def read_ical_upload_payload() -> bytes:
@@ -3735,6 +3842,22 @@ def _reservation_snapshot_for_audit(reservation_id: UUID) -> dict | None:
         "assigned_room_id": str(reservation.assigned_room_id) if reservation.assigned_room_id else None,
         "check_in_date": reservation.check_in_date.isoformat(),
         "check_out_date": reservation.check_out_date.isoformat(),
+    }
+
+
+def _inventory_override_snapshot_for_audit(override_id: UUID) -> dict | None:
+    override = db.session.get(InventoryOverride, override_id)
+    if not override:
+        return None
+    return {
+        "name": override.name,
+        "scope_type": override.scope_type,
+        "override_action": override.override_action,
+        "room_id": str(override.room_id) if override.room_id else None,
+        "room_type_id": str(override.room_type_id) if override.room_type_id else None,
+        "start_date": override.start_date.isoformat(),
+        "end_date": override.end_date.isoformat(),
+        "is_active": override.is_active,
     }
 
 

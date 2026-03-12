@@ -292,11 +292,17 @@ def test_board_room_reassignment_updates_inventory_and_redirects_back_to_anchor(
 
     with app.app_context():
         refreshed = db.session.get(Reservation, reservation.id)
+        audit_log = (
+            AuditLog.query.filter_by(action="staff_room_changed", entity_id=str(reservation.id))
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
         assert refreshed.assigned_room_id == alternate_room.id
         old_rows = InventoryDay.query.filter_by(room_id=original_room_id, reservation_id=reservation.id).all()
         new_rows = InventoryDay.query.filter_by(room_id=alternate_room.id, reservation_id=reservation.id).all()
         assert not old_rows
         assert len(new_rows) == 2
+        assert audit_log is not None
 
 
 def test_front_desk_board_data_endpoint_returns_normalized_blocks_and_operational_rows(app_factory):
@@ -350,6 +356,8 @@ def test_front_desk_board_data_endpoint_returns_normalized_blocks_and_operationa
     assert unallocated_block["roomId"] is None
     assert unallocated_block["draggable"] is True
     assert unallocated_block["resizable"] is False
+    assert all(block["searchText"] == block["search_text"] for block in all_blocks)
+    assert all(block["laneIndex"] == block["lane_index"] for block in all_blocks)
     assert any(block["sourceType"] == "maintenance" for block in all_blocks)
 
 
@@ -404,6 +412,152 @@ def test_board_move_json_can_assign_unallocated_reservation_into_room_inventory(
         assert refreshed.assigned_room_id == target_room_id
         assert len(inventory_rows) == 2
         assert all(row.availability_status == "reserved" for row in inventory_rows)
+
+
+def test_board_move_json_rejects_room_type_mismatch_and_preserves_state(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=7)
+        staff_user = make_staff_user("front_desk", "board-json-room-type@example.com")
+        reservation = create_staff_reservation(
+            first_name="Desk",
+            last_name="Mismatch",
+            phone="+66810000045",
+            room_type_code="TWN",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        original_room_id = reservation.assigned_room_id
+        wrong_room = Room.query.filter(Room.room_type.has(code="DBL"), Room.is_active.is_(True)).order_by(Room.room_number.asc()).first()
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(wrong_room.id),
+            "checkInDate": start_date.isoformat(),
+            "checkOutDate": (start_date + timedelta(days=2)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["ok"] is False
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        audit_log = (
+            AuditLog.query.filter_by(action="front_desk_board_move_rejected", entity_id=str(reservation_id))
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
+        assert refreshed.assigned_room_id == original_room_id
+        assert audit_log is not None
+        assert "booked room type" in audit_log.after_data["failure_reason"]
+
+
+def test_board_move_json_invalid_request_returns_400_and_records_invalid_request_audit(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=8)
+        staff_user = make_staff_user("front_desk", "board-json-invalid@example.com")
+        reservation = create_staff_reservation(
+            first_name="Desk",
+            last_name="Payload",
+            phone="+66810000046",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        assigned_room_id = reservation.assigned_room_id
+        original_check_out = reservation.check_out_date
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(assigned_room_id),
+            "checkInDate": start_date.isoformat(),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["ok"] is False
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        audit_log = (
+            AuditLog.query.filter_by(action="front_desk_board_move_invalid_request", entity_id=str(reservation_id))
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
+        assert refreshed.check_out_date == original_check_out
+        assert audit_log is not None
+        assert audit_log.after_data["failure_reason"] == "Check-out date is required."
+
+
+def test_board_move_json_rejects_closure_block_and_preserves_state(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=11)
+        staff_user = make_staff_user("front_desk", "board-json-closure@example.com")
+        manager = make_staff_user("manager", "board-json-closure-manager@example.com")
+        reservation = create_staff_reservation(
+            first_name="Desk",
+            last_name="Blocked",
+            phone="+66810000047",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        original_room_id = reservation.assigned_room_id
+        blocked_room = find_open_room(
+            room_type_id=reservation.room_type_id,
+            start_date=reservation.check_in_date,
+            end_date=reservation.check_out_date,
+            exclude_room_ids={original_room_id},
+        )
+        create_inventory_override(
+            InventoryOverridePayload(
+                name="Board blocked room",
+                scope_type="room",
+                override_action="close",
+                room_id=blocked_room.id,
+                room_type_id=None,
+                start_date=reservation.check_in_date,
+                end_date=reservation.check_out_date - timedelta(days=1),
+                reason="Blocked for board rejection test",
+            ),
+            actor_user_id=manager.id,
+        )
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(blocked_room.id),
+            "checkInDate": start_date.isoformat(),
+            "checkOutDate": (start_date + timedelta(days=2)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["ok"] is False
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        assert refreshed.assigned_room_id == original_room_id
 
 
 def test_board_resize_json_rejection_records_audit_and_activity_logs(app_factory):
@@ -469,6 +623,48 @@ def test_board_resize_json_rejection_records_audit_and_activity_logs(app_factory
         assert activity_log.metadata_json["action"] == "front_desk_board_resize_rejected"
 
 
+def test_board_resize_json_success_updates_dates_and_writes_audit_log(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=18)
+        staff_user = make_staff_user("front_desk", "board-json-resize-success@example.com")
+        reservation = create_staff_reservation(
+            first_name="Resize",
+            last_name="Success",
+            phone="+66810000048",
+            room_type_code="TWN",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        new_checkout = reservation.check_out_date + timedelta(days=1)
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/resize",
+        payload={
+            "checkInDate": start_date.isoformat(),
+            "checkOutDate": new_checkout.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        audit_log = (
+            AuditLog.query.filter_by(action="staff_stay_dates_changed", entity_id=str(reservation_id))
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
+        assert refreshed.check_out_date == new_checkout
+        assert audit_log is not None
+
+
 def test_board_closure_create_and_release_actions_round_trip(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -515,6 +711,40 @@ def test_board_closure_create_and_release_actions_round_trip(app_factory):
     with app.app_context():
         refreshed = db.session.get(InventoryOverride, override.id)
         assert refreshed.is_active is False
+
+
+def test_front_desk_board_move_json_requires_edit_permission(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=6)
+        reservation = create_staff_reservation(
+            first_name="Rbac",
+            last_name="Denied",
+            phone="+66810000049",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        assigned_room_id = reservation.assigned_room_id
+        check_in_date = reservation.check_in_date
+        check_out_date = reservation.check_out_date
+        provider_user = make_staff_user("provider", "board-rbac-provider@example.com")
+
+    login_as(client, provider_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(assigned_room_id),
+            "checkInDate": check_in_date.isoformat(),
+            "checkOutDate": check_out_date.isoformat(),
+        },
+    )
+
+    assert response.status_code == 403
 
 
 def test_front_desk_board_export_and_import_ical_routes_round_trip_metadata(app_factory):

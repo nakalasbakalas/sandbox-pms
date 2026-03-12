@@ -8,6 +8,13 @@
   const csrfToken = root.dataset.csrfToken || "";
   const canEdit = root.dataset.canEdit === "true";
   const feedback = root.querySelector("[data-board-feedback]");
+  let mutationInFlight = false;
+
+  function setBusyState(isBusy) {
+    mutationInFlight = isBusy;
+    root.dataset.busy = isBusy ? "true" : "false";
+    surface.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
 
   function setFeedback(message, tone) {
     if (!feedback) {
@@ -15,6 +22,7 @@
     }
     feedback.textContent = message || "";
     feedback.dataset.tone = tone || "neutral";
+    feedback.hidden = !message;
   }
 
   function parseIsoDate(value) {
@@ -32,53 +40,141 @@
     return formatIsoDate(next);
   }
 
+  function readBoardDays(track) {
+    const candidates = [
+      track.style.getPropertyValue("--board-days"),
+      getComputedStyle(track).getPropertyValue("--board-days"),
+      track.closest(".planning-board-grid")?.style.getPropertyValue("--board-days"),
+      track.closest(".planning-board-grid")
+        ? getComputedStyle(track.closest(".planning-board-grid")).getPropertyValue("--board-days")
+        : "",
+    ];
+    for (const candidate of candidates) {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    return 14;
+  }
+
   async function refreshSurface() {
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
+    surface.setAttribute("aria-busy", "true");
     const response = await fetch(target.toString(), {
       headers: { Accept: "text/html" },
       credentials: "same-origin",
     });
     if (!response.ok) {
+      surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
       throw new Error("Unable to refresh the planning board.");
     }
     surface.innerHTML = await response.text();
-    initInteractiveBoard();
+    surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
   }
 
   function clearTrackHighlights() {
-    surface.querySelectorAll(".planning-board-track.drop-target").forEach((track) => {
-      track.classList.remove("drop-target");
-    });
+    surface
+      .querySelectorAll(".planning-board-track.drop-target, .planning-board-track.drop-target-invalid")
+      .forEach((track) => {
+        track.classList.remove("drop-target", "drop-target-invalid");
+      });
   }
 
-  function attachSummaryGuards(summary) {
-    summary.addEventListener("click", (event) => {
-      const block = summary.closest("[data-board-block]");
-      if (!block || block.dataset.suppressClick !== "true") {
-        return;
-      }
-      block.dataset.suppressClick = "false";
-      event.preventDefault();
-      event.stopPropagation();
-    });
+  function resolveSummaryTarget(target) {
+    return target instanceof Element ? target.closest("summary[data-block-handle]") : null;
   }
 
-  function initInteractiveBoard() {
-    surface.querySelectorAll("[data-board-block] > summary").forEach(attachSummaryGuards);
-    if (!canEdit) {
+  function applyPreview(block, gridStart, gridSpan) {
+    block.dataset.previewGridStart = String(gridStart);
+    block.dataset.previewGridSpan = String(gridSpan);
+    block.style.gridColumn = `${gridStart} / span ${gridSpan}`;
+    block.style.gridRow = "1";
+  }
+
+  function revertPreview(interaction) {
+    interaction.block.classList.remove("is-dragging", "is-pending");
+    interaction.block.style.gridColumn = `${interaction.originalGridStart} / span ${interaction.originalGridSpan}`;
+    interaction.block.style.gridRow = "";
+    interaction.block.dataset.previewGridStart = "";
+    interaction.block.dataset.previewGridSpan = "";
+    interaction.block.dataset.suppressClick = "false";
+    if (interaction.originalParent && interaction.block.parentElement !== interaction.originalParent) {
+      interaction.originalParent.insertBefore(interaction.block, interaction.originalNextSibling);
+    }
+  }
+
+  function isCompatibleTrack(interaction, candidateTrack) {
+    if (!candidateTrack) {
+      return false;
+    }
+    const candidateRoomId = candidateTrack.dataset.roomId || "";
+    const candidateRoomTypeId = candidateTrack.dataset.roomTypeId || "";
+    const candidateLaneKind = candidateTrack.dataset.laneKind || "room";
+    const blockRoomTypeId = interaction.block.dataset.roomTypeId || "";
+
+    if (candidateRoomTypeId && blockRoomTypeId && candidateRoomTypeId !== blockRoomTypeId) {
+      return false;
+    }
+    if (interaction.originalRoomId && !candidateRoomId) {
+      return false;
+    }
+    if (candidateLaneKind === "unallocated") {
+      return candidateTrack === interaction.originalTrack;
+    }
+    return true;
+  }
+
+  async function readJsonResponse(response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+    return { ok: response.ok, error: (await response.text()) || "The board change was rejected." };
+  }
+
+  function onSurfaceClick(event) {
+    const summary = resolveSummaryTarget(event.target);
+    if (!summary) {
       return;
     }
-
-    surface.querySelectorAll("[data-board-block] > summary").forEach((summary) => {
-      summary.addEventListener("pointerdown", onPointerDown);
-    });
+    const block = summary.closest("[data-board-block]");
+    if (!block || block.dataset.suppressClick !== "true") {
+      return;
+    }
+    block.dataset.suppressClick = "false";
+    event.preventDefault();
+    event.stopPropagation();
   }
 
-  function onPointerDown(event) {
-    const summary = event.currentTarget;
+  function onSurfaceKeydown(event) {
+    if (event.key !== "Escape") {
+      return;
+    }
+    const openContainer =
+      (event.target instanceof Element && event.target.closest("[data-board-block][open]")) ||
+      (event.target instanceof Element && event.target.closest(".planning-board-quick[open]"));
+    if (!openContainer) {
+      return;
+    }
+    openContainer.removeAttribute("open");
+    setFeedback("", "neutral");
+  }
+
+  function onSurfacePointerDown(event) {
+    if (!canEdit || mutationInFlight) {
+      return;
+    }
+    if (typeof event.button === "number" && event.button !== 0) {
+      return;
+    }
+    const summary = resolveSummaryTarget(event.target);
+    if (!summary) {
+      return;
+    }
     const block = summary.closest("[data-board-block]");
-    if (!block) {
+    if (!block || block.classList.contains("is-pending")) {
       return;
     }
     const resizeHandle = event.target.closest("[data-resize-handle]");
@@ -99,12 +195,7 @@
       return;
     }
 
-    const boardDays = Number(
-      track.style.getPropertyValue("--board-days") ||
-        getComputedStyle(track).getPropertyValue("--board-days") ||
-        block.closest(".planning-board-grid")?.style.getPropertyValue("--board-days") ||
-        14,
-    );
+    const boardDays = readBoardDays(track);
     const cell = track.querySelector(".planning-board-cell");
     const dayWidth = cell ? cell.getBoundingClientRect().width : track.getBoundingClientRect().width / boardDays;
     const interaction = {
@@ -117,7 +208,7 @@
       mode,
       dragPolicy,
       boardDays,
-      dayWidth,
+      dayWidth: dayWidth || 1,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -128,10 +219,17 @@
       originalRoomId: track.dataset.roomId || "",
       previewTrack: track,
       moved: false,
+      invalidTargetAttempted: false,
     };
 
     block.classList.add("is-dragging");
     summary.setPointerCapture(event.pointerId);
+
+    function removePointerListeners() {
+      summary.removeEventListener("pointermove", onMove);
+      summary.removeEventListener("pointerup", onEnd);
+      summary.removeEventListener("pointercancel", onCancel);
+    }
 
     function onMove(moveEvent) {
       const deltaX = moveEvent.clientX - interaction.startX;
@@ -142,25 +240,34 @@
       }
       interaction.moved = true;
       block.dataset.suppressClick = "true";
+
       const rawDayDelta = Math.round(deltaX / interaction.dayWidth);
       let dayDelta = rawDayDelta;
       if (interaction.dragPolicy === "room") {
         dayDelta = 0;
       }
 
-      let targetTrack = interaction.track;
-      if (interaction.mode === "move") {
-        const candidateTrack = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest("[data-board-track]");
-        if (candidateTrack) {
-          const candidateRoomId = candidateTrack.dataset.roomId || "";
-          if (candidateRoomId || !interaction.originalRoomId) {
-            targetTrack = candidateTrack;
-          }
-        }
-      }
+      let targetTrack = interaction.previewTrack;
+      const candidateTrack =
+        interaction.mode === "move"
+          ? document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest("[data-board-track]")
+          : null;
 
       clearTrackHighlights();
-      targetTrack.classList.add("drop-target");
+      if (candidateTrack) {
+        if (isCompatibleTrack(interaction, candidateTrack)) {
+          interaction.invalidTargetAttempted = false;
+          candidateTrack.classList.add("drop-target");
+          targetTrack = candidateTrack;
+        } else {
+          interaction.invalidTargetAttempted = true;
+          candidateTrack.classList.add("drop-target-invalid");
+        }
+      } else {
+        interaction.invalidTargetAttempted = false;
+        interaction.previewTrack.classList.add("drop-target");
+      }
+
       if (targetTrack !== interaction.previewTrack) {
         targetTrack.appendChild(block);
         interaction.previewTrack = targetTrack;
@@ -185,11 +292,11 @@
       }
     }
 
-    async function onEnd(endEvent) {
-      summary.releasePointerCapture(interaction.pointerId);
-      summary.removeEventListener("pointermove", onMove);
-      summary.removeEventListener("pointerup", onEnd);
-      summary.removeEventListener("pointercancel", onCancel);
+    async function onEnd() {
+      if (summary.hasPointerCapture(interaction.pointerId)) {
+        summary.releasePointerCapture(interaction.pointerId);
+      }
+      removePointerListeners();
       clearTrackHighlights();
 
       if (!interaction.moved) {
@@ -209,11 +316,15 @@
         roomId === interaction.originalRoomId;
       if (noBoardChange) {
         revertPreview(interaction);
+        if (interaction.invalidTargetAttempted) {
+          setFeedback("That room lane cannot accept this reservation.", "error");
+        }
         return;
       }
 
       block.classList.remove("is-dragging");
       block.classList.add("is-pending");
+      setBusyState(true);
       setFeedback("Saving board change...", "pending");
 
       const payload = {
@@ -224,6 +335,9 @@
       const endpoint = interaction.mode === "move" ? block.dataset.moveUrl : block.dataset.resizeUrl;
 
       try {
+        if (!endpoint) {
+          throw new Error("The planning board action is unavailable for this block.");
+        }
         const response = await fetch(endpoint, {
           method: "POST",
           credentials: "same-origin",
@@ -234,7 +348,7 @@
           },
           body: JSON.stringify(payload),
         });
-        const result = await response.json();
+        const result = await readJsonResponse(response);
         if (!response.ok || !result.ok) {
           throw new Error(result.error || "The board change was rejected.");
         }
@@ -245,13 +359,15 @@
         setFeedback(error.message || "The board change was rejected.", "error");
       } finally {
         block.classList.remove("is-pending");
+        setBusyState(false);
       }
     }
 
     function onCancel() {
-      summary.removeEventListener("pointermove", onMove);
-      summary.removeEventListener("pointerup", onEnd);
-      summary.removeEventListener("pointercancel", onCancel);
+      if (summary.hasPointerCapture(interaction.pointerId)) {
+        summary.releasePointerCapture(interaction.pointerId);
+      }
+      removePointerListeners();
       clearTrackHighlights();
       revertPreview(interaction);
     }
@@ -261,23 +377,10 @@
     summary.addEventListener("pointercancel", onCancel);
   }
 
-  function applyPreview(block, gridStart, gridSpan) {
-    block.dataset.previewGridStart = String(gridStart);
-    block.dataset.previewGridSpan = String(gridSpan);
-    block.style.gridColumn = `${gridStart} / span ${gridSpan}`;
-    block.style.gridRow = "1";
+  surface.addEventListener("click", onSurfaceClick);
+  surface.addEventListener("keydown", onSurfaceKeydown);
+  if (canEdit) {
+    surface.addEventListener("pointerdown", onSurfacePointerDown);
   }
-
-  function revertPreview(interaction) {
-    interaction.block.classList.remove("is-dragging", "is-pending");
-    interaction.block.style.gridColumn = `${interaction.originalGridStart} / span ${interaction.originalGridSpan}`;
-    interaction.block.style.gridRow = "";
-    interaction.block.dataset.previewGridStart = "";
-    interaction.block.dataset.previewGridSpan = "";
-    if (interaction.originalParent && interaction.block.parentElement !== interaction.originalParent) {
-      interaction.originalParent.insertBefore(interaction.block, interaction.originalNextSibling);
-    }
-  }
-
-  initInteractiveBoard();
+  setBusyState(false);
 })();

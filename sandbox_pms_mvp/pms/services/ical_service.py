@@ -474,6 +474,8 @@ def parse_ical_events(payload: bytes) -> list[dict[str, Any]]:
         categories = _component_categories(component)
         x_properties = _component_x_properties(component)
         sequence = _component_sequence(component)
+        last_modified = _component_timestamp(component.get("LAST-MODIFIED"))
+        dtstamp = _component_timestamp(component.get("DTSTAMP"))
         events.append(
             {
                 "external_uid": external_uid[:255],
@@ -481,7 +483,7 @@ def parse_ical_events(payload: bytes) -> list[dict[str, Any]]:
                 "starts_on": starts_on,
                 "ends_on": ends_on,
                 "event_created_at": _component_timestamp(component.get("CREATED")),
-                "event_updated_at": _component_timestamp(component.get("LAST-MODIFIED") or component.get("DTSTAMP")),
+                "event_updated_at": last_modified or dtstamp,
                 "raw_status": raw_status or None,
                 "metadata_json": {
                     "location": _truncate(str(component.get("LOCATION") or "").strip(), 255) or None,
@@ -489,12 +491,8 @@ def parse_ical_events(payload: bytes) -> list[dict[str, Any]]:
                     "categories": categories or None,
                     "sequence": sequence,
                     "x_properties": x_properties or None,
-                    "last_modified": _component_timestamp(component.get("LAST-MODIFIED")).isoformat()
-                    if _component_timestamp(component.get("LAST-MODIFIED"))
-                    else None,
-                    "dtstamp": _component_timestamp(component.get("DTSTAMP")).isoformat()
-                    if _component_timestamp(component.get("DTSTAMP"))
-                    else None,
+                    "last_modified": last_modified.isoformat() if last_modified else None,
+                    "dtstamp": dtstamp.isoformat() if dtstamp else None,
                     "timezone_issue": _component_timezone_issue(component),
                 },
             }
@@ -582,6 +580,7 @@ def stage_ical_import(payload: bytes, *, known_uids: set[str] | None = None) -> 
         parsed_event["ends_on"] = ends_on.isoformat()
         uid = raw_uid or _event_fallback_uid(component, starts_on, ends_on)
         parsed_event["uid"] = uid
+        report["parsed_events"].append(parsed_event)
 
         if missing_fields:
             report["missing_fields"].append(
@@ -619,7 +618,6 @@ def stage_ical_import(payload: bytes, *, known_uids: set[str] | None = None) -> 
             report["rejected_events"].append(parsed_event)
             continue
 
-        report["parsed_events"].append(parsed_event)
         report["accepted_events"].append(parsed_event)
 
     report["summary"] = {
