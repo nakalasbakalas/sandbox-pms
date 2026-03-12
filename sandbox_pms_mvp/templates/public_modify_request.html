@@ -12,7 +12,7 @@
 
   <section class="grid two gap-lg">
     <article class="card">
-      <form class="stack-form" method="post">
+      <form class="stack-form" method="post" data-analytics-event="booking_request_submit" data-analytics-step="modification_request" data-analytics-label="modification_form">
         {{ csrf_input() }}
         <div class="grid two">
           <label><span>{{ t('booking_reference_label') }}</span><input type="text" name="booking_reference" value="{{ form_defaults.booking_reference }}" maxlength="20" autocomplete="off" required></label>

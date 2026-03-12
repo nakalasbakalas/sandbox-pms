@@ -16,7 +16,7 @@
   </section>
 
   <section class="card public-search-card">
-    <form class="stack-form" action="{{ url_for('booking_entry') }}" method="get">
+    <form class="stack-form" action="{{ url_for('booking_entry') }}" method="get" data-analytics-event="booking_request_submit" data-analytics-step="availability_search" data-analytics-label="availability_search_form">
       <input type="hidden" name="lang" value="{{ current_language }}">
       {% if booking_attribution.utm_source %}<input type="hidden" name="utm_source" value="{{ booking_attribution.utm_source }}">{% endif %}
       {% if booking_attribution.utm_medium %}<input type="hidden" name="utm_medium" value="{{ booking_attribution.utm_medium }}">{% endif %}
@@ -101,7 +101,7 @@
             <div class="price-line total"><span>{{ t('grand_total_label') }}</span><strong>{{ currency }} {{ item.quote.grand_total|money }}</strong></div>
             <div class="price-line"><span>{{ t('stay_label') }}</span><strong>{{ t('stay_nights', count=item.quote.nightly_rates|length) }}</strong></div>
           </div>
-          <form class="stack-form room-offer-form" action="{{ url_for('booking_hold') }}" method="post">
+          <form class="stack-form room-offer-form" action="{{ url_for('booking_hold') }}" method="post" data-analytics-event="booking_request_submit" data-analytics-step="hold_request" data-analytics-label="room_hold_form">
             {{ csrf_input() }}
             <input type="hidden" name="room_type_id" value="{{ item.room_type.id }}">
             <input type="hidden" name="room_type" value="{{ item.room_type.code }}">

@@ -51,3 +51,11 @@ Repo layout:
 - the application intentionally lives under `sandbox_pms_mvp/`
 - repo-level deployment files such as [render.yaml](render.yaml) and [.gitignore](.gitignore) now treat that subtree as the canonical app root
 - local-only state such as virtualenvs, SQLite files, caches, and instance data are ignored at the repo root
+
+Codex guardrails:
+
+- install dev tooling with `pip install -r sandbox_pms_mvp/requirements-dev.txt`
+- install local hooks with `pre-commit install`
+- run `python scripts/launch_gate.py` for the standard guest-facing guardrail pass
+- run `python scripts/launch_gate.py --strict-launch` before release sign-off
+- use the global `sandbox-launch-gate` skill in Codex when you want the same workflow guided automatically

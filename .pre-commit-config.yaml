@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: sandbox-placeholders
+        name: sandbox placeholder check
+        entry: python scripts/check_placeholders.py
+        language: system
+        pass_filenames: false
+      - id: sandbox-public-surface
+        name: sandbox public surface check
+        entry: python scripts/check_public_surface.py
+        language: system
+        pass_filenames: false
+      - id: sandbox-codex-guardrails
+        name: sandbox codex guardrail tests
+        entry: python -m pytest sandbox_pms_mvp/tests/test_codex_guardrails.py -q
+        language: system
+        pass_filenames: false

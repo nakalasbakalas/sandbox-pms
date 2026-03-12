@@ -30,6 +30,7 @@ from ..models import (
     User,
     utc_now,
 )
+from ..normalization import clean_optional, normalize_email, normalize_phone
 from ..pricing import money, quote_reservation
 from .communication_service import (
     dispatch_notification_deliveries,
@@ -1073,24 +1074,8 @@ def guest_snapshot(guest: Guest) -> dict:
     }
 
 
-def normalize_phone(value: str | None) -> str:
-    return "".join(ch for ch in (value or "") if ch.isdigit() or ch == "+").strip()
-
-
 def phone_digits(value: str | None) -> str:
     return "".join(ch for ch in (value or "") if ch.isdigit())
-
-
-def normalize_email(value: str | None) -> str | None:
-    cleaned = (value or "").strip().lower()
-    return cleaned or None
-
-
-def clean_optional(value: str | None, *, limit: int = 120) -> str | None:
-    cleaned = (value or "").strip()
-    if not cleaned:
-        return None
-    return cleaned[:limit]
 
 
 def _actor_name(actor_user_id) -> str | None:

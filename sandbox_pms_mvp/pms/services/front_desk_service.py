@@ -26,6 +26,7 @@ from ..models import (
     User,
     utc_now,
 )
+from ..normalization import clean_optional, normalize_email, normalize_phone
 from ..pricing import get_setting_value, quote_reservation
 from .ical_service import calendar_timezone, room_has_external_block
 from .cashier_service import (
@@ -50,10 +51,7 @@ from .staff_reservations_service import (
     _reservation_inventory_rows,
     assign_room,
     build_reservation_summary,
-    clean_optional,
     get_reservation_detail,
-    normalize_email,
-    normalize_phone,
     payment_summary,
 )
 

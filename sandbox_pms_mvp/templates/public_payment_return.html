@@ -29,9 +29,9 @@
     <p class="muted">{{ hotel_support_contact_text }}</p>
     <div class="actions">
       {% if payment_request.status in ['pending', 'failed'] %}
-      <a class="button" href="{{ payment_entry_url }}">{{ t('payment_pay_deposit') }}</a>
+      <a class="button" href="{{ payment_entry_url }}" data-analytics-event="cta_click" data-analytics-label="retry_payment" data-analytics-context="payment_return">{{ t('payment_pay_deposit') }}</a>
       {% endif %}
-      <a class="button secondary" href="{{ url_for('booking_confirmation', reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}">{{ t('confirmation_title') }}</a>
+      <a class="button secondary" href="{{ url_for('booking_confirmation', reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="view_confirmation" data-analytics-context="payment_return">{{ t('confirmation_title') }}</a>
     </div>
   </section>
 </div>

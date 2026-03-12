@@ -52,6 +52,8 @@ Before running commands, detect the actual toolchain from the repo:
 After non-trivial changes, run the relevant available checks:
 
 - tests through `python -m pytest`
+- `python scripts/launch_gate.py` for guest-facing launch, contact, metadata, or operational-readiness work
+- `python scripts/launch_gate.py --strict-launch` before release sign-off when launch readiness is the actual question
 - targeted test modules for the touched flow when that is faster or safer
 - additional lint, typecheck, or build commands only if they actually exist in the repo
 

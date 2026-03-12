@@ -919,6 +919,39 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert "https://hotel.example/static/hotel-share.svg" in body
 
 
+def test_public_pages_render_analytics_and_consent_hooks(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get("/?lang=en")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "public-site.js" in body
+    assert 'data-consent-banner' in body
+    assert 'data-consent-action="grant"' in body
+    assert 'data-consent-action="deny"' in body
+    assert 'data-consent-open' in body
+    assert 'data-analytics-event="booking_request_submit"' in body
+    assert 'data-analytics-event="cta_click"' in body
+
+
+def test_public_site_script_exposes_expected_event_taxonomy(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get("/static/public-site.js")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "dataLayer" in body
+    assert "cta_click" in body
+    assert "booking_request_submit" in body
+    assert "contact_click" in body
+    assert "gallery_interaction" in body
+    assert "consent_update" in body
+
+
 def test_robots_route_includes_dynamic_sitemap_url(app_factory):
     app = app_factory(seed=True, config={"APP_BASE_URL": "https://hotel.example"})
     client = app.test_client()

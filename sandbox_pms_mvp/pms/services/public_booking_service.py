@@ -31,6 +31,7 @@ from ..models import (
     RoomType,
     utc_now,
 )
+from ..normalization import clean_optional, normalize_email, normalize_phone
 from ..pricing import QuoteResult, get_setting_value, quote_reservation
 from .admin_service import assert_blackout_allows_booking, policy_text, render_notification_template
 from .communication_service import (
@@ -65,13 +66,6 @@ def as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _clean_text(value: str | None, *, limit: int | None = None) -> str | None:
-    cleaned = (value or "").strip()
-    if not cleaned:
-        return None
-    return cleaned[:limit] if limit else cleaned
-
-
 def _clean_string_list(value, *, item_limit: int, max_items: int) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -80,7 +74,7 @@ def _clean_string_list(value, *, item_limit: int, max_items: int) -> list[str]:
     for raw_item in value:
         if not isinstance(raw_item, str):
             continue
-        cleaned = _clean_text(raw_item, limit=item_limit)
+        cleaned = clean_optional(raw_item, limit=item_limit)
         if not cleaned:
             continue
         key = cleaned.casefold()
@@ -97,9 +91,9 @@ def build_room_type_content(room_type: RoomType) -> dict[str, object]:
     media_urls = _clean_string_list(room_type.media_urls, item_limit=500, max_items=12)
     amenities = _clean_string_list(room_type.amenities, item_limit=120, max_items=16)
     policy_callouts = _clean_string_list(room_type.policy_callouts, item_limit=200, max_items=8)
-    summary = _clean_text(room_type.summary, limit=280)
-    description = _clean_text(room_type.description, limit=5000)
-    bed_details = _clean_text(room_type.bed_details, limit=255)
+    summary = clean_optional(room_type.summary, limit=280)
+    description = clean_optional(room_type.description, limit=5000)
+    bed_details = clean_optional(room_type.bed_details, limit=255)
 
     if not summary:
         if description and description != bed_details:
@@ -183,15 +177,6 @@ def stay_dates(check_in_date: date, check_out_date: date) -> list[date]:
         nights.append(cursor)
         cursor += timedelta(days=1)
     return nights
-
-
-def normalize_email(value: str | None) -> str | None:
-    return (value or "").strip().lower() or None
-
-
-def normalize_phone(value: str | None) -> str | None:
-    raw = "".join(ch for ch in (value or "") if ch.isdigit() or ch == "+").strip()
-    return raw or None
 
 
 def mask_contact(value: str | None) -> str | None:

@@ -49,7 +49,7 @@
     <article class="card booking-form-card">
       <div class="card-head"><div><p class="eyebrow">{{ t('complete_booking_title') }}</p><h2>{{ hotel_name }}</h2></div></div>
       <p class="muted">{{ hotel_support_contact_text }}</p>
-      <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post">
+      <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post" data-analytics-event="booking_request_submit" data-analytics-step="booking_confirm" data-analytics-label="booking_confirm_form">
         {{ csrf_input() }}
         <input type="hidden" name="hold_code" value="{{ hold.hold_code }}">
         <input type="hidden" name="idempotency_key" value="{{ hold.idempotency_key }}">
@@ -76,7 +76,7 @@
         <fieldset class="subsection">
           <legend>{{ t('extras_title') }}</legend>
           <p class="muted">{{ t('extras_selection_help') }}</p>
-          <div class="list-stack compact" id="booking-extra-options">
+          <div class="list-stack compact" id="booking-extra-options" data-booking-extras="true">
             {% for extra in booking_extras %}
             <label class="card inset toggle-row">
               <span>
@@ -149,13 +149,13 @@
         <div><small>{{ t('room_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
         <div><small>{{ t('tax_label') }}</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
         <div><small>{{ t('extras_summary_label') }}</small><strong id="extras-total-value">{{ currency }} {{ extras_total|money }}</strong></div>
-        <div><small>{{ t('grand_total_label') }}</small><strong id="grand-total-value" data-base-total="{{ hold.quoted_grand_total }}">{{ currency }} {{ grand_total_with_extras|money }}</strong></div>
+        <div><small>{{ t('grand_total_label') }}</small><strong id="grand-total-value" data-base-total="{{ hold.quoted_grand_total }}" data-currency="{{ currency }}">{{ currency }} {{ grand_total_with_extras|money }}</strong></div>
         <div><small>{{ t('terms_version_label') }}</small><strong>{{ published_terms_version }}</strong></div>
       </div>
       {% if booking_extras %}
       <div class="subsection">
         <h3>{{ t('extras_summary_label') }}</h3>
-        <div class="list-stack compact" id="selected-extras-summary">
+        <div class="list-stack compact" id="selected-extras-summary" data-empty-text="{{ t('extras_none_selected') }}" data-currency="{{ currency }}">
           {% for line in selected_extras_quote %}
           <div class="list-row no-link">
             <div>
@@ -183,52 +183,4 @@
     </article>
   </section>
 </div>
-{% if booking_extras %}
-<script>
-  (() => {
-    const optionInputs = Array.from(document.querySelectorAll('input[name="extra_ids"]'));
-    if (!optionInputs.length) {
-      return;
-    }
-    const formatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const extrasTotalValue = document.getElementById('extras-total-value');
-    const grandTotalValue = document.getElementById('grand-total-value');
-    const summaryContainer = document.getElementById('selected-extras-summary');
-    const baseTotal = Number(grandTotalValue?.dataset.baseTotal || '0');
-
-    const render = () => {
-      const selected = optionInputs.filter((input) => input.checked);
-      const extrasTotal = selected.reduce((sum, input) => sum + Number(input.dataset.extraTotal || '0'), 0);
-      if (extrasTotalValue) {
-        extrasTotalValue.textContent = '{{ currency }} ' + formatter.format(extrasTotal);
-      }
-      if (grandTotalValue) {
-        grandTotalValue.textContent = '{{ currency }} ' + formatter.format(baseTotal + extrasTotal);
-      }
-      if (!summaryContainer) {
-        return;
-      }
-      if (!selected.length) {
-        summaryContainer.innerHTML = '<p class="muted" id="no-extras-selected">{{ t("extras_none_selected") }}</p>';
-        return;
-      }
-      summaryContainer.innerHTML = selected.map((input) => {
-        const total = formatter.format(Number(input.dataset.extraTotal || '0'));
-        return `
-          <div class="list-row no-link">
-            <div>
-              <strong>${input.dataset.extraName || ''}</strong>
-              <p class="small muted">${input.dataset.extraPricing || ''}</p>
-            </div>
-            <strong>{{ currency }} ${total}</strong>
-          </div>
-        `;
-      }).join('');
-    };
-
-    optionInputs.forEach((input) => input.addEventListener('change', render));
-    render();
-  })();
-</script>
-{% endif %}
 {% endblock %}

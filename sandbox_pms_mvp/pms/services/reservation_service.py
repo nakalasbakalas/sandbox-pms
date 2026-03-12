@@ -25,6 +25,7 @@ from ..models import (
     RoomType,
     utc_now,
 )
+from ..normalization import clean_optional_text, normalize_email, normalize_phone
 from ..pricing import get_setting_value, quote_reservation
 from .admin_service import assert_blackout_allows_booking
 from .ical_service import room_has_external_block
@@ -209,7 +210,7 @@ def validate_payload(payload: ReservationCreatePayload) -> None:
         raise ValueError("Guest first and last name are required.")
     if len(payload.first_name) > 80 or len(payload.last_name) > 80:
         raise ValueError("Guest name fields are too long.")
-    normalized_phone = normalize_phone(payload.phone)
+    normalized_phone = normalize_phone(payload.phone, limit=32)
     if not normalized_phone:
         raise ValueError("A valid phone number is required.")
     payload.phone = normalized_phone
@@ -389,25 +390,6 @@ def reservation_snapshot(reservation: Reservation) -> dict:
         "quoted_extras_total": str(getattr(reservation, "quoted_extras_total", 0)),
         "quoted_grand_total": str(reservation.quoted_grand_total),
     }
-
-
-def normalize_email(value: str | None) -> str | None:
-    normalized = (value or "").strip().lower()
-    return normalized or None
-
-
-def normalize_phone(value: str | None) -> str | None:
-    raw = "".join(ch for ch in (value or "") if ch.isdigit() or ch == "+").strip()
-    return raw[:32] or None
-
-
-def clean_optional_text(value: str | None, *, limit: int) -> str | None:
-    cleaned = (value or "").strip()
-    if not cleaned:
-        return None
-    if len(cleaned) > limit:
-        raise ValueError("Free-text input is too long.")
-    return cleaned
 
 
 def _stay_dates(check_in_date: date, check_out_date: date):

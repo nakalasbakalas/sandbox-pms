@@ -23,7 +23,7 @@ from ..models import (
     User,
     utc_now,
 )
-from .staff_reservations_service import clean_optional
+from ..normalization import clean_optional
 
 
 READY_HOUSEKEEPING_CODES = {"clean", "inspected"}

@@ -12,7 +12,7 @@
 
   <section class="grid two gap-lg">
     <article class="card">
-      <form class="stack-form" method="post">
+      <form class="stack-form" method="post" data-analytics-event="booking_request_submit" data-analytics-step="cancellation_request" data-analytics-label="cancellation_form">
         {{ csrf_input() }}
         <label><span>{{ t('booking_reference_label') }}</span><input type="text" name="booking_reference" value="{{ form_defaults.booking_reference }}" maxlength="20" autocomplete="off" required></label>
         <label><span>{{ t('contact_value_label') }}</span><input type="text" name="contact_value" value="{{ form_defaults.contact_value }}" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>

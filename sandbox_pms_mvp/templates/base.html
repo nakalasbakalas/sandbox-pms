@@ -42,7 +42,15 @@
     }
   </style>
 </head>
-<body class="{% if is_public_site %}public-site{% endif %}{% if request.endpoint %} route-{{ request.endpoint|replace('.', '-')|replace('_', '-') }}{% endif %}">
+<body
+  class="{% if is_public_site %}public-site{% endif %}{% if request.endpoint %} route-{{ request.endpoint|replace('.', '-')|replace('_', '-') }}{% endif %}"
+  data-analytics-language="{{ current_language }}"
+  data-analytics-endpoint="{{ request.endpoint or '' }}"
+  data-analytics-path="{{ request.path }}"
+  data-analytics-source-channel="{{ booking_attribution.source_channel or '' }}"
+  data-analytics-consent-saved="{{ t('consent_saved') }}"
+  data-analytics-consent="pending"
+>
   <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
   <header class="site-header{% if is_public_site %} public-header{% endif %}">
     <div class="container topbar{% if is_public_site %} public-topbar{% endif %}">
@@ -60,18 +68,18 @@
         </a>
         <small class="brand-contact">
           {% if hotel_contact_phone %}
-            {% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}
+            {% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}" data-analytics-label="header_phone" data-analytics-context="header_contact">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}
           {% endif %}
           {% if hotel_contact_phone and hotel_contact_email %}<span class="contact-separator">/</span>{% endif %}
           {% if hotel_contact_email %}
-            {% if hotel_contact_email_href %}<a class="contact-link subtle" href="{{ hotel_contact_email_href }}">{{ hotel_contact_email }}</a>{% else %}{{ hotel_contact_email }}{% endif %}
+            {% if hotel_contact_email_href %}<a class="contact-link subtle" href="{{ hotel_contact_email_href }}" data-analytics-label="header_email" data-analytics-context="header_contact">{{ hotel_contact_email }}</a>{% else %}{{ hotel_contact_email }}{% endif %}
           {% endif %}
         </small>
       </div>
       <nav class="topnav{% if is_public_site %} public-topnav{% endif %}">
-        <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}">{{ t('search_title') }}</a>
-        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}">{{ t('nav_cancel') }}</a>
-        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}">{{ t('nav_modify') }}</a>
+        <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
         {% if staff_logged_in %}
           {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
           {% if can('provider.dashboard.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
@@ -111,6 +119,18 @@
     {% block content %}{% endblock %}
   </main>
   {% if is_public_site %}
+  <section class="consent-banner card" data-consent-banner hidden aria-label="{{ t('consent_title') }}">
+    <div class="consent-copy">
+      <p class="eyebrow">{{ hotel_name }}</p>
+      <h2>{{ t('consent_title') }}</h2>
+      <p>{{ t('consent_body') }}</p>
+      <p class="muted consent-status" data-consent-status aria-live="polite"></p>
+    </div>
+    <div class="actions consent-actions">
+      <button type="button" class="button secondary" data-consent-action="deny">{{ t('consent_decline') }}</button>
+      <button type="button" class="button" data-consent-action="grant">{{ t('consent_accept') }}</button>
+    </div>
+  </section>
   <footer class="site-footer{% if is_public_site %} public-footer{% endif %}">
     <div class="container footer-shell{% if is_public_site %} public-footer-shell{% endif %}">
       <div class="footer-copy">
@@ -119,21 +139,21 @@
         {% if hotel_address %}<p class="footer-meta">{{ hotel_address }}</p>{% endif %}
         {% if is_public_site %}
         <div class="actions footer-actions">
-          <a class="button" href="{{ url_for('booking_entry', lang=current_language) }}">{{ t('search_title') }}</a>
+          <a class="button" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="footer_search" data-analytics-context="footer_cta">{{ t('search_title') }}</a>
         </div>
         {% endif %}
       </div>
       <div class="footer-links">
         {% if hotel_contact_phone %}
           {% if hotel_contact_phone_href %}
-            <a class="contact-link subtle" href="{{ hotel_contact_phone_href }}">{{ hotel_contact_phone }}</a>
+            <a class="contact-link subtle" href="{{ hotel_contact_phone_href }}" data-analytics-label="footer_phone" data-analytics-context="footer_contact">{{ hotel_contact_phone }}</a>
           {% else %}
             <span>{{ hotel_contact_phone }}</span>
           {% endif %}
         {% endif %}
         {% if hotel_contact_email %}
           {% if hotel_contact_email_href %}
-            <a class="contact-link subtle" href="{{ hotel_contact_email_href }}">{{ hotel_contact_email }}</a>
+            <a class="contact-link subtle" href="{{ hotel_contact_email_href }}" data-analytics-label="footer_email" data-analytics-context="footer_contact">{{ hotel_contact_email }}</a>
           {% else %}
             <span>{{ hotel_contact_email }}</span>
           {% endif %}
@@ -141,9 +161,11 @@
         {% if site_base_url %}
           <a class="contact-link subtle" href="{{ site_base_url }}">{{ site_base_url }}</a>
         {% endif %}
+        <button type="button" class="button-link contact-link subtle consent-manage-button" data-consent-open>{{ t('consent_manage') }}</button>
       </div>
     </div>
   </footer>
+  <script src="{{ url_for('static', filename='public-site.js') }}" defer></script>
   {% endif %}
 </body>
 </html>
