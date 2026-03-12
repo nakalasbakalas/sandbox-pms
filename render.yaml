@@ -7,6 +7,7 @@ services:
     autoDeployTrigger: checksPass
     healthCheckPath: /health
     buildCommand: pip install -r requirements.txt
+    preDeployCommand: flask --app app db upgrade
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
     domains:
       - book.sandboxhotel.com
@@ -19,6 +20,8 @@ services:
       - key: PREFERRED_URL_SCHEME
         value: https
       - key: FORCE_HTTPS
+        value: "1"
+      - key: TRUST_PROXY_COUNT
         value: "1"
       - key: ENFORCE_CANONICAL_HOSTS
         value: "1"
@@ -37,10 +40,16 @@ services:
       - key: TRUSTED_HOSTS
         value: book.sandboxhotel.com,staff.sandboxhotel.com
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: sandbox-hotel-pms-db
+          property: connectionString
       - key: SECRET_KEY
         sync: false
       - key: AUTH_ENCRYPTION_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
         sync: false
       - key: SMTP_HOST
         sync: false
@@ -52,6 +61,10 @@ services:
         sync: false
       - key: PAYMENT_PROVIDER
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
 
 databases:
   - name: sandbox-hotel-pms-db
@@ -60,7 +73,3 @@ databases:
     databaseName: sandbox_hotel_pms
     user: sandbox_hotel_pms
     postgresMajorVersion: "17"
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false

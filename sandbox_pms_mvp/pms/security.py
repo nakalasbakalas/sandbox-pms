@@ -185,6 +185,10 @@ def _validate_runtime_configuration(app: Flask) -> None:
         raise RuntimeError("SESSION_COOKIE_SECURE must be enabled in production.")
     if not bool(app.config.get("FORCE_HTTPS")):
         raise RuntimeError("FORCE_HTTPS must be enabled in production.")
+    if not str(app.config.get("ADMIN_EMAIL") or "").strip():
+        raise RuntimeError("ADMIN_EMAIL is required in production.")
+    if not str(app.config.get("ADMIN_PASSWORD") or "").strip():
+        raise RuntimeError("ADMIN_PASSWORD is required in production.")
     if bool(app.config.get("AUTO_BOOTSTRAP_SCHEMA")):
         raise RuntimeError("AUTO_BOOTSTRAP_SCHEMA must be disabled in production.")
     if bool(app.config.get("AUTO_SEED_REFERENCE_DATA")):

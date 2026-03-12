@@ -138,6 +138,29 @@ def test_render_database_url_is_normalized_for_psycopg(monkeypatch):
     importlib.reload(config_module)
 
 
+def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
+    monkeypatch.setenv("TRUSTED_HOSTS", "book.example.com,staff.example.com")
+    monkeypatch.setenv("APP_BASE_URL", "https://book.example.com")
+    monkeypatch.setenv("BOOKING_ENGINE_URL", "https://book.example.com")
+    monkeypatch.setenv("STAFF_APP_URL", "https://staff.example.com")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://sandbox-pms-v43m.onrender.com")
+
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.TRUSTED_HOSTS == [
+        "book.example.com",
+        "staff.example.com",
+        "sandbox-pms-v43m.onrender.com",
+    ]
+
+    monkeypatch.delenv("TRUSTED_HOSTS", raising=False)
+    monkeypatch.delenv("APP_BASE_URL", raising=False)
+    monkeypatch.delenv("BOOKING_ENGINE_URL", raising=False)
+    monkeypatch.delenv("STAFF_APP_URL", raising=False)
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+    importlib.reload(config_module)
+
+
 def test_security_headers_and_session_cookie_flags_are_present(app_factory):
     app = app_factory(
         config={

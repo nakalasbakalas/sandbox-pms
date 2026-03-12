@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,6 +18,28 @@ def _normalize_database_uri(value: str | None) -> str:
     if raw.startswith("postgres://"):
         return f"postgresql+psycopg://{raw.removeprefix('postgres://')}"
     return raw
+
+
+def _normalized_host_candidate(value: str | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+    host = (parsed.hostname or "").strip().lower()
+    return host or None
+
+
+def _build_trusted_hosts(*values: str | None, existing: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    hosts: list[str] = []
+    for item in existing or []:
+        host = _normalized_host_candidate(item)
+        if host and host not in hosts:
+            hosts.append(host)
+    for item in values:
+        host = _normalized_host_candidate(item)
+        if host and host not in hosts:
+            hosts.append(host)
+    return hosts
 
 
 class Config:
@@ -37,7 +60,14 @@ class Config:
     APPLICATION_ROOT = os.getenv("APPLICATION_ROOT", "/")
     FORCE_HTTPS = os.getenv("FORCE_HTTPS", "1" if APP_ENV == "production" else "0") == "1"
     TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0"))
-    _trusted_hosts_raw = [item.strip().lower() for item in os.getenv("TRUSTED_HOSTS", "").split(",") if item.strip()]
+    _trusted_hosts_raw = _build_trusted_hosts(
+        os.getenv("APP_BASE_URL"),
+        os.getenv("BOOKING_ENGINE_URL"),
+        os.getenv("STAFF_APP_URL"),
+        os.getenv("MARKETING_SITE_URL"),
+        RENDER_EXTERNAL_URL,
+        existing=os.getenv("TRUSTED_HOSTS", "").split(","),
+    )
     TRUSTED_HOSTS = _trusted_hosts_raw or None
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     ENABLE_ACCESS_LOGGING = os.getenv("ENABLE_ACCESS_LOGGING", "1") == "1"
@@ -136,6 +166,22 @@ def normalize_runtime_config(config: dict, *, override_keys: set[str] | None = N
         "STAFF_APP_URL" not in override_keys and {"APP_BASE_URL", "BOOKING_ENGINE_URL"}.intersection(override_keys)
     ):
         config["STAFF_APP_URL"] = booking_engine_url
+
+    should_infer_trusted_hosts = bool(config.get("TRUSTED_HOSTS")) or bool(RENDER_EXTERNAL_URL) or str(
+        config.get("APP_ENV", "")
+    ).lower() in {"production", "staging"}
+    if should_infer_trusted_hosts:
+        config["TRUSTED_HOSTS"] = (
+            _build_trusted_hosts(
+                config.get("APP_BASE_URL"),
+                config.get("BOOKING_ENGINE_URL"),
+                config.get("STAFF_APP_URL"),
+                config.get("MARKETING_SITE_URL"),
+                RENDER_EXTERNAL_URL,
+                existing=config.get("TRUSTED_HOSTS") or [],
+            )
+            or None
+        )
 
     if "SQLALCHEMY_DATABASE_URI" in config:
         config["SQLALCHEMY_DATABASE_URI"] = _normalize_database_uri(config.get("SQLALCHEMY_DATABASE_URI"))

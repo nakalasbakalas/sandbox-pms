@@ -1826,13 +1826,13 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping")
     def staff_housekeeping():
         user = require_permission("housekeeping.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         filters = HousekeepingBoardFilters(
             business_date=target_date,
             floor=request.args.get("floor", ""),
             status=request.args.get("status", ""),
             priority=request.args.get("priority", ""),
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             arrival_today=request.args.get("arrival_today", ""),
             departure_today=request.args.get("departure_today", ""),
             blocked=request.args.get("blocked", ""),
@@ -1854,13 +1854,16 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping/rooms/<uuid:room_id>")
     def staff_housekeeping_room_detail(room_id):
         user = require_permission("housekeeping.view")
-        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        business_date = parse_request_date_arg("date", default=date.today())
         detail = get_housekeeping_room_detail(room_id, business_date=business_date, actor_user=user)
         return render_template(
             "housekeeping_room_detail.html",
             detail=detail,
             business_date=business_date,
-            back_url=request.args.get("back") or url_for("staff_housekeeping", date=business_date.isoformat()),
+            back_url=safe_back_path(
+                request.args.get("back"),
+                url_for("staff_housekeeping", date=business_date.isoformat()),
+            ),
             housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
             room_note_types=ROOM_NOTE_TYPES,
             can_manage_controls=user.primary_role in {"admin", "manager"},
@@ -1979,11 +1982,11 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk")
     def staff_front_desk():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         filters = FrontDeskFilters(
             business_date=target_date,
             mode=request.args.get("mode", "arrivals"),
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             assigned=request.args.get("assigned", ""),
             ready=request.args.get("ready", ""),
             payment_state=request.args.get("payment_state", ""),
@@ -2139,14 +2142,14 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/<uuid:reservation_id>")
     def staff_front_desk_detail(reservation_id):
         require_permission("reservation.view")
-        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        business_date = parse_request_date_arg("date", default=date.today())
         detail = get_front_desk_detail(reservation_id, business_date=business_date)
         checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
         return render_template(
             "front_desk_detail.html",
             detail=detail,
             checkout_prep=checkout_prep,
-            back_url=request.args.get("back") or url_for("staff_front_desk"),
+            back_url=safe_back_path(request.args.get("back"), url_for("staff_front_desk")),
             business_date=business_date,
             can_folio=can("folio.view"),
             can_charge=can("folio.charge_add"),
@@ -2259,16 +2262,19 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/cashier/<uuid:reservation_id>")
     def staff_cashier_detail(reservation_id):
         require_permission("folio.view")
-        auto_post_until = request.args.get("auto_post_until")
+        auto_post_until = parse_request_date_arg("auto_post_until", default=None)
         detail = get_cashier_detail(
             reservation_id,
             auto_post_room_charges=request.args.get("auto_post") == "1",
-            auto_post_through=date.fromisoformat(auto_post_until) if auto_post_until else None,
+            auto_post_through=auto_post_until,
         )
         return render_template(
             "cashier_folio.html",
             detail=detail,
-            back_url=request.args.get("back") or url_for("staff_reservation_detail", reservation_id=reservation_id),
+            back_url=safe_back_path(
+                request.args.get("back"),
+                url_for("staff_reservation_detail", reservation_id=reservation_id),
+            ),
             can_adjust=can("folio.adjust"),
             can_charge=can("folio.charge_add"),
             can_payment=can("payment.create"),
@@ -2450,18 +2456,20 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations")
     def staff_reservations():
         require_permission("reservation.view")
+        arrival_date = parse_request_date_arg("arrival_date", default=None)
+        departure_date = parse_request_date_arg("departure_date", default=None)
         filters = ReservationWorkspaceFilters(
             q=(request.args.get("q") or "").strip(),
             status=request.args.get("status", ""),
-            room_type_id=request.args.get("room_type_id", ""),
-            arrival_date=request.args.get("arrival_date", ""),
-            departure_date=request.args.get("departure_date", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
+            arrival_date=arrival_date.isoformat() if arrival_date else "",
+            departure_date=departure_date.isoformat() if departure_date else "",
             payment_state=request.args.get("payment_state", ""),
             booking_source=request.args.get("booking_source", ""),
             review_status=request.args.get("review_status", ""),
             assigned=request.args.get("assigned", ""),
             include_closed=request.args.get("include_closed") == "1",
-            page=int(request.args.get("page", 1)),
+            page=parse_request_int_arg("page", default=1, minimum=1),
             per_page=25,
         )
         result = list_reservations(filters)
@@ -2480,10 +2488,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/arrivals")
     def staff_reservation_arrivals():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_arrivals(
             arrival_date=target_date,
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             payment_state=request.args.get("payment_state", ""),
             assigned=request.args.get("assigned", ""),
         )
@@ -2501,10 +2509,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/departures")
     def staff_reservation_departures():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_departures(
             departure_date=target_date,
-            room_type_id=request.args.get("room_type_id", ""),
+            room_type_id=parse_request_uuid_arg("room_type_id") or "",
             payment_state=request.args.get("payment_state", ""),
         )
         return render_template(
@@ -2521,7 +2529,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/in-house")
     def staff_reservation_in_house():
         require_permission("reservation.view")
-        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
+        target_date = parse_request_date_arg("date", default=date.today())
         items = list_in_house(business_date=target_date)
         return render_template(
             "staff_operational_list.html",
@@ -2602,7 +2610,7 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "reservation_detail.html",
             detail=detail,
-            back_url=request.args.get("back") or url_for("staff_reservations"),
+            back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations")),
             today=date.today(),
             can_folio=can("folio.view"),
         )
@@ -2741,10 +2749,11 @@ def register_routes(app: Flask) -> None:
             return redirect(url_for("staff_review_queue"))
 
         query = ReservationReviewQueue.query.join(Reservation, Reservation.id == ReservationReviewQueue.reservation_id)
+        arrival_date = parse_request_date_arg("arrival_date", default=None)
         if request.args.get("status"):
             query = query.filter(ReservationReviewQueue.review_status == request.args["status"])
-        if request.args.get("arrival_date"):
-            query = query.filter(Reservation.check_in_date == date.fromisoformat(request.args["arrival_date"]))
+        if arrival_date:
+            query = query.filter(Reservation.check_in_date == arrival_date)
         if request.args.get("booking_source"):
             query = query.filter(Reservation.source_channel == request.args["booking_source"])
         if request.args.get("deposit_state"):
