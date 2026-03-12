@@ -46,7 +46,12 @@ from .extras_service import (
     reservation_extra_summary,
 )
 from .ical_service import room_has_external_block
-from .reservation_service import calculate_deposit_required, reservation_snapshot, validate_occupancy
+from .reservation_service import (
+    calculate_deposit_required,
+    inventory_row_can_allocate,
+    reservation_snapshot,
+    validate_occupancy,
+)
 
 
 @dataclass
@@ -85,6 +90,7 @@ class StayDateChangePayload:
     adults: int
     children: int
     extra_guests: int
+    requested_room_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -521,7 +527,7 @@ def change_stay_dates(
         room_type_id=reservation.room_type_id,
         check_in_date=payload.check_in_date,
         check_out_date=payload.check_out_date,
-        requested_room_id=reservation.assigned_room_id,
+        requested_room_id=payload.requested_room_id or reservation.assigned_room_id,
         include_current_reservation_rows=True,
     )
     current_rows = _reservation_inventory_rows(reservation.id)
@@ -621,6 +627,9 @@ def assign_room(
     if room.room_type_id != reservation.room_type_id:
         raise ValueError("Room assignment must stay within the booked room type.")
 
+    if reservation.assigned_room_id == room.id:
+        return reservation
+
     effective_start = max(date.today(), reservation.check_in_date) if reservation.current_status == "checked_in" else reservation.check_in_date
     if effective_start >= reservation.check_out_date:
         raise ValueError("No future inventory remains to reassign.")
@@ -630,11 +639,25 @@ def assign_room(
         raise ValueError("Selected room is blocked by an external calendar sync.")
     if len(target_rows) != (reservation.check_out_date - effective_start).days:
         raise ValueError("Selected room is not available for the full remaining stay.")
-    if not all(row.is_sellable and row.availability_status == "available" for row in target_rows):
+    if not all(inventory_row_can_allocate(row) for row in target_rows):
         raise ValueError("Selected room is not available for the full remaining stay.")
 
     before_data = reservation_snapshot(reservation)
-    rate_lookup = {row.business_date: row.nightly_rate for row in current_rows}
+    if current_rows:
+        rate_lookup = {row.business_date: row.nightly_rate for row in current_rows}
+    else:
+        quote = quote_reservation(
+            room_type=reservation.room_type,
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+            adults=reservation.adults + reservation.extra_guests,
+            children=reservation.children,
+        )
+        rate_lookup = {
+            business_date: nightly_rate
+            for business_date, nightly_rate in quote.nightly_rates
+            if business_date >= effective_start
+        }
     for row in current_rows:
         row.availability_status = "available"
         row.reservation_id = None
@@ -968,12 +991,15 @@ def _eligible_room_list(
         if len(rows) != (check_out_date - check_in_date).days:
             continue
         if all(
-            row.is_sellable and (
-                row.availability_status == "available"
+            (
+                inventory_row_can_allocate(row)
                 or (
                     include_current_reservation_rows
                     and row.reservation_id == reservation.id
-                    and row.availability_status in {"reserved", "occupied"}
+                    and row.is_sellable
+                    and not row.is_blocked
+                    and not row.maintenance_flag
+                    and row.availability_status in {"reserved", "occupied", "house_use"}
                 )
             )
             for row in rows
@@ -1002,7 +1028,7 @@ def _find_eligible_room(
         for room in rooms:
             if room.id == requested_room_id:
                 return room
-        raise ValueError("The current room is not available for the requested stay.")
+        raise ValueError("The requested room is not available for the requested stay.")
     if not rooms:
         raise ValueError("No eligible room is available for the requested change.")
     current_room = next((room for room in rooms if room.id == reservation.assigned_room_id), None)
@@ -1051,7 +1077,7 @@ def _allocate_inventory_range(
     if len(rows) != len(rate_lookup):
         raise ValueError("Inventory horizon is incomplete for the requested stay.")
     for row in rows:
-        if row.availability_status != "available" or not row.is_sellable:
+        if not inventory_row_can_allocate(row):
             raise ValueError("Inventory could not be allocated without conflict.")
         row.availability_status = "occupied" if reservation.current_status == "checked_in" else "reserved"
         row.reservation_id = reservation.id

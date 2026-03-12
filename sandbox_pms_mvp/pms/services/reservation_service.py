@@ -52,6 +52,7 @@ class ReservationCreatePayload:
     request_payment: bool = False
     request_type: str = "deposit"
     initial_status: str | None = None
+    defer_room_assignment: bool = False
 
 
 def create_reservation(payload: ReservationCreatePayload, actor_user_id: uuid.UUID | None = None) -> Reservation:
@@ -78,12 +79,14 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         adults=payload.adults + payload.extra_guests,
         children=payload.children,
     )
-    assigned_room = choose_available_room(
-        room_type_id=room_type.id,
-        check_in_date=payload.check_in_date,
-        check_out_date=payload.check_out_date,
-        assigned_room_id=payload.assigned_room_id,
-    )
+    assigned_room = None
+    if not payload.defer_room_assignment:
+        assigned_room = choose_available_room(
+            room_type_id=room_type.id,
+            check_in_date=payload.check_in_date,
+            check_out_date=payload.check_out_date,
+            assigned_room_id=payload.assigned_room_id,
+        )
     reservation_code = next_reservation_code()
     deposit_required = calculate_deposit_required(payload.check_in_date, payload.check_out_date, quote.grand_total)
     requested_status = (payload.initial_status or "").strip() or None
@@ -94,7 +97,7 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         reservation_code=reservation_code,
         primary_guest_id=guest.id,
         room_type_id=room_type.id,
-        assigned_room_id=assigned_room.id,
+        assigned_room_id=assigned_room.id if assigned_room else None,
         current_status=current_status,
         source_channel=payload.source_channel,
         check_in_date=payload.check_in_date,
@@ -116,12 +119,13 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
     )
     db.session.add(reservation)
     db.session.flush()
-    allocate_inventory(
-        reservation=reservation,
-        room=assigned_room,
-        nightly_rates=quote.nightly_rates,
-        actor_user_id=actor_user_id,
-    )
+    if assigned_room:
+        allocate_inventory(
+            reservation=reservation,
+            room=assigned_room,
+            nightly_rates=quote.nightly_rates,
+            actor_user_id=actor_user_id,
+        )
     db.session.add(
         ReservationStatusHistory(
             reservation_id=reservation.id,
@@ -223,6 +227,10 @@ def validate_payload(payload: ReservationCreatePayload) -> None:
     payload.initial_status = (payload.initial_status or "").strip() or None
     if payload.initial_status and payload.initial_status not in {"tentative", "confirmed", "house_use"}:
         raise ValueError("Initial status is invalid.")
+    if payload.defer_room_assignment and payload.assigned_room_id:
+        raise ValueError("Deferred room assignment cannot also target a specific room.")
+    if payload.defer_room_assignment and payload.initial_status == "house_use":
+        raise ValueError("House-use reservations must have an assigned room.")
     payload.special_requests = clean_optional_text(payload.special_requests, limit=500)
     payload.internal_notes = clean_optional_text(payload.internal_notes, limit=2000)
     if payload.adults < 1:
@@ -297,7 +305,7 @@ def choose_available_room(
         )
         if len(rows) != len(nights):
             continue
-        if all(row.availability_status == "available" and row.is_sellable for row in rows):
+        if all(inventory_row_can_allocate(row) for row in rows):
             return room
     raise ValueError("No available room could be assigned without overbooking.")
 
@@ -326,7 +334,7 @@ def allocate_inventory(reservation: Reservation, room: Room, nightly_rates, acto
     elif reservation.current_status == "house_use":
         inventory_status = "house_use"
     for row in rows:
-        if row.availability_status != "available" or not row.is_sellable:
+        if not inventory_row_can_allocate(row):
             raise ValueError("Selected room is not available for all requested nights.")
         row.availability_status = inventory_status
         row.reservation_id = reservation.id
@@ -384,12 +392,21 @@ def reservation_snapshot(reservation: Reservation) -> dict:
         "reservation_code": reservation.reservation_code,
         "status": reservation.current_status,
         "room_type_id": str(reservation.room_type_id),
-        "assigned_room_id": str(reservation.assigned_room_id),
+        "assigned_room_id": str(reservation.assigned_room_id) if reservation.assigned_room_id else None,
         "check_in_date": reservation.check_in_date.isoformat(),
         "check_out_date": reservation.check_out_date.isoformat(),
         "quoted_extras_total": str(getattr(reservation, "quoted_extras_total", 0)),
         "quoted_grand_total": str(reservation.quoted_grand_total),
     }
+
+
+def inventory_row_can_allocate(row: InventoryDay) -> bool:
+    return (
+        row.availability_status == "available"
+        and row.is_sellable
+        and not row.is_blocked
+        and not row.maintenance_flag
+    )
 
 
 def _stay_dates(check_in_date: date, check_out_date: date):

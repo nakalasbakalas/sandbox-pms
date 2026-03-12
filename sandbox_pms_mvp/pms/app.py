@@ -13,6 +13,7 @@ from flask import Flask, Response, abort, current_app, flash, g, jsonify, redire
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
+from .audit import write_audit_log
 from .branding import (
     absolute_public_url as branding_absolute_public_url,
     branding_settings_context,
@@ -49,6 +50,7 @@ from .models import (
     CalendarFeed,
     CancellationRequest,
     EmailOutbox,
+    ExternalCalendarBlock,
     ExternalCalendarSource,
     InventoryOverride,
     MfaFactor,
@@ -88,6 +90,7 @@ from .services.admin_service import (
     query_audit_entries,
     release_inventory_override,
     summarize_audit_entry,
+    update_inventory_override,
     update_role_permissions,
     upsert_blackout_period,
     upsert_notification_template,
@@ -165,6 +168,9 @@ from .services.front_desk_service import (
 from .services.front_desk_board_service import (
     FrontDeskBoardFilters,
     build_front_desk_board,
+    flatten_front_desk_blocks,
+    list_front_desk_room_groups,
+    serialize_front_desk_board,
 )
 from .services.housekeeping_service import (
     BlockRoomPayload,
@@ -186,8 +192,10 @@ from .services.ical_service import (
     create_calendar_feed,
     create_external_calendar_source,
     export_feed_ical,
+    export_front_desk_blocks_ical,
     provider_calendar_context,
     rotate_calendar_feed,
+    stage_ical_import,
     sync_all_external_calendar_sources,
     sync_external_calendar_source,
 )
@@ -2014,31 +2022,38 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/board")
     def staff_front_desk_board():
         require_permission("reservation.view")
-        start_date = parse_request_date_arg("start_date", default=date.today())
-        days = parse_request_int_arg("days", default=14, minimum=7, maximum=14)
-        if days not in {7, 14}:
-            abort(400, description="Invalid days query parameter.")
-        filters = FrontDeskBoardFilters(
-            start_date=start_date,
-            days=days,
-            q=(request.args.get("q") or "").strip(),
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
-            show_unallocated=request.args.get("show_unallocated", "1") != "0",
-            show_closed=request.args.get("show_closed") == "1",
+        filters = front_desk_board_filters_from_request()
+        return render_template("front_desk_board.html", **front_desk_board_context(filters))
+
+    @app.route("/staff/front-desk/board/fragment")
+    def staff_front_desk_board_fragment():
+        require_permission("reservation.view")
+        filters = front_desk_board_filters_from_request()
+        context = front_desk_board_context(filters)
+        return render_template("_front_desk_board_surface.html", **context)
+
+    @app.route("/staff/front-desk/board/data")
+    def staff_front_desk_board_data():
+        require_permission("reservation.view")
+        filters = front_desk_board_filters_from_request()
+        context = front_desk_board_context(filters)
+        return jsonify(
+            {
+                "filters": serialize_front_desk_board(_front_desk_filters_payload(filters)),
+                "board": serialize_front_desk_board(context["board"]),
+                "permissions": {
+                    "canCreate": context["can_create"],
+                    "canEdit": context["can_edit"],
+                    "canManageClosures": context["can_manage_closures"],
+                },
+            }
         )
-        board = build_front_desk_board(filters)
-        back_url = request.full_path.rstrip("?")
-        hydrate_front_desk_board_urls(board, back_url=back_url, board_date=start_date)
-        return render_template(
-            "front_desk_board.html",
-            board=board,
-            filters=filters,
-            room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
-            default_checkout_date=start_date + timedelta(days=1),
-            can_create=can("reservation.create"),
-            can_edit=can("reservation.edit"),
-            can_manage_closures=can("settings.edit"),
-        )
+
+    @app.route("/staff/front-desk/board/rooms")
+    def staff_front_desk_board_rooms():
+        require_permission("reservation.view")
+        room_type_id = parse_request_uuid_arg("room_type_id") or ""
+        return jsonify({"groups": list_front_desk_room_groups(room_type_id=room_type_id)})
 
     @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room", methods=["POST"])
     def staff_front_desk_board_assign_room(reservation_id):
@@ -2055,6 +2070,132 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/dates", methods=["POST"])
+    def staff_front_desk_board_change_dates(reservation_id):
+        user = require_permission("reservation.edit")
+        back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
+        try:
+            reservation = db.session.get(Reservation, reservation_id)
+            if not reservation:
+                raise ValueError("Reservation not found.")
+            change_stay_dates(
+                reservation_id,
+                StayDateChangePayload(
+                    check_in_date=date.fromisoformat(request.form["check_in_date"]),
+                    check_out_date=date.fromisoformat(request.form["check_out_date"]),
+                    adults=int(request.form.get("adults", reservation.adults)),
+                    children=int(request.form.get("children", reservation.children)),
+                    extra_guests=int(request.form.get("extra_guests", reservation.extra_guests)),
+                    requested_room_id=parse_optional_uuid(request.form.get("requested_room_id")),
+                ),
+                actor_user_id=user.id,
+            )
+            flash("Stay dates updated from the planning board.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/move", methods=["POST"])
+    def staff_front_desk_board_move_reservation(reservation_id):
+        user = require_permission("reservation.edit")
+        payload = board_request_payload()
+        before_data = _reservation_snapshot_for_audit(reservation_id)
+        try:
+            current = db.session.get(Reservation, reservation_id)
+            if not current:
+                raise ValueError("Reservation not found.")
+            requested_room_id = parse_optional_uuid(payload.get("room_id") or payload.get("roomId"))
+            new_check_in = date.fromisoformat(payload["check_in_date"] if "check_in_date" in payload else payload["checkInDate"])
+            new_check_out = date.fromisoformat(payload["check_out_date"] if "check_out_date" in payload else payload["checkOutDate"])
+            room_changed = requested_room_id != current.assigned_room_id
+            date_changed = new_check_in != current.check_in_date or new_check_out != current.check_out_date
+            if requested_room_id is None and current.assigned_room_id is not None:
+                raise ValueError("Reservations cannot be moved into the unallocated lane.")
+            if current.assigned_room_id is None and requested_room_id is None:
+                raise ValueError("Unallocated reservations must be assigned to a room before moving dates.")
+            if not room_changed and not date_changed:
+                return jsonify({"ok": True, "message": "No board change was needed."})
+            if date_changed:
+                result = change_stay_dates(
+                    reservation_id,
+                    StayDateChangePayload(
+                        check_in_date=new_check_in,
+                        check_out_date=new_check_out,
+                        adults=current.adults,
+                        children=current.children,
+                        extra_guests=current.extra_guests,
+                        requested_room_id=requested_room_id,
+                    ),
+                    actor_user_id=user.id,
+                )
+                return jsonify(
+                    {
+                        "ok": True,
+                        "message": f"Reservation moved. New total {result['new_total']:.2f} THB.",
+                    }
+                )
+            if requested_room_id is None:
+                raise ValueError("A target room is required.")
+            assign_room(
+                reservation_id,
+                requested_room_id,
+                actor_user_id=user.id,
+                reason=payload.get("reason") or payload.get("moveReason") or "front_desk_board_drag_move",
+            )
+            return jsonify({"ok": True, "message": "Room assignment updated."})
+        except Exception as exc:  # noqa: BLE001
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_move_rejected",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
+            return jsonify({"ok": False, "error": public_error_message(exc)}), 409
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/resize", methods=["POST"])
+    def staff_front_desk_board_resize_reservation(reservation_id):
+        user = require_permission("reservation.edit")
+        payload = board_request_payload()
+        before_data = _reservation_snapshot_for_audit(reservation_id)
+        try:
+            current = db.session.get(Reservation, reservation_id)
+            if not current:
+                raise ValueError("Reservation not found.")
+            if current.assigned_room_id is None:
+                raise ValueError("Assign the reservation to a room before resizing stay dates.")
+            result = change_stay_dates(
+                reservation_id,
+                StayDateChangePayload(
+                    check_in_date=date.fromisoformat(payload["check_in_date"] if "check_in_date" in payload else payload["checkInDate"]),
+                    check_out_date=date.fromisoformat(payload["check_out_date"] if "check_out_date" in payload else payload["checkOutDate"]),
+                    adults=current.adults,
+                    children=current.children,
+                    extra_guests=current.extra_guests,
+                    requested_room_id=current.assigned_room_id,
+                ),
+                actor_user_id=user.id,
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": f"Stay resized. New total {result['new_total']:.2f} THB.",
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            record_board_mutation_rejection(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_resize_rejected",
+                before_data=before_data,
+                payload=payload,
+                reason=str(exc),
+            )
+            return jsonify({"ok": False, "error": public_error_message(exc)}), 409
 
     @app.route("/staff/front-desk/board/closures", methods=["POST"])
     def staff_front_desk_board_create_closure():
@@ -2083,6 +2224,35 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
 
+    @app.route("/staff/front-desk/board/closures/<uuid:override_id>", methods=["POST"])
+    def staff_front_desk_board_update_closure(override_id):
+        user = require_permission("settings.edit")
+        back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
+        override = db.session.get(InventoryOverride, override_id)
+        room_id = UUID(request.form["room_id"]) if request.form.get("room_id") else override.room_id if override else None
+        room = db.session.get(Room, room_id) if room_id else None
+        closure_name = (request.form.get("name") or "").strip() or f"Room {room.room_number if room else ''} closure".strip()
+        try:
+            update_inventory_override(
+                override_id,
+                InventoryOverridePayload(
+                    name=closure_name,
+                    scope_type="room",
+                    override_action="close",
+                    room_id=room_id,
+                    room_type_id=None,
+                    start_date=date.fromisoformat(request.form["start_date"]),
+                    end_date=date.fromisoformat(request.form["end_date"]),
+                    reason=request.form.get("reason", ""),
+                    expires_at=parse_optional_datetime(request.form.get("expires_at")),
+                ),
+                actor_user_id=user.id,
+            )
+            flash("Room closure updated.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
+
     @app.route("/staff/front-desk/board/closures/<uuid:override_id>/release", methods=["POST"])
     def staff_front_desk_board_release_closure(override_id):
         user = require_permission("settings.edit")
@@ -2093,6 +2263,39 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+
+    @app.route("/staff/front-desk/board/export.ics")
+    def staff_front_desk_board_export_ical():
+        require_permission("reservation.view")
+        filters = front_desk_board_filters_from_request()
+        context = front_desk_board_context(filters)
+        selected_block_ids = {item for item in request.args.getlist("block_id") if item}
+        blocks = flatten_front_desk_blocks(context["board"], visible_only=request.args.get("include_hidden") != "1")
+        if selected_block_ids:
+            blocks = [block for block in blocks if block["id"] in selected_block_ids]
+        payload = export_front_desk_blocks_ical(
+            blocks,
+            calendar_name=f"Front Desk Board {context['board']['current_window_label']}",
+        )
+        response = Response(payload, mimetype="text/calendar")
+        response.headers["Content-Disposition"] = 'inline; filename="front-desk-board.ics"'
+        response.headers["Cache-Control"] = "private, max-age=60"
+        return response
+
+    @app.route("/staff/front-desk/board/import.ics", methods=["POST"])
+    def staff_front_desk_board_import_ical():
+        require_permission("reservation.edit")
+        filters = front_desk_board_filters_from_request()
+        try:
+            payload = read_ical_upload_payload()
+            report = stage_ical_import(
+                payload,
+                known_uids=set(db.session.execute(sa.select(ExternalCalendarBlock.external_uid)).scalars().all()),
+            )
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+            report = None
+        return render_template("front_desk_board.html", **front_desk_board_context(filters, ical_import_report=report))
 
     @app.route("/staff/front-desk/walk-in", methods=["POST"])
     def staff_front_desk_walk_in():
@@ -3348,37 +3551,191 @@ def add_anchor_to_path(path: str, anchor: str | None) -> str:
     return f"{base}#{fragment}"
 
 
+def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
+    start_date = parse_request_date_arg("start_date", default=date.today())
+    days = parse_request_int_arg("days", default=14, minimum=7, maximum=30)
+    if days not in {7, 14, 30}:
+        abort(400, description="Invalid days query parameter.")
+    return FrontDeskBoardFilters(
+        start_date=start_date,
+        days=days,
+        q=(request.args.get("q") or "").strip(),
+        room_type_id=parse_request_uuid_arg("room_type_id") or "",
+        show_unallocated=request.args.get("show_unallocated", "1") != "0",
+        show_closed=request.args.get("show_closed") == "1",
+    )
+
+
+def front_desk_board_context(
+    filters: FrontDeskBoardFilters,
+    *,
+    ical_import_report: dict | None = None,
+) -> dict:
+    board = build_front_desk_board(filters)
+    back_url = front_desk_board_url(filters)
+    hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
+    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    return {
+        "board": board,
+        "filters": filters,
+        "room_types": room_types,
+        "default_checkout_date": filters.start_date + timedelta(days=1),
+        "can_create": can("reservation.create"),
+        "can_edit": can("reservation.edit"),
+        "can_manage_closures": can("settings.edit"),
+        "board_url": url_for("staff_front_desk_board"),
+        "board_fragment_url": url_for("staff_front_desk_board_fragment"),
+        "board_data_url": url_for("staff_front_desk_board_data"),
+        "board_rooms_url": url_for("staff_front_desk_board_rooms"),
+        "board_export_url": url_for("staff_front_desk_board_export_ical"),
+        "board_filter_query": front_desk_board_filter_query(filters),
+        "board_current_url": back_url,
+        "ical_import_report": ical_import_report,
+    }
+
+
+def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, str]:
+    query = {
+        "start_date": filters.start_date.isoformat(),
+        "days": str(filters.days),
+        "show_unallocated": "1" if filters.show_unallocated else "0",
+    }
+    if filters.q:
+        query["q"] = filters.q
+    if filters.room_type_id:
+        query["room_type_id"] = filters.room_type_id
+    if filters.show_closed:
+        query["show_closed"] = "1"
+    return query
+
+
+def front_desk_board_url(filters: FrontDeskBoardFilters) -> str:
+    return url_for("staff_front_desk_board", **front_desk_board_filter_query(filters))
+
+
 def hydrate_front_desk_board_urls(board: dict, *, back_url: str, board_date: date) -> None:
     for group in board.get("groups", []):
         reassign_options = group.get("room_options", [])
         for row in group.get("rows", []):
-            for block in row.get("visible_blocks", []):
-                block["back_url"] = back_url
-                block["return_anchor"] = row.get("anchor_id")
-                reservation_id = block.get("reservation_id")
-                override_id = block.get("override_id")
+            for block in row.get("blocks", []):
+                block["backUrl"] = back_url
+                block["returnAnchor"] = row.get("anchor_id")
+                reservation_id = block.get("reservationId")
+                override_id = block.get("overrideId")
                 if reservation_id:
-                    block["detail_url"] = url_for(
+                    block["detailUrl"] = url_for(
                         "staff_reservation_detail",
                         reservation_id=UUID(reservation_id),
                         back=back_url,
                     )
-                    block["front_desk_url"] = url_for(
+                    block["frontDeskUrl"] = url_for(
                         "staff_front_desk_detail",
                         reservation_id=UUID(reservation_id),
                         back=back_url,
                         date=board_date.isoformat(),
                     )
-                    block["reassign_url"] = url_for(
+                    block["reassignUrl"] = url_for(
                         "staff_front_desk_board_assign_room",
                         reservation_id=UUID(reservation_id),
                     )
-                    block["reassign_options"] = reassign_options
+                    block["moveUrl"] = url_for(
+                        "staff_front_desk_board_move_reservation",
+                        reservation_id=UUID(reservation_id),
+                    )
+                    block["resizeUrl"] = url_for(
+                        "staff_front_desk_board_resize_reservation",
+                        reservation_id=UUID(reservation_id),
+                    )
+                    block["datesFormUrl"] = url_for(
+                        "staff_front_desk_board_change_dates",
+                        reservation_id=UUID(reservation_id),
+                    )
+                    block["reassignOptions"] = reassign_options
                 if override_id:
-                    block["release_url"] = url_for(
+                    block["releaseUrl"] = url_for(
                         "staff_front_desk_board_release_closure",
                         override_id=UUID(override_id),
                     )
+                    block["editUrl"] = url_for(
+                        "staff_front_desk_board_update_closure",
+                        override_id=UUID(override_id),
+                    )
+                    block["canRelease"] = True
+                    block["canEdit"] = True
+
+
+def _front_desk_filters_payload(filters: FrontDeskBoardFilters) -> dict[str, str | bool]:
+    return {
+        "startDate": filters.start_date.isoformat(),
+        "days": filters.days,
+        "q": filters.q,
+        "roomTypeId": filters.room_type_id,
+        "showUnallocated": filters.show_unallocated,
+        "showClosed": filters.show_closed,
+    }
+
+
+def board_request_payload() -> dict:
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if isinstance(payload, dict):
+            return payload
+        abort(400, description="Invalid JSON payload.")
+    return request.form.to_dict()
+
+
+def read_ical_upload_payload() -> bytes:
+    upload = request.files.get("ical_file")
+    if upload and upload.filename:
+        payload = upload.read()
+        if payload:
+            return payload
+    text_payload = (request.form.get("ical_text") or "").strip()
+    if text_payload:
+        return text_payload.encode("utf-8")
+    raise ValueError("Provide an .ics file or paste iCalendar content.")
+
+
+def record_board_mutation_rejection(
+    *,
+    actor_user_id: UUID,
+    entity_table: str,
+    entity_id: str,
+    action: str,
+    before_data: dict | None,
+    payload: dict,
+    reason: str,
+) -> None:
+    db.session.rollback()
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table=entity_table,
+        entity_id=entity_id,
+        action=action,
+        before_data=before_data,
+        after_data={"request": payload, "failure_reason": reason},
+    )
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="front_desk.board_mutation_rejected",
+        entity_table=entity_table,
+        entity_id=entity_id,
+        metadata={"action": action, "failure_reason": reason},
+    )
+    db.session.commit()
+
+
+def _reservation_snapshot_for_audit(reservation_id: UUID) -> dict | None:
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        return None
+    return {
+        "reservation_code": reservation.reservation_code,
+        "status": reservation.current_status,
+        "assigned_room_id": str(reservation.assigned_room_id) if reservation.assigned_room_id else None,
+        "check_in_date": reservation.check_in_date.isoformat(),
+        "check_out_date": reservation.check_out_date.isoformat(),
+    }
 
 
 def public_base_url() -> str:

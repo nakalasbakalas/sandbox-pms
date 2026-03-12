@@ -679,6 +679,9 @@ tbody tr:last-child td { border-bottom: 0; }
   gap: 18px;
   flex-wrap: wrap;
 }
+.planning-board-feedback {
+  margin-top: 14px;
+}
 .planning-board-actions {
   align-items: flex-start;
   margin-top: 0;
@@ -710,6 +713,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-track {
   display: grid;
   grid-template-columns: repeat(var(--board-days), minmax(86px, 1fr));
+}
+.planning-board-days {
   grid-template-rows: minmax(70px, auto);
 }
 .planning-board-room.heading,
@@ -784,17 +789,35 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-track {
   position: relative;
-  min-height: 70px;
+  min-height: var(--track-height, 74px);
+  grid-template-rows: repeat(var(--row-lanes, 1), minmax(44px, auto));
   border-bottom: 1px solid var(--border);
   background: rgba(255,255,255,0.015);
+  align-items: stretch;
+}
+.planning-board-track::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((100% / var(--board-days)) * (var(--today-column, 0) - 1));
+  width: 2px;
+  background: rgba(var(--accent-rgb), 0.42);
+  opacity: 0;
+  pointer-events: none;
+}
+.planning-board-track[data-has-today="true"]::after {
+  opacity: 1;
+}
+.planning-board-track.drop-target {
+  background: rgba(var(--accent-rgb), 0.09);
 }
 .planning-board-cell {
-  grid-row: 1;
-  min-height: 70px;
+  grid-row: 1 / -1;
+  min-height: var(--track-height, 74px);
   border-right: 1px solid var(--border);
 }
 .planning-board-block {
-  grid-row: 1;
   align-self: center;
   margin: 8px 6px;
   position: relative;
@@ -805,38 +828,82 @@ tbody tr:last-child td { border-bottom: 0; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-height: 42px;
+  gap: 12px;
+  min-height: 44px;
   padding: 10px 12px;
   border-radius: 14px;
   color: white;
   font-weight: 800;
   cursor: pointer;
   box-shadow: 0 10px 22px rgba(0,0,0,0.18);
-  white-space: nowrap;
   overflow: hidden;
+  position: relative;
 }
 .planning-board-block > summary::-webkit-details-marker {
   display: none;
 }
-.planning-board-block > summary span {
+.planning-board-block-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.planning-board-block-copy strong,
+.planning-board-block-copy small {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.planning-board-block > summary small {
+.planning-board-block-copy strong {
+  font-size: 0.88rem;
+}
+.planning-board-block-copy small,
+.planning-board-block-badges small {
   color: rgba(255,255,255,0.8);
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  font-size: 0.68rem;
+}
+.planning-board-block-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.planning-board-resize-handle {
+  position: relative;
+  width: 10px;
+  min-height: 30px;
+  flex: none;
+  opacity: 0.9;
+}
+.planning-board-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 5px 2px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.55);
+}
+.planning-board-block.is-pending > summary,
+.planning-board-block.is-dragging > summary {
+  box-shadow: 0 18px 32px rgba(0,0,0,0.28);
+  transform: translateY(-1px);
 }
 .planning-board-block.confirmed > summary {
   background: linear-gradient(135deg, #6b9f47, #87b65a);
 }
+.planning-board-block.pending > summary,
 .planning-board-block.tentative > summary {
   background: linear-gradient(135deg, #d06d3f, #e1824e);
 }
+.planning-board-block.in_house > summary,
 .planning-board-block.checked_in > summary {
   background: linear-gradient(135deg, #d06d3f, #e1824e);
 }
+.planning-board-block.past > summary {
+  background: linear-gradient(135deg, #46626c, #607986);
+}
+.planning-board-block.unallocated > summary,
 .planning-board-block.waitlist > summary {
   background: linear-gradient(135deg, #7a5ab8, #9676d2);
 }
@@ -851,6 +918,9 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-block.blocked > summary {
   background: linear-gradient(135deg, #8f6f36, #b48c42);
+}
+.planning-board-block.maintenance > summary {
+  background: linear-gradient(135deg, #b64f3e, #dc7359);
 }
 .planning-board-block.external > summary {
   background: linear-gradient(135deg, #2d7b84, #4ba1ad);
@@ -879,6 +949,17 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-popover p {
   margin-bottom: 0;
+}
+.planning-board-popover-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.planning-board-import-report {
+  display: grid;
+  gap: 10px;
 }
 .planning-board-block[open] .planning-board-popover,
 .planning-board-quick[open] .planning-board-popover {
@@ -921,10 +1002,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-mobile-block.confirmed > summary {
   color: #b8ee9a;
 }
+.planning-mobile-block.pending > summary,
 .planning-mobile-block.tentative > summary,
 .planning-mobile-block.checked_in > summary {
   color: #ffc698;
 }
+.planning-mobile-block.past > summary {
+  color: #b7cad4;
+}
+.planning-mobile-block.unallocated > summary,
 .planning-mobile-block.waitlist > summary {
   color: #cdb8ff;
 }
@@ -936,6 +1022,9 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-mobile-block.blocked > summary {
   color: #f7d18a;
+}
+.planning-mobile-block.maintenance > summary {
+  color: #ffbea7;
 }
 .planning-mobile-block.external > summary {
   color: #88d9e2;

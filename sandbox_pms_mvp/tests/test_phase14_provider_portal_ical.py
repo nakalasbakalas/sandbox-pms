@@ -8,7 +8,14 @@ from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
 from pms.models import ActivityLog, ExternalCalendarBlock, PaymentRequest, Reservation, Role, Room, RoomType, User
-from pms.services.ical_service import create_calendar_feed, create_external_calendar_source, provider_calendar_context, sync_external_calendar_source
+from pms.services.ical_service import (
+    create_calendar_feed,
+    create_external_calendar_source,
+    parse_ical_events,
+    provider_calendar_context,
+    stage_ical_import,
+    sync_external_calendar_source,
+)
 from pms.services.payment_integration_service import process_payment_webhook, sign_test_hosted_webhook
 from pms.services.public_booking_service import get_live_available_rooms
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
@@ -259,3 +266,76 @@ def test_external_ical_blocks_affect_live_availability_without_duplicate_blocks(
 
         assert ExternalCalendarBlock.query.filter_by(source_id=source.id).count() == 1
         assert all(item.id != room.id for item in available)
+
+
+def test_ical_metadata_parsing_and_staging_report_preserve_x_properties_and_validation_details(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        metadata_payload = "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//Sandbox Hotel//Calendar Metadata Test//EN",
+                "BEGIN:VEVENT",
+                "UID:metadata-event-1",
+                "DTSTAMP:20260312T000000Z",
+                "LAST-MODIFIED:20260312T010000Z",
+                "DTSTART;VALUE=DATE:20260320",
+                "DTEND;VALUE=DATE:20260322",
+                "SUMMARY:OTA reservation",
+                "DESCRIPTION:Imported from OTA feed",
+                "LOCATION:Room 201",
+                "CATEGORIES:reservation,ota",
+                "SEQUENCE:7",
+                "X-ROOM-ID:room-201",
+                "X-BLOCK-TYPE:reservation",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "",
+            ]
+        ).encode("utf-8")
+        parsed_events = parse_ical_events(metadata_payload)
+
+        assert len(parsed_events) == 1
+        assert parsed_events[0]["metadata_json"]["categories"] == ["reservation", "ota"]
+        assert parsed_events[0]["metadata_json"]["sequence"] == 7
+        assert parsed_events[0]["metadata_json"]["x_properties"]["X-ROOM-ID"] == "room-201"
+        assert parsed_events[0]["metadata_json"]["x_properties"]["X-BLOCK-TYPE"] == "reservation"
+        assert parsed_events[0]["metadata_json"]["last_modified"] is not None
+        assert parsed_events[0]["metadata_json"]["dtstamp"] is not None
+
+        staging_payload = "\n".join(
+            [
+                "BEGIN:VCALENDAR",
+                "VERSION:2.0",
+                "PRODID:-//Sandbox Hotel//Calendar Stage Test//EN",
+                "BEGIN:VEVENT",
+                "UID:known-duplicate",
+                "DTSTART;TZID=UTC:20260320T120000",
+                "DTEND;TZID=UTC:20260321T120000",
+                "SUMMARY:Known duplicate",
+                "END:VEVENT",
+                "BEGIN:VEVENT",
+                "DTSTART;VALUE=DATE:20260325",
+                "DTEND;VALUE=DATE:20260327",
+                "SUMMARY:Missing UID event",
+                "END:VEVENT",
+                "BEGIN:VEVENT",
+                "UID:bad-dates",
+                "DTSTART;VALUE=DATE:20260328",
+                "DTEND;VALUE=DATE:20260328",
+                "SUMMARY:Invalid dates",
+                "END:VEVENT",
+                "END:VCALENDAR",
+                "",
+            ]
+        ).encode("utf-8")
+        report = stage_ical_import(staging_payload, known_uids={"known-duplicate"})
+
+        assert report["summary"]["accepted_count"] == 1
+        assert report["summary"]["rejected_count"] == 2
+        assert report["summary"]["duplicate_uid_count"] == 1
+        assert report["duplicate_uid_issues"] == [{"uid": "known-duplicate", "scope": "existing"}]
+        assert report["timezone_issues"][0]["uid"] == "known-duplicate"
+        assert report["missing_fields"][0]["fields"] == ["UID"]
+        assert report["invalid_dates"] == [{"uid": "bad-dates", "summary": "Invalid dates"}]

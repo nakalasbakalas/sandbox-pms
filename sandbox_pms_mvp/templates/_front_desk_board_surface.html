@@ -1,0 +1,187 @@
+<section class="grid four metric-grid">
+  <article class="metric-card"><small>Window</small><strong>{{ board.current_window_label }}</strong></article>
+  <article class="metric-card"><small>Unallocated stays / holds</small><strong>{{ board.counts.unallocated }}</strong></article>
+  <article class="metric-card"><small>Operational blocks</small><strong>{{ board.counts.closed_or_blocked }}</strong></article>
+  <article class="metric-card"><small>Arrivals / departures today</small><strong>{{ board.counts.arrivals_today }} / {{ board.counts.departures_today }}</strong></article>
+</section>
+
+{% if board.groups %}
+<section class="planning-board-desktop">
+  <div class="planning-board-grid" style="--board-days: {{ board.days }};">
+    <div class="planning-board-room heading">Rooms</div>
+    <div class="planning-board-days">
+      {% for day in board.headers %}
+      <div class="planning-board-day {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}">
+        <span>{{ day.day_label }}</span>
+        <strong>{{ day.day_number }}</strong>
+        <small>{{ day.month_label }}</small>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% for group in board.groups %}
+    <div class="planning-board-group">{{ group.room_type_code }} - {{ group.room_type_name }}</div>
+      {% for row in group.rows %}
+      <div class="planning-board-room {% if row.is_unallocated %}unallocated{% endif %}" id="{{ row.anchor_id }}">
+        <strong>{{ row.label }}</strong>
+        <span>{{ row.secondary_label }}</span>
+      </div>
+      <div
+        class="planning-board-track"
+        data-board-track
+        data-room-id="{{ row.roomId or '' }}"
+        data-room-type-id="{{ group.room_type_id }}"
+        data-lane-kind="{{ row.laneKind }}"
+        data-anchor-id="{{ row.anchor_id }}"
+        data-has-today="{{ 'true' if board.todayOffset else 'false' }}"
+        style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
+      >
+        {% for day in board.headers %}
+        <div class="planning-board-cell {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}"></div>
+        {% endfor %}
+        {% for block in row.visible_blocks %}
+        <details
+          class="planning-board-block {{ block.displayVariant }} {{ block.status }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
+          data-board-block
+          data-block-id="{{ block.id }}"
+          data-source-type="{{ block.sourceType }}"
+          data-reservation-id="{{ block.reservationId or '' }}"
+          data-room-id="{{ block.roomId or '' }}"
+          data-room-type-id="{{ block.roomTypeId or '' }}"
+          data-start-date="{{ block.startDate }}"
+          data-end-date="{{ block.endDateExclusive }}"
+          data-grid-start="{{ block.gridStart }}"
+          data-grid-span="{{ block.gridSpan }}"
+          data-draggable="{{ 'true' if block.draggable else 'false' }}"
+          data-resizable="{{ 'true' if block.resizable else 'false' }}"
+          data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
+          data-move-url="{{ block.moveUrl or '' }}"
+          data-resize-url="{{ block.resizeUrl or '' }}"
+          style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
+        >
+          <summary data-block-handle>
+            {% if block.resizable %}<span class="planning-board-resize-handle start" data-resize-handle="start" aria-hidden="true"></span>{% endif %}
+            <span class="planning-board-block-copy">
+              <strong>{{ block.label }}</strong>
+              {% if block.subtitle %}<small>{{ block.subtitle }}</small>{% endif %}
+            </span>
+            <span class="planning-board-block-badges">
+              {% if block.displayVariant == 'unallocated' %}<small>Unallocated</small>{% elif block.status == 'conflict' %}<small>Conflict</small>{% elif block.displayVariant == 'in_house' %}<small>In-house</small>{% elif block.displayVariant == 'past' %}<small>Past</small>{% endif %}
+            </span>
+            {% if block.resizable %}<span class="planning-board-resize-handle end" data-resize-handle="end" aria-hidden="true"></span>{% endif %}
+          </summary>
+          <div class="planning-board-popover">
+            <strong>{{ block.label }}</strong>
+            {% if block.subtitle %}<p>{{ block.subtitle }}</p>{% endif %}
+            <div class="planning-board-popover-meta">
+              <span>{{ block.startDate }} &rarr; {{ block.endDate }}</span>
+              <span>{{ block.status.replace('_', ' ') }}</span>
+              <span>{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}</span>
+            </div>
+            <div class="actions">
+              {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
+              {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}
+              <a class="button tiny secondary" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
+            </div>
+            {% if can_edit and block.reassignUrl and block.reassignOptions %}
+            <form class="stack-form compact-form" method="post" action="{{ block.reassignUrl }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="{{ row.anchor_id }}">
+              <label><span>Reassign room</span><select name="room_id">{% for room_option in block.reassignOptions %}<option value="{{ room_option.id }}" {% if row.roomId == room_option.id %}selected{% endif %}>{{ room_option.label }}</option>{% endfor %}</select></label>
+              <label><span>Reason</span><input type="text" name="reason" value="front_desk_board_reassign"></label>
+              <button class="button tiny" type="submit">Save room move</button>
+            </form>
+            {% endif %}
+            {% if can_edit and block.resizable and block.datesFormUrl %}
+            <form class="stack-form compact-form" method="post" action="{{ block.datesFormUrl }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="{{ row.anchor_id }}">
+              {% if row.roomId %}<input type="hidden" name="requested_room_id" value="{{ row.roomId }}">{% endif %}
+              <div class="grid two">
+                <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ block.startDate }}"></label>
+                <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ block.endDateExclusive }}"></label>
+              </div>
+              <button class="button tiny" type="submit">Save dates</button>
+            </form>
+            {% endif %}
+            {% if can_manage_closures and block.editUrl %}
+            <form class="stack-form compact-form" method="post" action="{{ block.editUrl }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="{{ row.anchor_id }}">
+              {% if row.roomId %}<input type="hidden" name="room_id" value="{{ row.roomId }}">{% endif %}
+              <div class="grid two">
+                <label><span>Start date</span><input type="date" name="start_date" value="{{ block.startDate }}"></label>
+                <label><span>End date</span><input type="date" name="end_date" value="{{ block.endDate }}"></label>
+              </div>
+              <label><span>Name</span><input type="text" name="name" value="{{ block.label }}"></label>
+              <label><span>Reason</span><input type="text" name="reason" value="{{ block.subtitle }}"></label>
+              <button class="button tiny" type="submit">Update closure</button>
+            </form>
+            {% endif %}
+            {% if can_manage_closures and block.releaseUrl %}
+            <form method="post" action="{{ block.releaseUrl }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="{{ row.anchor_id }}">
+              <button class="button tiny secondary" type="submit">Release closure</button>
+            </form>
+            {% endif %}
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</section>
+
+<section class="planning-board-mobile">
+  {% for group in board.groups %}
+  <article class="card">
+    <div class="card-head">
+      <div>
+        <p class="eyebrow">{{ group.room_type_code }}</p>
+        <h2>{{ group.room_type_name }}</h2>
+      </div>
+    </div>
+    <div class="list-stack compact">
+      {% for row in group.rows %}
+      <div class="list-row no-link planning-mobile-row" id="mobile-{{ row.anchor_id }}">
+        <div class="grow">
+          <strong>{{ row.label }}</strong>
+          <p>{{ row.secondary_label }}</p>
+          {% if row.visible_blocks %}
+          <div class="planning-mobile-blocks">
+            {% for block in row.visible_blocks %}
+            <details class="planning-mobile-block {{ block.displayVariant }}">
+              <summary>{{ block.label }} <span>{{ block.startDate }} &rarr; {{ block.endDate }}</span></summary>
+              <div class="planning-board-popover">
+                {% if block.subtitle %}<p>{{ block.subtitle }}</p>{% endif %}
+                <div class="actions">
+                  {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
+                  {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}
+                  <a class="button tiny secondary" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
+                </div>
+              </div>
+            </details>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="small muted">No activity in this window.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="card center">
+  <h2>No rooms matched this planning view</h2>
+  <p class="muted">Adjust the filters or move the planning window to review a different set of stays.</p>
+</section>
+{% endif %}

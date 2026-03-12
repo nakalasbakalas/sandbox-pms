@@ -167,5 +167,6 @@
   </footer>
   <script src="{{ url_for('static', filename='public-site.js') }}" defer></script>
   {% endif %}
+  {% block extra_scripts %}{% endblock %}
 </body>
 </html>

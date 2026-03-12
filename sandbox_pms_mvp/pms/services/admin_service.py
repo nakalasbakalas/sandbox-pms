@@ -441,28 +441,8 @@ class InventoryOverridePayload:
 
 
 def create_inventory_override(payload: InventoryOverridePayload, *, actor_user_id: uuid.UUID) -> InventoryOverride:
-    if payload.scope_type not in INVENTORY_OVERRIDE_SCOPE_TYPES:
-        raise ValueError("Override scope type is invalid.")
-    if payload.override_action not in INVENTORY_OVERRIDE_ACTIONS:
-        raise ValueError("Override action is invalid.")
-    if payload.start_date > payload.end_date:
-        raise ValueError("Override start date must be before the end date.")
-    if payload.scope_type == "room" and not payload.room_id:
-        raise ValueError("A room must be selected for room-level overrides.")
-    if payload.scope_type == "room_type" and not payload.room_type_id:
-        raise ValueError("A room type must be selected for room-type overrides.")
-
-    overlap_query = InventoryOverride.query.filter(
-        InventoryOverride.is_active.is_(True),
-        InventoryOverride.start_date <= payload.end_date,
-        InventoryOverride.end_date >= payload.start_date,
-        InventoryOverride.scope_type == payload.scope_type,
-    )
-    if payload.room_id:
-        overlap_query = overlap_query.filter(InventoryOverride.room_id == payload.room_id)
-    if payload.room_type_id:
-        overlap_query = overlap_query.filter(InventoryOverride.room_type_id == payload.room_type_id)
-    if overlap_query.first():
+    _validate_inventory_override_payload(payload)
+    if _inventory_override_overlap_query(payload).first():
         raise ValueError("An active inventory override already covers that room scope and date range.")
 
     override = InventoryOverride(
@@ -493,6 +473,65 @@ def create_inventory_override(payload: InventoryOverridePayload, *, actor_user_i
     write_activity_log(
         actor_user_id=actor_user_id,
         event_type="admin.inventory_override_created",
+        entity_table="inventory_overrides",
+        entity_id=str(override.id),
+        metadata={"scope_type": override.scope_type, "action": override.override_action},
+    )
+    db.session.commit()
+    return override
+
+
+def update_inventory_override(
+    override_id: uuid.UUID,
+    payload: InventoryOverridePayload,
+    *,
+    actor_user_id: uuid.UUID,
+) -> InventoryOverride:
+    _validate_inventory_override_payload(payload)
+    override = (
+        db.session.execute(
+            sa.select(InventoryOverride).where(InventoryOverride.id == override_id).with_for_update()
+        )
+        .scalars()
+        .first()
+    )
+    if not override:
+        raise ValueError("Inventory override not found.")
+    if not override.is_active:
+        raise ValueError("Only active inventory overrides can be edited.")
+    if _inventory_override_overlap_query(payload, exclude_override_id=override.id).first():
+        raise ValueError("An active inventory override already covers that room scope and date range.")
+
+    before = _inventory_override_snapshot(override)
+    for row in _inventory_rows_for_override(override, lock=True):
+        if row.reservation_id or row.hold_id:
+            raise ValueError("The override cannot be edited because one or more covered dates are already allocated.")
+        _restore_inventory_row_to_room_default(row, actor_user_id=actor_user_id)
+
+    override.name = payload.name.strip()
+    override.scope_type = payload.scope_type
+    override.override_action = payload.override_action
+    override.room_id = payload.room_id
+    override.room_type_id = payload.room_type_id
+    override.start_date = payload.start_date
+    override.end_date = payload.end_date
+    override.reason = payload.reason.strip()
+    override.expires_at = payload.expires_at
+    override.updated_by_user_id = actor_user_id
+
+    _apply_inventory_override(override, actor_user_id=actor_user_id)
+
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="inventory_overrides",
+        entity_id=str(override.id),
+        action="inventory_override_updated",
+        before_data=before,
+        after_data=_inventory_override_snapshot(override),
+    )
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="admin.inventory_override_updated",
         entity_table="inventory_overrides",
         entity_id=str(override.id),
         metadata={"scope_type": override.scope_type, "action": override.override_action},
@@ -1156,6 +1195,39 @@ def _inventory_rows_for_override(override: InventoryOverride, *, lock: bool) -> 
     if lock:
         query = query.with_for_update()
     return db.session.execute(query).scalars().all()
+
+
+def _validate_inventory_override_payload(payload: InventoryOverridePayload) -> None:
+    if payload.scope_type not in INVENTORY_OVERRIDE_SCOPE_TYPES:
+        raise ValueError("Override scope type is invalid.")
+    if payload.override_action not in INVENTORY_OVERRIDE_ACTIONS:
+        raise ValueError("Override action is invalid.")
+    if payload.start_date > payload.end_date:
+        raise ValueError("Override start date must be before the end date.")
+    if payload.scope_type == "room" and not payload.room_id:
+        raise ValueError("A room must be selected for room-level overrides.")
+    if payload.scope_type == "room_type" and not payload.room_type_id:
+        raise ValueError("A room type must be selected for room-type overrides.")
+
+
+def _inventory_override_overlap_query(
+    payload: InventoryOverridePayload,
+    *,
+    exclude_override_id: uuid.UUID | None = None,
+):
+    query = InventoryOverride.query.filter(
+        InventoryOverride.is_active.is_(True),
+        InventoryOverride.start_date <= payload.end_date,
+        InventoryOverride.end_date >= payload.start_date,
+        InventoryOverride.scope_type == payload.scope_type,
+    )
+    if exclude_override_id:
+        query = query.filter(InventoryOverride.id != exclude_override_id)
+    if payload.room_id:
+        query = query.filter(InventoryOverride.room_id == payload.room_id)
+    if payload.room_type_id:
+        query = query.filter(InventoryOverride.room_type_id == payload.room_type_id)
+    return query
 
 
 def _apply_inventory_override(override: InventoryOverride, *, actor_user_id: uuid.UUID) -> None:

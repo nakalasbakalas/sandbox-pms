@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import ExternalCalendarBlock, ExternalCalendarSource, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
+from pms.models import ActivityLog, AuditLog, ExternalCalendarBlock, ExternalCalendarSource, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
 from pms.services.admin_service import InventoryOverridePayload, create_inventory_override
 from pms.services.front_desk_board_service import FrontDeskBoardFilters, build_front_desk_board
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
@@ -39,6 +39,15 @@ def post_form(client, url: str, *, data: dict, follow_redirects: bool = False):
     return client.post(url, data=payload, follow_redirects=follow_redirects)
 
 
+def post_json(client, url: str, *, payload: dict, follow_redirects: bool = False):
+    return client.post(
+        url,
+        json=payload,
+        headers={"X-CSRF-Token": "test-csrf-token"},
+        follow_redirects=follow_redirects,
+    )
+
+
 def create_staff_reservation(
     *,
     first_name: str,
@@ -48,6 +57,9 @@ def create_staff_reservation(
     check_in_date: date,
     check_out_date: date,
     initial_status: str | None = None,
+    assigned_room_id=None,
+    defer_room_assignment: bool = False,
+    source_channel: str = "admin_manual",
 ) -> Reservation:
     room_type = RoomType.query.filter_by(code=room_type_code).one()
     return create_reservation(
@@ -57,12 +69,14 @@ def create_staff_reservation(
             phone=phone,
             email=f"{first_name.lower()}.{last_name.lower()}@example.com",
             room_type_id=room_type.id,
+            assigned_room_id=assigned_room_id,
             check_in_date=check_in_date,
             check_out_date=check_out_date,
             adults=2,
             children=0,
-            source_channel="admin_manual",
+            source_channel=source_channel,
             initial_status=initial_status,
+            defer_room_assignment=defer_room_assignment,
         )
     )
 
@@ -285,6 +299,176 @@ def test_board_room_reassignment_updates_inventory_and_redirects_back_to_anchor(
         assert len(new_rows) == 2
 
 
+def test_front_desk_board_data_endpoint_returns_normalized_blocks_and_operational_rows(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today()
+        staff_user = make_staff_user("front_desk", "board-data@example.com")
+        unallocated = create_staff_reservation(
+            first_name="Unassigned",
+            last_name="Guest",
+            phone="+66810000040",
+            room_type_code="TWN",
+            check_in_date=start_date + timedelta(days=2),
+            check_out_date=start_date + timedelta(days=4),
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+        maintenance_room = find_open_room(
+            room_type_id=unallocated.room_type_id,
+            start_date=start_date + timedelta(days=5),
+            end_date=start_date + timedelta(days=6),
+        )
+        maintenance_row = InventoryDay.query.filter_by(
+            room_id=maintenance_room.id,
+            business_date=start_date + timedelta(days=5),
+        ).one()
+        maintenance_row.maintenance_flag = True
+        maintenance_row.notes = "AC servicing"
+        db.session.commit()
+
+    login_as(client, staff_user)
+    response = client.get(
+        f"/staff/front-desk/board/data?start_date={start_date.isoformat()}&days=30&show_closed=1"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["board"]["days"] == 30
+    assert payload["permissions"]["canEdit"] is True
+
+    all_blocks = [
+        block
+        for group in payload["board"]["groups"]
+        for row in group["rows"]
+        for block in row["visibleBlocks"]
+    ]
+    unallocated_block = next(block for block in all_blocks if block["reservationId"] == str(unallocated.id))
+    assert unallocated_block["sourceType"] == "reservation"
+    assert unallocated_block["allocationState"] == "unallocated"
+    assert unallocated_block["roomId"] is None
+    assert unallocated_block["draggable"] is True
+    assert unallocated_block["resizable"] is False
+    assert any(block["sourceType"] == "maintenance" for block in all_blocks)
+
+
+def test_board_move_json_can_assign_unallocated_reservation_into_room_inventory(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=5)
+        staff_user = make_staff_user("front_desk", "board-json-move@example.com")
+        reservation = create_staff_reservation(
+            first_name="Desk",
+            last_name="Assign",
+            phone="+66810000041",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+        reservation_id = reservation.id
+        room_type_id = reservation.room_type_id
+        check_in_date = reservation.check_in_date
+        check_out_date = reservation.check_out_date
+        target_room = find_open_room(
+            room_type_id=room_type_id,
+            start_date=check_in_date,
+            end_date=check_out_date,
+        )
+        target_room_id = target_room.id
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(target_room_id),
+            "checkInDate": check_in_date.isoformat(),
+            "checkOutDate": check_out_date.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        inventory_rows = (
+            InventoryDay.query.filter_by(reservation_id=reservation_id, room_id=target_room_id)
+            .order_by(InventoryDay.business_date.asc())
+            .all()
+        )
+        assert refreshed.assigned_room_id == target_room_id
+        assert len(inventory_rows) == 2
+        assert all(row.availability_status == "reserved" for row in inventory_rows)
+
+
+def test_board_resize_json_rejection_records_audit_and_activity_logs(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=9)
+        staff_user = make_staff_user("front_desk", "board-json-resize@example.com")
+        reservation = create_staff_reservation(
+            first_name="Resize",
+            last_name="Target",
+            phone="+66810000042",
+            room_type_code="TWN",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        check_in_date = reservation.check_in_date
+        original_check_out_date = reservation.check_out_date
+        create_staff_reservation(
+            first_name="Resize",
+            last_name="Conflict",
+            phone="+66810000043",
+            room_type_code="TWN",
+            check_in_date=original_check_out_date,
+            check_out_date=original_check_out_date + timedelta(days=2),
+            initial_status="confirmed",
+            assigned_room_id=reservation.assigned_room_id,
+        )
+        rejected_checkout = (original_check_out_date + timedelta(days=1)).isoformat()
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/resize",
+        payload={
+            "checkInDate": check_in_date.isoformat(),
+            "checkOutDate": rejected_checkout,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["ok"] is False
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation_id)
+        audit_log = (
+            AuditLog.query.filter_by(action="front_desk_board_resize_rejected", entity_id=str(reservation_id))
+            .order_by(AuditLog.created_at.desc())
+            .first()
+        )
+        activity_log = (
+            ActivityLog.query.filter_by(event_type="front_desk.board_mutation_rejected", entity_id=str(reservation_id))
+            .order_by(ActivityLog.created_at.desc())
+            .first()
+        )
+        assert refreshed.check_out_date == start_date + timedelta(days=2)
+        assert audit_log is not None
+        assert audit_log.after_data["request"]["checkOutDate"] == rejected_checkout
+        assert audit_log.after_data["failure_reason"]
+        assert activity_log is not None
+        assert activity_log.metadata_json["action"] == "front_desk_board_resize_rejected"
+
+
 def test_board_closure_create_and_release_actions_round_trip(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -331,6 +515,89 @@ def test_board_closure_create_and_release_actions_round_trip(app_factory):
     with app.app_context():
         refreshed = db.session.get(InventoryOverride, override.id)
         assert refreshed.is_active is False
+
+
+def test_front_desk_board_export_and_import_ical_routes_round_trip_metadata(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=6)
+        staff_user = make_staff_user("front_desk", "board-ical@example.com")
+        reservation = create_staff_reservation(
+            first_name="Calendar",
+            last_name="Guest",
+            phone="+66810000044",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        reservation_id = reservation.id
+        assigned_room_id = reservation.assigned_room_id
+        room_type_id = reservation.room_type_id
+        source = ExternalCalendarSource(
+            room_id=assigned_room_id,
+            name="Board import source",
+            feed_url_encrypted="encrypted-feed",
+            feed_url_hint="calendar.example",
+            external_reference="board-import",
+            is_active=True,
+            last_status="success",
+        )
+        db.session.add(source)
+        db.session.flush()
+        db.session.add(
+            ExternalCalendarBlock(
+                source_id=source.id,
+                room_id=assigned_room_id,
+                external_uid="board-import-dup",
+                summary="Existing imported block",
+                starts_on=start_date + timedelta(days=7),
+                ends_on=start_date + timedelta(days=8),
+            )
+        )
+        db.session.commit()
+
+    login_as(client, staff_user)
+    export_response = client.get(
+        f"/staff/front-desk/board/export.ics?start_date={start_date.isoformat()}&days=14&block_id=reservation-{reservation_id}"
+    )
+
+    assert export_response.status_code == 200
+    export_body = export_response.data.decode("utf-8")
+    assert "BEGIN:VCALENDAR" in export_body
+    assert f"X-RESERVATION-ID:{reservation_id}" in export_body
+    assert f"X-ROOM-ID:{assigned_room_id}" in export_body
+    assert f"X-ROOM-TYPE-ID:{room_type_id}" in export_body
+    assert "X-BLOCK-TYPE:reservation" in export_body
+    assert "X-PMS-STATUS:confirmed" in export_body
+
+    import_response = post_form(
+        client,
+        f"/staff/front-desk/board/import.ics?start_date={start_date.isoformat()}&days=14",
+        data={
+            "ical_text": "\n".join(
+                [
+                    "BEGIN:VCALENDAR",
+                    "VERSION:2.0",
+                    "PRODID:-//Sandbox Hotel//Board Import Test//EN",
+                    "BEGIN:VEVENT",
+                    "UID:board-import-dup",
+                    f"DTSTART;VALUE=DATE:{(start_date + timedelta(days=9)).strftime('%Y%m%d')}",
+                    f"DTEND;VALUE=DATE:{(start_date + timedelta(days=10)).strftime('%Y%m%d')}",
+                    "SUMMARY:Duplicate board import",
+                    "END:VEVENT",
+                    "END:VCALENDAR",
+                    "",
+                ]
+            ),
+        },
+    )
+
+    assert import_response.status_code == 200
+    import_body = import_response.get_data(as_text=True)
+    assert "Validation summary" in import_body
+    assert "Duplicate UID issues: 1" in import_body
 
 
 def test_staff_reservation_create_route_prefills_and_creates_house_use_booking(app_factory):

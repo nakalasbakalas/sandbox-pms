@@ -549,8 +549,8 @@ class Reservation(AuditMixin, db.Model):
     room_type_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("room_types.id", ondelete="RESTRICT"), nullable=False
     )
-    assigned_room_id: Mapped[uuid.UUID] = mapped_column(
-        UUIDType, ForeignKey("rooms.id", ondelete="RESTRICT"), nullable=False
+    assigned_room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("rooms.id", ondelete="RESTRICT"), nullable=True
     )
     current_status: Mapped[str] = mapped_column(sa.String(30), nullable=False)
     source_channel: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="direct")

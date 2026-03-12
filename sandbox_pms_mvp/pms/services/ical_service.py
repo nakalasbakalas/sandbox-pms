@@ -471,6 +471,9 @@ def parse_ical_events(payload: bytes) -> list[dict[str, Any]]:
         if starts_on >= ends_on:
             continue
         external_uid = str(component.get("UID") or _event_fallback_uid(component, starts_on, ends_on))
+        categories = _component_categories(component)
+        x_properties = _component_x_properties(component)
+        sequence = _component_sequence(component)
         events.append(
             {
                 "external_uid": external_uid[:255],
@@ -483,10 +486,149 @@ def parse_ical_events(payload: bytes) -> list[dict[str, Any]]:
                 "metadata_json": {
                     "location": _truncate(str(component.get("LOCATION") or "").strip(), 255) or None,
                     "description": _truncate(str(component.get("DESCRIPTION") or "").strip(), 255) or None,
+                    "categories": categories or None,
+                    "sequence": sequence,
+                    "x_properties": x_properties or None,
+                    "last_modified": _component_timestamp(component.get("LAST-MODIFIED")).isoformat()
+                    if _component_timestamp(component.get("LAST-MODIFIED"))
+                    else None,
+                    "dtstamp": _component_timestamp(component.get("DTSTAMP")).isoformat()
+                    if _component_timestamp(component.get("DTSTAMP"))
+                    else None,
+                    "timezone_issue": _component_timezone_issue(component),
                 },
             }
         )
     return events
+
+
+def export_front_desk_blocks_ical(
+    blocks: list[dict[str, Any]],
+    *,
+    calendar_name: str,
+) -> bytes:
+    calendar = Calendar()
+    calendar.add("prodid", "-//Sandbox Hotel//Front Desk Board//EN")
+    calendar.add("version", "2.0")
+    calendar.add("calscale", "GREGORIAN")
+    calendar.add("x-wr-timezone", calendar_timezone_name())
+    calendar.add("x-wr-calname", _truncate(calendar_name.strip() or "Front desk board", 120))
+    for block in blocks:
+        calendar.add_component(_front_desk_block_event(block))
+    return calendar.to_ical()
+
+
+def stage_ical_import(payload: bytes, *, known_uids: set[str] | None = None) -> dict[str, Any]:
+    known_uids = {item for item in (known_uids or set()) if item}
+    report = {
+        "timezone_name": calendar_timezone_name(),
+        "parsed_events": [],
+        "accepted_events": [],
+        "rejected_events": [],
+        "duplicate_uid_issues": [],
+        "missing_fields": [],
+        "timezone_issues": [],
+        "invalid_dates": [],
+    }
+    try:
+        calendar = Calendar.from_ical(payload)
+    except Exception as exc:  # noqa: BLE001
+        report["rejected_events"].append(
+            {
+                "uid": None,
+                "summary": None,
+                "reason": f"Invalid iCalendar payload: {exc}",
+            }
+        )
+        report["summary"] = {
+            "parsed_count": 0,
+            "accepted_count": 0,
+            "rejected_count": 1,
+            "duplicate_uid_count": 0,
+        }
+        return report
+
+    seen_uids: Counter[str] = Counter()
+    for index, component in enumerate(calendar.walk("VEVENT"), start=1):
+        raw_uid = str(component.get("UID") or "").strip()
+        summary = _truncate(str(component.get("SUMMARY") or "").strip(), 255) or None
+        missing_fields: list[str] = []
+        if not raw_uid:
+            missing_fields.append("UID")
+        if component.get("DTSTART") is None:
+            missing_fields.append("DTSTART")
+        if component.get("DTEND") is None:
+            missing_fields.append("DTEND")
+
+        timezone_issue = _component_timezone_issue(component)
+        parsed_event: dict[str, Any] = {
+            "index": index,
+            "uid": raw_uid or None,
+            "summary": summary,
+            "status": str(component.get("STATUS") or "").strip().upper() or None,
+            "categories": _component_categories(component),
+            "x_properties": _component_x_properties(component),
+            "sequence": _component_sequence(component),
+        }
+
+        try:
+            starts_on, ends_on = _component_dates(component, normalize_invalid_end=False)
+        except Exception as exc:  # noqa: BLE001
+            parsed_event["reason"] = f"Unable to parse event dates: {exc}"
+            report["rejected_events"].append(parsed_event)
+            continue
+
+        parsed_event["starts_on"] = starts_on.isoformat()
+        parsed_event["ends_on"] = ends_on.isoformat()
+        uid = raw_uid or _event_fallback_uid(component, starts_on, ends_on)
+        parsed_event["uid"] = uid
+
+        if missing_fields:
+            report["missing_fields"].append(
+                {
+                    "uid": uid,
+                    "summary": summary,
+                    "fields": missing_fields,
+                }
+            )
+
+        if timezone_issue:
+            report["timezone_issues"].append(
+                {
+                    "uid": uid,
+                    "summary": summary,
+                    "issue": timezone_issue,
+                }
+            )
+
+        if starts_on >= ends_on:
+            parsed_event["reason"] = "DTEND must be after DTSTART."
+            report["invalid_dates"].append({"uid": uid, "summary": summary})
+            report["rejected_events"].append(parsed_event)
+            continue
+
+        seen_uids[uid] += 1
+        if seen_uids[uid] > 1:
+            parsed_event["reason"] = "Duplicate UID appears multiple times in this payload."
+            report["duplicate_uid_issues"].append({"uid": uid, "scope": "payload"})
+            report["rejected_events"].append(parsed_event)
+            continue
+        if uid in known_uids:
+            parsed_event["reason"] = "UID already exists in imported calendar data."
+            report["duplicate_uid_issues"].append({"uid": uid, "scope": "existing"})
+            report["rejected_events"].append(parsed_event)
+            continue
+
+        report["parsed_events"].append(parsed_event)
+        report["accepted_events"].append(parsed_event)
+
+    report["summary"] = {
+        "parsed_count": len(report["parsed_events"]),
+        "accepted_count": len(report["accepted_events"]),
+        "rejected_count": len(report["rejected_events"]),
+        "duplicate_uid_count": len(report["duplicate_uid_issues"]),
+    }
+    return report
 
 
 def normalize_external_feed_url(feed_url: str) -> str:
@@ -652,7 +794,101 @@ def _fetch_feed_bytes(source: ExternalCalendarSource) -> bytes:
         return response.read()
 
 
-def _component_dates(component) -> tuple[date, date]:
+def _front_desk_block_event(block: dict[str, Any]) -> Event:
+    event = Event()
+    metadata = block.get("metadata") or {}
+    room_number = metadata.get("roomNumber")
+    room_type_code = metadata.get("roomTypeCode")
+    event.add("uid", _front_desk_block_uid(block))
+    event.add("dtstamp", _coerce_event_timestamp(metadata.get("updatedAt")) or utc_now())
+    event.add("dtstart", _coerce_event_date(block.get("startDate")))
+    event.add("dtend", _coerce_event_date(block.get("endDateExclusive")))
+    event.add("summary", _front_desk_block_summary(block))
+    event.add("description", _front_desk_block_description(block))
+    event.add("status", _front_desk_block_status(block))
+    event.add("location", _front_desk_block_location(block))
+    event.add(
+        "categories",
+        [item for item in [block.get("sourceType"), block.get("status"), room_type_code] if item],
+    )
+    event.add("last-modified", _coerce_event_timestamp(metadata.get("updatedAt")) or utc_now())
+    event.add("sequence", int(metadata.get("sequence") or 0))
+    event.add("transp", "OPAQUE")
+    if block.get("reservationId"):
+        event.add("x-reservation-id", str(block["reservationId"]))
+    if block.get("roomId"):
+        event.add("x-room-id", str(block["roomId"]))
+    if block.get("roomTypeId"):
+        event.add("x-room-type-id", str(block["roomTypeId"]))
+    event.add("x-block-type", str(block.get("sourceType") or "unknown"))
+    if block.get("status"):
+        event.add("x-pms-status", str(block["status"]))
+    if room_number:
+        event.add("x-room-number", _truncate(str(room_number), 32))
+    return event
+
+
+def _front_desk_block_uid(block: dict[str, Any]) -> str:
+    metadata = block.get("metadata") or {}
+    source_type = str(block.get("sourceType") or "block")
+    source_id = (
+        metadata.get("externalUid")
+        or block.get("sourceId")
+        or block.get("reservationId")
+        or block.get("overrideId")
+        or block.get("id")
+    )
+    return f"{source_type}-{source_id}@{_calendar_uid_host()}"
+
+
+def _front_desk_block_summary(block: dict[str, Any]) -> str:
+    source_type = block.get("sourceType")
+    room_number = (block.get("metadata") or {}).get("roomNumber")
+    if source_type == "reservation":
+        guest_name = block.get("guestName") or block.get("label") or "Reservation"
+        if room_number:
+            return _truncate(f"{guest_name} - Room {room_number}", 255)
+        return _truncate(str(guest_name), 255)
+    if source_type == "closure":
+        return _truncate(str(block.get("label") or "Room closure"), 255)
+    if source_type == "maintenance":
+        return _truncate(str(block.get("label") or "Maintenance"), 255)
+    if source_type == "hold":
+        return _truncate(str(block.get("label") or "Reservation hold"), 255)
+    return _truncate(str(block.get("label") or "Planning block"), 255)
+
+
+def _front_desk_block_description(block: dict[str, Any]) -> str:
+    metadata = block.get("metadata") or {}
+    description_parts = [
+        block.get("subtitle"),
+        metadata.get("reservationCode"),
+        metadata.get("reason"),
+    ]
+    return _truncate(" | ".join(str(part).strip() for part in description_parts if part), 1024) or "Planning board event"
+
+
+def _front_desk_block_location(block: dict[str, Any]) -> str:
+    metadata = block.get("metadata") or {}
+    room_number = metadata.get("roomNumber")
+    room_type_code = metadata.get("roomTypeCode")
+    if room_number:
+        return _truncate(f"Room {room_number}", 255)
+    if room_type_code:
+        return _truncate(f"Unallocated - {room_type_code}", 255)
+    return "Unallocated"
+
+
+def _front_desk_block_status(block: dict[str, Any]) -> str:
+    status = str(block.get("status") or "").strip().lower()
+    if status in {"tentative", "pending"}:
+        return "TENTATIVE"
+    if status in {"cancelled"}:
+        return "CANCELLED"
+    return "CONFIRMED"
+
+
+def _component_dates(component, *, normalize_invalid_end: bool = True) -> tuple[date, date]:
     tz = calendar_timezone()
     starts_on = _coerce_component_date(component.decoded("DTSTART"), tz, is_end=False)
     dtend_raw = component.get("DTEND")
@@ -660,7 +896,7 @@ def _component_dates(component) -> tuple[date, date]:
         ends_on = _coerce_component_date(component.decoded("DTEND"), tz, is_end=True)
     else:
         ends_on = starts_on + timedelta(days=1)
-    if ends_on <= starts_on:
+    if normalize_invalid_end and ends_on <= starts_on:
         ends_on = starts_on + timedelta(days=1)
     return starts_on, ends_on
 
@@ -682,11 +918,110 @@ def _coerce_component_date(value: Any, tz: ZoneInfo, *, is_end: bool) -> date:
 def _component_timestamp(value: Any | None) -> datetime | None:
     if value is None:
         return None
+    decoded = getattr(value, "dt", None)
+    if decoded is not None and decoded is not value:
+        return _component_timestamp(decoded)
     if isinstance(value, datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.endswith("Z"):
+            candidate = f"{candidate[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            try:
+                parsed = datetime.strptime(value.strip(), "%Y%m%dT%H%M%S%z")
+            except ValueError:
+                return None
+        return _component_timestamp(parsed)
+    serialized = value.to_ical() if hasattr(value, "to_ical") else None
+    if isinstance(serialized, bytes):
+        return _component_timestamp(serialized.decode("utf-8", errors="ignore"))
     return None
+
+
+def _coerce_event_date(value: Any) -> date:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return date.fromisoformat(value)
+    raise ValueError("Unsupported front desk event date value.")
+
+
+def _coerce_event_timestamp(value: Any | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return _component_timestamp(value)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return _component_timestamp(parsed)
+    return None
+
+
+def _component_categories(component) -> list[str]:
+    raw = component.get("CATEGORIES")
+    if raw is None:
+        return []
+    values: list[Any] = []
+    queue = list(raw) if isinstance(raw, (list, tuple)) else [raw]
+    while queue:
+        item = queue.pop(0)
+        nested_values = getattr(item, "cats", None)
+        if nested_values:
+            queue[:0] = list(nested_values)
+            continue
+        serialized = item.to_ical() if hasattr(item, "to_ical") else str(item)
+        if isinstance(serialized, bytes):
+            serialized = serialized.decode("utf-8", errors="ignore")
+        values.extend(str(serialized).split(","))
+    return [_truncate(str(item).strip(), 80) for item in values if str(item).strip()]
+
+
+def _component_x_properties(component) -> dict[str, str]:
+    properties: dict[str, str] = {}
+    for key in component.keys():
+        upper_key = str(key).upper()
+        if not upper_key.startswith("X-"):
+            continue
+        properties[upper_key] = _truncate(str(component.get(key) or "").strip(), 255)
+    return properties
+
+
+def _component_sequence(component) -> int | None:
+    value = component.get("SEQUENCE")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _component_timezone_issue(component) -> str | None:
+    issues: list[str] = []
+    hotel_tz = calendar_timezone_name()
+    for field in ("DTSTART", "DTEND"):
+        property_value = component.get(field)
+        if property_value is None:
+            continue
+        decoded = component.decoded(field)
+        tzid = property_value.params.get("TZID") if getattr(property_value, "params", None) else None
+        if isinstance(decoded, datetime) and decoded.tzinfo is None and not tzid:
+            issues.append(f"{field} is timezone-naive.")
+        elif tzid and str(tzid) != hotel_tz:
+            issues.append(f"{field} uses {tzid} instead of {hotel_tz}.")
+    if not issues:
+        return None
+    return " ".join(issues)
 
 
 def _conflicting_internal_reservation(room_id: uuid.UUID, starts_on: date, ends_on: date) -> Reservation | None:
