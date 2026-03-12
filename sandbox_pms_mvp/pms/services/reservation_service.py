@@ -26,6 +26,7 @@ from ..models import (
 )
 from ..pricing import get_setting_value, quote_reservation
 from .admin_service import assert_blackout_allows_booking
+from .ical_service import room_has_external_block
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,255}$")
 
@@ -52,6 +53,7 @@ class ReservationCreatePayload:
     internal_notes: str | None = None
     request_payment: bool = False
     request_type: str = "deposit"
+    initial_status: str | None = None
 
 
 def create_reservation(payload: ReservationCreatePayload, actor_user_id: uuid.UUID | None = None) -> Reservation:
@@ -86,12 +88,16 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
     )
     reservation_code = next_reservation_code()
     deposit_required = calculate_deposit_required(payload.check_in_date, payload.check_out_date, quote.grand_total)
+    requested_status = (payload.initial_status or "").strip() or None
+    if requested_status == "house_use":
+        deposit_required = Decimal("0.00")
+    current_status = requested_status or ("confirmed" if deposit_required == Decimal("0.00") else "tentative")
     reservation = Reservation(
         reservation_code=reservation_code,
         primary_guest_id=guest.id,
         room_type_id=room_type.id,
         assigned_room_id=assigned_room.id,
-        current_status="confirmed" if deposit_required == Decimal("0.00") else "tentative",
+        current_status=current_status,
         source_channel=payload.source_channel,
         check_in_date=payload.check_in_date,
         check_out_date=payload.check_out_date,
@@ -102,6 +108,7 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         internal_notes=payload.internal_notes,
         quoted_room_total=quote.room_total,
         quoted_tax_total=quote.tax_total,
+        quoted_extras_total=Decimal("0.00"),
         quoted_grand_total=quote.grand_total,
         deposit_required_amount=deposit_required,
         deposit_received_amount=Decimal("0.00"),
@@ -215,6 +222,9 @@ def validate_payload(payload: ReservationCreatePayload) -> None:
     payload.source_channel = (payload.source_channel or "direct").strip() or "direct"
     if len(payload.source_channel) > 80:
         raise ValueError("Source channel is too long.")
+    payload.initial_status = (payload.initial_status or "").strip() or None
+    if payload.initial_status and payload.initial_status not in {"tentative", "confirmed", "house_use"}:
+        raise ValueError("Initial status is invalid.")
     payload.special_requests = clean_optional_text(payload.special_requests, limit=500)
     payload.internal_notes = clean_optional_text(payload.internal_notes, limit=2000)
     if payload.adults < 1:
@@ -273,6 +283,8 @@ def choose_available_room(
         candidates = candidates.all()
     nights = list(_stay_dates(check_in_date, check_out_date))
     for room in candidates:
+        if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
+            continue
         rows = (
             db.session.execute(
                 sa.select(InventoryDay)
@@ -293,6 +305,8 @@ def choose_available_room(
 
 
 def allocate_inventory(reservation: Reservation, room: Room, nightly_rates, actor_user_id: uuid.UUID | None) -> None:
+    if room_has_external_block(room.id, reservation.check_in_date, reservation.check_out_date, for_update=True):
+        raise ValueError("Selected room is blocked by an external calendar sync.")
     rate_lookup = {business_date: nightly_rate for business_date, nightly_rate in nightly_rates}
     rows = (
         db.session.execute(
@@ -308,10 +322,15 @@ def allocate_inventory(reservation: Reservation, room: Room, nightly_rates, acto
     )
     if len(rows) != len(rate_lookup):
         raise ValueError("Inventory horizon is incomplete for this stay.")
+    inventory_status = "reserved"
+    if reservation.current_status == "checked_in":
+        inventory_status = "occupied"
+    elif reservation.current_status == "house_use":
+        inventory_status = "house_use"
     for row in rows:
         if row.availability_status != "available" or not row.is_sellable:
             raise ValueError("Selected room is not available for all requested nights.")
-        row.availability_status = "reserved" if reservation.current_status != "checked_in" else "occupied"
+        row.availability_status = inventory_status
         row.reservation_id = reservation.id
         row.nightly_rate = rate_lookup[row.business_date]
         row.updated_by_user_id = actor_user_id
@@ -370,6 +389,7 @@ def reservation_snapshot(reservation: Reservation) -> dict:
         "assigned_room_id": str(reservation.assigned_room_id),
         "check_in_date": reservation.check_in_date.isoformat(),
         "check_out_date": reservation.check_out_date.isoformat(),
+        "quoted_extras_total": str(getattr(reservation, "quoted_extras_total", 0)),
         "quoted_grand_total": str(reservation.quoted_grand_total),
     }
 

@@ -52,6 +52,14 @@ services:
         sync: false
       - key: PAYMENT_PROVIDER
         sync: false
+
+databases:
+  - name: sandbox-hotel-pms-db
+    plan: basic-256mb
+    region: oregon
+    databaseName: sandbox_hotel_pms
+    user: sandbox_hotel_pms
+    postgresMajorVersion: "17"
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET

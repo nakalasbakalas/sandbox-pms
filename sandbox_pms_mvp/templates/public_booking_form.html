@@ -1,49 +1,234 @@
 {% extends 'base.html' %}
 {% block title %}{{ t('complete_booking_title') }} | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="grid two gap-lg">
-  <article class="card">
-    <div class="card-head"><div><p class="eyebrow">{{ t('final_step') }}</p><h1>{{ room_type.name }}</h1></div></div>
-    <p>{{ t('checkin_summary') }}</p>
-    <p class="muted">{{ t('hold_expires_at', hold_code=hold.hold_code, expires_at=hold.expires_at.strftime('%Y-%m-%d %H:%M')) }}</p>
-    <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post">
-      {{ csrf_input() }}
-      <input type="hidden" name="hold_code" value="{{ hold.hold_code }}">
-      <input type="hidden" name="idempotency_key" value="{{ hold.idempotency_key }}">
-      <input type="hidden" name="language" value="{{ current_language }}">
-      <input type="hidden" name="source_channel" value="{{ hold.source_channel }}">
-      <div class="grid two">
-        <label><span>{{ t('label_first_name') }}</span><input type="text" name="first_name" maxlength="120" autocomplete="given-name" required></label>
-        <label><span>{{ t('label_last_name') }}</span><input type="text" name="last_name" maxlength="120" autocomplete="family-name" required></label>
+<div class="public-page">
+  <section class="page-hero card booking-room-hero">
+    <div class="booking-room-copy">
+      <div>
+        <p class="eyebrow">{{ t('final_step') }}</p>
+        <h1>{{ room_type.name }}</h1>
+        <p class="lead">{{ room_content.summary or t('checkin_summary') }}</p>
+        {% if room_content.long_description %}<p class="muted booking-room-intro">{{ room_content.long_description }}</p>{% endif %}
       </div>
-      <div class="grid two">
-        <label><span>{{ t('label_mobile_phone') }}</span><input type="tel" name="phone" maxlength="30" autocomplete="tel" inputmode="tel" required></label>
-        <label><span>{{ t('label_email') }}</span><input type="email" name="email" value="{{ hold.guest_email or '' }}" maxlength="255" autocomplete="email" inputmode="email" required></label>
+      <div class="detail-pills">
+        <span class="detail-pill">{{ t('hold_expires_at', hold_code=hold.hold_code, expires_at=hold.expires_at.strftime('%Y-%m-%d %H:%M')) }}</span>
+        <span class="detail-pill">{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</span>
+        <span class="detail-pill">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
+        {% if room_content.bed_details and room_content.bed_details != room_content.summary %}
+          <span class="detail-pill">{{ room_content.bed_details }}</span>
+        {% endif %}
       </div>
-      <label><span>{{ t('label_special_requests') }}</span><textarea name="special_requests" rows="4" maxlength="500"></textarea></label>
-      <label class="toggle-row"><span>{{ t('terms_acknowledgement') }}</span><input type="checkbox" name="accept_terms" required></label>
-      <button class="button" type="submit">{{ t('book_now') }}</button>
-    </form>
-  </article>
-  <article class="card">
-    <div class="card-head"><div><p class="eyebrow">{{ t('summary_title') }}</p><h2>{{ room_type.name }}</h2></div></div>
-    <div class="metric-strip">
-      <div><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=hold.check_in_date, end=hold.check_out_date) }}</strong></div>
-      <div><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</strong></div>
-      <div><small>{{ t('room_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
-      <div><small>{{ t('tax_label') }}</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
-      <div><small>{{ t('grand_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_grand_total|money }}</strong></div>
-      <div><small>{{ t('terms_version_label') }}</small><strong>{{ published_terms_version }}</strong></div>
+      {% if room_content.amenities %}
+        <div class="room-amenities">
+          {% for amenity in room_content.amenities[:6] %}
+            <span class="amenity-chip">{{ amenity }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
     </div>
-    <div class="subsection">
-      <h3>{{ t('booking_terms_title') }}</h3>
-      <ul class="checklist compact">
-        <li>{{ policy_documents.cancellation }}</li>
-        <li>{{ policy_documents.extra_guest }}</li>
-        <li>{{ policy_documents.check_in }}</li>
-        <li>{{ policy_documents.privacy }}</li>
-      </ul>
+    <div class="booking-room-visual">
+      {% if room_content.primary_media_url %}
+        <img
+          class="booking-room-media"
+          src="{{ room_content.primary_media_url }}"
+          alt="{{ room_type.name }}"
+          loading="eager"
+          decoding="async"
+        >
+      {% else %}
+        <div class="room-offer-placeholder booking-room-placeholder">
+          <span class="eyebrow">{{ room_type.code }}</span>
+          <strong>{{ room_type.name }}</strong>
+          {% if room_content.summary %}<p>{{ room_content.summary }}</p>{% endif %}
+        </div>
+      {% endif %}
     </div>
-  </article>
-</section>
+  </section>
+
+  <section class="grid two gap-lg booking-layout">
+    <article class="card booking-form-card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('complete_booking_title') }}</p><h2>{{ hotel_name }}</h2></div></div>
+      <p class="muted">{{ hotel_support_contact_text }}</p>
+      <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="hold_code" value="{{ hold.hold_code }}">
+        <input type="hidden" name="idempotency_key" value="{{ hold.idempotency_key }}">
+        <input type="hidden" name="language" value="{{ current_language }}">
+        <input type="hidden" name="source_channel" value="{{ hold.source_channel }}">
+        {% if booking_attribution.utm_source %}<input type="hidden" name="utm_source" value="{{ booking_attribution.utm_source }}">{% endif %}
+        {% if booking_attribution.utm_medium %}<input type="hidden" name="utm_medium" value="{{ booking_attribution.utm_medium }}">{% endif %}
+        {% if booking_attribution.utm_campaign %}<input type="hidden" name="utm_campaign" value="{{ booking_attribution.utm_campaign }}">{% endif %}
+        {% if booking_attribution.utm_content %}<input type="hidden" name="utm_content" value="{{ booking_attribution.utm_content }}">{% endif %}
+        {% if booking_attribution.source_label %}<input type="hidden" name="source_label" value="{{ booking_attribution.source_label }}">{% endif %}
+        {% if booking_attribution.referrer_host %}<input type="hidden" name="referrer_host" value="{{ booking_attribution.referrer_host }}">{% endif %}
+        {% if booking_attribution.entry_page %}<input type="hidden" name="entry_page" value="{{ booking_attribution.entry_page }}">{% endif %}
+        {% if booking_attribution.landing_path %}<input type="hidden" name="landing_path" value="{{ booking_attribution.landing_path }}">{% endif %}
+        <input type="hidden" name="cta_source" value="{{ booking_attribution.entry_cta_source or 'guest_details_submit' }}">
+        <div class="grid two">
+          <label><span>{{ t('label_first_name') }}</span><input type="text" name="first_name" value="{{ form_values.first_name or '' }}" maxlength="120" autocomplete="given-name" required></label>
+          <label><span>{{ t('label_last_name') }}</span><input type="text" name="last_name" value="{{ form_values.last_name or '' }}" maxlength="120" autocomplete="family-name" required></label>
+        </div>
+        <div class="grid two">
+          <label><span>{{ t('label_mobile_phone') }}</span><input type="tel" name="phone" value="{{ form_values.phone or '' }}" maxlength="30" autocomplete="tel" inputmode="tel" required></label>
+          <label><span>{{ t('label_email') }}</span><input type="email" name="email" value="{{ form_values.email or hold.guest_email or '' }}" maxlength="255" autocomplete="email" inputmode="email" required></label>
+        </div>
+        {% if booking_extras %}
+        <fieldset class="subsection">
+          <legend>{{ t('extras_title') }}</legend>
+          <p class="muted">{{ t('extras_selection_help') }}</p>
+          <div class="list-stack compact" id="booking-extra-options">
+            {% for extra in booking_extras %}
+            <label class="card inset toggle-row">
+              <span>
+                <strong>{{ extra.name }}</strong>
+                {% if extra.description %}<span class="muted">{{ extra.description }}</span>{% endif %}
+                <span class="small muted">{{ t('extras_per_night') if extra.pricing_mode == 'per_night' else t('extras_per_stay') }} · {{ currency }} {{ extra.unit_price|money }}</span>
+              </span>
+              <input
+                type="checkbox"
+                name="extra_ids"
+                value="{{ extra.id }}"
+                data-extra-name="{{ extra.name }}"
+                data-extra-pricing="{{ t('extras_per_night') if extra.pricing_mode == 'per_night' else t('extras_per_stay') }}"
+                data-extra-total="{{ ((hold.check_out_date - hold.check_in_date).days if extra.pricing_mode == 'per_night' else 1) * extra.unit_price }}"
+                {% if (extra.id|string) in selected_extra_ids %}checked{% endif %}
+              >
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        {% endif %}
+        <label><span>{{ t('label_special_requests') }}</span><textarea name="special_requests" rows="4" maxlength="500">{{ form_values.special_requests or '' }}</textarea></label>
+        <label class="toggle-row"><span>{{ t('terms_acknowledgement') }}</span><input type="checkbox" name="accept_terms" required></label>
+        <button class="button" type="submit">{{ t('book_now') }}</button>
+      </form>
+    </article>
+    <article class="card sticky-card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('summary_title') }}</p><h2>{{ room_type.name }}</h2></div></div>
+      <div class="room-summary-panel">
+        {% if room_content.primary_media_url %}
+          <img
+            class="summary-room-media"
+            src="{{ room_content.primary_media_url }}"
+            alt="{{ room_type.name }}"
+            loading="lazy"
+            decoding="async"
+          >
+        {% else %}
+          <div class="room-offer-placeholder summary-room-placeholder">
+            <span class="eyebrow">{{ room_type.code }}</span>
+            <strong>{{ room_type.name }}</strong>
+            {% if room_content.summary %}<p>{{ room_content.summary }}</p>{% endif %}
+          </div>
+        {% endif %}
+        {% if room_content.summary %}<p class="room-offer-summary">{{ room_content.summary }}</p>{% endif %}
+        <div class="detail-pills room-offer-pills">
+          {% if room_content.bed_details and room_content.bed_details != room_content.summary %}
+            <span class="detail-pill">{{ room_content.bed_details }}</span>
+          {% endif %}
+          <span class="detail-pill">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
+        </div>
+        {% if room_content.amenities %}
+          <div class="room-amenities">
+            {% for amenity in room_content.amenities[:6] %}
+              <span class="amenity-chip">{{ amenity }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if room_content.policy_callouts %}
+          <ul class="checklist compact">
+            {% for callout in room_content.policy_callouts %}
+              <li>{{ callout }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+      <div class="metric-strip">
+        <div><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=hold.check_in_date, end=hold.check_out_date) }}</strong></div>
+        <div><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</strong></div>
+        <div><small>{{ t('room_total_label') }}</small><strong>{{ currency }} {{ hold.quoted_room_total|money }}</strong></div>
+        <div><small>{{ t('tax_label') }}</small><strong>{{ currency }} {{ hold.quoted_tax_total|money }}</strong></div>
+        <div><small>{{ t('extras_summary_label') }}</small><strong id="extras-total-value">{{ currency }} {{ extras_total|money }}</strong></div>
+        <div><small>{{ t('grand_total_label') }}</small><strong id="grand-total-value" data-base-total="{{ hold.quoted_grand_total }}">{{ currency }} {{ grand_total_with_extras|money }}</strong></div>
+        <div><small>{{ t('terms_version_label') }}</small><strong>{{ published_terms_version }}</strong></div>
+      </div>
+      {% if booking_extras %}
+      <div class="subsection">
+        <h3>{{ t('extras_summary_label') }}</h3>
+        <div class="list-stack compact" id="selected-extras-summary">
+          {% for line in selected_extras_quote %}
+          <div class="list-row no-link">
+            <div>
+              <strong>{{ line.name }}</strong>
+              <p class="small muted">{{ line.pricing_label }}{% if line.pricing_mode == 'per_night' %} · {{ line.quantity }} {{ 'night' if line.quantity == 1 else 'nights' }}{% endif %}</p>
+            </div>
+            <strong>{{ currency }} {{ line.total_amount|money }}</strong>
+          </div>
+          {% else %}
+          <p class="muted" id="no-extras-selected">{{ t('extras_none_selected') }}</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <div class="subsection">
+        <h3>{{ t('booking_terms_title') }}</h3>
+        <p class="muted">{{ hotel_support_contact_text }}</p>
+        <ul class="checklist compact">
+          <li>{{ policy_documents.cancellation }}</li>
+          <li>{{ policy_documents.extra_guest }}</li>
+          <li>{{ policy_documents.check_in }}</li>
+          <li>{{ policy_documents.privacy }}</li>
+        </ul>
+      </div>
+    </article>
+  </section>
+</div>
+{% if booking_extras %}
+<script>
+  (() => {
+    const optionInputs = Array.from(document.querySelectorAll('input[name="extra_ids"]'));
+    if (!optionInputs.length) {
+      return;
+    }
+    const formatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const extrasTotalValue = document.getElementById('extras-total-value');
+    const grandTotalValue = document.getElementById('grand-total-value');
+    const summaryContainer = document.getElementById('selected-extras-summary');
+    const baseTotal = Number(grandTotalValue?.dataset.baseTotal || '0');
+
+    const render = () => {
+      const selected = optionInputs.filter((input) => input.checked);
+      const extrasTotal = selected.reduce((sum, input) => sum + Number(input.dataset.extraTotal || '0'), 0);
+      if (extrasTotalValue) {
+        extrasTotalValue.textContent = '{{ currency }} ' + formatter.format(extrasTotal);
+      }
+      if (grandTotalValue) {
+        grandTotalValue.textContent = '{{ currency }} ' + formatter.format(baseTotal + extrasTotal);
+      }
+      if (!summaryContainer) {
+        return;
+      }
+      if (!selected.length) {
+        summaryContainer.innerHTML = '<p class="muted" id="no-extras-selected">{{ t("extras_none_selected") }}</p>';
+        return;
+      }
+      summaryContainer.innerHTML = selected.map((input) => {
+        const total = formatter.format(Number(input.dataset.extraTotal || '0'));
+        return `
+          <div class="list-row no-link">
+            <div>
+              <strong>${input.dataset.extraName || ''}</strong>
+              <p class="small muted">${input.dataset.extraPricing || ''}</p>
+            </div>
+            <strong>{{ currency }} ${total}</strong>
+          </div>
+        `;
+      }).join('');
+    };
+
+    optionInputs.forEach((input) => input.addEventListener('change', render));
+    render();
+  })();
+</script>
+{% endif %}
 {% endblock %}

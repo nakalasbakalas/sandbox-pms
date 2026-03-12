@@ -12,6 +12,7 @@
     <div class="actions">
       <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
       <a class="button secondary" href="{{ url_for('staff_reservations') }}">Reservations</a>
+      <a class="button secondary" href="{{ url_for('staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Planning board</a>
     </div>
   </div>
 
@@ -22,6 +23,7 @@
   </section>
 
   <div class="status-actions front-desk-tabs">
+    <a class="pill subtle" href="{{ url_for('staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Board</a>
     <a class="pill {% if mode == 'arrivals' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='arrivals', date=workspace.business_date.isoformat()) }}">Arrivals</a>
     <a class="pill {% if mode == 'departures' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='departures', date=workspace.business_date.isoformat()) }}">Departures</a>
     <a class="pill {% if mode == 'in_house' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='in_house', date=workspace.business_date.isoformat()) }}">In-house</a>

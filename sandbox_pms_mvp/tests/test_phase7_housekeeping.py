@@ -461,7 +461,7 @@ def test_checkout_dirty_turnover_appears_in_housekeeping_and_clean_inspected_res
             CheckoutPayload(
                 collect_payment_amount=current_payment["balance_due"],
                 departure_note="Checked out on time",
-                action_at=utc_dt(business_date + timedelta(days=1), 10),
+                action_at=utc_dt(business_date + timedelta(days=1), 3),
             ),
             actor_user_id=front_desk.id,
         )

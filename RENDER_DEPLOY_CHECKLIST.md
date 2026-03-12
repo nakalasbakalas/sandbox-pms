@@ -8,7 +8,7 @@ In Render:
 
 1. Click `New` -> `Blueprint`.
 2. Connect this repository.
-3. Confirm Render is reading [render.yaml](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/render.yaml) from the repo root.
+3. Confirm Render is reading [render.yaml](render.yaml) from the repo root.
 
 This Blueprint creates:
 
@@ -150,5 +150,6 @@ Check all of these manually:
 
 ## 9. Important note
 
-Do not upload [sandboxhotel-render.env](C:/Users/nakal/Downloads/sandbox_hotel_pms_mvp/sandbox_pms_mvp/sandboxhotel-render.env) to Render.
+Do not keep live secret files inside the repository. Use [sandboxhotel-render.template.env](sandbox_pms_mvp/sandboxhotel-render.template.env) only as a local placeholder reference and set the real values directly in Render.
 Use Render-managed environment variables only.
+

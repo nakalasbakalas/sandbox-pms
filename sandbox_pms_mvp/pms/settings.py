@@ -9,6 +9,7 @@ APP_SETTINGS_SEED = [
     ("hotel.currency", {"value": "THB"}, "string", "Operating currency", True, 2),
     ("hotel.check_in_time", {"value": "14:00"}, "time", "Standard check-in time", True, 3),
     ("hotel.check_out_time", {"value": "11:00"}, "time", "Standard check-out time", True, 4),
+    ("hotel.timezone", {"value": "Asia/Bangkok"}, "string", "Operational hotel timezone", True, 5),
     ("hotel.vat_rate", {"value": "0.07"}, "decimal", "VAT rate", False, 5),
     ("hotel.service_charge_rate", {"value": "0.00"}, "decimal", "Service charge rate", False, 6),
     ("hotel.extra_guest_fee", {"value": "200.00"}, "money", "Extra guest nightly fee", False, 7),
@@ -46,6 +47,20 @@ APP_SETTINGS_SEED = [
     ("notifications.staff_alert_recipients", {"value": ""}, "string", "Comma-separated staff alert email recipients", False, 39),
     ("notifications.line_staff_alert_enabled", {"value": False}, "boolean", "Enable optional LINE staff alert channel", False, 40),
     ("notifications.whatsapp_staff_alert_enabled", {"value": False}, "boolean", "Enable optional WhatsApp staff alert channel", False, 41),
+    ("calendar.export_enabled", {"value": True}, "boolean", "Enable secure iCal export feeds", False, 42),
+    ("calendar.import_enabled", {"value": True}, "boolean", "Enable external iCal source sync", False, 43),
+    ("calendar.default_sync_interval_minutes", {"value": 60}, "integer", "Recommended external calendar sync interval", False, 44),
+    (
+        "hotel.support_contact_text",
+        {"value": "Questions before you book? Contact our reservations team for direct booking support."},
+        "string",
+        "Guest-facing support message shown across the booking engine",
+        True,
+        45,
+    ),
+    ("hotel.accent_color", {"value": "#C57C35"}, "string", "Primary booking engine accent color", True, 46),
+    ("hotel.accent_color_soft", {"value": "#F0C89A"}, "string", "Secondary booking engine accent color", True, 47),
+    ("hotel.public_base_url", {"value": ""}, "string", "Canonical public booking base URL override", True, 48),
 ]
 
 
@@ -125,6 +140,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "deposit_amount",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
         "cancellation_policy",
         "check_in_policy",
         "check_out_policy",
@@ -140,6 +157,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "payment_expires_at",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
         "check_in_policy",
     ],
     "payment_success": [
@@ -152,6 +171,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "payment_status",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
     ],
     "payment_failed": [
         "hotel_name",
@@ -163,6 +184,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "payment_status",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
     ],
     "pre_arrival_reminder": [
         "hotel_name",
@@ -179,6 +202,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "hotel_check_out_time",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
         "check_in_policy",
     ],
     "cancellation_confirmation": [
@@ -190,6 +215,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "refund_amount",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
         "cancellation_policy",
     ],
     "modification_confirmation": [
@@ -205,6 +232,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "modification_summary",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
     ],
     "cancellation_request_received": [
         "hotel_name",
@@ -212,6 +241,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "reservation_code",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
     ],
     "modification_request_received": [
         "hotel_name",
@@ -219,6 +250,8 @@ NOTIFICATION_TEMPLATE_PLACEHOLDERS = {
         "reservation_code",
         "contact_phone",
         "contact_email",
+        "support_contact_text",
+        "public_booking_url",
     ],
     "internal_new_booking_alert": [
         "hotel_name",

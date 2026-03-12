@@ -72,6 +72,23 @@
       <div><small>Balance due</small><strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
       <div><small>Refund due</small><strong>{{ currency }} {{ detail.payment_summary.refund_due|money }}</strong></div>
     </div>
+    {% if detail.extras %}
+    <div class="subsection">
+      <h3>Booked extras</h3>
+      <div class="list-stack compact">
+        {% for extra in detail.extras %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ extra.name }}</strong>
+            <p class="small muted">{{ extra.pricing_label }}{% if extra.pricing_mode == 'per_night' %} - {{ extra.quantity }} {{ 'night' if extra.quantity == 1 else 'nights' }}{% endif %}</p>
+            {% if extra.description %}<p class="small muted">{{ extra.description }}</p>{% endif %}
+          </div>
+          <strong>{{ currency }} {{ extra.total_amount|money }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
     <div class="subsection">
       <h3>Recent folio charges</h3>
       <div class="list-stack compact">

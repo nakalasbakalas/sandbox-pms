@@ -16,6 +16,7 @@ from flask import current_app
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
+from ..branding import branding_settings_context, resolve_public_base_url
 from ..extensions import db
 from ..i18n import normalize_language, t
 from ..pricing import get_setting_value
@@ -711,6 +712,11 @@ def _public_url(endpoint: str, *, external: bool, **values: str) -> str:
     }
     relative_path = route_map[endpoint]
     if not external:
+        return relative_url
+    base_url = resolve_public_base_url()
+    if not base_url:
+        raise RuntimeError("APP_BASE_URL must be configured for hosted payment links.")
+    return f"{base_url}{relative_url}"
         return f"{relative_path}?{query_string}"
     return build_booking_url(relative_path, query_string=query_string)
 
@@ -752,12 +758,20 @@ def render_payment_request_message(
     language: str,
     payment_link: str,
 ) -> tuple[str, str]:
+    branding = branding_settings_context()
     context = {
+        "hotel_name": branding["hotel_name"],
+        "hotel_logo_url": branding["logo_url"],
+        "hotel_address": branding["address"],
         "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
         "guest_name": guest_name,
         "reservation_code": reservation.reservation_code,
         "deposit_amount": f"{money(payment_request.amount):,.2f}",
         "payment_link": payment_link,
+        "contact_phone": branding["contact_phone"],
+        "contact_email": branding["contact_email"],
+        "support_contact_text": branding["support_contact_text"],
+        "public_booking_url": branding["public_base_url"],
         "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
         "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
         "check_in_policy": policy_text("check_in_policy", language, t(language, "checkin_summary")),
@@ -771,6 +785,8 @@ def render_payment_request_message(
             payment_link,
             context["check_in_policy"],
             f"Contact: {context['contact_phone']} / {context['contact_email']}",
+            context["support_contact_text"],
+            context["public_booking_url"],
         ]
     )
     return render_notification_template(

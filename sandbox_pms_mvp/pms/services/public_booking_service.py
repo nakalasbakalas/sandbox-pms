@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
+from ..branding import branding_settings_context
 from ..constants import BOOKING_LANGUAGES, BOOKING_SOURCE_CHANNELS
 from ..extensions import db
 from ..i18n import normalize_language, t
@@ -40,6 +41,13 @@ from .communication_service import (
     queue_reservation_confirmation,
     queue_staff_new_booking_alert,
 )
+from .extras_service import (
+    attach_extras_quote_to_reservation,
+    post_reservation_extras_to_folio,
+    quote_booking_extras,
+    resolve_booking_extras,
+)
+from .ical_service import room_has_external_block
 from .reservation_service import (
     calculate_deposit_required,
     create_or_get_guest,
@@ -58,6 +66,62 @@ def as_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _clean_text(value: str | None, *, limit: int | None = None) -> str | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    return cleaned[:limit] if limit else cleaned
+
+
+def _clean_string_list(value, *, item_limit: int, max_items: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_item in value:
+        if not isinstance(raw_item, str):
+            continue
+        cleaned = _clean_text(raw_item, limit=item_limit)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(cleaned)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def build_room_type_content(room_type: RoomType) -> dict[str, object]:
+    media_urls = _clean_string_list(room_type.media_urls, item_limit=500, max_items=12)
+    amenities = _clean_string_list(room_type.amenities, item_limit=120, max_items=16)
+    policy_callouts = _clean_string_list(room_type.policy_callouts, item_limit=200, max_items=8)
+    summary = _clean_text(room_type.summary, limit=280)
+    description = _clean_text(room_type.description, limit=5000)
+    bed_details = _clean_text(room_type.bed_details, limit=255)
+
+    if not summary:
+        if description and description != bed_details:
+            summary = description
+        else:
+            summary = bed_details or description
+
+    long_description = description if description and description != summary else None
+
+    return {
+        "summary": summary,
+        "long_description": long_description,
+        "bed_details": bed_details,
+        "primary_media_url": media_urls[0] if media_urls else None,
+        "media_count": len(media_urls),
+        "media_urls": media_urls,
+        "amenities": amenities,
+        "policy_callouts": policy_callouts,
+    }
 
 
 @dataclass
@@ -101,6 +165,7 @@ class PublicBookingPayload:
     source_metadata: dict | None
     terms_accepted: bool
     terms_version: str
+    extra_ids: tuple[uuid.UUID, ...] = ()
 
 
 @dataclass
@@ -149,6 +214,29 @@ def public_source_channel(value: str | None) -> str:
     if value in BOOKING_SOURCE_CHANNELS:
         return value
     return "direct_web"
+
+
+def merge_public_source_metadata(*sources: dict | None) -> dict | None:
+    first_touch_keys = {
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_content",
+        "source_label",
+        "referrer_host",
+        "entry_page",
+        "landing_path",
+        "entry_cta_source",
+    }
+    merged: dict[str, object] = {}
+    for source in sources:
+        for key, value in (source or {}).items():
+            if value in {None, ""}:
+                continue
+            if key in first_touch_keys and key in merged:
+                continue
+            merged[key] = value
+    return merged or None
 
 
 def cleanup_expired_holds() -> None:
@@ -206,6 +294,8 @@ def get_live_available_rooms(
     candidates = candidate_query.all()
     available_rooms: list[Room] = []
     for room in candidates:
+        if room_has_external_block(room.id, check_in_date, check_out_date):
+            continue
         rows = (
             db.session.execute(
                 sa.select(InventoryDay)
@@ -254,14 +344,27 @@ def search_public_availability(payload: PublicSearchPayload) -> list[dict]:
             adults=payload.adults,
             children=payload.children,
         )
+        room_content = build_room_type_content(item)
+        policy_highlights = list(room_content["policy_callouts"])
+        for callout in (
+            policy_text("check_in_policy", payload.language, t(payload.language, "checkin_summary")),
+            policy_text("cancellation_policy", payload.language, t(payload.language, "policy_summary")),
+            policy_text("child_extra_guest_policy", payload.language, t(payload.language, "extra_guest_summary")),
+        ):
+            if callout and callout not in policy_highlights:
+                policy_highlights.append(callout)
+            if len(policy_highlights) >= 4:
+                break
         results.append(
             {
                 "room_type": item,
+                "room_content": room_content,
                 "available_rooms": len(rooms),
                 "quote": quote,
                 "policy_summary": policy_text("cancellation_policy", payload.language, t(payload.language, "policy_summary")),
                 "extra_guest_summary": policy_text("child_extra_guest_policy", payload.language, t(payload.language, "extra_guest_summary")),
                 "checkin_summary": policy_text("check_in_policy", payload.language, t(payload.language, "checkin_summary")),
+                "policy_highlights": policy_highlights,
             }
         )
     return results
@@ -360,6 +463,8 @@ def _create_hold_once(payload: HoldRequestPayload, room_type: RoomType, quote: Q
     now = utc_now()
     expires_at = now + timedelta(minutes=current_app.config["PUBLIC_BOOKING_HOLD_MINUTES"])
     for room in rooms:
+        if room_has_external_block(room.id, payload.check_in_date, payload.check_out_date, for_update=True):
+            continue
         rows = (
             db.session.execute(
                 sa.select(InventoryDay)
@@ -420,7 +525,13 @@ def _create_hold_once(payload: HoldRequestPayload, room_type: RoomType, quote: Q
     raise ValueError(t(payload.language, "room_unavailable"))
 
 
-def _duplicate_reservation(payload: PublicBookingPayload, hold: ReservationHold) -> Reservation | None:
+def _duplicate_reservation(
+    payload: PublicBookingPayload,
+    hold: ReservationHold,
+    *,
+    grand_total: Decimal,
+    extras_total: Decimal,
+) -> Reservation | None:
     window_start = utc_now() - timedelta(minutes=15)
     email = normalize_email(payload.email)
     phone = normalize_phone(payload.phone)
@@ -439,8 +550,9 @@ def _duplicate_reservation(payload: PublicBookingPayload, hold: ReservationHold)
             Reservation.check_in_date == hold.check_in_date,
             Reservation.check_out_date == hold.check_out_date,
             Reservation.room_type_id == hold.room_type_id,
-            Reservation.quoted_grand_total == hold.quoted_grand_total,
-            Reservation.source_channel == public_source_channel(payload.source_channel),
+            Reservation.quoted_grand_total == grand_total,
+            Reservation.quoted_extras_total == extras_total,
+            Reservation.source_channel == hold.source_channel,
             Reservation.booked_at >= window_start,
             Reservation.current_status.in_(["tentative", "confirmed", "checked_in"]),
         )
@@ -481,18 +593,32 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
         db.session.flush()
         raise ValueError(t(payload.language, "hold_expired"))
 
-    duplicate = _duplicate_reservation(payload, hold)
-    if duplicate:
-        duplicate.duplicate_suspected = True
-        db.session.commit()
-        return duplicate
-
+    selected_extras = resolve_booking_extras(payload.extra_ids, public_only=True)
+    extras_quote = quote_booking_extras(
+        selected_extras,
+        check_in_date=hold.check_in_date,
+        check_out_date=hold.check_out_date,
+    )
     quote = QuoteResult(
         room_total=Decimal(str(hold.quoted_room_total)),
         tax_total=Decimal(str(hold.quoted_tax_total)),
         grand_total=Decimal(str(hold.quoted_grand_total)),
         nightly_rates=[],
     )
+    grand_total = quote.room_total + quote.tax_total + extras_quote.total_amount
+    duplicate = _duplicate_reservation(
+        payload,
+        hold,
+        grand_total=grand_total,
+        extras_total=extras_quote.total_amount,
+    )
+    if duplicate:
+        duplicate.duplicate_suspected = True
+        hold.status = "converted"
+        hold.converted_reservation_id = duplicate.id
+        _release_hold_inventory(hold)
+        db.session.commit()
+        return duplicate
     guest_payload = type(
         "GuestPayload",
         (),
@@ -509,8 +635,8 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
         primary_guest_id=guest.id,
         room_type_id=hold.room_type_id,
         assigned_room_id=hold.assigned_room_id,
-        current_status="tentative" if quote.grand_total > Decimal("0.00") else "confirmed",
-        source_channel=public_source_channel(payload.source_channel),
+        current_status="tentative" if grand_total > Decimal("0.00") else "confirmed",
+        source_channel=hold.source_channel,
         check_in_date=hold.check_in_date,
         check_out_date=hold.check_out_date,
         adults=hold.adults,
@@ -519,12 +645,13 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
         special_requests=(payload.special_requests or "").strip() or None,
         quoted_room_total=quote.room_total,
         quoted_tax_total=quote.tax_total,
-        quoted_grand_total=quote.grand_total,
-        deposit_required_amount=calculate_deposit_required(hold.check_in_date, hold.check_out_date, quote.grand_total),
+        quoted_extras_total=extras_quote.total_amount,
+        quoted_grand_total=grand_total,
+        deposit_required_amount=calculate_deposit_required(hold.check_in_date, hold.check_out_date, grand_total),
         deposit_received_amount=Decimal("0.00"),
         created_from_public_booking_flow=True,
         booking_language=payload.language,
-        source_metadata_json=payload.source_metadata,
+        source_metadata_json=merge_public_source_metadata(hold.source_metadata_json, payload.source_metadata),
         duplicate_suspected=False,
         terms_accepted_at=utc_now(),
         terms_version=payload.terms_version,
@@ -533,6 +660,13 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
     )
     db.session.add(reservation)
     db.session.flush()
+    attach_extras_quote_to_reservation(
+        reservation,
+        extras_quote,
+        actor_user_id=None,
+        source="public_booking",
+    )
+    post_reservation_extras_to_folio(reservation, actor_user_id=None)
     notification_delivery_ids: list[uuid.UUID] = []
 
     rows = (
@@ -596,6 +730,8 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
             "reservation_code": reservation.reservation_code,
             "source_channel": reservation.source_channel,
             "booking_language": reservation.booking_language,
+            "source_label": (reservation.source_metadata_json or {}).get("source_label"),
+            "utm_campaign": (reservation.source_metadata_json or {}).get("utm_campaign"),
         },
     )
     write_activity_log(
@@ -610,22 +746,46 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
     return reservation
 
 
+def _release_hold_inventory(hold: ReservationHold) -> None:
+    rows = (
+        db.session.execute(
+            sa.select(InventoryDay)
+            .where(InventoryDay.hold_id == hold.id)
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        row.availability_status = "available"
+        row.hold_id = None
+        row.nightly_rate = None
+
+
 def render_guest_confirmation_email(reservation: Reservation, guest_name: str, language: str) -> str:
     return render_guest_confirmation_message(reservation, guest_name, language)[1]
 
 
 def render_guest_confirmation_message(reservation: Reservation, guest_name: str, language: str) -> tuple[str, str]:
+    branding = branding_settings_context()
     context = {
-        "hotel_name": str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))),
+        "hotel_name": branding["hotel_name"],
+        "hotel_logo_url": branding["logo_url"],
+        "hotel_address": branding["address"],
+        "hotel_check_in_time": branding["check_in_time"],
+        "hotel_check_out_time": branding["check_out_time"],
         "guest_name": guest_name,
         "reservation_code": reservation.reservation_code,
         "check_in_date": reservation.check_in_date.isoformat(),
         "check_out_date": reservation.check_out_date.isoformat(),
         "room_type_name": reservation.room_type.name if reservation.room_type else "Room",
+        "occupancy_summary": f"{reservation.adults} adults / {reservation.children} children / {reservation.extra_guests} extra",
         "grand_total": f"{Decimal(str(reservation.quoted_grand_total)):,.2f}",
         "deposit_amount": f"{Decimal(str(reservation.deposit_required_amount or 0)):,.2f}",
-        "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-        "contact_email": str(get_setting_value("hotel.contact_email", current_app.config.get("MAIL_FROM", ""))),
+        "contact_phone": branding["contact_phone"],
+        "contact_email": branding["contact_email"],
+        "support_contact_text": branding["support_contact_text"],
+        "public_booking_url": branding["public_base_url"],
         "cancellation_policy": policy_text("cancellation_policy", language, t(language, "policy_summary")),
         "check_in_policy": policy_text("check_in_policy", language, t(language, "checkin_summary")),
         "check_out_policy": policy_text("check_out_policy", language, ""),
@@ -644,7 +804,9 @@ def render_guest_confirmation_message(reservation: Reservation, guest_name: str,
             f"Total THB {context['grand_total']}",
             context["cancellation_policy"],
             context["check_in_policy"],
-            f"Contact: {context['contact_phone']}",
+            f"Contact: {context['contact_phone']} / {context['contact_email']}",
+            context["support_contact_text"],
+            context["public_booking_url"],
         ]
     )
     return render_notification_template(

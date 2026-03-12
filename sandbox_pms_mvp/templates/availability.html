@@ -1,65 +1,134 @@
 {% extends 'base.html' %}
 {% block title %}{{ t('availability_title') }} | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="card">
-  <div class="card-head">
-    <div><p class="eyebrow">{{ t('live_inventory') }}</p><h1>{{ t('search_title') }}</h1></div>
-  </div>
-  <form class="stack-form" method="get">
-    <input type="hidden" name="lang" value="{{ current_language }}">
-    <div class="grid two">
-      <label><span>{{ t('label_check_in') }}</span><input type="date" name="check_in" value="{{ form_data.check_in }}" required></label>
-      <label><span>{{ t('label_check_out') }}</span><input type="date" name="check_out" value="{{ form_data.check_out }}" required></label>
+<div class="public-page">
+  <section class="page-hero card">
+    <div>
+      <p class="eyebrow">{{ t('live_inventory') }}</p>
+      <h1>{{ t('search_title') }}</h1>
+      <p class="lead">{{ hotel_support_contact_text }}</p>
     </div>
-    <div class="grid three">
-      <label><span>{{ t('label_adults') }}</span><input type="number" name="adults" min="1" max="3" value="{{ form_data.adults }}" required></label>
-      <label><span>{{ t('label_children') }}</span><input type="number" name="children" min="0" max="2" value="{{ form_data.children }}" required></label>
-      <label><span>{{ t('label_room_type') }}</span><select name="room_type_id"><option value="">{{ t('option_any') }}</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if form_data.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.name }}</option>{% endfor %}</select></label>
+    <div class="detail-pills">
+      {% if form_data.check_in %}<span class="detail-pill">{{ t('label_check_in') }} {{ form_data.check_in }}</span>{% endif %}
+      {% if form_data.check_out %}<span class="detail-pill">{{ t('label_check_out') }} {{ form_data.check_out }}</span>{% endif %}
+      {% if form_data.adults %}<span class="detail-pill">{{ t('occupancy_summary', adults=form_data.adults, children=form_data.children) }}</span>{% endif %}
     </div>
-    <button class="button" type="submit">{{ t('search_title') }}</button>
-  </form>
-  {% if error %}<div class="subsection"><p class="flash error">{{ error }}</p></div>{% endif %}
-</section>
+  </section>
 
-{% if results %}
-<section class="grid two gap-lg">
-  {% for item in results %}
-    <article class="card">
-      <div class="card-head split-row">
-        <div>
-          <h2>{{ item.room_type.name }}</h2>
-          <p>{{ item.room_type.description }}</p>
+  <section class="card public-search-card">
+    <form class="stack-form" method="get">
+      <input type="hidden" name="lang" value="{{ current_language }}">
+      {% if booking_attribution.utm_source %}<input type="hidden" name="utm_source" value="{{ booking_attribution.utm_source }}">{% endif %}
+      {% if booking_attribution.utm_medium %}<input type="hidden" name="utm_medium" value="{{ booking_attribution.utm_medium }}">{% endif %}
+      {% if booking_attribution.utm_campaign %}<input type="hidden" name="utm_campaign" value="{{ booking_attribution.utm_campaign }}">{% endif %}
+      {% if booking_attribution.utm_content %}<input type="hidden" name="utm_content" value="{{ booking_attribution.utm_content }}">{% endif %}
+      {% if booking_attribution.source_label %}<input type="hidden" name="source_label" value="{{ booking_attribution.source_label }}">{% endif %}
+      {% if booking_attribution.referrer_host %}<input type="hidden" name="referrer_host" value="{{ booking_attribution.referrer_host }}">{% endif %}
+      {% if booking_attribution.entry_page %}<input type="hidden" name="entry_page" value="{{ booking_attribution.entry_page }}">{% endif %}
+      {% if booking_attribution.landing_path %}<input type="hidden" name="landing_path" value="{{ booking_attribution.landing_path }}">{% endif %}
+      {% if booking_attribution.source_channel %}<input type="hidden" name="source_channel" value="{{ booking_attribution.source_channel }}">{% endif %}
+      <input type="hidden" name="cta_source" value="{{ booking_attribution.entry_cta_source or 'availability_search' }}">
+      <div class="grid two">
+        <label><span>{{ t('label_check_in') }}</span><input type="date" name="check_in" value="{{ form_data.check_in }}" required></label>
+        <label><span>{{ t('label_check_out') }}</span><input type="date" name="check_out" value="{{ form_data.check_out }}" required></label>
+      </div>
+      <div class="grid three">
+        <label><span>{{ t('label_adults') }}</span><input type="number" name="adults" min="1" max="3" value="{{ form_data.adults }}" required></label>
+        <label><span>{{ t('label_children') }}</span><input type="number" name="children" min="0" max="2" value="{{ form_data.children }}" required></label>
+        <label><span>{{ t('label_room_type') }}</span><select name="room_type_id"><option value="">{{ t('option_any') }}</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if form_data.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.name }}</option>{% endfor %}</select></label>
+      </div>
+      <button class="button" type="submit">{{ t('search_title') }}</button>
+    </form>
+    {% if error %}<div class="subsection"><p class="flash error">{{ error }}</p></div>{% endif %}
+  </section>
+
+  {% if results %}
+  <section class="results-stack">
+    {% for item in results %}
+      <article class="card room-offer-card">
+        <div class="room-offer-main">
+          <div class="room-offer-gallery">
+            {% if item.room_content.primary_media_url %}
+              <img
+                class="room-offer-media"
+                src="{{ item.room_content.primary_media_url }}"
+                alt="{{ item.room_type.name }}"
+                loading="lazy"
+                decoding="async"
+              >
+            {% else %}
+              <div class="room-offer-placeholder">
+                <span class="eyebrow">{{ item.room_type.code }}</span>
+                <strong>{{ item.room_type.name }}</strong>
+                {% if item.room_content.summary %}<p>{{ item.room_content.summary }}</p>{% endif %}
+              </div>
+            {% endif %}
+          </div>
+          <div class="room-offer-copy">
+            <div class="card-head split-row">
+              <div>
+                <p class="eyebrow">{{ t('room_type_label') }}</p>
+                <h2>{{ item.room_type.name }}</h2>
+                {% if item.room_content.summary %}<p class="room-offer-summary">{{ item.room_content.summary }}</p>{% endif %}
+                {% if item.room_content.long_description %}<p class="muted room-offer-description">{{ item.room_content.long_description }}</p>{% endif %}
+              </div>
+              <span class="status confirmed">{{ t('available_rooms', count=item.available_rooms) }}</span>
+            </div>
+            <div class="detail-pills room-offer-pills">
+              {% if item.room_content.bed_details and item.room_content.bed_details != item.room_content.summary %}
+                <span class="detail-pill">{{ item.room_content.bed_details }}</span>
+              {% endif %}
+              <span class="detail-pill">{{ t('max_occupancy', count=item.room_type.max_occupancy) }}</span>
+            </div>
+            {% if item.room_content.amenities %}
+              <div class="room-amenities">
+                {% for amenity in item.room_content.amenities[:6] %}
+                  <span class="amenity-chip">{{ amenity }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <ul class="checklist compact">
+              {% for callout in item.policy_highlights %}
+                <li>{{ callout }}</li>
+              {% endfor %}
+            </ul>
+          </div>
         </div>
-        <span class="status confirmed">{{ t('available_rooms', count=item.available_rooms) }}</span>
-      </div>
-      <div class="metric-strip">
-        <div><small>{{ t('room_total_label') }}</small><strong>{{ currency }} {{ item.quote.room_total|money }}</strong></div>
-        <div><small>{{ t('tax_label') }}</small><strong>{{ currency }} {{ item.quote.tax_total|money }}</strong></div>
-        <div><small>{{ t('grand_total_label') }}</small><strong>{{ currency }} {{ item.quote.grand_total|money }}</strong></div>
-        <div><small>{{ t('stay_label') }}</small><strong>{{ t('stay_nights', count=item.quote.nightly_rates|length) }}</strong></div>
-      </div>
-      <ul class="checklist compact">
-        <li>{{ item.checkin_summary }}</li>
-        <li>{{ item.policy_summary }}</li>
-        <li>{{ item.extra_guest_summary }}</li>
-      </ul>
-      <form class="stack-form subsection" action="{{ url_for('booking_hold') }}" method="post">
-        {{ csrf_input() }}
-        <input type="hidden" name="room_type_id" value="{{ item.room_type.id }}">
-        <input type="hidden" name="check_in_date" value="{{ form_data.check_in }}">
-        <input type="hidden" name="check_out_date" value="{{ form_data.check_out }}">
-        <input type="hidden" name="adults" value="{{ form_data.adults }}">
-        <input type="hidden" name="children" value="{{ form_data.children }}">
-        <input type="hidden" name="language" value="{{ current_language }}">
-        <input type="hidden" name="source_channel" value="{{ request.args.get('utm_source', 'direct_web') if request.args.get('utm_source') in ['google_business','facebook','line','whatsapp','qr','referral'] else 'direct_web' }}">
-        <input type="hidden" name="idempotency_key" value="{{ [booking_nonce, item.room_type.id, form_data.check_in, form_data.check_out, form_data.adults, form_data.children]|join('-') }}">
-        <label><span>{{ t('hold_email_label') }}</span><input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required></label>
-        <button class="button" type="submit">{{ t('book_now') }}</button>
-      </form>
-    </article>
-  {% endfor %}
-</section>
-{% elif form_data.check_in and not error %}
-<section class="card"><p class="muted">{{ t('no_rooms_available') }}</p></section>
-{% endif %}
+        <aside class="room-offer-aside">
+          <div class="price-stack">
+            <div class="price-line"><span>{{ t('room_total_label') }}</span><strong>{{ currency }} {{ item.quote.room_total|money }}</strong></div>
+            <div class="price-line"><span>{{ t('tax_label') }}</span><strong>{{ currency }} {{ item.quote.tax_total|money }}</strong></div>
+            <div class="price-line total"><span>{{ t('grand_total_label') }}</span><strong>{{ currency }} {{ item.quote.grand_total|money }}</strong></div>
+            <div class="price-line"><span>{{ t('stay_label') }}</span><strong>{{ t('stay_nights', count=item.quote.nightly_rates|length) }}</strong></div>
+          </div>
+          <form class="stack-form room-offer-form" action="{{ url_for('booking_hold') }}" method="post">
+            {{ csrf_input() }}
+            <input type="hidden" name="room_type_id" value="{{ item.room_type.id }}">
+            <input type="hidden" name="check_in_date" value="{{ form_data.check_in }}">
+            <input type="hidden" name="check_out_date" value="{{ form_data.check_out }}">
+            <input type="hidden" name="adults" value="{{ form_data.adults }}">
+            <input type="hidden" name="children" value="{{ form_data.children }}">
+            <input type="hidden" name="language" value="{{ current_language }}">
+            <input type="hidden" name="source_channel" value="{{ booking_attribution.source_channel or 'direct_web' }}">
+            {% if booking_attribution.utm_source %}<input type="hidden" name="utm_source" value="{{ booking_attribution.utm_source }}">{% endif %}
+            {% if booking_attribution.utm_medium %}<input type="hidden" name="utm_medium" value="{{ booking_attribution.utm_medium }}">{% endif %}
+            {% if booking_attribution.utm_campaign %}<input type="hidden" name="utm_campaign" value="{{ booking_attribution.utm_campaign }}">{% endif %}
+            {% if booking_attribution.utm_content %}<input type="hidden" name="utm_content" value="{{ booking_attribution.utm_content }}">{% endif %}
+            {% if booking_attribution.source_label %}<input type="hidden" name="source_label" value="{{ booking_attribution.source_label }}">{% endif %}
+            {% if booking_attribution.referrer_host %}<input type="hidden" name="referrer_host" value="{{ booking_attribution.referrer_host }}">{% endif %}
+            {% if booking_attribution.entry_page %}<input type="hidden" name="entry_page" value="{{ booking_attribution.entry_page }}">{% endif %}
+            {% if booking_attribution.landing_path %}<input type="hidden" name="landing_path" value="{{ booking_attribution.landing_path }}">{% endif %}
+            <input type="hidden" name="cta_source" value="{{ booking_attribution.entry_cta_source or 'availability_room_card' }}">
+            <input type="hidden" name="idempotency_key" value="{{ [booking_nonce, item.room_type.id, form_data.check_in, form_data.check_out, form_data.adults, form_data.children]|join('-') }}">
+            <label><span>{{ t('hold_email_label') }}</span><input type="email" name="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required></label>
+            <button class="button" type="submit">{{ t('book_now') }}</button>
+          </form>
+        </aside>
+      </article>
+    {% endfor %}
+  </section>
+  {% elif form_data.check_in and not error %}
+  <section class="card empty-card"><p class="muted">{{ t('no_rooms_available') }}</p></section>
+  {% endif %}
+</div>
 {% endblock %}

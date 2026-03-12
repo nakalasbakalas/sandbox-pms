@@ -1,20 +1,30 @@
 {% extends 'base.html' %}
 {% block title %}{{ t('confirmation_title') }} | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="card success-panel">
-  <p class="eyebrow">{{ t('confirmation_title') }}</p>
-  <h1>{{ reservation.reservation_code }}</h1>
-  <div class="metric-grid grid three">
-    <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name }}</strong></article>
-    <article class="metric-card"><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=reservation.check_in_date, end=reservation.check_out_date) }}</strong></article>
-    <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('reservation_status_' ~ reservation.current_status) }}</strong></article>
-    <article class="metric-card"><small>{{ t('room_type_label') }}</small><strong>{{ reservation.room_type.name }}</strong></article>
-    <article class="metric-card"><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=reservation.adults, children=reservation.children) }}</strong></article>
-    <article class="metric-card"><small>{{ t('total_label') }}</small><strong>{{ currency }} {{ reservation.quoted_grand_total|money }}</strong></article>
-  </div>
+<div class="public-page">
+  <section class="card confirmation-panel">
+    <div class="card-head split-row">
+      <div>
+        <p class="eyebrow">{{ t('confirmation_title') }}</p>
+        <h1>{{ reservation.reservation_code }}</h1>
+        <p class="lead">{{ hotel_support_contact_text }}</p>
+      </div>
+      <span class="status confirmed">{{ t('reservation_status_' ~ reservation.current_status) }}</span>
+    </div>
+    <div class="metric-grid grid three">
+      <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name }}</strong></article>
+      <article class="metric-card"><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=reservation.check_in_date, end=reservation.check_out_date) }}</strong></article>
+      <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('reservation_status_' ~ reservation.current_status) }}</strong></article>
+      <article class="metric-card"><small>{{ t('room_type_label') }}</small><strong>{{ reservation.room_type.name }}</strong></article>
+      <article class="metric-card"><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=reservation.adults, children=reservation.children) }}</strong></article>
+      <article class="metric-card"><small>{{ t('extras_summary_label') }}</small><strong>{{ currency }} {{ reservation.quoted_extras_total|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('total_label') }}</small><strong>{{ currency }} {{ reservation.quoted_grand_total|money }}</strong></article>
+    </div>
+  </section>
+
   {% if reservation.deposit_required_amount and reservation.deposit_required_amount > 0 %}
-  <section class="subsection">
-    <h2>{{ t('payment_return_title') }}</h2>
+  <section class="card">
+    <div class="card-head"><div><p class="eyebrow">{{ t('payment_return_title') }}</p><h2>{{ t('payment_status_label') }}</h2></div></div>
     <div class="metric-grid grid three">
       <article class="metric-card"><small>{{ t('deposit_required_label') }}</small><strong>{{ currency }} {{ reservation.deposit_required_amount|money }}</strong></article>
       <article class="metric-card"><small>{{ t('deposit_received_label') }}</small><strong>{{ currency }} {{ reservation.deposit_received_amount|money }}</strong></article>
@@ -30,15 +40,43 @@
     {% endif %}
   </section>
   {% endif %}
-  <ul class="checklist compact">
-    <li>{{ t('policy_summary') }}</li>
-    <li>{{ t('checkin_summary') }}</li>
-    <li>{{ t('extra_guest_summary') }}</li>
-    <li>{{ t('confirmation_change_help') }}</li>
-  </ul>
-  <div class="actions">
-    <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_modification') }}</a>
-    <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_cancellation') }}</a>
-  </div>
-</section>
+
+  <section class="grid two gap-lg">
+    <article class="card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('summary_title') }}</p><h2>{{ reservation.room_type.name }}</h2></div></div>
+      {% if extras_summary %}
+      <div class="subsection">
+        <h3>{{ t('extras_included') }}</h3>
+        <div class="list-stack compact">
+          {% for extra in extras_summary %}
+          <div class="list-row no-link">
+            <div>
+              <strong>{{ extra.name }}</strong>
+              <p class="small muted">{{ extra.pricing_label }}{% if extra.pricing_mode == 'per_night' %} · {{ extra.quantity }} {{ 'night' if extra.quantity == 1 else 'nights' }}{% endif %}</p>
+              {% if extra.description %}<p class="small muted">{{ extra.description }}</p>{% endif %}
+            </div>
+            <strong>{{ currency }} {{ extra.total_amount|money }}</strong>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      <ul class="checklist compact">
+        <li>{{ t('policy_summary') }}</li>
+        <li>{{ t('checkin_summary') }}</li>
+        <li>{{ t('extra_guest_summary') }}</li>
+        <li>{{ t('confirmation_change_help') }}</li>
+      </ul>
+      <p class="muted">{{ hotel_support_contact_text }}</p>
+    </article>
+    <article class="card support-card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('guest_self_service') }}</p><h2>{{ hotel_name }}</h2></div></div>
+      <p>{{ t('confirmation_change_help') }}</p>
+      <div class="actions">
+        <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_modification') }}</a>
+        <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}">{{ t('request_cancellation') }}</a>
+      </div>
+    </article>
+  </section>
+</div>
 {% endblock %}

@@ -5,6 +5,7 @@ import threading
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 import sqlalchemy as sa
@@ -13,8 +14,21 @@ from werkzeug.security import generate_password_hash
 
 from pms.app import create_app
 from pms.extensions import db
-from pms.models import ActivityLog, HousekeepingStatus, InventoryDay, PaymentRequest, Reservation, ReservationStatusHistory, Role, Room, RoomType, User
+from pms.models import (
+    ActivityLog,
+    BookingExtra,
+    HousekeepingStatus,
+    InventoryDay,
+    PaymentRequest,
+    Reservation,
+    ReservationStatusHistory,
+    Role,
+    Room,
+    RoomType,
+    User,
+)
 from pms.seeds import seed_all
+from pms.services.extras_service import attach_extras_quote_to_reservation, post_reservation_extras_to_folio, quote_booking_extras
 from pms.services.front_desk_service import (
     CheckInPayload,
     CheckoutPayload,
@@ -38,10 +52,15 @@ from pms.services.staff_reservations_service import assign_room
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = PROJECT_ROOT / "migrations"
+HOTEL_TZ = ZoneInfo("Asia/Bangkok")
 
 
 def utc_dt(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour=hour, minute=minute), tzinfo=timezone.utc)
+
+
+def hotel_dt(day: date, hour: int, minute: int = 0) -> datetime:
+    return datetime.combine(day, time(hour=hour, minute=minute), tzinfo=HOTEL_TZ)
 
 
 def make_staff_user(role_code: str, email: str) -> User:
@@ -97,6 +116,21 @@ def create_staff_reservation(
             source_channel=source_channel,
         )
     )
+
+
+def create_booking_extra(*, code: str, name: str, pricing_mode: str, unit_price: str) -> BookingExtra:
+    extra = BookingExtra(
+        code=code,
+        name=name,
+        pricing_mode=pricing_mode,
+        unit_price=Decimal(unit_price),
+        is_active=True,
+        is_public=True,
+        sort_order=10,
+    )
+    db.session.add(extra)
+    db.session.commit()
+    return extra
 
 
 def mark_checked_in(reservation: Reservation) -> None:
@@ -312,13 +346,39 @@ def test_early_and_late_fee_evaluation_use_operating_rules(app_factory):
             check_in_date=business_date,
             check_out_date=business_date + timedelta(days=1),
         )
-        early = evaluate_early_check_in(reservation, utc_dt(reservation.check_in_date, 10))
-        late = evaluate_late_check_out(reservation, utc_dt(reservation.check_out_date, 12))
+        early = evaluate_early_check_in(reservation, hotel_dt(reservation.check_in_date, 10))
+        late = evaluate_late_check_out(reservation, hotel_dt(reservation.check_out_date, 12))
 
         assert early["applies"] is True
         assert late["applies"] is True
         assert early["amount"] == Decimal("100.00")
         assert late["amount"] == Decimal("100.00")
+
+
+def test_fee_cutoffs_respect_hotel_timezone(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        business_date = date.today() + timedelta(days=1)
+        reservation = create_staff_reservation(
+            first_name="Timezone",
+            last_name="Guest",
+            phone="+66800000109",
+            room_type_code="DBL",
+            check_in_date=business_date,
+            check_out_date=business_date + timedelta(days=1),
+        )
+        early = evaluate_early_check_in(
+            reservation,
+            hotel_dt(reservation.check_in_date, 15),
+        )
+        late = evaluate_late_check_out(
+            reservation,
+            hotel_dt(reservation.check_out_date, 12),
+        )
+
+        assert early["cutoff"].tzinfo == HOTEL_TZ
+        assert early["applies"] is False
+        assert late["applies"] is True
 
 
 def test_walk_in_create_and_check_in_uses_authoritative_service_path(app_factory):
@@ -395,7 +455,7 @@ def test_checkout_prep_and_checkout_handoff_update_state_correctly(app_factory):
         mark_checked_in(reservation)
         actor = make_staff_user("front_desk", "fd5@example.com")
 
-        prep = prepare_checkout(reservation.id, action_at=utc_dt(check_out_date, 10))
+        prep = prepare_checkout(reservation.id, action_at=hotel_dt(check_out_date, 10))
         assert prep["checkout_payment_summary"]["balance_due"] == Decimal(str(reservation.quoted_grand_total))
 
         checked_out = complete_checkout(
@@ -403,10 +463,10 @@ def test_checkout_prep_and_checkout_handoff_update_state_correctly(app_factory):
             CheckoutPayload(
                 collect_payment_amount=Decimal(str(reservation.quoted_grand_total)),
                 departure_note="Guest settled balance and returned key",
-                action_at=utc_dt(check_out_date, 10),
-            ),
-            actor_user_id=actor.id,
-        )
+                    action_at=hotel_dt(check_out_date, 10),
+                ),
+                actor_user_id=actor.id,
+            )
 
         dirty = HousekeepingStatus.query.filter_by(code="dirty").one()
         turnover_row = InventoryDay.query.filter_by(room_id=reservation.assigned_room_id, business_date=check_out_date).one()
@@ -433,11 +493,11 @@ def test_checkout_blocks_when_financial_balance_remains(app_factory):
         actor = make_staff_user("front_desk", "fd6@example.com")
 
         with pytest.raises(ValueError, match="Outstanding balance remains"):
-            complete_checkout(
-                reservation.id,
-                CheckoutPayload(collect_payment_amount=Decimal("0.00"), action_at=utc_dt(check_out_date, 10)),
-                actor_user_id=actor.id,
-            )
+                complete_checkout(
+                    reservation.id,
+                    CheckoutPayload(collect_payment_amount=Decimal("0.00"), action_at=hotel_dt(check_out_date, 10)),
+                    actor_user_id=actor.id,
+                )
 
 
 def test_no_show_processing_updates_status_history_and_releases_inventory(app_factory):
@@ -533,6 +593,43 @@ def test_front_desk_routes_render_and_show_operational_data(app_factory):
     assert "Front desk workspace" in workspace_response.get_data(as_text=True)
     assert detail_response.status_code == 200
     assert reservation.reservation_code in detail_response.get_data(as_text=True)
+
+
+def test_front_desk_detail_shows_booked_extras(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Front",
+            last_name="Extras",
+            phone="+66800000170",
+            room_type_code="TWN",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        transfer = create_booking_extra(
+            code="TRNS",
+            name="Airport transfer",
+            pricing_mode="per_stay",
+            unit_price="900.00",
+        )
+        extras_quote = quote_booking_extras(
+            [transfer],
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+        )
+        attach_extras_quote_to_reservation(reservation, extras_quote, actor_user_id=None, source="public_booking")
+        post_reservation_extras_to_folio(reservation, actor_user_id=None)
+        db.session.commit()
+        user = make_staff_user("front_desk", "fd-extras@example.com")
+    login_as(client, user)
+
+    response = client.get(f"/staff/front-desk/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Booked extras" in body
+    assert "Airport transfer" in body
 
 
 def test_check_in_route_updates_guest_identity_fields(app_factory):

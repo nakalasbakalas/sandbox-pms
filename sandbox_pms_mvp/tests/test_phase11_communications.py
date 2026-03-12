@@ -139,6 +139,15 @@ def create_staff_reservation(*, first_name: str, room_type_code: str = "DBL", of
 def test_public_booking_creates_guest_confirmation_and_staff_alert_deliveries(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+        upsert_settings_bundle(
+            [
+                {"key": "hotel.name", "value": "Sandbox Hotel Riverside", "value_type": "string", "description": "Hotel display name", "is_public": True, "sort_order": 10},
+                {"key": "hotel.support_contact_text", "value": "Need help before arrival? Our Sandbox reservations team is available for direct support.", "value_type": "string", "description": "Guest support message", "is_public": True, "sort_order": 20},
+                {"key": "hotel.public_base_url", "value": "https://book.sandboxhotel.example", "value_type": "string", "description": "Canonical public booking base URL", "is_public": True, "sort_order": 23},
+            ],
+            actor_user_id=admin.id,
+        )
         reservation = create_public_reservation()
         deliveries = query_notification_history(reservation_id=reservation.id, limit=10)
         guest_delivery = next(item for item in deliveries if item.event_type == "reservation.confirmation")
@@ -148,7 +157,9 @@ def test_public_booking_creates_guest_confirmation_and_staff_alert_deliveries(ap
 
         assert guest_delivery.audience_type == "guest"
         assert guest_delivery.rendered_body and reservation.reservation_code in guest_delivery.rendered_body
-        assert "Sandbox Hotel" in guest_delivery.rendered_body
+        assert "Sandbox Hotel Riverside" in guest_delivery.rendered_body
+        assert "Need help before arrival? Our Sandbox reservations team is available for direct support." in guest_delivery.rendered_body
+        assert "https://book.sandboxhotel.example" in guest_delivery.rendered_body
         assert outbox.subject == guest_delivery.rendered_subject
         assert staff_delivery.status == "delivered"
         assert staff_note.payload_json["reservation_code"] == reservation.reservation_code

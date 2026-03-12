@@ -37,6 +37,13 @@ from .communication_service import (
     queue_modification_confirmation,
     queue_reservation_confirmation,
 )
+from .extras_service import (
+    post_reservation_extras_to_folio,
+    recompute_reservation_grand_total,
+    reprice_reservation_extras,
+    reservation_extra_summary,
+)
+from .ical_service import room_has_external_block
 from .reservation_service import calculate_deposit_required, reservation_snapshot, validate_occupancy
 
 
@@ -166,6 +173,7 @@ def get_reservation_detail(reservation_id: uuid.UUID) -> dict:
     detail = build_reservation_summary(reservation)
     detail["reservation"] = reservation
     detail["payment_summary"] = payment_summary(reservation)
+    detail["extras"] = reservation_extra_summary(reservation)
     detail["eligible_rooms"] = eligible_rooms(reservation)
     detail["timeline"] = reservation_timeline(reservation)
     detail["pending_cancellation_requests"] = CancellationRequest.query.filter(
@@ -181,9 +189,36 @@ def get_reservation_detail(reservation_id: uuid.UUID) -> dict:
     return detail
 
 
+def reservation_attribution_summary(reservation: Reservation) -> dict:
+    metadata = dict(reservation.source_metadata_json or {})
+    entry_page = metadata.get("entry_page") or metadata.get("landing_path")
+    source_label = metadata.get("source_label") or metadata.get("utm_source")
+    if not source_label:
+        source_label = "direct" if reservation.source_channel == "direct_web" else reservation.source_channel
+    return {
+        "source_label": source_label,
+        "utm_source": metadata.get("utm_source"),
+        "utm_medium": metadata.get("utm_medium"),
+        "utm_campaign": metadata.get("utm_campaign"),
+        "utm_content": metadata.get("utm_content"),
+        "referrer_host": metadata.get("referrer_host"),
+        "entry_page": entry_page,
+        "entry_cta_source": metadata.get("entry_cta_source"),
+        "has_marketing_context": bool(
+            metadata.get("utm_source")
+            or metadata.get("utm_medium")
+            or metadata.get("utm_campaign")
+            or metadata.get("utm_content")
+            or metadata.get("referrer_host")
+            or metadata.get("entry_cta_source")
+        ),
+    }
+
+
 def build_reservation_summary(reservation: Reservation) -> dict:
     payment = payment_summary(reservation)
     review_entry = ReservationReviewQueue.query.filter_by(reservation_id=reservation.id).first()
+    attribution = reservation_attribution_summary(reservation)
     return {
         "id": reservation.id,
         "reservation_code": reservation.reservation_code,
@@ -203,7 +238,9 @@ def build_reservation_summary(reservation: Reservation) -> dict:
         "deposit_required_amount": Decimal(str(reservation.deposit_required_amount)),
         "deposit_received_amount": payment["deposit_received_amount"],
         "balance_due": payment["balance_due"],
+        "quoted_extras_total": Decimal(str(getattr(reservation, "quoted_extras_total", 0))),
         "source_channel": reservation.source_channel,
+        "attribution": attribution,
         "review_status": review_entry.review_status if review_entry else None,
         "needs_follow_up": bool(review_entry and review_entry.review_status in {"needs_follow_up", "issue_flagged"}),
         "special_requests_present": bool(reservation.special_requests),
@@ -248,18 +285,33 @@ def payment_summary(reservation: Reservation) -> dict:
         (money(line.total_amount) for line in lines if line.charge_type == "room"),
         Decimal("0.00"),
     )
+    posted_extra_total = sum(
+        (
+            money(line.total_amount)
+            for line in lines
+            if (
+                line.charge_code == "XTR"
+                or (line.metadata_json or {}).get("source") == "booking_extra"
+            )
+        ),
+        Decimal("0.00"),
+    )
     posted_other_total = sum(
         (
             money(line.total_amount)
             for line in lines
             if line.charge_type not in {"room", "deposit", "payment"}
+            and line.charge_code != "XTR"
+            and (line.metadata_json or {}).get("source") != "booking_extra"
         ),
         Decimal("0.00"),
     )
     quoted_room_total = Decimal("0.00")
+    quoted_extra_total = Decimal("0.00")
     if reservation.current_status not in {"cancelled", "no_show"}:
-        quoted_room_total = money(reservation.quoted_grand_total)
-    expected_total = max(posted_room_total, quoted_room_total) + posted_other_total
+        quoted_room_total = money(reservation.quoted_room_total) + money(reservation.quoted_tax_total)
+        quoted_extra_total = money(getattr(reservation, "quoted_extras_total", 0))
+    expected_total = max(posted_room_total, quoted_room_total) + max(posted_extra_total, quoted_extra_total) + posted_other_total
     credits_total = deposit_received + payment_total
     balance_due = max(expected_total - credits_total, Decimal("0.00"))
     refund_due = max(credits_total - expected_total, Decimal("0.00"))
@@ -489,8 +541,10 @@ def change_stay_dates(
     reservation.assigned_room_id = candidate_room.id
     reservation.quoted_room_total = quote.room_total
     reservation.quoted_tax_total = quote.tax_total
-    reservation.quoted_grand_total = quote.grand_total
-    reservation.deposit_required_amount = calculate_deposit_required(payload.check_in_date, payload.check_out_date, quote.grand_total)
+    reprice_reservation_extras(reservation, actor_user_id=actor_user_id)
+    post_reservation_extras_to_folio(reservation, actor_user_id=actor_user_id)
+    new_grand_total = recompute_reservation_grand_total(reservation)
+    reservation.deposit_required_amount = calculate_deposit_required(payload.check_in_date, payload.check_out_date, new_grand_total)
     reservation.updated_by_user_id = actor_user_id
 
     _allocate_inventory_range(
@@ -574,6 +628,8 @@ def assign_room(
         raise ValueError("No future inventory remains to reassign.")
     current_rows = _reservation_inventory_rows(reservation.id, start_date=effective_start)
     target_rows = _lock_inventory_rows(room.id, effective_start, reservation.check_out_date)
+    if room_has_external_block(room.id, effective_start, reservation.check_out_date, for_update=True):
+        raise ValueError("Selected room is blocked by an external calendar sync.")
     if len(target_rows) != (reservation.check_out_date - effective_start).days:
         raise ValueError("Selected room is not available for the full remaining stay.")
     if not all(row.is_sellable and row.availability_status == "available" for row in target_rows):
@@ -908,6 +964,8 @@ def _eligible_room_list(
     rooms = Room.query.filter_by(room_type_id=room_type_id, is_active=True, is_sellable=True).order_by(Room.room_number.asc()).all()
     eligible: list[Room] = []
     for room in rooms:
+        if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
+            continue
         rows = _lock_inventory_rows(room.id, check_in_date, check_out_date)
         if len(rows) != (check_out_date - check_in_date).days:
             continue
@@ -988,6 +1046,8 @@ def _allocate_inventory_range(
     nightly_rates: list[tuple[date, Decimal]],
     actor_user_id: uuid.UUID,
 ) -> None:
+    if room_has_external_block(room.id, reservation.check_in_date, reservation.check_out_date, for_update=True):
+        raise ValueError("Inventory could not be allocated because the room is blocked by an external calendar sync.")
     rate_lookup = {business_date: nightly_rate for business_date, nightly_rate in nightly_rates}
     rows = _lock_inventory_rows(room.id, reservation.check_in_date, reservation.check_out_date)
     if len(rows) != len(rate_lookup):

@@ -4,6 +4,7 @@ import os
 import re
 import threading
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
@@ -14,8 +15,10 @@ from flask_migrate import upgrade
 from pms.app import create_app
 from pms.extensions import db
 from pms.models import (
+    BookingExtra,
     CancellationRequest,
     EmailOutbox,
+    FolioCharge,
     InventoryDay,
     ModificationRequest,
     Reservation,
@@ -115,6 +118,21 @@ def make_booking_payload(hold_code, idempotency_key="hold-001", **overrides):
     return payload
 
 
+def create_public_extra(*, code: str, name: str, pricing_mode: str, unit_price: str) -> BookingExtra:
+    extra = BookingExtra(
+        code=code,
+        name=name,
+        pricing_mode=pricing_mode,
+        unit_price=Decimal(unit_price),
+        is_active=True,
+        is_public=True,
+        sort_order=10,
+    )
+    db.session.add(extra)
+    db.session.commit()
+    return extra
+
+
 def lock_all_but_one(room_type_code: str, business_dates: list[date]) -> None:
     room_type = RoomType.query.filter_by(code=room_type_code).first()
     rooms = Room.query.filter_by(room_type_id=room_type.id, is_sellable=True).order_by(Room.room_number.asc()).all()
@@ -157,6 +175,67 @@ def test_public_availability_returns_only_sellable_rooms(app_factory):
         results = search_public_availability(make_search_payload(twin.id))
         assert results
         assert results[0]["available_rooms"] == 15
+
+
+def test_public_room_merchandising_renders_on_availability_and_booking_summary(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    check_in = date.today() + timedelta(days=7)
+    check_out = date.today() + timedelta(days=9)
+
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").one()
+        double = RoomType.query.filter_by(code="DBL").one()
+        twin.summary = "Quiet twin room with a flexible layout for short city stays."
+        twin.description = "Corner sofa for reading or extra luggage space."
+        twin.bed_details = "Two single beds"
+        twin.media_urls = ["https://cdn.example.test/twin-room.jpg"]
+        twin.amenities = ["Rain shower", "Writing desk", "Blackout curtains"]
+        twin.policy_callouts = ["No party groups after 22:00."]
+        double.summary = None
+        double.description = None
+        double.bed_details = None
+        double.media_urls = None
+        double.amenities = None
+        double.policy_callouts = None
+        db.session.commit()
+
+    availability = client.get(
+        f"/availability?lang=en&check_in={check_in.isoformat()}&check_out={check_out.isoformat()}&adults=2&children=0"
+    )
+    availability_body = availability.get_data(as_text=True)
+
+    assert availability.status_code == 200
+    assert "https://cdn.example.test/twin-room.jpg" in availability_body
+    assert "Quiet twin room with a flexible layout for short city stays." in availability_body
+    assert "Corner sofa for reading or extra luggage space." in availability_body
+    assert "Rain shower" in availability_body
+    assert "No party groups after 22:00." in availability_body
+    assert "room-offer-placeholder" in availability_body
+
+    hold_response = post_form(
+        client,
+        "/booking/hold",
+        data={
+            "room_type_id": str(twin.id),
+            "check_in_date": str(check_in),
+            "check_out_date": str(check_out),
+            "adults": "2",
+            "children": "0",
+            "language": "en",
+            "source_channel": "direct_web",
+            "idempotency_key": "room-content-booking-summary",
+            "email": "room-content@example.com",
+        },
+        follow_redirects=True,
+    )
+    hold_body = hold_response.get_data(as_text=True)
+
+    assert hold_response.status_code == 200
+    assert "https://cdn.example.test/twin-room.jpg" in hold_body
+    assert "Quiet twin room with a flexible layout for short city stays." in hold_body
+    assert "Rain shower" in hold_body
+    assert "No party groups after 22:00." in hold_body
 
 
 def test_non_sellable_rooms_never_appear_publicly(app_factory):
@@ -203,6 +282,33 @@ def test_booking_confirmation_returns_booking_reference(app_factory):
         hold = create_reservation_hold(make_hold_payload(twin.id))
         reservation = confirm_public_booking(make_booking_payload(hold.hold_code))
         assert reservation.reservation_code.startswith("SBX-")
+
+
+def test_public_booking_can_add_extras_and_post_them_to_folio(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        breakfast = create_public_extra(
+            code="BFST",
+            name="Daily breakfast",
+            pricing_mode="per_night",
+            unit_price="350.00",
+        )
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="extras-booking"))
+        reservation = confirm_public_booking(
+            make_booking_payload(
+                hold.hold_code,
+                idempotency_key="extras-booking",
+                extra_ids=(breakfast.id,),
+            )
+        )
+        extra_line = FolioCharge.query.filter_by(reservation_id=reservation.id, charge_code="XTR").one()
+
+        assert reservation.quoted_extras_total == Decimal("700.00")
+        assert reservation.quoted_grand_total == Decimal(str(hold.quoted_grand_total)) + Decimal("700.00")
+        assert len(reservation.extras) == 1
+        assert reservation.extras[0].quantity == 2
+        assert extra_line.description.startswith("Daily breakfast")
 
 
 def test_guest_confirmation_email_is_queued_after_booking(app_factory):
@@ -281,6 +387,50 @@ def test_duplicate_browser_submit_does_not_create_two_bookings(app_factory):
         assert Reservation.query.count() == 1
 
 
+def test_duplicate_match_releases_redundant_hold_inventory(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        first_hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="dup-release-1"))
+        first = confirm_public_booking(make_booking_payload(first_hold.hold_code, idempotency_key="dup-release-1"))
+
+        second_hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="dup-release-2"))
+        duplicate = confirm_public_booking(make_booking_payload(second_hold.hold_code, idempotency_key="dup-release-2"))
+        refreshed_hold = db.session.get(ReservationHold, second_hold.id)
+
+        assert duplicate.id == first.id
+        assert refreshed_hold.status == "converted"
+        assert refreshed_hold.converted_reservation_id == first.id
+        assert InventoryDay.query.filter_by(hold_id=second_hold.id).count() == 0
+
+
+def test_duplicate_detection_respects_selected_extras(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        breakfast = create_public_extra(
+            code="BFST",
+            name="Daily breakfast",
+            pricing_mode="per_night",
+            unit_price="350.00",
+        )
+        twin = RoomType.query.filter_by(code="TWN").first()
+        first_hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="dup-extra-1"))
+        first = confirm_public_booking(make_booking_payload(first_hold.hold_code, idempotency_key="dup-extra-1"))
+
+        second_hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="dup-extra-2"))
+        second = confirm_public_booking(
+            make_booking_payload(
+                second_hold.hold_code,
+                idempotency_key="dup-extra-2",
+                extra_ids=(breakfast.id,),
+            )
+        )
+
+        assert first.id != second.id
+        assert second.quoted_extras_total == Decimal("700.00")
+        assert Reservation.query.count() == 2
+
+
 def test_duplicate_idempotency_key_does_not_create_two_holds_or_bookings(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
@@ -350,6 +500,40 @@ def test_multilingual_content_renders_for_booking_flow(app_factory):
     assert "入住日期" in body
 
 
+def test_booking_form_renders_configured_public_extras(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        create_public_extra(
+            code="TRNS",
+            name="Airport transfer",
+            pricing_mode="per_stay",
+            unit_price="900.00",
+        )
+        twin = RoomType.query.filter_by(code="TWN").first()
+
+    response = post_form(
+        client,
+        "/booking/hold",
+        data={
+            "check_in_date": (date.today() + timedelta(days=7)).isoformat(),
+            "check_out_date": (date.today() + timedelta(days=9)).isoformat(),
+            "adults": "2",
+            "children": "0",
+            "room_type_id": str(twin.id),
+            "email": "guest@example.com",
+            "idempotency_key": "extras-ui",
+            "language": "en",
+            "source_channel": "direct_web",
+        },
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Airport transfer" in body
+    assert "Enhance your stay" in body
+
+
 @pytest.mark.parametrize(
     ("path", "expected_snippets"),
     [
@@ -378,6 +562,87 @@ def test_booking_source_tracking_is_persisted(app_factory):
         reservation = confirm_public_booking(make_booking_payload(hold.hold_code, source_channel="facebook", source_metadata={"utm_source": "facebook"}))
         assert reservation.source_channel == "facebook"
         assert reservation.source_metadata_json["utm_source"] == "facebook"
+
+
+def test_marketing_attribution_survives_public_route_flow(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+
+    landing = client.get(
+        "/?lang=en&utm_source=google&utm_medium=cpc&utm_campaign=spring_sale&utm_content=hero_banner&source_label=google_ads",
+        headers={"Referer": "https://partner.example/deals?token=secret"},
+    )
+    assert landing.status_code == 200
+
+    availability = client.get(
+        f"/availability?lang=en&check_in={date.today() + timedelta(days=7)}&check_out={date.today() + timedelta(days=9)}&adults=2&children=0&cta_source=home_search"
+    )
+    assert availability.status_code == 200
+
+    hold_response = post_form(
+        client,
+        "/booking/hold",
+        data={
+            "room_type_id": str(twin.id),
+            "check_in_date": str(date.today() + timedelta(days=7)),
+            "check_out_date": str(date.today() + timedelta(days=9)),
+            "adults": "2",
+            "children": "0",
+            "language": "en",
+            "idempotency_key": "route-attribution-hold",
+            "email": "attrib@example.com",
+            "cta_source": "availability_room_card",
+        },
+        follow_redirects=True,
+    )
+    assert hold_response.status_code == 200
+
+    with app.app_context():
+        hold = ReservationHold.query.filter_by(idempotency_key="route-attribution-hold").one()
+        hold_id = hold.id
+        assert hold.source_channel == "referral"
+        assert hold.source_metadata_json["utm_source"] == "google"
+        assert hold.source_metadata_json["utm_medium"] == "cpc"
+        assert hold.source_metadata_json["utm_campaign"] == "spring_sale"
+        assert hold.source_metadata_json["utm_content"] == "hero_banner"
+        assert hold.source_metadata_json["source_label"] == "google_ads"
+        assert hold.source_metadata_json["entry_page"] == "/"
+        assert hold.source_metadata_json["entry_cta_source"] == "home_search"
+        assert hold.source_metadata_json["referrer_host"] == "partner.example"
+        assert "referrer" not in hold.source_metadata_json
+
+    confirm_response = post_form(
+        client,
+        "/booking/confirm",
+        data={
+            "hold_code": hold.hold_code,
+            "idempotency_key": "route-attribution-hold",
+            "first_name": "Attrib",
+            "last_name": "Guest",
+            "phone": "+66800000123",
+            "email": "attrib@example.com",
+            "language": "en",
+            "accept_terms": "on",
+        },
+        follow_redirects=False,
+    )
+    assert confirm_response.status_code == 302
+
+    with app.app_context():
+        hold = db.session.get(ReservationHold, hold_id)
+        reservation = db.session.get(Reservation, hold.converted_reservation_id)
+        assert reservation is not None
+        assert reservation.source_channel == "referral"
+        assert reservation.source_metadata_json["utm_source"] == "google"
+        assert reservation.source_metadata_json["utm_medium"] == "cpc"
+        assert reservation.source_metadata_json["utm_campaign"] == "spring_sale"
+        assert reservation.source_metadata_json["utm_content"] == "hero_banner"
+        assert reservation.source_metadata_json["source_label"] == "google_ads"
+        assert reservation.source_metadata_json["entry_page"] == "/"
+        assert reservation.source_metadata_json["entry_cta_source"] == "home_search"
+        assert reservation.source_metadata_json["referrer_host"] == "partner.example"
 
 
 def test_backend_validation_blocks_malformed_requests(app_factory):
@@ -560,11 +825,11 @@ def test_public_pages_use_token_free_og_url(app_factory):
 
     assert response.status_code == 200
     assert og_url_match is not None
-    assert og_url_match.group(1).endswith("/availability")
-    assert "?" not in og_url_match.group(1)
+    assert og_url_match.group(1).endswith("/availability?lang=en")
+    assert "utm_source" not in og_url_match.group(1)
     assert canonical_match is not None
-    assert canonical_match.group(1).endswith("/availability")
-    assert "?" not in canonical_match.group(1)
+    assert canonical_match.group(1).endswith("/availability?lang=en")
+    assert "utm_source" not in canonical_match.group(1)
 
 
 @pytest.mark.parametrize("path", ["/booking/cancel?lang=en", "/booking/modify?lang=en"])
@@ -595,9 +860,25 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert 'application/ld+json' in body
     assert 'rel="icon"' in body
     assert "favicon.svg" in body
+    assert 'hreflang="en"' in body
+    assert 'hreflang="th"' in body
+    assert 'hreflang="x-default"' in body
     assert "tel:" in body
     assert "mailto:" in body
-    assert "https://hotel.example/static/favicon.svg" in body
+    assert "https://hotel.example/static/hotel-share.svg" in body
+
+
+def test_robots_route_includes_dynamic_sitemap_url(app_factory):
+    app = app_factory(seed=True, config={"APP_BASE_URL": "https://hotel.example"})
+    client = app.test_client()
+
+    response = client.get("/robots.txt")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    assert "Disallow: /staff/" in body
+    assert "Sitemap: https://hotel.example/sitemap.xml" in body
 
 
 def test_sitemap_route_lists_public_guest_pages(app_factory):
