@@ -10,14 +10,25 @@ In Render:
 2. Connect this repository.
 3. Confirm Render is reading [render.yaml](render.yaml) from the repo root.
 
-This Blueprint creates:
+This Blueprint currently creates:
 
-- web service: `sandbox-hotel-pms`
-- Postgres database: `sandbox-hotel-pms-db`
+- web service: `sandbox-hotel-pms-v43m`
+- Postgres database: `sandbox-hotel-pms-db-v43m`
 
 ## 2. Enter required secret values
 
-Render will prompt for these `sync: false` variables during the first Blueprint creation:
+Render will prompt for these `sync: false` variables during the first Blueprint creation. Do not leave any production secret at the repo default value.
+
+### `SECRET_KEY`
+
+Generate a unique 32+ character random secret and store it only in Render.
+
+Example PowerShell:
+
+```powershell
+cd C:\Users\nakal\Downloads\sandbox_hotel_pms_mvp\sandbox_pms_mvp
+.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(48))"
+```
 
 ### `AUTH_ENCRYPTION_KEY`
 
@@ -48,7 +59,7 @@ Recommended minimum:
 - random, not memorable
 - not reused anywhere else
 
-The service will not boot in production if either `ADMIN_EMAIL` or `ADMIN_PASSWORD` is missing.
+The service will not boot in production if `SECRET_KEY`, `AUTH_ENCRYPTION_KEY`, `ADMIN_EMAIL`, or `ADMIN_PASSWORD` is missing.
 
 ## 3. Deploy
 

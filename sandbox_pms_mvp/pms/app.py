@@ -73,7 +73,7 @@ from .models import (
 )
 from .pricing import get_setting_value
 from .security import configure_app_security, public_error_message, request_client_ip
-from .seeds import bootstrap_inventory_horizon, seed_all
+from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .services.admin_service import (
@@ -506,6 +506,17 @@ def register_template_helpers(app: Flask) -> None:
 
 
 def register_cli(app: Flask) -> None:
+    @app.cli.command("seed-reference-data")
+    def seed_reference_data_command() -> None:
+        seed_reference_data(sync_existing_roles=False)
+        print("Reference data seeded.")
+
+    @app.cli.command("sync-role-permissions")
+    def sync_role_permissions_command() -> None:
+        seed_roles_permissions(sync_existing_roles=True)
+        db.session.commit()
+        print("System role permissions synchronized.")
+
     @app.cli.command("seed-phase2")
     def seed_phase2_command() -> None:
         seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])

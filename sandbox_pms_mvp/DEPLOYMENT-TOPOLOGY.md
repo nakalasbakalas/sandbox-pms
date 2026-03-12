@@ -57,7 +57,7 @@ This keeps links, SEO-facing public pages, and staff entry points aligned withou
 - Keep `FORCE_HTTPS=1` and use HTTPS origins for all production URL variables.
 - Use the booking host for guest-facing emails, payment links, and provider return URLs.
 - Use the staff host for staff login and password-reset flows.
-- Render-oriented repo scaffolding now exists at [render.yaml](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/render.yaml) with the intended `book.sandboxhotel.com` and `staff.sandboxhotel.com` domains. Keep those aligned with the live DNS cutover and inject secrets per environment.
+- Render-oriented repo scaffolding now exists at [render.yaml](../render.yaml) with the intended `book.sandboxhotel.com` and `staff.sandboxhotel.com` domains. Keep those aligned with the live DNS cutover and inject secrets per environment.
 
 ## Payment Provider URLs
 

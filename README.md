@@ -25,19 +25,26 @@ Render is now configured through the root [render.yaml](render.yaml) Blueprint. 
 - predeploy schema migration only
 - a `/health` health check
 
+The current committed Blueprint names are:
+
+- web service: `sandbox-hotel-pms-v43m`
+- database: `sandbox-hotel-pms-db-v43m`
+
 Before the first deploy, set these required secret env vars in Render:
 
+- `SECRET_KEY` with a unique 32+ character random secret
 - `AUTH_ENCRYPTION_KEY` using `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
 - `ADMIN_EMAIL`
 - `ADMIN_PASSWORD`
 
-Production startup now fails fast if `ADMIN_EMAIL` or `ADMIN_PASSWORD` is missing.
+Production startup now fails fast if `SECRET_KEY`, `AUTH_ENCRYPTION_KEY`, `ADMIN_EMAIL`, or `ADMIN_PASSWORD` is missing or insecure.
 
 If you stay on the default Render hostname, `APP_BASE_URL` can fall back to `RENDER_EXTERNAL_URL`.
 Set `APP_BASE_URL` and `TRUSTED_HOSTS` only after your custom domain or final hostname is known.
 
 For the first production bootstrap on an empty database, run `flask --app app seed-reference-data` and then
 `flask --app app bootstrap-inventory` manually from a Render shell or one-off job after the service is up.
+Run `flask --app app sync-role-permissions` only when you intentionally want the seeded permission map reapplied to existing system roles.
 
 For a step-by-step dashboard checklist, use [RENDER_DEPLOY_CHECKLIST.md](RENDER_DEPLOY_CHECKLIST.md).
 

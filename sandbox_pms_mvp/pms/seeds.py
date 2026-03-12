@@ -221,12 +221,21 @@ def seed_app_settings() -> None:
 def seed_initial_admin() -> None:
     admin_email = str(current_app.config.get("ADMIN_EMAIL") or os.getenv("ADMIN_EMAIL") or "").strip()
     admin_password = str(current_app.config.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or "")
+    admin_role = Role.query.filter_by(code="admin").first()
+    existing_admin_user = None
+    if admin_role:
+        existing_admin_user = User.query.join(User.roles).filter(Role.id == admin_role.id).first()
+    if existing_admin_user:
+        if not admin_email:
+            return
+        existing_user = User.query.filter_by(email=admin_email).first()
+        if existing_user:
+            return
     if not admin_email or not admin_password.strip():
         raise RuntimeError("ADMIN_EMAIL and ADMIN_PASSWORD are required to bootstrap the initial admin account.")
     user = User.query.filter_by(email=admin_email).first()
     if user:
         return
-    admin_role = Role.query.filter_by(code="admin").first()
     user = User(
         username=admin_email.split("@", 1)[0].lower(),
         email=admin_email,
