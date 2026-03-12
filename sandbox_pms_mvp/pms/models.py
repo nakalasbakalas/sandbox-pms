@@ -388,7 +388,12 @@ class RoomType(AuditMixin, db.Model):
 
     code: Mapped[str] = mapped_column(sa.String(20), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    summary: Mapped[str | None] = mapped_column(sa.String(280), nullable=True)
     description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    bed_details: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    media_urls: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    amenities: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
+    policy_callouts: Mapped[list[str] | None] = mapped_column(JSONType, nullable=True)
     standard_occupancy: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     max_occupancy: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     extra_bed_allowed: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)

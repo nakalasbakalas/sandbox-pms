@@ -55,7 +55,7 @@
           <div class="room-type-row">
             <div>
               <strong>{{ room_type.name }}</strong>
-              <p>{{ room_type.description }}</p>
+              <p>{{ room_type.summary or room_type.bed_details or room_type.description }}</p>
             </div>
             <span class="status confirmed">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
           </div>

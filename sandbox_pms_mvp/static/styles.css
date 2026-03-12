@@ -1193,6 +1193,35 @@ body.public-site .page-hero {
     radial-gradient(640px 220px at 15% 0%, rgba(var(--accent-soft-rgb), 0.1), transparent 58%),
     linear-gradient(180deg, rgba(17, 18, 22, 0.96), rgba(11, 12, 16, 0.95));
 }
+body.public-site .booking-room-hero {
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  align-items: stretch;
+  gap: 22px;
+}
+body.public-site .booking-room-copy {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+body.public-site .booking-room-intro {
+  max-width: 62ch;
+  margin-bottom: 0;
+}
+body.public-site .booking-room-visual {
+  min-height: 260px;
+}
+body.public-site .booking-room-media,
+body.public-site .summary-room-media,
+body.public-site .room-offer-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  border-radius: 22px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
 body.public-site .detail-pills {
   display: flex;
   flex-wrap: wrap;
@@ -1245,7 +1274,67 @@ body.public-site .room-offer-card {
 }
 body.public-site .room-offer-main {
   display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1fr);
   gap: 18px;
+}
+body.public-site .room-offer-gallery {
+  min-height: 100%;
+}
+body.public-site .room-offer-copy {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+body.public-site .room-offer-summary {
+  margin-bottom: 0;
+  color: #f5ede3;
+}
+body.public-site .room-offer-description {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+body.public-site .room-offer-placeholder {
+  height: 100%;
+  min-height: 220px;
+  display: grid;
+  align-content: end;
+  gap: 10px;
+  padding: 22px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(560px 240px at 10% 0%, rgba(var(--accent-rgb), 0.22), transparent 60%),
+    linear-gradient(180deg, rgba(24, 25, 30, 0.98), rgba(11, 12, 16, 0.95));
+}
+body.public-site .room-offer-placeholder strong {
+  font-size: 1.3rem;
+  color: #fff7ed;
+}
+body.public-site .room-offer-placeholder p {
+  margin: 0;
+  color: #d5c9bb;
+}
+body.public-site .room-offer-pills {
+  gap: 8px;
+}
+body.public-site .room-amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+body.public-site .amenity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #efe3d5;
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 body.public-site .room-offer-aside {
   display: grid;
@@ -1281,6 +1370,14 @@ body.public-site .booking-layout {
 body.public-site .sticky-card {
   position: sticky;
   top: 112px;
+}
+body.public-site .room-summary-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+body.public-site .summary-room-media {
+  min-height: 200px;
 }
 body.public-site .toggle-row {
   justify-content: space-between;
@@ -1343,7 +1440,8 @@ body.public-site .status.house_use {
 @media (max-width: 1040px) {
   body.public-site .public-hero,
   body.public-site .room-offer-card,
-  body.public-site .booking-layout {
+  body.public-site .booking-layout,
+  body.public-site .booking-room-hero {
     grid-template-columns: 1fr;
   }
   body.public-site .sticky-card {
@@ -1370,6 +1468,9 @@ body.public-site .status.house_use {
   body.public-site .public-search-card,
   body.public-site .confirmation-panel {
     padding: 22px;
+  }
+  body.public-site .room-offer-main {
+    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 640px) {
@@ -1400,6 +1501,12 @@ body.public-site .status.house_use {
   }
   body.public-site .room-offer-aside {
     padding: 16px;
+  }
+  body.public-site .room-offer-placeholder,
+  body.public-site .booking-room-media,
+  body.public-site .summary-room-media,
+  body.public-site .room-offer-media {
+    min-height: 180px;
   }
   body.public-site .public-footer-shell {
     padding-bottom: 30px;

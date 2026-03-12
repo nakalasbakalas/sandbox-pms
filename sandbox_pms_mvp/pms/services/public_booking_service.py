@@ -68,6 +68,62 @@ def as_utc(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _clean_text(value: str | None, *, limit: int | None = None) -> str | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    return cleaned[:limit] if limit else cleaned
+
+
+def _clean_string_list(value, *, item_limit: int, max_items: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_item in value:
+        if not isinstance(raw_item, str):
+            continue
+        cleaned = _clean_text(raw_item, limit=item_limit)
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(cleaned)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def build_room_type_content(room_type: RoomType) -> dict[str, object]:
+    media_urls = _clean_string_list(room_type.media_urls, item_limit=500, max_items=12)
+    amenities = _clean_string_list(room_type.amenities, item_limit=120, max_items=16)
+    policy_callouts = _clean_string_list(room_type.policy_callouts, item_limit=200, max_items=8)
+    summary = _clean_text(room_type.summary, limit=280)
+    description = _clean_text(room_type.description, limit=5000)
+    bed_details = _clean_text(room_type.bed_details, limit=255)
+
+    if not summary:
+        if description and description != bed_details:
+            summary = description
+        else:
+            summary = bed_details or description
+
+    long_description = description if description and description != summary else None
+
+    return {
+        "summary": summary,
+        "long_description": long_description,
+        "bed_details": bed_details,
+        "primary_media_url": media_urls[0] if media_urls else None,
+        "media_count": len(media_urls),
+        "media_urls": media_urls,
+        "amenities": amenities,
+        "policy_callouts": policy_callouts,
+    }
+
+
 @dataclass
 class PublicSearchPayload:
     check_in_date: date
@@ -288,14 +344,27 @@ def search_public_availability(payload: PublicSearchPayload) -> list[dict]:
             adults=payload.adults,
             children=payload.children,
         )
+        room_content = build_room_type_content(item)
+        policy_highlights = list(room_content["policy_callouts"])
+        for callout in (
+            policy_text("check_in_policy", payload.language, t(payload.language, "checkin_summary")),
+            policy_text("cancellation_policy", payload.language, t(payload.language, "policy_summary")),
+            policy_text("child_extra_guest_policy", payload.language, t(payload.language, "extra_guest_summary")),
+        ):
+            if callout and callout not in policy_highlights:
+                policy_highlights.append(callout)
+            if len(policy_highlights) >= 4:
+                break
         results.append(
             {
                 "room_type": item,
+                "room_content": room_content,
                 "available_rooms": len(rooms),
                 "quote": quote,
                 "policy_summary": policy_text("cancellation_policy", payload.language, t(payload.language, "policy_summary")),
                 "extra_guest_summary": policy_text("child_extra_guest_policy", payload.language, t(payload.language, "extra_guest_summary")),
                 "checkin_summary": policy_text("check_in_policy", payload.language, t(payload.language, "checkin_summary")),
+                "policy_highlights": policy_highlights,
             }
         )
     return results

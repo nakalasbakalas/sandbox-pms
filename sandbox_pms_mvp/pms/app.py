@@ -202,6 +202,7 @@ from .services.public_booking_service import (
     PublicBookingPayload,
     PublicSearchPayload,
     VerificationRequestPayload,
+    build_room_type_content,
     confirm_public_booking,
     create_reservation_hold,
     load_public_confirmation,
@@ -1212,7 +1213,12 @@ def register_routes(app: Flask) -> None:
                         RoomTypePayload(
                             code=request.form.get("code", ""),
                             name=request.form.get("name", ""),
+                            summary=request.form.get("summary"),
                             description=request.form.get("description"),
+                            bed_details=request.form.get("bed_details"),
+                            media_urls=request.form.get("media_urls"),
+                            amenities=request.form.get("amenities"),
+                            policy_callouts=request.form.get("policy_callouts"),
                             standard_occupancy=int(request.form.get("standard_occupancy", 1)),
                             max_occupancy=int(request.form.get("max_occupancy", 1)),
                             extra_bed_allowed=truthy_setting(request.form.get("extra_bed_allowed")),
@@ -3094,6 +3100,7 @@ def public_booking_form_context(
     return {
         "hold": hold,
         "room_type": room_type,
+        "room_content": build_room_type_content(room_type),
         "settings": resolved_settings,
         "booking_extras": list_booking_extras(public_only=True),
         "selected_extra_ids": {str(item.id) for item in selected_extras},

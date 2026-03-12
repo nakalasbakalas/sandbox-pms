@@ -58,6 +58,33 @@ def clean_optional(value: str | None, *, limit: int) -> str | None:
     return cleaned[:limit]
 
 
+def clean_multiline_list(
+    value: str | None,
+    *,
+    item_limit: int,
+    max_items: int,
+) -> list[str] | None:
+    if not value:
+        return None
+    items: list[str] = []
+    seen: set[str] = set()
+    for raw_line in value.replace("\r", "\n").split("\n"):
+        cleaned = raw_line.strip()
+        while cleaned[:1] in {"-", "*", "\u2022"}:
+            cleaned = cleaned[1:].strip()
+        if not cleaned:
+            continue
+        cleaned = cleaned[:item_limit]
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(cleaned)
+        if len(items) >= max_items:
+            break
+    return items or None
+
+
 def _decimal(value, *, default: str | None = None) -> Decimal:
     candidate = default if value in {None, ""} and default is not None else value
     try:
@@ -181,7 +208,12 @@ def upsert_settings_bundle(
 class RoomTypePayload:
     code: str
     name: str
+    summary: str | None
     description: str | None
+    bed_details: str | None
+    media_urls: str | None
+    amenities: str | None
+    policy_callouts: str | None
     standard_occupancy: int
     max_occupancy: int
     extra_bed_allowed: bool
@@ -219,7 +251,12 @@ def upsert_room_type(room_type_id: uuid.UUID | None, payload: RoomTypePayload, *
 
     room_type.code = code
     room_type.name = payload.name.strip()
-    room_type.description = clean_optional(payload.description, limit=2000)
+    room_type.summary = clean_optional(payload.summary, limit=280)
+    room_type.description = clean_optional(payload.description, limit=5000)
+    room_type.bed_details = clean_optional(payload.bed_details, limit=255)
+    room_type.media_urls = clean_multiline_list(payload.media_urls, item_limit=500, max_items=12)
+    room_type.amenities = clean_multiline_list(payload.amenities, item_limit=120, max_items=16)
+    room_type.policy_callouts = clean_multiline_list(payload.policy_callouts, item_limit=200, max_items=8)
     room_type.standard_occupancy = payload.standard_occupancy
     room_type.max_occupancy = payload.max_occupancy
     room_type.extra_bed_allowed = payload.extra_bed_allowed
@@ -918,6 +955,12 @@ def _room_type_snapshot(room_type: RoomType | None) -> dict | None:
     return {
         "code": room_type.code,
         "name": room_type.name,
+        "summary": room_type.summary,
+        "description": room_type.description,
+        "bed_details": room_type.bed_details,
+        "media_urls": room_type.media_urls or [],
+        "amenities": room_type.amenities or [],
+        "policy_callouts": room_type.policy_callouts or [],
         "standard_occupancy": room_type.standard_occupancy,
         "max_occupancy": room_type.max_occupancy,
         "extra_bed_allowed": room_type.extra_bed_allowed,

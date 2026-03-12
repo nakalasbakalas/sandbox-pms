@@ -124,7 +124,12 @@ def seed_room_types() -> dict[str, RoomType]:
             room_type = RoomType(
                 code=code,
                 name=payload[0],
+                summary=None,
                 description=payload[1],
+                bed_details=payload[1],
+                media_urls=None,
+                amenities=None,
+                policy_callouts=None,
                 standard_occupancy=payload[2],
                 max_occupancy=payload[3],
                 extra_bed_allowed=payload[4],
@@ -132,6 +137,8 @@ def seed_room_types() -> dict[str, RoomType]:
             )
             db.session.add(room_type)
             db.session.flush()
+        elif room_type.description and not room_type.bed_details:
+            room_type.bed_details = room_type.description
         room_types[code] = room_type
     return room_types
 

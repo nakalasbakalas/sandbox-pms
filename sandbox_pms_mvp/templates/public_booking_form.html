@@ -2,15 +2,46 @@
 {% block title %}{{ t('complete_booking_title') }} | {{ hotel_name }}{% endblock %}
 {% block content %}
 <div class="public-page">
-  <section class="page-hero card">
-    <div>
-      <p class="eyebrow">{{ t('final_step') }}</p>
-      <h1>{{ room_type.name }}</h1>
-      <p class="lead">{{ t('checkin_summary') }}</p>
+  <section class="page-hero card booking-room-hero">
+    <div class="booking-room-copy">
+      <div>
+        <p class="eyebrow">{{ t('final_step') }}</p>
+        <h1>{{ room_type.name }}</h1>
+        <p class="lead">{{ room_content.summary or t('checkin_summary') }}</p>
+        {% if room_content.long_description %}<p class="muted booking-room-intro">{{ room_content.long_description }}</p>{% endif %}
+      </div>
+      <div class="detail-pills">
+        <span class="detail-pill">{{ t('hold_expires_at', hold_code=hold.hold_code, expires_at=hold.expires_at.strftime('%Y-%m-%d %H:%M')) }}</span>
+        <span class="detail-pill">{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</span>
+        <span class="detail-pill">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
+        {% if room_content.bed_details and room_content.bed_details != room_content.summary %}
+          <span class="detail-pill">{{ room_content.bed_details }}</span>
+        {% endif %}
+      </div>
+      {% if room_content.amenities %}
+        <div class="room-amenities">
+          {% for amenity in room_content.amenities[:6] %}
+            <span class="amenity-chip">{{ amenity }}</span>
+          {% endfor %}
+        </div>
+      {% endif %}
     </div>
-    <div class="detail-pills">
-      <span class="detail-pill">{{ t('hold_expires_at', hold_code=hold.hold_code, expires_at=hold.expires_at.strftime('%Y-%m-%d %H:%M')) }}</span>
-      <span class="detail-pill">{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</span>
+    <div class="booking-room-visual">
+      {% if room_content.primary_media_url %}
+        <img
+          class="booking-room-media"
+          src="{{ room_content.primary_media_url }}"
+          alt="{{ room_type.name }}"
+          loading="eager"
+          decoding="async"
+        >
+      {% else %}
+        <div class="room-offer-placeholder booking-room-placeholder">
+          <span class="eyebrow">{{ room_type.code }}</span>
+          <strong>{{ room_type.name }}</strong>
+          {% if room_content.summary %}<p>{{ room_content.summary }}</p>{% endif %}
+        </div>
+      {% endif %}
     </div>
   </section>
 
@@ -74,6 +105,44 @@
     </article>
     <article class="card sticky-card">
       <div class="card-head"><div><p class="eyebrow">{{ t('summary_title') }}</p><h2>{{ room_type.name }}</h2></div></div>
+      <div class="room-summary-panel">
+        {% if room_content.primary_media_url %}
+          <img
+            class="summary-room-media"
+            src="{{ room_content.primary_media_url }}"
+            alt="{{ room_type.name }}"
+            loading="lazy"
+            decoding="async"
+          >
+        {% else %}
+          <div class="room-offer-placeholder summary-room-placeholder">
+            <span class="eyebrow">{{ room_type.code }}</span>
+            <strong>{{ room_type.name }}</strong>
+            {% if room_content.summary %}<p>{{ room_content.summary }}</p>{% endif %}
+          </div>
+        {% endif %}
+        {% if room_content.summary %}<p class="room-offer-summary">{{ room_content.summary }}</p>{% endif %}
+        <div class="detail-pills room-offer-pills">
+          {% if room_content.bed_details and room_content.bed_details != room_content.summary %}
+            <span class="detail-pill">{{ room_content.bed_details }}</span>
+          {% endif %}
+          <span class="detail-pill">{{ t('max_occupancy', count=room_type.max_occupancy) }}</span>
+        </div>
+        {% if room_content.amenities %}
+          <div class="room-amenities">
+            {% for amenity in room_content.amenities[:6] %}
+              <span class="amenity-chip">{{ amenity }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if room_content.policy_callouts %}
+          <ul class="checklist compact">
+            {% for callout in room_content.policy_callouts %}
+              <li>{{ callout }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
       <div class="metric-strip">
         <div><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=hold.check_in_date, end=hold.check_out_date) }}</strong></div>
         <div><small>{{ t('occupancy_label') }}</small><strong>{{ t('occupancy_summary', adults=hold.adults, children=hold.children) }}</strong></div>

@@ -177,6 +177,67 @@ def test_public_availability_returns_only_sellable_rooms(app_factory):
         assert results[0]["available_rooms"] == 15
 
 
+def test_public_room_merchandising_renders_on_availability_and_booking_summary(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    check_in = date.today() + timedelta(days=7)
+    check_out = date.today() + timedelta(days=9)
+
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").one()
+        double = RoomType.query.filter_by(code="DBL").one()
+        twin.summary = "Quiet twin room with a flexible layout for short city stays."
+        twin.description = "Corner sofa for reading or extra luggage space."
+        twin.bed_details = "Two single beds"
+        twin.media_urls = ["https://cdn.example.test/twin-room.jpg"]
+        twin.amenities = ["Rain shower", "Writing desk", "Blackout curtains"]
+        twin.policy_callouts = ["No party groups after 22:00."]
+        double.summary = None
+        double.description = None
+        double.bed_details = None
+        double.media_urls = None
+        double.amenities = None
+        double.policy_callouts = None
+        db.session.commit()
+
+    availability = client.get(
+        f"/availability?lang=en&check_in={check_in.isoformat()}&check_out={check_out.isoformat()}&adults=2&children=0"
+    )
+    availability_body = availability.get_data(as_text=True)
+
+    assert availability.status_code == 200
+    assert "https://cdn.example.test/twin-room.jpg" in availability_body
+    assert "Quiet twin room with a flexible layout for short city stays." in availability_body
+    assert "Corner sofa for reading or extra luggage space." in availability_body
+    assert "Rain shower" in availability_body
+    assert "No party groups after 22:00." in availability_body
+    assert "room-offer-placeholder" in availability_body
+
+    hold_response = post_form(
+        client,
+        "/booking/hold",
+        data={
+            "room_type_id": str(twin.id),
+            "check_in_date": str(check_in),
+            "check_out_date": str(check_out),
+            "adults": "2",
+            "children": "0",
+            "language": "en",
+            "source_channel": "direct_web",
+            "idempotency_key": "room-content-booking-summary",
+            "email": "room-content@example.com",
+        },
+        follow_redirects=True,
+    )
+    hold_body = hold_response.get_data(as_text=True)
+
+    assert hold_response.status_code == 200
+    assert "https://cdn.example.test/twin-room.jpg" in hold_body
+    assert "Quiet twin room with a flexible layout for short city stays." in hold_body
+    assert "Rain shower" in hold_body
+    assert "No party groups after 22:00." in hold_body
+
+
 def test_non_sellable_rooms_never_appear_publicly(app_factory):
     app = app_factory(seed=True)
     with app.app_context():

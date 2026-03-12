@@ -60,10 +60,31 @@
           <label><span>Name</span><input type="text" name="name" required></label>
         </div>
         <div class="grid two">
+          <label><span>Short summary</span><input type="text" name="summary" maxlength="280" placeholder="Brief decision-making summary for booking cards"></label>
+          <label><span>Bed details</span><input type="text" name="bed_details" maxlength="255" placeholder="Two single beds / One king bed"></label>
+        </div>
+        <div class="grid two">
           <label><span>Standard occupancy</span><input type="number" min="1" name="standard_occupancy" value="2" required></label>
           <label><span>Max occupancy</span><input type="number" min="1" name="max_occupancy" value="3" required></label>
         </div>
-        <label><span>Description</span><textarea name="description" rows="2"></textarea></label>
+        <label><span>Long description</span><textarea name="description" rows="4"></textarea></label>
+        <div class="grid two">
+          <label>
+            <span>Image URLs or asset paths</span>
+            <textarea name="media_urls" rows="3" placeholder="https://images.example/room.jpg&#10;/static/uploads/room-1.webp"></textarea>
+            <small class="muted">One per line. Leave blank to show the no-image fallback.</small>
+          </label>
+          <label>
+            <span>Amenities</span>
+            <textarea name="amenities" rows="3" placeholder="Rain shower&#10;Writing desk&#10;Balcony"></textarea>
+            <small class="muted">One per line. Only enter amenities this room type actually includes.</small>
+          </label>
+        </div>
+        <label>
+          <span>Policy callouts</span>
+          <textarea name="policy_callouts" rows="3" placeholder="Non-smoking room type&#10;Accessible by lift only"></textarea>
+          <small class="muted">Optional room-specific callouts that appear alongside the standard booking policies.</small>
+        </label>
         <div class="grid two">
           <label class="toggle-row"><input type="checkbox" name="extra_bed_allowed"> <span>Extra bed allowed</span></label>
           <label class="toggle-row"><input type="checkbox" name="is_active" checked> <span>Active</span></label>
@@ -89,10 +110,31 @@
             <label><span>Name</span><input type="text" name="name" value="{{ room_type.name }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
           </div>
           <div class="grid two">
+            <label><span>Short summary</span><input type="text" name="summary" value="{{ room_type.summary or '' }}" maxlength="280" {% if not can('settings.edit') %}disabled{% endif %}></label>
+            <label><span>Bed details</span><input type="text" name="bed_details" value="{{ room_type.bed_details or '' }}" maxlength="255" {% if not can('settings.edit') %}disabled{% endif %}></label>
+          </div>
+          <div class="grid two">
             <label><span>Standard occupancy</span><input type="number" min="1" name="standard_occupancy" value="{{ room_type.standard_occupancy }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
             <label><span>Max occupancy</span><input type="number" min="1" name="max_occupancy" value="{{ room_type.max_occupancy }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
           </div>
-          <label><span>Description</span><textarea name="description" rows="2" {% if not can('settings.edit') %}disabled{% endif %}>{{ room_type.description or '' }}</textarea></label>
+          <label><span>Long description</span><textarea name="description" rows="4" {% if not can('settings.edit') %}disabled{% endif %}>{{ room_type.description or '' }}</textarea></label>
+          <div class="grid two">
+            <label>
+              <span>Image URLs or asset paths</span>
+              <textarea name="media_urls" rows="3" {% if not can('settings.edit') %}disabled{% endif %}>{{ (room_type.media_urls or [])|join('\n') }}</textarea>
+              <small class="muted">One per line. Leave blank to show the no-image fallback.</small>
+            </label>
+            <label>
+              <span>Amenities</span>
+              <textarea name="amenities" rows="3" {% if not can('settings.edit') %}disabled{% endif %}>{{ (room_type.amenities or [])|join('\n') }}</textarea>
+              <small class="muted">One per line. Only enter amenities this room type actually includes.</small>
+            </label>
+          </div>
+          <label>
+            <span>Policy callouts</span>
+            <textarea name="policy_callouts" rows="3" {% if not can('settings.edit') %}disabled{% endif %}>{{ (room_type.policy_callouts or [])|join('\n') }}</textarea>
+            <small class="muted">Optional room-specific callouts that appear alongside the standard booking policies.</small>
+          </label>
           <div class="grid two">
             <label class="toggle-row"><input type="checkbox" name="extra_bed_allowed" {% if room_type.extra_bed_allowed %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Extra bed allowed</span></label>
             <label class="toggle-row"><input type="checkbox" name="is_active" {% if room_type.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Active</span></label>

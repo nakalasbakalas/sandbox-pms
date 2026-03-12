@@ -111,7 +111,12 @@ def test_room_type_and_room_manager_updates_persist_and_audit(app_factory):
             "action": "room_type",
             "code": "FAM",
             "name": "Family Triple",
+            "summary": "Flexible triple room with room for a small family",
             "description": "Flexible triple room",
+            "bed_details": "One queen bed and one single bed",
+            "media_urls": "https://cdn.example.test/family-1.jpg\nhttps://cdn.example.test/family-2.jpg",
+            "amenities": "Dining nook\nBlackout curtains",
+            "policy_callouts": "Accessible by lift only\nQuiet hours from 22:00",
             "standard_occupancy": "2",
             "max_occupancy": "3",
             "extra_bed_allowed": "on",
@@ -139,6 +144,14 @@ def test_room_type_and_room_manager_updates_persist_and_audit(app_factory):
         room_type = RoomType.query.filter_by(code="FAM").one()
         updated_room = db.session.get(Room, room_216.id)
         assert room_type.name == "Family Triple"
+        assert room_type.summary == "Flexible triple room with room for a small family"
+        assert room_type.bed_details == "One queen bed and one single bed"
+        assert room_type.media_urls == [
+            "https://cdn.example.test/family-1.jpg",
+            "https://cdn.example.test/family-2.jpg",
+        ]
+        assert room_type.amenities == ["Dining nook", "Blackout curtains"]
+        assert room_type.policy_callouts == ["Accessible by lift only", "Quiet hours from 22:00"]
         assert room_type.extra_bed_allowed is True
         assert updated_room.notes == "Swing room reserved for admin maintenance planning"
         assert AuditLog.query.filter_by(action="room_type_upserted", entity_table="room_types").count() >= 1

@@ -47,19 +47,52 @@
     {% for item in results %}
       <article class="card room-offer-card">
         <div class="room-offer-main">
-          <div class="card-head split-row">
-            <div>
-              <p class="eyebrow">{{ t('room_type_label') }}</p>
-              <h2>{{ item.room_type.name }}</h2>
-              <p>{{ item.room_type.description }}</p>
-            </div>
-            <span class="status confirmed">{{ t('available_rooms', count=item.available_rooms) }}</span>
+          <div class="room-offer-gallery">
+            {% if item.room_content.primary_media_url %}
+              <img
+                class="room-offer-media"
+                src="{{ item.room_content.primary_media_url }}"
+                alt="{{ item.room_type.name }}"
+                loading="lazy"
+                decoding="async"
+              >
+            {% else %}
+              <div class="room-offer-placeholder">
+                <span class="eyebrow">{{ item.room_type.code }}</span>
+                <strong>{{ item.room_type.name }}</strong>
+                {% if item.room_content.summary %}<p>{{ item.room_content.summary }}</p>{% endif %}
+              </div>
+            {% endif %}
           </div>
-          <ul class="checklist compact">
-            <li>{{ item.checkin_summary }}</li>
-            <li>{{ item.policy_summary }}</li>
-            <li>{{ item.extra_guest_summary }}</li>
-          </ul>
+          <div class="room-offer-copy">
+            <div class="card-head split-row">
+              <div>
+                <p class="eyebrow">{{ t('room_type_label') }}</p>
+                <h2>{{ item.room_type.name }}</h2>
+                {% if item.room_content.summary %}<p class="room-offer-summary">{{ item.room_content.summary }}</p>{% endif %}
+                {% if item.room_content.long_description %}<p class="muted room-offer-description">{{ item.room_content.long_description }}</p>{% endif %}
+              </div>
+              <span class="status confirmed">{{ t('available_rooms', count=item.available_rooms) }}</span>
+            </div>
+            <div class="detail-pills room-offer-pills">
+              {% if item.room_content.bed_details and item.room_content.bed_details != item.room_content.summary %}
+                <span class="detail-pill">{{ item.room_content.bed_details }}</span>
+              {% endif %}
+              <span class="detail-pill">{{ t('max_occupancy', count=item.room_type.max_occupancy) }}</span>
+            </div>
+            {% if item.room_content.amenities %}
+              <div class="room-amenities">
+                {% for amenity in item.room_content.amenities[:6] %}
+                  <span class="amenity-chip">{{ amenity }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <ul class="checklist compact">
+              {% for callout in item.policy_highlights %}
+                <li>{{ callout }}</li>
+              {% endfor %}
+            </ul>
+          </div>
         </div>
         <aside class="room-offer-aside">
           <div class="price-stack">
