@@ -281,6 +281,14 @@ input, select, textarea {
   color: var(--text);
   outline: none;
 }
+select option,
+select optgroup {
+  color: #140d07;
+  background: #fff7ed;
+}
+select option:disabled {
+  color: #8b7d6d;
+}
 input:focus, select:focus, textarea:focus { border-color: rgba(var(--accent-rgb), 0.7); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15); }
 textarea { resize: vertical; }
 .stack-form { display: grid; gap: 16px; }
