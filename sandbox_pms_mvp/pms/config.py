@@ -107,6 +107,8 @@ class Config:
     AUTH_COOKIE_HTTPONLY = True
     AUTH_COOKIE_SAMESITE = os.getenv("AUTH_COOKIE_SAMESITE", "Lax")
     AUTH_ENCRYPTION_KEY = os.getenv("AUTH_ENCRYPTION_KEY", "")
+    ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
     SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "sbx_browser_state")
     SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", os.getenv("AUTH_COOKIE_SECURE", "1")) == "1"
     SESSION_COOKIE_HTTPONLY = True

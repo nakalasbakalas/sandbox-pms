@@ -138,6 +138,20 @@ def test_render_database_url_is_normalized_for_psycopg(monkeypatch):
     importlib.reload(config_module)
 
 
+def test_admin_bootstrap_credentials_are_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@hotel.example")
+    monkeypatch.setenv("ADMIN_PASSWORD", "production-password-from-env")
+
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.ADMIN_EMAIL == "admin@hotel.example"
+    assert reloaded.Config.ADMIN_PASSWORD == "production-password-from-env"
+
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    importlib.reload(config_module)
+
+
 def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
     monkeypatch.setenv("TRUSTED_HOSTS", "book.example.com,staff.example.com")
     monkeypatch.setenv("APP_BASE_URL", "https://book.example.com")
