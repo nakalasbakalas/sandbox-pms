@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import sqlalchemy as sa
-from flask import current_app, has_request_context, url_for
+from flask import current_app
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
@@ -20,6 +20,7 @@ from ..branding import branding_settings_context, resolve_public_base_url
 from ..extensions import db
 from ..i18n import normalize_language, t
 from ..pricing import get_setting_value
+from ..url_topology import build_booking_url
 from ..models import (
     EmailOutbox,
     Guest,
@@ -170,7 +171,6 @@ class StripeHostedPaymentProvider(PaymentProviderBase):
         secret_key = current_app.config.get("STRIPE_SECRET_KEY")
         if not secret_key:
             raise ValueError("Stripe secret key is not configured.")
-        hotel_name = str(get_setting_value("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel")))
         payload = {
             "mode": "payment",
             "success_url": payment_return_url(payment_request, reservation, external=True),
@@ -182,7 +182,7 @@ class StripeHostedPaymentProvider(PaymentProviderBase):
             "metadata[reservation_code]": reservation.reservation_code,
             "line_items[0][price_data][currency]": payment_request.currency_code.lower(),
             "line_items[0][price_data][unit_amount]": str(int(money(payment_request.amount) * Decimal("100"))),
-            "line_items[0][price_data][product_data][name]": f"{hotel_name} deposit {reservation.reservation_code}",
+            "line_items[0][price_data][product_data][name]": f"Sandbox Hotel deposit {reservation.reservation_code}",
             "line_items[0][price_data][product_data][description]": f"Deposit for stay {reservation.check_in_date} to {reservation.check_out_date}",
             "line_items[0][quantity]": "1",
             "expires_at": str(int((utc_now() + timedelta(minutes=payment_link_ttl_minutes())).timestamp())),
@@ -699,8 +699,6 @@ def sign_test_hosted_webhook(payload: bytes) -> str:
 
 
 def _public_url(endpoint: str, *, external: bool, **values: str) -> str:
-    if has_request_context():
-        return url_for(endpoint, _external=external, **values)
     request_code = values["request_code"]
     query_string = urllib.parse.urlencode(
         {
@@ -712,13 +710,15 @@ def _public_url(endpoint: str, *, external: bool, **values: str) -> str:
         "public_payment_start": f"/payments/request/{request_code}",
         "public_payment_return": f"/payments/return/{request_code}",
     }
-    relative_url = f"{route_map[endpoint]}?{query_string}"
+    relative_path = route_map[endpoint]
     if not external:
         return relative_url
     base_url = resolve_public_base_url()
     if not base_url:
         raise RuntimeError("APP_BASE_URL must be configured for hosted payment links.")
     return f"{base_url}{relative_url}"
+        return f"{relative_path}?{query_string}"
+    return build_booking_url(relative_path, query_string=query_string)
 
 
 def guest_payment_entry_url(payment_request: PaymentRequest, reservation: Reservation, *, external: bool) -> str:
@@ -763,6 +763,7 @@ def render_payment_request_message(
         "hotel_name": branding["hotel_name"],
         "hotel_logo_url": branding["logo_url"],
         "hotel_address": branding["address"],
+        "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
         "guest_name": guest_name,
         "reservation_code": reservation.reservation_code,
         "deposit_amount": f"{money(payment_request.amount):,.2f}",
@@ -771,14 +772,11 @@ def render_payment_request_message(
         "contact_email": branding["contact_email"],
         "support_contact_text": branding["support_contact_text"],
         "public_booking_url": branding["public_base_url"],
+        "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
+        "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
         "check_in_policy": policy_text("check_in_policy", language, t(language, "checkin_summary")),
     }
-    fallback_subject = t(
-        language,
-        "payment_email_subject",
-        reference=reservation.reservation_code,
-        hotel_name=context["hotel_name"],
-    )
+    fallback_subject = t(language, "payment_email_subject", reference=reservation.reservation_code)
     fallback_body = "\n".join(
         [
             f"{context['hotel_name']} - {reservation.reservation_code}",

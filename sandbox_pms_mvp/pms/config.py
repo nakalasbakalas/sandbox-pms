@@ -5,36 +5,37 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-RUNNING_ON_RENDER = os.getenv("RENDER", "").strip().lower() == "true"
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
 
 
-def _normalize_database_url(value: str | None) -> str:
-    candidate = (value or "").strip()
-    if not candidate:
-        return f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}"
-    if candidate.startswith("postgres://"):
-        return "postgresql+psycopg://" + candidate[len("postgres://") :]
-    if candidate.startswith("postgresql+psycopg2://"):
-        return "postgresql+psycopg://" + candidate[len("postgresql+psycopg2://") :]
-    if candidate.startswith("postgresql://") and not candidate.startswith("postgresql+"):
-        return "postgresql+psycopg://" + candidate[len("postgresql://") :]
-    return candidate
+def _normalize_database_uri(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    if raw.startswith("postgresql://"):
+        return f"postgresql+psycopg://{raw.removeprefix('postgresql://')}"
+    if raw.startswith("postgres://"):
+        return f"postgresql+psycopg://{raw.removeprefix('postgres://')}"
+    return raw
 
 
 class Config:
     APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "sandbox-hotel-pms-dev-key")
-    SQLALCHEMY_DATABASE_URI = _normalize_database_url(os.getenv("DATABASE_URL"))
+    SQLALCHEMY_DATABASE_URI = _normalize_database_uri(
+        os.getenv(
+            "DATABASE_URL",
+            f"sqlite:///{BASE_DIR / 'sandbox_pms.db'}",
+        )
+    )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}
-    HOTEL_NAME = os.getenv("HOTEL_NAME", "Hotel")
+    HOTEL_NAME = "Sandbox Hotel"
     DEFAULT_CURRENCY = "THB"
     SERVER_NAME = os.getenv("SERVER_NAME")
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "https")
     APPLICATION_ROOT = os.getenv("APPLICATION_ROOT", "/")
     FORCE_HTTPS = os.getenv("FORCE_HTTPS", "1" if APP_ENV == "production" else "0") == "1"
-    TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "1" if RUNNING_ON_RENDER else "0"))
+    TRUST_PROXY_COUNT = int(os.getenv("TRUST_PROXY_COUNT", "0"))
     _trusted_hosts_raw = [item.strip().lower() for item in os.getenv("TRUSTED_HOSTS", "").split(",") if item.strip()]
     TRUSTED_HOSTS = _trusted_hosts_raw or None
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -62,12 +63,15 @@ class Config:
     APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://sandbox-hotel.local")
     ICAL_SYNC_HTTP_TIMEOUT_SECONDS = int(os.getenv("ICAL_SYNC_HTTP_TIMEOUT_SECONDS", "15"))
     ICAL_SYNC_USER_AGENT = os.getenv("ICAL_SYNC_USER_AGENT", "SandboxHotelPMS/1.0")
+    APP_BASE_URL = os.getenv("APP_BASE_URL", "https://sandbox-hotel.local")
+    MARKETING_SITE_URL = os.getenv("MARKETING_SITE_URL", "")
+    BOOKING_ENGINE_URL = os.getenv("BOOKING_ENGINE_URL", APP_BASE_URL)
+    STAFF_APP_URL = os.getenv("STAFF_APP_URL", BOOKING_ENGINE_URL)
+    ENFORCE_CANONICAL_HOSTS = os.getenv("ENFORCE_CANONICAL_HOSTS", "1" if APP_ENV in {"staging", "production"} else "0") == "1"
     AUTO_BOOTSTRAP_SCHEMA = os.getenv("AUTO_BOOTSTRAP_SCHEMA", "0") == "1"
     AUTO_SEED_REFERENCE_DATA = os.getenv("AUTO_SEED_REFERENCE_DATA", "0") == "1"
     INVENTORY_BOOTSTRAP_DAYS = int(os.getenv("INVENTORY_BOOTSTRAP_DAYS", "730"))
     RESERVATION_CODE_PREFIX = os.getenv("RESERVATION_CODE_PREFIX", "SBX")
-    ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip()
-    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
     AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "sbx_staff_session")
     AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "1") == "1"
     AUTH_COOKIE_HTTPONLY = True
@@ -87,7 +91,7 @@ class Config:
     LOGIN_LOCK_WINDOW_MINUTES = int(os.getenv("LOGIN_LOCK_WINDOW_MINUTES", "15"))
     LOGIN_LOCK_DURATION_MINUTES = int(os.getenv("LOGIN_LOCK_DURATION_MINUTES", "15"))
     MFA_VERIFY_WINDOW = int(os.getenv("MFA_VERIFY_WINDOW", "1"))
-    MFA_ISSUER = os.getenv("MFA_ISSUER", f"{HOTEL_NAME} PMS")
+    MFA_ISSUER = os.getenv("MFA_ISSUER", "Sandbox Hotel PMS")
     AUTH_SHOW_RESET_LINKS = os.getenv("AUTH_SHOW_RESET_LINKS", "0") == "1"
     ARGON2_TIME_COST = int(os.getenv("ARGON2_TIME_COST", "3"))
     ARGON2_MEMORY_COST = int(os.getenv("ARGON2_MEMORY_COST", "65536"))
@@ -102,10 +106,36 @@ class Config:
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") == "1"
-    MAIL_FROM = os.getenv("MAIL_FROM", "reservations@example.com")
+    MAIL_FROM = os.getenv("MAIL_FROM", "reservations@sandbox-hotel.local")
     STAFF_ALERT_EMAILS = [item.strip() for item in os.getenv("STAFF_ALERT_EMAILS", "").split(",") if item.strip()]
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")
     BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "14"))
     BACKUP_ENCRYPTION_REQUIRED = os.getenv("BACKUP_ENCRYPTION_REQUIRED", "1" if APP_ENV == "production" else "0") == "1"
     RESTORE_VERIFY_COMMAND = os.getenv("RESTORE_VERIFY_COMMAND", "")
+
+
+def normalize_runtime_config(config: dict, *, override_keys: set[str] | None = None) -> None:
+    override_keys = set(override_keys or set())
+
+    app_base_url = str(config.get("APP_BASE_URL") or "").strip() or "https://sandbox-hotel.local"
+    booking_engine_url = str(config.get("BOOKING_ENGINE_URL") or "").strip()
+    staff_app_url = str(config.get("STAFF_APP_URL") or "").strip()
+
+    if "BOOKING_ENGINE_URL" in override_keys and "APP_BASE_URL" not in override_keys:
+        app_base_url = booking_engine_url or app_base_url
+        config["APP_BASE_URL"] = app_base_url
+    elif "APP_BASE_URL" in override_keys and "BOOKING_ENGINE_URL" not in override_keys:
+        booking_engine_url = app_base_url
+        config["BOOKING_ENGINE_URL"] = booking_engine_url
+    elif not booking_engine_url:
+        booking_engine_url = app_base_url
+        config["BOOKING_ENGINE_URL"] = booking_engine_url
+
+    if not staff_app_url or (
+        "STAFF_APP_URL" not in override_keys and {"APP_BASE_URL", "BOOKING_ENGINE_URL"}.intersection(override_keys)
+    ):
+        config["STAFF_APP_URL"] = booking_engine_url
+
+    if "SQLALCHEMY_DATABASE_URI" in config:
+        config["SQLALCHEMY_DATABASE_URI"] = _normalize_database_uri(config.get("SQLALCHEMY_DATABASE_URI"))

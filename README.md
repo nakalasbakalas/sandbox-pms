@@ -1,22 +1,22 @@
-# Sandbox Hotel PMS - Repository Root
+# sandbox-pms
 
-This is the root of the Sandbox Hotel Property Management System repository.
+Canonical operational PMS and booking engine for Sandbox Hotel.
 
-The main application code is located in the `sandbox_pms_mvp/` directory.
+Use this repository as the single source of truth for:
+- live availability and booking engine behavior
+- reservations and inventory allocation
+- front desk, housekeeping, cashier, and payments
+- staff auth, admin configuration, communications, reporting, and security hardening
 
-## Quick Start
+The companion `nakalasbakalas/sandbox-hotel-site` repository is brochure-only and must not contain active PMS business logic.
 
-```bash
-cd sandbox_pms_mvp
-pip install -r requirements.txt
-flask db upgrade
-flask run
-```
+Primary application code lives in `sandbox_pms_mvp/`.
 
-## Deployment
+Recommended domain topology:
 
-This repository is a server-rendered Flask application and requires a Python host with a database.
-It is not deployable to GitHub Pages as a static site without a separate export/build step.
+- `www.sandboxhotel.com` -> `sandbox-hotel-site`
+- `book.sandboxhotel.com` -> public booking engine in `sandbox-pms`
+- `staff.sandboxhotel.com` -> staff PMS in `sandbox-pms`
 
 Render is now configured through the root [render.yaml](render.yaml) Blueprint. It provisions:
 
@@ -41,3 +41,13 @@ For the first production bootstrap on an empty database, run `flask --app app se
 
 For a step-by-step dashboard checklist, use [RENDER_DEPLOY_CHECKLIST.md](RENDER_DEPLOY_CHECKLIST.md).
 
+See [sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md](sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md) for the URL model, canonical-host behavior, and deployment runbook.
+For platform cutover steps, see [DEPLOYMENT-RUNBOOK.md](DEPLOYMENT-RUNBOOK.md).
+For hosted-payment provider setup on the live `book` origin, see [PAYMENT-CUTOVER-RUNBOOK.md](PAYMENT-CUTOVER-RUNBOOK.md).
+Production-oriented environment defaults for the live domain split are in [sandbox_pms_mvp/.env.production.example](sandbox_pms_mvp/.env.production.example).
+
+Repo layout:
+
+- the application intentionally lives under `sandbox_pms_mvp/`
+- repo-level deployment files such as [render.yaml](render.yaml) and [.gitignore](.gitignore) now treat that subtree as the canonical app root
+- local-only state such as virtualenvs, SQLite files, caches, and instance data are ignored at the repo root

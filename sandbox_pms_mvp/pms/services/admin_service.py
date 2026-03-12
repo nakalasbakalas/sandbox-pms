@@ -42,6 +42,7 @@ from ..models import (
 )
 from ..pricing import get_setting_value
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS, POLICY_DOCUMENTS_SEED
+from ..url_topology import build_booking_url
 
 
 ACTIVE_RESERVATION_STATUSES = {"tentative", "confirmed", "checked_in", "waitlist", "house_use"}
@@ -912,6 +913,7 @@ def sample_notification_context(language_code: str) -> dict[str, object]:
         "hotel_name": branding["hotel_name"],
         "hotel_logo_url": branding["logo_url"],
         "hotel_address": branding["address"],
+        "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
         "guest_name": "Sample Guest",
         "reservation_code": "SBX-00009999",
         "check_in_date": "2026-04-01",
@@ -924,6 +926,9 @@ def sample_notification_context(language_code: str) -> dict[str, object]:
         "contact_email": branding["contact_email"],
         "support_contact_text": branding["support_contact_text"],
         "public_booking_url": branding["public_base_url"],
+        "payment_link": build_booking_url("/payments/request/PAY-SAMPLE"),
+        "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
+        "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
         "cancellation_policy": policy_text("cancellation_policy", language_code, ""),
         "check_in_policy": policy_text("check_in_policy", language_code, ""),
         "check_out_policy": policy_text("check_out_policy", language_code, ""),

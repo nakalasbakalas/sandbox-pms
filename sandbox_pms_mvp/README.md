@@ -2,9 +2,11 @@
 
 Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed PostgreSQL-first. The repo now includes the Phase 2 operating data layer, the Phase 3 staff authentication and authorization layer, the Phase 4 public booking flow, the Phase 5 staff reservations workspace, the Phase 6 front-desk check-in / check-out workspace, the Phase 7 housekeeping operations board, the Phase 8 cashier / folio module, the Phase 9 hosted deposit payment integration, the Phase 10 admin and hotel configuration panel, the Phase 11 notifications and communication layer, the Phase 12 manager dashboard and reporting workspace, the Phase 13 security hardening layer, and the Phase 14 provider portal plus iCal availability sync layer on top of it.
 
-Deployment note: this app is designed for a Python application host such as Render. It is not a GitHub Pages-compatible static site.
+Domain topology is now documented separately in [DEPLOYMENT-TOPOLOGY.md](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md). The recommended production split is `www.sandboxhotel.com` for marketing, `book.sandboxhotel.com` for the public booking engine, and `staff.sandboxhotel.com` for the PMS, with `book` and `staff` pointing at the same Flask deployment.
 
 The canonical Render Blueprint lives at [render.yaml](../render.yaml). It deploys the web service from [sandbox_pms_mvp](.), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](../RENDER_DEPLOY_CHECKLIST.md).
+Render deployment scaffolding is available at [render.yaml](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/render.yaml). It now carries the intended `sandboxhotel.com` production hostnames, while database credentials, provider secrets, and other sensitive settings must still be injected per environment during deployment.
+Use [.env.production.example](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/.env.production.example) as the production env skeleton, and keep [.env.example](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/.env.example) for local or generic setup.
 
 ## Stack
 
@@ -725,7 +727,11 @@ Important variables:
 - `LOGIN_LOCK_DURATION_MINUTES`
 - `MFA_VERIFY_WINDOW`
 - `MFA_ISSUER`
+- `MARKETING_SITE_URL`
+- `BOOKING_ENGINE_URL`
+- `STAFF_APP_URL`
 - `APP_BASE_URL`
+- `ENFORCE_CANONICAL_HOSTS`
 - `PUBLIC_BOOKING_HOLD_MINUTES`
 - `PUBLIC_BOOKING_RATE_LIMIT_WINDOW_MINUTES`
 - `PUBLIC_BOOKING_RATE_LIMIT_COUNT`
@@ -775,12 +781,12 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Seeded admin bootstrap credentials:
+Seeded admin defaults:
 
-- set `ADMIN_EMAIL` before running any seed command that creates the initial admin
-- set `ADMIN_PASSWORD` before running any seed command that creates the initial admin
+- email: `admin@sandbox.local`
+- password: `sandbox-admin-123`
 
-There are no built-in fallback admin credentials anymore.
+Override these with `ADMIN_EMAIL` and `ADMIN_PASSWORD` in real environments.
 
 ## Migrations
 
@@ -805,22 +811,10 @@ Remove-Item .\sandbox_pms.db -ErrorAction SilentlyContinue
 
 ## Seed Commands
 
-Load missing reference data without rewriting existing role permissions or extending inventory:
-
-```powershell
-.\.venv\Scripts\flask.exe --app app seed-reference-data
-```
-
-Load the full local bootstrap, including initial inventory:
+Load Phase 2 reference data and bootstrap the inventory horizon:
 
 ```powershell
 .\.venv\Scripts\flask.exe --app app seed-phase2
-```
-
-Explicitly synchronize seeded permissions onto existing system roles:
-
-```powershell
-.\.venv\Scripts\flask.exe --app app sync-role-permissions
 ```
 
 Extend nightly inventory rows only:
@@ -829,8 +823,7 @@ Extend nightly inventory rows only:
 .\.venv\Scripts\flask.exe --app app bootstrap-inventory
 ```
 
-Use `seed-reference-data` for production-safe inserts of missing reference records.
-Use `seed-phase2` only for local/dev bootstrap where creating inventory rows and refreshing seeded role permissions is intentional.
+The seed path is safe to rerun for reference data in non-production environments.
 
 ## Backup and Restore
 
@@ -946,7 +939,7 @@ Launch-readiness checklist:
 - run with `APP_ENV=production`, `FORCE_HTTPS=1`, `AUTH_COOKIE_SECURE=1`, and `SESSION_COOKIE_SECURE=1`
 - disable `AUTO_BOOTSTRAP_SCHEMA`, `AUTO_SEED_REFERENCE_DATA`, and `AUTH_SHOW_RESET_LINKS`
 - configure `TRUST_PROXY_COUNT` and `TRUSTED_HOSTS` for the actual deployment edge
-- point `APP_BASE_URL` and `PAYMENT_BASE_URL` at HTTPS origins
+- point `MARKETING_SITE_URL`, `BOOKING_ENGINE_URL`, `STAFF_APP_URL`, `APP_BASE_URL`, and `PAYMENT_BASE_URL` at the correct HTTPS origins
 - keep `PAYMENT_PROVIDER=disabled` or `stripe`; never deploy `test_hosted` in production
 - verify backup output, checksum, manifest, and restore workflow before go-live
 - require MFA for admin and manager users
@@ -1111,12 +1104,11 @@ Recommended production setup:
 
 1. Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SECRET_KEY`, and `AUTH_ENCRYPTION_KEY`.
 2. Run migrations against PostgreSQL.
-3. Run `flask --app app seed-reference-data`.
-4. Run `flask --app app bootstrap-inventory`.
-5. Sign in as the seeded admin.
-6. Create real staff accounts from `/staff/users`.
-7. Require new staff to complete the password reset flow before daily use.
-8. Encourage or require MFA for admin and manager accounts from `/staff/security`.
+3. Run `flask --app app seed-phase2`.
+4. Sign in as the seeded admin.
+5. Create real staff accounts from `/staff/users`.
+6. Require new staff to complete the password reset flow before daily use.
+7. Encourage or require MFA for admin and manager accounts from `/staff/security`.
 
 ## Runnable App
 

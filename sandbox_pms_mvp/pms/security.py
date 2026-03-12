@@ -37,13 +37,6 @@ SENSITIVE_FIELD_FRAGMENTS = {
     "token",
     "webhook",
 }
-SENSITIVE_PUBLIC_ENDPOINTS = {
-    "booking_confirmation",
-    "booking_cancel_request",
-    "booking_modify_request",
-    "public_payment_return",
-    "public_payment_start",
-}
 
 
 def configure_app_security(app: Flask) -> None:
@@ -141,16 +134,29 @@ def _validate_runtime_configuration(app: Flask) -> None:
         raise RuntimeError("APP_ENV must be one of development, staging, production, or test.")
 
     _validate_url(app.config.get("APP_BASE_URL"), label="APP_BASE_URL", must_be_https=app_env == "production")
+    _validate_url(app.config.get("BOOKING_ENGINE_URL"), label="BOOKING_ENGINE_URL", must_be_https=app_env == "production")
+    _validate_url(app.config.get("STAFF_APP_URL"), label="STAFF_APP_URL", must_be_https=app_env == "production")
+    if app.config.get("MARKETING_SITE_URL"):
+        _validate_url(
+            app.config.get("MARKETING_SITE_URL"),
+            label="MARKETING_SITE_URL",
+            must_be_https=app_env == "production",
+        )
     if app.config.get("PAYMENT_BASE_URL"):
         _validate_url(
             app.config.get("PAYMENT_BASE_URL"),
             label="PAYMENT_BASE_URL",
             must_be_https=app_env == "production",
         )
+    if (
+        str(app.config.get("APP_BASE_URL") or "").strip()
+        and str(app.config.get("BOOKING_ENGINE_URL") or "").strip()
+        and str(app.config.get("APP_BASE_URL")).strip().rstrip("/")
+        != str(app.config.get("BOOKING_ENGINE_URL")).strip().rstrip("/")
+    ):
+        raise RuntimeError("APP_BASE_URL must match BOOKING_ENGINE_URL when both are configured.")
 
     auth_encryption_key = str(app.config.get("AUTH_ENCRYPTION_KEY") or "").strip()
-    admin_email = str(app.config.get("ADMIN_EMAIL") or "").strip()
-    admin_password = str(app.config.get("ADMIN_PASSWORD") or "")
     if auth_encryption_key:
         try:
             Fernet(auth_encryption_key.encode("utf-8"))
@@ -173,10 +179,6 @@ def _validate_runtime_configuration(app: Flask) -> None:
         raise RuntimeError("SECRET_KEY must be at least 32 characters in production.")
     if not auth_encryption_key:
         raise RuntimeError("AUTH_ENCRYPTION_KEY is required in production.")
-    if not admin_email:
-        raise RuntimeError("ADMIN_EMAIL is required in production.")
-    if not admin_password.strip():
-        raise RuntimeError("ADMIN_PASSWORD is required in production.")
     if not bool(app.config.get("AUTH_COOKIE_SECURE")):
         raise RuntimeError("AUTH_COOKIE_SECURE must be enabled in production.")
     if not bool(app.config.get("SESSION_COOKIE_SECURE")):
@@ -218,11 +220,6 @@ def _register_request_security_hooks(app: Flask) -> None:
         if getattr(g, "current_staff_user", None) is not None or getattr(g, "pending_mfa_user", None) is not None:
             response.headers["Cache-Control"] = "no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
-        elif request.endpoint in SENSITIVE_PUBLIC_ENDPOINTS:
-            response.headers["Cache-Control"] = "no-store, private, max-age=0"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
 
         if current_app.config.get("ENABLE_ACCESS_LOGGING", True):
             duration_ms = None

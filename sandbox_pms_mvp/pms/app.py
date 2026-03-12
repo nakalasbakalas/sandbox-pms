@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from urllib.parse import urlparse
+from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
@@ -21,6 +22,7 @@ from .branding import (
     resolve_public_base_url,
 )
 from .config import Config
+from .config import Config, normalize_runtime_config
 from .constants import (
     BLACKOUT_TYPES,
     BOOKING_EXTRA_PRICING_MODES,
@@ -68,9 +70,10 @@ from .models import (
     UserSession,
 )
 from .pricing import get_setting_value
-from .security import configure_app_security, public_error_message, request_client_ip
-from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
+from .security import configure_app_security, public_error_message
+from .seeds import bootstrap_inventory_horizon, seed_all
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
+from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .services.admin_service import (
     BlackoutPayload,
     InventoryOverridePayload,
@@ -80,7 +83,6 @@ from .services.admin_service import (
     RoomPayload,
     RoomTypePayload,
     create_inventory_override,
-    policy_text,
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
@@ -261,11 +263,13 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.config.from_object(Config)
     if test_config:
         app.config.update(test_config)
+    normalize_runtime_config(app.config, override_keys=set((test_config or {}).keys()))
     configure_app_security(app)
     db.init_app(app)
     migrate.init_app(app, db)
 
     register_template_helpers(app)
+    register_url_topology_hooks(app)
     register_auth_hooks(app)
     register_cli(app)
     register_routes(app)
@@ -334,7 +338,6 @@ def register_auth_hooks(app: Flask) -> None:
                 httponly=app.config["AUTH_COOKIE_HTTPONLY"],
                 secure=app.config["AUTH_COOKIE_SECURE"],
                 samesite=app.config["AUTH_COOKIE_SAMESITE"],
-                max_age=app.config["SESSION_ABSOLUTE_HOURS"] * 3600,
                 path="/",
             )
         elif getattr(g, "clear_auth_cookie", False):
@@ -343,6 +346,15 @@ def register_auth_hooks(app: Flask) -> None:
         if getattr(g, "current_auth_session", None):
             db.session.commit()
         return response
+
+
+def register_url_topology_hooks(app: Flask) -> None:
+    @app.before_request
+    def enforce_canonical_host():
+        redirect_url = canonical_redirect_url()
+        if redirect_url:
+            return redirect(redirect_url, code=302)
+        return None
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -435,6 +447,20 @@ def register_template_helpers(app: Flask) -> None:
             and not request.endpoint.startswith("provider_")
         )
 
+        hotel_name = str(get_setting_value("hotel.name", "Sandbox Hotel"))
+        hotel_currency = str(get_setting_value("hotel.currency", "THB"))
+        hotel_brand_mark = str(get_setting_value("hotel.brand_mark", "SBX"))
+        hotel_logo_url = _public_asset_url(str(get_setting_value("hotel.logo_url", "") or ""))
+        hotel_contact_phone = str(get_setting_value("hotel.contact_phone", "+66 000 000 000"))
+        hotel_contact_email = str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local"))
+        hotel_address = str(get_setting_value("hotel.address", "Sandbox Hotel"))
+        hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
+        hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
+        marketing_site_url = marketing_site_base_url(required=False)
+        favicon_url = hotel_logo_url or url_for("static", filename="favicon.svg", _external=True)
+        share_image_url = hotel_logo_url or favicon_url
+        hotel_contact_phone_href = _phone_href(hotel_contact_phone)
+        hotel_contact_email_href = _email_href(hotel_contact_email)
         return {
             "hotel_name": hotel_name,
             "currency": hotel_currency,
@@ -445,8 +471,8 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_contact_email": hotel_contact_email,
             "hotel_contact_phone_href": hotel_contact_phone_href,
             "hotel_contact_email_href": hotel_contact_email_href,
-            "hotel_contact_phone_link": hotel_contact_phone_link,
-            "hotel_contact_email_link": hotel_contact_email_link,
+            "hotel_contact_phone_link": _contact_link(hotel_contact_phone_href, hotel_contact_phone),
+            "hotel_contact_email_link": _contact_link(hotel_contact_email_href, hotel_contact_email),
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
@@ -462,6 +488,20 @@ def register_template_helpers(app: Flask) -> None:
             "share_image_url": share_image_url,
             "hotel_structured_data": hotel_structured_data,
             "is_public_site": is_public_site,
+            "marketing_site_url": marketing_site_url,
+            "booking_engine_url": booking_engine_base_url(),
+            "staff_app_url": staff_app_base_url(),
+            "favicon_url": favicon_url,
+            "share_image_url": share_image_url,
+            "hotel_structured_data": _hotel_structured_data(
+                hotel_name=hotel_name,
+                hotel_address=hotel_address,
+                hotel_contact_phone=hotel_contact_phone,
+                hotel_contact_email=hotel_contact_email,
+                hotel_check_in_time=hotel_check_in_time,
+                hotel_check_out_time=hotel_check_out_time,
+                share_image_url=share_image_url,
+            ),
             "staff_logged_in": current_user() is not None,
             "provider_logged_in": bool(current_user() and current_user().has_permission("provider.dashboard.view")),
             "current_staff_user": current_user(),
@@ -470,6 +510,7 @@ def register_template_helpers(app: Flask) -> None:
             "language_labels": LANGUAGE_LABELS,
             "language_alternate_urls": language_alternate_urls,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
+            "make_lang_url": make_language_url,
             "can": can,
             "admin_sections": available_admin_sections(),
             "default_dashboard_url": default_dashboard_url(current_user()) if current_user() else "",
@@ -477,7 +518,6 @@ def register_template_helpers(app: Flask) -> None:
             "csrf_input": lambda: Markup(
                 f'<input type="hidden" name="csrf_token" value="{ensure_csrf_token()}">'
             ),
-            "make_lang_url": _make_lang_url,
         }
 
 
@@ -486,17 +526,6 @@ def register_cli(app: Flask) -> None:
     def seed_phase2_command() -> None:
         seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
         print("Phase 2 seed completed.")
-
-    @app.cli.command("seed-reference-data")
-    def seed_reference_data_command() -> None:
-        seed_reference_data(sync_existing_roles=False)
-        print("Reference data seeded without rewriting existing role permissions or inventory.")
-
-    @app.cli.command("sync-role-permissions")
-    def sync_role_permissions_command() -> None:
-        seed_roles_permissions(sync_existing_roles=True)
-        db.session.commit()
-        print("Seeded role permissions synchronized.")
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:
@@ -553,28 +582,37 @@ def register_routes(app: Flask) -> None:
     @app.route("/favicon.ico")
     def favicon_ico():
         return redirect(url_for("static", filename="favicon.svg"), code=302)
+        upcoming = (
+            Reservation.query.filter(Reservation.created_from_public_booking_flow.is_(True))
+            .order_by(Reservation.booked_at.desc())
+            .limit(5)
+            .all()
+        )
+        return render_template("index.html", upcoming=upcoming, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
 
     @app.route("/sitemap.xml")
     def sitemap_xml():
-        public_pages = [
-            ("index", {}),
-            ("availability", {}),
-            ("booking_cancel_request", {}),
-            ("booking_modify_request", {}),
+        booking_base = booking_engine_base_url() or request.url_root.rstrip("/")
+        pages = [
+            "/",
+            "/availability",
+            "/booking/new",
         ]
-        urls: list[str] = []
-        for endpoint, values in public_pages:
-            urls.append(absolute_public_url(url_for(endpoint, **values)))
-            for language_code in LANGUAGE_LABELS:
-                urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
-        unique_urls = list(dict.fromkeys(url for url in urls if url))
-        body = [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-        ]
-        body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
-        body.append("</urlset>")
-        return Response("\n".join(body), mimetype="application/xml")
+        body = "".join(
+            f"<url><loc>{booking_base}{path}</loc></url>"
+            for path in pages
+        )
+        xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            f"{body}"
+            "</urlset>"
+        )
+        return app.response_class(xml, mimetype="application/xml")
+
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok"})
 
     @app.route("/availability")
     def availability():
@@ -602,10 +640,7 @@ def register_routes(app: Flask) -> None:
                 results = search_public_availability(payload)
             except Exception as exc:  # noqa: BLE001
                 error = public_error_message(exc)
-        if not session.get("_booking_nonce"):
-            session["_booking_nonce"] = secrets.token_hex(8)
-        booking_nonce = session["_booking_nonce"]
-        return render_template("availability.html", results=results, form_data=form_data, error=error, room_types=RoomType.query.order_by(RoomType.code.asc()).all(), booking_nonce=booking_nonce)
+        return render_template("availability.html", results=results, form_data=form_data, error=error, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
 
     @app.route("/booking/hold", methods=["POST"])
     def booking_hold():
@@ -625,15 +660,15 @@ def register_routes(app: Flask) -> None:
                     source_channel=resolve_booking_source_channel(request.form.get("source_channel"), attribution),
                     source_metadata=attribution,
                     request_ip=request_client_ip(),
+                    source_channel=request.form.get("source_channel", "direct_web"),
+                    source_metadata=source_metadata_from_request(language),
+                    request_ip=request.remote_addr,
                     user_agent=request.user_agent.string,
                     extra_guests=int(request.form.get("extra_guests", 0)),
                 )
             )
             room_type = db.session.get(RoomType, hold.room_type_id)
-            return render_template(
-                "public_booking_form.html",
-                **public_booking_form_context(hold, room_type),
-            )
+            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
             return redirect(
@@ -672,6 +707,10 @@ def register_routes(app: Flask) -> None:
                     terms_accepted=request.form.get("accept_terms") == "on",
                     terms_version=published_terms_version,
                     extra_ids=selected_extra_ids,
+                    terms_version=(
+                        request.form.get("terms_version")
+                        or current_settings().get("booking.terms_version", {}).get("value", "2026-03")
+                    ),
                 )
             )
             if payments_enabled() and Decimal(str(reservation.deposit_required_amount or "0.00")) > Decimal("0.00"):
@@ -683,28 +722,13 @@ def register_routes(app: Flask) -> None:
                         language=language,
                         source="public_confirmation",
                     )
-                except Exception as exc:  # noqa: BLE001
-                    current_app.logger.exception(
-                        "Failed to create deposit request for reservation %s",
-                        reservation.reservation_code,
-                    )
-                    write_activity_log(
-                        actor_user_id=None,
-                        event_type="payment.deposit_request_failed",
-                        entity_table="reservations",
-                        entity_id=str(reservation.id),
-                        metadata={
-                            "reservation_code": reservation.reservation_code,
-                            "error": str(exc)[:255],
-                        },
-                    )
-                    flash(t(language, "payment_link_unavailable"), "warning")
+                except Exception:  # noqa: BLE001
+                    pass
             return redirect(
                 url_for(
                     "booking_confirmation",
                     reservation_code=reservation.reservation_code,
                     token=reservation.public_confirmation_token,
-                    lang=language,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -729,13 +753,13 @@ def register_routes(app: Flask) -> None:
                     },
                 ),
             )
+            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
 
     @app.route("/booking/confirmation/<reservation_code>")
     def booking_confirmation(reservation_code):
         reservation = load_public_confirmation(reservation_code, request.args.get("token", ""))
         if not reservation:
             abort(404)
-        g.public_language = reservation.booking_language
         payment_request = (
             PaymentRequest.query.filter_by(reservation_id=reservation.id)
             .order_by(PaymentRequest.created_at.desc())
@@ -774,7 +798,6 @@ def register_routes(app: Flask) -> None:
             )
         except LookupError:
             abort(404)
-        g.public_language = context["reservation"].booking_language
         return render_template("public_payment_return.html", **context)
 
     @app.route("/webhooks/payments/<provider_name>", methods=["POST"])
@@ -794,92 +817,42 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/booking/cancel", methods=["GET", "POST"])
     def booking_cancel_request():
-        language = current_language()
         request_row = None
-        form_defaults = {
-            "booking_reference": (request.args.get("booking_reference") or "").strip(),
-            "contact_value": (request.args.get("contact_value") or "").strip(),
-            "reason": "",
-        }
         if request.method == "POST":
-            form_defaults.update(
-                {
-                    "booking_reference": request.form["booking_reference"].strip(),
-                    "contact_value": request.form["contact_value"].strip(),
-                    "reason": request.form.get("reason", ""),
-                }
-            )
             payload = VerificationRequestPayload(
-                booking_reference=form_defaults["booking_reference"],
-                contact_value=form_defaults["contact_value"],
-                language=language,
+                booking_reference=request.form["booking_reference"].strip(),
+                contact_value=request.form["contact_value"].strip(),
+                language=current_language(),
                 reason=request.form.get("reason"),
-                request_ip=request_client_ip(),
+                request_ip=request.remote_addr,
                 user_agent=request.user_agent.string,
             )
             request_row = submit_cancellation_request(payload)
-            if request_row:
-                flash(t(language, "cancellation_received"), "success")
-            else:
-                flash(t(language, "booking_lookup_not_found"), "error")
-        return render_template(
-            "public_cancel_request.html",
-            request_row=request_row,
-            form_defaults=form_defaults,
-        )
+            flash(t(current_language(), "cancellation_received"), "success")
+        return render_template("public_cancel_request.html", request_row=request_row)
 
     @app.route("/booking/modify", methods=["GET", "POST"])
     def booking_modify_request():
-        language = current_language()
         request_row = None
-        form_defaults = {
-            "booking_reference": (request.args.get("booking_reference") or "").strip(),
-            "contact_value": (request.args.get("contact_value") or "").strip(),
-            "requested_check_in": request.args.get("requested_check_in", ""),
-            "requested_check_out": request.args.get("requested_check_out", ""),
-            "requested_adults": request.args.get("requested_adults", ""),
-            "requested_children": request.args.get("requested_children", ""),
-            "contact_correction": request.args.get("contact_correction", ""),
-            "special_requests": request.args.get("special_requests", ""),
-        }
         if request.method == "POST":
-            form_defaults.update(
-                {
-                    "booking_reference": request.form["booking_reference"].strip(),
-                    "contact_value": request.form["contact_value"].strip(),
-                    "requested_check_in": request.form.get("requested_check_in", ""),
-                    "requested_check_out": request.form.get("requested_check_out", ""),
-                    "requested_adults": request.form.get("requested_adults", ""),
-                    "requested_children": request.form.get("requested_children", ""),
-                    "contact_correction": request.form.get("contact_correction", ""),
-                    "special_requests": request.form.get("special_requests", ""),
-                }
-            )
             payload = VerificationRequestPayload(
-                booking_reference=form_defaults["booking_reference"],
-                contact_value=form_defaults["contact_value"],
-                language=language,
+                booking_reference=request.form["booking_reference"].strip(),
+                contact_value=request.form["contact_value"].strip(),
+                language=current_language(),
                 requested_changes={
-                    "requested_check_in": form_defaults["requested_check_in"],
-                    "requested_check_out": form_defaults["requested_check_out"],
-                    "requested_adults": form_defaults["requested_adults"],
-                    "requested_children": form_defaults["requested_children"],
-                    "contact_correction": form_defaults["contact_correction"],
-                    "special_requests": form_defaults["special_requests"],
+                    "requested_check_in": request.form.get("requested_check_in"),
+                    "requested_check_out": request.form.get("requested_check_out"),
+                    "requested_adults": request.form.get("requested_adults"),
+                    "requested_children": request.form.get("requested_children"),
+                    "contact_correction": request.form.get("contact_correction"),
+                    "special_requests": request.form.get("special_requests"),
                 },
-                request_ip=request_client_ip(),
+                request_ip=request.remote_addr,
                 user_agent=request.user_agent.string,
             )
             request_row = submit_modification_request(payload)
-            if request_row:
-                flash(t(language, "modification_received"), "success")
-            else:
-                flash(t(language, "booking_lookup_not_found"), "error")
-        return render_template(
-            "public_modify_request.html",
-            request_row=request_row,
-            form_defaults=form_defaults,
-        )
+            flash(t(current_language(), "modification_received"), "success")
+        return render_template("public_modify_request.html", request_row=request_row)
 
     @app.route("/calendar/feed/<token>.ics")
     def calendar_feed_export(token):
@@ -903,7 +876,7 @@ def register_routes(app: Flask) -> None:
             result = login_with_password(
                 identifier,
                 password,
-                ip_address=request_client_ip(),
+                ip_address=request.remote_addr,
                 user_agent=request.user_agent.string,
             )
             if result.success:
@@ -938,7 +911,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/forgot-password", methods=["GET", "POST"])
     def staff_forgot_password():
         if request.method == "POST":
-            request_password_reset(request.form.get("identifier", ""), ip_address=request_client_ip())
+            request_password_reset(request.form.get("identifier", ""), ip_address=request.remote_addr)
             flash("If the account exists, a reset link has been sent.", "success")
             return redirect(url_for("staff_login"))
         return render_template("staff_forgot_password.html")
@@ -996,7 +969,7 @@ def register_routes(app: Flask) -> None:
                     if getattr(g, "current_auth_session", None):
                         revoke_session(g.current_auth_session)
                     db.session.commit()
-                    result = login_with_password(user.email, new_password, ip_address=request_client_ip(), user_agent=request.user_agent.string)
+                    result = login_with_password(user.email, new_password, ip_address=request.remote_addr, user_agent=request.user_agent.string)
                     session.clear()
                     rotate_csrf_token()
                     g.auth_cookie_value = result.cookie_value
@@ -1049,6 +1022,18 @@ def register_routes(app: Flask) -> None:
 
     def property_settings_context() -> dict[str, str]:
         return branding_settings_context()
+        return {
+            "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
+            "brand_mark": str(get_setting_value("hotel.brand_mark", "SBX")),
+            "logo_url": str(get_setting_value("hotel.logo_url", "") or ""),
+            "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
+            "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
+            "address": str(get_setting_value("hotel.address", "")),
+            "currency": str(get_setting_value("hotel.currency", "THB")),
+            "check_in_time": str(get_setting_value("hotel.check_in_time", "14:00")),
+            "check_out_time": str(get_setting_value("hotel.check_out_time", "11:00")),
+            "tax_id": str(get_setting_value("hotel.tax_id", "") or ""),
+        }
 
     def payment_settings_context() -> dict[str, object]:
         return {
@@ -1689,10 +1674,9 @@ def register_routes(app: Flask) -> None:
         if not notification:
             abort(404)
         notification.status = "read"
-        notification.read_at = datetime.now(timezone.utc)
+        notification.read_at = datetime.utcnow()
         db.session.commit()
-        safe_back = safe_back_path(request.form.get("back_url"), url_for("staff_dashboard"))
-        return redirect(safe_back)
+        return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
 
     @app.route("/provider")
     def provider_dashboard():
@@ -1860,7 +1844,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping")
     def staff_housekeeping():
         user = require_permission("housekeeping.view")
-        target_date = parse_request_date_arg("date", default=date.today())
+        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         filters = HousekeepingBoardFilters(
             business_date=target_date,
             floor=request.args.get("floor", ""),
@@ -1888,16 +1872,13 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/housekeeping/rooms/<uuid:room_id>")
     def staff_housekeeping_room_detail(room_id):
         user = require_permission("housekeeping.view")
-        business_date = parse_request_date_arg("date", default=date.today())
+        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         detail = get_housekeeping_room_detail(room_id, business_date=business_date, actor_user=user)
         return render_template(
             "housekeeping_room_detail.html",
             detail=detail,
             business_date=business_date,
-            back_url=safe_back_path(
-                request.args.get("back"),
-                url_for("staff_housekeeping", date=business_date.isoformat()),
-            ),
+            back_url=request.args.get("back") or url_for("staff_housekeeping", date=business_date.isoformat()),
             housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
             room_note_types=ROOM_NOTE_TYPES,
             can_manage_controls=user.primary_role in {"admin", "manager"},
@@ -2016,11 +1997,11 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk")
     def staff_front_desk():
         require_permission("reservation.view")
-        target_date = parse_request_date_arg("date", default=date.today())
+        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         filters = FrontDeskFilters(
             business_date=target_date,
             mode=request.args.get("mode", "arrivals"),
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
+            room_type_id=request.args.get("room_type_id", ""),
             assigned=request.args.get("assigned", ""),
             ready=request.args.get("ready", ""),
             payment_state=request.args.get("payment_state", ""),
@@ -2164,7 +2145,6 @@ def register_routes(app: Flask) -> None:
                     apply_early_fee=request.form.get("apply_early_fee") == "on",
                     waive_early_fee=request.form.get("waive_early_fee") == "on",
                     waiver_reason=request.form.get("waiver_reason"),
-                    action_at=action_datetime_for_form_date("check_in_date"),
                 ),
                 actor_user_id=user.id,
             )
@@ -2177,14 +2157,14 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/<uuid:reservation_id>")
     def staff_front_desk_detail(reservation_id):
         require_permission("reservation.view")
-        business_date = parse_request_date_arg("date", default=date.today())
+        business_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         detail = get_front_desk_detail(reservation_id, business_date=business_date)
         checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
         return render_template(
             "front_desk_detail.html",
             detail=detail,
             checkout_prep=checkout_prep,
-            back_url=safe_back_path(request.args.get("back"), url_for("staff_front_desk")),
+            back_url=request.args.get("back") or url_for("staff_front_desk"),
             business_date=business_date,
             can_folio=can("folio.view"),
             can_charge=can("folio.charge_add"),
@@ -2210,7 +2190,6 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_check_in(reservation_id):
         user = require_permission("reservation.check_in")
         collect_payment_amount = Decimal(request.form.get("collect_payment_amount") or "0.00")
-        action_at = action_datetime_for_form_date("business_date")
         if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
             abort(403)
         if request.form.get("apply_early_fee") == "on" and not user.has_permission("folio.charge_add"):
@@ -2242,7 +2221,6 @@ def register_routes(app: Flask) -> None:
                     waive_early_fee=request.form.get("waive_early_fee") == "on",
                     waiver_reason=request.form.get("waiver_reason"),
                     override_payment=request.form.get("override_payment") == "on",
-                    action_at=action_at,
                 ),
                 actor_user_id=user.id,
             )
@@ -2255,7 +2233,6 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_check_out(reservation_id):
         user = require_permission("reservation.check_out")
         collect_payment_amount = Decimal(request.form.get("collect_payment_amount") or "0.00")
-        action_at = action_datetime_for_form_date("business_date")
         if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
             abort(403)
         if request.form.get("apply_late_fee") == "on" and not user.has_permission("folio.charge_add"):
@@ -2273,7 +2250,6 @@ def register_routes(app: Flask) -> None:
                     override_balance=request.form.get("override_balance") == "on",
                     process_refund=request.form.get("process_refund") == "on",
                     refund_note=request.form.get("refund_note"),
-                    action_at=action_at,
                 ),
                 actor_user_id=user.id,
             )
@@ -2290,10 +2266,7 @@ def register_routes(app: Flask) -> None:
         try:
             process_no_show(
                 reservation_id,
-                NoShowPayload(
-                    reason=request.form.get("reason"),
-                    action_at=action_datetime_for_form_date("business_date"),
-                ),
+                NoShowPayload(reason=request.form.get("reason")),
                 actor_user_id=user.id,
             )
             flash("Reservation marked as no-show.", "success")
@@ -2313,10 +2286,7 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "cashier_folio.html",
             detail=detail,
-            back_url=safe_back_path(
-                request.args.get("back"),
-                url_for("staff_reservation_detail", reservation_id=reservation_id),
-            ),
+            back_url=request.args.get("back") or url_for("staff_reservation_detail", reservation_id=reservation_id),
             can_adjust=can("folio.adjust"),
             can_charge=can("folio.charge_add"),
             can_payment=can("payment.create"),
@@ -2498,20 +2468,18 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations")
     def staff_reservations():
         require_permission("reservation.view")
-        arrival_date = parse_request_date_arg("arrival_date", default=None)
-        departure_date = parse_request_date_arg("departure_date", default=None)
         filters = ReservationWorkspaceFilters(
             q=(request.args.get("q") or "").strip(),
             status=request.args.get("status", ""),
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
-            arrival_date=arrival_date.isoformat() if arrival_date else "",
-            departure_date=departure_date.isoformat() if departure_date else "",
+            room_type_id=request.args.get("room_type_id", ""),
+            arrival_date=request.args.get("arrival_date", ""),
+            departure_date=request.args.get("departure_date", ""),
             payment_state=request.args.get("payment_state", ""),
             booking_source=request.args.get("booking_source", ""),
             review_status=request.args.get("review_status", ""),
             assigned=request.args.get("assigned", ""),
             include_closed=request.args.get("include_closed") == "1",
-            page=parse_request_int_arg("page", default=1, minimum=1),
+            page=int(request.args.get("page", 1)),
             per_page=25,
         )
         result = list_reservations(filters)
@@ -2530,10 +2498,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/arrivals")
     def staff_reservation_arrivals():
         require_permission("reservation.view")
-        target_date = parse_request_date_arg("date", default=date.today())
+        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         items = list_arrivals(
             arrival_date=target_date,
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
+            room_type_id=request.args.get("room_type_id", ""),
             payment_state=request.args.get("payment_state", ""),
             assigned=request.args.get("assigned", ""),
         )
@@ -2551,10 +2519,10 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/departures")
     def staff_reservation_departures():
         require_permission("reservation.view")
-        target_date = parse_request_date_arg("date", default=date.today())
+        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         items = list_departures(
             departure_date=target_date,
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
+            room_type_id=request.args.get("room_type_id", ""),
             payment_state=request.args.get("payment_state", ""),
         )
         return render_template(
@@ -2571,7 +2539,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/in-house")
     def staff_reservation_in_house():
         require_permission("reservation.view")
-        target_date = parse_request_date_arg("date", default=date.today())
+        target_date = date.fromisoformat(request.args.get("date", date.today().isoformat()))
         items = list_in_house(business_date=target_date)
         return render_template(
             "staff_operational_list.html",
@@ -2652,7 +2620,7 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "reservation_detail.html",
             detail=detail,
-            back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations")),
+            back_url=request.args.get("back") or url_for("staff_reservations"),
             today=date.today(),
             can_folio=can("folio.view"),
         )
@@ -2776,7 +2744,7 @@ def register_routes(app: Flask) -> None:
             action = request.form["action"]
             if action == "reviewed":
                 entry.review_status = "reviewed"
-                entry.reviewed_at = datetime.now(timezone.utc)
+                entry.reviewed_at = datetime.now()
                 entry.reviewed_by_user_id = user.id
             elif action == "needs_follow_up":
                 entry.review_status = "needs_follow_up"
@@ -2785,7 +2753,7 @@ def register_routes(app: Flask) -> None:
             elif action == "resolved":
                 entry.review_status = "resolved"
             elif action == "contacted":
-                entry.contacted_at = datetime.now(timezone.utc)
+                entry.contacted_at = datetime.now()
             entry.internal_note = request.form.get("internal_note") or entry.internal_note
             db.session.commit()
             return redirect(url_for("staff_review_queue"))
@@ -2793,9 +2761,8 @@ def register_routes(app: Flask) -> None:
         query = ReservationReviewQueue.query.join(Reservation, Reservation.id == ReservationReviewQueue.reservation_id)
         if request.args.get("status"):
             query = query.filter(ReservationReviewQueue.review_status == request.args["status"])
-        arrival_date = parse_request_date_arg("arrival_date", default=None)
-        if arrival_date:
-            query = query.filter(Reservation.check_in_date == arrival_date)
+        if request.args.get("arrival_date"):
+            query = query.filter(Reservation.check_in_date == date.fromisoformat(request.args["arrival_date"]))
         if request.args.get("booking_source"):
             query = query.filter(Reservation.source_channel == request.args["booking_source"])
         if request.args.get("deposit_state"):
@@ -2809,7 +2776,82 @@ def register_routes(app: Flask) -> None:
 
 
 def current_language() -> str:
-    return normalize_language(request.args.get("lang") or request.form.get("language") or getattr(g, "public_language", None) or "th")
+    return normalize_language(request.args.get("lang") or request.form.get("language") or "th")
+
+
+def make_language_url(language_code: str) -> str:
+    args = request.args.to_dict(flat=False)
+    args["lang"] = [normalize_language(language_code)]
+    query_string = urlencode(args, doseq=True)
+    if query_string:
+        return f"{request.path}?{query_string}"
+    return request.path
+
+
+def _public_asset_url(value: str | None) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return ""
+    if candidate.startswith(("http://", "https://", "data:")):
+        return candidate
+    if candidate.startswith("/"):
+        return f"{request.url_root.rstrip('/')}{candidate}"
+    return f"{request.url_root.rstrip('/')}/{candidate.lstrip('/')}"
+
+
+def _phone_href(phone_number: str) -> str:
+    normalized = "".join(character for character in str(phone_number or "") if character.isdigit() or character == "+")
+    if not normalized:
+        return ""
+    return f"tel:{normalized}"
+
+
+def _email_href(email_address: str) -> str:
+    normalized = str(email_address or "").strip()
+    if not normalized:
+        return ""
+    return f"mailto:{normalized}"
+
+
+def _contact_link(href: str, label: str) -> Markup | str:
+    safe_label = escape(label or "")
+    if not href:
+        return safe_label
+    return Markup('<a class="contact-link subtle" href="{0}">{1}</a>').format(escape(href), safe_label)
+
+
+def _hotel_structured_data(
+    *,
+    hotel_name: str,
+    hotel_address: str,
+    hotel_contact_phone: str,
+    hotel_contact_email: str,
+    hotel_check_in_time: str,
+    hotel_check_out_time: str,
+    share_image_url: str,
+) -> dict[str, object]:
+    structured_data: dict[str, object] = {
+        "@context": "https://schema.org",
+        "@type": "Hotel",
+        "name": hotel_name,
+        "url": booking_engine_base_url(),
+    }
+    if hotel_address:
+        structured_data["address"] = {
+            "@type": "PostalAddress",
+            "streetAddress": hotel_address,
+        }
+    if hotel_contact_phone:
+        structured_data["telephone"] = hotel_contact_phone
+    if hotel_contact_email:
+        structured_data["email"] = hotel_contact_email
+    if hotel_check_in_time:
+        structured_data["checkinTime"] = hotel_check_in_time
+    if hotel_check_out_time:
+        structured_data["checkoutTime"] = hotel_check_out_time
+    if share_image_url:
+        structured_data["image"] = share_image_url
+    return structured_data
 
 
 def ensure_csrf_token() -> str:
