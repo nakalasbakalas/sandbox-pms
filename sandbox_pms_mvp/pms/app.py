@@ -441,11 +441,22 @@ def register_template_helpers(app: Flask) -> None:
         def _make_lang_url(lang_code: str) -> str:
             return _language_url(lang_code, preserve_query=True)
 
-        canonical_url = absolute_public_url(_language_url(language, preserve_query=False))
+        def _absolute_route_url(path: str) -> str:
+            candidate = str(path or "").strip()
+            if not candidate:
+                return ""
+            if request.endpoint and (
+                request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
+            ):
+                normalized_path = candidate if candidate.startswith("/") else f"/{candidate.lstrip('/')}"
+                return f"{staff_app_base_url()}{normalized_path}"
+            return absolute_public_url(candidate)
+
+        canonical_url = _absolute_route_url(_language_url(language, preserve_query=False))
         language_alternate_urls = {}
         if request.endpoint and not request.endpoint.startswith("staff_") and not request.endpoint.startswith("provider_"):
             language_alternate_urls = {
-                code: absolute_public_url(_language_url(code, preserve_query=False))
+                code: _absolute_route_url(_language_url(code, preserve_query=False))
                 for code in LANGUAGE_LABELS
             }
         is_public_site = bool(

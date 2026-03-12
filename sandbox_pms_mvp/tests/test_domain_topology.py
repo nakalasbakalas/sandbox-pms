@@ -177,3 +177,4 @@ def test_staff_host_login_renders_without_missing_template_globals(app_factory):
 
     assert response.status_code == 200
     assert b"Staff sign in" in response.data
+    assert b'<link rel="canonical" href="https://staff.example.com/staff/login?lang=th">' in response.data
