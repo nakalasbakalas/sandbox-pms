@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "").strip()
 
 
 def _normalize_database_uri(value: str | None) -> str:
@@ -63,7 +64,6 @@ class Config:
     APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://sandbox-hotel.local")
     ICAL_SYNC_HTTP_TIMEOUT_SECONDS = int(os.getenv("ICAL_SYNC_HTTP_TIMEOUT_SECONDS", "15"))
     ICAL_SYNC_USER_AGENT = os.getenv("ICAL_SYNC_USER_AGENT", "SandboxHotelPMS/1.0")
-    APP_BASE_URL = os.getenv("APP_BASE_URL", "https://sandbox-hotel.local")
     MARKETING_SITE_URL = os.getenv("MARKETING_SITE_URL", "")
     BOOKING_ENGINE_URL = os.getenv("BOOKING_ENGINE_URL", APP_BASE_URL)
     STAFF_APP_URL = os.getenv("STAFF_APP_URL", BOOKING_ENGINE_URL)

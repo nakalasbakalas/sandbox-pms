@@ -7,6 +7,7 @@ from flask import current_app, request
 
 BOOKING_CANONICAL_EXACT_PATHS = {
     "/",
+    "/book",
     "/availability",
     "/booking/cancel",
     "/booking/modify",

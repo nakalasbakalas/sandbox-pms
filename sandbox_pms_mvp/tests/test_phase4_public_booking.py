@@ -201,7 +201,7 @@ def test_public_room_merchandising_renders_on_availability_and_booking_summary(a
         db.session.commit()
 
     availability = client.get(
-        f"/availability?lang=en&check_in={check_in.isoformat()}&check_out={check_out.isoformat()}&adults=2&children=0"
+        f"/book?lang=en&check_in={check_in.isoformat()}&check_out={check_out.isoformat()}&adults=2&children=0"
     )
     availability_body = availability.get_data(as_text=True)
 
@@ -492,7 +492,7 @@ def test_stale_hold_cannot_confirm_after_expiry(app_factory):
 def test_multilingual_content_renders_for_booking_flow(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
-    response = client.get("/availability?lang=zh-Hans")
+    response = client.get("/book?lang=zh-Hans")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "查询可订房型" in body
@@ -564,6 +564,57 @@ def test_booking_source_tracking_is_persisted(app_factory):
         assert reservation.source_metadata_json["utm_source"] == "facebook"
 
 
+def test_book_route_prefills_clean_query_params_and_tracking(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    check_in = str(date.today() + timedelta(days=7))
+    check_out = str(date.today() + timedelta(days=9))
+
+    response = client.get(
+        f"/book?lang=en&check_in={check_in}&check_out={check_out}&guests=2&room_type=TWN&utm_source=facebook&utm_campaign=spring-sale"
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert f'name="check_in" value="{check_in}"' in body
+    assert f'name="check_out" value="{check_out}"' in body
+    assert 'name="adults" min="1" max="3" value="2"' in body
+    assert 'name="children" min="0" max="2" value="0"' in body
+    assert 'value="TWN" selected' in body
+    assert 'name="utm_source" value="facebook"' in body
+    assert 'name="utm_campaign" value="spring-sale"' in body
+    assert 'name="source_channel" value="facebook"' in body
+
+
+def test_book_route_rejects_unknown_room_type_query(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get("/book?lang=en&room_type=NOT-A-ROOM")
+
+    assert response.status_code == 400
+    assert "Invalid room_type query parameter." in response.get_data(as_text=True)
+
+
+def test_legacy_availability_redirects_to_book_preserving_query_string(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    check_in = str(date.today() + timedelta(days=7))
+    check_out = str(date.today() + timedelta(days=9))
+
+    response = client.get(
+        f"/availability?lang=en&check_in={check_in}&check_out={check_out}&room_type=TWN&utm_source=facebook",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 308
+    assert response.headers["Location"].startswith("/book?")
+    assert f"check_in={check_in}" in response.headers["Location"]
+    assert f"check_out={check_out}" in response.headers["Location"]
+    assert "room_type=TWN" in response.headers["Location"]
+    assert "utm_source=facebook" in response.headers["Location"]
+
+
 def test_marketing_attribution_survives_public_route_flow(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -577,7 +628,7 @@ def test_marketing_attribution_survives_public_route_flow(app_factory):
     assert landing.status_code == 200
 
     availability = client.get(
-        f"/availability?lang=en&check_in={date.today() + timedelta(days=7)}&check_out={date.today() + timedelta(days=9)}&adults=2&children=0&cta_source=home_search"
+        f"/book?lang=en&check_in={date.today() + timedelta(days=7)}&check_out={date.today() + timedelta(days=9)}&adults=2&children=0&cta_source=home_search"
     )
     assert availability.status_code == 200
 
@@ -818,17 +869,17 @@ def test_public_pages_use_token_free_og_url(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
 
-    response = client.get("/availability?lang=en&utm_source=google_business")
+    response = client.get("/book?lang=en&utm_source=google_business")
     body = response.get_data(as_text=True)
     og_url_match = re.search(r'<meta property="og:url" content="([^"]+)">', body)
     canonical_match = re.search(r'<link rel="canonical" href="([^"]+)">', body)
 
     assert response.status_code == 200
     assert og_url_match is not None
-    assert og_url_match.group(1).endswith("/availability?lang=en")
+    assert og_url_match.group(1).endswith("/book?lang=en")
     assert "utm_source" not in og_url_match.group(1)
     assert canonical_match is not None
-    assert canonical_match.group(1).endswith("/availability?lang=en")
+    assert canonical_match.group(1).endswith("/book?lang=en")
     assert "utm_source" not in canonical_match.group(1)
 
 
@@ -892,7 +943,7 @@ def test_sitemap_route_lists_public_guest_pages(app_factory):
     assert response.mimetype == "application/xml"
     assert "<urlset" in body
     assert "https://hotel.example/" in body
-    assert "https://hotel.example/availability?lang=en" in body
+    assert "https://hotel.example/book?lang=en" in body
     assert "https://hotel.example/booking/cancel?lang=th" in body
     assert "https://hotel.example/booking/modify?lang=zh-Hans" in body
 

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Flask, abort, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
@@ -21,7 +21,6 @@ from .branding import (
     phone_href as branding_phone_href,
     resolve_public_base_url,
 )
-from .config import Config
 from .config import Config, normalize_runtime_config
 from .constants import (
     BLACKOUT_TYPES,
@@ -70,7 +69,7 @@ from .models import (
     UserSession,
 )
 from .pricing import get_setting_value
-from .security import configure_app_security, public_error_message
+from .security import configure_app_security, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
@@ -83,6 +82,7 @@ from .services.admin_service import (
     RoomPayload,
     RoomTypePayload,
     create_inventory_override,
+    policy_text,
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
@@ -255,7 +255,7 @@ BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
     "landing_path",
     "entry_cta_source",
 }
-BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {"index", "availability", "booking_hold", "booking_confirm"}
+BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {"index", "availability", "booking_entry", "booking_hold", "booking_confirm"}
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -345,6 +345,15 @@ def register_auth_hooks(app: Flask) -> None:
 
         if getattr(g, "current_auth_session", None):
             db.session.commit()
+        if request.endpoint in {
+            "booking_confirmation",
+            "booking_cancel_request",
+            "booking_modify_request",
+            "public_payment_return",
+            "public_payment_start",
+        }:
+            response.headers["Cache-Control"] = "no-store, private, max-age=0"
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
         return response
 
 
@@ -369,28 +378,18 @@ def register_template_helpers(app: Flask) -> None:
         hotel_name = branding["hotel_name"]
         hotel_currency = branding["currency"]
         hotel_brand_mark = branding["brand_mark"]
-        hotel_logo_url = branding["logo_url"]
+        hotel_logo_url = absolute_public_url(branding["logo_url"]) if branding["logo_url"] else ""
         hotel_contact_phone = branding["contact_phone"]
         hotel_contact_email = branding["contact_email"]
         hotel_address = branding["address"]
         hotel_check_in_time = branding["check_in_time"]
         hotel_check_out_time = branding["check_out_time"]
-        site_base_url = branding["public_base_url"]
+        site_base_url = branding["public_base_url"] or absolute_public_url("/")
         favicon_url = absolute_public_url(url_for("static", filename="favicon.svg"))
         default_share_image_url = absolute_public_url(url_for("static", filename="hotel-share.svg"))
-        share_image_url = absolute_public_url(hotel_logo_url) if hotel_logo_url else default_share_image_url
+        share_image_url = hotel_logo_url or default_share_image_url
         hotel_contact_phone_href = phone_href(hotel_contact_phone)
         hotel_contact_email_href = email_href(hotel_contact_email)
-        hotel_contact_phone_link = (
-            Markup(f'<a class="contact-link" href="{escape(hotel_contact_phone_href)}">{escape(hotel_contact_phone)}</a>')
-            if hotel_contact_phone_href
-            else escape(hotel_contact_phone)
-        )
-        hotel_contact_email_link = (
-            Markup(f'<a class="contact-link" href="{escape(hotel_contact_email_href)}">{escape(hotel_contact_email)}</a>')
-            if hotel_contact_email_href
-            else escape(hotel_contact_email)
-        )
         hotel_structured_data: dict[str, object] = {
             "@context": "https://schema.org",
             "@type": "Hotel",
@@ -446,21 +445,8 @@ def register_template_helpers(app: Flask) -> None:
             and not request.endpoint.startswith("staff_")
             and not request.endpoint.startswith("provider_")
         )
-
-        hotel_name = str(get_setting_value("hotel.name", "Sandbox Hotel"))
-        hotel_currency = str(get_setting_value("hotel.currency", "THB"))
-        hotel_brand_mark = str(get_setting_value("hotel.brand_mark", "SBX"))
-        hotel_logo_url = _public_asset_url(str(get_setting_value("hotel.logo_url", "") or ""))
-        hotel_contact_phone = str(get_setting_value("hotel.contact_phone", "+66 000 000 000"))
-        hotel_contact_email = str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local"))
-        hotel_address = str(get_setting_value("hotel.address", "Sandbox Hotel"))
-        hotel_check_in_time = str(get_setting_value("hotel.check_in_time", "14:00"))
-        hotel_check_out_time = str(get_setting_value("hotel.check_out_time", "11:00"))
+        current_staff = current_user()
         marketing_site_url = marketing_site_base_url(required=False)
-        favicon_url = hotel_logo_url or url_for("static", filename="favicon.svg", _external=True)
-        share_image_url = hotel_logo_url or favicon_url
-        hotel_contact_phone_href = _phone_href(hotel_contact_phone)
-        hotel_contact_email_href = _email_href(hotel_contact_email)
         return {
             "hotel_name": hotel_name,
             "currency": hotel_currency,
@@ -489,31 +475,20 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_structured_data": hotel_structured_data,
             "is_public_site": is_public_site,
             "marketing_site_url": marketing_site_url,
-            "booking_engine_url": booking_engine_base_url(),
-            "staff_app_url": staff_app_base_url(),
-            "favicon_url": favicon_url,
-            "share_image_url": share_image_url,
-            "hotel_structured_data": _hotel_structured_data(
-                hotel_name=hotel_name,
-                hotel_address=hotel_address,
-                hotel_contact_phone=hotel_contact_phone,
-                hotel_contact_email=hotel_contact_email,
-                hotel_check_in_time=hotel_check_in_time,
-                hotel_check_out_time=hotel_check_out_time,
-                share_image_url=share_image_url,
-            ),
-            "staff_logged_in": current_user() is not None,
-            "provider_logged_in": bool(current_user() and current_user().has_permission("provider.dashboard.view")),
-            "current_staff_user": current_user(),
+            "booking_engine_url": site_base_url,
+            "staff_app_url": staff_app_base_url() if site_base_url else "",
+            "staff_logged_in": current_staff is not None,
+            "provider_logged_in": bool(current_staff and current_staff.has_permission("provider.dashboard.view")),
+            "current_staff_user": current_staff,
             "current_language": language,
             "booking_attribution": current_booking_attribution(),
             "language_labels": LANGUAGE_LABELS,
             "language_alternate_urls": language_alternate_urls,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
-            "make_lang_url": make_language_url,
+            "make_lang_url": _make_lang_url,
             "can": can,
             "admin_sections": available_admin_sections(),
-            "default_dashboard_url": default_dashboard_url(current_user()) if current_user() else "",
+            "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
             "csrf_token": ensure_csrf_token,
             "csrf_input": lambda: Markup(
                 f'<input type="hidden" name="csrf_token" value="{ensure_csrf_token()}">'
@@ -582,65 +557,36 @@ def register_routes(app: Flask) -> None:
     @app.route("/favicon.ico")
     def favicon_ico():
         return redirect(url_for("static", filename="favicon.svg"), code=302)
-        upcoming = (
-            Reservation.query.filter(Reservation.created_from_public_booking_flow.is_(True))
-            .order_by(Reservation.booked_at.desc())
-            .limit(5)
-            .all()
-        )
-        return render_template("index.html", upcoming=upcoming, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
 
     @app.route("/sitemap.xml")
     def sitemap_xml():
-        booking_base = booking_engine_base_url() or request.url_root.rstrip("/")
-        pages = [
-            "/",
-            "/availability",
-            "/booking/new",
+        public_pages = [
+            ("index", {}),
+            ("booking_entry", {}),
+            ("booking_cancel_request", {}),
+            ("booking_modify_request", {}),
         ]
-        body = "".join(
-            f"<url><loc>{booking_base}{path}</loc></url>"
-            for path in pages
-        )
-        xml = (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-            f"{body}"
-            "</urlset>"
-        )
-        return app.response_class(xml, mimetype="application/xml")
+        urls: list[str] = []
+        for endpoint, values in public_pages:
+            urls.append(absolute_public_url(url_for(endpoint, **values)))
+            for language_code in LANGUAGE_LABELS:
+                urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
+        unique_urls = list(dict.fromkeys(url for url in urls if url))
+        body = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        ]
+        body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
+        body.append("</urlset>")
+        return Response("\n".join(body), mimetype="application/xml")
 
-    @app.route("/health")
-    def health():
-        return jsonify({"status": "ok"})
+    @app.route("/book")
+    def booking_entry():
+        return render_template("availability.html", **build_public_booking_entry_context())
 
     @app.route("/availability")
     def availability():
-        language = current_language()
-        form_data = {
-            "check_in": request.args.get("check_in", ""),
-            "check_out": request.args.get("check_out", ""),
-            "adults": request.args.get("adults", "2"),
-            "children": request.args.get("children", "0"),
-            "room_type_id": request.args.get("room_type_id", ""),
-            "language": language,
-        }
-        results: list[dict] = []
-        error = None
-        if form_data["check_in"] and form_data["check_out"]:
-            try:
-                payload = PublicSearchPayload(
-                    check_in_date=date.fromisoformat(form_data["check_in"]),
-                    check_out_date=date.fromisoformat(form_data["check_out"]),
-                    adults=int(form_data["adults"]),
-                    children=int(form_data["children"]),
-                    room_type_id=UUID(form_data["room_type_id"]) if form_data["room_type_id"] else None,
-                    language=language,
-                )
-                results = search_public_availability(payload)
-            except Exception as exc:  # noqa: BLE001
-                error = public_error_message(exc)
-        return render_template("availability.html", results=results, form_data=form_data, error=error, room_types=RoomType.query.order_by(RoomType.code.asc()).all())
+        return redirect(url_for("booking_entry", **request.args.to_dict(flat=True)), code=308)
 
     @app.route("/booking/hold", methods=["POST"])
     def booking_hold():
@@ -660,25 +606,36 @@ def register_routes(app: Flask) -> None:
                     source_channel=resolve_booking_source_channel(request.form.get("source_channel"), attribution),
                     source_metadata=attribution,
                     request_ip=request_client_ip(),
-                    source_channel=request.form.get("source_channel", "direct_web"),
-                    source_metadata=source_metadata_from_request(language),
-                    request_ip=request.remote_addr,
                     user_agent=request.user_agent.string,
                     extra_guests=int(request.form.get("extra_guests", 0)),
                 )
             )
             room_type = db.session.get(RoomType, hold.room_type_id)
-            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
+            return render_template(
+                "public_booking_form.html",
+                **public_booking_form_context(hold, room_type),
+            )
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
             return redirect(
                 url_for(
-                    "availability",
+                    "booking_entry",
                     check_in=request.form.get("check_in_date"),
                     check_out=request.form.get("check_out_date"),
                     adults=request.form.get("adults"),
                     children=request.form.get("children", 0),
+                    room_type=request.form.get("room_type"),
                     room_type_id=request.form.get("room_type_id"),
+                    utm_source=request.form.get("utm_source"),
+                    utm_medium=request.form.get("utm_medium"),
+                    utm_campaign=request.form.get("utm_campaign"),
+                    utm_content=request.form.get("utm_content"),
+                    source_label=request.form.get("source_label"),
+                    referrer_host=request.form.get("referrer_host"),
+                    entry_page=request.form.get("entry_page"),
+                    landing_path=request.form.get("landing_path"),
+                    source_channel=request.form.get("source_channel"),
+                    cta_source=request.form.get("cta_source"),
                     lang=language,
                 )
             )
@@ -689,9 +646,13 @@ def register_routes(app: Flask) -> None:
         settings = current_settings()
         published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
         selected_extra_ids: tuple[UUID, ...] = ()
+        hold = ReservationHold.query.filter_by(hold_code=request.form.get("hold_code")).first()
         try:
             selected_extra_ids = parse_booking_extra_ids(request.form.getlist("extra_ids"))
-            attribution = source_metadata_from_request(language)
+            attribution = source_metadata_from_request(
+                language,
+                fallback=hold.source_metadata_json if hold and isinstance(hold.source_metadata_json, dict) else None,
+            )
             reservation = confirm_public_booking(
                 PublicBookingPayload(
                     hold_code=request.form["hold_code"],
@@ -707,10 +668,6 @@ def register_routes(app: Flask) -> None:
                     terms_accepted=request.form.get("accept_terms") == "on",
                     terms_version=published_terms_version,
                     extra_ids=selected_extra_ids,
-                    terms_version=(
-                        request.form.get("terms_version")
-                        or current_settings().get("booking.terms_version", {}).get("value", "2026-03")
-                    ),
                 )
             )
             if payments_enabled() and Decimal(str(reservation.deposit_required_amount or "0.00")) > Decimal("0.00"):
@@ -733,9 +690,8 @@ def register_routes(app: Flask) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
-            hold = ReservationHold.query.filter_by(hold_code=request.form.get("hold_code")).first()
             if not hold:
-                return redirect(url_for("availability", lang=language))
+                return redirect(url_for("booking_entry", lang=language))
             room_type = db.session.get(RoomType, hold.room_type_id)
             return render_template(
                 "public_booking_form.html",
@@ -753,13 +709,13 @@ def register_routes(app: Flask) -> None:
                     },
                 ),
             )
-            return render_template("public_booking_form.html", hold=hold, room_type=room_type, settings=current_settings())
 
     @app.route("/booking/confirmation/<reservation_code>")
     def booking_confirmation(reservation_code):
         reservation = load_public_confirmation(reservation_code, request.args.get("token", ""))
         if not reservation:
             abort(404)
+        g.public_language = reservation.booking_language
         payment_request = (
             PaymentRequest.query.filter_by(reservation_id=reservation.id)
             .order_by(PaymentRequest.created_at.desc())
@@ -798,6 +754,7 @@ def register_routes(app: Flask) -> None:
             )
         except LookupError:
             abort(404)
+        g.public_language = context["reservation"].booking_language
         return render_template("public_payment_return.html", **context)
 
     @app.route("/webhooks/payments/<provider_name>", methods=["POST"])
@@ -818,22 +775,40 @@ def register_routes(app: Flask) -> None:
     @app.route("/booking/cancel", methods=["GET", "POST"])
     def booking_cancel_request():
         request_row = None
+        form_defaults = public_request_form_defaults("booking_reference", "contact_value", "reason")
         if request.method == "POST":
             payload = VerificationRequestPayload(
                 booking_reference=request.form["booking_reference"].strip(),
                 contact_value=request.form["contact_value"].strip(),
                 language=current_language(),
                 reason=request.form.get("reason"),
-                request_ip=request.remote_addr,
+                request_ip=request_client_ip(),
                 user_agent=request.user_agent.string,
             )
-            request_row = submit_cancellation_request(payload)
-            flash(t(current_language(), "cancellation_received"), "success")
-        return render_template("public_cancel_request.html", request_row=request_row)
+            try:
+                request_row = submit_cancellation_request(payload)
+            except Exception as exc:  # noqa: BLE001
+                flash(public_error_message(exc), "error")
+            else:
+                if request_row:
+                    flash(t(current_language(), "cancellation_received"), "success")
+                else:
+                    flash(t(current_language(), "booking_lookup_not_found"), "error")
+        return render_template("public_cancel_request.html", request_row=request_row, form_defaults=form_defaults)
 
     @app.route("/booking/modify", methods=["GET", "POST"])
     def booking_modify_request():
         request_row = None
+        form_defaults = public_request_form_defaults(
+            "booking_reference",
+            "contact_value",
+            "requested_check_in",
+            "requested_check_out",
+            "requested_adults",
+            "requested_children",
+            "contact_correction",
+            "special_requests",
+        )
         if request.method == "POST":
             payload = VerificationRequestPayload(
                 booking_reference=request.form["booking_reference"].strip(),
@@ -847,12 +822,19 @@ def register_routes(app: Flask) -> None:
                     "contact_correction": request.form.get("contact_correction"),
                     "special_requests": request.form.get("special_requests"),
                 },
-                request_ip=request.remote_addr,
+                request_ip=request_client_ip(),
                 user_agent=request.user_agent.string,
             )
-            request_row = submit_modification_request(payload)
-            flash(t(current_language(), "modification_received"), "success")
-        return render_template("public_modify_request.html", request_row=request_row)
+            try:
+                request_row = submit_modification_request(payload)
+            except Exception as exc:  # noqa: BLE001
+                flash(public_error_message(exc), "error")
+            else:
+                if request_row:
+                    flash(t(current_language(), "modification_received"), "success")
+                else:
+                    flash(t(current_language(), "booking_lookup_not_found"), "error")
+        return render_template("public_modify_request.html", request_row=request_row, form_defaults=form_defaults)
 
     @app.route("/calendar/feed/<token>.ics")
     def calendar_feed_export(token):
@@ -2776,7 +2758,7 @@ def register_routes(app: Flask) -> None:
 
 
 def current_language() -> str:
-    return normalize_language(request.args.get("lang") or request.form.get("language") or "th")
+    return normalize_language(getattr(g, "public_language", None) or request.args.get("lang") or request.form.get("language") or "th")
 
 
 def make_language_url(language_code: str) -> str:
@@ -2879,6 +2861,93 @@ def validate_csrf_request() -> None:
         abort(400, description="CSRF validation failed.")
 
 
+def resolve_public_room_type_query() -> RoomType | None:
+    room_type_code = (request.args.get("room_type") or "").strip()
+    if room_type_code:
+        room_type = (
+            RoomType.query.filter(
+                sa.func.lower(RoomType.code) == room_type_code.lower(),
+                RoomType.is_active.is_(True),
+            )
+            .order_by(RoomType.code.asc())
+            .first()
+        )
+        if not room_type:
+            abort(400, description="Invalid room_type query parameter.")
+        return room_type
+
+    room_type_id = parse_request_uuid_arg("room_type_id")
+    if not room_type_id:
+        return None
+
+    room_type = db.session.get(RoomType, UUID(room_type_id))
+    if not room_type or not room_type.is_active:
+        abort(400, description="Invalid room_type_id query parameter.")
+    return room_type
+
+
+def public_guest_counts_from_request() -> tuple[int, int]:
+    if request.args.get("adults") or request.args.get("children"):
+        return (
+            parse_request_int_arg("adults", default=2, minimum=1),
+            parse_request_int_arg("children", default=0, minimum=0),
+        )
+    if request.args.get("guests"):
+        return parse_request_int_arg("guests", default=2, minimum=1), 0
+    return 2, 0
+
+
+def ensure_booking_nonce() -> str:
+    if not session.get("_booking_nonce"):
+        session["_booking_nonce"] = secrets.token_hex(8)
+    return session["_booking_nonce"]
+
+
+def build_public_booking_entry_context() -> dict[str, object]:
+    language = current_language()
+    check_in_date = parse_request_date_arg("check_in", default=None)
+    check_out_date = parse_request_date_arg("check_out", default=None)
+    adults, children = public_guest_counts_from_request()
+    room_type = resolve_public_room_type_query()
+    results: list[dict] = []
+    error = None
+
+    if check_in_date and check_out_date:
+        try:
+            results = search_public_availability(
+                PublicSearchPayload(
+                    check_in_date=check_in_date,
+                    check_out_date=check_out_date,
+                    adults=adults,
+                    children=children,
+                    room_type_id=room_type.id if room_type else None,
+                    language=language,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            error = public_error_message(exc)
+
+    return {
+        "results": results,
+        "form_data": {
+            "check_in": check_in_date.isoformat() if check_in_date else "",
+            "check_out": check_out_date.isoformat() if check_out_date else "",
+            "adults": str(adults),
+            "children": str(children),
+            "room_type": room_type.code if room_type else "",
+            "room_type_id": str(room_type.id) if room_type else parse_request_uuid_arg("room_type_id") or "",
+            "language": language,
+        },
+        "error": error,
+        "room_types": RoomType.query.order_by(RoomType.code.asc()).all(),
+        "booking_nonce": ensure_booking_nonce(),
+    }
+
+
+def public_request_form_defaults(*field_names: str) -> dict[str, str]:
+    return {field_name: str(request.values.get(field_name) or "").strip() for field_name in field_names}
+
+
 def capture_public_booking_attribution() -> None:
     existing = dict(session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
     if not _should_track_booking_attribution():
@@ -2947,11 +3016,11 @@ def booking_request_starts_new_attribution() -> bool:
         for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
     ):
         return True
-    return bool(external_referrer_host() and request.endpoint in {"index", "availability"})
+    return bool(external_referrer_host() and request.endpoint in {"index", "availability", "booking_entry"})
 
 
 def default_booking_attribution() -> dict:
-    if request.method != "GET" or request.endpoint not in {"index", "availability"}:
+    if request.method != "GET" or request.endpoint not in {"index", "availability", "booking_entry"}:
         return {}
     entry_page = clean_public_path(request.path)
     referrer_host = external_referrer_host()
@@ -3099,10 +3168,11 @@ def _should_track_booking_attribution() -> bool:
     return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
 
 
-def source_metadata_from_request(language: str) -> dict:
-    metadata = merge_booking_attribution(current_booking_attribution(), booking_attribution_from_request())
+def source_metadata_from_request(language: str, fallback: dict | None = None) -> dict:
+    metadata = merge_booking_attribution(fallback, current_booking_attribution())
+    metadata = merge_booking_attribution(metadata, booking_attribution_from_request())
     if not metadata:
-        metadata = default_booking_attribution()
+        metadata = dict(fallback or {}) or default_booking_attribution()
     if not metadata.get("entry_page"):
         metadata["entry_page"] = clean_public_path(request.path) or "/"
     if not metadata.get("landing_path"):
@@ -3130,6 +3200,7 @@ def public_booking_form_context(
 ) -> dict:
     resolved_settings = settings or current_settings()
     language = normalize_language(getattr(hold, "booking_language", None) or current_language())
+    source_metadata = hold.source_metadata_json if isinstance(hold.source_metadata_json, dict) else {}
     try:
         selected_extras = resolve_booking_extras(selected_extra_ids or [], public_only=True)
     except ValueError:
@@ -3163,6 +3234,7 @@ def public_booking_form_context(
         "grand_total_with_extras": Decimal(str(hold.quoted_grand_total)) + extras_quote.total_amount,
         "form_values": form_values or {},
         "published_terms_version": resolved_settings.get("booking.terms_version", {}).get("value", "2026-03"),
+        "booking_attribution": merge_booking_attribution(source_metadata, current_booking_attribution()),
         "policy_documents": {
             "cancellation": policy_text("cancellation_policy", language, t(language, "policy_summary")),
             "extra_guest": policy_text("child_extra_guest_policy", language, t(language, "extra_guest_summary")),

@@ -712,11 +712,6 @@ def _public_url(endpoint: str, *, external: bool, **values: str) -> str:
     }
     relative_path = route_map[endpoint]
     if not external:
-        return relative_url
-    base_url = resolve_public_base_url()
-    if not base_url:
-        raise RuntimeError("APP_BASE_URL must be configured for hosted payment links.")
-    return f"{base_url}{relative_url}"
         return f"{relative_path}?{query_string}"
     return build_booking_url(relative_path, query_string=query_string)
 

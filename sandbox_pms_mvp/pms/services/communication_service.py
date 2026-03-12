@@ -91,15 +91,7 @@ def _brand_context() -> dict[str, str]:
         "contact_phone": branding["contact_phone"],
         "contact_email": branding["contact_email"],
         "support_contact_text": branding["support_contact_text"],
-        "public_booking_url": branding["public_base_url"],
-    return {
-        "hotel_name": _string_setting("hotel.name", "Sandbox Hotel"),
-        "hotel_logo_url": _string_setting("hotel.logo_url", ""),
-        "hotel_address": _string_setting("hotel.address", "Sandbox Hotel, Thailand"),
-        "hotel_check_in_time": _string_setting("hotel.check_in_time", "14:00"),
-        "hotel_check_out_time": _string_setting("hotel.check_out_time", "11:00"),
-        "contact_phone": _string_setting("hotel.contact_phone", "+66 000 000 000"),
-        "contact_email": _string_setting("hotel.contact_email", "reservations@sandbox-hotel.local"),
+        "public_booking_url": branding["public_base_url"] or resolve_public_base_url(),
     }
 
 
@@ -1178,8 +1170,23 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
                 manual=False,
             )
             db.session.commit()
-        except Exception:
+        except Exception as exc:
             db.session.rollback()
+            current_app.logger.exception(
+                "Failed to generate failed-payment reminder checkout for %s.",
+                payment_request.request_code,
+            )
+            write_activity_log(
+                actor_user_id=actor_user_id,
+                event_type="notification.failed_payment_reminder_failed",
+                entity_table="payment_requests",
+                entity_id=str(payment_request.id),
+                metadata={
+                    "payment_request_code": payment_request.request_code,
+                    "reservation_code": reservation.reservation_code,
+                    "error": str(exc)[:255],
+                },
+            )
             totals["failed"] += 1
             continue
         outcome = dispatch_notification_deliveries(delivery_ids)
