@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
+from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
@@ -1807,6 +1808,22 @@ class TestBoardSSERealtimeSync:
         # Verify error handling
         assert "MAX_SSE_RETRIES" in content
         assert "eventSource.addEventListener" in content
+        assert "JSON.parse" in content
+        assert "payload.event_type" in content
+        assert "front_desk.board_" in content
+        assert "reservation." in content
+
+    def test_sse_event_payload_contains_extended_fields(self, app_factory):
+        """SSE payload contract should include activity and entity metadata fields."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        assert app is not None
+
+        app_source = Path(__file__).resolve().parents[1] / "pms" / "app.py"
+        source_text = app_source.read_text(encoding="utf-8")
+
+        assert '"activity_id": str(event.id)' in source_text
+        assert '"entity_table": event.entity_table' in source_text
+        assert '"metadata": event.metadata_json or {}' in source_text
 
     def test_move_operation_writes_activity_log(self, app_factory):
         """Move operation should write activity log for SSE to pick up."""

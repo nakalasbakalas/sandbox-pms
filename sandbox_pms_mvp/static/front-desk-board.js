@@ -1194,7 +1194,24 @@
     eventSource = new EventSource(url);
 
     eventSource.addEventListener("board.changed", (e) => {
-      console.log("Board updated via SSE:", e.data);
+      let payload = null;
+      try {
+        payload = JSON.parse(e.data || "{}");
+      } catch {
+        payload = null;
+      }
+
+      if (!payload || !payload.event_type) {
+        return;
+      }
+
+      const shouldRefresh =
+        payload.event_type.startsWith("front_desk.board_") || payload.event_type.startsWith("reservation.");
+      if (!shouldRefresh) {
+        return;
+      }
+
+      console.log("Board updated via SSE:", payload);
 
       // Debounce rapid refreshes
       debounceRefreshSurface();
