@@ -1310,7 +1310,7 @@ class TestBoardDensityPreferences:
 
 
 class TestBoardKeyboardSelection:
-    """Test Sprint 2.1: Block selection model with keyboard navigation."""
+    """Test keyboard selection model, including cross-track navigation."""
 
     def test_board_page_loads_with_keyboard_support(self, app_factory):
         """Board page should load and support keyboard navigation."""
@@ -1341,6 +1341,21 @@ class TestBoardKeyboardSelection:
         # Verify JavaScript is loaded
         assert b"front-desk-board.js" in response.data
 
+    def test_selection_script_supports_cross_track_navigation(self, app_factory):
+        """Selection script should navigate between adjacent room tracks."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert 'querySelectorAll("[data-board-track]")' in content
+        assert "findAdjacentBlock" in content
+        assert "getClosestBlockInTrack" in content
+        assert 'case "ArrowUp":' in content
+        assert 'case "ArrowDown":' in content
+
     def test_board_css_has_selected_styling(self, app_factory):
         """Board CSS should include styling for selected blocks."""
         app = app_factory(seed=True)
@@ -1356,7 +1371,7 @@ class TestBoardKeyboardSelection:
 
 
 class TestBoardKeyboardMoveResize:
-    """Test Sprint 2.2: Keyboard move/resize modes with M and R keys."""
+    """Test keyboard move/resize modes with room-target navigation."""
 
     def test_move_mode_styles_defined(self, app_factory):
         """CSS should include styling for move-mode class."""
@@ -1420,6 +1435,20 @@ class TestBoardKeyboardMoveResize:
         assert "case \"r\":" in content or "case 'r':" in content
         assert "enterMoveMode()" in content
         assert "enterResizeMode()" in content
+
+    def test_move_mode_tracks_target_lane_without_reselecting_block(self, app_factory):
+        """Move mode should keep the source block selected and change only the target lane."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert "moveTargetTrack" in content
+        assert "setMoveTarget" in content
+        assert "moveTargetBy" in content
+        assert "isCompatibleMoveTrack" in content
 
 
 class TestBoardGlobalActionShortcuts:

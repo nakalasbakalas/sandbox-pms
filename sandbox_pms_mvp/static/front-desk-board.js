@@ -12,6 +12,7 @@
   let selectedBlock = null;
   let moveMode = false;
   let moveTargetRoomId = null;
+  let moveTargetTrack = null;
   let resizeMode = false;
   let resizeTargetEndDate = null;
 
@@ -67,27 +68,131 @@
     return Array.from(track.querySelectorAll("[data-board-block]"));
   }
 
-  function moveSelectionUp() {
-    if (!selectedBlock) return;
-    const track = selectedBlock.closest("[data-board-track]");
-    if (!track) return;
+  function getBoardTracks() {
+    return Array.from(surface.querySelectorAll("[data-board-track]"));
+  }
 
+  function getBlockTrack(block) {
+    return block ? block.closest("[data-board-track]") : null;
+  }
+
+  function getBlockCenterColumn(block) {
+    const start = Number(block?.dataset.gridStart || 1);
+    const span = Number(block?.dataset.gridSpan || 1);
+    return start + (span - 1) / 2;
+  }
+
+  function getClosestBlockInTrack(referenceBlock, track) {
     const blocks = getBlocksInTrack(track);
-    const index = blocks.indexOf(selectedBlock);
-    if (index > 0) {
-      selectBlock(blocks[index - 1]);
+    if (!blocks.length) {
+      return null;
+    }
+    const referenceCenter = getBlockCenterColumn(referenceBlock);
+    return blocks.reduce((best, candidate) => {
+      if (!best) {
+        return candidate;
+      }
+      const bestDistance = Math.abs(getBlockCenterColumn(best) - referenceCenter);
+      const candidateDistance = Math.abs(getBlockCenterColumn(candidate) - referenceCenter);
+      if (candidateDistance < bestDistance) {
+        return candidate;
+      }
+      return best;
+    }, null);
+  }
+
+  function findAdjacentBlock(direction) {
+    if (!selectedBlock) {
+      return null;
+    }
+    const currentTrack = getBlockTrack(selectedBlock);
+    if (!currentTrack) {
+      return null;
+    }
+    const tracks = getBoardTracks();
+    const currentIndex = tracks.indexOf(currentTrack);
+    if (currentIndex === -1) {
+      return null;
+    }
+    for (let index = currentIndex + direction; index >= 0 && index < tracks.length; index += direction) {
+      const candidate = getClosestBlockInTrack(selectedBlock, tracks[index]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function isCompatibleMoveTrack(block, candidateTrack) {
+    if (!block || !candidateTrack) {
+      return false;
+    }
+    const sourceTrack = getBlockTrack(block);
+    const sourceRoomId = sourceTrack?.dataset.roomId || "";
+    const candidateRoomId = candidateTrack.dataset.roomId || "";
+    const candidateRoomTypeId = candidateTrack.dataset.roomTypeId || "";
+    const candidateLaneKind = candidateTrack.dataset.laneKind || "room";
+    const blockRoomTypeId = block.dataset.roomTypeId || "";
+
+    if (candidateRoomTypeId && blockRoomTypeId && candidateRoomTypeId !== blockRoomTypeId) {
+      return false;
+    }
+    if (sourceRoomId && !candidateRoomId) {
+      return false;
+    }
+    if (candidateLaneKind === "unallocated") {
+      return candidateTrack === sourceTrack;
+    }
+    return true;
+  }
+
+  function describeTrack(track) {
+    return track?.getAttribute("aria-label") || track?.dataset.anchorId || "selected lane";
+  }
+
+  function setMoveTarget(track) {
+    if (!selectedBlock || !track) {
+      return false;
+    }
+    clearTrackHighlights();
+    moveTargetTrack = track;
+    moveTargetRoomId = track.dataset.roomId || "";
+    track.classList.add(isCompatibleMoveTrack(selectedBlock, track) ? "drop-target" : "drop-target-invalid");
+    return isCompatibleMoveTrack(selectedBlock, track);
+  }
+
+  function moveTargetBy(direction) {
+    if (!selectedBlock) {
+      return;
+    }
+    const tracks = getBoardTracks();
+    const currentTrack = moveTargetTrack || getBlockTrack(selectedBlock);
+    const currentIndex = tracks.indexOf(currentTrack);
+    if (currentIndex === -1) {
+      return;
+    }
+    for (let index = currentIndex + direction; index >= 0 && index < tracks.length; index += direction) {
+      const candidateTrack = tracks[index];
+      if (isCompatibleMoveTrack(selectedBlock, candidateTrack)) {
+        setMoveTarget(candidateTrack);
+        setFeedback(`Move target: ${describeTrack(candidateTrack)}. Enter to confirm.`, "neutral");
+        return;
+      }
+    }
+    setFeedback("No more compatible room lanes in that direction.", "neutral");
+  }
+
+  function moveSelectionUp() {
+    const candidate = findAdjacentBlock(-1);
+    if (candidate) {
+      selectBlock(candidate);
     }
   }
 
   function moveSelectionDown() {
-    if (!selectedBlock) return;
-    const track = selectedBlock.closest("[data-board-track]");
-    if (!track) return;
-
-    const blocks = getBlocksInTrack(track);
-    const index = blocks.indexOf(selectedBlock);
-    if (index < blocks.length - 1) {
-      selectBlock(blocks[index + 1]);
+    const candidate = findAdjacentBlock(1);
+    if (candidate) {
+      selectBlock(candidate);
     }
   }
 
@@ -96,7 +201,7 @@
       return;
     }
     moveMode = true;
-    moveTargetRoomId = selectedBlock.dataset.roomId || "";
+    setMoveTarget(getBlockTrack(selectedBlock));
     selectedBlock.classList.add("move-mode");
     setFeedback("Move mode: Use ↑↓ to select room. Enter to confirm. Esc to cancel.", "neutral");
   }
@@ -104,6 +209,8 @@
   function exitMoveMode(canceled = false) {
     moveMode = false;
     moveTargetRoomId = null;
+    moveTargetTrack = null;
+    clearTrackHighlights();
     if (selectedBlock) {
       selectedBlock.classList.remove("move-mode");
     }
@@ -329,13 +436,11 @@
         switch (event.key) {
           case "ArrowUp":
             event.preventDefault();
-            moveSelectionUp();
-            moveTargetRoomId = selectedBlock.dataset.roomId || "";
+            moveTargetBy(-1);
             break;
           case "ArrowDown":
             event.preventDefault();
-            moveSelectionDown();
-            moveTargetRoomId = selectedBlock.dataset.roomId || "";
+            moveTargetBy(1);
             break;
           case "Enter":
             event.preventDefault();
