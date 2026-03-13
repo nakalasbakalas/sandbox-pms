@@ -4,6 +4,7 @@ import importlib
 import json
 import os
 import subprocess
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -438,22 +439,57 @@ def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path
     backup_dir = tmp_path / "backups"
     restore_log = tmp_path / "restore.log"
     verify_file = tmp_path / "verified.txt"
-    fake_pg_dump = tmp_path / "fake_pg_dump.ps1"
-    fake_pg_restore = tmp_path / "fake_pg_restore.ps1"
 
-    fake_pg_dump.write_text(
-        "param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)\n"
-        "$output = $Arguments | Where-Object { $_ -like '--file=*' } | Select-Object -First 1\n"
-        "if (-not $output) { exit 1 }\n"
-        "$target = $output.Substring(7)\n"
-        "Set-Content -Path $target -Value 'fake backup'\n",
-        encoding="utf-8",
-    )
-    fake_pg_restore.write_text(
-        "param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)\n"
-        "if ($env:FAKE_RESTORE_LOG) { Set-Content -Path $env:FAKE_RESTORE_LOG -Value ($Arguments -join ' ') }\n",
-        encoding="utf-8",
-    )
+    on_windows = sys.platform == "win32"
+
+    if on_windows:
+        fake_pg_dump = tmp_path / "fake_pg_dump.ps1"
+        fake_pg_restore = tmp_path / "fake_pg_restore.ps1"
+        fake_pg_dump.write_text(
+            "param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)\n"
+            "$output = $Arguments | Where-Object { $_ -like '--file=*' } | Select-Object -First 1\n"
+            "if (-not $output) { exit 1 }\n"
+            "$target = $output.Substring(7)\n"
+            "Set-Content -Path $target -Value 'fake backup'\n",
+            encoding="utf-8",
+        )
+        fake_pg_restore.write_text(
+            "param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments)\n"
+            "if ($env:FAKE_RESTORE_LOG) { Set-Content -Path $env:FAKE_RESTORE_LOG -Value ($Arguments -join ' ') }\n",
+            encoding="utf-8",
+        )
+        verify_cmd = f"Set-Content -Path '{verify_file}' -Value 'verified'"
+        backup_script = PROJECT_ROOT / "scripts" / "backup_db.ps1"
+        restore_script = PROJECT_ROOT / "scripts" / "restore_db.ps1"
+        backup_cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(backup_script), "-BackupDir", str(backup_dir)]
+        restore_cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(restore_script), "-BackupFile", "{dump_file}", "-DropExisting"]
+    else:
+        fake_pg_dump = tmp_path / "fake_pg_dump.sh"
+        fake_pg_restore = tmp_path / "fake_pg_restore.sh"
+        fake_pg_dump.write_text(
+            "#!/usr/bin/env bash\n"
+            "for arg in \"$@\"; do\n"
+            "  if [[ \"$arg\" == --file=* ]]; then\n"
+            "    target=\"${arg#--file=}\"\n"
+            "    printf 'fake backup' > \"$target\"\n"
+            "    exit 0\n"
+            "  fi\n"
+            "done\n"
+            "exit 1\n",
+        )
+        fake_pg_restore.write_text(
+            "#!/usr/bin/env bash\n"
+            "if [[ -n \"${FAKE_RESTORE_LOG:-}\" ]]; then\n"
+            "  printf '%s' \"$*\" > \"${FAKE_RESTORE_LOG}\"\n"
+            "fi\n",
+        )
+        fake_pg_dump.chmod(0o755)
+        fake_pg_restore.chmod(0o755)
+        verify_cmd = f"printf 'verified' > '{verify_file}'"
+        backup_script = PROJECT_ROOT / "scripts" / "backup_db.sh"
+        restore_script = PROJECT_ROOT / "scripts" / "restore_db.sh"
+        backup_cmd = ["bash", str(backup_script), str(backup_dir)]
+        restore_cmd = ["bash", str(restore_script), "{dump_file}", "--drop-existing"]
 
     env = {
         **os.environ,
@@ -462,20 +498,11 @@ def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path
         "PG_RESTORE_BIN": str(fake_pg_restore),
         "BACKUP_RETENTION_DAYS": "14",
         "BACKUP_ENCRYPTION_REQUIRED": "1",
-        "RESTORE_VERIFY_COMMAND": f"Set-Content -Path '{verify_file}' -Value 'verified'",
+        "RESTORE_VERIFY_COMMAND": verify_cmd,
         "FAKE_RESTORE_LOG": str(restore_log),
     }
 
-    backup_script = PROJECT_ROOT / "scripts" / "backup_db.ps1"
-    restore_script = PROJECT_ROOT / "scripts" / "restore_db.ps1"
-
-    subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(backup_script), "-BackupDir", str(backup_dir)],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    subprocess.run(backup_cmd, check=True, capture_output=True, text=True, env=env)
 
     dump_files = list(backup_dir.glob("*.dump"))
     assert len(dump_files) == 1
@@ -489,22 +516,8 @@ def test_backup_and_restore_scripts_create_manifest_checksum_and_verify(tmp_path
     assert manifest["storage_encryption_required"] is True
     assert manifest["database_target"] == "postgresql+psycopg://***@localhost/sandbox_hotel_pms"
 
-    subprocess.run(
-        [
-            "powershell",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(restore_script),
-            "-BackupFile",
-            str(dump_file),
-            "-DropExisting",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    final_restore_cmd = [arg.replace("{dump_file}", str(dump_file)) for arg in restore_cmd]
+    subprocess.run(final_restore_cmd, check=True, capture_output=True, text=True, env=env)
 
     assert restore_log.exists()
     assert "--clean --if-exists" in restore_log.read_text(encoding="utf-8")

@@ -301,6 +301,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             groups.append(group | {"rows": rows})
 
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
+    headers = _build_headers(window_start, filters.days, today=today)
+    weekend_columns = [h["column"] for h in headers if h["is_weekend"]]
     return {
         "start_date": window_start,
         "startDate": window_start.isoformat(),
@@ -308,7 +310,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         "endDate": window_end.isoformat(),
         "days": filters.days,
         "day_options": list(BOARD_VISIBLE_DAY_OPTIONS),
-        "headers": _build_headers(window_start, filters.days, today=today),
+        "headers": headers,
+        "weekend_track_bg": _build_weekend_track_bg(weekend_columns, filters.days),
         "groups": groups,
         "room_options": [
             {
@@ -404,6 +407,21 @@ def _hold_query(*, room_type_id: str, window_start: date, window_end: date) -> l
     if room_type_id:
         query = query.filter(ReservationHold.room_type_id == uuid.UUID(room_type_id))
     return query.order_by(ReservationHold.check_in_date.asc(), ReservationHold.created_at.asc()).all()
+
+
+def _build_weekend_track_bg(weekend_columns: list[int], days: int) -> str:
+    """Build a CSS linear-gradient string for weekend column highlights."""
+    if not weekend_columns or not days:
+        return "none"
+    stops: list[str] = []
+    for col in weekend_columns:
+        stops.extend([
+            f"transparent calc({col - 1} / {days} * 100%)",
+            f"rgba(77,157,255,0.07) calc({col - 1} / {days} * 100%)",
+            f"rgba(77,157,255,0.07) calc({col} / {days} * 100%)",
+            f"transparent calc({col} / {days} * 100%)",
+        ])
+    return f"linear-gradient(90deg, {', '.join(stops)})"
 
 
 def _build_headers(window_start: date, days: int, *, today: date) -> list[dict[str, Any]]:

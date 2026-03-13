@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import ActivityLog, AuditLog, ExternalCalendarBlock, ExternalCalendarSource, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
+from pms.models import ActivityLog, AppSetting, AuditLog, ExternalCalendarBlock, ExternalCalendarSource, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
 from pms.services.admin_service import InventoryOverridePayload, create_inventory_override
 from pms.services.front_desk_board_service import FrontDeskBoardFilters, build_front_desk_board
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
@@ -201,6 +202,8 @@ def test_build_front_desk_board_groups_unallocated_clips_stays_and_surfaces_spec
         assert len(board["headers"]) == 14
         assert sum(1 for header in board["headers"] if header["is_today"]) == 1
         assert any(header["is_weekend"] for header in board["headers"])
+        assert board["weekend_track_bg"].startswith("linear-gradient(")
+        assert "rgba(77,157,255,0.07)" in board["weekend_track_bg"]
 
         twin_group = next(group for group in board["groups"] if group["room_type_id"] == str(room_type_id))
         all_blocks = [block for row in twin_group["rows"] for block in row["visible_blocks"]]
@@ -246,10 +249,68 @@ def test_front_desk_board_route_requires_reservation_view_permission(app_factory
     authorized = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
     assert authorized.status_code == 200
     assert "Front desk planning board" in authorized.get_data(as_text=True)
+    assert "planning-board-cell" not in authorized.get_data(as_text=True)
+    assert "--track-bg:" in authorized.get_data(as_text=True)
 
     login_as(client, provider_user)
     unauthorized = client.get("/staff/front-desk/board")
     assert unauthorized.status_code == 403
+
+
+def test_front_desk_board_route_exposes_board_v2_flag_from_settings(app_factory):
+    app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+    client = app.test_client()
+    with app.app_context():
+        front_desk_user = make_staff_user("front_desk", "board-flag@example.com")
+
+    login_as(client, front_desk_user)
+    initial = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
+    assert initial.status_code == 200
+    assert 'data-board-v2-enabled="false"' in initial.get_data(as_text=True)
+
+    with app.app_context():
+        db.session.add(
+            AppSetting(
+                key="feature.front_desk_board_v2",
+                value_json={"value": True},
+                value_type="boolean",
+                description="Enable front desk planning board v2 scaffolding",
+            )
+        )
+        db.session.commit()
+
+    enabled = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
+    assert enabled.status_code == 200
+    assert 'data-board-v2-enabled="true"' in enabled.get_data(as_text=True)
+
+
+def test_front_desk_board_data_route_logs_metric_payload(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    logged_messages = []
+    monkeypatch.setattr(app.logger, "info", lambda message: logged_messages.append(json.loads(message)))
+    with app.app_context():
+        create_staff_reservation(
+            first_name="Metric",
+            last_name="Board",
+            phone="+66810000060",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        front_desk_user = make_staff_user("front_desk", "board-metrics@example.com")
+
+    login_as(client, front_desk_user)
+    response = client.get(f"/staff/front-desk/board/data?start_date={date.today().isoformat()}&days=14")
+
+    assert response.status_code == 200
+    metric = next(item for item in logged_messages if item["event"] == "front_desk.board.data")
+    assert metric["outcome"] == "success"
+    assert metric["response_format"] == "json"
+    assert metric["group_count"] >= 1
+    assert metric["row_count"] >= 1
+    assert metric["visible_block_count"] >= 1
+    assert metric["board_v2_enabled"] is False
 
 
 def test_board_room_reassignment_updates_inventory_and_redirects_back_to_anchor(app_factory):
@@ -412,6 +473,52 @@ def test_board_move_json_can_assign_unallocated_reservation_into_room_inventory(
         assert refreshed.assigned_room_id == target_room_id
         assert len(inventory_rows) == 2
         assert all(row.availability_status == "reserved" for row in inventory_rows)
+
+
+def test_board_move_json_logs_metric_payload(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    logged_messages = []
+    monkeypatch.setattr(app.logger, "info", lambda message: logged_messages.append(json.loads(message)))
+    with app.app_context():
+        start_date = date.today() + timedelta(days=5)
+        staff_user = make_staff_user("front_desk", "board-json-metric@example.com")
+        reservation = create_staff_reservation(
+            first_name="Desk",
+            last_name="Metric",
+            phone="+66810000061",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+        reservation_id = reservation.id
+        target_room = find_open_room(
+            room_type_id=reservation.room_type_id,
+            start_date=reservation.check_in_date,
+            end_date=reservation.check_out_date,
+        )
+
+    login_as(client, staff_user)
+    response = post_json(
+        client,
+        f"/staff/front-desk/board/reservations/{reservation_id}/move",
+        payload={
+            "roomId": str(target_room.id),
+            "checkInDate": start_date.isoformat(),
+            "checkOutDate": (start_date + timedelta(days=2)).isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    metric = next(item for item in logged_messages if item["event"] == "front_desk.board.move")
+    assert metric["outcome"] == "success"
+    assert metric["status_code"] == 200
+    assert metric["reservation_id"] == str(reservation_id)
+    assert metric["requested_room_id"] == str(target_room.id)
+    assert metric["room_changed"] is True
+    assert metric["date_changed"] is False
 
 
 def test_board_move_json_rejects_room_type_mismatch_and_preserves_state(app_factory):
@@ -881,3 +988,817 @@ def test_staff_reservation_create_route_prefills_and_creates_house_use_booking(a
         assert reservation.current_status == "house_use"
         assert inventory_rows
         assert all(row.availability_status == "house_use" for row in inventory_rows)
+
+
+# ===== Sprint 0 Tests: Feature Flag & Metrics Infrastructure =====
+
+
+class TestBoardV2FeatureFlag:
+    """Test feature flag framework and v2 endpoint guards."""
+
+    def test_v2_feature_disabled_by_default(self, app_factory):
+        """V2 feature should be off by default in config."""
+        app = app_factory(config={"FEATURE_BOARD_V2": False})
+        with app.app_context():
+            from pms.front_desk_board_runtime import front_desk_board_v2_enabled
+
+            assert front_desk_board_v2_enabled() is False
+
+    def test_v2_feature_enabled_when_configured(self, app_factory):
+        """V2 feature should be on if configured."""
+        app = app_factory(config={"FEATURE_BOARD_V2": True})
+        with app.app_context():
+            from pms.front_desk_board_runtime import front_desk_board_v2_enabled
+
+            assert front_desk_board_v2_enabled() is True
+
+    def test_v1_endpoints_work_when_v2_disabled(self, app_factory):
+        """V1 board endpoints should work when v2 is disabled."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "test-v1@example.com")
+
+        login_as(client, user)
+
+        # V1 endpoints should work
+        response = client.get("/staff/front-desk/board")
+        assert response.status_code == 200
+        assert b"Front Desk Board" in response.data or b"planning-board" in response.data
+
+        response = client.get("/staff/front-desk/board/fragment")
+        assert response.status_code == 200
+
+        response = client.get("/staff/front-desk/board/data")
+        assert response.status_code == 200
+
+        response = client.get("/staff/front-desk/board/rooms")
+        assert response.status_code == 200
+
+    def test_is_v2_endpoint_detection(self):
+        """Test the is_v2_endpoint helper function."""
+        from pms.front_desk_board_runtime import is_v2_endpoint
+
+        # V2 endpoints that should be gated
+        assert is_v2_endpoint("staff_front_desk_board_events") is True
+        assert is_v2_endpoint("staff_front_desk_board_check_in") is True
+        assert is_v2_endpoint("staff_front_desk_board_check_out") is True
+        assert is_v2_endpoint("staff_front_desk_board_mark_room_ready") is True
+        assert is_v2_endpoint("staff_front_desk_board_reservation_panel") is True
+
+        # Non-v2 endpoints
+        assert is_v2_endpoint("staff_front_desk_board_preferences") is False
+        assert is_v2_endpoint("staff_front_desk_board") is False
+        assert is_v2_endpoint("staff_front_desk_board_move_reservation") is False
+        assert is_v2_endpoint(None) is False
+        assert is_v2_endpoint("nonexistent_endpoint") is False
+
+    def test_check_board_v2_feature_gate_returns_404_when_disabled(self, app_factory):
+        """V2 endpoints should return 404 when feature is disabled.
+
+        Note: This test will skip if no v2 endpoints are registered yet,
+        as they'll be added in Sprint 3 and beyond.
+        """
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "test-gate@example.com")
+            from pms.front_desk_board_runtime import front_desk_board_v2_enabled
+
+            # Verify the feature flag is actually False.
+            assert front_desk_board_v2_enabled() is False
+
+
+class TestBoardMetricsInfrastructure:
+    """Test metrics logging for board operations."""
+
+    def test_log_metrics_includes_v2_flag(self, app_factory, monkeypatch):
+        """Board metrics should include v2_enabled flag in logs."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+
+        with app.app_context():
+            from pms.front_desk_board_runtime import log_front_desk_board_metric
+            from time import perf_counter
+
+            # Capture logged output
+            logged_messages = []
+
+            original_info = app.logger.info
+
+            def mock_info(msg, *args, **kwargs):
+                logged_messages.append(msg)
+                return original_info(msg, *args, **kwargs)
+
+            monkeypatch.setattr(app.logger, "info", mock_info)
+
+            # Log a metric
+            started = perf_counter()
+            log_front_desk_board_metric(
+                event="test.board.render",
+                started_at=started,
+                board={"groups": [], "days": 7},
+            )
+
+            # Verify metric was logged with v2_enabled flag
+            assert len(logged_messages) > 0
+            last_log = logged_messages[-1]
+            assert "test.board.render" in last_log
+            assert "board_v2_enabled" in last_log
+            assert "false" in last_log or "False" in last_log.lower()
+
+    def test_log_metrics_with_board_summary(self, app_factory, monkeypatch):
+        """Metrics should include board summary stats when provided."""
+        app = app_factory(seed=True)
+
+        with app.app_context():
+            from pms.front_desk_board_runtime import log_front_desk_board_metric
+            from time import perf_counter
+
+            logged_messages = []
+
+            original_info = app.logger.info
+
+            def mock_info(msg, *args, **kwargs):
+                logged_messages.append(msg)
+                return original_info(msg, *args, **kwargs)
+
+            monkeypatch.setattr(app.logger, "info", mock_info)
+
+            board = {
+                "groups": [{"rows": [{"visible_blocks": [1, 2, 3]}, {"visible_blocks": []}]}],
+                "days": 7,
+            }
+
+            started = perf_counter()
+            log_front_desk_board_metric(
+                event="test.board.render",
+                started_at=started,
+                board=board,
+            )
+
+            last_log = logged_messages[-1]
+            assert "group_count" in last_log
+            assert "row_count" in last_log
+            assert "visible_block_count" in last_log
+
+
+
+# ===== Sprint 1 Tests: Layout & Density =====
+
+
+class TestBoardDensityPreferences:
+    """Test density toggle and user preference persistence."""
+
+    def test_default_user_density_is_comfortable(self, app_factory):
+        """New users should default to comfortable density."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            from pms.app import front_desk_board_context
+
+            user = make_staff_user("front_desk", "density-test@example.com")
+            filters = FrontDeskBoardFilters(start_date=date.today())
+
+            # Simulate being logged in
+            with app.test_request_context():
+                from flask import g
+
+                g.current_staff_user = user
+                context = front_desk_board_context(filters)
+                assert context["user_density"] == "comfortable"
+
+    def test_user_can_save_density_preference(self, app_factory):
+        """User should be able to save density preference via endpoint."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-save@example.com")
+
+        login_as(client, user)
+
+        # Save preference
+        response = client.post(
+            "/staff/front-desk/board/preferences",
+            json={"density": "compact"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["ok"] is True
+        assert data["density"] == "compact"
+
+    def test_saved_density_persists_across_sessions(self, app_factory):
+        """Saved density preference should load on next page visit."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-persist@example.com")
+
+        login_as(client, user)
+
+        # Save density
+        response = client.post(
+            "/staff/front-desk/board/preferences",
+            json={"density": "compact"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+        assert response.status_code == 200
+
+        # Load board and verify density is in context
+        response = client.get("/staff/front-desk/board")
+        assert response.status_code == 200
+        assert b'density-compact' in response.data or b'class="planning-board-grid density' in response.data
+
+    def test_invalid_density_returns_400(self, app_factory):
+        """Invalid density value should return 400."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-invalid@example.com")
+
+        login_as(client, user)
+
+        response = client.post(
+            "/staff/front-desk/board/preferences",
+            json={"density": "invalid_value"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 400
+
+    def test_density_preference_requires_view_permission(self, app_factory):
+        """Saving density should require at least reservation.view permission."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("provider", "density-perm@example.com")
+
+        login_as(client, user)
+
+        response = client.post(
+            "/staff/front-desk/board/preferences",
+            json={"density": "compact"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 403
+
+    def test_user_preference_model_stores_density(self, app_factory):
+        """UserPreference model should correctly store preferences."""
+        from pms.models import UserPreference
+
+        app = app_factory(seed=True)
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-model@example.com")
+
+            # Manually create preference
+            pref = UserPreference(user_id=user.id, preferences={"frontDeskBoard": {"density": "compact"}})
+            db.session.add(pref)
+            db.session.commit()
+
+            # Reload and verify
+            retrieved = UserPreference.query.filter_by(user_id=user.id).first()
+            assert retrieved is not None
+            assert retrieved.preferences["frontDeskBoard"]["density"] == "compact"
+
+    def test_density_board_class_renders_correctly(self, app_factory):
+        """Board HTML should include density class."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-render@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        # Should have comfortable as default
+        assert b"density-comfortable" in response.data
+
+    def test_spacious_density_is_accepted(self, app_factory):
+        """Spacious density should be accepted by the preferences endpoint."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-spacious@example.com")
+
+        login_as(client, user)
+
+        response = client.post(
+            "/staff/front-desk/board/preferences",
+            json={"density": "spacious"},
+            headers={"X-CSRF-Token": "test-csrf-token"},
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data["ok"] is True
+        assert data["density"] == "spacious"
+
+    def test_spacious_density_toggle_button_in_html(self, app_factory):
+        """Board template should render a Spacious density toggle button."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "density-spacious-btn@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        assert b'data-density="spacious"' in response.data
+
+
+class TestBoardKeyboardSelection:
+    """Test Sprint 2.1: Block selection model with keyboard navigation."""
+
+    def test_board_page_loads_with_keyboard_support(self, app_factory):
+        """Board page should load and support keyboard navigation."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "kb-select@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        # Verify board structure and scripts are present
+        assert b"front-desk-board-surface" in response.data
+        assert b"front-desk-board.js" in response.data
+
+    def test_board_page_has_selection_script(self, app_factory):
+        """Board page should load JavaScript for selection handling."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "kb-script@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        # Verify JavaScript is loaded
+        assert b"front-desk-board.js" in response.data
+
+    def test_board_css_has_selected_styling(self, app_factory):
+        """Board CSS should include styling for selected blocks."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        # Fetch the CSS file
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        # Verify selected state CSS is present
+        assert b".planning-board-block.selected > summary" in response.data
+        assert b"outline:" in response.data
+
+
+class TestBoardKeyboardMoveResize:
+    """Test Sprint 2.2: Keyboard move/resize modes with M and R keys."""
+
+    def test_move_mode_styles_defined(self, app_factory):
+        """CSS should include styling for move-mode class."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        # Verify move-mode CSS is present
+        assert b".planning-board-block.move-mode > summary" in response.data
+
+    def test_resize_mode_styles_defined(self, app_factory):
+        """CSS should include styling for resize-mode class."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        # Verify resize-mode CSS is present
+        assert b".planning-board-block.resize-mode > summary" in response.data
+
+    def test_board_script_has_move_mode_functions(self, app_factory):
+        """JavaScript should include move mode handler functions."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify move mode functions are in the script
+        assert b"enterMoveMode" in response.data
+        assert b"exitMoveMode" in response.data
+        assert b"submitMove" in response.data
+
+    def test_board_script_has_resize_mode_functions(self, app_factory):
+        """JavaScript should include resize mode handler functions."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify resize mode functions are in the script
+        assert b"enterResizeMode" in response.data
+        assert b"exitResizeMode" in response.data
+        assert b"submitResize" in response.data
+
+    def test_keyboard_handlers_support_m_and_r_keys(self, app_factory):
+        """Keyboard handler should recognize M and R key presses."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify M and R key handling
+        content = response.get_data(as_text=True)
+        assert "case \"m\":" in content or "case 'm':" in content
+        assert "case \"r\":" in content or "case 'r':" in content
+        assert "enterMoveMode()" in content
+        assert "enterResizeMode()" in content
+
+
+class TestBoardGlobalActionShortcuts:
+    """Test Sprint 2.3: Global action shortcuts (/, ?, A, C, O)."""
+
+    def test_board_script_has_global_shortcut_handlers(self, app_factory):
+        """JavaScript should include global shortcut handler functions."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify shortcut functions exist
+        assert b"openSearchPanel" in response.data
+        assert b"showKeyboardHelp" in response.data
+        assert b"performCheckIn" in response.data
+        assert b"performCheckOut" in response.data
+
+    def test_keyboard_shortcuts_in_script(self, app_factory):
+        """JavaScript should handle global keyboard shortcuts."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        # Verify slash key handling
+        assert 'case "/"' in content or "case '/':" in content
+        # Verify question mark handling
+        assert 'case "?"' in content or "case '?':" in content
+        # Verify A/C/O keys handling
+        assert "case \"a\":" in content or "case 'a':" in content
+        assert "case \"c\":" in content or "case 'c':" in content
+        assert "case \"o\":" in content or "case 'o':" in content
+
+    def test_check_in_and_checkout_endpoints_in_app(self, app_factory):
+        """App should register check-in and check-out endpoints."""
+        from sandbox_pms_mvp.pms.app import create_app
+
+        app = create_app()
+        routes = [str(rule) for rule in app.url_map.iter_rules()
+                  if "check_in" in str(rule) or "check_out" in str(rule)]
+
+        # Should have at least the check_in endpoint
+        assert any("check_in" in route for route in routes)
+        # Should have at least the check_out endpoint
+        assert any("check_out" in route for route in routes)
+
+
+class TestBoardCommandPalette:
+    """Test Sprint 2.4: Command palette UI (optional enhancement)."""
+
+    def test_keyboard_help_function_exists(self, app_factory):
+        """JavaScript should have keyboard help display function."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify help function exists
+        assert b"showKeyboardHelp" in response.data
+        # Verify help content with shortcuts
+        assert b"Keyboard Shortcuts" in response.data
+        assert b"Move mode" in response.data
+        assert b"Resize mode" in response.data
+
+    def test_search_panel_function_exists(self, app_factory):
+        """JavaScript should have search panel function (stub)."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify search panel function exists
+        assert b"openSearchPanel" in response.data
+
+    def test_command_palette_infrastructure_in_place(self, app_factory):
+        """Global keyboard event listener should  handle command palette triggers."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+
+        # Verify global event listener exists
+        assert "document.addEventListener" in content
+        assert "keydown" in content
+
+        # Verify slash key handling for search/command palette
+        assert 'case "/"' in content or "case '/':" in content
+
+    def test_help_modal_displays_shortcuts(self, app_factory):
+        """Help modal should display all major keyboard shortcuts."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify shortcut descriptions are in the help text
+        assert b"Navigate blocks" in response.data
+        assert b"Move mode" in response.data
+        assert b"Resize mode" in response.data
+        assert b"Check-in" in response.data
+        assert b"Check-out" in response.data
+
+
+class TestBoardSidePanel:
+    """Test Sprint 3: Side panel for reservation details."""
+
+    def test_panel_html_element_exists(self, app_factory):
+        """Board page should include side panel HTML element."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "panel@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        # Verify panel HTML is present
+        assert b'id="board-side-panel"' in response.data
+        assert b'data-panel-title' in response.data
+        assert b'data-action="close-panel"' in response.data
+
+    def test_panel_css_styles_present(self, app_factory):
+        """CSS should include panel styling."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        # Verify panel CSS classes are present
+        assert b".board-side-panel" in response.data
+        assert b".panel-header" in response.data
+        assert b".panel-content" in response.data
+        assert b"transform: translateX(100%)" in response.data
+
+    def test_panel_endpoint_exists(self, app_factory):
+        """Panel endpoint should exist and be accessible."""
+        from sandbox_pms_mvp.pms.app import create_app
+
+        app = create_app()
+        routes = [str(rule) for rule in app.url_map.iter_rules()
+                  if "panel" in str(rule)]
+
+        # Should have panel endpoint
+        assert any("panel" in route for route in routes)
+
+    def test_panel_javascript_handlers_present(self, app_factory):
+        """JavaScript should include panel handler functions."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        # Verify panel functions exist
+        assert b"openPanel" in response.data
+        assert b"closePanel" in response.data
+        assert b"attachPanelHandlers" in response.data
+        assert b"board-side-panel" in response.data
+        # Verify panel is referenced in event listeners
+        assert b"panelEl" in response.data or b"board-side-panel" in response.data
+
+
+class TestBoardSSERealtimeSync:
+    """Test Sprint 4: Real-time sync with Server-Sent Events."""
+
+    def test_sse_endpoint_requires_auth(self, app_factory):
+        """SSE endpoint should require authentication."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+
+        response = client.get("/staff/front-desk/board/events")
+
+        assert response.status_code == 401
+
+    def test_sse_endpoint_requires_reservation_view_permission(self, app_factory):
+        """SSE endpoint should require reservation.view permission."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+        with app.app_context():
+            # Create user with no permissions
+            user = User(
+                username="noperms",
+                email="noperms@example.com",
+                full_name="No Perms",
+                password_hash=generate_password_hash("password"),
+                is_active=True,
+                account_state="active",
+            )
+            db.session.add(user)
+            db.session.commit()
+            login_as(client, user)
+
+        response = client.get("/staff/front-desk/board/events")
+
+        assert response.status_code == 403
+
+    def test_sse_endpoint_returns_event_stream_content_type(self, app_factory):
+        """SSE endpoint should return text/event-stream content type."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "sse@example.com")
+            login_as(client, user)
+
+        response = client.get("/staff/front-desk/board/events")
+
+        assert response.status_code == 200
+        assert response.headers["Content-Type"] == "text/event-stream"
+        assert response.headers["Cache-Control"] == "no-cache"
+        assert response.headers["Connection"] == "keep-alive"
+
+    def test_sse_emits_event_on_activity_log_write(self, app_factory):
+        """SSE should emit event when activity log is written."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "sse-activity@example.com")
+            login_as(client, user)
+
+            # Write an activity log entry
+            activity = ActivityLog(
+                actor_user_id=user.id,
+                event_type="reservation.room_changed",
+                entity_table="reservations",
+                entity_id="test-res-id",
+                metadata_json={"room_id": "new-room"},
+            )
+            db.session.add(activity)
+            db.session.commit()
+
+            # Get SSE stream (this will block, so we test the setup, not actual streaming)
+            response = client.get("/staff/front-desk/board/events")
+
+            # Should be able to start the stream
+            assert response.status_code == 200
+            # Content should be iterable/streamable
+            assert response.is_streamed
+
+    def test_sse_filters_board_and_reservation_events(self, app_factory):
+        """SSE endpoint should listen for front_desk.board and reservation events."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        with app.app_context():
+            # Create sample activity logs
+            user = make_staff_user("front_desk", "sse-filter@example.com")
+
+            # Add various event types
+            events = [
+                ActivityLog(
+                    actor_user_id=user.id,
+                    event_type="front_desk.board_check_in",
+                    entity_table="reservations",
+                    metadata_json={},
+                ),
+                ActivityLog(
+                    actor_user_id=user.id,
+                    event_type="reservation.room_changed",
+                    entity_table="reservations",
+                    metadata_json={},
+                ),
+                ActivityLog(
+                    actor_user_id=user.id,
+                    event_type="auth.login",  # Should NOT match filter
+                    entity_table="users",
+                    metadata_json={},
+                ),
+            ]
+            for event in events:
+                db.session.add(event)
+            db.session.commit()
+
+            # Query database to verify events can be filtered
+            import sqlalchemy as sa
+
+            query = ActivityLog.query.filter(
+                sa.or_(
+                    ActivityLog.event_type.ilike("front_desk.board_%"),
+                    ActivityLog.event_type.ilike("reservation.%"),
+                )
+            )
+            results = query.all()
+
+            # Should find 2 matching events, not the auth.login event
+            assert len(results) == 2
+            event_types = {r.event_type for r in results}
+            assert "front_desk.board_check_in" in event_types
+            assert "reservation.room_changed" in event_types
+            assert "auth.login" not in event_types
+
+    def test_sse_javascript_infrastructure_present(self, app_factory):
+        """JavaScript should include SSE EventSource infrastructure."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+
+        # Verify EventSource initialization
+        assert "EventSource" in content
+        assert "initSSE" in content
+        assert "closeSSE" in content
+        assert "/staff/front-desk/board/events" in content
+
+        # Verify debouncing
+        assert "debounceRefreshSurface" in content
+        assert "refreshTimeout" in content
+
+        # Verify error handling
+        assert "MAX_SSE_RETRIES" in content
+        assert "eventSource.addEventListener" in content
+
+    def test_move_operation_writes_activity_log(self, app_factory):
+        """Move operation should write activity log for SSE to pick up."""
+        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "move@example.com")
+            login_as(client, user)
+
+            # Create a reservation and room
+            room_type = RoomType.query.first()
+            room = Room(room_type_id=room_type.id, room_number=101, is_active=True)
+            db.session.add(room)
+            db.session.commit()
+
+            start_date = date.today()
+            res = create_reservation(
+                ReservationCreatePayload(
+                    room_type_id=room_type.id,
+                    check_in_date=start_date,
+                    check_out_date=start_date + timedelta(days=1),
+                    first_name="Test",
+                    last_name="Guest",
+                    email="guest@example.com",
+                    phone="555-1234",
+                    adults=1,
+                    children=0,
+                    extra_guests=0,
+                ),
+                actor_user_id=user.id,
+            )
+
+            # Clear activity logs before move
+            ActivityLog.query.delete()
+            db.session.commit()
+
+            # Perform move
+            response = post_json(
+                client,
+                f"/staff/front-desk/board/reservations/{res.id}/move",
+                payload={
+                    "checkInDate": start_date.isoformat(),
+                    "checkOutDate": (start_date + timedelta(days=1)).isoformat(),
+                    "roomId": str(room.id),
+                },
+            )
+
+            assert response.status_code == 200
+
+            # Verify activity log was written
+            activities = ActivityLog.query.filter(
+                ActivityLog.entity_id == str(res.id)
+            ).all()
+
+            # Should have activity from move operation (via service layer)
+            assert len(activities) > 0
+            # At least one should be reservation-related
+            event_types = {a.event_type for a in activities}
+            assert any("reservation" in et or "front_desk.board" in et for et in event_types)

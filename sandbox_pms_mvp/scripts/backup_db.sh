@@ -43,6 +43,8 @@ print(f"{scheme}://***@{host}{port}{path}")
 PY
 )"
 
+_ENC_BOOL=$( [ "${BACKUP_ENCRYPTION_REQUIRED:-0}" = "1" ] && echo true || echo false )
+
 cat > "${MANIFEST_PATH}" <<JSON
 {
   "label": "${LABEL}",
@@ -51,7 +53,7 @@ cat > "${MANIFEST_PATH}" <<JSON
   "database_target": "${DATABASE_TARGET}",
   "checksum_sha256": "${CHECKSUM}",
   "retention_days": ${RETENTION_DAYS},
-  "storage_encryption_required": ${BACKUP_ENCRYPTION_REQUIRED:-0},
+  "storage_encryption_required": ${_ENC_BOOL},
   "restore_verify_command": "$(printf '%s' "${RESTORE_VERIFY_COMMAND:-}" | sed 's/"/\\"/g')"
 }
 JSON
