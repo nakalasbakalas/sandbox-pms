@@ -1356,6 +1356,18 @@ class TestBoardKeyboardSelection:
         assert 'case "ArrowUp":' in content
         assert 'case "ArrowDown":' in content
 
+    def test_keyboard_navigation_uses_selected_block_state(self, app_factory):
+        """Keyboard navigation should rely on selected state, not only current event target block."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert "if (!selectedBlock)" in content
+        assert "const blockEl = event.target instanceof Element ? event.target.closest(\"[data-board-block]\") : null;" not in content
+
     def test_board_css_has_selected_styling(self, app_factory):
         """Board CSS should include styling for selected blocks."""
         app = app_factory(seed=True)
@@ -1555,11 +1567,22 @@ class TestBoardCommandPalette:
 
         assert response.status_code == 200
         # Verify shortcut descriptions are in the help text
-        assert b"Navigate blocks" in response.data
-        assert b"Move mode" in response.data
-        assert b"Resize mode" in response.data
+        assert b"Navigate blocks across room tracks" in response.data
+        assert b"Move mode (keyboard alternative to drag)" in response.data
+        assert b"Resize mode (keyboard alternative to drag)" in response.data
         assert b"Check-in" in response.data
         assert b"Check-out" in response.data
+
+    def test_help_uses_html_feedback_rendering(self, app_factory):
+        """Keyboard help should render structured HTML in the feedback region."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        assert b"allowHtml" in response.data
+        assert b"feedback.innerHTML" in response.data
 
 
 class TestBoardSidePanel:
@@ -1621,6 +1644,18 @@ class TestBoardSidePanel:
         assert b"board-side-panel" in response.data
         # Verify panel is referenced in event listeners
         assert b"panelEl" in response.data or b"board-side-panel" in response.data
+
+    def test_panel_supports_escape_key_close(self, app_factory):
+        """Side panel should close via Escape for keyboard users."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert 'panelEl.addEventListener("keydown"' in content
+        assert 'event.key === "Escape"' in content
 
 
 class TestBoardSSERealtimeSync:
