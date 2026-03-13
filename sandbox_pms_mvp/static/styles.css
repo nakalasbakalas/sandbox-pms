@@ -129,6 +129,58 @@ a { color: inherit; text-decoration: none; }
 }
 .topnav a { color: var(--muted); font-weight: 600; }
 .topnav a:hover { color: var(--text); }
+/* ── Staff GitHub-style navigation bar ── */
+.staff-header .topbar { padding-top: 10px; padding-bottom: 10px; }
+.staff-topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.staff-topbar-username {
+  font-size: 0.875rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.staff-topbar-signout {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 5px 12px;
+  border-radius: 6px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.staff-topbar-signout:hover { color: var(--text); border-color: rgba(255,255,255,0.35); }
+.staff-nav-strip {
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+.staff-nav-tabs {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.staff-nav-tabs::-webkit-scrollbar { display: none; }
+.staff-nav-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 14px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.staff-nav-link:hover { color: var(--text); border-bottom-color: rgba(255,255,255,0.2); }
+.staff-nav-link.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+/* ── end staff nav ── */
 .inline-form { display: inline-flex; margin: 0; }
 .button-link {
   background: none;
