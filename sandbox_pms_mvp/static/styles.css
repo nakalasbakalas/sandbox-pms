@@ -17,6 +17,19 @@
   --radius: 20px;
   --radius-sm: 14px;
   --container: 1240px;
+  /* Planning board density defaults (responsive, overridable per-density mode) */
+  --track-height-spacious: 96px;
+  --track-height-comfortable: 74px;
+  --track-height-compact: 60px;
+  --day-header-height-spacious: 90px;
+  --day-header-height-comfortable: 70px;
+  --day-header-height-compact: 50px;
+  --room-header-width-spacious: 280px;
+  --room-header-width-comfortable: 240px;
+  --room-header-width-compact: 200px;
+  --track-height: var(--track-height-comfortable);
+  --day-header-height: var(--day-header-height-comfortable);
+  --room-header-width: var(--room-header-width-comfortable);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -930,6 +943,18 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-block.is-dragging > summary {
   cursor: grabbing;
 }
+.planning-board-block.selected > summary {
+  outline: 3px solid var(--accent-soft);
+  outline-offset: 2px;
+  box-shadow: 0 18px 32px rgba(0,0,0,0.28), 0 0 0 4px rgba(var(--accent-soft-rgb), 0.15);
+}
+.planning-board-block.move-mode > summary,
+.planning-board-block.resize-mode > summary {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  background: linear-gradient(135deg, rgba(197, 124, 53, 0.9), rgba(225, 130, 78, 0.9));
+  opacity: 0.95;
+}
 .planning-board-block.confirmed > summary {
   background: linear-gradient(135deg, #6b9f47, #87b65a);
 }
@@ -1007,7 +1032,194 @@ tbody tr:last-child td { border-bottom: 0; }
   display: grid;
   gap: 12px;
 }
-.planning-board-mobile {
+/* Density mode overrides */
+.planning-board-grid.density-spacious {
+  --track-height: var(--track-height-spacious);
+  --day-header-height: var(--day-header-height-spacious);
+  --room-header-width: var(--room-header-width-spacious);
+}
+.planning-board-grid.density-comfortable {
+  --track-height: var(--track-height-comfortable);
+  --day-header-height: var(--day-header-height-comfortable);
+  --room-header-width: var(--room-header-width-comfortable);
+}
+.planning-board-grid.density-compact {
+  --track-height: var(--track-height-compact);
+  --day-header-height: var(--day-header-height-compact);
+  --room-header-width: var(--room-header-width-compact);
+}
+/* Update grid layout to use room-header-width variable */
+.planning-board-grid.density-spacious,
+.planning-board-grid.density-compact,
+.planning-board-grid.density-comfortable {
+  grid-template-columns: var(--room-header-width) minmax(960px, 1fr);
+}
+/* Adjust day header height per density */
+.planning-board-grid.density-spacious .planning-board-days {
+  grid-template-rows: minmax(var(--day-header-height-spacious), auto);
+}
+.planning-board-grid.density-compact .planning-board-days {
+  grid-template-rows: minmax(var(--day-header-height-compact), auto);
+}
+.planning-board-grid.density-comfortable .planning-board-days {
+  grid-template-rows: minmax(var(--day-header-height-comfortable), auto);
+}
+/* Adjust day cell sizes per density */
+.planning-board-grid.density-spacious .planning-board-day {
+  min-height: var(--day-header-height-spacious);
+  font-size: 0.78rem;
+}
+.planning-board-grid.density-spacious .planning-board-day strong {
+  font-size: 1.25rem;
+}
+.planning-board-grid.density-compact .planning-board-day {
+  min-height: var(--day-header-height-compact);
+  font-size: 0.68rem;
+}
+.planning-board-grid.density-comfortable .planning-board-day {
+  min-height: var(--day-header-height-comfortable);
+  font-size: 0.72rem;
+}
+.planning-board-grid.density-compact .planning-board-day strong {
+  font-size: 0.95rem;
+}
+.planning-board-density-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.planning-board-density-toggle legend {
+  padding: 8px 12px;
+  margin: 0;
+  cursor: default;
+  opacity: 0.8;
+}
+.planning-board-density-toggle button {
+  padding: 8px 12px;
+  min-width: 44px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.planning-board-density-toggle button:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.2);
+}
+.planning-board-density-toggle button[data-active="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+/* Side panel for reservation details */
+.board-side-panel {
+  position: fixed;
+  right: 0;
+  top: 0;
+  width: 360px;
+  height: 100vh;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  transform: translateX(100%);
+  transition: transform 0.3s ease-in-out;
+}
+.board-side-panel.hidden {
+  display: grid; /* Keep display grid even when hidden for proper layout */
+}
+.board-side-panel:not(.hidden) {
+  transform: translateX(0);
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+.close-button {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.close-button:hover {
+  color: var(--accent);
+}
+.panel-content {
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+/* Panel sections */
+.panel-section {
+  display: grid;
+  gap: 12px;
+}
+.panel-section h3 {
+  margin: 8px 0 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-soft);
+}
+.panel-section dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  font-size: 0.9rem;
+}
+.panel-section dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+.panel-section dd {
+  margin: 0;
+}
+.panel-actions {
+  display: grid;
+  gap: 8px;
+}
+.panel-alert {
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border-left: 3px solid var(--border);
+}
+.panel-alert.warning {
+  background: rgba(240, 173, 78, 0.1);
+  border-left-color: var(--warning);
+}
+/* Responsive */
+@media (max-width: 600px) {
+  .board-side-panel {
+    width: 100%;
+  }
+}
   display: none;
   margin-top: 22px;
 }

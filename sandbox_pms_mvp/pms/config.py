@@ -45,6 +45,7 @@ def _build_trusted_hosts(*values: str | None, existing: list[str] | tuple[str, .
 class Config:
     APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "sandbox-hotel-pms-dev-key")
+    FEATURE_BOARD_V2 = os.getenv("FEATURE_BOARD_V2", "0") == "1"
     SQLALCHEMY_DATABASE_URI = _normalize_database_uri(
         os.getenv(
             "DATABASE_URL",

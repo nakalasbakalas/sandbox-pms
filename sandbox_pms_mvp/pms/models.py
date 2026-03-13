@@ -121,6 +121,7 @@ class User(AuditMixin, SoftDeleteMixin, db.Model):
     roles = relationship("Role", secondary="user_roles", lazy="joined")
     sessions = relationship("UserSession", back_populates="user", lazy="select")
     mfa_factors = relationship("MfaFactor", back_populates="user", lazy="select")
+    preferences = relationship("UserPreference", back_populates="user", lazy="select", uselist=False)
 
     __table_args__ = (
         Index("ix_users_active_email", "email", unique=False, sqlite_where=sa.text("deleted_at IS NULL")),
@@ -223,6 +224,28 @@ class UserSession(db.Model):
         Index("ix_user_sessions_user_id", "user_id"),
         Index("ix_user_sessions_expires_at", "expires_at"),
     )
+
+
+class UserPreference(db.Model):
+    """Store user-specific application preferences (e.g. UI density, theme, layout)."""
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    preferences: Mapped[dict] = mapped_column(JSONType, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    user = relationship("User", back_populates="preferences")
+
+    __table_args__ = (Index("ix_user_preferences_updated_at", "updated_at"),)
 
 
 class PasswordResetToken(db.Model):

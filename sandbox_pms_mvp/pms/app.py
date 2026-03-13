@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import hmac
+import json
 import secrets
+import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from time import perf_counter
 from urllib.parse import urlparse
 from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
@@ -41,6 +44,11 @@ from .constants import (
     USER_ACCOUNT_STATES,
 )
 from .extensions import db, migrate
+from .front_desk_board_runtime import (
+    check_board_v2_feature_gate,
+    front_desk_board_v2_enabled,
+    log_front_desk_board_metric,
+)
 from .i18n import LANGUAGE_LABELS, normalize_language, t
 from .models import (
     ActivityLog,
@@ -68,6 +76,7 @@ from .models import (
     RoomType,
     StaffNotification,
     User,
+    UserPreference,
     UserSession,
     utc_now,
 )
@@ -279,6 +288,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     register_template_helpers(app)
     register_url_topology_hooks(app)
+    register_board_v2_feature_gates(app)
     register_auth_hooks(app)
     register_cli(app)
     register_routes(app)
@@ -373,6 +383,13 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
+
+
+def register_board_v2_feature_gates(app: Flask) -> None:
+    """Register feature gate checks for v2 board endpoints."""
+    @app.before_request
+    def check_v2_board_access():
+        check_board_v2_feature_gate()
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -2045,37 +2062,111 @@ def register_routes(app: Flask) -> None:
     def staff_front_desk_board():
         require_permission("reservation.view")
         filters = front_desk_board_filters_from_request()
-        return render_template("front_desk_board.html", **front_desk_board_context(filters))
+        started_at = perf_counter()
+        outcome = "error"
+        context = None
+        try:
+            context = front_desk_board_context(filters)
+            outcome = "success"
+            return render_template("front_desk_board.html", **context)
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.render",
+                started_at=started_at,
+                board=context["board"] if context else None,
+                board_v2_enabled=context["board_v2_enabled"] if context else front_desk_board_v2_enabled(),
+                outcome=outcome,
+                response_format="html",
+                days=filters.days,
+                room_type_id=filters.room_type_id or None,
+                has_search=bool(filters.q),
+                show_unallocated=filters.show_unallocated,
+                show_closed=filters.show_closed,
+            )
 
     @app.route("/staff/front-desk/board/fragment")
     def staff_front_desk_board_fragment():
         require_permission("reservation.view")
         filters = front_desk_board_filters_from_request()
-        context = front_desk_board_context(filters)
-        return render_template("_front_desk_board_surface.html", **context)
+        started_at = perf_counter()
+        outcome = "error"
+        context = None
+        try:
+            context = front_desk_board_context(filters)
+            outcome = "success"
+            return render_template("_front_desk_board_surface.html", **context)
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.fragment",
+                started_at=started_at,
+                board=context["board"] if context else None,
+                board_v2_enabled=context["board_v2_enabled"] if context else front_desk_board_v2_enabled(),
+                outcome=outcome,
+                response_format="html_fragment",
+                days=filters.days,
+                room_type_id=filters.room_type_id or None,
+                has_search=bool(filters.q),
+                show_unallocated=filters.show_unallocated,
+                show_closed=filters.show_closed,
+            )
 
     @app.route("/staff/front-desk/board/data")
     def staff_front_desk_board_data():
         require_permission("reservation.view")
         filters = front_desk_board_filters_from_request()
-        context = front_desk_board_context(filters)
-        return jsonify(
-            {
-                "filters": serialize_front_desk_board(_front_desk_filters_payload(filters)),
-                "board": serialize_front_desk_board(context["board"]),
-                "permissions": {
-                    "canCreate": context["can_create"],
-                    "canEdit": context["can_edit"],
-                    "canManageClosures": context["can_manage_closures"],
-                },
-            }
-        )
+        started_at = perf_counter()
+        outcome = "error"
+        context = None
+        try:
+            context = front_desk_board_context(filters)
+            outcome = "success"
+            return jsonify(
+                {
+                    "filters": serialize_front_desk_board(_front_desk_filters_payload(filters)),
+                    "board": serialize_front_desk_board(context["board"]),
+                    "permissions": {
+                        "canCreate": context["can_create"],
+                        "canEdit": context["can_edit"],
+                        "canManageClosures": context["can_manage_closures"],
+                    },
+                }
+            )
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.data",
+                started_at=started_at,
+                board=context["board"] if context else None,
+                board_v2_enabled=context["board_v2_enabled"] if context else front_desk_board_v2_enabled(),
+                outcome=outcome,
+                response_format="json",
+                days=filters.days,
+                room_type_id=filters.room_type_id or None,
+                has_search=bool(filters.q),
+                show_unallocated=filters.show_unallocated,
+                show_closed=filters.show_closed,
+            )
 
     @app.route("/staff/front-desk/board/rooms")
     def staff_front_desk_board_rooms():
         require_permission("reservation.view")
         room_type_id = parse_request_uuid_arg("room_type_id") or ""
-        return jsonify({"groups": list_front_desk_room_groups(room_type_id=room_type_id)})
+        started_at = perf_counter()
+        outcome = "error"
+        groups = []
+        try:
+            groups = list_front_desk_room_groups(room_type_id=room_type_id)
+            outcome = "success"
+            return jsonify({"groups": groups})
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.rooms",
+                started_at=started_at,
+                outcome=outcome,
+                response_format="json",
+                room_type_id=room_type_id or None,
+                group_count=len(groups),
+                row_count=sum(len(group.get("rooms", [])) for group in groups),
+            )
 
     @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room", methods=["POST"])
     def staff_front_desk_board_assign_room(reservation_id):
@@ -2121,8 +2212,17 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/move", methods=["POST"])
     def staff_front_desk_board_move_reservation(reservation_id):
         user = require_permission("reservation.edit")
+        started_at = perf_counter()
         payload = board_request_payload()
         before_data = _reservation_snapshot_for_audit(reservation_id)
+        requested_room_id = None
+        new_check_in = None
+        new_check_out = None
+        room_changed = False
+        date_changed = False
+        outcome = "error"
+        status_code = 500
+        message = None
         try:
             current = db.session.get(Reservation, reservation_id)
             if not current:
@@ -2137,7 +2237,10 @@ def register_routes(app: Flask) -> None:
             if current.assigned_room_id is None and requested_room_id is None:
                 raise ValueError("Unallocated reservations must be assigned to a room before moving dates.")
             if not room_changed and not date_changed:
-                return jsonify({"ok": True, "message": "No board change was needed."})
+                outcome = "noop"
+                status_code = 200
+                message = "No board change was needed."
+                return jsonify({"ok": True, "message": message})
             if date_changed:
                 result = change_stay_dates(
                     reservation_id,
@@ -2151,10 +2254,13 @@ def register_routes(app: Flask) -> None:
                     ),
                     actor_user_id=user.id,
                 )
+                outcome = "success"
+                status_code = 200
+                message = f"Reservation moved. New total {result['new_total']:.2f} THB."
                 return jsonify(
                     {
                         "ok": True,
-                        "message": f"Reservation moved. New total {result['new_total']:.2f} THB.",
+                        "message": message,
                     }
                 )
             if requested_room_id is None:
@@ -2165,8 +2271,14 @@ def register_routes(app: Flask) -> None:
                 actor_user_id=user.id,
                 reason=parse_board_reason(payload) or "front_desk_board_drag_move",
             )
-            return jsonify({"ok": True, "message": "Room assignment updated."})
+            outcome = "success"
+            status_code = 200
+            message = "Room assignment updated."
+            return jsonify({"ok": True, "message": message})
         except BoardMutationRequestError as exc:
+            outcome = "invalid_request"
+            status_code = 400
+            message = str(exc)
             record_board_mutation_rejection(
                 actor_user_id=user.id,
                 entity_table="reservations",
@@ -2176,8 +2288,11 @@ def register_routes(app: Flask) -> None:
                 payload=payload,
                 reason=str(exc),
             )
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            return jsonify({"ok": False, "error": message}), 400
         except Exception as exc:  # noqa: BLE001
+            outcome = "rejected"
+            status_code = 409
+            message = public_error_message(exc)
             record_board_mutation_rejection(
                 actor_user_id=user.id,
                 entity_table="reservations",
@@ -2187,24 +2302,56 @@ def register_routes(app: Flask) -> None:
                 payload=payload,
                 reason=str(exc),
             )
-            return jsonify({"ok": False, "error": public_error_message(exc)}), 409
+            # Reload current state so the client can show what actually changed
+            try:
+                current_after = db.session.get(Reservation, reservation_id)
+                server_state = {
+                    "currentRoomId": str(current_after.assigned_room_id) if current_after and current_after.assigned_room_id else None,
+                    "currentCheckInDate": current_after.check_in_date.isoformat() if current_after else None,
+                    "currentCheckOutDate": current_after.check_out_date.isoformat() if current_after else None,
+                } if current_after else None
+            except Exception:  # noqa: BLE001
+                server_state = None
+            return jsonify({"ok": False, "error": message, "code": "inventory_conflict", "serverState": server_state}), 409
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.move",
+                started_at=started_at,
+                outcome=outcome,
+                status_code=status_code,
+                reservation_id=str(reservation_id),
+                requested_room_id=str(requested_room_id) if requested_room_id else None,
+                check_in_date=new_check_in.isoformat() if new_check_in else None,
+                check_out_date=new_check_out.isoformat() if new_check_out else None,
+                room_changed=room_changed,
+                date_changed=date_changed,
+                message=message,
+            )
 
     @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/resize", methods=["POST"])
     def staff_front_desk_board_resize_reservation(reservation_id):
         user = require_permission("reservation.edit")
+        started_at = perf_counter()
         payload = board_request_payload()
         before_data = _reservation_snapshot_for_audit(reservation_id)
+        requested_check_in = None
+        requested_check_out = None
+        outcome = "error"
+        status_code = 500
+        message = None
         try:
             current = db.session.get(Reservation, reservation_id)
             if not current:
                 raise ValueError("Reservation not found.")
             if current.assigned_room_id is None:
                 raise ValueError("Assign the reservation to a room before resizing stay dates.")
+            requested_check_in = parse_board_date(payload, "check-in date", "check_in_date", "checkInDate")
+            requested_check_out = parse_board_date(payload, "check-out date", "check_out_date", "checkOutDate")
             result = change_stay_dates(
                 reservation_id,
                 StayDateChangePayload(
-                    check_in_date=parse_board_date(payload, "check-in date", "check_in_date", "checkInDate"),
-                    check_out_date=parse_board_date(payload, "check-out date", "check_out_date", "checkOutDate"),
+                    check_in_date=requested_check_in,
+                    check_out_date=requested_check_out,
                     adults=current.adults,
                     children=current.children,
                     extra_guests=current.extra_guests,
@@ -2212,13 +2359,19 @@ def register_routes(app: Flask) -> None:
                 ),
                 actor_user_id=user.id,
             )
+            outcome = "success"
+            status_code = 200
+            message = f"Stay resized. New total {result['new_total']:.2f} THB."
             return jsonify(
                 {
                     "ok": True,
-                    "message": f"Stay resized. New total {result['new_total']:.2f} THB.",
+                    "message": message,
                 }
             )
         except BoardMutationRequestError as exc:
+            outcome = "invalid_request"
+            status_code = 400
+            message = str(exc)
             record_board_mutation_rejection(
                 actor_user_id=user.id,
                 entity_table="reservations",
@@ -2228,8 +2381,11 @@ def register_routes(app: Flask) -> None:
                 payload=payload,
                 reason=str(exc),
             )
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            return jsonify({"ok": False, "error": message}), 400
         except Exception as exc:  # noqa: BLE001
+            outcome = "rejected"
+            status_code = 409
+            message = public_error_message(exc)
             record_board_mutation_rejection(
                 actor_user_id=user.id,
                 entity_table="reservations",
@@ -2239,7 +2395,28 @@ def register_routes(app: Flask) -> None:
                 payload=payload,
                 reason=str(exc),
             )
-            return jsonify({"ok": False, "error": public_error_message(exc)}), 409
+            # Reload current state so the client can show what actually changed
+            try:
+                current_after = db.session.get(Reservation, reservation_id)
+                server_state = {
+                    "currentRoomId": str(current_after.assigned_room_id) if current_after and current_after.assigned_room_id else None,
+                    "currentCheckInDate": current_after.check_in_date.isoformat() if current_after else None,
+                    "currentCheckOutDate": current_after.check_out_date.isoformat() if current_after else None,
+                } if current_after else None
+            except Exception:  # noqa: BLE001
+                server_state = None
+            return jsonify({"ok": False, "error": message, "code": "inventory_conflict", "serverState": server_state}), 409
+        finally:
+            log_front_desk_board_metric(
+                event="front_desk.board.resize",
+                started_at=started_at,
+                outcome=outcome,
+                status_code=status_code,
+                reservation_id=str(reservation_id),
+                check_in_date=requested_check_in.isoformat() if requested_check_in else None,
+                check_out_date=requested_check_out.isoformat() if requested_check_out else None,
+                message=message,
+            )
 
     @app.route("/staff/front-desk/board/closures", methods=["POST"])
     def staff_front_desk_board_create_closure():
@@ -2380,6 +2557,220 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
             report = None
         return render_template("front_desk_board.html", **front_desk_board_context(filters, ical_import_report=report))
+
+    @app.route("/staff/front-desk/board/preferences", methods=["POST"])
+    def staff_front_desk_board_preferences():
+        """Save user's front desk board preferences (density, layout, etc)."""
+        user = require_permission("reservation.view")
+        payload = request.get_json() or {}
+        density = payload.get("density", "comfortable")
+
+        if density not in ["comfortable", "compact", "spacious"]:
+            abort(400, "Invalid density value")
+
+        # Create or update user preference record
+        pref = UserPreference.query.filter_by(user_id=user.id).first()
+        if not pref:
+            pref = UserPreference(user_id=user.id, preferences={})
+            db.session.add(pref)
+
+        # Ensure preferences dict has the frontDeskBoard key
+        if "frontDeskBoard" not in pref.preferences:
+            pref.preferences["frontDeskBoard"] = {}
+
+        # Update density setting
+        pref.preferences["frontDeskBoard"]["density"] = density
+        db.session.commit()
+
+        # Log the change
+        write_activity_log(
+            actor_user_id=user.id,
+            event_type="front_desk.board_density_changed",
+            metadata={"density": density},
+        )
+
+        return jsonify(ok=True, density=density)
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/check_in", methods=["POST"])
+    def staff_front_desk_board_check_in(reservation_id):
+        """Check in a reservation via the front desk board."""
+        user = require_permission("reservation.check_in")
+        reservation = Reservation.query.get_or_404(reservation_id)
+
+        if reservation.current_status in ("checked_in", "checked_out"):
+            return jsonify(ok=False, error=f"Cannot check in a {reservation.current_status} reservation.")
+
+        try:
+            from pms.services.front_desk_service import complete_check_in
+            complete_check_in(reservation_id, actor_user_id=user.id)
+
+            write_activity_log(
+                actor_user_id=user.id,
+                event_type="front_desk.board_check_in",
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                metadata={"via": "board_keyboard"},
+            )
+
+            db.session.refresh(reservation)
+            return jsonify(ok=True, message="Checked in.", status=reservation.current_status)
+        except Exception as exc:
+            write_audit_log(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_check_in_failed",
+                after_data={"error": str(exc)},
+            )
+            return jsonify(ok=False, error=str(exc)), 409
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/check_out", methods=["POST"])
+    def staff_front_desk_board_check_out(reservation_id):
+        """Check out a reservation via the front desk board."""
+        user = require_permission("reservation.check_out")
+        reservation = Reservation.query.get_or_404(reservation_id)
+
+        if reservation.current_status in ("checked_out", "canceled"):
+            return jsonify(ok=False, error=f"Cannot check out a {reservation.current_status} reservation.")
+
+        try:
+            from pms.services.front_desk_service import complete_checkout
+            complete_checkout(reservation_id, actor_user_id=user.id)
+
+            write_activity_log(
+                actor_user_id=user.id,
+                event_type="front_desk.board_check_out",
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                metadata={"via": "board_keyboard"},
+            )
+
+            db.session.refresh(reservation)
+            return jsonify(ok=True, message="Checked out.", status=reservation.current_status)
+        except Exception as exc:
+            write_audit_log(
+                actor_user_id=user.id,
+                entity_table="reservations",
+                entity_id=str(reservation_id),
+                action="front_desk_board_check_out_failed",
+                after_data={"error": str(exc)},
+            )
+            return jsonify(ok=False, error=str(exc)), 409
+
+    @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel", methods=["GET"])
+    def staff_front_desk_board_reservation_panel(reservation_id):
+        """Load panel content for a reservation."""
+        user = require_permission("reservation.view")
+        reservation = Reservation.query.get_or_404(reservation_id)
+
+        # Determine available actions based on permissions
+        can_reassign = user.has_permission("reservation.edit")
+        can_change_dates = user.has_permission("reservation.edit")
+        can_check_in = user.has_permission("reservation.check_in") and reservation.current_status in ["tentative", "confirmed"]
+        can_check_out = user.has_permission("reservation.check_out") and reservation.current_status == "checked_in"
+
+        # Get available rooms for reassignment: same type, active, not conflicting
+        # with existing allocated reservations during the stay window (excluding this reservation itself).
+        available_rooms = []
+        if can_reassign and reservation.room_type_id:
+            all_rooms = Room.query.filter(
+                Room.room_type_id == reservation.room_type_id,
+                Room.is_active.is_(True),
+            ).order_by(Room.room_number).all()
+            # Find room IDs that are blocked by other active reservations in the same window
+            conflict_statuses = {"tentative", "confirmed", "checked_in", "house_use"}
+            conflicting_room_ids = {
+                row.assigned_room_id
+                for row in db.session.query(Reservation.assigned_room_id).filter(
+                    Reservation.id != reservation.id,
+                    Reservation.assigned_room_id.isnot(None),
+                    Reservation.current_status.in_(conflict_statuses),
+                    Reservation.check_in_date < reservation.check_out_date,
+                    Reservation.check_out_date > reservation.check_in_date,
+                ).all()
+                if row.assigned_room_id is not None
+            }
+            for room in all_rooms:
+                label = f"Room {room.room_number} — Floor {room.floor_number}"
+                if room.id in conflicting_room_ids:
+                    label += " (unavailable)"
+                available_rooms.append({"id": str(room.id), "label": label, "available": room.id not in conflicting_room_ids})
+
+        context = {
+            "reservation": reservation,
+            "can_reassign": can_reassign,
+            "can_change_dates": can_change_dates,
+            "can_check_in": can_check_in,
+            "can_check_out": can_check_out,
+            "available_rooms": available_rooms,
+            "csrf_token": ensure_csrf_token(),
+        }
+
+        return render_template("_panel_reservation_details.html", **context)
+
+    @app.route("/staff/front-desk/board/events", methods=["GET"])
+    def staff_front_desk_board_events():
+        """Server-Sent Events endpoint for board changes."""
+        require_permission("reservation.view")
+
+        def event_stream():
+            last_event_id = request.headers.get("Last-Event-ID", request.args.get("last_event_id", ""))
+            last_timestamp = None
+            if last_event_id:
+                try:
+                    last_timestamp = datetime.fromisoformat(last_event_id)
+                except (ValueError, TypeError):
+                    pass
+
+            # Stream events for 5 minutes, then client reconnects
+            start_time = time.time()
+            seen_events = set()
+
+            while (time.time() - start_time) < 300:  # 5 min timeout
+                # Query for new activity log entries (board events or reservation changes)
+                query = ActivityLog.query.filter(
+                    sa.or_(
+                        ActivityLog.event_type.ilike("front_desk.board_%"),
+                        ActivityLog.event_type.ilike("reservation.%"),
+                    )
+                )
+                if last_timestamp:
+                    query = query.filter(ActivityLog.created_at > last_timestamp)
+
+                events = query.order_by(ActivityLog.created_at).all()
+
+                for event in events:
+                    event_id = f"{event.created_at.isoformat()}"
+                    if event_id not in seen_events:
+                        seen_events.add(event_id)
+
+                        payload = {
+                            "event": "board.changed",
+                            "data": {
+                                "event_type": event.event_type,
+                                "timestamp": event.created_at.isoformat(),
+                                "entity_id": event.entity_id,
+                            },
+                        }
+
+                        yield f"event: board.changed\n"
+                        yield f"id: {event_id}\n"
+                        yield f"data: {json.dumps(payload['data'])}\n\n"
+
+                        last_timestamp = event.created_at
+
+                # Sleep briefly before next query
+                time.sleep(1)
+
+        return Response(
+            stream_with_context(event_stream()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",  # For Nginx
+                "Connection": "keep-alive",
+            },
+        )
 
     @app.route("/staff/front-desk/walk-in", methods=["POST"])
     def staff_front_desk_walk_in():
@@ -3659,10 +4050,20 @@ def front_desk_board_context(
     back_url = front_desk_board_url(filters)
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
     room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    board_v2_enabled = front_desk_board_v2_enabled()
+
+    # Load user density preference
+    user_density = "comfortable"  # default
+    user = g.current_staff_user
+    if user and user.preferences:
+        user_density = (user.preferences.preferences or {}).get("frontDeskBoard", {}).get("density", "comfortable")
+
     return {
         "board": board,
+        "board_v2_enabled": board_v2_enabled,
         "filters": filters,
         "room_types": room_types,
+        "user_density": user_density,
         "default_checkout_date": filters.start_date + timedelta(days=1),
         "can_create": can("reservation.create"),
         "can_edit": can("reservation.edit"),

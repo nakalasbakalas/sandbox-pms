@@ -1,0 +1,68 @@
+<div class="panel-section">
+  <h3>Reservation Details</h3>
+  <dl>
+    <dt>Code</dt>
+    <dd>{{ reservation.reservation_code }}</dd>
+    <dt>Guest</dt>
+    <dd>{{ reservation.guest_name }}</dd>
+    <dt>Room</dt>
+    <dd>{% if reservation.assigned_room %}Room {{ reservation.assigned_room.room_number }}{% else %}<em>Unallocated</em>{% endif %}</dd>
+    <dt>Check-in</dt>
+    <dd>{{ reservation.check_in_date.strftime('%a, %b %d') }}</dd>
+    <dt>Check-out</dt>
+    <dd>{{ reservation.check_out_date.strftime('%a, %b %d') }}</dd>
+    <dt>Status</dt>
+    <dd><span class="badge {{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ')|title }}</span></dd>
+  </dl>
+</div>
+
+{% if not reservation.assigned_room %}
+<div class="panel-alert warning">
+  <strong>Unallocated</strong> — Choose a room to complete this reservation
+</div>
+{% endif %}
+
+{% if can_reassign %}
+<div class="panel-section">
+  <h3>Room Assignment</h3>
+  <form method="POST" action="{{ url_for('staff_front_desk_board_assign_room', reservation_id=reservation.id) }}" class="stack-form compact">
+    {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('staff_front_desk_board') }}">
+    <label><span>Select room</span>
+      <select name="room_id" required>
+        <option value="">-- Choose room --</option>
+        {% for room in available_rooms %}
+        <option value="{{ room.id }}" {% if reservation.assigned_room and reservation.assigned_room.id|string == room.id %}selected{% endif %} {% if not room.available %}disabled{% endif %}>{{ room.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label><span>Reason</span><input type="text" name="reason" value="front_desk_board_reassign"></label>
+    <button type="submit" class="button primary">Assign Room</button>
+  </form>
+</div>
+{% endif %}
+
+{% if can_change_dates %}
+<div class="panel-section">
+  <h3>Change Dates</h3>
+  <form method="POST" action="{{ url_for('staff_front_desk_board_change_dates', reservation_id=reservation.id) }}" class="stack-form compact">
+    {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('staff_front_desk_board') }}">
+    <div class="grid two">
+      <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ reservation.check_in_date.isoformat() }}" required></label>
+      <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ reservation.check_out_date.isoformat() }}" required></label>
+    </div>
+    <label><input type="checkbox" name="notify_guest" value="1"> Notify guest of change</label>
+    <button type="submit" class="button primary">Save Dates</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel-actions">
+  {% if can_check_in %}
+  <button class="button secondary full-width" data-action="check-in" data-reservation-id="{{ reservation.id }}">Check In</button>
+  {% endif %}
+  {% if can_check_out %}
+  <button class="button secondary full-width" data-action="check-out" data-reservation-id="{{ reservation.id }}">Check Out</button>
+  {% endif %}
+</div>

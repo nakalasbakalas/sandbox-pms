@@ -8,6 +8,7 @@
   data-fragment-url="{{ board_fragment_url }}"
   data-csrf-token="{{ csrf_token() }}"
   data-can-edit="{{ 'true' if can_edit else 'false' }}"
+  data-board-v2-enabled="{{ 'true' if board_v2_enabled else 'false' }}"
 >
   <div class="card-head">
     <div>
@@ -63,6 +64,12 @@
         </form>
       </details>
       {% endif %}
+      <fieldset class="planning-board-density-toggle" data-density-toggle>
+        <legend class="button secondary" aria-label="Board layout density">Layout</legend>
+        <button type="button" class="button secondary" data-density="spacious" title="Spacious: more block height and wider room labels" {% if user_density == 'spacious' %}data-active="true"{% endif %}>⬜</button>
+        <button type="button" class="button secondary" data-density="comfortable" title="Comfortable: balanced height and room labels" {% if user_density == 'comfortable' or not user_density %}data-active="true"{% endif %}>☐</button>
+        <button type="button" class="button secondary" data-density="compact" title="Compact: minimize row height to show more rooms at once" {% if user_density == 'compact' %}data-active="true"{% endif %}>▦</button>
+      </fieldset>
       <details class="planning-board-quick{% if ical_import_report %} open-state{% endif %}" {% if ical_import_report %}open{% endif %}>
         <summary class="button secondary">Import ICS</summary>
         <form class="card inset stack-form planning-board-popover" method="post" enctype="multipart/form-data" action="{{ url_for('staff_front_desk_board_import_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">
@@ -116,6 +123,17 @@
 <div id="front-desk-board-surface" aria-busy="false">
   {% include '_front_desk_board_surface.html' %}
 </div>
+
+<div id="board-side-panel" class="board-side-panel hidden" role="complementary" aria-label="Reservation details" aria-hidden="true">
+  <div class="panel-header">
+    <h2 data-panel-title>Reservation Details</h2>
+    <button class="close-button" aria-label="Close details panel" data-action="close-panel">&times;</button>
+  </div>
+  <div class="panel-content">
+    <!-- Content dynamically loaded here -->
+  </div>
+</div>
+
 {% endblock %}
 {% block extra_scripts %}
 <script src="{{ url_for('static', filename='front-desk-board.js') }}" defer></script>

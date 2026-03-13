@@ -7,7 +7,7 @@
 
 {% if board.groups %}
 <section class="planning-board-desktop">
-  <div class="planning-board-grid" style="--board-days: {{ board.days }};">
+  <div class="planning-board-grid density-{{ user_density or 'comfortable' }}" style="--board-days: {{ board.days }};">
     <div class="planning-board-room heading">Rooms</div>
     <div class="planning-board-days">
       {% for day in board.headers %}
