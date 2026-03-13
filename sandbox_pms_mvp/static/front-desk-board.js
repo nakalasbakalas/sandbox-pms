@@ -527,8 +527,7 @@
     }
 
     const boardDays = readBoardDays(track);
-    const cell = track.querySelector(".planning-board-cell");
-    const dayWidth = cell ? cell.getBoundingClientRect().width : track.getBoundingClientRect().width / boardDays;
+    const dayWidth = track.getBoundingClientRect().width / boardDays;
     const interaction = {
       block,
       summary,

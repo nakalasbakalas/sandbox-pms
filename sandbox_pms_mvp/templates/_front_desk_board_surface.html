@@ -7,7 +7,7 @@
 
 {% if board.groups %}
 <section class="planning-board-desktop">
-  <div class="planning-board-grid density-{{ user_density or 'comfortable' }}" style="--board-days: {{ board.days }};">
+  <div class="planning-board-grid density-{{ user_density or 'comfortable' }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }};">
     <div class="planning-board-room heading">Rooms</div>
     <div class="planning-board-days">
       {% for day in board.headers %}
@@ -37,9 +37,6 @@
         aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
       >
-        {% for day in board.headers %}
-        <div class="planning-board-cell {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}" aria-hidden="true"></div>
-        {% endfor %}
         {% for block in row.visible_blocks %}
         <details
           class="planning-board-block {{ block.displayVariant }} {{ block.status }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"

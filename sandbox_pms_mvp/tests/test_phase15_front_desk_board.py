@@ -202,6 +202,8 @@ def test_build_front_desk_board_groups_unallocated_clips_stays_and_surfaces_spec
         assert len(board["headers"]) == 14
         assert sum(1 for header in board["headers"] if header["is_today"]) == 1
         assert any(header["is_weekend"] for header in board["headers"])
+        assert board["weekend_track_bg"].startswith("linear-gradient(")
+        assert "rgba(77,157,255,0.07)" in board["weekend_track_bg"]
 
         twin_group = next(group for group in board["groups"] if group["room_type_id"] == str(room_type_id))
         all_blocks = [block for row in twin_group["rows"] for block in row["visible_blocks"]]
@@ -247,6 +249,8 @@ def test_front_desk_board_route_requires_reservation_view_permission(app_factory
     authorized = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
     assert authorized.status_code == 200
     assert "Front desk planning board" in authorized.get_data(as_text=True)
+    assert "planning-board-cell" not in authorized.get_data(as_text=True)
+    assert "--track-bg:" in authorized.get_data(as_text=True)
 
     login_as(client, provider_user)
     unauthorized = client.get("/staff/front-desk/board")
