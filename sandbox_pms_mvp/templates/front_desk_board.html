@@ -124,9 +124,9 @@
   {% include '_front_desk_board_surface.html' %}
 </div>
 
-<div id="board-side-panel" class="board-side-panel hidden" role="complementary" aria-label="Reservation details" aria-hidden="true">
+<div id="board-side-panel" class="board-side-panel hidden" role="dialog" aria-modal="true" aria-labelledby="board-panel-title" aria-hidden="true">
   <div class="panel-header">
-    <h2 data-panel-title>Reservation Details</h2>
+    <h2 id="board-panel-title" data-panel-title>Reservation Details</h2>
     <button class="close-button" aria-label="Close details panel" data-action="close-panel">&times;</button>
   </div>
   <div class="panel-content">

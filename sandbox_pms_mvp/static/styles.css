@@ -32,7 +32,7 @@
   --room-header-width: var(--room-header-width-comfortable);
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scroll-padding-top: 80px; }
 body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -273,6 +273,10 @@ p { margin: 0 0 10px; color: var(--muted); }
   html { scroll-behavior: auto; }
   .button, button.button { transition: none; }
   .skip-link { transition: none; }
+  .board-side-panel { transition: none; }
+  .nav-drawer, .nav-drawer-content { transition: none; }
+  .nav-menu-line { transition: none; }
+  .nav-chip, .planning-board-density-toggle button { transition: none; }
 }
 .button:hover { transform: translateY(-1px); }
 .button-link:focus-visible,
@@ -980,7 +984,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-resize-handle {
   position: relative;
-  width: 10px;
+  width: 24px;
   min-height: 30px;
   flex: none;
   opacity: 0.9;
@@ -1171,6 +1175,10 @@ tbody tr:last-child td { border-bottom: 0; }
   background: rgba(255,255,255,0.1);
   border-color: rgba(255,255,255,0.2);
 }
+.planning-board-density-toggle button:focus-visible {
+  outline: 3px solid rgba(var(--accent-soft-rgb), 0.9);
+  outline-offset: 3px;
+}
 .planning-board-density-toggle button[data-active="true"] {
   background: var(--accent);
   border-color: var(--accent);
@@ -1228,6 +1236,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .close-button:hover {
   color: var(--accent);
 }
+.close-button:focus-visible {
+  outline: 3px solid rgba(var(--accent-soft-rgb), 0.9);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
 .panel-content {
   overflow-y: auto;
   padding: 20px;
@@ -1280,6 +1293,7 @@ tbody tr:last-child td { border-bottom: 0; }
     width: 100%;
   }
 }
+.planning-board-mobile {
   display: none;
   margin-top: 22px;
 }
