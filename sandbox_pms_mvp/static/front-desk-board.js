@@ -919,6 +919,8 @@
       panelEl.setAttribute("aria-hidden", "false");
       setFeedback("", "neutral");
       attachPanelHandlers();
+      // Move focus to close button so screen readers announce the dialog
+      panelCloseBtn.focus();
     })
     .catch(err => {
       setFeedback(err.message || "Failed to load panel.", "error");
@@ -1023,6 +1025,31 @@
     if (event.key === "Escape") {
       event.preventDefault();
       closePanel();
+      return;
+    }
+    // Focus trap: keep Tab within the panel while it is open.
+    // Guard against spurious events when the panel is off-screen.
+    if (event.key !== "Tab" || panelEl.classList.contains("hidden")) {
+      return;
+    }
+    const focusable = Array.from(
+      panelEl.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => !el.hidden && el.offsetWidth > 0 && el.offsetHeight > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey) {
+      if (document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
   });
 
