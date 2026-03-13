@@ -2740,16 +2740,19 @@ def register_routes(app: Flask) -> None:
                 events = query.order_by(ActivityLog.created_at).all()
 
                 for event in events:
-                    event_id = f"{event.created_at.isoformat()}"
+                    event_id = f"{event.created_at.isoformat()}:{event.id}"
                     if event_id not in seen_events:
                         seen_events.add(event_id)
 
                         payload = {
                             "event": "board.changed",
                             "data": {
+                                "activity_id": str(event.id),
                                 "event_type": event.event_type,
                                 "timestamp": event.created_at.isoformat(),
+                                "entity_table": event.entity_table,
                                 "entity_id": event.entity_id,
+                                "metadata": event.metadata_json or {},
                             },
                         }
 
