@@ -12,6 +12,7 @@
   let selectedBlock = null;
   let moveMode = false;
   let moveTargetRoomId = null;
+  let moveTargetTrack = null;
   let resizeMode = false;
   let resizeTargetEndDate = null;
 
@@ -21,13 +22,32 @@
     surface.setAttribute("aria-busy", isBusy ? "true" : "false");
   }
 
-  function setFeedback(message, tone) {
+  function setFeedback(message, tone, options) {
     if (!feedback) {
       return;
     }
-    feedback.textContent = message || "";
+    const allowHtml = Boolean(options && options.allowHtml);
+    if (allowHtml) {
+      feedback.innerHTML = message || "";
+    } else {
+      feedback.textContent = message || "";
+    }
     feedback.dataset.tone = tone || "neutral";
     feedback.hidden = !message;
+  }
+
+  function focusBlockHandle(blockEl) {
+    if (!blockEl) {
+      return;
+    }
+    const summary = blockEl.querySelector("summary[data-block-handle]");
+    if (summary && typeof summary.focus === "function") {
+      summary.focus();
+      return;
+    }
+    if (typeof blockEl.focus === "function") {
+      blockEl.focus();
+    }
   }
 
   function selectBlock(blockEl) {
@@ -42,7 +62,7 @@
     }
     selectedBlock = blockEl;
     blockEl.classList.add("selected");
-    blockEl.focus();
+    focusBlockHandle(blockEl);
     announceSelection(blockEl);
   }
 
@@ -67,27 +87,131 @@
     return Array.from(track.querySelectorAll("[data-board-block]"));
   }
 
-  function moveSelectionUp() {
-    if (!selectedBlock) return;
-    const track = selectedBlock.closest("[data-board-track]");
-    if (!track) return;
+  function getBoardTracks() {
+    return Array.from(surface.querySelectorAll("[data-board-track]"));
+  }
 
+  function getBlockTrack(block) {
+    return block ? block.closest("[data-board-track]") : null;
+  }
+
+  function getBlockCenterColumn(block) {
+    const start = Number(block?.dataset.gridStart || 1);
+    const span = Number(block?.dataset.gridSpan || 1);
+    return start + (span - 1) / 2;
+  }
+
+  function getClosestBlockInTrack(referenceBlock, track) {
     const blocks = getBlocksInTrack(track);
-    const index = blocks.indexOf(selectedBlock);
-    if (index > 0) {
-      selectBlock(blocks[index - 1]);
+    if (!blocks.length) {
+      return null;
+    }
+    const referenceCenter = getBlockCenterColumn(referenceBlock);
+    return blocks.reduce((best, candidate) => {
+      if (!best) {
+        return candidate;
+      }
+      const bestDistance = Math.abs(getBlockCenterColumn(best) - referenceCenter);
+      const candidateDistance = Math.abs(getBlockCenterColumn(candidate) - referenceCenter);
+      if (candidateDistance < bestDistance) {
+        return candidate;
+      }
+      return best;
+    }, null);
+  }
+
+  function findAdjacentBlock(direction) {
+    if (!selectedBlock) {
+      return null;
+    }
+    const currentTrack = getBlockTrack(selectedBlock);
+    if (!currentTrack) {
+      return null;
+    }
+    const tracks = getBoardTracks();
+    const currentIndex = tracks.indexOf(currentTrack);
+    if (currentIndex === -1) {
+      return null;
+    }
+    for (let index = currentIndex + direction; index >= 0 && index < tracks.length; index += direction) {
+      const candidate = getClosestBlockInTrack(selectedBlock, tracks[index]);
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function isCompatibleMoveTrack(block, candidateTrack) {
+    if (!block || !candidateTrack) {
+      return false;
+    }
+    const sourceTrack = getBlockTrack(block);
+    const sourceRoomId = sourceTrack?.dataset.roomId || "";
+    const candidateRoomId = candidateTrack.dataset.roomId || "";
+    const candidateRoomTypeId = candidateTrack.dataset.roomTypeId || "";
+    const candidateLaneKind = candidateTrack.dataset.laneKind || "room";
+    const blockRoomTypeId = block.dataset.roomTypeId || "";
+
+    if (candidateRoomTypeId && blockRoomTypeId && candidateRoomTypeId !== blockRoomTypeId) {
+      return false;
+    }
+    if (sourceRoomId && !candidateRoomId) {
+      return false;
+    }
+    if (candidateLaneKind === "unallocated") {
+      return candidateTrack === sourceTrack;
+    }
+    return true;
+  }
+
+  function describeTrack(track) {
+    return track?.getAttribute("aria-label") || track?.dataset.anchorId || "selected lane";
+  }
+
+  function setMoveTarget(track) {
+    if (!selectedBlock || !track) {
+      return false;
+    }
+    clearTrackHighlights();
+    moveTargetTrack = track;
+    moveTargetRoomId = track.dataset.roomId || "";
+    track.classList.add(isCompatibleMoveTrack(selectedBlock, track) ? "drop-target" : "drop-target-invalid");
+    return isCompatibleMoveTrack(selectedBlock, track);
+  }
+
+  function moveTargetBy(direction) {
+    if (!selectedBlock) {
+      return;
+    }
+    const tracks = getBoardTracks();
+    const currentTrack = moveTargetTrack || getBlockTrack(selectedBlock);
+    const currentIndex = tracks.indexOf(currentTrack);
+    if (currentIndex === -1) {
+      return;
+    }
+    for (let index = currentIndex + direction; index >= 0 && index < tracks.length; index += direction) {
+      const candidateTrack = tracks[index];
+      if (isCompatibleMoveTrack(selectedBlock, candidateTrack)) {
+        setMoveTarget(candidateTrack);
+        setFeedback(`Move target: ${describeTrack(candidateTrack)}. Enter to confirm.`, "neutral");
+        return;
+      }
+    }
+    setFeedback("No more compatible room lanes in that direction.", "neutral");
+  }
+
+  function moveSelectionUp() {
+    const candidate = findAdjacentBlock(-1);
+    if (candidate) {
+      selectBlock(candidate);
     }
   }
 
   function moveSelectionDown() {
-    if (!selectedBlock) return;
-    const track = selectedBlock.closest("[data-board-track]");
-    if (!track) return;
-
-    const blocks = getBlocksInTrack(track);
-    const index = blocks.indexOf(selectedBlock);
-    if (index < blocks.length - 1) {
-      selectBlock(blocks[index + 1]);
+    const candidate = findAdjacentBlock(1);
+    if (candidate) {
+      selectBlock(candidate);
     }
   }
 
@@ -96,7 +220,7 @@
       return;
     }
     moveMode = true;
-    moveTargetRoomId = selectedBlock.dataset.roomId || "";
+    setMoveTarget(getBlockTrack(selectedBlock));
     selectedBlock.classList.add("move-mode");
     setFeedback("Move mode: Use ↑↓ to select room. Enter to confirm. Esc to cancel.", "neutral");
   }
@@ -104,6 +228,8 @@
   function exitMoveMode(canceled = false) {
     moveMode = false;
     moveTargetRoomId = null;
+    moveTargetTrack = null;
+    clearTrackHighlights();
     if (selectedBlock) {
       selectedBlock.classList.remove("move-mode");
     }
@@ -321,84 +447,82 @@
       return;
     }
 
-    // Handle arrow key navigation and mode-specific actions
-    const blockEl = event.target instanceof Element ? event.target.closest("[data-board-block]") : null;
-    if (blockEl && selectedBlock === blockEl) {
-      // In move mode: arrow keys navigate rooms
-      if (moveMode) {
-        switch (event.key) {
-          case "ArrowUp":
-            event.preventDefault();
-            moveSelectionUp();
-            moveTargetRoomId = selectedBlock.dataset.roomId || "";
-            break;
-          case "ArrowDown":
-            event.preventDefault();
-            moveSelectionDown();
-            moveTargetRoomId = selectedBlock.dataset.roomId || "";
-            break;
-          case "Enter":
-            event.preventDefault();
-            submitMove();
-            break;
-          default:
-            break;
-        }
-        return;
-      }
+    if (!selectedBlock) {
+      return;
+    }
 
-      // In resize mode: arrow keys adjust end date
-      if (resizeMode) {
-        switch (event.key) {
-          case "ArrowLeft":
-            event.preventDefault();
-            resizeTargetEndDate = addDays(resizeTargetEndDate, -1);
-            setFeedback(`Checkout adjusted to ${resizeTargetEndDate}`, "neutral");
-            break;
-          case "ArrowRight":
-            event.preventDefault();
-            resizeTargetEndDate = addDays(resizeTargetEndDate, 1);
-            setFeedback(`Checkout adjusted to ${resizeTargetEndDate}`, "neutral");
-            break;
-          case "Enter":
-            event.preventDefault();
-            submitResize();
-            break;
-          default:
-            break;
-        }
-        return;
-      }
-
-      // Normal navigation mode
+    // In move mode: arrow keys navigate room targets without requiring focus on the block element.
+    if (moveMode) {
       switch (event.key) {
         case "ArrowUp":
           event.preventDefault();
-          moveSelectionUp();
+          moveTargetBy(-1);
           break;
         case "ArrowDown":
           event.preventDefault();
-          moveSelectionDown();
-          break;
-        case "m":
-        case "M":
-          if (!canEdit || mutationInFlight) return;
-          event.preventDefault();
-          enterMoveMode();
-          break;
-        case "r":
-        case "R":
-          if (!canEdit || mutationInFlight) return;
-          event.preventDefault();
-          enterResizeMode();
+          moveTargetBy(1);
           break;
         case "Enter":
           event.preventDefault();
-          openPanel(selectedBlock);
+          submitMove();
           break;
         default:
           break;
       }
+      return;
+    }
+
+    // In resize mode: arrow keys adjust end date without pointer dragging.
+    if (resizeMode) {
+      switch (event.key) {
+        case "ArrowLeft":
+          event.preventDefault();
+          resizeTargetEndDate = addDays(resizeTargetEndDate, -1);
+          setFeedback(`Checkout adjusted to ${resizeTargetEndDate}`, "neutral");
+          break;
+        case "ArrowRight":
+          event.preventDefault();
+          resizeTargetEndDate = addDays(resizeTargetEndDate, 1);
+          setFeedback(`Checkout adjusted to ${resizeTargetEndDate}`, "neutral");
+          break;
+        case "Enter":
+          event.preventDefault();
+          submitResize();
+          break;
+        default:
+          break;
+      }
+      return;
+    }
+
+    // Normal navigation mode
+    switch (event.key) {
+      case "ArrowUp":
+        event.preventDefault();
+        moveSelectionUp();
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        moveSelectionDown();
+        break;
+      case "m":
+      case "M":
+        if (!canEdit || mutationInFlight) return;
+        event.preventDefault();
+        enterMoveMode();
+        break;
+      case "r":
+      case "R":
+        if (!canEdit || mutationInFlight) return;
+        event.preventDefault();
+        enterResizeMode();
+        break;
+      case "Enter":
+        event.preventDefault();
+        openPanel(selectedBlock);
+        break;
+      default:
+        break;
     }
   }
 
@@ -807,7 +931,7 @@
     panelEl.setAttribute("aria-hidden", "true");
     panelContent.innerHTML = "";
     if (selectedBlock) {
-      selectedBlock.focus();
+      focusBlockHandle(selectedBlock);
     }
   }
 
@@ -895,6 +1019,12 @@
   panelEl.addEventListener("click", (e) => {
     if (e.target === panelEl) closePanel();
   });
+  panelEl.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePanel();
+    }
+  });
 
   // Wire Enter key to open panel for selected block (from Sprint 2)
   // Modify the global keyboard handler to call openPanel instead of a stub
@@ -954,9 +1084,9 @@
     const helpContent = `
       <strong>Keyboard Shortcuts</strong>
       <ul style="margin: 8px 0; padding-left: 20px;">
-        <li>↑ ↓ : Navigate blocks</li>
-        <li><kbd>M</kbd> : Move mode</li>
-        <li><kbd>R</kbd> : Resize mode</li>
+        <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
+        <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
         <li><kbd>Enter</kbd> : Confirm action or open details</li>
         <li><kbd>Esc</kbd> : Cancel or close</li>
         <li><kbd>/</kbd> : Open search</li>
@@ -965,7 +1095,7 @@
         <li><kbd>O</kbd> : Check-out selected</li>
       </ul>
     `;
-    setFeedback(helpContent, "neutral");
+    setFeedback(helpContent, "neutral", { allowHtml: true });
   }
 
   async function performCheckIn() {
