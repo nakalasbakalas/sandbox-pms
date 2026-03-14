@@ -28,7 +28,7 @@
 ## Functional issues found
 - A redundant internal helper module existed for email-outbox delivery: `sandbox_pms_mvp/pms/services/notification_service.py` was only imported by `communication_service.py` and contained a single helper.
 - No broken guest/staff validation commands were reproduced locally; launch gate and regression tests passed.
-- GitHub Actions run `23090024976` reported `action_required`, but the Actions API returned no jobs and no failed-job logs at inspection time, so no remote-only failure could be concretely attributed to repository code from this session.
+- GitHub Actions runs on this branch repeatedly reported `action_required`, but the Actions API returned no jobs and no failed-job logs at inspection time, so no remote-only failure could be concretely attributed to repository code from this session.
 
 ## Redundancy/duplication findings
 - Removed confirmed redundancy: `notification_service.py` duplicated a private email-delivery concern that only `communication_service.py` used.
@@ -60,7 +60,7 @@
 - Did not change database schema, migrations, payment logic, auth logic, or deployment behavior.
 
 ## Remaining recommended next steps
-1. Investigate why GitHub Actions run `23090024976` shows `action_required` while the API exposes zero jobs.
+1. Investigate why the latest GitHub Actions runs on this branch show `action_required` while the API exposes zero jobs.
 2. Audit and, where safe, narrow broad `except Exception` blocks in communications, iCal, and app route handlers.
 3. Evaluate whether the SMTP transport logic shared by communications and messaging should be centralized behind a common internal helper.
 4. Continue any larger cleanup in small subsystem-specific PRs instead of broad rewrites.

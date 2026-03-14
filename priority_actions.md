@@ -1,7 +1,7 @@
 # Priority Actions
 
 ## Immediate follow-ups
-1. Re-check GitHub Actions run `23090024976` directly in GitHub or via the API once job metadata is available, because it reported `action_required` without exposed job details.
+1. Re-check the latest GitHub Actions run on this branch directly in GitHub or via the API once job metadata is available, because repeated runs reported `action_required` without exposed job details.
 2. Keep future changes to booking, payment, auth, and staff operations scoped and test-backed because local baseline is currently green.
 
 ## Medium-priority improvements

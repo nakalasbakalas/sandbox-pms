@@ -23,8 +23,8 @@
 
 ## GitHub Actions observations
 - Run `23089741084`: in progress when first inspected; setup, dependency install, placeholder check, and public-surface check had already passed.
-- Run `23090024976`: concluded `action_required`, but the Actions API returned zero jobs and no failed-job logs at inspection time.
+- Runs `23090024976` and `23090077244`: both concluded `action_required`, but the Actions API returned zero jobs and no failed-job logs at inspection time.
 
 ## Remaining warnings / errors
 - No local validation failures remain after the applied cleanup.
-- Remote CI status for run `23090024976` remains unexplained from available job metadata and should be re-checked on GitHub.
+- Remote CI status for the latest branch runs remains unexplained from available job metadata and should be re-checked on GitHub.
