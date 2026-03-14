@@ -545,7 +545,10 @@ def complete_checkout(
             row.nightly_rate = None
             row.updated_by_user_id = actor_user_id
 
-    _handoff_room_to_housekeeping(reservation.assigned_room_id, business_date, actor_user_id=actor_user_id)
+    _handoff_room_to_housekeeping(
+        reservation.assigned_room_id, business_date,
+        actor_user_id=actor_user_id, reservation_id=reservation.id,
+    )
 
     reservation.current_status = "checked_out"
     reservation.checked_out_at = action_at
@@ -1018,7 +1021,13 @@ def _resolve_fee_decision(
     raise ValueError(f"{description} decision is required before continuing.")
 
 
-def _handoff_room_to_housekeeping(room_id: uuid.UUID, business_date: date, *, actor_user_id: uuid.UUID) -> None:
+def _handoff_room_to_housekeeping(
+    room_id: uuid.UUID,
+    business_date: date,
+    *,
+    actor_user_id: uuid.UUID,
+    reservation_id: uuid.UUID | None = None,
+) -> None:
     row = (
         db.session.execute(
             sa.select(InventoryDay)
@@ -1040,6 +1049,19 @@ def _handoff_room_to_housekeeping(room_id: uuid.UUID, business_date: date, *, ac
     row.housekeeping_status_id = dirty_status.id if dirty_status else row.housekeeping_status_id
     row.notes = "Awaiting housekeeping turnover after checkout"
     row.updated_by_user_id = actor_user_id
+
+    # Auto-create a departure turnover task
+    from .housekeeping_service import create_departure_turnover_task
+    try:
+        create_departure_turnover_task(
+            room_id,
+            business_date,
+            reservation_id=reservation_id,
+            actor_user_id=actor_user_id,
+            commit=False,
+        )
+    except Exception:  # noqa: BLE001
+        pass  # Best-effort — don't block checkout if task creation fails
 
 
 def _no_show_charge_amount(reservation: Reservation) -> Decimal:

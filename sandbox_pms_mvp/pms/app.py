@@ -186,17 +186,30 @@ from .services.front_desk_board_service import (
 from .services.housekeeping_service import (
     BlockRoomPayload,
     BulkHousekeepingPayload,
+    CreateTaskPayload,
     HousekeepingBoardFilters,
     MaintenanceFlagPayload,
     RoomNotePayload as HousekeepingRoomNotePayload,
     RoomStatusUpdatePayload,
+    TaskListFilters,
     add_room_note as add_housekeeping_room_note,
+    assign_housekeeping_task,
     bulk_update_housekeeping,
+    cancel_housekeeping_task,
+    complete_housekeeping_task,
+    create_housekeeping_task,
     get_housekeeping_room_detail,
+    inspect_housekeeping_task,
     list_housekeeping_board,
+    list_housekeeping_tasks,
     set_blocked_state,
     set_maintenance_flag,
+    start_housekeeping_task,
     update_housekeeping_status,
+)
+from .services.room_readiness_service import (
+    is_room_assignable,
+    room_readiness_board,
 )
 from .services.ical_service import (
     calendar_timezone,
@@ -1980,12 +1993,14 @@ def register_routes(app: Flask) -> None:
             mobile=request.args.get("view") == "mobile",
         )
         board = list_housekeeping_board(filters, actor_user=user)
+        tasks = list_housekeeping_tasks(TaskListFilters(business_date=target_date))
         return render_template(
             "housekeeping_board.html",
             board=board,
+            tasks=tasks,
             filters=filters,
             room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
-            housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
+            housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service", "cleaning_in_progress"],
             room_note_types=ROOM_NOTE_TYPES,
             can_manage_controls=user.primary_role in {"admin", "manager"},
         )
@@ -2117,6 +2132,211 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_housekeeping", date=business_date.isoformat(), view=request.form.get("view")))
+
+    # ------------------------------------------------------------------
+    # Housekeeping task management routes
+    # ------------------------------------------------------------------
+
+    @app.route("/staff/housekeeping/tasks")
+    def staff_housekeeping_tasks():
+        user = require_permission("housekeeping.view")
+        target_date = parse_request_date_arg("date", default=date.today())
+        filters = TaskListFilters(
+            business_date=target_date,
+            status=request.args.get("status", ""),
+            room_id=request.args.get("room_id", ""),
+            assigned_to_user_id=request.args.get("assigned_to_user_id", ""),
+            task_type=request.args.get("task_type", ""),
+            priority=request.args.get("priority", ""),
+        )
+        tasks = list_housekeeping_tasks(filters)
+        return jsonify({"tasks": tasks, "business_date": target_date.isoformat()})
+
+    @app.route("/staff/housekeeping/tasks", methods=["POST"])
+    def staff_housekeeping_task_create():
+        user = require_permission("housekeeping.task_manage")
+        try:
+            room_id = UUID(request.form["room_id"])
+            business_date = date.fromisoformat(request.form["business_date"])
+            assigned_to = request.form.get("assigned_to_user_id")
+            due_at_raw = request.form.get("due_at")
+            task = create_housekeeping_task(
+                CreateTaskPayload(
+                    room_id=room_id,
+                    business_date=business_date,
+                    task_type=request.form.get("task_type", "checkout_clean"),
+                    priority=request.form.get("priority", "normal"),
+                    notes=request.form.get("notes"),
+                    assigned_to_user_id=UUID(assigned_to) if assigned_to else None,
+                    reservation_id=UUID(request.form["reservation_id"]) if request.form.get("reservation_id") else None,
+                    due_at=datetime.fromisoformat(due_at_raw) if due_at_raw else None,
+                ),
+                actor_user_id=user.id,
+            )
+            flash("Housekeeping task created.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping", date=request.form.get("business_date", date.today().isoformat())))
+
+    @app.route("/staff/housekeeping/tasks/<task_id>/assign", methods=["POST"])
+    def staff_housekeeping_task_assign(task_id):
+        user = require_permission("housekeeping.task_manage")
+        try:
+            assigned_to = UUID(request.form["assigned_to_user_id"])
+            assign_housekeeping_task(UUID(task_id), assigned_to_user_id=assigned_to, actor_user_id=user.id)
+            flash("Task assigned.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
+
+    @app.route("/staff/housekeeping/tasks/<task_id>/start", methods=["POST"])
+    def staff_housekeeping_task_start(task_id):
+        user = require_permission("housekeeping.task_manage")
+        try:
+            start_housekeeping_task(UUID(task_id), actor_user_id=user.id)
+            flash("Task started — room set to cleaning in progress.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
+
+    @app.route("/staff/housekeeping/tasks/<task_id>/complete", methods=["POST"])
+    def staff_housekeeping_task_complete(task_id):
+        user = require_permission("housekeeping.task_manage")
+        try:
+            complete_housekeeping_task(UUID(task_id), actor_user_id=user.id, notes=request.form.get("notes"))
+            flash("Task completed — room marked clean.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
+
+    @app.route("/staff/housekeeping/tasks/<task_id>/inspect", methods=["POST"])
+    def staff_housekeeping_task_inspect(task_id):
+        user = require_permission("housekeeping.task_manage")
+        try:
+            inspect_housekeeping_task(UUID(task_id), actor_user_id=user.id, notes=request.form.get("notes"))
+            flash("Inspection passed — room ready for assignment.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
+
+    @app.route("/staff/housekeeping/tasks/<task_id>/cancel", methods=["POST"])
+    def staff_housekeeping_task_cancel(task_id):
+        user = require_permission("housekeeping.task_manage")
+        try:
+            cancel_housekeeping_task(UUID(task_id), actor_user_id=user.id, reason=request.form.get("reason"))
+            flash("Task cancelled.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
+
+    # ------------------------------------------------------------------
+    # Room readiness API
+    # ------------------------------------------------------------------
+
+    @app.route("/staff/api/room-readiness")
+    def staff_api_room_readiness():
+        """JSON endpoint returning readiness state of all rooms for a given date."""
+        require_permission("reservation.view")
+        target_date = parse_request_date_arg("date", default=date.today())
+        board = room_readiness_board(target_date)
+        return jsonify({
+            "business_date": target_date.isoformat(),
+            "rooms": [
+                {
+                    "room_id": str(r.room_id),
+                    "room_number": r.room_number,
+                    "room_type_code": r.room_type_code,
+                    "floor_number": r.floor_number,
+                    "is_ready": r.is_ready,
+                    "label": r.label,
+                    "reason": r.reason,
+                    "housekeeping_status_code": r.housekeeping_status_code,
+                    "availability_status": r.availability_status,
+                    "is_blocked": r.is_blocked,
+                    "is_maintenance": r.is_maintenance,
+                    "has_active_task": r.has_active_task,
+                    "active_task_status": r.active_task_status,
+                    "reservation_code": r.reservation_code,
+                }
+                for r in board
+            ],
+        })
+
+    @app.route("/staff/api/room-readiness/<room_id>")
+    def staff_api_room_readiness_single(room_id):
+        """JSON endpoint returning readiness state of a single room."""
+        require_permission("reservation.view")
+        target_date = parse_request_date_arg("date", default=date.today())
+        try:
+            r = is_room_assignable(UUID(room_id), target_date)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 404
+        return jsonify({
+            "room_id": str(r.room_id),
+            "room_number": r.room_number,
+            "room_type_code": r.room_type_code,
+            "floor_number": r.floor_number,
+            "is_ready": r.is_ready,
+            "label": r.label,
+            "reason": r.reason,
+            "housekeeping_status_code": r.housekeeping_status_code,
+            "availability_status": r.availability_status,
+            "is_blocked": r.is_blocked,
+            "is_maintenance": r.is_maintenance,
+            "has_active_task": r.has_active_task,
+            "active_task_status": r.active_task_status,
+            "reservation_code": r.reservation_code,
+        })
+
+    # ------------------------------------------------------------------
+    # Quick actions for room status changes
+    # ------------------------------------------------------------------
+
+    @app.route("/staff/housekeeping/quick-action", methods=["POST"])
+    def staff_housekeeping_quick_action():
+        """Compact front-desk / supervisor quick actions for room status changes."""
+        user = require_permission("housekeeping.status_change")
+        action = request.form.get("action", "")
+        room_id = UUID(request.form["room_id"])
+        business_date = date.fromisoformat(request.form.get("business_date", date.today().isoformat()))
+        try:
+            if action == "mark_dirty":
+                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="dirty"), actor_user_id=user.id)
+                flash("Room marked dirty.", "success")
+            elif action == "mark_cleaning":
+                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="cleaning_in_progress"), actor_user_id=user.id)
+                flash("Room marked cleaning in progress.", "success")
+            elif action == "mark_clean":
+                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="clean"), actor_user_id=user.id)
+                flash("Room marked clean.", "success")
+            elif action == "mark_inspected":
+                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="inspected"), actor_user_id=user.id)
+                flash("Room marked inspected / ready.", "success")
+            elif action == "block_room":
+                reason = request.form.get("reason", "")
+                set_blocked_state(room_id, business_date=business_date, payload=BlockRoomPayload(blocked=True, reason=reason or "Blocked via quick action"), actor_user_id=user.id)
+                flash("Room blocked.", "success")
+            elif action == "unblock_room":
+                set_blocked_state(room_id, business_date=business_date, payload=BlockRoomPayload(blocked=False), actor_user_id=user.id)
+                flash("Room unblocked.", "success")
+            elif action == "maintenance_on":
+                note = request.form.get("note", "")
+                set_maintenance_flag(room_id, business_date=business_date, payload=MaintenanceFlagPayload(enabled=True, note=note or "Maintenance issue via quick action"), actor_user_id=user.id)
+                flash("Maintenance flag set.", "success")
+            elif action == "maintenance_off":
+                set_maintenance_flag(room_id, business_date=business_date, payload=MaintenanceFlagPayload(enabled=False), actor_user_id=user.id)
+                flash("Maintenance flag cleared.", "success")
+            elif action == "rush_clean":
+                create_housekeeping_task(
+                    CreateTaskPayload(room_id=room_id, business_date=business_date, task_type="rush_clean", priority="urgent", notes=request.form.get("notes", "Urgent clean requested")),
+                    actor_user_id=user.id,
+                )
+                flash("Rush clean task created.", "success")
+            else:
+                flash("Unknown quick action.", "error")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(request.form.get("back_url") or url_for("staff_housekeeping", date=business_date.isoformat()))
 
     @app.route("/staff/front-desk")
     def staff_front_desk():
@@ -2823,6 +3043,7 @@ def register_routes(app: Flask) -> None:
                     sa.or_(
                         ActivityLog.event_type.ilike("front_desk.board_%"),
                         ActivityLog.event_type.ilike("reservation.%"),
+                        ActivityLog.event_type.ilike("housekeeping.%"),
                     )
                 )
                 if last_timestamp:
