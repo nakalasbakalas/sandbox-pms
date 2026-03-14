@@ -1,0 +1,164 @@
+{% extends 'base.html' %}
+{% block title %}Pre-Check-In | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="public-page" style="max-width:640px;margin:0 auto;padding:1.5rem 1rem;">
+
+  {% if error %}
+  <div class="card" style="padding:2rem;text-align:center;">
+    <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Pre-Check-In</h1>
+    <p class="text-danger" style="margin-bottom:1rem;">{{ error }}</p>
+    <a href="/" class="btn btn-primary">Return to Homepage</a>
+  </div>
+  {% elif ctx %}
+  {% set pc = ctx.pre_checkin %}
+  {% set res = ctx.reservation %}
+  {% set guest = ctx.guest %}
+  {% set docs = ctx.documents %}
+
+  <div class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h1 style="font-size:1.5rem;margin-bottom:0.5rem;">🏨 Pre-Check-In</h1>
+    <p class="muted" style="margin-bottom:1rem;">Complete your arrival information before you arrive. This saves time at reception.</p>
+    <div class="detail-pills" style="gap:0.5rem;display:flex;flex-wrap:wrap;margin-bottom:1rem;">
+      <span class="detail-pill">Booking: <strong>{{ ctx.reservation_code }}</strong></span>
+      <span class="detail-pill">Check-in: <strong>{{ ctx.check_in_date }}</strong></span>
+      <span class="detail-pill">Check-out: <strong>{{ ctx.check_out_date }}</strong></span>
+      <span class="detail-pill">Room: <strong>{{ ctx.room_type_name }}</strong></span>
+      <span class="detail-pill">Guests: <strong>{{ ctx.adults }} adults{% if ctx.children %}, {{ ctx.children }} children{% endif %}</strong></span>
+    </div>
+    {% if pc.status == 'submitted' %}
+    <div style="background:#d4edda;padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">
+      ✅ Your pre-check-in has been submitted. Thank you!
+    </div>
+    {% endif %}
+  </div>
+
+  {% if saved is defined and saved %}
+  <div style="background:#d4edda;padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">
+    ✅ Your information has been saved. You can continue or submit when ready.
+  </div>
+  {% endif %}
+  {% if uploaded is defined and uploaded %}
+  <div style="background:#d4edda;padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;">
+    ✅ Document uploaded successfully.
+  </div>
+  {% endif %}
+
+  {# ── Guest Information Form ── #}
+  <form method="POST" action="/pre-checkin/{{ pc.token }}/save" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;">👤 Guest Information</h2>
+
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Full Name *</label>
+      <input type="text" name="primary_contact_name" value="{{ pc.primary_contact_name or (guest.full_name if guest else '') }}" required maxlength="255" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Phone *</label>
+      <input type="tel" name="primary_contact_phone" value="{{ pc.primary_contact_phone or (guest.phone if guest else '') }}" required maxlength="60" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Email</label>
+      <input type="email" name="primary_contact_email" value="{{ pc.primary_contact_email or (guest.email if guest else '') }}" maxlength="255" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Nationality</label>
+      <input type="text" name="nationality" value="{{ pc.nationality or (guest.nationality if guest else '') }}" maxlength="80" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Number of Guests</label>
+      <input type="number" name="number_of_occupants" value="{{ pc.number_of_occupants or ctx.adults }}" min="1" max="20" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;margin-top:1.5rem;">🕐 Arrival Details</h2>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Estimated Arrival Time</label>
+      <input type="time" name="eta" value="{{ pc.eta or '' }}" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Special Requests</label>
+      <textarea name="special_requests" rows="3" maxlength="2000" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;">{{ pc.special_requests or res.special_requests or '' }}</textarea>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Notes for Staff</label>
+      <textarea name="notes_for_staff" rows="2" maxlength="2000" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;">{{ pc.notes_for_staff or '' }}</textarea>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Vehicle Registration (if applicable)</label>
+      <input type="text" name="vehicle_registration" value="{{ pc.vehicle_registration or '' }}" maxlength="80" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+
+    {# ── Occupant Details ── #}
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;margin-top:1.5rem;">👥 Additional Occupants</h2>
+    <p class="muted" style="margin-bottom:0.75rem;font-size:0.9rem;">If travelling with others, please list their names.</p>
+    {% set occ_list = pc.occupant_details or [] %}
+    {% for i in range(4) %}
+    <div style="margin-bottom:0.5rem;">
+      <input type="text" name="occupant_name_{{ i }}" value="{{ occ_list[i].name if i < occ_list|length else '' }}" placeholder="Occupant {{ i + 1 }} name" maxlength="255" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;" />
+    </div>
+    {% endfor %}
+
+    {# ── Acknowledgment ── #}
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;margin-top:1.5rem;">✍️ Registration Acknowledgment</h2>
+    <div style="background:#f8f9fa;padding:1rem;border-radius:6px;margin-bottom:1rem;font-size:0.9rem;">
+      <p>By submitting this form, I confirm that the information provided is accurate. I agree to abide by the hotel's house rules and policies during my stay.</p>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+        <input type="checkbox" name="acknowledgment_accepted" {% if pc.acknowledgment_accepted %}checked{% endif %} />
+        <span>I acknowledge and agree to the above terms</span>
+      </label>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Typed Signature (Full Name)</label>
+      <input type="text" name="acknowledgment_name" value="{{ pc.acknowledgment_name or '' }}" maxlength="255" placeholder="Type your full name as signature" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;font-style:italic;" />
+    </div>
+
+    <div style="display:flex;gap:0.75rem;margin-top:1.5rem;">
+      <button type="submit" name="action" value="save" class="btn btn-secondary" style="flex:1;">Save Progress</button>
+      <button type="submit" name="action" value="submit" class="btn btn-primary" style="flex:1;">Submit Pre-Check-In</button>
+    </div>
+  </form>
+
+  {# ── Document Upload ── #}
+  <form method="POST" action="/pre-checkin/{{ pc.token }}/upload" enctype="multipart/form-data" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;">📄 Identity Document Upload</h2>
+    <p class="muted" style="margin-bottom:1rem;font-size:0.9rem;">Please upload a clear photo or scan of your ID document (passport, national ID, or driving license). Accepted formats: JPG, PNG, PDF (max 10 MB).</p>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">Document Type</label>
+      <select name="document_type" style="width:100%;padding:0.5rem;border:1px solid #ccc;border-radius:4px;">
+        <option value="passport">Passport</option>
+        <option value="national_id">National ID</option>
+        <option value="driving_license">Driving License</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:block;font-weight:600;margin-bottom:0.25rem;">File</label>
+      <input type="file" name="document_file" accept=".jpg,.jpeg,.png,.webp,.pdf" required style="width:100%;" />
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%;">Upload Document</button>
+  </form>
+
+  {# ── Uploaded Documents ── #}
+  {% if docs %}
+  <div class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.2rem;margin-bottom:1rem;">📋 Uploaded Documents</h2>
+    {% for doc in docs %}
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid #eee;">
+      <div>
+        <strong>{{ doc.document_type|replace('_',' ')|title }}</strong>
+        <span class="muted" style="font-size:0.85rem;margin-left:0.5rem;">{{ doc.original_filename }}</span>
+      </div>
+      <span style="font-size:0.85rem;padding:0.25rem 0.5rem;border-radius:4px;
+        {% if doc.verification_status == 'verified' %}background:#d4edda;color:#155724;
+        {% elif doc.verification_status == 'rejected' %}background:#f8d7da;color:#721c24;
+        {% else %}background:#fff3cd;color:#856404;{% endif %}">
+        {{ doc.verification_status|title }}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>
+{% endblock %}

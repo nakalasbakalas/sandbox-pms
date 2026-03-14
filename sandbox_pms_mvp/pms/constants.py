@@ -188,6 +188,41 @@ CANCELLATION_REQUEST_STATUSES = ["submitted", "auto_processed", "needs_review", 
 MODIFICATION_REQUEST_STATUSES = ["submitted", "reviewed", "approved", "declined"]
 EMAIL_OUTBOX_STATUSES = ["pending", "sent", "failed"]
 
+PRE_CHECKIN_STATUSES = [
+    "not_sent",
+    "sent",
+    "opened",
+    "in_progress",
+    "submitted",
+    "verified",
+    "incomplete",
+    "rejected",
+    "expired",
+]
+
+ARRIVAL_READINESS_STATES = [
+    "awaiting_guest",
+    "docs_missing",
+    "id_uploaded",
+    "signature_missing",
+    "payment_pending",
+    "ready_for_arrival",
+    "checked_at_desk",
+]
+
+DOCUMENT_TYPES = [
+    "passport",
+    "national_id",
+    "driving_license",
+    "other",
+]
+
+DOCUMENT_VERIFICATION_STATUSES = [
+    "pending",
+    "verified",
+    "rejected",
+]
+
 PERMISSION_SEEDS = [
     ("reservation.view", "View reservations", "Reservations", "reservation"),
     ("reservation.create", "Create reservations", "Reservations", "reservation"),

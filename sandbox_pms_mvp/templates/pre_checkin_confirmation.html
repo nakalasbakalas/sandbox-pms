@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+{% block title %}Pre-Check-In Complete | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="public-page" style="max-width:640px;margin:0 auto;padding:2rem 1rem;text-align:center;">
+  <div class="card" style="padding:2rem;">
+    <div style="font-size:3rem;margin-bottom:1rem;">✅</div>
+    <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Pre-Check-In Complete</h1>
+    <p style="margin-bottom:1.5rem;color:#555;">
+      Thank you for completing your pre-check-in for reservation
+      <strong>{{ reservation.reservation_code }}</strong>.
+    </p>
+    <div style="background:#f8f9fa;padding:1rem;border-radius:8px;margin-bottom:1.5rem;text-align:left;">
+      <p style="margin-bottom:0.5rem;"><strong>Check-in Date:</strong> {{ reservation.check_in_date }}</p>
+      <p style="margin-bottom:0.5rem;"><strong>Check-out Date:</strong> {{ reservation.check_out_date }}</p>
+      {% if pc.eta %}
+      <p style="margin-bottom:0.5rem;"><strong>Expected Arrival:</strong> {{ pc.eta }}</p>
+      {% endif %}
+      {% if pc.number_of_occupants %}
+      <p style="margin-bottom:0;"><strong>Number of Guests:</strong> {{ pc.number_of_occupants }}</p>
+      {% endif %}
+    </div>
+    <p class="muted" style="font-size:0.9rem;">
+      Our front desk team will review your information. When you arrive, your check-in will be faster since your details are already on file.
+    </p>
+  </div>
+</div>
+{% endblock %}

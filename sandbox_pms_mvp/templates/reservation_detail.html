@@ -33,6 +33,18 @@
     {% if detail.duplicate_suspected %}<span class="pill subtle">Duplicate suspicion</span>{% endif %}
     {% if detail.pending_cancellation_requests %}<span class="pill subtle">Cancellation request pending</span>{% endif %}
     {% if detail.pending_modification_requests %}<span class="pill subtle">Modification request pending</span>{% endif %}
+    {% set _pc = detail.reservation.pre_checkin|first if detail.reservation.pre_checkin else None %}
+    {% if _pc %}
+    <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=detail.reservation.id) }}" class="pill subtle" style="text-decoration:none;
+      {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}background:#d4edda;color:#155724;
+      {% elif _pc.readiness == 'docs_missing' or _pc.readiness == 'signature_missing' %}background:#fff3cd;color:#856404;
+      {% elif _pc.readiness == 'payment_pending' %}background:#f8d7da;color:#721c24;
+      {% else %}background:#e8f4fd;color:#004085;{% endif %}">Pre-check-in: {{ _pc.readiness|replace('_',' ')|title }}</a>
+    {% elif detail.reservation.current_status in ('confirmed', 'tentative') %}
+    <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=detail.reservation.id) }}" style="display:inline;">
+      <button type="submit" class="pill subtle" style="background:#e8f4fd;color:#004085;border:none;cursor:pointer;">+ Send Pre-Check-In</button>
+    </form>
+    {% endif %}
   </div>
 </section>
 

@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% block title %}Pre-Check-In Details — {{ reservation.reservation_code }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="staff-page" style="max-width:900px;margin:0 auto;padding:1.5rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+    <div>
+      <a href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}" style="font-size:0.9rem;">&larr; Back to Reservation</a>
+      <h1 style="font-size:1.4rem;margin:0.25rem 0 0;">Pre-Check-In: {{ reservation.reservation_code }}</h1>
+    </div>
+    <div style="display:flex;gap:0.5rem;">
+      {% if pc %}
+      <span style="padding:0.35rem 0.75rem;border-radius:6px;font-size:0.85rem;font-weight:600;
+        {% if pc.status == 'verified' %}background:#d4edda;color:#155724;
+        {% elif pc.status == 'submitted' %}background:#cce5ff;color:#004085;
+        {% elif pc.status == 'in_progress' %}background:#fff3cd;color:#856404;
+        {% elif pc.status == 'rejected' %}background:#f8d7da;color:#721c24;
+        {% elif pc.status == 'expired' %}background:#e2e3e5;color:#383d41;
+        {% else %}background:#f0f0f0;color:#555;{% endif %}">
+        {{ pc.status|replace('_',' ')|title }}
+      </span>
+      <span style="padding:0.35rem 0.75rem;border-radius:6px;font-size:0.85rem;
+        {% if pc.readiness == 'ready_for_arrival' %}background:#d4edda;color:#155724;
+        {% elif pc.readiness == 'checked_at_desk' %}background:#d4edda;color:#155724;
+        {% elif pc.readiness == 'docs_missing' or pc.readiness == 'signature_missing' %}background:#fff3cd;color:#856404;
+        {% elif pc.readiness == 'payment_pending' %}background:#f8d7da;color:#721c24;
+        {% else %}background:#f0f0f0;color:#555;{% endif %}">
+        {{ pc.readiness|replace('_',' ')|title }}
+      </span>
+      {% else %}
+      <span style="padding:0.35rem 0.75rem;border-radius:6px;font-size:0.85rem;background:#f0f0f0;color:#555;">Not Created</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Generate / Resend Link ── #}
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">🔗 Pre-Check-In Link</h2>
+    {% if pc and pre_checkin_link %}
+    <div style="background:#f8f9fa;padding:0.75rem;border-radius:6px;margin-bottom:0.75rem;word-break:break-all;">
+      <code style="font-size:0.85rem;">{{ pre_checkin_link }}</code>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+      <form method="POST" action="{{ url_for('staff_pre_checkin_resend', reservation_id=reservation.id) }}">
+        <button type="submit" class="btn btn-secondary btn-sm">Regenerate & Copy Link</button>
+      </form>
+      {% if pc.expires_at %}
+      <span class="muted" style="font-size:0.85rem;align-self:center;">Expires: {{ pc.expires_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="muted" style="margin-bottom:0.75rem;">No pre-check-in link has been generated yet.</p>
+    <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=reservation.id) }}">
+      <button type="submit" class="btn btn-primary btn-sm">Generate Pre-Check-In Link</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if pc %}
+  {# ── Guest Submitted Information ── #}
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">👤 Guest Submitted Information</h2>
+    <table style="width:100%;font-size:0.9rem;">
+      <tr><td style="padding:0.35rem 0;font-weight:600;width:40%;">Full Name</td><td>{{ pc.primary_contact_name or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Phone</td><td>{{ pc.primary_contact_phone or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Email</td><td>{{ pc.primary_contact_email or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Nationality</td><td>{{ pc.nationality or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Number of Occupants</td><td>{{ pc.number_of_occupants or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">ETA</td><td>{{ pc.eta or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Special Requests</td><td>{{ pc.special_requests or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Notes for Staff</td><td>{{ pc.notes_for_staff or '—' }}</td></tr>
+      <tr><td style="padding:0.35rem 0;font-weight:600;">Vehicle Registration</td><td>{{ pc.vehicle_registration or '—' }}</td></tr>
+    </table>
+
+    {% if pc.occupant_details %}
+    <h3 style="font-size:1rem;margin-top:1rem;margin-bottom:0.5rem;">Additional Occupants</h3>
+    <ul style="font-size:0.9rem;margin:0;padding-left:1.25rem;">
+      {% for occ in pc.occupant_details %}
+      <li>{{ occ.name }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    <h3 style="font-size:1rem;margin-top:1rem;margin-bottom:0.5rem;">Acknowledgment</h3>
+    {% if pc.acknowledgment_accepted %}
+    <p style="font-size:0.9rem;">✅ Accepted by <strong>{{ pc.acknowledgment_name or 'Guest' }}</strong>
+      {% if pc.acknowledgment_at %} on {{ pc.acknowledgment_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}
+    </p>
+    {% else %}
+    <p style="font-size:0.9rem;color:#856404;">⚠️ Not yet accepted</p>
+    {% endif %}
+
+    <h3 style="font-size:1rem;margin-top:1rem;margin-bottom:0.5rem;">Timeline</h3>
+    <table style="width:100%;font-size:0.85rem;color:#555;">
+      <tr><td style="padding:0.25rem 0;">Link Sent</td><td>{{ pc.link_sent_at.strftime('%Y-%m-%d %H:%M') if pc.link_sent_at else '—' }}</td></tr>
+      <tr><td style="padding:0.25rem 0;">Opened</td><td>{{ pc.link_opened_at.strftime('%Y-%m-%d %H:%M') if pc.link_opened_at else '—' }}</td></tr>
+      <tr><td style="padding:0.25rem 0;">Started</td><td>{{ pc.started_at.strftime('%Y-%m-%d %H:%M') if pc.started_at else '—' }}</td></tr>
+      <tr><td style="padding:0.25rem 0;">Completed</td><td>{{ pc.completed_at.strftime('%Y-%m-%d %H:%M') if pc.completed_at else '—' }}</td></tr>
+    </table>
+  </div>
+
+  {# ── Documents ── #}
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">📄 Documents ({{ documents|length }})</h2>
+    {% if documents %}
+    {% for doc in documents %}
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0;border-bottom:1px solid #eee;">
+      <div>
+        <strong>{{ doc.document_type|replace('_',' ')|title }}</strong>
+        <span class="muted" style="font-size:0.85rem;">— {{ doc.original_filename }}</span>
+        <br><span class="muted" style="font-size:0.8rem;">Uploaded {{ doc.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <span style="padding:0.25rem 0.5rem;border-radius:4px;font-size:0.8rem;
+          {% if doc.verification_status == 'verified' %}background:#d4edda;color:#155724;
+          {% elif doc.verification_status == 'rejected' %}background:#f8d7da;color:#721c24;
+          {% else %}background:#fff3cd;color:#856404;{% endif %}">
+          {{ doc.verification_status|title }}
+        </span>
+        <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
+        {% if doc.verification_status == 'pending' %}
+        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          <input type="hidden" name="verification_status" value="verified" />
+          <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
+        </form>
+        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          <input type="hidden" name="verification_status" value="rejected" />
+          <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No documents uploaded yet.</p>
+    {% endif %}
+  </div>
+
+  {# ── Staff Actions ── #}
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">⚡ Staff Actions</h2>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
+      {% if pc.status == 'submitted' %}
+      <form method="POST" action="{{ url_for('staff_pre_checkin_verify', reservation_id=reservation.id) }}">
+        <button type="submit" class="btn btn-primary">✅ Mark Verified (Desk Complete)</button>
+      </form>
+      <form method="POST" action="{{ url_for('staff_pre_checkin_reject', reservation_id=reservation.id) }}">
+        <input type="hidden" name="reason" value="Staff rejected during desk review" />
+        <button type="submit" class="btn btn-secondary" style="color:#721c24;">❌ Reject Pre-Check-In</button>
+      </form>
+      {% elif pc.status == 'verified' %}
+      <p style="color:#155724;">✅ Pre-check-in has been verified. Guest is ready for check-in.</p>
+      {% else %}
+      <p class="muted">Pre-check-in has not been submitted yet. Current status: {{ pc.status|replace('_',' ')|title }}</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
