@@ -273,7 +273,7 @@ from .services.pre_checkin_service import (
     validate_token_access,
     verify_document,
 )
-from .services.reporting_service import build_manager_dashboard
+from .services.reporting_service import build_daily_report, build_front_desk_dashboard, build_manager_dashboard
 from .services.reservation_service import ReservationCreatePayload, create_reservation
 from .services.staff_reservations_service import (
     GuestUpdatePayload,
@@ -1769,6 +1769,52 @@ def register_routes(app: Flask) -> None:
             can_audit=user.has_permission("audit.view"),
         )
 
+    DAILY_REPORT_TYPES = {
+        "arrivals": ("reservation.view", "Arrivals Report"),
+        "departures": ("reservation.view", "Departures Report"),
+        "room_status": ("housekeeping.view", "Room Status Report"),
+        "payment_due": ("folio.view", "Payment Due Report"),
+        "occupancy": ("reports.view", "Occupancy Report"),
+        "booking_source": ("reports.view", "Booking Source Report"),
+        "no_show_cancellation": ("reports.view", "No-show & Cancellation Report"),
+    }
+
+    @app.route("/staff/daily-reports/<report_type>")
+    def staff_daily_report(report_type):
+        if report_type not in DAILY_REPORT_TYPES:
+            abort(404)
+        permission_code, report_title = DAILY_REPORT_TYPES[report_type]
+        user = require_permission(permission_code)
+        target_date = parse_request_date_arg("date", default=date.today())
+        preset, date_from, date_to = resolve_report_date_range(
+            preset=(request.args.get("preset") or "next_7_days").strip(),
+            requested_start=parse_optional_date(request.args.get("date_from")),
+            requested_end=parse_optional_date(request.args.get("date_to")),
+        )
+        report = build_daily_report(
+            report_type=report_type,
+            business_date=target_date,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        return render_template(
+            "staff_daily_report.html",
+            report=report,
+            report_type=report_type,
+            report_title=report_title,
+            target_date=target_date,
+            filters={
+                "preset": preset,
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+            },
+            report_presets=report_date_presets(),
+            report_range_label=format_report_date_range(date_from, date_to),
+            can_reservation=user.has_permission("reservation.view"),
+            can_folio=user.has_permission("folio.view"),
+            can_housekeeping=user.has_permission("housekeeping.view"),
+        )
+
     @app.route("/staff/admin/audit", endpoint="staff_admin_audit")
     @app.route("/staff/audit")
     def staff_audit():
@@ -1816,21 +1862,30 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/staff")
     def staff_dashboard():
-        require_permission("reservation.view")
+        user = require_permission("reservation.view")
         today = date.today()
         queue_entries = (
             ReservationReviewQueue.query.order_by(ReservationReviewQueue.created_at.desc()).limit(10).all()
         )
         notifications = StaffNotification.query.filter_by(status="new").order_by(StaffNotification.created_at.desc()).limit(10).all()
         pending_emails = EmailOutbox.query.filter(EmailOutbox.status.in_(["pending", "failed"])).count()
+        dashboard = build_front_desk_dashboard(
+            business_date=today,
+            include_housekeeping=user.has_permission("housekeeping.view"),
+            include_financials=user.has_permission("folio.view"),
+        )
         return render_template(
             "staff_dashboard.html",
+            dashboard=dashboard,
             queue_entries=queue_entries,
             notifications=notifications,
             pending_emails=pending_emails,
-            arrivals_count=len(list_arrivals(arrival_date=today)),
-            departures_count=len(list_departures(departure_date=today)),
-            in_house_count=len(list_in_house(business_date=today)),
+            arrivals_count=dashboard["arrivals"]["count"],
+            departures_count=dashboard["departures"]["count"],
+            in_house_count=dashboard["in_house"]["count"],
+            can_housekeeping=user.has_permission("housekeeping.view"),
+            can_folio=user.has_permission("folio.view"),
+            can_reports=user.has_permission("reports.view"),
         )
 
     @app.route("/staff/notifications/<uuid:notification_id>/read", methods=["POST"])

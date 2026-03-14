@@ -1,0 +1,413 @@
+{% extends 'base.html' %}
+{% block title %}{{ report_title }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card report-hero">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Daily Report</p>
+      <h1>{{ report_title }}</h1>
+      <p class="lead">{{ report_range_label }}</p>
+    </div>
+    <div class="report-context">
+      <span class="pill subtle">{{ target_date.strftime('%d %b %Y') }}</span>
+      <a class="button secondary tiny" href="{{ url_for('staff_dashboard') }}">← Dashboard</a>
+      {% if can('reports.view') %}
+        <a class="button secondary tiny" href="{{ url_for('staff_reports') }}">Manager reports</a>
+      {% endif %}
+    </div>
+  </div>
+  <form method="get" class="toolbar report-toolbar">
+    {% if report_type in ('arrivals', 'departures', 'room_status') %}
+      <label>
+        <span>Date</span>
+        <input type="date" name="date" value="{{ target_date.isoformat() }}">
+      </label>
+    {% else %}
+      <label>
+        <span>Range preset</span>
+        <select name="preset" id="preset-select">
+          {% for preset in report_presets %}
+            <option value="{{ preset.value }}" {% if filters.preset == preset.value %}selected{% endif %}>{{ preset.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>From</span>
+        <input type="date" name="date_from" value="{{ filters.date_from }}">
+      </label>
+      <label>
+        <span>To</span>
+        <input type="date" name="date_to" value="{{ filters.date_to }}">
+      </label>
+    {% endif %}
+    <button class="button" type="submit">Apply</button>
+  </form>
+</section>
+
+{% if report_type == 'arrivals' %}
+  {% set data = report.data %}
+  <section class="grid four metric-grid">
+    <article class="metric-card report-metric"><small>Total arrivals</small><strong>{{ data.count }}</strong></article>
+    <article class="metric-card report-metric warning"><small>No room assigned</small><strong>{{ data.unassigned_count }}</strong></article>
+    <article class="metric-card report-metric warning"><small>Room not ready</small><strong>{{ data.not_ready_count }}</strong></article>
+    <article class="metric-card report-metric"><small>Deposit missing</small><strong>{{ data.deposit_missing_count }}</strong></article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Guest</th>
+              <th>Room</th>
+              <th>Room type</th>
+              <th>Readiness</th>
+              <th>Deposit</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr>
+                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=target_date.isoformat(), back=url_for('staff_daily_report', report_type='arrivals', date=target_date.isoformat())) }}">{{ item.reservation_code }}</a></td>
+                <td>{{ item.guest_name }}</td>
+                <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
+                <td>{{ item.room_type_code }}</td>
+                <td><span class="status {{ item.room_readiness_label }}">{{ item.room_readiness_label|replace('_', ' ') }}</span></td>
+                <td><span class="status {{ item.payment_summary.deposit_state }}">{{ item.payment_summary.deposit_state|replace('_', ' ') }}</span></td>
+                <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="card inset"><p class="empty-state">No arrivals for this date.</p></section>
+  {% endif %}
+
+{% elif report_type == 'departures' %}
+  {% set data = report.data %}
+  <section class="grid three metric-grid">
+    <article class="metric-card report-metric"><small>Total departures</small><strong>{{ data.count }}</strong></article>
+    <article class="metric-card report-metric warning"><small>Outstanding balance</small><strong>{{ data.outstanding_balance_count }}</strong></article>
+    <article class="metric-card report-metric"><small>Not checked out</small><strong>{{ data.pending_checkout_count }}</strong></article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Guest</th>
+              <th>Room</th>
+              <th>Room type</th>
+              <th>Balance due</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr>
+                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=target_date.isoformat(), back=url_for('staff_daily_report', report_type='departures', date=target_date.isoformat())) }}">{{ item.reservation_code }}</a></td>
+                <td>{{ item.guest_name }}</td>
+                <td>{{ item.assigned_room_number or '-' }}</td>
+                <td>{{ item.room_type_code }}</td>
+                <td>{{ item.payment_summary.balance_due | money }}</td>
+                <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="card inset"><p class="empty-state">No departures for this date.</p></section>
+  {% endif %}
+
+{% elif report_type == 'room_status' %}
+  {% set data = report.data %}
+  <section class="grid four metric-grid">
+    <article class="status-card"><span>Ready (sellable)</span><strong>{{ data.counts.sellable_ready }}</strong></article>
+    <article class="status-card"><span>Dirty</span><strong>{{ data.counts.dirty }}</strong></article>
+    <article class="status-card"><span>Clean</span><strong>{{ data.counts.clean }}</strong></article>
+    <article class="status-card"><span>Inspected</span><strong>{{ data.counts.inspected }}</strong></article>
+    <article class="status-card"><span>Blocked</span><strong>{{ data.counts.blocked }}</strong></article>
+    <article class="status-card"><span>Out of order</span><strong>{{ data.counts.out_of_order }}</strong></article>
+    <article class="status-card"><span>Maintenance</span><strong>{{ data.counts.maintenance }}</strong></article>
+    <article class="status-card"><span>Arrival risk</span><strong>{{ data.counts.arrival_risk }}</strong></article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="card-head">
+        <h2>All rooms</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Room</th>
+              <th>Type</th>
+              <th>HK status</th>
+              <th>Priority</th>
+              <th>State</th>
+              <th>Context</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr>
+                <td><a href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=target_date.isoformat(), back=url_for('staff_daily_report', report_type='room_status', date=target_date.isoformat())) }}">{{ item.room_number }}</a></td>
+                <td>{{ item.room_type_code }}</td>
+                <td><span class="status {{ item.housekeeping_status_code }}">{{ item.housekeeping_status_code|replace('_', ' ') }}</span></td>
+                <td><span class="status {{ item.priority }}">{{ item.priority_label }}</span></td>
+                <td>{{ item.operational_state }}</td>
+                <td>{{ item.priority_reason }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+{% elif report_type == 'payment_due' %}
+  {% set data = report.data %}
+  <section class="grid two metric-grid">
+    <article class="metric-card report-metric"><small>Open folios</small><strong>{{ data.count }}</strong></article>
+    <article class="metric-card report-metric danger"><small>Total balance due</small><strong>{{ data.total_balance_due | money }}</strong></article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Guest</th>
+              <th>Status</th>
+              <th>Arrival</th>
+              <th>Departure</th>
+              <th>Balance due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr>
+                {% if can_folio %}
+                  <td><a href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=url_for('staff_daily_report', report_type='payment_due', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                {% else %}
+                  <td>{{ item.reservation_code }}</td>
+                {% endif %}
+                <td>{{ item.guest_name }}</td>
+                <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+                <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
+                <td>{{ item.departure_date.strftime('%d %b %Y') }}</td>
+                <td>{{ item.payment_summary.balance_due | money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    <section class="card inset"><p class="empty-state">No outstanding balances in selected range.</p></section>
+  {% endif %}
+
+{% elif report_type == 'occupancy' %}
+  {% set data = report.data %}
+  <section class="grid four metric-grid">
+    <article class="metric-card report-metric accent"><small>Today's occupancy</small><strong>{{ '%.1f'|format(data.today.occupancy_percentage) }}%</strong></article>
+    <article class="metric-card report-metric"><small>Today occupied</small><strong>{{ data.today.occupied_rooms }} / {{ data.today.saleable_rooms }}</strong></article>
+    <article class="metric-card report-metric"><small>Range average</small><strong>{{ '%.1f'|format(data.average_occupancy_percentage) }}%</strong></article>
+    <article class="metric-card report-metric"><small>Range peak</small><strong>{{ '%.1f'|format(data.peak_occupancy_percentage) }}%</strong></article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="card-head"><h2>Daily breakdown</h2></div>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Occupied</th>
+              <th>Saleable</th>
+              <th>Occupancy %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in data["items"] %}
+              <tr{% if row.date == report.business_date %} class="highlight-row"{% endif %}>
+                <td>{{ row.date.strftime('%a %d %b %Y') }}</td>
+                <td>{{ row.occupied_rooms }}</td>
+                <td>{{ row.saleable_rooms }}</td>
+                <td>{{ '%.2f'|format(row.occupancy_percentage) }}%</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+{% elif report_type == 'booking_source' %}
+  {% set data = report.data %}
+  <section class="grid three metric-grid">
+    <article class="metric-card report-metric"><small>Public bookings</small><strong>{{ data.count }}</strong></article>
+    <article class="metric-card report-metric"><small>Campaign tagged</small><strong>{{ data.campaign_tagged_count }}</strong></article>
+    <article class="metric-card report-metric"><small>Direct / untagged</small><strong>{{ data.direct_or_unknown_count }}</strong></article>
+  </section>
+  <section class="grid two gap-lg">
+    <article class="card inset">
+      <div class="card-head"><h2>Top sources</h2></div>
+      {% if data.top_sources %}
+        <div class="report-summary-list">
+          {% for item in data.top_sources %}
+            <div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty-state">No public bookings in range.</p>
+      {% endif %}
+    </article>
+    <article class="card inset">
+      <div class="card-head"><h2>Top campaigns</h2></div>
+      {% if data.top_campaigns %}
+        <div class="report-summary-list">
+          {% for item in data.top_campaigns %}
+            <div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty-state">No campaign-tagged bookings in range.</p>
+      {% endif %}
+    </article>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="card-head"><h2>Recent bookings</h2></div>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Guest</th>
+              <th>Source</th>
+              <th>Campaign</th>
+              <th>Channel</th>
+              <th>Entry page</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr>
+                {% if can_reservation %}
+                  <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_daily_report', report_type='booking_source', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                {% else %}
+                  <td>{{ item.reservation_code }}</td>
+                {% endif %}
+                <td>{{ item.guest_name }}</td>
+                <td>{{ item.source_label }}</td>
+                <td>{{ item.utm_campaign or 'untagged' }}</td>
+                <td>{{ item.source_channel }}</td>
+                <td>{{ item.entry_page or '/' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+{% elif report_type == 'no_show_cancellation' %}
+  {% set cancellations = report.data.cancellations %}
+  {% set no_shows = report.data.no_shows %}
+  <section class="grid two metric-grid">
+    <article class="metric-card report-metric warning"><small>Cancellations</small><strong>{{ cancellations.count }}</strong></article>
+    <article class="metric-card report-metric warning"><small>No-shows</small><strong>{{ no_shows.count }}</strong></article>
+  </section>
+  <section class="grid two gap-lg">
+    <article class="card inset">
+      <div class="card-head"><h2>Cancellations</h2></div>
+      {% if cancellations["items"] %}
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Guest</th>
+                <th>Arrival</th>
+                <th>Source</th>
+                <th>Room type</th>
+                <th>Cancelled at</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in cancellations["items"] %}
+                <tr>
+                  {% if can_reservation %}
+                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_daily_report', report_type='no_show_cancellation', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                  {% else %}
+                    <td>{{ item.reservation_code }}</td>
+                  {% endif %}
+                  <td>{{ item.guest_name }}</td>
+                  <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
+                  <td>{{ item.source_channel }}</td>
+                  <td>{{ item.room_type_code }}</td>
+                  <td>{{ item.changed_at.strftime('%d %b %H:%M') if item.changed_at else '-' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">No cancellations in selected range.</p>
+      {% endif %}
+    </article>
+    <article class="card inset">
+      <div class="card-head"><h2>No-shows</h2></div>
+      {% if no_shows["items"] %}
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Guest</th>
+                <th>Arrival</th>
+                <th>Source</th>
+                <th>Room type</th>
+                <th>Deposit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in no_shows["items"] %}
+                <tr>
+                  {% if can_reservation %}
+                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_daily_report', report_type='no_show_cancellation', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                  {% else %}
+                    <td>{{ item.reservation_code }}</td>
+                  {% endif %}
+                  <td>{{ item.guest_name }}</td>
+                  <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
+                  <td>{{ item.source_channel }}</td>
+                  <td>{{ item.room_type_code }}</td>
+                  <td>{{ item.deposit_received_amount | money }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">No no-shows in selected range.</p>
+      {% endif %}
+    </article>
+  </section>
+
+{% else %}
+  <section class="card inset">
+    <p class="empty-state">Unknown report type.</p>
+  </section>
+{% endif %}
+{% endblock %}

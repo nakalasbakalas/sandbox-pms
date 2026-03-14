@@ -11,6 +11,7 @@ from ..models import (
     AuditLog,
     CashierActivityLog,
     FolioCharge,
+    HousekeepingTask,
     InventoryDay,
     PaymentRequest,
     Reservation,
@@ -136,6 +137,148 @@ def build_manager_dashboard(
         dashboard["audit_activity"] = audit_activity_summary_report(date_from, date_to)
     dashboard["headline"] = _headline_metrics(dashboard)
     return dashboard
+
+
+def build_front_desk_dashboard(
+    *,
+    business_date: date,
+    include_housekeeping: bool = True,
+    include_financials: bool = True,
+) -> dict:
+    """Compact operational dashboard for front-desk daily planning.
+
+    Reuses the same authoritative metric functions as the manager dashboard
+    but selects only the data a front-desk agent needs for shift preparation.
+    """
+    arrivals = arrivals_today_report(business_date)
+    departures = departures_today_report(business_date)
+    in_house = checked_in_guests_report(business_date)
+    occupancy = occupancy_today_report(business_date)
+
+    dashboard: dict = {
+        "business_date": business_date,
+        "arrivals": arrivals,
+        "departures": departures,
+        "in_house": in_house,
+        "occupancy_today": occupancy,
+    }
+
+    if include_housekeeping:
+        hk = housekeeping_room_status_summary_report(business_date)
+        dashboard["housekeeping"] = hk
+        dashboard["urgent_tasks"] = _urgent_tasks_summary(business_date)
+
+    if include_financials:
+        balances = folio_balances_outstanding_report(
+            business_date, business_date, limit=10,
+        )
+        dashboard["balances_due"] = balances
+
+    dashboard["headline"] = _front_desk_headline(dashboard)
+    return dashboard
+
+
+def _urgent_tasks_summary(business_date: date) -> dict:
+    """Open or in-progress housekeeping tasks with urgent or high priority."""
+    query = HousekeepingTask.query.filter(
+        HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
+        HousekeepingTask.priority.in_(["urgent", "high"]),
+        HousekeepingTask.business_date == business_date,
+    ).order_by(
+        sa.case({"urgent": 0, "high": 1}, value=HousekeepingTask.priority, else_=2),
+        HousekeepingTask.due_at.asc().nullslast(),
+    )
+    tasks = query.all()
+    items = []
+    for task in tasks[:10]:
+        room = db.session.get(Room, task.room_id) if task.room_id else None
+        items.append({
+            "id": task.id,
+            "room_number": room.room_number if room else "-",
+            "room_id": task.room_id,
+            "task_type": task.task_type,
+            "priority": task.priority,
+            "status": task.status,
+            "due_at": task.due_at,
+        })
+    return {
+        "count": len(tasks),
+        "items": items,
+    }
+
+
+def _front_desk_headline(dashboard: dict) -> list[dict]:
+    cards = [
+        {"label": "Arrivals", "value": dashboard["arrivals"]["count"], "tone": "default"},
+        {"label": "Departures", "value": dashboard["departures"]["count"], "tone": "default"},
+        {"label": "In-house", "value": dashboard["in_house"]["count"], "tone": "default"},
+        {
+            "label": "Occupancy",
+            "value": f"{dashboard['occupancy_today']['occupancy_percentage']:.0f}%",
+            "tone": "accent",
+        },
+    ]
+    if "housekeeping" in dashboard:
+        counts = dashboard["housekeeping"]["counts"]
+        ready = counts.get("sellable_ready", 0)
+        dirty = counts.get("dirty", 0)
+        cards.append({"label": "Rooms ready", "value": ready, "tone": "default"})
+        cards.append({"label": "Rooms dirty", "value": dirty, "tone": "warning" if dirty else "default"})
+    if "balances_due" in dashboard:
+        cards.append({
+            "label": "Balance due",
+            "value": f"{dashboard['balances_due']['total_balance_due']:,.0f}",
+            "tone": "danger" if dashboard["balances_due"]["count"] else "default",
+        })
+    if "urgent_tasks" in dashboard:
+        cards.append({
+            "label": "Urgent tasks",
+            "value": dashboard["urgent_tasks"]["count"],
+            "tone": "danger" if dashboard["urgent_tasks"]["count"] else "default",
+        })
+    return cards
+
+
+def build_daily_report(
+    *,
+    report_type: str,
+    business_date: date,
+    date_from: date,
+    date_to: date,
+) -> dict:
+    """Build a single focused daily report by type.
+
+    Supports: arrivals, departures, room_status, payment_due,
+    occupancy, booking_source, no_show_cancellation.
+    """
+    report: dict = {
+        "report_type": report_type,
+        "business_date": business_date,
+        "date_from": date_from,
+        "date_to": date_to,
+        "definitions": report_metric_definitions(),
+    }
+    if report_type == "arrivals":
+        report["data"] = arrivals_today_report(business_date)
+    elif report_type == "departures":
+        report["data"] = departures_today_report(business_date)
+    elif report_type == "room_status":
+        report["data"] = housekeeping_room_status_summary_report(business_date)
+    elif report_type == "payment_due":
+        report["data"] = folio_balances_outstanding_report(date_from, date_to, limit=50)
+    elif report_type == "occupancy":
+        report["data"] = occupancy_by_date_range_report(date_from, date_to)
+        report["data"]["today"] = occupancy_today_report(business_date)
+    elif report_type == "booking_source":
+        report["data"] = booking_attribution_report(date_from, date_to, limit=50)
+    elif report_type == "no_show_cancellation":
+        report["data"] = {
+            "cancellations": cancellation_summary_report(date_from, date_to, limit=50),
+            "no_shows": no_show_summary_report(date_from, date_to, limit=50),
+        }
+    else:
+        report["data"] = {}
+    return report
 
 
 def arrivals_today_report(business_date: date) -> dict:
