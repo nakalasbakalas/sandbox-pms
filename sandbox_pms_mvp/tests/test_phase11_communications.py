@@ -402,6 +402,80 @@ def test_optional_staff_alert_channel_failure_isolated_from_internal_alerts(app_
         assert result["failed"] >= 1
 
 
+def test_dispatch_notification_deliveries_sends_email_outbox_entries(app_factory, monkeypatch):
+    app = app_factory(
+        config={
+            "SMTP_HOST": "smtp.sandbox.test",
+            "SMTP_PORT": 2525,
+            "SMTP_USE_TLS": False,
+            "MAIL_FROM": "reservations@sandbox.test",
+        }
+    )
+    sent_message: dict[str, str] = {}
+
+    class FakeSMTP:
+        def __init__(self, host: str, port: int, timeout: int):
+            assert host == "smtp.sandbox.test"
+            assert port == 2525
+            assert timeout == 15
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def send_message(self, message):
+            sent_message["subject"] = message["Subject"]
+            sent_message["from"] = message["From"]
+            sent_message["to"] = message["To"]
+            sent_message["body"] = message.get_content().strip()
+
+    monkeypatch.setattr(communication_service_module.smtplib, "SMTP", FakeSMTP)
+
+    with app.app_context():
+        outbox = EmailOutbox(
+            email_type="guest_confirmation",
+            recipient_email="guest@example.com",
+            subject="Sandbox confirmation",
+            body_text="Your reservation is confirmed.",
+            language="en",
+            dedupe_key="phase11-email-dispatch",
+        )
+        delivery = NotificationDelivery(
+            event_type="reservation.confirmation",
+            audience_type="guest",
+            channel="email",
+            template_key="guest_confirmation",
+            language_code="en",
+            recipient_target="guest@example.com",
+            dedupe_key="phase11-email-delivery",
+            rendered_subject=outbox.subject,
+            rendered_body=outbox.body_text,
+            email_outbox=outbox,
+        )
+        db.session.add_all([outbox, delivery])
+        db.session.commit()
+
+        result = dispatch_notification_deliveries([delivery.id])
+
+        refreshed_outbox = db.session.get(EmailOutbox, outbox.id)
+        refreshed_delivery = db.session.get(NotificationDelivery, delivery.id)
+
+        assert result == {"processed": 1, "sent": 1, "failed": 0, "skipped": 0}
+        assert refreshed_outbox is not None and refreshed_outbox.status == "sent"
+        assert refreshed_outbox.sent_at is not None
+        assert refreshed_delivery is not None and refreshed_delivery.status == "delivered"
+        assert refreshed_delivery.delivered_at is not None
+        assert refreshed_delivery.failure_reason is None
+        assert sent_message == {
+            "subject": "Sandbox confirmation",
+            "from": "reservations@sandbox.test",
+            "to": "guest@example.com",
+            "body": "Your reservation is confirmed.",
+        }
+
+
 def test_template_updates_affect_future_deliveries_only(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
