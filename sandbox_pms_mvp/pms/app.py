@@ -3604,8 +3604,10 @@ def register_routes(app: Flask) -> None:
         file_path = _upload_dir() / doc.storage_key
         if not file_path.is_file():
             abort(404)
+        with open(str(file_path), "rb") as f:
+            data = f.read()
         return Response(
-            open(str(file_path), "rb").read(),
+            data,
             mimetype=doc.content_type,
             headers={"Content-Disposition": f'inline; filename="{doc.original_filename}"'},
         )

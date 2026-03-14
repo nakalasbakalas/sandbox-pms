@@ -387,7 +387,7 @@ def _recompute_readiness(pc: PreCheckIn) -> None:
 
     # Check deposit
     res = pc.reservation
-    if res and res.deposit_required_amount and res.deposit_received_amount < res.deposit_required_amount:
+    if res and res.deposit_required_amount and (res.deposit_received_amount or 0) < res.deposit_required_amount:
         pc.readiness = "payment_pending"
         return
 
