@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -1061,7 +1062,10 @@ def _handoff_room_to_housekeeping(
             commit=False,
         )
     except Exception:  # noqa: BLE001
-        pass  # Best-effort — don't block checkout if task creation fails
+        logging.getLogger(__name__).warning(
+            "Failed to create departure turnover task for room %s on %s",
+            room_id, business_date, exc_info=True,
+        )
 
 
 def _no_show_charge_amount(reservation: Reservation) -> Decimal:

@@ -250,9 +250,7 @@ def update_housekeeping_status(
     elif payload.status_code == "inspected":
         row.cleaned_at = row.cleaned_at or utc_now()
         row.inspected_at = utc_now()
-    elif payload.status_code == "dirty":
-        row.inspected_at = None
-    elif payload.status_code == "cleaning_in_progress":
+    elif payload.status_code in {"dirty", "cleaning_in_progress"}:
         row.inspected_at = None
 
     row.is_sellable = _sellable_for_row(row, status.code)
