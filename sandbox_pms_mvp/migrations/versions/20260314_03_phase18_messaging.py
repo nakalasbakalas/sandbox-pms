@@ -1,14 +1,14 @@
 """Phase 18: Unified Guest Messaging Hub
 
-Revision ID: a1b2c3d4e5f6
-Revises: 20260314_01_phase17_pre_checkin
+Revision ID: 20260314_03
+Revises: 20260314_02
 Create Date: 2026-03-14 07:00:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260314_02"
-down_revision = "20260314_01"
+revision = "20260314_03"
+down_revision = "20260314_02"
 branch_labels = None
 depends_on = None
 
