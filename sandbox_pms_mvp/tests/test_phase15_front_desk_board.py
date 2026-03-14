@@ -1704,7 +1704,7 @@ class TestBoardSSERealtimeSync:
         response = client.get("/staff/front-desk/board/events")
 
         assert response.status_code == 200
-        assert response.headers["Content-Type"] == "text/event-stream"
+        assert response.headers["Content-Type"].startswith("text/event-stream")
         assert response.headers["Cache-Control"] == "no-cache"
         assert response.headers["Connection"] == "keep-alive"
 
@@ -1833,13 +1833,10 @@ class TestBoardSSERealtimeSync:
             user = make_staff_user("front_desk", "move@example.com")
             login_as(client, user)
 
-            # Create a reservation and room
             room_type = RoomType.query.first()
-            room = Room(room_type_id=room_type.id, room_number=101, is_active=True)
-            db.session.add(room)
-            db.session.commit()
-
             start_date = date.today()
+
+            # Create reservation first (assigned to a seeded room)
             res = create_reservation(
                 ReservationCreatePayload(
                     room_type_id=room_type.id,
@@ -1855,6 +1852,20 @@ class TestBoardSSERealtimeSync:
                 ),
                 actor_user_id=user.id,
             )
+
+            # Now create a second room as the move target
+            room = Room(room_type_id=room_type.id, room_number=101, floor_number=1, is_active=True)
+            db.session.add(room)
+            db.session.flush()
+            inv = InventoryDay(
+                room_id=room.id,
+                room_type_id=room_type.id,
+                business_date=start_date,
+                availability_status="available",
+                is_sellable=True,
+            )
+            db.session.add(inv)
+            db.session.commit()
 
             # Clear activity logs before move
             ActivityLog.query.delete()
