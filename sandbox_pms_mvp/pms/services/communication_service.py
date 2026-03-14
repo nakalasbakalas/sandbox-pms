@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import smtplib
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from email.message import EmailMessage
 
 import sqlalchemy as sa
 from flask import current_app
@@ -29,7 +32,6 @@ from ..models import (
 from ..pricing import get_setting_value, money
 from ..url_topology import build_booking_url
 from .admin_service import get_notification_template_variant, policy_text, render_notification_template
-from .notification_service import deliver_email_outbox_entry
 
 
 def _string_setting(key: str, default: str) -> str:
@@ -907,13 +909,54 @@ def _mark_delivery_failed(delivery: NotificationDelivery, *, category: str, reas
     delivery.failed_at = utc_now()
 
 
+def _deliver_email_outbox_entry(email_outbox_id: uuid.UUID, *, commit: bool = True) -> EmailOutbox | None:
+    entry = db.session.get(EmailOutbox, email_outbox_id)
+    if not entry or entry.status == "sent":
+        return entry
+
+    entry.attempts += 1
+    smtp_host = current_app.config.get("SMTP_HOST")
+    if not smtp_host:
+        entry.status = "failed"
+        entry.last_error = "SMTP is not configured."
+        if commit:
+            db.session.commit()
+        return entry
+
+    message = EmailMessage()
+    message["Subject"] = entry.subject
+    message["From"] = current_app.config["MAIL_FROM"]
+    message["To"] = entry.recipient_email
+    message.set_content(entry.body_text)
+
+    try:
+        with smtplib.SMTP(smtp_host, current_app.config["SMTP_PORT"], timeout=15) as client:
+            if current_app.config["SMTP_USE_TLS"]:
+                client.starttls(context=ssl.create_default_context())
+            if current_app.config["SMTP_USERNAME"]:
+                client.login(
+                    current_app.config["SMTP_USERNAME"],
+                    current_app.config["SMTP_PASSWORD"],
+                )
+            client.send_message(message)
+        entry.status = "sent"
+        entry.sent_at = utc_now()
+        entry.last_error = None
+    except Exception as exc:  # noqa: BLE001
+        entry.status = "failed"
+        entry.last_error = str(exc)[:255]
+    if commit:
+        db.session.commit()
+    return entry
+
+
 def _dispatch_email(delivery: NotificationDelivery) -> str:
     if not delivery.email_outbox_id:
         _mark_delivery_failed(delivery, category="configuration", reason="Email outbox entry is missing.")
         return "failed"
     delivery.queued_at = delivery.queued_at or utc_now()
     delivery.attempts += 1
-    outbox = deliver_email_outbox_entry(delivery.email_outbox_id, commit=False)
+    outbox = _deliver_email_outbox_entry(delivery.email_outbox_id, commit=False)
     if not outbox:
         _mark_delivery_failed(delivery, category="configuration", reason="Email outbox entry could not be loaded.")
         return "failed"
