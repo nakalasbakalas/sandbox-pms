@@ -8,6 +8,7 @@ from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint, eve
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .constants import (
+    ARRIVAL_READINESS_STATES,
     AUTH_FAILURE_REASONS,
     BLACKOUT_TYPES,
     BOOKING_LANGUAGES,
@@ -17,6 +18,8 @@ from .constants import (
     CASHIER_DOCUMENT_TYPES,
     CALENDAR_FEED_SCOPE_TYPES,
     CANCELLATION_REQUEST_STATUSES,
+    DOCUMENT_TYPES,
+    DOCUMENT_VERIFICATION_STATUSES,
     EMAIL_OUTBOX_STATUSES,
     EXTERNAL_CALENDAR_SOURCE_STATUSES,
     EXTERNAL_CALENDAR_SYNC_RUN_STATUSES,
@@ -36,6 +39,7 @@ from .constants import (
     NOTIFICATION_TEMPLATE_KEYS,
     PAYMENT_REQUEST_STATUSES,
     POLICY_DOCUMENT_CODES,
+    PRE_CHECKIN_STATUSES,
     RATE_ADJUSTMENT_TYPES,
     RATE_RULE_TYPES,
     RESERVATION_STATUSES,
@@ -1652,6 +1656,92 @@ class ExternalCalendarSyncRun(AuditMixin, db.Model):
     )
 
 
+class PreCheckIn(AuditMixin, db.Model):
+    __tablename__ = "pre_checkins"
+
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    token: Mapped[str] = mapped_column(sa.String(120), nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="not_sent")
+    readiness: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="awaiting_guest")
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    eta: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+    special_requests: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    notes_for_staff: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    number_of_occupants: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    primary_contact_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    primary_contact_phone: Mapped[str | None] = mapped_column(sa.String(60), nullable=True)
+    primary_contact_email: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    nationality: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    vehicle_registration: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    acknowledgment_accepted: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    acknowledgment_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    acknowledgment_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    occupant_details: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    link_sent_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    link_opened_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    reservation = relationship("Reservation", backref="pre_checkin", foreign_keys=[reservation_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in PRE_CHECKIN_STATUSES)})",
+            name="ck_pre_checkins_status",
+        ),
+        CheckConstraint(
+            f"readiness IN ({', '.join(repr(v) for v in ARRIVAL_READINESS_STATES)})",
+            name="ck_pre_checkins_readiness",
+        ),
+        Index("ix_pre_checkins_reservation_id", "reservation_id"),
+        Index("ix_pre_checkins_status", "status"),
+    )
+
+
+class ReservationDocument(AuditMixin, db.Model):
+    __tablename__ = "reservation_documents"
+
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="CASCADE"), nullable=False
+    )
+    guest_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("guests.id", ondelete="SET NULL"), nullable=True
+    )
+    document_type: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    storage_key: Mapped[str] = mapped_column(sa.String(500), nullable=False)
+    original_filename: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    file_size_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    verification_status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="pending")
+    verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
+    reservation = relationship("Reservation", backref="documents", foreign_keys=[reservation_id])
+    guest = relationship("Guest", foreign_keys=[guest_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"document_type IN ({', '.join(repr(v) for v in DOCUMENT_TYPES)})",
+            name="ck_reservation_documents_document_type",
+        ),
+        CheckConstraint(
+            f"verification_status IN ({', '.join(repr(v) for v in DOCUMENT_VERIFICATION_STATUSES)})",
+            name="ck_reservation_documents_verification_status",
+        ),
+        CheckConstraint("file_size_bytes > 0", name="ck_reservation_documents_file_size"),
+        Index("ix_reservation_documents_reservation_id", "reservation_id"),
+        Index("ix_reservation_documents_verification_status", "verification_status"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -1686,6 +1776,8 @@ for model in (
     ExternalCalendarSource,
     ExternalCalendarBlock,
     ExternalCalendarSyncRun,
+    PreCheckIn,
+    ReservationDocument,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
 

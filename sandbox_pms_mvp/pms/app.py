@@ -67,7 +67,9 @@ from .models import (
     PaymentRequest,
     Permission,
     PolicyDocument,
+    PreCheckIn,
     Reservation,
+    ReservationDocument,
     ReservationHold,
     ReservationReviewQueue,
     Role,
@@ -239,6 +241,24 @@ from .services.provider_portal_service import (
     provider_dashboard_context,
     provider_refresh_payment_status,
     provider_resend_payment_link,
+)
+from .services.pre_checkin_service import (
+    DocumentVerifyPayload,
+    PreCheckInSavePayload,
+    build_pre_checkin_link,
+    generate_pre_checkin,
+    get_documents_for_reservation,
+    get_pre_checkin_context,
+    get_pre_checkin_for_reservation,
+    list_todays_arrivals_with_readiness,
+    load_pre_checkin_by_token,
+    mark_opened,
+    mark_rejected,
+    mark_verified,
+    save_pre_checkin,
+    upload_document,
+    validate_token_access,
+    verify_document,
 )
 from .services.reporting_service import build_manager_dashboard
 from .services.reservation_service import ReservationCreatePayload, create_reservation
@@ -897,6 +917,77 @@ def register_routes(app: Flask) -> None:
         response.headers["Content-Disposition"] = f'inline; filename="{safe_name}.ics"'
         response.headers["Cache-Control"] = "private, max-age=300"
         return response
+
+    # ── Pre-Check-In: Guest-facing routes ───────────────────────────────
+
+    @app.route("/pre-checkin/<token>", methods=["GET"])
+    def pre_checkin_form(token):
+        pc = load_pre_checkin_by_token(token)
+        error = validate_token_access(pc)
+        if error:
+            return render_template("pre_checkin_form.html", error=error, ctx=None), 403
+        mark_opened(pc)
+        db.session.commit()
+        ctx = get_pre_checkin_context(pc)
+        return render_template("pre_checkin_form.html", error=None, ctx=ctx)
+
+    @app.route("/pre-checkin/<token>/save", methods=["POST"])
+    def pre_checkin_save(token):
+        pc = load_pre_checkin_by_token(token)
+        error = validate_token_access(pc)
+        if error:
+            return render_template("pre_checkin_form.html", error=error, ctx=None), 403
+        payload = PreCheckInSavePayload(
+            primary_contact_name=request.form.get("primary_contact_name"),
+            primary_contact_phone=request.form.get("primary_contact_phone"),
+            primary_contact_email=request.form.get("primary_contact_email"),
+            nationality=request.form.get("nationality"),
+            number_of_occupants=int(request.form.get("number_of_occupants") or 0) or None,
+            eta=request.form.get("eta"),
+            special_requests=request.form.get("special_requests"),
+            notes_for_staff=request.form.get("notes_for_staff"),
+            vehicle_registration=request.form.get("vehicle_registration"),
+            acknowledgment_accepted=request.form.get("acknowledgment_accepted") == "on",
+            acknowledgment_name=request.form.get("acknowledgment_name"),
+        )
+        # Parse occupant details from form
+        occupants = []
+        for i in range(20):
+            name = request.form.get(f"occupant_name_{i}", "").strip()
+            if name:
+                occupants.append({"name": name})
+        if occupants:
+            payload.occupant_details = occupants
+        is_submit = request.form.get("action") == "submit"
+        try:
+            save_pre_checkin(pc, payload, submit=is_submit)
+            db.session.commit()
+        except ValueError as exc:
+            db.session.rollback()
+            ctx = get_pre_checkin_context(pc)
+            return render_template("pre_checkin_form.html", error=str(exc), ctx=ctx)
+        if is_submit:
+            return render_template("pre_checkin_confirmation.html", pc=pc, reservation=pc.reservation)
+        ctx = get_pre_checkin_context(pc)
+        return render_template("pre_checkin_form.html", error=None, ctx=ctx, saved=True)
+
+    @app.route("/pre-checkin/<token>/upload", methods=["POST"])
+    def pre_checkin_upload(token):
+        pc = load_pre_checkin_by_token(token)
+        error = validate_token_access(pc)
+        if error:
+            return render_template("pre_checkin_form.html", error=error, ctx=None), 403
+        document_type = request.form.get("document_type", "passport")
+        uploaded_file = request.files.get("document_file")
+        try:
+            upload_document(pc, uploaded_file, document_type)
+            db.session.commit()
+        except ValueError as exc:
+            db.session.rollback()
+            ctx = get_pre_checkin_context(pc)
+            return render_template("pre_checkin_form.html", error=str(exc), ctx=ctx)
+        ctx = get_pre_checkin_context(pc)
+        return render_template("pre_checkin_form.html", error=None, ctx=ctx, uploaded=True)
 
     @app.route("/staff/login", methods=["GET", "POST"])
     def staff_login():
@@ -3406,6 +3497,121 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
 
+    # ── Pre-Check-In: Staff-facing routes ───────────────────────────────
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/generate", methods=["POST"])
+    def staff_pre_checkin_generate(reservation_id):
+        user = require_permission("reservation.edit")
+        try:
+            pc = generate_pre_checkin(reservation_id, actor_user_id=user.id)
+            db.session.commit()
+            link = build_pre_checkin_link(pc.token)
+            flash(Markup(f'Pre-check-in link generated: <code class="text-xs select-all">{escape(link)}</code>'), "success")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/resend", methods=["POST"])
+    def staff_pre_checkin_resend(reservation_id):
+        user = require_permission("reservation.edit")
+        try:
+            pc = generate_pre_checkin(reservation_id, actor_user_id=user.id)
+            db.session.commit()
+            link = build_pre_checkin_link(pc.token)
+            flash(Markup(f'Pre-check-in link resent: <code class="text-xs select-all">{escape(link)}</code>'), "success")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin")
+    def staff_pre_checkin_detail(reservation_id):
+        user = require_permission("reservation.view")
+        reservation = db.session.get(Reservation, reservation_id)
+        if not reservation:
+            abort(404)
+        pc = get_pre_checkin_for_reservation(reservation_id)
+        docs = get_documents_for_reservation(reservation_id) if pc else []
+        link = build_pre_checkin_link(pc.token) if pc else None
+        return render_template(
+            "staff_pre_checkin_detail.html",
+            reservation=reservation,
+            pc=pc,
+            documents=docs,
+            pre_checkin_link=link,
+        )
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/verify", methods=["POST"])
+    def staff_pre_checkin_verify(reservation_id):
+        user = require_permission("reservation.check_in")
+        pc = get_pre_checkin_for_reservation(reservation_id)
+        if not pc:
+            flash("No pre-check-in record found.", "error")
+            return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id))
+        try:
+            mark_verified(pc, actor_user_id=user.id)
+            db.session.commit()
+            flash("Pre-check-in verified successfully.", "success")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/reject", methods=["POST"])
+    def staff_pre_checkin_reject(reservation_id):
+        user = require_permission("reservation.check_in")
+        pc = get_pre_checkin_for_reservation(reservation_id)
+        if not pc:
+            flash("No pre-check-in record found.", "error")
+            return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id))
+        reason = request.form.get("reason", "")
+        try:
+            mark_rejected(pc, actor_user_id=user.id, reason=reason)
+            db.session.commit()
+            flash("Pre-check-in rejected.", "warning")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/documents/<uuid:doc_id>/verify", methods=["POST"])
+    def staff_document_verify(doc_id):
+        user = require_permission("reservation.check_in")
+        status = request.form.get("verification_status", "verified")
+        reason = request.form.get("rejection_reason")
+        try:
+            doc = verify_document(
+                doc_id,
+                DocumentVerifyPayload(verification_status=status, rejection_reason=reason),
+                actor_user_id=user.id,
+            )
+            db.session.commit()
+            flash(f"Document {status}.", "success" if status == "verified" else "warning")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+            return redirect(request.referrer or url_for("staff_front_desk"))
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=doc.reservation_id))
+
+    @app.route("/staff/documents/<uuid:doc_id>/view")
+    def staff_document_view(doc_id):
+        require_permission("reservation.view")
+        doc = db.session.get(ReservationDocument, doc_id)
+        if not doc:
+            abort(404)
+        from .services.pre_checkin_service import _upload_dir
+        file_path = _upload_dir() / doc.storage_key
+        if not file_path.is_file():
+            abort(404)
+        with open(str(file_path), "rb") as f:
+            data = f.read()
+        return Response(
+            data,
+            mimetype=doc.content_type,
+            headers={"Content-Disposition": f'inline; filename="{doc.original_filename}"'},
+        )
+
     @app.route("/staff/review-queue", methods=["GET", "POST"])
     def staff_review_queue():
         user = require_permission("reservation.view")
@@ -3544,7 +3750,7 @@ def rotate_csrf_token() -> str:
 def validate_csrf_request() -> None:
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    if request.endpoint in {None, "static", "payment_webhook"}:
+    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload"}:
         return
     expected = session.get("_csrf_token")
     provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
