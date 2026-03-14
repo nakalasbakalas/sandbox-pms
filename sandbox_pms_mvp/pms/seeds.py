@@ -96,6 +96,7 @@ def seed_housekeeping_statuses() -> None:
         "sleep": ("Sleep", "Sleeping guest", False, 8),
         "out_of_service": ("Out of Service", "Temporarily not sellable", False, 9),
         "out_of_order": ("Out of Order", "Major maintenance outage", False, 10),
+        "cleaning_in_progress": ("Cleaning In Progress", "Housekeeper is cleaning the room", False, 11),
     }
     for code in HOUSEKEEPING_STATUS_CODES:
         if HousekeepingStatus.query.filter_by(code=code).first():

@@ -27,6 +27,9 @@ from .constants import (
     FOLIO_CHARGE_TYPES,
     GUEST_NOTE_TYPES,
     HOUSEKEEPING_STATUS_CODES,
+    HOUSEKEEPING_TASK_PRIORITIES,
+    HOUSEKEEPING_TASK_STATUSES,
+    HOUSEKEEPING_TASK_TYPES,
     INVENTORY_OVERRIDE_ACTIONS,
     INVENTORY_OVERRIDE_SCOPE_TYPES,
     INVENTORY_AVAILABILITY_STATUSES,
@@ -556,6 +559,55 @@ class RoomStatusHistory(db.Model):
     __table_args__ = (
         Index("ix_room_status_history_room_changed", "room_id", "changed_at"),
         Index("ix_room_status_history_business_date", "business_date"),
+    )
+
+
+class HousekeepingTask(AuditMixin, db.Model):
+    __tablename__ = "housekeeping_tasks"
+
+    room_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="SET NULL"), nullable=True
+    )
+    task_type: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="checkout_clean")
+    priority: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="normal")
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="open")
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    due_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    business_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+
+    room = relationship("Room", foreign_keys=[room_id])
+    reservation = relationship("Reservation", foreign_keys=[reservation_id])
+    assigned_to_user = relationship("User", foreign_keys=[assigned_to_user_id])
+    verified_by_user = relationship("User", foreign_keys=[verified_by_user_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"task_type IN ({', '.join(repr(v) for v in HOUSEKEEPING_TASK_TYPES)})",
+            name="ck_housekeeping_tasks_task_type",
+        ),
+        CheckConstraint(
+            f"priority IN ({', '.join(repr(v) for v in HOUSEKEEPING_TASK_PRIORITIES)})",
+            name="ck_housekeeping_tasks_priority",
+        ),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in HOUSEKEEPING_TASK_STATUSES)})",
+            name="ck_housekeeping_tasks_status",
+        ),
+        Index("ix_housekeeping_tasks_room_date", "room_id", "business_date"),
+        Index("ix_housekeeping_tasks_status_date", "status", "business_date"),
+        Index("ix_housekeeping_tasks_assigned", "assigned_to_user_id", "status"),
     )
 
 
@@ -1778,6 +1830,7 @@ for model in (
     ExternalCalendarSyncRun,
     PreCheckIn,
     ReservationDocument,
+    HousekeepingTask,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
 

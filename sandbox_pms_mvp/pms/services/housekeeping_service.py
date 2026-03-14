@@ -38,6 +38,7 @@ OPERABLE_HOUSEKEEPING_CODES = {
     "sleep",
     "out_of_service",
     "out_of_order",
+    "cleaning_in_progress",
 }
 CLOSURE_STATUS_CODES = {"out_of_order", "out_of_service"}
 
@@ -249,6 +250,8 @@ def update_housekeeping_status(
         row.cleaned_at = row.cleaned_at or utc_now()
         row.inspected_at = utc_now()
     elif payload.status_code == "dirty":
+        row.inspected_at = None
+    elif payload.status_code == "cleaning_in_progress":
         row.inspected_at = None
 
     row.is_sellable = _sellable_for_row(row, status.code)

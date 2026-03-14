@@ -146,6 +146,32 @@ HOUSEKEEPING_STATUS_CODES = [
     "sleep",
     "out_of_service",
     "out_of_order",
+    "cleaning_in_progress",
+]
+
+HOUSEKEEPING_TASK_STATUSES = [
+    "open",
+    "assigned",
+    "in_progress",
+    "completed",
+    "inspected",
+    "cancelled",
+]
+
+HOUSEKEEPING_TASK_TYPES = [
+    "checkout_clean",
+    "daily_service",
+    "rush_clean",
+    "deep_clean",
+    "inspection",
+    "turndown",
+]
+
+HOUSEKEEPING_TASK_PRIORITIES = [
+    "low",
+    "normal",
+    "high",
+    "urgent",
 ]
 
 USER_ACCOUNT_STATES = [
@@ -252,6 +278,7 @@ PERMISSION_SEEDS = [
     ("provider.calendar.manage", "Manage provider calendar sync", "Provider Portal", "provider"),
     ("housekeeping.view", "View housekeeping", "Housekeeping", "housekeeping"),
     ("housekeeping.status_change", "Change housekeeping status", "Housekeeping", "housekeeping"),
+    ("housekeeping.task_manage", "Manage housekeeping tasks", "Housekeeping", "housekeeping"),
     ("reports.view", "View reports", "Reports", "reports"),
     ("settings.view", "View settings", "Settings", "settings"),
     ("settings.edit", "Edit settings", "Settings", "settings"),
@@ -298,6 +325,7 @@ ROLE_PERMISSION_SEEDS = {
         "provider.calendar.manage",
         "housekeeping.view",
         "housekeeping.status_change",
+        "housekeeping.task_manage",
         "reports.view",
         "settings.view",
         "settings.edit",
@@ -322,11 +350,13 @@ ROLE_PERMISSION_SEEDS = {
         "payment_request.create",
         "housekeeping.view",
         "housekeeping.status_change",
+        "housekeeping.task_manage",
     ],
     "housekeeping": [
         "reservation.view",
         "housekeeping.view",
         "housekeeping.status_change",
+        "housekeeping.task_manage",
     ],
     "provider": [
         "provider.dashboard.view",
