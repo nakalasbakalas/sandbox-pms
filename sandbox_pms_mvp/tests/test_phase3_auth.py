@@ -68,7 +68,7 @@ def test_login_succeeds_with_correct_credentials(app_factory):
     app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
     client = app.test_client()
     with app.app_context():
-        user = make_staff_user(email="frontdesk@example.com", password="correct horse 123", role_codes=("front_desk",))
+        user = make_staff_user(email="test.frontdesk@example.com", password="correct horse 123", role_codes=("front_desk",))
 
     response = login(client, identifier=user.email, password="correct horse 123")
 
@@ -263,7 +263,7 @@ def test_admin_and_manager_permissions_allow_operational_admin_pages(app_factory
     app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
     with app.app_context():
         admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
-        manager = make_staff_user(email="manager@example.com", password="correct horse 123", role_codes=("manager",))
+        manager = make_staff_user(email="test.manager@example.com", password="correct horse 123", role_codes=("manager",))
 
     for email, password in [(admin.email, "sandbox-admin-123"), (manager.email, "correct horse 123")]:
         client = app.test_client()
