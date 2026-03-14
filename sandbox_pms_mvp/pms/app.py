@@ -425,6 +425,7 @@ def register_template_helpers(app: Flask) -> None:
         hotel_currency = branding["currency"]
         hotel_brand_mark = branding["brand_mark"]
         hotel_logo_url = absolute_public_url(branding["logo_url"]) if branding["logo_url"] else ""
+        default_logo_url = url_for("static", filename="branding/sandbox-hotel-logo-safe-256.png")
         hotel_contact_phone = branding["contact_phone"]
         hotel_contact_email = branding["contact_email"]
         hotel_address = branding["address"]
@@ -432,6 +433,8 @@ def register_template_helpers(app: Flask) -> None:
         hotel_check_out_time = branding["check_out_time"]
         site_base_url = branding["public_base_url"] or absolute_public_url("/")
         favicon_url = absolute_public_url(url_for("static", filename="favicon.svg"))
+        favicon_ico_url = absolute_public_url(url_for("static", filename="branding/sandbox-hotel-favicon.ico"))
+        apple_touch_icon_url = absolute_public_url(url_for("static", filename="branding/sandbox-hotel-logo-safe-180.png"))
         default_share_image_url = absolute_public_url(url_for("static", filename="hotel-share.svg"))
         share_image_url = hotel_logo_url or default_share_image_url
         hotel_contact_phone_href = phone_href(hotel_contact_phone)
@@ -509,6 +512,7 @@ def register_template_helpers(app: Flask) -> None:
             "currency": hotel_currency,
             "hotel_brand_mark": hotel_brand_mark,
             "hotel_logo_url": hotel_logo_url,
+            "default_logo_url": default_logo_url,
             "hotel_support_contact_text": branding["support_contact_text"],
             "hotel_contact_phone": hotel_contact_phone,
             "hotel_contact_email": hotel_contact_email,
@@ -528,6 +532,8 @@ def register_template_helpers(app: Flask) -> None:
             "site_base_url": site_base_url,
             "canonical_url": canonical_url,
             "favicon_url": favicon_url,
+            "favicon_ico_url": favicon_ico_url,
+            "apple_touch_icon_url": apple_touch_icon_url,
             "share_image_url": share_image_url,
             "hotel_structured_data": hotel_structured_data,
             "is_public_site": is_public_site,
@@ -624,7 +630,33 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/favicon.ico")
     def favicon_ico():
-        return redirect(url_for("static", filename="favicon.svg"), code=302)
+        return redirect(url_for("static", filename="branding/sandbox-hotel-favicon.ico"), code=302)
+
+    @app.route("/manifest.json")
+    def web_manifest():
+        branding = branding_settings_context()
+        hotel_name = branding["hotel_name"]
+        manifest = {
+            "name": hotel_name,
+            "short_name": branding["brand_mark"] or hotel_name[:12],
+            "icons": [
+                {
+                    "src": url_for("static", filename="branding/sandbox-hotel-logo-safe-192.png"),
+                    "sizes": "192x192",
+                    "type": "image/png",
+                },
+                {
+                    "src": url_for("static", filename="branding/sandbox-hotel-logo-safe-512.png"),
+                    "sizes": "512x512",
+                    "type": "image/png",
+                },
+            ],
+            "theme_color": branding["accent_color"],
+            "background_color": "#0b0d11",
+            "display": "standalone",
+            "start_url": "/",
+        }
+        return Response(json.dumps(manifest), mimetype="application/manifest+json")
 
     @app.route("/sitemap.xml")
     def sitemap_xml():
