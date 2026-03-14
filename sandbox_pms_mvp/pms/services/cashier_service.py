@@ -861,6 +861,21 @@ def _create_folio_line(
     return charge
 
 
+def _compute_payment_status(settlement: str, deposit_st: str, dep_required: Decimal) -> str:
+    """Derive reservation payment_status from folio settlement and deposit states."""
+    if settlement == "settled":
+        return "paid"
+    if settlement == "overpaid":
+        return "overpaid"
+    if dep_required > Decimal("0.00") and deposit_st == "missing":
+        return "deposit_required"
+    if dep_required > Decimal("0.00") and deposit_st in ("partial", "paid") and settlement != "settled":
+        return "deposit_received" if deposit_st == "paid" else "partially_paid"
+    if settlement == "partially_paid":
+        return "partially_paid"
+    return "unpaid"
+
+
 def _sync_reservation_payment_fields(reservation: Reservation) -> None:
     deposit_received = sum(
         (
@@ -873,21 +888,11 @@ def _sync_reservation_payment_fields(reservation: Reservation) -> None:
     reservation.deposit_received_amount = deposit_received.quantize(Decimal("0.01"))
     # Compute and persist payment_status from folio state
     summary = folio_summary(reservation)
-    settlement = summary["settlement_state"]
-    deposit_st = summary["deposit_state"]
-    dep_required = money(reservation.deposit_required_amount)
-    if settlement == "settled":
-        reservation.payment_status = "paid"
-    elif settlement == "overpaid":
-        reservation.payment_status = "overpaid"
-    elif dep_required > Decimal("0.00") and deposit_st == "missing":
-        reservation.payment_status = "deposit_required"
-    elif dep_required > Decimal("0.00") and deposit_st in ("partial", "paid") and settlement != "settled":
-        reservation.payment_status = "deposit_received" if deposit_st == "paid" else "partially_paid"
-    elif settlement == "partially_paid":
-        reservation.payment_status = "partially_paid"
-    else:
-        reservation.payment_status = "unpaid"
+    reservation.payment_status = _compute_payment_status(
+        summary["settlement_state"],
+        summary["deposit_state"],
+        money(reservation.deposit_required_amount),
+    )
 
 
 def _log_cashier_event(

@@ -1227,11 +1227,13 @@ def payment_reconciliation_data(
     )
 
     # Reservations with outstanding balances (awaiting payment)
+    _AWAITING_PAYMENT_STATUSES = ("unpaid", "partially_paid", "deposit_required")
+    _ACTIVE_RESERVATION_STATUSES = ("confirmed", "checked_in", "tentative")
     awaiting_payment = (
         Reservation.query
         .filter(
-            Reservation.payment_status.in_(["unpaid", "partially_paid", "deposit_required"]),
-            Reservation.current_status.in_(["confirmed", "checked_in", "tentative"]),
+            Reservation.payment_status.in_(_AWAITING_PAYMENT_STATUSES),
+            Reservation.current_status.in_(_ACTIVE_RESERVATION_STATUSES),
         )
         .order_by(Reservation.check_in_date.asc())
         .limit(50)

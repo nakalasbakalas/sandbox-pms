@@ -140,16 +140,12 @@ def test_payment_status_partially_paid_after_partial_payment(app_factory):
 
 
 def test_payment_status_deposit_required_when_deposit_not_received(app_factory):
-    """When deposit is required but not received, status is 'deposit_required'."""
+    """When deposit is required but not received, folio shows deposit_state='missing'."""
     app = app_factory(seed=True)
     with app.app_context():
         reservation = create_test_reservation(deposit_required=Decimal("500.00"))
-        # The default status without any folio actions is 'unpaid' (default).
-        # After a folio sync triggers, deposit_required should appear.
-        # Trigger sync via a small payment + void cycle to exercise the logic.
-        user = make_staff_user("front_desk", "fd@sandbox.local")
+        # Verify folio correctly reflects deposit_required state
         summary = folio_summary(reservation)
-        # deposit_state should be missing since no deposit received
         assert summary["deposit_state"] == "missing"
         assert summary["deposit_required_amount"] == Decimal("500.00")
 
@@ -162,7 +158,7 @@ def test_payment_status_deposit_received_after_deposit_payment(app_factory):
 
         reservation = create_test_reservation(deposit_required=Decimal("500.00"))
         user = make_staff_user("front_desk", "fd_dep@sandbox.local")
-        # Post room charges so the folio has debits
+        # Post room charges so the folio has debits exceeding the deposit
         ensure_room_charges_posted(reservation.id, actor_user_id=user.id)
         record_payment(
             reservation.id,
@@ -174,8 +170,9 @@ def test_payment_status_deposit_received_after_deposit_payment(app_factory):
             actor_user_id=user.id,
         )
         db.session.refresh(reservation)
-        # With room charges posted and deposit received, should be deposit_received or partially_paid
-        assert reservation.payment_status in ("deposit_received", "partially_paid")
+        # Room charges (2 nights × 750+) exceed 500 deposit, so balance remains
+        # deposit_state is "paid" (required met), but settlement is not settled
+        assert reservation.payment_status == "deposit_received"
 
 
 def test_payment_status_overpaid_after_excess_payment(app_factory):
