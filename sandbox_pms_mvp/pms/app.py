@@ -227,9 +227,11 @@ from .services.payment_integration_service import (
     create_or_reuse_deposit_request,
     handle_public_payment_start,
     load_public_payment_return,
+    payment_reconciliation_data,
     payments_enabled,
     process_payment_webhook,
     resend_payment_link,
+    reservation_payment_summary,
     sync_payment_request_status,
 )
 from .services.public_booking_service import (
@@ -1734,6 +1736,35 @@ def register_routes(app: Flask) -> None:
             recent_requests=recent_requests,
             is_super_admin=is_admin_user(viewer),
         )
+
+    @app.route("/staff/admin/payments/reconciliation")
+    def staff_admin_payment_reconciliation():
+        require_permission("payment.read")
+        date_from_str = request.args.get("date_from")
+        date_to_str = request.args.get("date_to")
+        try:
+            date_from = datetime.fromisoformat(date_from_str) if date_from_str else None
+        except ValueError:
+            date_from = None
+        try:
+            date_to = datetime.fromisoformat(date_to_str) if date_to_str else None
+        except ValueError:
+            date_to = None
+        recon = payment_reconciliation_data(date_from=date_from, date_to=date_to)
+        return render_template(
+            "admin_payment_reconciliation.html",
+            active_section="payments",
+            reconciliation=recon,
+        )
+
+    @app.route("/staff/cashier/<uuid:reservation_id>/payment-summary")
+    def staff_cashier_payment_summary(reservation_id):
+        require_permission("payment.read")
+        try:
+            summary = reservation_payment_summary(reservation_id)
+            return jsonify(summary)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 404
 
     @app.route("/staff/reports")
     def staff_reports():

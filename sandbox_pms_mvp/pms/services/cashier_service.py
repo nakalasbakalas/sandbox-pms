@@ -871,6 +871,23 @@ def _sync_reservation_payment_fields(reservation: Reservation) -> None:
         Decimal("0.00"),
     )
     reservation.deposit_received_amount = deposit_received.quantize(Decimal("0.01"))
+    # Compute and persist payment_status from folio state
+    summary = folio_summary(reservation)
+    settlement = summary["settlement_state"]
+    deposit_st = summary["deposit_state"]
+    dep_required = money(reservation.deposit_required_amount)
+    if settlement == "settled":
+        reservation.payment_status = "paid"
+    elif settlement == "overpaid":
+        reservation.payment_status = "overpaid"
+    elif dep_required > Decimal("0.00") and deposit_st == "missing":
+        reservation.payment_status = "deposit_required"
+    elif dep_required > Decimal("0.00") and deposit_st in ("partial", "paid") and settlement != "settled":
+        reservation.payment_status = "deposit_received" if deposit_st == "paid" else "partially_paid"
+    elif settlement == "partially_paid":
+        reservation.payment_status = "partially_paid"
+    else:
+        reservation.payment_status = "unpaid"
 
 
 def _log_cashier_event(

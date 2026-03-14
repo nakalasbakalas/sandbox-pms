@@ -1,0 +1,146 @@
+{% extends 'base.html' %}
+{% block title %}Payment Reconciliation | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Payment reconciliation</p>
+      <h2>Collection overview &amp; settlement visibility</h2>
+    </div>
+  </div>
+  <div class="grid three gap-lg" style="margin-bottom:var(--gap)">
+    <div class="stat-card">
+      <span class="stat-label">Total requests</span>
+      <span class="stat-value">{{ reconciliation.total_requests }}</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Total collected</span>
+      <span class="stat-value">{{ reconciliation.total_collected }} THB</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-label">Awaiting payment</span>
+      <span class="stat-value">{{ reconciliation.awaiting_payment | length }}</span>
+    </div>
+  </div>
+  {% if reconciliation.status_counts %}
+  <div class="list-stack compact" style="margin-bottom:var(--gap)">
+    {% for status, count in reconciliation.status_counts.items() %}
+    <div class="list-row no-link"><strong>{{ status }}</strong><span class="badge">{{ count }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Recent payment requests</p>
+      <h2>Period: {{ reconciliation.period_from[:10] }} – {{ reconciliation.period_to[:10] }}</h2>
+    </div>
+  </div>
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Request</th>
+          <th>Reservation</th>
+          <th>Status</th>
+          <th>Provider</th>
+          <th>Amount</th>
+          <th>Created</th>
+          <th>Paid</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in reconciliation.recent_requests %}
+          <tr>
+            <td>{{ req.request_code }}</td>
+            <td>{{ req.reservation_code or '-' }}</td>
+            <td><span class="badge {{ 'badge-success' if req.status == 'paid' else 'badge-warning' if req.status == 'pending' else '' }}">{{ req.status }}</span></td>
+            <td>{{ req.provider or '-' }}</td>
+            <td>{{ req.amount }} {{ req.currency_code }}</td>
+            <td>{{ req.created_at[:16] if req.created_at else '-' }}</td>
+            <td>{{ req.paid_at[:16] if req.paid_at else '-' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="muted center">No payment requests in this period.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if reconciliation.awaiting_payment %}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Reservations awaiting payment</p>
+      <h2>Outstanding balances</h2>
+    </div>
+  </div>
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Reservation</th>
+          <th>Status</th>
+          <th>Payment status</th>
+          <th>Check-in</th>
+          <th>Deposit required</th>
+          <th>Deposit received</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for res in reconciliation.awaiting_payment %}
+          <tr>
+            <td>{{ res.reservation_code }}</td>
+            <td>{{ res.current_status }}</td>
+            <td><span class="badge">{{ res.payment_status }}</span></td>
+            <td>{{ res.check_in_date or '-' }}</td>
+            <td>{{ res.deposit_required }}</td>
+            <td>{{ res.deposit_received }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if reconciliation.recent_events %}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Provider events</p>
+      <h2>Webhook &amp; status sync events</h2>
+    </div>
+  </div>
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Event type</th>
+          <th>Amount</th>
+          <th>Provider</th>
+          <th>Provider event ID</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ev in reconciliation.recent_events %}
+          <tr>
+            <td>{{ ev.event_type }}</td>
+            <td>{{ ev.amount or '-' }}</td>
+            <td>{{ ev.provider or '-' }}</td>
+            <td>{{ ev.provider_event_id or '-' }}</td>
+            <td>{{ ev.created_at[:16] if ev.created_at else '-' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

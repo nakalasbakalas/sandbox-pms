@@ -1119,3 +1119,167 @@ def _verify_stripe_signature(payload: bytes, signature_header: str, secret: str,
         raise ValueError("Invalid Stripe webhook signature.")
     if abs(int(utc_now().timestamp()) - int(timestamp)) > tolerance_seconds:
         raise ValueError("Stripe webhook signature is outside tolerance.")
+
+
+# ---------------------------------------------------------------------------
+# Reservation-linked balance summary and reconciliation helpers
+# ---------------------------------------------------------------------------
+
+
+def reservation_payment_summary(reservation_id: uuid.UUID) -> dict:
+    """Unified balance/payment summary for a single reservation.
+
+    Combines folio_summary data with payment request history and timeline
+    events for front-desk consumption.
+    """
+    from .cashier_service import folio_summary as _folio_summary
+
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        raise ValueError("Reservation not found.")
+    summary = _folio_summary(reservation)
+    requests = (
+        PaymentRequest.query
+        .filter_by(reservation_id=reservation_id)
+        .order_by(PaymentRequest.created_at.desc())
+        .all()
+    )
+    events = (
+        PaymentEvent.query
+        .filter_by(reservation_id=reservation_id)
+        .order_by(PaymentEvent.created_at.desc())
+        .all()
+    )
+    return {
+        **summary,
+        "reservation_code": reservation.reservation_code,
+        "payment_status": reservation.payment_status,
+        "payment_requests": [
+            {
+                "id": str(pr.id),
+                "request_code": pr.request_code,
+                "status": pr.status,
+                "amount": str(pr.amount),
+                "provider": pr.provider,
+                "payment_url": pr.payment_url,
+                "created_at": pr.created_at.isoformat() if pr.created_at else None,
+                "paid_at": pr.paid_at.isoformat() if pr.paid_at else None,
+                "expired_at": pr.expired_at.isoformat() if pr.expired_at else None,
+            }
+            for pr in requests
+        ],
+        "payment_events": [
+            {
+                "id": str(ev.id),
+                "event_type": ev.event_type,
+                "amount": str(ev.amount) if ev.amount else None,
+                "provider": ev.provider,
+                "provider_event_id": ev.provider_event_id,
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+            }
+            for ev in events
+        ],
+    }
+
+
+def payment_reconciliation_data(
+    *,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int = 100,
+) -> dict:
+    """Aggregate payment data for reconciliation visibility.
+
+    Returns summary metrics and recent transactions for admin dashboard.
+    """
+    from .cashier_service import folio_summary as _folio_summary
+
+    now = utc_now()
+    if date_from is None:
+        date_from = now - timedelta(days=7)
+    if date_to is None:
+        date_to = now
+
+    # Recent payment requests in period
+    requests = (
+        PaymentRequest.query
+        .filter(PaymentRequest.created_at >= date_from, PaymentRequest.created_at <= date_to)
+        .order_by(PaymentRequest.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    # Aggregate counts by status
+    status_counts: dict[str, int] = {}
+    total_collected = Decimal("0.00")
+    for pr in requests:
+        status_counts[pr.status] = status_counts.get(pr.status, 0) + 1
+        if pr.status == "paid":
+            total_collected += money(pr.amount)
+
+    # Recent payment events in period
+    events = (
+        PaymentEvent.query
+        .filter(PaymentEvent.created_at >= date_from, PaymentEvent.created_at <= date_to)
+        .order_by(PaymentEvent.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    # Reservations with outstanding balances (awaiting payment)
+    awaiting_payment = (
+        Reservation.query
+        .filter(
+            Reservation.payment_status.in_(["unpaid", "partially_paid", "deposit_required"]),
+            Reservation.current_status.in_(["confirmed", "checked_in", "tentative"]),
+        )
+        .order_by(Reservation.check_in_date.asc())
+        .limit(50)
+        .all()
+    )
+
+    return {
+        "period_from": date_from.isoformat(),
+        "period_to": date_to.isoformat(),
+        "total_requests": len(requests),
+        "status_counts": status_counts,
+        "total_collected": str(total_collected.quantize(Decimal("0.01"))),
+        "recent_requests": [
+            {
+                "id": str(pr.id),
+                "request_code": pr.request_code,
+                "reservation_code": pr.reservation.reservation_code if pr.reservation else None,
+                "status": pr.status,
+                "amount": str(pr.amount),
+                "currency_code": pr.currency_code,
+                "provider": pr.provider,
+                "created_at": pr.created_at.isoformat() if pr.created_at else None,
+                "paid_at": pr.paid_at.isoformat() if pr.paid_at else None,
+            }
+            for pr in requests
+        ],
+        "recent_events": [
+            {
+                "id": str(ev.id),
+                "event_type": ev.event_type,
+                "amount": str(ev.amount) if ev.amount else None,
+                "provider": ev.provider,
+                "provider_event_id": ev.provider_event_id,
+                "reservation_id": str(ev.reservation_id) if ev.reservation_id else None,
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+            }
+            for ev in events
+        ],
+        "awaiting_payment": [
+            {
+                "reservation_id": str(r.id),
+                "reservation_code": r.reservation_code,
+                "payment_status": r.payment_status,
+                "current_status": r.current_status,
+                "check_in_date": r.check_in_date.isoformat() if r.check_in_date else None,
+                "deposit_required": str(r.deposit_required_amount),
+                "deposit_received": str(r.deposit_received_amount),
+            }
+            for r in awaiting_payment
+        ],
+    }
