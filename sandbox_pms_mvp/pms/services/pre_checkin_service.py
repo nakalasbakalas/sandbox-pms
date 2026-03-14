@@ -251,10 +251,14 @@ def validate_token_access(pc: PreCheckIn) -> str | None:
         return "Invalid or expired pre-check-in link."
     if pc.status in ("verified", "rejected", "expired"):
         return "This pre-check-in link is no longer active."
-    if pc.expires_at and pc.expires_at < utc_now():
-        pc.status = "expired"
-        db.session.flush()
-        return "This pre-check-in link has expired."
+    if pc.expires_at:
+        expires = pc.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires < utc_now():
+            pc.status = "expired"
+            db.session.flush()
+            return "This pre-check-in link has expired."
     res = pc.reservation
     if res is None or res.current_status not in ("confirmed", "tentative"):
         return "This reservation is no longer eligible for pre-check-in."
