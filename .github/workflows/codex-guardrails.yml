@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -35,4 +38,4 @@ jobs:
         run: python -m pytest sandbox_pms_mvp/tests/test_codex_guardrails.py -q
 
       - name: Run full pytest suite
-        run: python -m pytest
+        run: python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q
