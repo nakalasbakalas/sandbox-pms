@@ -3600,12 +3600,14 @@ def register_routes(app: Flask) -> None:
     def staff_reservation_detail(reservation_id):
         require_permission("reservation.view")
         detail = get_reservation_detail(reservation_id)
+        comm_messages = reservation_messages(str(reservation_id)) if can("messaging.view") else []
         return render_template(
             "reservation_detail.html",
             detail=detail,
             back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations")),
             today=date.today(),
             can_folio=can("folio.view"),
+            comm_messages=comm_messages,
         )
 
     @app.route("/staff/reservations/<uuid:reservation_id>/guest", methods=["POST"])
@@ -3970,7 +3972,7 @@ def rotate_csrf_token() -> str:
 def validate_csrf_request() -> None:
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload"}:
+    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload", "staff_messaging_inbound_webhook"}:
         return
     expected = session.get("_csrf_token")
     provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")

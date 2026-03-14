@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "a1b2c3d4e5f6"
-down_revision = "20260314_01_phase17_pre_checkin"
+down_revision = "20260314_01"
 branch_labels = None
 depends_on = None
 
@@ -105,6 +105,7 @@ def upgrade():
         sa.Column("created_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("updated_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("deleted_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.CheckConstraint(
             "template_type IN ('booking_confirmation','pre_checkin_reminder','arrival_day_reminder','deposit_reminder','room_ready_notification','checkout_followup','manual_quote_response','inquiry_followup','general')",
             name="ck_message_templates_template_type",
@@ -148,6 +149,7 @@ def upgrade():
         sa.Column("created_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("updated_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("deleted_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     )
     op.create_index("ix_automation_rules_event_type", "automation_rules", ["event_type"])
 

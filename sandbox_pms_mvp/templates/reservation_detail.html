@@ -254,6 +254,40 @@
   </div>
 </section>
 
+{% if can('messaging.view') %}
+<section class="card">
+  <div class="card-head">
+    <div><h2>Guest Messages</h2></div>
+    <div class="actions">
+      {% if can('messaging.send') %}
+      <a class="button small" href="{{ url_for('staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for msg in comm_messages if comm_messages is defined %}
+      <div class="list-row no-link message-bubble message-{{ msg.direction }}{% if msg.is_internal_note %} message-internal{% endif %}" style="margin:0.3rem 0;border-radius:6px">
+        <div>
+          <strong>
+            {% if msg.direction == 'inbound' %}📥 Inbound{% elif msg.is_internal_note %}📌 Internal note{% elif msg.channel == 'manual_call_log' %}📞 Call log{% else %}📤 Outbound{% endif %}
+          </strong>
+          <span class="badge badge-channel badge-{{ msg.channel }}">{{ msg.channel.replace('_', ' ') }}</span>
+          <span class="badge badge-status badge-{{ msg.status }}">{{ msg.status }}</span>
+          {% if msg.sender_user %}<span class="small"> by {{ msg.sender_user.full_name }}</span>{% endif %}
+          <p class="small" style="margin-top:0.3rem">{{ msg.body_text[:150] }}{% if msg.body_text|length > 150 %}…{% endif %}</p>
+          {% if msg.provider_error %}<p class="small message-error">⚠️ {{ msg.provider_error }}</p>{% endif %}
+        </div>
+        <div class="right-stack">
+          <span class="small muted">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="muted">No guest messages linked to this reservation yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 {% if can('reservation.cancel') and detail.status in ['tentative', 'confirmed'] %}
 <section class="card">
   <div class="card-head"><h2>Cancel reservation</h2></div>
