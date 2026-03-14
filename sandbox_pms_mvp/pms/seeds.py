@@ -260,10 +260,20 @@ _EMPLOYEE_ACCOUNTS = [
 
 
 def seed_employee_accounts() -> None:
-    """Create built-in employee accounts (idempotent)."""
+    """Create built-in employee accounts (idempotent).
+
+    These are initial dev/staging credentials seeded for operational staff.
+    Change passwords after first login in production environments.
+    """
+    existing = {
+        u.username
+        for u in User.query.filter(
+            User.username.in_([a[0] for a in _EMPLOYEE_ACCOUNTS])
+        ).all()
+    }
     roles: dict[str, Role] = {r.code: r for r in Role.query.all()}
     for username, password, full_name, role_code in _EMPLOYEE_ACCOUNTS:
-        if User.query.filter_by(username=username).first():
+        if username in existing:
             continue
         role = roles.get(role_code)
         if not role:
