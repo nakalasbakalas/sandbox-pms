@@ -254,6 +254,63 @@ DOCUMENT_VERIFICATION_STATUSES = [
     "rejected",
 ]
 
+# ---------------------------------------------------------------------------
+# Unified Guest Messaging Hub constants
+# ---------------------------------------------------------------------------
+
+CONVERSATION_CHANNEL_TYPES = [
+    "email",
+    "sms",
+    "whatsapp",
+    "internal_note",
+    "manual_call_log",
+    "ota_message",
+]
+
+CONVERSATION_STATUSES = [
+    "open",
+    "waiting",
+    "closed",
+    "archived",
+]
+
+MESSAGE_DIRECTIONS = [
+    "inbound",
+    "outbound",
+    "internal",
+]
+
+MESSAGE_STATUSES = [
+    "draft",
+    "queued",
+    "sent",
+    "delivered",
+    "failed",
+    "read",
+]
+
+MESSAGE_TEMPLATE_TYPES = [
+    "booking_confirmation",
+    "pre_checkin_reminder",
+    "arrival_day_reminder",
+    "deposit_reminder",
+    "room_ready_notification",
+    "checkout_followup",
+    "manual_quote_response",
+    "inquiry_followup",
+    "general",
+]
+
+AUTOMATION_EVENT_TYPES = [
+    "reservation_created",
+    "reservation_pending_too_long",
+    "pre_checkin_not_completed",
+    "arrival_today",
+    "room_ready",
+    "payment_due",
+    "checkout_completed",
+]
+
 PERMISSION_SEEDS = [
     ("reservation.view", "View reservations", "Reservations", "reservation"),
     ("reservation.create", "Create reservations", "Reservations", "reservation"),
@@ -289,6 +346,9 @@ PERMISSION_SEEDS = [
     ("audit.view", "View audit", "Audit", "audit"),
     ("auth.manage_mfa", "Manage MFA", "Authentication", "auth"),
     ("auth.reset_password_admin", "Admin reset password", "Authentication", "auth"),
+    ("messaging.view", "View guest messaging inbox", "Messaging", "messaging"),
+    ("messaging.send", "Send guest messages", "Messaging", "messaging"),
+    ("messaging.manage", "Manage messaging settings and templates", "Messaging", "messaging"),
 ]
 
 ROLE_SEEDS = [
@@ -350,6 +410,8 @@ ROLE_PERMISSION_SEEDS = {
         "payment_request.create",
         "housekeeping.view",
         "housekeeping.status_change",
+        "messaging.view",
+        "messaging.send",
         "housekeeping.task_manage",
     ],
     "housekeeping": [

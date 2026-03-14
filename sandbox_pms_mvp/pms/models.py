@@ -18,6 +18,8 @@ from .constants import (
     CASHIER_DOCUMENT_TYPES,
     CALENDAR_FEED_SCOPE_TYPES,
     CANCELLATION_REQUEST_STATUSES,
+    CONVERSATION_CHANNEL_TYPES,
+    CONVERSATION_STATUSES,
     DOCUMENT_TYPES,
     DOCUMENT_VERIFICATION_STATUSES,
     EMAIL_OUTBOX_STATUSES,
@@ -33,6 +35,9 @@ from .constants import (
     INVENTORY_OVERRIDE_ACTIONS,
     INVENTORY_OVERRIDE_SCOPE_TYPES,
     INVENTORY_AVAILABILITY_STATUSES,
+    MESSAGE_DIRECTIONS,
+    MESSAGE_STATUSES,
+    MESSAGE_TEMPLATE_TYPES,
     MFA_FACTOR_TYPES,
     MODIFICATION_REQUEST_STATUSES,
     NOTE_VISIBILITY_SCOPES,
@@ -1794,6 +1799,172 @@ class ReservationDocument(AuditMixin, db.Model):
     )
 
 
+# ---------------------------------------------------------------------------
+# Unified Guest Messaging Hub models
+# ---------------------------------------------------------------------------
+
+class ConversationThread(AuditMixin, db.Model):
+    __tablename__ = "conversation_threads"
+
+    guest_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("guests.id", ondelete="SET NULL"), nullable=True
+    )
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="SET NULL"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    subject: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="open")
+    assigned_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    last_message_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_message_preview: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    unread_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    is_needs_followup: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    guest_contact_value: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
+    guest = relationship("Guest", foreign_keys=[guest_id])
+    reservation = relationship("Reservation", foreign_keys=[reservation_id])
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"channel IN ({', '.join(repr(v) for v in CONVERSATION_CHANNEL_TYPES)})",
+            name="ck_conversation_threads_channel",
+        ),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in CONVERSATION_STATUSES)})",
+            name="ck_conversation_threads_status",
+        ),
+        Index("ix_conversation_threads_guest_id", "guest_id"),
+        Index("ix_conversation_threads_reservation_id", "reservation_id"),
+        Index("ix_conversation_threads_status", "status"),
+        Index("ix_conversation_threads_channel", "channel"),
+        Index("ix_conversation_threads_last_message_at", "last_message_at"),
+    )
+
+
+class Message(AuditMixin, db.Model):
+    __tablename__ = "messages"
+
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("conversation_threads.id", ondelete="CASCADE"), nullable=False
+    )
+    direction: Mapped[str] = mapped_column(sa.String(20), nullable=False)
+    channel: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    sender_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    sender_name: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    recipient_address: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    subject: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    body_text: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    body_html: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="queued")
+    provider_message_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    provider_error: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    is_internal_note: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    template_key: Mapped[str | None] = mapped_column(sa.String(60), nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+
+    thread = relationship("ConversationThread", backref="messages")
+    sender_user = relationship("User", foreign_keys=[sender_user_id])
+
+    __table_args__ = (
+        CheckConstraint(
+            f"direction IN ({', '.join(repr(v) for v in MESSAGE_DIRECTIONS)})",
+            name="ck_messages_direction",
+        ),
+        CheckConstraint(
+            f"channel IN ({', '.join(repr(v) for v in CONVERSATION_CHANNEL_TYPES)})",
+            name="ck_messages_channel",
+        ),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in MESSAGE_STATUSES)})",
+            name="ck_messages_status",
+        ),
+        Index("ix_messages_thread_id", "thread_id"),
+        Index("ix_messages_status", "status"),
+        Index("ix_messages_created_at", "created_at"),
+    )
+
+
+class MessageTemplate(AuditMixin, SoftDeleteMixin, db.Model):
+    __tablename__ = "message_templates"
+
+    template_key: Mapped[str] = mapped_column(sa.String(60), nullable=False)
+    template_type: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="general")
+    channel: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="email")
+    language_code: Mapped[str] = mapped_column(sa.String(10), nullable=False, default="en")
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    subject_template: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    body_template: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"template_type IN ({', '.join(repr(v) for v in MESSAGE_TEMPLATE_TYPES)})",
+            name="ck_message_templates_template_type",
+        ),
+        CheckConstraint(
+            f"channel IN ({', '.join(repr(v) for v in CONVERSATION_CHANNEL_TYPES)})",
+            name="ck_message_templates_channel",
+        ),
+        UniqueConstraint("template_key", "channel", "language_code", name="uq_message_templates_key_channel_lang"),
+        Index("ix_message_templates_template_key", "template_key"),
+        Index("ix_message_templates_channel", "channel"),
+    )
+
+
+class DeliveryAttempt(db.Model):
+    __tablename__ = "delivery_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    attempted_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False)
+    provider_response: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+
+    message = relationship("Message", backref="delivery_attempts")
+
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in MESSAGE_STATUSES)})",
+            name="ck_delivery_attempts_status",
+        ),
+        Index("ix_delivery_attempts_message_id", "message_id"),
+    )
+
+
+class AutomationRule(AuditMixin, SoftDeleteMixin, db.Model):
+    __tablename__ = "automation_rules"
+
+    event_type: Mapped[str] = mapped_column(sa.String(60), nullable=False)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("message_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="email")
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    delay_minutes: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    conditions_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+
+    template = relationship("MessageTemplate", foreign_keys=[template_id])
+
+    __table_args__ = (
+        Index("ix_automation_rules_event_type", "event_type"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -1830,6 +2001,10 @@ for model in (
     ExternalCalendarSyncRun,
     PreCheckIn,
     ReservationDocument,
+    ConversationThread,
+    Message,
+    MessageTemplate,
+    AutomationRule,
     HousekeepingTask,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
