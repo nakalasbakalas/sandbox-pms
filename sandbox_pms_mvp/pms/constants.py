@@ -29,6 +29,19 @@ RESERVATION_STATUSES = [
 
 PAYMENT_REQUEST_STATUSES = ["pending", "paid", "expired", "cancelled", "failed"]
 
+RESERVATION_PAYMENT_STATUSES = [
+    "unpaid",
+    "partially_paid",
+    "paid",
+    "deposit_required",
+    "deposit_received",
+    "overpaid",
+    "refunded",
+    "failed",
+    "pending",
+    "voided",
+]
+
 BLACKOUT_TYPES = [
     "closed_to_booking",
     "no_arrival",

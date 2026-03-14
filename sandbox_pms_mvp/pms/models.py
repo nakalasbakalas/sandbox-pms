@@ -46,6 +46,7 @@ from .constants import (
     NOTIFICATION_TEMPLATE_CHANNELS,
     NOTIFICATION_TEMPLATE_KEYS,
     PAYMENT_REQUEST_STATUSES,
+    RESERVATION_PAYMENT_STATUSES,
     POLICY_DOCUMENT_CODES,
     PRE_CHECKIN_STATUSES,
     RATE_ADJUSTMENT_TYPES,
@@ -668,6 +669,9 @@ class Reservation(AuditMixin, db.Model):
     identity_verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    payment_status: Mapped[str] = mapped_column(
+        sa.String(30), nullable=False, default="unpaid", server_default="unpaid"
+    )
 
     primary_guest = relationship("Guest")
     room_type = relationship("RoomType")
@@ -707,10 +711,15 @@ class Reservation(AuditMixin, db.Model):
             "reservation_code LIKE 'SBX-%'",
             name="ck_reservations_reservation_code_format",
         ),
+        CheckConstraint(
+            f"payment_status IN ({', '.join(repr(v) for v in RESERVATION_PAYMENT_STATUSES)})",
+            name="ck_reservations_payment_status",
+        ),
         Index("ix_reservations_status_dates", "current_status", "check_in_date", "check_out_date"),
         Index("ix_reservations_primary_guest_id", "primary_guest_id"),
         Index("ix_reservations_assigned_room_id", "assigned_room_id"),
         Index("ix_reservations_source_channel", "source_channel"),
+        Index("ix_reservations_payment_status", "payment_status"),
     )
 
 

@@ -861,6 +861,21 @@ def _create_folio_line(
     return charge
 
 
+def _compute_payment_status(settlement: str, deposit_st: str, dep_required: Decimal) -> str:
+    """Derive reservation payment_status from folio settlement and deposit states."""
+    if settlement == "settled":
+        return "paid"
+    if settlement == "overpaid":
+        return "overpaid"
+    if dep_required > Decimal("0.00") and deposit_st == "missing":
+        return "deposit_required"
+    if dep_required > Decimal("0.00") and deposit_st in ("partial", "paid") and settlement != "settled":
+        return "deposit_received" if deposit_st == "paid" else "partially_paid"
+    if settlement == "partially_paid":
+        return "partially_paid"
+    return "unpaid"
+
+
 def _sync_reservation_payment_fields(reservation: Reservation) -> None:
     deposit_received = sum(
         (
@@ -871,6 +886,13 @@ def _sync_reservation_payment_fields(reservation: Reservation) -> None:
         Decimal("0.00"),
     )
     reservation.deposit_received_amount = deposit_received.quantize(Decimal("0.01"))
+    # Compute and persist payment_status from folio state
+    summary = folio_summary(reservation)
+    reservation.payment_status = _compute_payment_status(
+        summary["settlement_state"],
+        summary["deposit_state"],
+        money(reservation.deposit_required_amount),
+    )
 
 
 def _log_cashier_event(
