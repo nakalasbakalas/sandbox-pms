@@ -49,6 +49,7 @@ def seed_reference_data(*, sync_existing_roles: bool = False) -> None:
     seed_policy_documents()
     seed_notification_templates()
     seed_initial_admin()
+    seed_employee_accounts()
     db.session.commit()
 
 
@@ -247,6 +248,37 @@ def seed_initial_admin() -> None:
     )
     user.roles = [admin_role]
     db.session.add(user)
+
+
+_EMPLOYEE_ACCOUNTS = [
+    # (username, password, full_name, role_code)
+    ("hui.admin", "6astxSjtq9RF", "Hui", "admin"),
+    ("manager", "jyVCLAzMXL6U", "Manager", "manager"),
+    ("housekeeping", "X3Hp9bnTdKTn", "Housekeeping", "housekeeping"),
+    ("frontdesk", "3Y5vyMujqXwU", "Front Desk", "front_desk"),
+]
+
+
+def seed_employee_accounts() -> None:
+    """Create built-in employee accounts (idempotent)."""
+    roles: dict[str, Role] = {r.code: r for r in Role.query.all()}
+    for username, password, full_name, role_code in _EMPLOYEE_ACCOUNTS:
+        if User.query.filter_by(username=username).first():
+            continue
+        role = roles.get(role_code)
+        if not role:
+            continue
+        user = User(
+            username=username,
+            email=f"{username}@internal.sandbox.local",
+            full_name=full_name,
+            password_hash=hash_password(password),
+            is_active=True,
+            account_state="active",
+            password_changed_at=utc_now(),
+        )
+        user.roles = [role]
+        db.session.add(user)
 
 
 def seed_policy_documents() -> None:

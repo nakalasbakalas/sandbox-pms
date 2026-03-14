@@ -178,7 +178,7 @@ def test_reservation_list_loads_correctly(app_factory):
             check_in_date=date.today() + timedelta(days=1),
             check_out_date=date.today() + timedelta(days=3),
         )
-        user = make_staff_user("front_desk", "frontdesk@example.com")
+        user = make_staff_user("front_desk", "test.frontdesk@example.com")
     login_as(client, user)
     response = client.get("/staff/reservations")
     assert response.status_code == 200
@@ -390,7 +390,7 @@ def test_unauthorized_user_cannot_edit_guest_details(app_factory):
             check_in_date=date.today() + timedelta(days=2),
             check_out_date=date.today() + timedelta(days=4),
         )
-        user = make_staff_user("housekeeping", "housekeeping@example.com")
+        user = make_staff_user("housekeeping", "test.housekeeping@example.com")
     login_as(client, user)
     response = post_form(
         client,
