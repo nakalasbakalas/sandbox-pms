@@ -1,76 +1,257 @@
 {% extends 'base.html' %}
 {% block title %}Staff workspace | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="grid three metric-grid">
-  <article class="metric-card"><small>Today's arrivals</small><strong>{{ arrivals_count }}</strong></article>
-  <article class="metric-card"><small>Today's departures</small><strong>{{ departures_count }}</strong></article>
-  <article class="metric-card"><small>In-house now</small><strong>{{ in_house_count }}</strong></article>
+<section class="card report-hero">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Front Desk Dashboard</p>
+      <h1>Daily operations</h1>
+      <p class="lead">{{ dashboard.business_date.strftime('%A, %d %B %Y') }} — shift overview and quick actions.</p>
+    </div>
+    <div class="actions">
+      {% if can_reports %}<a class="button secondary tiny" href="{{ url_for('staff_reports') }}">Manager reports</a>{% endif %}
+    </div>
+  </div>
 </section>
 
-<section class="grid three metric-grid">
-  <article class="metric-card"><small>Review queue</small><strong>{{ queue_entries|length }}</strong></article>
-  <article class="metric-card"><small>Unread alerts</small><strong>{{ notifications|length }}</strong></article>
-  <article class="metric-card"><small>Email outbox pending</small><strong>{{ pending_emails }}</strong></article>
+<section class="grid four metric-grid">
+  {% for card in dashboard.headline %}
+    <article class="metric-card report-metric {{ card.tone }}">
+      <small>{{ card.label }}</small>
+      <strong>{{ card.value }}</strong>
+    </article>
+  {% endfor %}
 </section>
+
+<section class="grid two gap-lg">
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Arrivals today</h2>
+        <p>{{ arrivals_count }} arrival{{ '' if arrivals_count == 1 else 's' }} due today</p>
+      </div>
+      <div class="actions">
+        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">Full report</a>
+      </div>
+    </div>
+    <div class="metric-strip">
+      <div><small>No room assigned</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
+      <div><small>Not ready</small><strong>{{ dashboard.arrivals.not_ready_count }}</strong></div>
+      <div><small>Deposit missing</small><strong>{{ dashboard.arrivals.deposit_missing_count }}</strong></div>
+      <div><small>Flagged</small><strong>{{ dashboard.arrivals.flagged_count }}</strong></div>
+    </div>
+    {% if dashboard.arrivals["items"] %}
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr><th>Code</th><th>Guest</th><th>Room</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for item in dashboard.arrivals["items"][:5] %}
+              <tr>
+                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+                <td>{{ item.guest_name }}</td>
+                <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
+                <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if dashboard.arrivals.count > 5 %}
+        <p class="text-right"><a href="{{ url_for('staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">View all {{ dashboard.arrivals.count }} arrivals →</a></p>
+      {% endif %}
+    {% else %}
+      <p class="empty-state">No arrivals due today.</p>
+    {% endif %}
+  </article>
+
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Departures today</h2>
+        <p>{{ departures_count }} departure{{ '' if departures_count == 1 else 's' }} due today</p>
+      </div>
+      <div class="actions">
+        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">Full report</a>
+      </div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Outstanding balance</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
+      <div><small>Not checked out</small><strong>{{ dashboard.departures.pending_checkout_count }}</strong></div>
+    </div>
+    {% if dashboard.departures["items"] %}
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr><th>Code</th><th>Guest</th><th>Room</th><th>Balance</th></tr>
+          </thead>
+          <tbody>
+            {% for item in dashboard.departures["items"][:5] %}
+              <tr>
+                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+                <td>{{ item.guest_name }}</td>
+                <td>{{ item.assigned_room_number or '-' }}</td>
+                <td>{{ item.payment_summary.balance_due | money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if dashboard.departures.count > 5 %}
+        <p class="text-right"><a href="{{ url_for('staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">View all {{ dashboard.departures.count }} departures →</a></p>
+      {% endif %}
+    {% else %}
+      <p class="empty-state">No departures due today.</p>
+    {% endif %}
+  </article>
+</section>
+
+{% if can_housekeeping and dashboard.housekeeping %}
+<section class="grid two gap-lg">
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Room status</h2>
+        <p>{{ dashboard.housekeeping.counts.sellable_ready }} ready room{{ '' if dashboard.housekeeping.counts.sellable_ready == 1 else 's' }}</p>
+      </div>
+      <div class="actions">
+        <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Housekeeping board</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">Full report</a>
+      </div>
+    </div>
+    <div class="grid four report-mini-grid">
+      <article class="status-card"><span>Ready</span><strong>{{ dashboard.housekeeping.counts.sellable_ready }}</strong></article>
+      <article class="status-card"><span>Dirty</span><strong>{{ dashboard.housekeeping.counts.dirty }}</strong></article>
+      <article class="status-card"><span>Blocked</span><strong>{{ dashboard.housekeeping.counts.blocked }}</strong></article>
+      <article class="status-card"><span>Out of order</span><strong>{{ dashboard.housekeeping.counts.out_of_order }}</strong></article>
+    </div>
+  </article>
+
+  <article class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Urgent tasks</h2>
+        <p>{{ dashboard.urgent_tasks.count }} high-priority task{{ '' if dashboard.urgent_tasks.count == 1 else 's' }} today</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open tasks</a>
+    </div>
+    {% if dashboard.urgent_tasks["items"] %}
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr><th>Room</th><th>Type</th><th>Priority</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {% for task in dashboard.urgent_tasks["items"] %}
+              <tr>
+                <td>{% if task.room_id %}<a href="{{ url_for('staff_housekeeping_room_detail', room_id=task.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ task.room_number }}</a>{% else %}-{% endif %}</td>
+                <td>{{ task.task_type|replace('_', ' ') }}</td>
+                <td><span class="status {{ task.priority }}">{{ task.priority }}</span></td>
+                <td><span class="status {{ task.status }}">{{ task.status|replace('_', ' ') }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-state">No urgent tasks outstanding.</p>
+    {% endif %}
+  </article>
+</section>
+{% endif %}
+
+{% if can_folio and dashboard.balances_due %}
+<section class="card inset">
+  <div class="card-head">
+    <div>
+      <h2>Outstanding balances</h2>
+      <p>{{ dashboard.balances_due.count }} folio{{ '' if dashboard.balances_due.count == 1 else 's' }} with balance due · {{ dashboard.balances_due.total_balance_due | money }}</p>
+    </div>
+    <a class="button secondary tiny" href="{{ url_for('staff_daily_report', report_type='payment_due') }}">Full report</a>
+  </div>
+  {% if dashboard.balances_due["items"] %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr><th>Code</th><th>Guest</th><th>Status</th><th>Depart</th><th>Balance</th></tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.balances_due["items"][:5] %}
+            <tr>
+              <td><a href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td>{{ item.guest_name }}</td>
+              <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+              <td>{{ item.departure_date.strftime('%d %b') }}</td>
+              <td>{{ item.payment_summary.balance_due | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No outstanding balances.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head">
       <div>
-        <p class="eyebrow">Reservation Workspace</p>
-        <h2>Front desk command center</h2>
-      </div>
-      <div class="actions">
-        <a class="button" href="{{ url_for('staff_front_desk') }}">Open front desk</a>
-        <a class="button secondary" href="{{ url_for('staff_reservations') }}">Open reservations</a>
-        {% if can('housekeeping.view') %}<a class="button secondary" href="{{ url_for('staff_housekeeping') }}">Open housekeeping</a>{% endif %}
-        <a class="button secondary" href="{{ url_for('staff_review_queue') }}">Open review queue</a>
+        <p class="eyebrow">Workspace</p>
+        <h2>Quick actions</h2>
       </div>
     </div>
     <div class="list-stack compact">
-      <a class="list-row" href="{{ url_for('staff_front_desk', mode='arrivals') }}">
-        <div><strong>Arrivals</strong><p>Prepare rooms, deposits, and special requests for today.</p></div>
-        <span class="status confirmed">{{ arrivals_count }}</span>
+      <a class="list-row" href="{{ url_for('staff_front_desk') }}">
+        <div><strong>Front desk workspace</strong><p>Arrivals, departures, and in-house management.</p></div>
       </a>
-      <a class="list-row" href="{{ url_for('staff_front_desk', mode='departures') }}">
-        <div><strong>Departures</strong><p>Review balances and checkout readiness for today.</p></div>
-        <span class="status pending">{{ departures_count }}</span>
+      <a class="list-row" href="{{ url_for('staff_reservations') }}">
+        <div><strong>Reservations</strong><p>Search and manage all reservations.</p></div>
       </a>
-      <a class="list-row" href="{{ url_for('staff_front_desk', mode='in_house') }}">
-        <div><strong>In-house guests</strong><p>Track current rooms, notes, and folio risk at a glance.</p></div>
-        <span class="status checked_in">{{ in_house_count }}</span>
-      </a>
-      {% if can('housekeeping.view') %}
+      {% if can_housekeeping %}
       <a class="list-row" href="{{ url_for('staff_housekeeping') }}">
-        <div><strong>Housekeeping board</strong><p>See live room readiness, cleaning priorities, and blocked rooms.</p></div>
-        <span class="status house_use">Ready board</span>
+        <div><strong>Housekeeping board</strong><p>Room cleaning status and task management.</p></div>
       </a>
       {% endif %}
+      <a class="list-row" href="{{ url_for('staff_review_queue') }}">
+        <div><strong>Review queue</strong><p>New public bookings waiting for review.</p></div>
+        <span class="status confirmed">{{ queue_entries|length }}</span>
+      </a>
     </div>
   </article>
 
   <article class="card">
     <div class="card-head">
       <div>
-        <p class="eyebrow">New Public Bookings</p>
-        <h2>Review queue</h2>
+        <p class="eyebrow">Daily Reports</p>
+        <h2>Report shortcuts</h2>
       </div>
     </div>
-    {% if queue_entries %}
-      <div class="list-stack compact">
-        {% for entry in queue_entries %}
-          <a class="list-row" href="{{ url_for('staff_reservation_detail', reservation_id=entry.reservation_id, back=url_for('staff_review_queue')) }}">
-            <div>
-              <strong>{{ entry.reservation_id }}</strong>
-              <p>{{ entry.review_status }}{% if entry.special_requests_present %} - special request{% endif %}</p>
-            </div>
-            <span class="status {{ entry.review_status }}">{{ entry.review_status }}</span>
-          </a>
-        {% endfor %}
-      </div>
-    {% else %}
-      <p class="muted">No new public bookings waiting for review.</p>
-    {% endif %}
+    <div class="list-stack compact">
+      <a class="list-row" href="{{ url_for('staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">
+        <div><strong>Arrivals report</strong><p>Full arrival details with readiness and deposit status.</p></div>
+      </a>
+      <a class="list-row" href="{{ url_for('staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">
+        <div><strong>Departures report</strong><p>Checkout readiness and outstanding balances.</p></div>
+      </a>
+      <a class="list-row" href="{{ url_for('staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">
+        <div><strong>Room status report</strong><p>Room readiness, cleaning, and blocking status.</p></div>
+      </a>
+      {% if can_folio %}
+      <a class="list-row" href="{{ url_for('staff_daily_report', report_type='payment_due') }}">
+        <div><strong>Payment due report</strong><p>Outstanding folio balances requiring attention.</p></div>
+      </a>
+      {% endif %}
+      {% if can_reports %}
+      <a class="list-row" href="{{ url_for('staff_daily_report', report_type='no_show_cancellation') }}">
+        <div><strong>No-show & cancellation report</strong><p>Exceptions and lost bookings.</p></div>
+      </a>
+      {% endif %}
+    </div>
   </article>
 </section>
 
