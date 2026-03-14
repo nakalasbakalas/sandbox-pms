@@ -172,6 +172,8 @@ BOOKING_LANGUAGES = ["th", "en", "zh-Hans"]
 
 BOOKING_SOURCE_CHANNELS = [
     "direct_web",
+    "walk_in",
+    "phone",
     "google_business",
     "facebook",
     "line",
@@ -179,6 +181,9 @@ BOOKING_SOURCE_CHANNELS = [
     "qr",
     "referral",
     "admin_manual",
+    "ota_booking_com",
+    "ota_agoda",
+    "ota_expedia",
 ]
 
 RESERVATION_HOLD_STATUSES = ["active", "converted", "expired", "released"]
