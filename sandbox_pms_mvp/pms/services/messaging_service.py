@@ -716,13 +716,18 @@ def get_message_template(template_id: str) -> MessageTemplate | None:
 
 
 def render_message_template(template: MessageTemplate, context: dict[str, str]) -> tuple[str, str]:
-    """Render subject and body with simple placeholder substitution."""
+    """Render subject and body with simple placeholder substitution.
+
+    Context values are escaped to prevent injection.
+    """
+    import html as html_mod
     subject = template.subject_template or ""
     body = template.body_template or ""
     for key, value in context.items():
         placeholder = "{{" + key + "}}"
-        subject = subject.replace(placeholder, str(value))
-        body = body.replace(placeholder, str(value))
+        escaped_value = html_mod.escape(str(value))
+        subject = subject.replace(placeholder, escaped_value)
+        body = body.replace(placeholder, escaped_value)
     return subject, body
 
 

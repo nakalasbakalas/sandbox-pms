@@ -571,7 +571,12 @@ def register_template_helpers(app: Flask) -> None:
             "csrf_input": lambda: Markup(
                 f'<input type="hidden" name="csrf_token" value="{ensure_csrf_token()}">'
             ),
-            "messaging_unread_count": total_unread_count() if current_staff and current_staff.has_permission("messaging.view") else 0,
+            "messaging_unread_count": total_unread_count() if (
+                current_staff and current_staff.has_permission("messaging.view")
+                and request.endpoint and (
+                    request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
+                )
+            ) else 0,
             "CONVERSATION_CHANNEL_TYPES": CONVERSATION_CHANNEL_TYPES,
             "CONVERSATION_STATUSES": CONVERSATION_STATUSES,
         }
