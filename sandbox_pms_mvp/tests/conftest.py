@@ -25,6 +25,10 @@ def app_factory(tmp_path):
             "INVENTORY_BOOTSTRAP_DAYS": 30,
             "ADMIN_EMAIL": "admin@sandbox.local",
             "ADMIN_PASSWORD": "sandbox-admin-123",
+            # Allow large uploads in tests so oversized-file assertions are
+            # evaluated at the service layer rather than being rejected by
+            # Flask's request-body middleware before the test can run.
+            "MAX_CONTENT_LENGTH": 32 * 1024 * 1024,  # 32 MB
         }
         if config:
             app_config.update(config)
