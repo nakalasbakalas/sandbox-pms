@@ -3,13 +3,14 @@ services:
     name: sandbox-hotel-pms-v43m
     runtime: python
     rootDir: sandbox_pms_mvp
+    region: oregon
     plan: starter
-    autoDeployTrigger: commit
+    autoDeploy: true
     healthCheckPath: /health
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     preDeployCommand: flask --app app db upgrade
     startCommand: gunicorn --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-10000} --timeout 120 --worker-class sync --access-logfile - --error-logfile - app:app
-    domains:
+    customDomains:
       - book.sandboxhotel.com
       - staff.sandboxhotel.com
     envVars:
