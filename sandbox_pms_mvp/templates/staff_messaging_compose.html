@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}Compose Message | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow"><a href="{{ url_for('staff_messaging_inbox') }}">← Back to Inbox</a></p>
+      <h1>Compose New Message</h1>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('staff_messaging_send') }}">
+    {{ csrf_input() }}
+    {% if reservation %}
+    <input type="hidden" name="reservation_id" value="{{ reservation.id }}">
+    {% endif %}
+    {% if guest %}
+    <input type="hidden" name="guest_id" value="{{ guest.id }}">
+    {% endif %}
+
+    {% if guest %}
+    <div class="context-block" style="margin-bottom:1rem;padding:1rem;background:#f8f9fa;border-radius:8px">
+      <strong>Guest:</strong> {{ guest.full_name }}
+      {% if guest.phone %} | 📱 {{ guest.phone }}{% endif %}
+      {% if guest.email %} | ✉️ {{ guest.email }}{% endif %}
+    </div>
+    {% endif %}
+    {% if reservation %}
+    <div class="context-block" style="margin-bottom:1rem;padding:1rem;background:#f8f9fa;border-radius:8px">
+      <strong>Reservation:</strong> {{ reservation.reservation_code }}
+      | {{ reservation.current_status.replace('_', ' ').title() }}
+      | {{ reservation.check_in_date }} → {{ reservation.check_out_date }}
+    </div>
+    {% endif %}
+
+    <div class="form-group">
+      <label>
+        <span>Channel</span>
+        <select name="channel" id="compose-channel">
+          <option value="email" selected>Email</option>
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="internal_note">Internal Note</option>
+          <option value="manual_call_log">Phone Call Log</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-group" id="compose-recipient-group">
+      <label>
+        <span>Recipient</span>
+        <input type="text" name="recipient_address"
+               value="{{ guest.email if guest and guest.email else (guest.phone if guest and guest.phone else '') }}"
+               placeholder="Email address or phone number">
+      </label>
+    </div>
+    <div class="form-group" id="compose-subject-group">
+      <label>
+        <span>Subject</span>
+        <input type="text" name="subject" placeholder="Subject (optional)">
+      </label>
+    </div>
+    {% if templates %}
+    <div class="form-group">
+      <label>
+        <span>Template (optional)</span>
+        <select name="template_key">
+          <option value="">No template</option>
+          {% for tpl in templates %}
+          <option value="{{ tpl.template_key }}">{{ tpl.name }} ({{ tpl.channel }})</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    {% endif %}
+    <div class="form-group">
+      <label>
+        <span>Message</span>
+        <textarea name="body_text" rows="6" required placeholder="Type your message here..."></textarea>
+      </label>
+    </div>
+    <div class="form-group">
+      <label class="toggle-row">
+        <span>Internal note only (not sent to guest)</span>
+        <input type="checkbox" name="is_internal_note" value="1" id="compose-internal">
+      </label>
+    </div>
+    <div class="actions">
+      <button class="button" type="submit">Send Message</button>
+      <a class="button secondary" href="{{ url_for('staff_messaging_inbox') }}">Cancel</a>
+    </div>
+  </form>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var ch = document.getElementById('compose-channel');
+  var rg = document.getElementById('compose-recipient-group');
+  var sg = document.getElementById('compose-subject-group');
+  var ic = document.getElementById('compose-internal');
+  function update() {
+    var v = ch.value;
+    var isInternal = v === 'internal_note' || v === 'manual_call_log';
+    rg.style.display = isInternal ? 'none' : '';
+    sg.style.display = v === 'manual_call_log' ? 'none' : '';
+    ic.checked = isInternal;
+  }
+  ch.addEventListener('change', update);
+  update();
+});
+</script>
+{% endblock %}

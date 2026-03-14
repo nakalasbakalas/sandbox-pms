@@ -30,6 +30,8 @@ from .constants import (
     BLACKOUT_TYPES,
     BOOKING_EXTRA_PRICING_MODES,
     BOOKING_SOURCE_CHANNELS,
+    CONVERSATION_CHANNEL_TYPES,
+    CONVERSATION_STATUSES,
     INVENTORY_OVERRIDE_ACTIONS,
     INVENTORY_OVERRIDE_SCOPE_TYPES,
     NOTIFICATION_TEMPLATE_KEYS,
@@ -57,9 +59,11 @@ from .models import (
     BlackoutPeriod,
     CalendarFeed,
     CancellationRequest,
+    ConversationThread,
     EmailOutbox,
     ExternalCalendarBlock,
     ExternalCalendarSource,
+    Guest,
     InventoryOverride,
     MfaFactor,
     NotificationDelivery,
@@ -262,6 +266,23 @@ from .services.pre_checkin_service import (
 )
 from .services.reporting_service import build_manager_dashboard
 from .services.reservation_service import ReservationCreatePayload, create_reservation
+from .services.messaging_service import (
+    ComposePayload as MessagingComposePayload,
+    InboxFilters as MessagingInboxFilters,
+    assign_thread,
+    close_thread,
+    get_thread_detail,
+    list_inbox,
+    list_message_templates as list_msg_templates,
+    mark_thread_read,
+    record_inbound_message,
+    reopen_thread,
+    reservation_messages,
+    send_message as messaging_send_message,
+    toggle_followup,
+    total_unread_count,
+    upsert_message_template as upsert_msg_template,
+)
 from .services.staff_reservations_service import (
     GuestUpdatePayload,
     ReservationNotePayload,
@@ -550,6 +571,9 @@ def register_template_helpers(app: Flask) -> None:
             "csrf_input": lambda: Markup(
                 f'<input type="hidden" name="csrf_token" value="{ensure_csrf_token()}">'
             ),
+            "messaging_unread_count": total_unread_count() if current_staff and current_staff.has_permission("messaging.view") else 0,
+            "CONVERSATION_CHANNEL_TYPES": CONVERSATION_CHANNEL_TYPES,
+            "CONVERSATION_STATUSES": CONVERSATION_STATUSES,
         }
 
 
@@ -1798,6 +1822,202 @@ def register_routes(app: Flask) -> None:
         notification.read_at = utc_now()
         db.session.commit()
         return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
+
+    # ------------------------------------------------------------------
+    # Unified Guest Messaging Hub routes
+    # ------------------------------------------------------------------
+
+    @app.route("/staff/messaging")
+    def staff_messaging_inbox():
+        actor = require_permission("messaging.view")
+        filters = MessagingInboxFilters(
+            channel=request.args.get("channel", ""),
+            status=request.args.get("status", ""),
+            unread_only=request.args.get("unread") == "1",
+            needs_followup=request.args.get("followup") == "1",
+            reservation_status=request.args.get("res_status", ""),
+            search=(request.args.get("q") or "").strip(),
+            assigned_user_id=request.args.get("assigned", ""),
+            page=parse_request_int_arg("page", default=1, minimum=1),
+        )
+        entries, total = list_inbox(filters)
+        total_pages = max(1, (total + filters.per_page - 1) // filters.per_page)
+        templates = list_msg_templates()
+        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
+        return render_template(
+            "staff_messaging_inbox.html",
+            entries=entries,
+            filters=filters,
+            total=total,
+            total_pages=total_pages,
+            templates=templates,
+            staff_users=staff_users,
+        )
+
+    @app.route("/staff/messaging/thread/<uuid:thread_id>")
+    def staff_messaging_thread(thread_id):
+        require_permission("messaging.view")
+        detail = get_thread_detail(str(thread_id))
+        if not detail or not detail.thread:
+            abort(404)
+        mark_thread_read(str(thread_id))
+        templates = list_msg_templates(channel=detail.thread.channel)
+        return render_template(
+            "staff_messaging_thread.html",
+            detail=detail,
+            templates=templates,
+        )
+
+    @app.route("/staff/messaging/send", methods=["POST"])
+    def staff_messaging_send():
+        actor = require_permission("messaging.send")
+        payload = MessagingComposePayload(
+            thread_id=request.form.get("thread_id") or None,
+            guest_id=request.form.get("guest_id") or None,
+            reservation_id=request.form.get("reservation_id") or None,
+            channel=request.form.get("channel", "email"),
+            subject=request.form.get("subject", "").strip(),
+            body_text=request.form.get("body_text", "").strip(),
+            is_internal_note=request.form.get("is_internal_note") == "1",
+            template_key=request.form.get("template_key") or None,
+            recipient_address=request.form.get("recipient_address") or None,
+        )
+        if not payload.body_text:
+            flash("Message body cannot be empty.", "danger")
+            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
+            return redirect(back)
+        try:
+            msg = messaging_send_message(payload, actor_user_id=str(actor.id))
+            if msg.status == "sent":
+                flash("Message sent successfully.", "success")
+            elif msg.status == "failed":
+                flash(f"Message delivery failed: {msg.provider_error or 'unknown error'}", "danger")
+            else:
+                flash("Message queued.", "info")
+        except Exception as exc:
+            db.session.rollback()
+            flash(f"Error sending message: {escape(str(exc))}", "danger")
+
+        if payload.thread_id:
+            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
+        return redirect(url_for("staff_messaging_inbox"))
+
+    @app.route("/staff/messaging/note", methods=["POST"])
+    def staff_messaging_add_note():
+        actor = require_permission("messaging.send")
+        payload = MessagingComposePayload(
+            thread_id=request.form.get("thread_id") or None,
+            guest_id=request.form.get("guest_id") or None,
+            reservation_id=request.form.get("reservation_id") or None,
+            channel="internal_note",
+            body_text=request.form.get("body_text", "").strip(),
+            is_internal_note=True,
+        )
+        if not payload.body_text:
+            flash("Note text cannot be empty.", "danger")
+            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
+            return redirect(back)
+        messaging_send_message(payload, actor_user_id=str(actor.id))
+        flash("Internal note added.", "success")
+        if payload.thread_id:
+            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
+        return redirect(url_for("staff_messaging_inbox"))
+
+    @app.route("/staff/messaging/call-log", methods=["POST"])
+    def staff_messaging_call_log():
+        actor = require_permission("messaging.send")
+        payload = MessagingComposePayload(
+            thread_id=request.form.get("thread_id") or None,
+            guest_id=request.form.get("guest_id") or None,
+            reservation_id=request.form.get("reservation_id") or None,
+            channel="manual_call_log",
+            subject="Phone call",
+            body_text=request.form.get("body_text", "").strip(),
+            is_internal_note=True,
+        )
+        if not payload.body_text:
+            flash("Call log notes cannot be empty.", "danger")
+            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
+            return redirect(back)
+        messaging_send_message(payload, actor_user_id=str(actor.id))
+        flash("Phone call logged.", "success")
+        if payload.thread_id:
+            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
+        return redirect(url_for("staff_messaging_inbox"))
+
+    @app.route("/staff/messaging/thread/<uuid:thread_id>/close", methods=["POST"])
+    def staff_messaging_close_thread(thread_id):
+        actor = require_permission("messaging.send")
+        close_thread(str(thread_id), actor_user_id=str(actor.id))
+        flash("Conversation closed.", "success")
+        return redirect(url_for("staff_messaging_inbox"))
+
+    @app.route("/staff/messaging/thread/<uuid:thread_id>/reopen", methods=["POST"])
+    def staff_messaging_reopen_thread(thread_id):
+        actor = require_permission("messaging.send")
+        reopen_thread(str(thread_id), actor_user_id=str(actor.id))
+        flash("Conversation reopened.", "success")
+        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
+
+    @app.route("/staff/messaging/thread/<uuid:thread_id>/followup", methods=["POST"])
+    def staff_messaging_toggle_followup(thread_id):
+        actor = require_permission("messaging.send")
+        is_followup = toggle_followup(str(thread_id), actor_user_id=str(actor.id))
+        flash("Follow-up " + ("marked" if is_followup else "cleared") + ".", "success")
+        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
+
+    @app.route("/staff/messaging/thread/<uuid:thread_id>/assign", methods=["POST"])
+    def staff_messaging_assign_thread(thread_id):
+        actor = require_permission("messaging.send")
+        user_id = request.form.get("user_id") or None
+        assign_thread(str(thread_id), user_id, actor_user_id=str(actor.id))
+        flash("Thread assignment updated.", "success")
+        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
+
+    @app.route("/staff/messaging/compose")
+    def staff_messaging_compose():
+        require_permission("messaging.send")
+        reservation_id = request.args.get("reservation_id", "")
+        guest_id = request.args.get("guest_id", "")
+        reservation = None
+        guest = None
+        if reservation_id:
+            reservation = db.session.get(Reservation, UUID(reservation_id))
+            if reservation and reservation.primary_guest:
+                guest = reservation.primary_guest
+        elif guest_id:
+            guest = db.session.get(Guest, UUID(guest_id))
+        templates = list_msg_templates()
+        return render_template(
+            "staff_messaging_compose.html",
+            reservation=reservation,
+            guest=guest,
+            templates=templates,
+        )
+
+    @app.route("/staff/messaging/inbound", methods=["POST"])
+    def staff_messaging_inbound_webhook():
+        """Webhook endpoint for inbound messages from providers."""
+        data = request.get_json(silent=True) or {}
+        channel = data.get("channel", "email")
+        sender = data.get("sender_address", "")
+        body = data.get("body_text", "")
+        subject = data.get("subject")
+        provider_id = data.get("provider_message_id")
+        if not sender or not body:
+            return jsonify({"error": "sender_address and body_text required"}), 400
+        try:
+            msg = record_inbound_message(
+                channel=channel,
+                sender_address=sender,
+                body_text=body,
+                subject=subject,
+                provider_message_id=provider_id,
+            )
+            return jsonify({"status": "ok", "message_id": str(msg.id)})
+        except Exception as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/provider")
     def provider_dashboard():

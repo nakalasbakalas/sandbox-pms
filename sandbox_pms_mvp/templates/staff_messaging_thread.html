@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% block title %}Conversation | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% set thread = detail.thread %}
+{% set guest = detail.guest %}
+{% set reservation = detail.reservation %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">
+        <a href="{{ url_for('staff_messaging_inbox') }}">← Back to Inbox</a>
+      </p>
+      <h1>
+        {% if guest %}{{ guest.full_name }}{% else %}{{ thread.guest_contact_value or 'Unknown guest' }}{% endif %}
+        <span class="badge badge-channel badge-{{ thread.channel }}">{{ thread.channel.replace('_', ' ').title() }}</span>
+        <span class="badge badge-status badge-{{ thread.status }}">{{ thread.status.title() }}</span>
+        {% if thread.is_needs_followup %}<span class="badge badge-followup">Follow-up</span>{% endif %}
+      </h1>
+      {% if thread.subject %}<p>{{ thread.subject }}</p>{% endif %}
+    </div>
+    <div class="actions">
+      {% if thread.status != 'closed' %}
+      <form method="post" action="{{ url_for('staff_messaging_close_thread', thread_id=thread.id) }}" style="display:inline">
+        {{ csrf_input() }}
+        <button class="button small secondary" type="submit">Close</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('staff_messaging_reopen_thread', thread_id=thread.id) }}" style="display:inline">
+        {{ csrf_input() }}
+        <button class="button small secondary" type="submit">Reopen</button>
+      </form>
+      {% endif %}
+      <form method="post" action="{{ url_for('staff_messaging_toggle_followup', thread_id=thread.id) }}" style="display:inline">
+        {{ csrf_input() }}
+        <button class="button small secondary" type="submit">{{ 'Clear follow-up' if thread.is_needs_followup else 'Mark follow-up' }}</button>
+      </form>
+    </div>
+  </div>
+
+  {# Context sidebar #}
+  <div class="messaging-layout">
+    <div class="messaging-sidebar">
+      <h3>Context</h3>
+      {% if guest %}
+      <div class="context-block">
+        <h4>Guest</h4>
+        <p><strong>{{ guest.full_name }}</strong></p>
+        {% if guest.phone %}<p>📱 {{ guest.phone }}</p>{% endif %}
+        {% if guest.email %}<p>✉️ {{ guest.email }}</p>{% endif %}
+        {% if guest.preferred_language %}<p>🌐 {{ guest.preferred_language }}</p>{% endif %}
+      </div>
+      {% endif %}
+      {% if reservation %}
+      <div class="context-block">
+        <h4>Reservation</h4>
+        <p><strong>{{ reservation.reservation_code }}</strong></p>
+        <p>Status: <span class="badge badge-status badge-{{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ').title() }}</span></p>
+        <p>{{ reservation.check_in_date }} → {{ reservation.check_out_date }}</p>
+        {% if reservation.room_type %}
+        <p>Room type: {{ reservation.room_type.name }}</p>
+        {% endif %}
+        {% if reservation.assigned_room %}
+        <p>Room: {{ reservation.assigned_room.room_number }}</p>
+        {% endif %}
+        <a class="button small" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">View reservation</a>
+      </div>
+      {% endif %}
+      <div class="context-block">
+        <h4>Assigned to</h4>
+        <form method="post" action="{{ url_for('staff_messaging_assign_thread', thread_id=thread.id) }}">
+          {{ csrf_input() }}
+          <select name="user_id" onchange="this.form.submit()">
+            <option value="">Unassigned</option>
+            {% for user in staff_users if staff_users is defined %}
+            <option value="{{ user.id }}" {% if thread.assigned_user_id == user.id %}selected{% endif %}>{{ user.full_name }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
+    </div>
+
+    {# Message timeline #}
+    <div class="messaging-timeline">
+      <h3>Conversation Timeline</h3>
+      {% for msg in detail.messages %}
+      <div class="message-bubble message-{{ msg.direction }}{% if msg.is_internal_note %} message-internal{% endif %}">
+        <div class="message-header">
+          <span class="message-sender">
+            {% if msg.direction == 'inbound' %}
+              📥 {{ msg.sender_name or (guest.full_name if guest else 'Guest') }}
+            {% elif msg.is_internal_note %}
+              📌 Internal note
+              {% if msg.sender_user %}by {{ msg.sender_user.full_name }}{% endif %}
+            {% elif msg.channel == 'manual_call_log' %}
+              📞 Phone call log
+              {% if msg.sender_user %}by {{ msg.sender_user.full_name }}{% endif %}
+            {% else %}
+              📤 {{ msg.sender_user.full_name if msg.sender_user else 'Staff' }}
+              {% if msg.recipient_address %}→ {{ msg.recipient_address }}{% endif %}
+            {% endif %}
+          </span>
+          <span class="message-meta">
+            <span class="badge badge-channel badge-{{ msg.channel }}">{{ msg.channel.replace('_', ' ') }}</span>
+            <span class="badge badge-status badge-{{ msg.status }}">{{ msg.status }}</span>
+            {{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}
+          </span>
+        </div>
+        {% if msg.subject %}<div class="message-subject">{{ msg.subject }}</div>{% endif %}
+        <div class="message-body">{{ msg.body_text }}</div>
+        {% if msg.provider_error %}
+        <div class="message-error">⚠️ Delivery error: {{ msg.provider_error }}</div>
+        {% endif %}
+        {% if msg.template_key %}
+        <div class="message-template-tag small muted">Template: {{ msg.template_key }}</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="muted" style="text-align:center;padding:2rem">No messages in this conversation yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{# Reply / compose forms #}
+{% if thread.status != 'closed' and can('messaging.send') %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Reply</h2>
+    </div>
+  </div>
+
+  <div class="messaging-compose-tabs">
+    <div class="compose-tab-buttons">
+      <button type="button" class="button small compose-tab-btn active" data-tab="reply">Send Message</button>
+      <button type="button" class="button small secondary compose-tab-btn" data-tab="note">Internal Note</button>
+      <button type="button" class="button small secondary compose-tab-btn" data-tab="call">Log Phone Call</button>
+    </div>
+
+    {# Reply form #}
+    <form id="tab-reply" class="compose-tab" method="post" action="{{ url_for('staff_messaging_send') }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="thread_id" value="{{ thread.id }}">
+      <input type="hidden" name="channel" value="{{ thread.channel }}">
+      {% if guest %}<input type="hidden" name="guest_id" value="{{ guest.id }}">{% endif %}
+      {% if reservation %}<input type="hidden" name="reservation_id" value="{{ reservation.id }}">{% endif %}
+      <div class="form-group">
+        <label>
+          <span>Recipient</span>
+          <input type="text" name="recipient_address" value="{{ thread.guest_contact_value or (guest.email if guest and thread.channel == 'email' else '') or (guest.phone if guest and thread.channel in ['sms', 'whatsapp'] else '') }}" placeholder="Email or phone">
+        </label>
+      </div>
+      <div class="form-group">
+        <label>
+          <span>Subject</span>
+          <input type="text" name="subject" value="{{ thread.subject or '' }}" placeholder="Subject (optional)">
+        </label>
+      </div>
+      {% if templates %}
+      <div class="form-group">
+        <label>
+          <span>Template (optional)</span>
+          <select name="template_key">
+            <option value="">No template</option>
+            {% for tpl in templates %}
+            <option value="{{ tpl.template_key }}">{{ tpl.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      {% endif %}
+      <div class="form-group">
+        <label>
+          <span>Message</span>
+          <textarea name="body_text" rows="4" required placeholder="Type your message..."></textarea>
+        </label>
+      </div>
+      <button class="button" type="submit">Send</button>
+    </form>
+
+    {# Internal note form #}
+    <form id="tab-note" class="compose-tab" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none">
+      {{ csrf_input() }}
+      <input type="hidden" name="thread_id" value="{{ thread.id }}">
+      {% if guest %}<input type="hidden" name="guest_id" value="{{ guest.id }}">{% endif %}
+      {% if reservation %}<input type="hidden" name="reservation_id" value="{{ reservation.id }}">{% endif %}
+      <div class="form-group">
+        <label>
+          <span>Internal Note (not sent to guest)</span>
+          <textarea name="body_text" rows="4" required placeholder="Add an internal note..."></textarea>
+        </label>
+      </div>
+      <button class="button" type="submit">Save Note</button>
+    </form>
+
+    {# Call log form #}
+    <form id="tab-call" class="compose-tab" method="post" action="{{ url_for('staff_messaging_call_log') }}" style="display:none">
+      {{ csrf_input() }}
+      <input type="hidden" name="thread_id" value="{{ thread.id }}">
+      {% if guest %}<input type="hidden" name="guest_id" value="{{ guest.id }}">{% endif %}
+      {% if reservation %}<input type="hidden" name="reservation_id" value="{{ reservation.id }}">{% endif %}
+      <div class="form-group">
+        <label>
+          <span>Phone Call Notes</span>
+          <textarea name="body_text" rows="4" required placeholder="Summarize the phone call..."></textarea>
+        </label>
+      </div>
+      <button class="button" type="submit">Log Call</button>
+    </form>
+  </div>
+</section>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var btns = document.querySelectorAll('.compose-tab-btn');
+  var tabs = document.querySelectorAll('.compose-tab');
+  btns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var target = btn.getAttribute('data-tab');
+      btns.forEach(function(b) { b.classList.remove('active'); b.classList.add('secondary'); });
+      btn.classList.add('active'); btn.classList.remove('secondary');
+      tabs.forEach(function(t) { t.style.display = t.id === 'tab-' + target ? 'block' : 'none'; });
+    });
+  });
+});
+</script>
+{% endblock %}

@@ -129,6 +129,11 @@
           {% if can('reservation.view') %}
             <a class="staff-nav-link{% if ep == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}">Review Queue</a>
           {% endif %}
+          {% if can('messaging.view') %}
+            <a class="staff-nav-link{% if ep.startswith('staff_messaging') %} active{% endif %}" href="{{ url_for('staff_messaging_inbox') }}">
+              Messaging{% if messaging_unread_count %} <span class="badge-unread">{{ messaging_unread_count }}</span>{% endif %}
+            </a>
+          {% endif %}
         </nav>
       </div>
     </div>

@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block title %}Messaging Inbox | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Guest Messaging Hub</p>
+      <h1>Unified Inbox</h1>
+      <p>View and manage all guest conversations — email, phone logs, internal notes, and more — from one place.</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="{{ url_for('staff_messaging_compose') }}">New Message</a>
+    </div>
+  </div>
+
+  <form class="toolbar" method="get">
+    <label class="grow"><span>Search</span><input type="text" name="q" value="{{ filters.search }}" placeholder="Guest name, phone, email, or booking code"></label>
+    <label><span>Channel</span>
+      <select name="channel">
+        <option value="">All channels</option>
+        {% for ch in CONVERSATION_CHANNEL_TYPES %}
+        <option value="{{ ch }}" {% if filters.channel == ch %}selected{% endif %}>{{ ch.replace('_', ' ').title() }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label><span>Status</span>
+      <select name="status">
+        <option value="">All statuses</option>
+        {% for st in CONVERSATION_STATUSES %}
+        <option value="{{ st }}" {% if filters.status == st %}selected{% endif %}>{{ st.title() }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label><span>Reservation</span>
+      <select name="res_status">
+        <option value="">Any</option>
+        <option value="arrivals_today" {% if filters.reservation_status == 'arrivals_today' %}selected{% endif %}>Arrivals today</option>
+        <option value="in_house" {% if filters.reservation_status == 'in_house' %}selected{% endif %}>In-house</option>
+        <option value="post_stay" {% if filters.reservation_status == 'post_stay' %}selected{% endif %}>Post-stay</option>
+        <option value="no_reservation" {% if filters.reservation_status == 'no_reservation' %}selected{% endif %}>No reservation</option>
+      </select>
+    </label>
+    <label class="toggle-row"><span>Unread only</span><input type="checkbox" name="unread" value="1" {% if filters.unread_only %}checked{% endif %}></label>
+    <label class="toggle-row"><span>Needs follow-up</span><input type="checkbox" name="followup" value="1" {% if filters.needs_followup %}checked{% endif %}></label>
+    <button class="button" type="submit">Apply</button>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>{{ total }} conversation{{ 's' if total != 1 else '' }}</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Guest</th>
+          <th>Reservation</th>
+          <th>Channel</th>
+          <th>Subject / Last Message</th>
+          <th>Status</th>
+          <th>Last Activity</th>
+          <th>Unread</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr class="{% if entry.unread_count > 0 %}row-unread{% endif %}{% if entry.is_needs_followup %} row-followup{% endif %}">
+          <td>
+            <strong>{{ entry.guest_name }}</strong>
+          </td>
+          <td>
+            {% if entry.reservation_code %}
+            <span class="mono">{{ entry.reservation_code }}</span>
+            <div class="small muted">{{ entry.reservation_status.replace('_', ' ').title() }}</div>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge badge-channel badge-{{ entry.channel }}">{{ entry.channel.replace('_', ' ').title() }}</span>
+          </td>
+          <td>
+            {% if entry.subject %}<div class="small"><strong>{{ entry.subject }}</strong></div>{% endif %}
+            <div class="small muted">{{ entry.last_message_preview[:80] }}{% if entry.last_message_preview|length > 80 %}…{% endif %}</div>
+          </td>
+          <td>
+            <span class="badge badge-status badge-{{ entry.status }}">{{ entry.status.title() }}</span>
+            {% if entry.is_needs_followup %}<span class="badge badge-followup">Follow-up</span>{% endif %}
+          </td>
+          <td>
+            {% if entry.last_message_at %}
+            <span class="small">{{ entry.last_message_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if entry.unread_count > 0 %}
+            <span class="badge badge-unread">{{ entry.unread_count }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <a class="button small" href="{{ url_for('staff_messaging_thread', thread_id=entry.thread_id) }}">Open</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted" style="text-align:center;padding:2rem">No conversations match the current filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total_pages > 1 %}
+  <div class="pagination">
+    {% for p in range(1, total_pages + 1) %}
+    <a class="button small {% if p == filters.page %}secondary{% endif %}"
+       href="{{ url_for('staff_messaging_inbox', page=p, q=filters.search, channel=filters.channel, status=filters.status, res_status=filters.reservation_status, unread='1' if filters.unread_only else '', followup='1' if filters.needs_followup else '') }}">{{ p }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
