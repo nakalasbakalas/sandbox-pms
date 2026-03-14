@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from pms.extensions import db
 from pms.models import (
     InventoryDay,
@@ -283,7 +285,6 @@ class TestChannelService:
         """get_provider with unknown key raises ValueError."""
         app = app_factory(seed=True)
         with app.app_context():
-            import pytest
             with pytest.raises(ValueError, match="Unknown channel provider"):
                 get_provider("nonexistent_provider")
 
