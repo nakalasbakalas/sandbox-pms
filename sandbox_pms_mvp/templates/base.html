@@ -9,7 +9,9 @@
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
-  <link rel="alternate icon" href="{{ favicon_url }}">
+  <link rel="icon" type="image/x-icon" href="{{ favicon_ico_url }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ apple_touch_icon_url }}">
+  <link rel="manifest" href="{{ url_for('web_manifest') }}">
   <link rel="sitemap" type="application/xml" title="Sitemap" href="{{ url_for('sitemap_xml') }}">
   <link rel="canonical" href="{{ canonical_url }}">
   {% for code, href in language_alternate_urls.items() %}
@@ -58,6 +60,8 @@
         <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ url_for('index', lang=current_language) }}">
           {% if hotel_logo_url %}
             <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
+          {% elif default_logo_url %}
+            <img src="{{ default_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
           {% else %}
             <span class="brand-mark">{{ hotel_brand_mark }}</span>
           {% endif %}
