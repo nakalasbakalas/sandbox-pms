@@ -8,7 +8,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
-from ..models import ExternalCalendarBlock, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, HousekeepingStatus, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -106,6 +106,26 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
 
     group_map: dict[uuid.UUID, dict[str, Any]] = {}
     room_map: dict[uuid.UUID, dict[str, Any]] = {}
+
+    # Pre-fetch today's housekeeping state for each room
+    _today = date.today()
+    _today_inv: dict[uuid.UUID, InventoryDay] = {
+        row.room_id: row
+        for row in InventoryDay.query.filter_by(business_date=_today).all()
+    }
+    _hk_status_cache: dict[uuid.UUID, str] = {}
+
+    def _hk_code(status_id: uuid.UUID | None) -> str | None:
+        if not status_id:
+            return None
+        if status_id in _hk_status_cache:
+            return _hk_status_cache[status_id]
+        from ..extensions import db
+        s = db.session.get(HousekeepingStatus, status_id)
+        code = s.code if s else None
+        _hk_status_cache[status_id] = code
+        return code
+
     for room in rooms:
         group = _ensure_group(group_map, room_type_meta=room_type_meta, room_type_id=room.room_type_id)
         group["room_options"].append(
@@ -117,6 +137,16 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                 "roomTypeId": str(room.room_type_id),
             }
         )
+        _inv = _today_inv.get(room.id)
+        _hkc = _hk_code(_inv.housekeeping_status_id) if _inv else None
+        _ready_codes = {"clean", "inspected"}
+        _is_room_ready = (
+            _hkc in _ready_codes
+            and _inv is not None
+            and not _inv.is_blocked
+            and _inv.availability_status not in CLOSED_INVENTORY_STATUSES
+            and not _inv.maintenance_flag
+        ) if _inv else False
         row = {
             "id": str(room.id),
             "anchor_id": f"room-{room.id}",
@@ -139,6 +169,14 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             "secondary_label": f"Floor {room.floor_number}",
             "is_unallocated": False,
             "isUnallocated": False,
+            "housekeeping_status": _hkc,
+            "housekeepingStatus": _hkc,
+            "is_room_ready": _is_room_ready,
+            "isRoomReady": _is_room_ready,
+            "is_blocked": bool(_inv.is_blocked) if _inv else False,
+            "isBlocked": bool(_inv.is_blocked) if _inv else False,
+            "is_maintenance": bool(_inv.maintenance_flag) if _inv else False,
+            "isMaintenance": bool(_inv.maintenance_flag) if _inv else False,
             "blocks": [],
             "visible_blocks": [],
             "lane_count": 1,
