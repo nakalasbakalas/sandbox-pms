@@ -36,6 +36,8 @@
    - No Render dashboard or runtime log access was available from this session, so live deploy success/failure could not be proven directly.
 4. **CI platform drift**
    - Latest successful GitHub Actions logs include a Node.js 20 deprecation warning for marketplace actions. This is not a deploy blocker today, but it is a time-bound maintenance risk.
+5. **GitHub Actions dispatch anomaly**
+   - The latest PR-head workflow run (`23102726132`) completed as `action_required` without starting any jobs and without exposing downloadable logs through the API.
 
 ## Build/runtime mismatch findings
 - No repo-level build command exists beyond Python dependency install and runtime startup.
@@ -50,6 +52,7 @@
 ## Platform-specific blockers
 - **Blocked externally:** confirming the latest Render deployment status, release logs, and post-deploy smoke results.
 - **Blocked externally:** verifying whether the latest deployment required a manual bootstrap (`seed-reference-data`, `bootstrap-inventory`) on the target database.
+- **Blocked externally:** determining why GitHub Actions run `23102726132` resolved to `action_required` with zero jobs and no logs.
 
 ## Exact recovery steps requiring external access
 1. Open the Render dashboard for service `sandbox-hotel-pms-v43m`.
@@ -71,3 +74,4 @@
    - admin pages
    - seeded data presence
 6. Schedule a CI maintenance PR to address GitHub’s Node 24 marketplace-action migration.
+7. Open Actions run `23102726132` in the GitHub UI and check for approval, policy, or workflow-dispatch warnings that are not exposed through the MCP job/log APIs.

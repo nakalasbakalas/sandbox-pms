@@ -60,4 +60,4 @@
 ## Verdict
 - **PR safe as-is?** Yes, because it currently carries no functional code delta.
 - **Was follow-up needed?** Yes, for release documentation coherence and explicit release-readiness reporting.
-- **Current state after this pass:** fixed for the reproducible documentation drift; no additional in-repo regression fix was justified by the evidence gathered.
+- **Current state after this pass:** fixed for the reproducible documentation drift; no additional in-repo regression fix was justified by the evidence gathered. Remaining CI blockage is external because the latest PR run ended `action_required` without jobs/logs to debug in-repo.
