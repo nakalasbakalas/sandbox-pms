@@ -2,11 +2,9 @@
 
 Production-oriented Sandbox Hotel PMS on the existing Flask stack, designed PostgreSQL-first. The repo now includes the Phase 2 operating data layer, the Phase 3 staff authentication and authorization layer, the Phase 4 public booking flow, the Phase 5 staff reservations workspace, the Phase 6 front-desk check-in / check-out workspace, the Phase 7 housekeeping operations board, the Phase 8 cashier / folio module, the Phase 9 hosted deposit payment integration, the Phase 10 admin and hotel configuration panel, the Phase 11 notifications and communication layer, the Phase 12 manager dashboard and reporting workspace, the Phase 13 security hardening layer, and the Phase 14 provider portal plus iCal availability sync layer on top of it.
 
-Domain topology is now documented separately in [DEPLOYMENT-TOPOLOGY.md](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md). The recommended production split is `www.sandboxhotel.com` for marketing, `book.sandboxhotel.com` for the public booking engine, and `staff.sandboxhotel.com` for the PMS, with `book` and `staff` pointing at the same Flask deployment.
+Domain topology is now documented separately in [DEPLOYMENT-TOPOLOGY.md](DEPLOYMENT-TOPOLOGY.md). The recommended production split is `www.sandboxhotel.com` for marketing, `book.sandboxhotel.com` for the public booking engine, and `staff.sandboxhotel.com` for the PMS, with `book` and `staff` pointing at the same Flask deployment.
 
-The canonical Render Blueprint lives at [render.yaml](../render.yaml). It deploys the web service from [sandbox_pms_mvp](.), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](../RENDER_DEPLOY_CHECKLIST.md).
-Render deployment scaffolding is available at [render.yaml](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/render.yaml). It now carries the intended `sandboxhotel.com` production hostnames, while database credentials, provider secrets, and other sensitive settings must still be injected per environment during deployment.
-Use [.env.production.example](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/.env.production.example) as the production env skeleton, and keep [.env.example](/C:/Users/nakal/OneDrive/Documents/GitHub/sandbox-pms/sandbox_pms_mvp/.env.example) for local or generic setup.
+The canonical Render Blueprint lives at [render.yaml](../render.yaml). It deploys the web service from [sandbox_pms_mvp](.), runs migrations before release, and provisions a managed PostgreSQL database. After the first deploy on an empty database, run `flask --app app seed-reference-data` and `flask --app app bootstrap-inventory` manually. A deployment walkthrough is available in [RENDER_DEPLOY_CHECKLIST.md](../RENDER_DEPLOY_CHECKLIST.md). Use [.env.production.example](.env.production.example) as the production env skeleton, and keep [.env.example](.env.example) for local or generic setup.
 
 ## Stack
 
@@ -1117,5 +1115,4 @@ The Flask entrypoint remains [app.py](app.py).
 ```powershell
 .\.venv\Scripts\flask.exe --app app run --debug
 ```
-
 

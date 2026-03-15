@@ -10,3 +10,18 @@
 - **Exact remedy applied:** Moved the helper into `communication_service.py` as `_deliver_email_outbox_entry`, updated `_dispatch_email()` to call it directly, deleted the unused module, and added a focused regression test that exercises successful email delivery through a fake SMTP transport.
 - **Risk level:** Low
 - **Regression risk notes:** The helper logic itself was preserved verbatim, and the new regression test verifies that dispatch still marks the outbox row as `sent` and the delivery row as `delivered`.
+
+## Fix 2 — repair release-documentation path drift
+- **Files changed:**
+  - `sandbox_pms_mvp/README.md`
+  - `release_audit_report.md`
+  - `pr_diff_assessment.md`
+  - `deployment_diagnostics.md`
+  - `redundancy_cleanup_matrix.md`
+  - `validation_report.md`
+  - `priority_actions.md`
+- **Issue:** Release/audit documentation was incomplete for this task, and `sandbox_pms_mvp/README.md` contained broken markdown links pointing to a contributor's local Windows paths plus duplicated deployment guidance.
+- **Root cause:** Repository documentation had accumulated environment-specific link targets and repeated deployment copy instead of sticking to repo-relative references.
+- **Exact remedy applied:** Replaced the broken README links with repository-relative links, collapsed the duplicated deployment section into one canonical paragraph, and added the required root-level audit/remediation documents with evidence from CI, validation, and deployment-config inspection.
+- **Risk level:** Low
+- **Regression risk notes:** Documentation-only change; no runtime behavior or deployment configuration was altered.
