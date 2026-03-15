@@ -71,9 +71,17 @@
         <li>{{ t('extra_guest_summary') }}</li>
         <li>{{ t('home_secure_links_note') }}</li>
       </ul>
-      <p class="muted">{{ t('home_prebooking_help', phone=hotel_contact_phone_link, email=hotel_contact_email_link)|safe }}</p>
+      {% if hotel_contact_phone_link or hotel_contact_email_link %}
+        <p class="muted">{{ t('home_prebooking_help', phone=hotel_contact_phone_link, email=hotel_contact_email_link)|safe }}</p>
+      {% endif %}
       <div class="actions">
         <a class="button" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="support_search" data-analytics-context="support_card">{{ t('search_title') }}</a>
+        {% if hotel_contact_line_href %}
+          <a class="button secondary" href="{{ hotel_contact_line_href }}" data-analytics-event="contact_click" data-analytics-label="support_line" data-analytics-context="support_card" rel="noopener noreferrer">LINE</a>
+        {% endif %}
+        {% if hotel_contact_whatsapp_href %}
+          <a class="button secondary" href="{{ hotel_contact_whatsapp_href }}" data-analytics-event="contact_click" data-analytics-label="support_whatsapp" data-analytics-context="support_card" rel="noopener noreferrer">WhatsApp</a>
+        {% endif %}
       </div>
     </article>
   </section>

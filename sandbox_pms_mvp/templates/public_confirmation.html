@@ -35,7 +35,7 @@
     <div class="actions">
       <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="pay_deposit" data-analytics-context="confirmation_payment">{{ t('payment_pay_deposit') }}</a>
     </div>
-    {% elif not payment_request %}
+    {% elif not payment_request and (hotel_contact_phone_link or hotel_contact_email_link) %}
     <p class="muted">{{ t('payment_link_contact_help', phone=hotel_contact_phone_link, email=hotel_contact_email_link)|safe }}</p>
     {% endif %}
   </section>

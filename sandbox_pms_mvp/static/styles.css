@@ -1995,6 +1995,13 @@ body.public-site .sticky-card {
   position: sticky;
   top: 112px;
 }
+body.public-site .mobile-booking-submit {
+  display: none;
+}
+body.public-site.route-booking-hold .public-shell,
+body.public-site.route-booking-confirm .public-shell {
+  padding-bottom: 140px;
+}
 body.public-site .room-summary-panel {
   display: grid;
   gap: 14px;
@@ -2111,6 +2118,22 @@ body.public-site .consent-manage-button {
   }
   body.public-site .sticky-card {
     position: static;
+  }
+  body.public-site .mobile-booking-submit {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    z-index: 45;
+    display: grid;
+    padding: 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(8, 9, 11, 0.95);
+    box-shadow: 0 20px 42px rgba(0, 0, 0, 0.34);
+  }
+  body.public-site .mobile-booking-submit .button {
+    width: 100%;
   }
   body.public-site .public-topnav {
     justify-content: flex-start;

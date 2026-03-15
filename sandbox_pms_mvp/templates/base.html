@@ -9,9 +9,7 @@
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
-  <link rel="icon" type="image/x-icon" href="{{ favicon_ico_url }}">
-  <link rel="apple-touch-icon" sizes="180x180" href="{{ apple_touch_icon_url }}">
-  <link rel="manifest" href="{{ url_for('web_manifest') }}">
+  <link rel="alternate icon" href="{{ favicon_url }}">
   <link rel="sitemap" type="application/xml" title="Sitemap" href="{{ url_for('sitemap_xml') }}">
   <link rel="canonical" href="{{ canonical_url }}">
   {% for code, href in language_alternate_urls.items() %}
@@ -54,14 +52,12 @@
   data-analytics-consent="pending"
 >
   <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
-  <header class="site-header{% if is_public_site %} public-header{% endif %}{% if staff_logged_in and not is_public_site %} staff-header{% endif %}">
+  <header class="site-header{% if is_public_site %} public-header{% endif %}">
     <div class="container topbar{% if is_public_site %} public-topbar{% endif %}">
       <div class="brand-shell{% if is_public_site %} public-brand-shell{% endif %}">
         <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ url_for('index', lang=current_language) }}">
           {% if hotel_logo_url %}
             <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
-          {% elif default_logo_url %}
-            <img src="{{ default_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
           {% else %}
             <span class="brand-mark">{{ hotel_brand_mark }}</span>
           {% endif %}
@@ -70,137 +66,53 @@
             {% if is_public_site and hotel_address %}<small class="brand-location">{{ hotel_address }}</small>{% endif %}
           </span>
         </a>
+        <small class="brand-contact">
+          {% if hotel_contact_phone %}
+            {% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}" data-analytics-label="header_phone" data-analytics-context="header_contact">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}
+          {% endif %}
+          {% if hotel_contact_phone and hotel_contact_email %}<span class="contact-separator">/</span>{% endif %}
+          {% if hotel_contact_email %}
+            {% if hotel_contact_email_href %}<a class="contact-link subtle" href="{{ hotel_contact_email_href }}" data-analytics-label="header_email" data-analytics-context="header_contact">{{ hotel_contact_email }}</a>{% else %}{{ hotel_contact_email }}{% endif %}
+          {% endif %}
+          {% if (hotel_contact_phone or hotel_contact_email) and hotel_contact_line_href %}<span class="contact-separator">/</span>{% endif %}
+          {% if hotel_contact_line_href %}
+            <a class="contact-link subtle" href="{{ hotel_contact_line_href }}" data-analytics-label="header_line" data-analytics-context="header_contact" rel="noopener noreferrer">LINE</a>
+          {% endif %}
+          {% if (hotel_contact_phone or hotel_contact_email or hotel_contact_line_href) and hotel_contact_whatsapp_href %}<span class="contact-separator">/</span>{% endif %}
+          {% if hotel_contact_whatsapp_href %}
+            <a class="contact-link subtle" href="{{ hotel_contact_whatsapp_href }}" data-analytics-label="header_whatsapp" data-analytics-context="header_contact" rel="noopener noreferrer">WhatsApp</a>
+          {% endif %}
+        </small>
       </div>
-      {% if staff_logged_in and not is_public_site %}
-        <div class="staff-topbar-user">
-          <span class="staff-topbar-username">{{ current_staff_user.full_name }}</span>
+      <nav class="topnav{% if is_public_site %} public-topnav{% endif %}">
+        <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
+        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
+        {% if staff_logged_in %}
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
+          {% if can('provider.dashboard.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
+          {% if can('housekeeping.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+          {% if can('provider.calendar.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+          {% if admin_sections %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
+          {% if can('reports.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+          <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_security') }}">Security</a>
+          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+          <span class="pill subtle{% if is_public_site %} nav-chip nav-chip-static{% endif %}">{{ current_staff_user.full_name }}</span>
           <form method="post" action="{{ url_for('staff_logout') }}" class="inline-form">
             {{ csrf_input() }}
-            <button type="submit" class="staff-topbar-signout">Sign out</button>
+            <button type="submit" class="pill subtle button-link{% if is_public_site %} nav-chip nav-chip-button{% endif %}">Sign out</button>
           </form>
-        </div>
-      {% else %}
-        <nav class="topnav{% if is_public_site %} public-topnav{% endif %}">
-          <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
-          <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
-          <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
-          {% if not staff_logged_in %}
-            <a class="pill subtle{% if is_public_site %} nav-chip{% endif %}" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
-          {% endif %}
-        </nav>
-        {% if is_public_site %}
-          <button class="nav-menu-toggle" type="button" aria-label="Menu" aria-expanded="false" aria-controls="nav-drawer">
-            <span class="nav-menu-icon">
-              <span class="nav-menu-line"></span>
-              <span class="nav-menu-line"></span>
-              <span class="nav-menu-line"></span>
-            </span>
-          </button>
+        {% else %}
+          <a class="pill subtle{% if is_public_site %} nav-chip{% endif %}" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
         {% endif %}
-      {% endif %}
+        {% for code, label in language_labels.items() %}
+          <a class="pill subtle{% if is_public_site %} nav-chip nav-chip-small{% endif %}" href="{{ make_lang_url(code) }}">{{ label }}</a>
+        {% endfor %}
+      </nav>
     </div>
-    {% if staff_logged_in and not is_public_site %}
-    <div class="staff-nav-strip">
-      <div class="container">
-        {% set ep = request.endpoint or '' %}
-        <nav class="staff-nav-tabs" aria-label="Staff navigation">
-          {% if can('reservation.view') %}
-            <a class="staff-nav-link{% if ep == 'staff_dashboard' %} active{% endif %}" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
-          {% endif %}
-          {% if can('reservation.view') %}
-            <a class="staff-nav-link{% if ep == 'staff_front_desk' or ep.startswith('front_desk_') or ep in ['staff_checkin', 'staff_checkout'] %} active{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>
-          {% endif %}
-          {% if can('reservation.view') %}
-            <a class="staff-nav-link{% if ep.startswith('staff_reservation') and not ep.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>
-          {% endif %}
-          {% if can('housekeeping.view') %}
-            <a class="staff-nav-link{% if ep.startswith('staff_housekeeping') or ep.startswith('housekeeping_') %} active{% endif %}" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>
-          {% endif %}
-          {% if can('provider.dashboard.view') %}
-            <a class="staff-nav-link{% if ep.startswith('provider_') %} active{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>
-          {% endif %}
-          {% if admin_sections %}
-            <a class="staff-nav-link{% if ep.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>
-          {% endif %}
-          {% if can('reports.view') %}
-            <a class="staff-nav-link{% if ep == 'staff_reports' %} active{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>
-          {% endif %}
-          {% if can('audit.view') %}
-            <a class="staff-nav-link{% if ep == 'staff_audit' %} active{% endif %}" href="{{ url_for('staff_audit') }}">Audit</a>
-          {% endif %}
-          {# Security is intentionally available to all logged-in staff: it covers personal password and MFA management #}
-          <a class="staff-nav-link{% if ep == 'staff_security' %} active{% endif %}" href="{{ url_for('staff_security') }}">Security</a>
-          {% if can('reservation.view') %}
-            <a class="staff-nav-link{% if ep == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}">Review Queue</a>
-          {% endif %}
-          {% if can('messaging.view') %}
-            <a class="staff-nav-link{% if ep.startswith('staff_messaging') %} active{% endif %}" href="{{ url_for('staff_messaging_inbox') }}">
-              Messaging{% if messaging_unread_count %} <span class="badge-unread">{{ messaging_unread_count }}</span>{% endif %}
-            </a>
-          {% endif %}
-        </nav>
-      </div>
-    </div>
-    {% endif %}
   </header>
-
-  {% if is_public_site %}
-  <nav class="nav-drawer" id="nav-drawer" role="navigation">
-    <div class="nav-drawer-header">
-      <h2 class="nav-drawer-title">Menu</h2>
-      <button class="nav-drawer-close" type="button" aria-label="Close menu">
-        <span class="nav-menu-icon">
-          <span class="nav-menu-line"></span>
-          <span class="nav-menu-line"></span>
-          <span class="nav-menu-line"></span>
-        </span>
-      </button>
-    </div>
-    <div class="nav-drawer-content">
-      <div class="nav-drawer-section">
-        <strong class="nav-section-label">Contact</strong>
-        <div class="nav-drawer-contacts">
-          {% if hotel_contact_phone %}
-            {% if hotel_contact_phone_href %}<a class="nav-drawer-link" href="{{ hotel_contact_phone_href }}" data-analytics-label="drawer_phone" data-analytics-context="drawer_contact">{{ hotel_contact_phone }}</a>{% else %}<span class="nav-drawer-text">{{ hotel_contact_phone }}</span>{% endif %}
-          {% endif %}
-          {% if hotel_contact_email %}
-            {% if hotel_contact_email_href %}<a class="nav-drawer-link" href="{{ hotel_contact_email_href }}" data-analytics-label="drawer_email" data-analytics-context="drawer_contact">{{ hotel_contact_email }}</a>{% else %}<span class="nav-drawer-text">{{ hotel_contact_email }}</span>{% endif %}
-          {% endif %}
-        </div>
-      </div>
-      <div class="nav-drawer-section">
-        <strong class="nav-section-label">{{ t('language_label', default='Language') }}</strong>
-        <div class="nav-drawer-languages">
-          {% for code, label in language_labels.items() %}
-            <a class="nav-drawer-link" href="{{ make_lang_url(code) }}" data-analytics-label="drawer_lang_{{ code }}" data-analytics-context="drawer_language">{{ label }}</a>
-          {% endfor %}
-        </div>
-      </div>
-      {% if staff_logged_in %}
-        <div class="nav-drawer-section">
-          <strong class="nav-section-label">Staff Tools</strong>
-          <div class="nav-drawer-staff">
-            {% if can('reservation.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_dashboard') }}">Staff Dashboard</a>{% endif %}
-            {% if can('provider.dashboard.view') %}<a class="nav-drawer-link" href="{{ url_for('provider_dashboard') }}">Provider Dashboard</a>{% endif %}
-            {% if can('reservation.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
-            {% if can('reservation.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
-            {% if can('housekeeping.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
-            {% if can('provider.calendar.view') %}<a class="nav-drawer-link" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
-            {% if admin_sections %}<a class="nav-drawer-link" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
-            {% if can('reports.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
-            <a class="nav-drawer-link" href="{{ url_for('staff_security') }}">Security</a>
-            {% if can('reservation.view') %}<a class="nav-drawer-link" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
-            <span class="nav-drawer-user">{{ current_staff_user.full_name }}</span>
-            <form method="post" action="{{ url_for('staff_logout') }}" class="nav-drawer-logout">
-              {{ csrf_input() }}
-              <button type="submit" class="nav-drawer-link nav-drawer-link-button">Sign out</button>
-            </form>
-          </div>
-        </div>
-      {% endif %}
-    </div>
-  </nav>
-  {% endif %}
 
   <main id="main-content" class="container shell{% if is_public_site %} public-shell{% endif %}">
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -253,6 +165,12 @@
           {% else %}
             <span>{{ hotel_contact_email }}</span>
           {% endif %}
+        {% endif %}
+        {% if hotel_contact_line_href %}
+          <a class="contact-link subtle" href="{{ hotel_contact_line_href }}" data-analytics-label="footer_line" data-analytics-context="footer_contact" rel="noopener noreferrer">LINE</a>
+        {% endif %}
+        {% if hotel_contact_whatsapp_href %}
+          <a class="contact-link subtle" href="{{ hotel_contact_whatsapp_href }}" data-analytics-label="footer_whatsapp" data-analytics-context="footer_contact" rel="noopener noreferrer">WhatsApp</a>
         {% endif %}
         {% if site_base_url %}
           <a class="contact-link subtle" href="{{ site_base_url }}">{{ site_base_url }}</a>

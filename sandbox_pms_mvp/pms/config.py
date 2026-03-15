@@ -92,7 +92,7 @@ class Config:
     STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
     STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
     TEST_HOSTED_PAYMENT_SECRET = os.getenv("TEST_HOSTED_PAYMENT_SECRET", "sandbox-test-hosted-secret")
-    APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://sandbox-hotel.local")
+    APP_BASE_URL = os.getenv("APP_BASE_URL", RENDER_EXTERNAL_URL or "https://book.sandboxhotel.com")
     ICAL_SYNC_HTTP_TIMEOUT_SECONDS = int(os.getenv("ICAL_SYNC_HTTP_TIMEOUT_SECONDS", "15"))
     ICAL_SYNC_USER_AGENT = os.getenv("ICAL_SYNC_USER_AGENT", "SandboxHotelPMS/1.0")
     MARKETING_SITE_URL = os.getenv("MARKETING_SITE_URL", "")
@@ -139,7 +139,7 @@ class Config:
     SMTP_USERNAME = os.getenv("SMTP_USERNAME", "")
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") == "1"
-    MAIL_FROM = os.getenv("MAIL_FROM", "reservations@sandbox-hotel.local")
+    MAIL_FROM = os.getenv("MAIL_FROM", "")
     STAFF_ALERT_EMAILS = [item.strip() for item in os.getenv("STAFF_ALERT_EMAILS", "").split(",") if item.strip()]
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")
@@ -151,7 +151,7 @@ class Config:
 def normalize_runtime_config(config: dict, *, override_keys: set[str] | None = None) -> None:
     override_keys = set(override_keys or set())
 
-    app_base_url = str(config.get("APP_BASE_URL") or "").strip() or "https://sandbox-hotel.local"
+    app_base_url = str(config.get("APP_BASE_URL") or "").strip() or RENDER_EXTERNAL_URL or "https://book.sandboxhotel.com"
     booking_engine_url = str(config.get("BOOKING_ENGINE_URL") or "").strip()
     staff_app_url = str(config.get("STAFF_APP_URL") or "").strip()
 

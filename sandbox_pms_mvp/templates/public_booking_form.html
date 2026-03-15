@@ -49,7 +49,7 @@
     <article class="card booking-form-card">
       <div class="card-head"><div><p class="eyebrow">{{ t('complete_booking_title') }}</p><h2>{{ hotel_name }}</h2></div></div>
       <p class="muted">{{ hotel_support_contact_text }}</p>
-      <form class="stack-form" action="{{ url_for('booking_confirm') }}" method="post" data-analytics-event="booking_request_submit" data-analytics-step="booking_confirm" data-analytics-label="booking_confirm_form">
+      <form id="booking-confirm-form" class="stack-form" action="{{ url_for('booking_confirm') }}" method="post" data-analytics-event="booking_request_submit" data-analytics-step="booking_confirm" data-analytics-label="booking_confirm_form">
         {{ csrf_input() }}
         <input type="hidden" name="hold_code" value="{{ hold.hold_code }}">
         <input type="hidden" name="idempotency_key" value="{{ hold.idempotency_key }}">
@@ -182,5 +182,8 @@
       </div>
     </article>
   </section>
+  <div class="mobile-booking-submit">
+    <button class="button" type="submit" form="booking-confirm-form">{{ t('book_now') }}</button>
+  </div>
 </div>
 {% endblock %}

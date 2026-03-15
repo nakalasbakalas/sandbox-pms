@@ -15,6 +15,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _PHONE_RE = re.compile(r"^[0-9+()./\-\s]{6,30}$")
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_DEV_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _string_setting(key: str, default: str) -> str:
@@ -75,6 +76,25 @@ def _normalize_public_url(value: str | None, *, field_label: str, allow_relative
     return candidate.rstrip("/")
 
 
+def _is_dev_or_placeholder_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except Exception:  # noqa: BLE001
+        return False
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False
+    return hostname in _DEV_HOSTS or hostname.endswith(".local")
+
+
+def _safe_public_contact_url(value: str | None) -> str:
+    try:
+        candidate = _normalize_public_url(value, field_label="Contact URL")
+    except ValueError:
+        return ""
+    return "" if _is_dev_or_placeholder_url(candidate) else candidate
+
+
 def resolve_public_base_url() -> str:
     try:
         configured = _normalize_public_url(
@@ -83,10 +103,10 @@ def resolve_public_base_url() -> str:
         )
     except ValueError:
         configured = ""
-    if configured:
+    if configured and not _is_dev_or_placeholder_url(configured):
         return configured
     configured = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
-    if configured:
+    if configured and not _is_dev_or_placeholder_url(configured):
         return configured
     if has_request_context():
         return request.url_root.rstrip("/")
@@ -124,6 +144,14 @@ def phone_href(value: str | None) -> str:
     return f"tel:{candidate}"
 
 
+def line_href(value: str | None) -> str:
+    return _safe_public_contact_url(value)
+
+
+def whatsapp_href(value: str | None) -> str:
+    return _safe_public_contact_url(value)
+
+
 def branding_settings_context() -> dict[str, str]:
     hotel_name = _string_setting("hotel.name", current_app.config.get("HOTEL_NAME", "Hotel"))
     accent_color = _coerce_hex_color(get_setting_value("hotel.accent_color", DEFAULT_ACCENT_COLOR), DEFAULT_ACCENT_COLOR)
@@ -136,8 +164,10 @@ def branding_settings_context() -> dict[str, str]:
         "hotel_name": hotel_name,
         "brand_mark": _string_setting("hotel.brand_mark", "SBX"),
         "logo_url": _string_setting("hotel.logo_url", ""),
-        "contact_phone": _string_setting("hotel.contact_phone", "+66 000 000 000"),
+        "contact_phone": _string_setting("hotel.contact_phone", "+66 2 123 4567"),
         "contact_email": _string_setting("hotel.contact_email", current_app.config.get("MAIL_FROM", "")),
+        "contact_line_url": _safe_public_contact_url(_string_setting("hotel.contact_line_url", "")),
+        "contact_whatsapp_url": _safe_public_contact_url(_string_setting("hotel.contact_whatsapp_url", "")),
         "address": _string_setting("hotel.address", hotel_name),
         "currency": _string_setting("hotel.currency", "THB"),
         "check_in_time": _string_setting("hotel.check_in_time", "14:00"),
@@ -189,6 +219,15 @@ def clean_branding_form(form_data: Mapping[str, object]) -> dict[str, str]:
     if not contact_phone and not contact_email:
         raise ValueError("Provide at least one guest-facing contact method: phone or email.")
 
+    contact_line_url = _normalize_public_url(
+        form_data.get("contact_line_url"),
+        field_label="LINE contact URL",
+    )
+    contact_whatsapp_url = _normalize_public_url(
+        form_data.get("contact_whatsapp_url"),
+        field_label="WhatsApp contact URL",
+    )
+
     support_contact_text = str(form_data.get("support_contact_text") or "").strip()
     if support_contact_text and len(support_contact_text) > 255:
         raise ValueError("Support contact text must be 255 characters or fewer.")
@@ -223,6 +262,8 @@ def clean_branding_form(form_data: Mapping[str, object]) -> dict[str, str]:
         "logo_url": logo_url,
         "contact_phone": contact_phone,
         "contact_email": contact_email,
+        "contact_line_url": contact_line_url,
+        "contact_whatsapp_url": contact_whatsapp_url,
         "support_contact_text": support_contact_text,
         "accent_color": accent_color,
         "accent_color_soft": accent_color_soft,

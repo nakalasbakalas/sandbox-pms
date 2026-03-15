@@ -22,8 +22,10 @@ from .branding import (
     branding_settings_context,
     clean_branding_form,
     email_href as branding_email_href,
+    line_href as branding_line_href,
     phone_href as branding_phone_href,
     resolve_public_base_url,
+    whatsapp_href as branding_whatsapp_href,
 )
 from .config import Config, normalize_runtime_config
 from .constants import (
@@ -462,6 +464,8 @@ def register_template_helpers(app: Flask) -> None:
         default_logo_url = url_for("static", filename="branding/sandbox-hotel-logo-safe-256.png")
         hotel_contact_phone = branding["contact_phone"]
         hotel_contact_email = branding["contact_email"]
+        hotel_contact_line_url = branding["contact_line_url"]
+        hotel_contact_whatsapp_url = branding["contact_whatsapp_url"]
         hotel_address = branding["address"]
         hotel_check_in_time = branding["check_in_time"]
         hotel_check_out_time = branding["check_out_time"]
@@ -473,6 +477,8 @@ def register_template_helpers(app: Flask) -> None:
         share_image_url = hotel_logo_url or default_share_image_url
         hotel_contact_phone_href = phone_href(hotel_contact_phone)
         hotel_contact_email_href = email_href(hotel_contact_email)
+        hotel_contact_line_href = branding_line_href(hotel_contact_line_url)
+        hotel_contact_whatsapp_href = branding_whatsapp_href(hotel_contact_whatsapp_url)
         hotel_structured_data: dict[str, object] = {
             "@context": "https://schema.org",
             "@type": "Hotel",
@@ -550,10 +556,16 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_support_contact_text": branding["support_contact_text"],
             "hotel_contact_phone": hotel_contact_phone,
             "hotel_contact_email": hotel_contact_email,
+            "hotel_contact_line_url": hotel_contact_line_url,
+            "hotel_contact_whatsapp_url": hotel_contact_whatsapp_url,
             "hotel_contact_phone_href": hotel_contact_phone_href,
             "hotel_contact_email_href": hotel_contact_email_href,
+            "hotel_contact_line_href": hotel_contact_line_href,
+            "hotel_contact_whatsapp_href": hotel_contact_whatsapp_href,
             "hotel_contact_phone_link": _contact_link(hotel_contact_phone_href, hotel_contact_phone),
             "hotel_contact_email_link": _contact_link(hotel_contact_email_href, hotel_contact_email),
+            "hotel_contact_line_link": _contact_link(hotel_contact_line_href, "LINE"),
+            "hotel_contact_whatsapp_link": _contact_link(hotel_contact_whatsapp_href, "WhatsApp"),
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
@@ -1373,15 +1385,17 @@ def register_routes(app: Flask) -> None:
                             {"key": "hotel.logo_url", "value": branding["logo_url"], "value_type": "string", "description": "Hotel logo URL", "is_public": True, "sort_order": 12},
                             {"key": "hotel.contact_phone", "value": branding["contact_phone"], "value_type": "string", "description": "Primary phone", "is_public": True, "sort_order": 13},
                             {"key": "hotel.contact_email", "value": branding["contact_email"], "value_type": "string", "description": "Primary contact email", "is_public": True, "sort_order": 14},
-                            {"key": "hotel.address", "value": branding["address"], "value_type": "string", "description": "Property address", "is_public": True, "sort_order": 15},
-                            {"key": "hotel.currency", "value": branding["currency"], "value_type": "string", "description": "Hotel currency", "is_public": True, "sort_order": 16},
-                            {"key": "hotel.check_in_time", "value": branding["check_in_time"], "value_type": "string", "description": "Standard check-in time", "is_public": True, "sort_order": 17},
-                            {"key": "hotel.check_out_time", "value": branding["check_out_time"], "value_type": "string", "description": "Standard check-out time", "is_public": True, "sort_order": 18},
-                            {"key": "hotel.tax_id", "value": branding["tax_id"], "value_type": "string", "description": "Business tax identifier", "is_public": False, "sort_order": 19},
-                            {"key": "hotel.support_contact_text", "value": branding["support_contact_text"], "value_type": "string", "description": "Guest support message", "is_public": True, "sort_order": 20},
-                            {"key": "hotel.accent_color", "value": branding["accent_color"], "value_type": "string", "description": "Primary accent color", "is_public": True, "sort_order": 21},
-                            {"key": "hotel.accent_color_soft", "value": branding["accent_color_soft"], "value_type": "string", "description": "Secondary accent color", "is_public": True, "sort_order": 22},
-                            {"key": "hotel.public_base_url", "value": branding["public_base_url"], "value_type": "string", "description": "Canonical public booking base URL", "is_public": True, "sort_order": 23},
+                            {"key": "hotel.contact_line_url", "value": branding["contact_line_url"], "value_type": "string", "description": "Guest LINE contact URL", "is_public": True, "sort_order": 15},
+                            {"key": "hotel.contact_whatsapp_url", "value": branding["contact_whatsapp_url"], "value_type": "string", "description": "Guest WhatsApp contact URL", "is_public": True, "sort_order": 16},
+                            {"key": "hotel.address", "value": branding["address"], "value_type": "string", "description": "Property address", "is_public": True, "sort_order": 17},
+                            {"key": "hotel.currency", "value": branding["currency"], "value_type": "string", "description": "Hotel currency", "is_public": True, "sort_order": 18},
+                            {"key": "hotel.check_in_time", "value": branding["check_in_time"], "value_type": "string", "description": "Standard check-in time", "is_public": True, "sort_order": 19},
+                            {"key": "hotel.check_out_time", "value": branding["check_out_time"], "value_type": "string", "description": "Standard check-out time", "is_public": True, "sort_order": 20},
+                            {"key": "hotel.tax_id", "value": branding["tax_id"], "value_type": "string", "description": "Business tax identifier", "is_public": False, "sort_order": 21},
+                            {"key": "hotel.support_contact_text", "value": branding["support_contact_text"], "value_type": "string", "description": "Guest support message", "is_public": True, "sort_order": 22},
+                            {"key": "hotel.accent_color", "value": branding["accent_color"], "value_type": "string", "description": "Primary accent color", "is_public": True, "sort_order": 23},
+                            {"key": "hotel.accent_color_soft", "value": branding["accent_color_soft"], "value_type": "string", "description": "Secondary accent color", "is_public": True, "sort_order": 24},
+                            {"key": "hotel.public_base_url", "value": branding["public_base_url"], "value_type": "string", "description": "Canonical public booking base URL", "is_public": True, "sort_order": 25},
                         ],
                         actor_user_id=actor.id,
                     )

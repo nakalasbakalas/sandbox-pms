@@ -26,6 +26,10 @@
         <label><span>Phone</span><input type="text" name="contact_phone" value="{{ property_settings.contact_phone }}"></label>
         <label><span>Email</span><input type="email" name="contact_email" value="{{ property_settings.contact_email }}"></label>
       </div>
+      <div class="grid two">
+        <label><span>LINE contact URL</span><input type="url" name="contact_line_url" value="{{ property_settings.contact_line_url }}" placeholder="https://line.me/..."></label>
+        <label><span>WhatsApp contact URL</span><input type="url" name="contact_whatsapp_url" value="{{ property_settings.contact_whatsapp_url }}" placeholder="https://wa.me/..."></label>
+      </div>
       <label><span>Support contact text</span><textarea name="support_contact_text" rows="2" maxlength="255">{{ property_settings.support_contact_text }}</textarea></label>
       <div class="grid two">
         <label><span>Primary accent color</span><input type="color" name="accent_color" value="{{ property_settings.accent_color }}"></label>

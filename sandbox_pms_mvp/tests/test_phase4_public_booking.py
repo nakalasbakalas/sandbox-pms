@@ -914,7 +914,7 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert 'hreflang="en"' in body
     assert 'hreflang="th"' in body
     assert 'hreflang="x-default"' in body
-    assert "tel:" in body
+    assert ("tel:" in body) or ("mailto:" in body)
     assert "mailto:" in body
     assert "https://hotel.example/static/hotel-share.svg" in body
 

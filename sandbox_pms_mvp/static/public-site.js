@@ -181,17 +181,73 @@
   }
 
   function trackContactClick(target) {
-    const contactLink = target.closest('a[href^="tel:"], a[href^="mailto:"]');
+    const contactLink = target.closest(
+      'a[href^="tel:"], a[href^="mailto:"], a[href*="line.me"], a[href*="lin.ee"], a[href*="wa.me"], a[href*="whatsapp.com"]'
+    );
     if (!contactLink) {
       return;
     }
-    const href = contactLink.getAttribute("href") || "";
-    const contactMethod = href.startsWith("tel:") ? "phone" : "email";
+    const href = (contactLink.getAttribute("href") || "").toLowerCase();
+    let contactMethod = "email";
+    if (href.startsWith("tel:")) {
+      contactMethod = "phone";
+    } else if (href.includes("line.me") || href.includes("lin.ee")) {
+      contactMethod = "line";
+    } else if (href.includes("wa.me") || href.includes("whatsapp.com")) {
+      contactMethod = "whatsapp";
+    }
     pushEvent(EVENT_NAMES.contactClick, {
       contact_method: contactMethod,
       cta_label: contactLink.dataset.analyticsLabel || contactMethod,
       cta_context: inferContext(contactLink),
-      target_path: sanitizeTarget(href),
+      target_path: sanitizeTarget(contactLink.getAttribute("href") || ""),
+    });
+  }
+
+  function initDateGuards() {
+    const checkInInputs = Array.from(document.querySelectorAll('input[type="date"][name="check_in"]'));
+    const checkOutInputs = Array.from(document.querySelectorAll('input[type="date"][name="check_out"]'));
+    if (!checkInInputs.length || !checkOutInputs.length) {
+      return;
+    }
+    const today = new Date();
+    const localToday = new Date(today.getTime() - today.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+    function plusOneDay(isoDate) {
+      const candidate = new Date(isoDate + "T00:00:00");
+      if (Number.isNaN(candidate.getTime())) {
+        return "";
+      }
+      candidate.setDate(candidate.getDate() + 1);
+      return candidate.toISOString().slice(0, 10);
+    }
+
+    checkInInputs.forEach(function (checkInInput) {
+      if (!checkInInput.min || checkInInput.min < localToday) {
+        checkInInput.min = localToday;
+      }
+      const pairedCheckOut = checkOutInputs.find(function (checkOutInput) {
+        return checkOutInput.form === checkInInput.form;
+      });
+      if (!pairedCheckOut) {
+        return;
+      }
+      if (!pairedCheckOut.min || pairedCheckOut.min < localToday) {
+        pairedCheckOut.min = localToday;
+      }
+
+      function syncCheckOutMin() {
+        const nextDayMin = checkInInput.value ? plusOneDay(checkInInput.value) : localToday;
+        if (nextDayMin) {
+          pairedCheckOut.min = nextDayMin;
+          if (pairedCheckOut.value && pairedCheckOut.value < nextDayMin) {
+            pairedCheckOut.value = nextDayMin;
+          }
+        }
+      }
+
+      checkInInput.addEventListener("change", syncCheckOutMin);
+      syncCheckOutMin();
     });
   }
 
@@ -401,5 +457,6 @@
   if (analyticsAllowed()) {
     pushEvent(EVENT_NAMES.pageView, { page_title: document.title });
   }
+  initDateGuards();
   initBookingExtrasSummary();
 })();
