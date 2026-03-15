@@ -285,6 +285,33 @@ def test_front_desk_board_route_exposes_board_v2_flag_from_settings(app_factory)
     assert 'data-board-v2-enabled="true"' in enabled.get_data(as_text=True)
 
 
+def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        create_staff_reservation(
+            first_name="Compact",
+            last_name="Layout",
+            phone="+66810000061",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        front_desk_user = make_staff_user("front_desk", "board-compact@example.com")
+
+    login_as(client, front_desk_user)
+    response = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'class="toolbar planning-board-filters"' in html
+    assert 'class="planning-board-action-row planning-board-nav-actions"' in html
+    assert 'aria-pressed="true"' in html
+    assert ">Compact</button>" in html
+    assert ">Comfortable</button>" in html
+    assert ">Spacious</button>" in html
+
+
 def test_front_desk_board_data_route_logs_metric_payload(app_factory, monkeypatch):
     app = app_factory(seed=True)
     client = app.test_client()
