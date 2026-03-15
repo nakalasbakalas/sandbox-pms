@@ -63,7 +63,7 @@ def upgrade():
         sa.Column("primary_contact_email", sa.String(255), nullable=True),
         sa.Column("nationality", sa.String(80), nullable=True),
         sa.Column("vehicle_registration", sa.String(80), nullable=True),
-        sa.Column("acknowledgment_accepted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("acknowledgment_accepted", sa.Boolean, nullable=False, server_default=sa.text("false")),
         sa.Column("acknowledgment_name", sa.String(255), nullable=True),
         sa.Column("acknowledgment_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("occupant_details", JSON, nullable=True),
