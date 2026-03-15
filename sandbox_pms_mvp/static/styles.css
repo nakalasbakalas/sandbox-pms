@@ -258,7 +258,7 @@ a { color: inherit; text-decoration: none; }
 h1, h2, h3 { margin: 0 0 6px; line-height: 1.1; }
 h1 { font-size: clamp(1.75rem, 2.5vw, 2.5rem); }
 h2 { font-size: 1.3rem; }
-h3 { font-size: 1rem; }
+h3 { font-size: 1.05rem; }
 p { margin: 0 0 10px; color: var(--muted); }
 .lead { font-size: 1.05rem; max-width: 62ch; }
 .actions {
@@ -378,7 +378,7 @@ textarea { resize: vertical; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-thead th { background: rgba(255,255,255,0.03); color: var(--accent-soft); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.08em; }
+thead th { background: rgba(255,255,255,0.03); color: var(--accent-soft); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; }
 tbody tr:last-child td { border-bottom: 0; }
 .status {
   display: inline-flex;
@@ -880,7 +880,7 @@ tbody tr:last-child td { border-bottom: 0; }
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
 }
 .planning-board-day strong {
   font-size: 1.05rem;
@@ -1121,7 +1121,7 @@ tbody tr:last-child td { border-bottom: 0; }
   position: absolute;
   top: calc(100% + 6px);
   left: 0;
-  width: min(300px, 90vw);
+  width: min(320px, 90vw);
   padding: 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
