@@ -2,7 +2,7 @@
 
 ## Immediate follow-ups
 1. Verify the latest Render deployment directly in the platform dashboard/logs and complete the documented smoke test (`/health`, homepage, availability, hold flow, staff login, admin pages, seeded data).
-2. Investigate GitHub Actions run `23102726132`, which completed as `action_required` with zero jobs and no downloadable logs; this likely requires GitHub UI/policy inspection rather than repository edits.
+2. Investigate the latest PR-head GitHub Actions runs, which completed as `action_required` with zero jobs and no failed-job logs; this likely requires GitHub UI/policy inspection rather than repository edits.
 3. Keep future changes to booking, payment, auth, and staff operations scoped and test-backed because the current baseline is green and should not be destabilized.
 
 ## Medium-priority improvements
