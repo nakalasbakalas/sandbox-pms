@@ -846,8 +846,10 @@
         // Update button states
         densityButtons.forEach((btn) => {
           btn.removeAttribute("data-active");
+          btn.setAttribute("aria-pressed", "false");
         });
         button.setAttribute("data-active", "true");
+        button.setAttribute("aria-pressed", "true");
 
         // Apply CSS class to grid
         const grid = document.querySelector(".planning-board-grid");
