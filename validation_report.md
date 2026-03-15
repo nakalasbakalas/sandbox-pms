@@ -10,21 +10,24 @@
 - No standalone typecheck command is configured in the repository.
 
 ## Tests
-- `python -m pytest sandbox_pms_mvp/tests/test_phase11_communications.py -q` ✅ (`11 passed`)
-- `python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q -k 'not sse_endpoint_returns and not sse_emits_event'` ✅ (`443 passed, 6 skipped, 2 deselected`)
+- `python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q` ✅ (`447 passed, 6 skipped`)
 
 ## Build
 - No standalone build command is configured in the repository.
 
 ## Manual / flow checks performed
 - `python scripts/launch_gate.py` ✅ (`Blockers: 0`, `Warnings: 0`)
-- Verified the communications email dispatch path through the new SMTP regression test.
-- Reviewed GitHub Actions workflow configuration and recent runs through the GitHub Actions MCP tools.
+- Reviewed GitHub Actions workflow configuration, recent runs, job metadata, and latest successful job logs through the GitHub Actions MCP tools.
+- Inspected recent production-facing commits and Render deployment configuration for release drift.
 
 ## GitHub Actions observations
-- Run `23089741084`: in progress when first inspected; setup, dependency install, placeholder check, and public-surface check had already passed.
-- Runs `23090024976` and `23090077244`: both concluded `action_required`, but the Actions API returned zero jobs and no failed-job logs at inspection time.
+- Latest completed `main` run `23101952588` succeeded. The `quality-gates` job log ended with `447 passed, 6 skipped in 994.66s (0:16:34)`.
+- PR run `23102415584` completed successfully on the previous branch head.
+- Latest PR-head runs `23102726132` and `23102757598` both concluded `action_required` immediately with zero jobs returned by the Actions API and zero failed jobs.
+- GitHub Actions emitted a Node.js 20 deprecation warning for `actions/checkout@v4` and `actions/setup-python@v5`.
 
 ## Remaining warnings / errors
-- No local validation failures remain after the applied cleanup.
-- Remote CI status for the latest branch runs remains unexplained from available job metadata and should be re-checked on GitHub.
+- No local validation failures remain after the applied documentation cleanup.
+- No standalone build or typecheck commands exist, so there is nothing additional to run in those categories.
+- Live Render deployment success still requires external dashboard/log verification.
+- Latest PR CI is externally blocked by repeated zero-job `action_required` runs and could not be remediated from repository changes in this session.
