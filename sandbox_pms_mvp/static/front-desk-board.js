@@ -1317,10 +1317,12 @@
         if (action === "move" || action === "resize" || action === "assign") btn.disabled = !canEdit;
       });
 
-      ctxMenu.style.left = Math.min(x, window.innerWidth - 200) + "px";
-      ctxMenu.style.top = Math.min(y, window.innerHeight - 300) + "px";
       ctxMenu.classList.remove("hidden");
       ctxMenu.hidden = false;
+      var menuW = ctxMenu.offsetWidth || 200;
+      var menuH = ctxMenu.offsetHeight || 300;
+      ctxMenu.style.left = Math.min(x, window.innerWidth - menuW - 8) + "px";
+      ctxMenu.style.top = Math.min(y, window.innerHeight - menuH - 8) + "px";
       ctxMenu._block = blockEl;
     }
 

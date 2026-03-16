@@ -29,15 +29,19 @@
   --track-height-spacious: 90px;
   --track-height-comfortable: 68px;
   --track-height-compact: 50px;
+  --track-height-ultra: 38px;
   --day-header-height-spacious: 82px;
   --day-header-height-comfortable: 60px;
   --day-header-height-compact: 42px;
+  --day-header-height-ultra: 34px;
   --room-header-width-spacious: 264px;
   --room-header-width-comfortable: 220px;
   --room-header-width-compact: 176px;
+  --room-header-width-ultra: 140px;
   --day-column-min-spacious: 84px;
   --day-column-min-comfortable: 72px;
   --day-column-min-compact: 56px;
+  --day-column-min-ultra: 44px;
   --track-height: var(--track-height-comfortable);
   --day-header-height: var(--day-header-height-comfortable);
   --room-header-width: var(--room-header-width-comfortable);
@@ -1360,17 +1364,17 @@ tbody tr:last-child td { border-bottom: 0; }
   --track-height-adjust: 18px;
 }
 .planning-board-grid.density-ultra {
-  --track-height: 38px;
-  --day-header-height: 34px;
-  --room-header-width: 140px;
-  --day-column-min: 44px;
+  --track-height: var(--track-height-ultra);
+  --day-header-height: var(--day-header-height-ultra);
+  --room-header-width: var(--room-header-width-ultra);
+  --day-column-min: var(--day-column-min-ultra);
   --track-height-adjust: 24px;
 }
 /* Day header per density */
 .planning-board-grid.density-spacious .planning-board-days { grid-template-rows: minmax(var(--day-header-height-spacious), auto); }
 .planning-board-grid.density-comfortable .planning-board-days { grid-template-rows: minmax(var(--day-header-height-comfortable), auto); }
 .planning-board-grid.density-compact .planning-board-days { grid-template-rows: minmax(var(--day-header-height-compact), auto); }
-.planning-board-grid.density-ultra .planning-board-days { grid-template-rows: minmax(34px, auto); }
+.planning-board-grid.density-ultra .planning-board-days { grid-template-rows: minmax(var(--day-header-height-ultra), auto); }
 /* Spacious adjustments */
 .planning-board-grid.density-spacious .planning-board-day { min-height: var(--day-header-height-spacious); font-size: 0.72rem; }
 .planning-board-grid.density-spacious .planning-board-day strong { font-size: 1.1rem; }
@@ -1393,7 +1397,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.52rem; }
 .planning-board-grid.density-compact .planning-board-resize-handle { width: 12px; min-height: 18px; }
 /* Ultra compact */
-.planning-board-grid.density-ultra .planning-board-day { min-height: 34px; padding: 1px 2px; font-size: 0.54rem; }
+.planning-board-grid.density-ultra .planning-board-day { min-height: var(--day-header-height-ultra); padding: 1px 2px; font-size: 0.54rem; }
 .planning-board-grid.density-ultra .planning-board-day strong { font-size: 0.76rem; }
 .planning-board-grid.density-ultra .planning-board-day small { display: none; }
 .planning-board-grid.density-ultra .planning-board-room { min-height: 32px; gap: 0; padding: 2px 5px; }
