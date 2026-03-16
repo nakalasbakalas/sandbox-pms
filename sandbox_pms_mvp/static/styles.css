@@ -46,6 +46,71 @@
   --day-header-height: var(--day-header-height-compact);
   --room-header-width: var(--room-header-width-compact);
   --day-column-min: var(--day-column-min-compact);
+
+  /* ===== PMS Operational Design System ===== */
+  /* Compact spacing for operational interfaces */
+  --pms-space-xxs: 2px;
+  --pms-space-xs: 4px;
+  --pms-space-sm: 6px;
+  --pms-space-md: 8px;
+  --pms-space-lg: 12px;
+  --pms-space-xl: 16px;
+
+  /* Operational colors - neutral, professional */
+  --pms-bg-base: #f5f6f8;
+  --pms-bg-panel: #ffffff;
+  --pms-bg-filter: #2c3e50;
+  --pms-bg-hover: #f0f1f3;
+  --pms-border-thin: #e1e4e8;
+  --pms-border-medium: #d1d5da;
+  --pms-text-primary: #24292e;
+  --pms-text-secondary: #586069;
+  --pms-text-muted: #6a737d;
+
+  /* Compact dimensions */
+  --pms-nav-height: 42px;
+  --pms-input-height: 32px;
+  --pms-input-height-sm: 28px;
+  --pms-table-row-height: 36px;
+  --pms-table-row-height-compact: 32px;
+  --pms-filter-block-pad: 12px;
+
+  /* Minimal rounding */
+  --pms-radius: 4px;
+  --pms-radius-sm: 2px;
+
+  /* Typography */
+  --pms-font-size-xs: 11px;
+  --pms-font-size-sm: 12px;
+  --pms-font-size-md: 13px;
+  --pms-font-size-lg: 14px;
+  --pms-line-height-tight: 1.3;
+  --pms-line-height-normal: 1.4;
+
+  /* Status colors - muted, professional */
+  --pms-status-success: #28a745;
+  --pms-status-warning: #ffc107;
+  --pms-status-danger: #dc3545;
+  --pms-status-info: #17a2b8;
+  --pms-status-neutral: #6c757d;
+
+  /* Booking state colors */
+  --pms-booking-confirmed: #4a90e2;
+  --pms-booking-checkin: #f39c12;
+  --pms-booking-inhouse: #27ae60;
+  --pms-booking-checkout: #e67e22;
+  --pms-booking-unpaid: #e74c3c;
+  --pms-booking-cancelled: #95a5a6;
+}
+
+/* PMS mode detection - apply operational styling to staff pages */
+body:not(.public-site) {
+  --bg: var(--pms-bg-base);
+  --panel: var(--pms-bg-panel);
+  --border: var(--pms-border-thin);
+  --text: var(--pms-text-primary);
+  --muted: var(--pms-text-secondary);
+  background: var(--pms-bg-base);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 80px; }
@@ -2782,4 +2847,347 @@ body.public-site .consent-manage-button {
   gap: .3rem;
   padding: 1rem;
   justify-content: center;
+}
+
+/* ===============================================
+   PMS OPERATIONAL COMPONENTS
+   Reference-matched compact design system
+   =============================================== */
+
+/* ─── Dense Operational Table ─── */
+.table-pms {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--pms-font-size-md);
+  line-height: var(--pms-line-height-tight);
+}
+
+.table-pms th,
+.table-pms td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--pms-border-thin);
+  text-align: left;
+  height: var(--pms-table-row-height);
+}
+
+.table-pms th {
+  background: var(--pms-bg-hover);
+  font-weight: 600;
+  font-size: var(--pms-font-size-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--pms-text-secondary);
+  white-space: nowrap;
+}
+
+.table-pms tbody tr:hover {
+  background: var(--pms-bg-hover);
+}
+
+.table-pms-compact th,
+.table-pms-compact td {
+  padding: 4px 8px;
+  height: var(--pms-table-row-height-compact);
+  font-size: var(--pms-font-size-sm);
+}
+
+.table-pms .cell-nowrap {
+  white-space: nowrap;
+}
+
+.table-pms .cell-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-pms .cell-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ─── Compact Filter Block ─── */
+.filter-block-pms {
+  background: var(--pms-bg-filter);
+  padding: var(--pms-filter-block-pad);
+  border-radius: var(--pms-radius);
+  margin-bottom: var(--pms-space-lg);
+}
+
+.filter-form-pms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--pms-space-md);
+  align-items: end;
+}
+
+.filter-form-pms label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pms-space-xs);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: var(--pms-font-size-sm);
+  font-weight: 500;
+}
+
+.filter-form-pms input,
+.filter-form-pms select {
+  height: var(--pms-input-height);
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--pms-radius-sm);
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: var(--pms-font-size-md);
+}
+
+.filter-form-pms input:focus,
+.filter-form-pms select:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.3);
+  outline-offset: 0;
+}
+
+.filter-form-pms button[type="submit"] {
+  height: var(--pms-input-height);
+  padding: 0 16px;
+  background: var(--pms-status-success);
+  color: white;
+  border: none;
+  border-radius: var(--pms-radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-form-pms button[type="submit"]:hover {
+  background: #239a41;
+}
+
+.filter-summary-pms {
+  margin-top: var(--pms-space-md);
+  padding-top: var(--pms-space-md);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: var(--pms-font-size-sm);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ─── Flat Operational Status Badges ─── */
+.status-pms {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--pms-radius-sm);
+  font-size: var(--pms-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.status-pms.confirmed { background: #e3f2fd; color: #1565c0; }
+.status-pms.checked_in { background: #fff3e0; color: #e65100; }
+.status-pms.checked_out { background: #f3e5f5; color: #6a1b9a; }
+.status-pms.cancelled { background: #f5f5f5; color: #757575; }
+.status-pms.unpaid { background: #ffebee; color: #c62828; }
+.status-pms.paid { background: #e8f5e9; color: #2e7d32; }
+.status-pms.partial,
+.status-pms.partially_paid { background: #fff8e1; color: #f57f17; }
+.status-pms.missing { background: #ffebee; color: #c62828; }
+.status-pms.clean { background: #e8f5e9; color: #2e7d32; }
+.status-pms.dirty { background: #fff3e0; color: #e65100; }
+.status-pms.inspected { background: #e3f2fd; color: #1565c0; }
+.status-pms.blocked { background: #f5f5f5; color: #757575; }
+
+/* ─── PMS Page Structure ─── */
+.pms-page-header {
+  margin-bottom: var(--pms-space-lg);
+}
+
+.pms-page-title-group {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--pms-space-lg);
+}
+
+.pms-page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--pms-text-primary);
+}
+
+.pms-page-subtitle {
+  font-size: var(--pms-font-size-md);
+  color: var(--pms-text-secondary);
+  margin: var(--pms-space-xs) 0 0;
+}
+
+.pms-page-actions {
+  display: flex;
+  gap: var(--pms-space-sm);
+}
+
+.pms-results-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--pms-space-md);
+  padding: var(--pms-space-md) 0;
+}
+
+.pms-results-count {
+  font-size: var(--pms-font-size-sm);
+  color: var(--pms-text-secondary);
+}
+
+.pms-results-actions {
+  display: flex;
+  gap: var(--pms-space-sm);
+}
+
+.pms-table-container {
+  background: var(--pms-bg-panel);
+  border: 1px solid var(--pms-border-thin);
+  border-radius: var(--pms-radius);
+  overflow-x: auto;
+}
+
+.pms-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--pms-space-lg);
+  padding: var(--pms-space-md) 0;
+  font-size: var(--pms-font-size-sm);
+  color: var(--pms-text-secondary);
+}
+
+.pms-pagination div {
+  display: flex;
+  gap: var(--pms-space-sm);
+}
+
+/* ─── PMS Buttons ─── */
+.btn-pms {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px;
+  border: 1px solid var(--pms-border-medium);
+  border-radius: var(--pms-radius-sm);
+  background: var(--pms-bg-panel);
+  color: var(--pms-text-primary);
+  font-size: var(--pms-font-size-md);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-pms:hover {
+  background: var(--pms-bg-hover);
+  border-color: var(--pms-text-secondary);
+}
+
+.btn-pms-primary {
+  background: var(--pms-status-success);
+  color: white;
+  border-color: var(--pms-status-success);
+}
+
+.btn-pms-primary:hover {
+  background: #239a41;
+  border-color: #239a41;
+}
+
+.btn-pms-sm {
+  padding: 4px 10px;
+  font-size: var(--pms-font-size-sm);
+}
+
+.btn-pms-xs {
+  padding: 2px 8px;
+  font-size: var(--pms-font-size-xs);
+}
+
+/* ─── Text Utilities ─── */
+.text-muted-pms {
+  color: var(--pms-text-muted);
+  font-size: var(--pms-font-size-sm);
+}
+
+.text-success {
+  color: var(--pms-status-success);
+}
+
+.text-danger {
+  color: var(--pms-status-danger);
+}
+
+.badge-tiny {
+  display: inline-block;
+  padding: 1px 4px;
+  background: var(--pms-status-warning);
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+
+/* ─── PMS Compact Navigation Override ─── */
+body:not(.public-site) .site-header {
+  min-height: var(--pms-nav-height);
+  background: var(--pms-bg-panel);
+  border-bottom: 1px solid var(--pms-border-medium);
+  backdrop-filter: none;
+}
+
+body:not(.public-site) .app-header {
+  min-height: var(--pms-nav-height);
+  gap: 8px;
+}
+
+body:not(.public-site) .header-primary-link {
+  padding: 8px 14px;
+  font-size: var(--pms-font-size-md);
+  font-weight: 500;
+  color: var(--pms-text-secondary);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  transition: all 0.15s ease;
+}
+
+body:not(.public-site) .header-primary-link:hover {
+  color: var(--pms-text-primary);
+  background: var(--pms-bg-hover);
+}
+
+body:not(.public-site) .header-primary-link.active {
+  color: var(--pms-text-primary);
+  border-bottom-color: var(--accent);
+  background: transparent;
+  font-weight: 600;
+}
+
+/* ─── Responsive Adjustments for PMS ─── */
+@media (max-width: 900px) {
+  .filter-form-pms {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .pms-page-title-group {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .pms-table-container {
+    overflow-x: auto;
+  }
+
+  .table-pms {
+    min-width: 800px;
+  }
 }
