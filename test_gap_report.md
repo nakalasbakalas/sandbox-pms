@@ -15,7 +15,7 @@
 ## Missing or weak tests for critical operational flows
 
 | Area | Gap |
-|---|---|
+| --- | --- |
 | Payment webhook handling | Add duplicate-delivery and replay tests for the same provider event ID under repeated callback conditions. |
 | Payment webhook concurrency | Add tests that simulate near-simultaneous webhook delivery for the same payment request to verify no duplicate folio side effects. |
 | Booking modification concurrency | Add tests for conflicting stay-date changes and room reassignment collisions. |
