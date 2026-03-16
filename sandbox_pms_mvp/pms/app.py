@@ -3217,9 +3217,9 @@ def register_routes(app: Flask) -> None:
         """Save user's front desk board preferences (density, layout, etc)."""
         user = require_permission("reservation.view")
         payload = request.get_json() or {}
-        density = payload.get("density", "comfortable")
+        density = payload.get("density", "compact")
 
-        if density not in ["comfortable", "compact", "spacious"]:
+        if density not in ["comfortable", "compact", "spacious", "ultra"]:
             abort(400, "Invalid density value")
 
         # Create or update user preference record
@@ -4832,10 +4832,10 @@ def front_desk_board_context(
     board_v2_enabled = front_desk_board_v2_enabled()
 
     # Load user density preference
-    user_density = "comfortable"  # default
+    user_density = "compact"  # default
     user = g.current_staff_user
     if user and user.preferences:
-        user_density = (user.preferences.preferences or {}).get("frontDeskBoard", {}).get("density", "comfortable")
+        user_density = (user.preferences.preferences or {}).get("frontDeskBoard", {}).get("density", "compact")
 
     return {
         "board": board,

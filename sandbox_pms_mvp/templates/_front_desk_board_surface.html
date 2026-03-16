@@ -10,7 +10,7 @@
 
 {% if board.groups %}
 <section class="planning-board-desktop">
-  <div class="planning-board-grid density-{{ user_density or 'comfortable' }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }};">
+  <div class="planning-board-grid density-{{ user_density or 'compact' }}" data-board-days="{{ board.days }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }}; --today-column: {{ board.todayOffset or 0 }};">
     <div class="planning-board-room heading">
       <strong>Rooms</strong>
       <span>Live status</span>
