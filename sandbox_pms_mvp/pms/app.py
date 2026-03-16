@@ -89,6 +89,7 @@ from .models import (
     utc_now,
 )
 from .pricing import get_setting_value
+from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
 from .security import configure_app_security, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
@@ -1476,9 +1477,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/admin/rates-inventory", methods=["GET", "POST"], endpoint="staff_admin_rates_inventory")
     @app.route("/staff/rates", methods=["GET", "POST"])
     def staff_rates():
-        user = require_user()
-        if not (user.has_permission("rate_rule.view") or user.has_permission("settings.view")):
-            abort(403)
+        require_any_permission("rate_rule.view", "settings.view")
         if request.method == "POST":
             try:
                 action = request.form.get("action")
@@ -2328,7 +2327,7 @@ def register_routes(app: Flask) -> None:
             room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
             housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service", "cleaning_in_progress"],
             room_note_types=ROOM_NOTE_TYPES,
-            can_manage_controls=user.primary_role in {"admin", "manager"},
+            can_manage_controls=can_manage_operational_overrides(user),
         )
 
     @app.route("/staff/housekeeping/rooms/<uuid:room_id>")
@@ -2346,7 +2345,8 @@ def register_routes(app: Flask) -> None:
             ),
             housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
             room_note_types=ROOM_NOTE_TYPES,
-            can_manage_controls=user.primary_role in {"admin", "manager"},
+            can_manage_controls=can_manage_operational_overrides(user),
+            can_view_audit=user.has_permission("audit.view"),
         )
 
     @app.route("/staff/housekeeping/rooms/<uuid:room_id>/status", methods=["POST"])
@@ -2562,7 +2562,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/api/room-readiness")
     def staff_api_room_readiness():
         """JSON endpoint returning readiness state of all rooms for a given date."""
-        require_permission("reservation.view")
+        require_any_permission("reservation.view", "housekeeping.view")
         target_date = parse_request_date_arg("date", default=date.today())
         board = room_readiness_board(target_date)
         return jsonify({
@@ -2591,7 +2591,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/api/room-readiness/<room_id>")
     def staff_api_room_readiness_single(room_id):
         """JSON endpoint returning readiness state of a single room."""
-        require_permission("reservation.view")
+        require_any_permission("reservation.view", "housekeeping.view")
         target_date = parse_request_date_arg("date", default=date.today())
         try:
             r = is_room_assignable(UUID(room_id), target_date)
@@ -3057,7 +3057,7 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/staff/front-desk/board/closures", methods=["POST"])
     def staff_front_desk_board_create_closure():
-        user = require_permission("settings.edit")
+        user = require_permission("operations.override")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
         payload = request.form.to_dict()
         try:
@@ -3096,7 +3096,7 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/staff/front-desk/board/closures/<uuid:override_id>", methods=["POST"])
     def staff_front_desk_board_update_closure(override_id):
-        user = require_permission("settings.edit")
+        user = require_permission("operations.override")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
         override = db.session.get(InventoryOverride, override_id)
         payload = request.form.to_dict()
@@ -3142,7 +3142,7 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/staff/front-desk/board/closures/<uuid:override_id>/release", methods=["POST"])
     def staff_front_desk_board_release_closure(override_id):
-        user = require_permission("settings.edit")
+        user = require_permission("operations.override")
         back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk_board"))
         payload = request.form.to_dict()
         before_data = _inventory_override_snapshot_for_audit(override_id)
@@ -3926,7 +3926,7 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/reservations/<uuid:reservation_id>")
     def staff_reservation_detail(reservation_id):
         require_permission("reservation.view")
-        detail = get_reservation_detail(reservation_id)
+        detail = get_reservation_detail(reservation_id, actor_user=current_user())
         comm_messages = reservation_messages(str(reservation_id)) if can("messaging.view") else []
         return render_template(
             "reservation_detail.html",
@@ -4712,17 +4712,21 @@ def require_permission(permission_code: str) -> User:
     return user
 
 
+def require_any_permission(*permission_codes: str) -> User:
+    user = require_user()
+    if not any(user.has_permission(permission_code) for permission_code in permission_codes):
+        abort(403)
+    return user
+
+
 def can(permission_code: str) -> bool:
     user = current_user()
     if not user:
         return False
     return user.has_permission(permission_code)
 
-
 def default_dashboard_endpoint(user: User | None) -> str:
-    if user and user.primary_role == "provider" and user.has_permission("provider.dashboard.view"):
-        return "provider_dashboard"
-    return "staff_dashboard"
+    return default_dashboard_endpoint_for_user(user)
 
 
 def default_dashboard_url(user: User | None) -> str:
@@ -4825,7 +4829,7 @@ def front_desk_board_context(
         "default_checkout_date": filters.start_date + timedelta(days=1),
         "can_create": can("reservation.create"),
         "can_edit": can("reservation.edit"),
-        "can_manage_closures": can("settings.edit"),
+        "can_manage_closures": can("operations.override"),
         "board_url": url_for("staff_front_desk_board"),
         "board_fragment_url": url_for("staff_front_desk_board_fragment"),
         "board_data_url": url_for("staff_front_desk_board_data"),

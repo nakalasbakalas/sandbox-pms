@@ -30,6 +30,7 @@ from ..models import (
     User,
     utc_now,
 )
+from ..permissions import allowed_note_visibility_scopes
 from ..normalization import clean_optional, normalize_email, normalize_phone
 from ..pricing import money, quote_reservation
 from .communication_service import (
@@ -170,12 +171,16 @@ def list_in_house(*, business_date: date) -> list[dict]:
     return [build_reservation_summary(item) for item in query.order_by(Reservation.check_out_date.asc()).all()]
 
 
-def get_reservation_detail(reservation_id: uuid.UUID) -> dict:
+def get_reservation_detail(reservation_id: uuid.UUID, *, actor_user: User | None = None) -> dict:
     reservation = _load_reservation(reservation_id)
     if not reservation:
         raise ValueError("Reservation not found.")
     detail = build_reservation_summary(reservation)
     detail["reservation"] = reservation
+    detail["visible_notes"] = [
+        note for note in reservation.notes
+        if note.visibility_scope in allowed_note_visibility_scopes(actor_user)
+    ]
     detail["payment_summary"] = payment_summary(reservation)
     detail["extras"] = reservation_extra_summary(reservation)
     detail["eligible_rooms"] = eligible_rooms(reservation)

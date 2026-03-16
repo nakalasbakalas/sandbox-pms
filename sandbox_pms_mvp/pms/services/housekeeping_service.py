@@ -25,6 +25,7 @@ from ..models import (
     utc_now,
 )
 from ..normalization import clean_optional
+from ..permissions import allowed_note_visibility_scopes, can_manage_operational_overrides
 
 
 READY_HOUSEKEEPING_CODES = {"clean", "inspected"}
@@ -104,11 +105,13 @@ def list_housekeeping_board(filters: HousekeepingBoardFilters, *, actor_user: Us
         row.room_id: row
         for row in InventoryDay.query.filter_by(business_date=filters.business_date).all()
     }
+    allowed_scopes = allowed_note_visibility_scopes(actor_user)
     note_counts = {
         room_id: count
         for room_id, count in db.session.query(RoomNote.room_id, sa.func.count(RoomNote.id))
         .filter(
-            sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == filters.business_date)
+            sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == filters.business_date),
+            RoomNote.visibility_scope.in_(allowed_scopes),
         )
         .group_by(RoomNote.room_id)
         .all()
@@ -174,6 +177,7 @@ def get_housekeeping_room_detail(
         RoomNote.query.options(joinedload(RoomNote.created_by_user)).filter(
             RoomNote.room_id == room.id,
             sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == business_date),
+            RoomNote.visibility_scope.in_(allowed_note_visibility_scopes(actor_user)),
         )
         .order_by(RoomNote.created_at.desc())
         .all()
@@ -197,15 +201,17 @@ def get_housekeeping_room_detail(
         .limit(20)
         .all()
     )
-    audits = (
-        AuditLog.query.filter(
-            AuditLog.entity_table == "inventory_days",
-            AuditLog.entity_id == str(inventory_row.id),
+    audits = []
+    if actor_user and actor_user.has_permission("audit.view"):
+        audits = (
+            AuditLog.query.filter(
+                AuditLog.entity_table == "inventory_days",
+                AuditLog.entity_id == str(inventory_row.id),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(20)
+            .all()
         )
-        .order_by(AuditLog.created_at.desc())
-        .limit(20)
-        .all()
-    )
     return {
         "room": room,
         "inventory": inventory_row,
@@ -539,7 +545,7 @@ def _room_board_summary(
     )
     reservation_code = arrival.reservation_code if arrival else departure.reservation_code if departure else in_house.reservation_code if in_house else None
     guest_name = None
-    if actor_user and actor_user.primary_role != "housekeeping":
+    if actor_user and actor_user.has_permission("reservation.view"):
         guest = arrival.primary_guest if arrival else departure.primary_guest if departure else in_house.primary_guest if in_house else None
         guest_name = guest.full_name if guest else None
     return {
@@ -763,7 +769,7 @@ def _status_id_from_code(code: str | None) -> uuid.UUID | None:
 
 
 def _require_override(actor: User | None) -> None:
-    if not actor or actor.primary_role not in {"admin", "manager"}:
+    if not can_manage_operational_overrides(actor):
         raise ValueError("Only manager or admin can perform this operational override.")
 
 
