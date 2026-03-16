@@ -3925,7 +3925,7 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/staff/reservations/<uuid:reservation_id>")
     def staff_reservation_detail(reservation_id):
-        require_permission("reservation.view")
+        require_any_permission("reservation.view", "housekeeping.view")
         detail = get_reservation_detail(reservation_id, actor_user=current_user())
         comm_messages = reservation_messages(str(reservation_id)) if can("messaging.view") else []
         return render_template(
