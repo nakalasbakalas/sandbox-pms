@@ -5,6 +5,37 @@ description: Use when the task involves deployment, Cloudflare, domains, SSL, en
 
 # Deploy Environment Safety
 
+## Owns
+- secrets handling review
+- environment separation verification
+- deployment config correctness
+- release safety and rollback planning
+- smoke test and launch readiness guidance
+
+## Does Not Own
+- feature implementation
+- UI styling
+- business logic changes
+- database schema design
+
+## Trigger When
+- a deployment is being prepared or reviewed
+- environment variables or secrets are added, changed, or audited
+- a production incident requires rollback investigation
+- staging and production configs diverge unexpectedly
+
+## Read First
+- `render.yaml`
+- `DEPLOYMENT-RUNBOOK.md`
+- `RENDER_DEPLOY_CHECKLIST.md`
+- `.env.example` or equivalent config documentation
+- `sandbox_pms_mvp/pms/app.py` startup config
+
+## Avoid Reading Unless Needed
+- component templates
+- static assets
+- unrelated service logic
+
 ## Goal
 
 Keep deployment and environment work safe, explicit, and production-aware.
@@ -71,11 +102,15 @@ Keep deployment and environment work safe, explicit, and production-aware.
 - logging expectations
 - admin access boundaries
 
-## Output expectations
+## Output Format
+- What is ready
+- What is blocked by credentials or platform access
+- Exact repo changes made
+- Exact manual platform steps remaining
+- Production risks still open
 
-Report:
-- what is ready
-- what is blocked by credentials or platform access
-- what exact repo changes were made
-- what exact manual platform steps remain
-- what production risks still exist
+## Success Criteria
+- all environment variables and secrets are accounted for
+- staging and production configs are verified as distinct
+- rollback path is stated
+- no external action is claimed as complete unless confirmed

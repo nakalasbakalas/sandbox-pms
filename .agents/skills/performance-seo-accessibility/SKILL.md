@@ -5,6 +5,35 @@ description: Use when the task is to improve page speed, mobile performance, acc
 
 # Performance SEO Accessibility
 
+## Owns
+- page load and rendering performance
+- semantic HTML structure and heading hierarchy
+- metadata quality and crawlability
+- accessibility basics (keyboard, screen reader, contrast, labels)
+- mobile rendering correctness
+
+## Does Not Own
+- business logic or route handling
+- schema migrations
+- deployment config
+- copy and translation content
+
+## Trigger When
+- UI or template changes are landing and performance/a11y impact is unknown
+- mobile layout issues are reported
+- SEO or metadata quality is questioned
+- accessibility gaps are reported or suspected
+
+## Read First
+- the affected page template(s) in `sandbox_pms_mvp/templates/`
+- `sandbox_pms_mvp/static/styles.css` for shared layout patterns
+- shared base template or layout partials
+
+## Avoid Reading Unless Needed
+- backend service logic
+- migration files
+- unrelated admin-only templates
+
 ## Goal
 
 Improve the front end so it loads cleanly, ranks sensibly, and works better for all users.
@@ -53,7 +82,7 @@ Improve the front end so it loads cleanly, ranks sensibly, and works better for 
 4. Avoid performance regressions from decorative additions.
 5. Preserve brand quality while simplifying heavy patterns.
 
-## Output expectations
+## Output Format
 
 When editing, prioritize:
 - faster perceived load
@@ -69,3 +98,9 @@ When editing, prioritize:
 - Do not add fake SEO content.
 - Do not sacrifice usability for micro-optimizations.
 - Do not break visual hierarchy while chasing scores.
+
+## Success Criteria
+- page has correct heading hierarchy and meaningful metadata
+- key interactive elements are keyboard-accessible and labeled
+- mobile layout renders without overflow or misaligned elements
+- no performance regressions introduced by decorative additions

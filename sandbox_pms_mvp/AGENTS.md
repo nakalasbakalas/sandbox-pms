@@ -48,6 +48,8 @@ This file applies to the Flask PMS application under `sandbox_pms_mvp/`, includi
 
 After non-trivial app changes:
 
-- run the most relevant `python -m pytest` target you can support
+- `pre-commit run --all-files` — runs placeholder check, public-surface check, and codex guardrail tests
+- `python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q` — full suite, or run a targeted module for speed
+- `python scripts/launch_gate.py` when changing guest-facing routes, templates, or metadata
 - check the affected route/template pairing for missing context or broken conditionals
 - call out any manual browser verification you could not perform

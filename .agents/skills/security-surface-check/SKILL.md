@@ -5,6 +5,36 @@ description: Use when the task involves security review, auth boundaries, form h
 
 # Security Surface Check
 
+## Owns
+- auth boundary mapping and role enforcement review
+- input validation and output escaping audit
+- CSRF and session safety review
+- secret and config exposure review
+- security finding prioritization and reporting
+
+## Does Not Own
+- feature implementation
+- general UX or visual improvements
+- schema migrations
+- deployment infrastructure changes
+
+## Trigger When
+- any code touches auth, role checks, or session behavior
+- new forms or input paths are added
+- admin or booking routes are modified
+- a post-feature security review is requested
+
+## Read First
+- `sandbox_pms_mvp/pms/app.py` for route and middleware structure
+- auth and security helpers in `sandbox_pms_mvp/pms/`
+- the specific routes or forms flagged for review
+- existing tests covering auth or access control
+
+## Avoid Reading Unless Needed
+- static front-end assets unrelated to data handling
+- migration files (unless schema exposure is in scope)
+- unrelated service modules
+
 ## Goal
 
 Perform a practical security-focused review that reduces obvious application risk without derailing product velocity.
@@ -54,18 +84,22 @@ Perform a practical security-focused review that reduces obvious application ris
 - Are environment variables exposed accidentally?
 - Are test credentials or debug toggles left behind?
 
-## Output expectations
-
-Report:
-- critical issues
-- medium-risk issues
-- low-risk hygiene issues
-- recommended fixes
-- fixes applied
-- remaining follow-up items
+## Output Format
+- Critical issues
+- Medium-risk issues
+- Low-risk hygiene issues
+- Recommended fixes
+- Fixes applied
+- Remaining follow-up items
 
 ## Guardrails
 
 - Prioritize exploitable or user-impacting issues first.
 - Do not create security theater.
 - Preserve working product behavior while hardening it.
+
+## Success Criteria
+- all externally reachable routes have verified role and auth guards
+- no secrets or debug credentials remain in templates or client-facing code
+- input paths have documented validation coverage
+- critical and medium issues are resolved or explicitly deferred with rationale

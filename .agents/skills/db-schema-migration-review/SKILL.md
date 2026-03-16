@@ -5,6 +5,35 @@ description: Use when the task touches schema design, migrations, column changes
 
 # DB Schema Migration Review
 
+## Owns
+- schema safety review
+- migration ordering and correctness
+- constraint and index evaluation
+- backfill logic validation
+- rollback impact assessment
+
+## Does Not Own
+- service or route business logic
+- UI or template changes
+- deployment secrets or hosting config
+
+## Trigger When
+- a migration file is created or modified
+- schema columns, types, or constraints are changing
+- a data backfill is planned
+- query performance or integrity issues suggest schema problems
+
+## Read First
+- `sandbox_pms_mvp/pms/models.py`
+- `sandbox_pms_mvp/migrations/versions/` (recent files first)
+- service modules querying or writing the affected tables
+- related tests
+
+## Avoid Reading Unless Needed
+- unrelated templates or static assets
+- deployment runbooks unless migration triggers a deploy step
+- unrelated service modules
+
 ## Goal
 
 Review and harden schema and migration work so it remains safe, performant, and operationally sound.
@@ -51,15 +80,13 @@ Review and harden schema and migration work so it remains safe, performant, and 
 - Could the change hurt hot paths?
 - Are uniqueness checks too expensive or missing?
 
-## Output expectations
-
-Report:
-- risk level
-- migration shape
-- required safeguards
-- rollout notes
-- rollback notes
-- exact recommendations before merge
+## Output Format
+- Risk level
+- Migration shape (additive / destructive / transitional)
+- Required safeguards
+- Rollout notes
+- Rollback notes
+- Exact recommendations before merge
 
 ## Guardrails
 
@@ -67,3 +94,9 @@ Report:
 - Do not approve destructive changes casually.
 - Do not ignore downstream query impact.
 - Flag uncertainty clearly.
+
+## Success Criteria
+- migration is confirmed safe before merge
+- downstream query impact is documented
+- rollback path is stated or flagged as unavailable
+- indexes and constraints are verified alongside the change

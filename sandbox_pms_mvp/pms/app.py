@@ -2318,10 +2318,27 @@ def register_routes(app: Flask) -> None:
             mobile=request.args.get("view") == "mobile",
         )
         board = list_housekeeping_board(filters, actor_user=user)
+        tomorrow_date = target_date + timedelta(days=1)
+        tomorrow_filters = HousekeepingBoardFilters(
+            business_date=tomorrow_date,
+            floor=filters.floor,
+            status=filters.status,
+            priority=filters.priority,
+            room_type_id=filters.room_type_id,
+            arrival_today=filters.arrival_today,
+            departure_today=filters.departure_today,
+            blocked=filters.blocked,
+            maintenance=filters.maintenance,
+            notes=filters.notes,
+            mobile=filters.mobile,
+        )
+        tomorrow_board = list_housekeeping_board(tomorrow_filters, actor_user=user)
         tasks = list_housekeeping_tasks(TaskListFilters(business_date=target_date))
         return render_template(
             "housekeeping_board.html",
             board=board,
+            tomorrow_board=tomorrow_board,
+            today_date=date.today(),
             tasks=tasks,
             filters=filters,
             room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
