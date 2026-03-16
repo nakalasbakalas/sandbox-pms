@@ -854,10 +854,11 @@ tbody tr:last-child td { border-bottom: 0; }
   display: flex;
   align-items: center;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 .planning-board-filters-inline select,
 .planning-board-filters-inline input[type="date"] {
+  width: auto;
   min-height: 28px;
   padding: 3px 6px;
   font-size: 0.74rem;
@@ -893,6 +894,7 @@ tbody tr:last-child td { border-bottom: 0; }
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--text);
+  max-width: 220px;
 }
 .planning-board-search-inline input::placeholder { color: var(--muted); }
 .planning-board-density-toggle {
@@ -1491,7 +1493,8 @@ tbody tr:last-child td { border-bottom: 0; }
 @media (max-width: 600px) {
   .board-side-panel { width: 100%; }
   .planning-board-row1 { gap: 6px; }
-  .planning-board-row2 { gap: 4px; }
+  .planning-board-row2 { gap: 4px; flex-wrap: wrap; }
+  .planning-board-filters-inline { flex-wrap: wrap; }
 }
 .planning-board-mobile {
   display: none;
