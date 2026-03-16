@@ -854,7 +854,7 @@
         // Apply CSS class to grid
         const grid = document.querySelector(".planning-board-grid");
         if (grid) {
-          grid.classList.remove("density-compact", "density-comfortable", "density-spacious");
+          grid.classList.remove("density-compact", "density-comfortable", "density-spacious", "density-ultra");
           grid.classList.add(`density-${density}`);
         }
 
@@ -1297,4 +1297,91 @@
   }
 
   setBusyState(false);
+
+  // ── Context menu (right-click on blocks) ──
+  const ctxMenu = document.getElementById("board-context-menu");
+  if (ctxMenu) {
+    function showContextMenu(blockEl, x, y) {
+      if (!blockEl) return;
+      const detailUrl = blockEl.querySelector("a[href*='/staff/reservations/']");
+      const frontDeskUrl = blockEl.querySelector("a[href*='/staff/front-desk/reservation/']");
+      const allocationState = blockEl.dataset.allocationState || "";
+      const sourceType = blockEl.dataset.sourceType || "";
+      const isClosure = sourceType === "closure" || sourceType === "blocked";
+
+      ctxMenu.querySelectorAll("button").forEach(btn => {
+        const action = btn.dataset.ctx;
+        if (action === "open") btn.disabled = !detailUrl;
+        if (action === "front-desk") btn.disabled = !frontDeskUrl;
+        if (action === "check-in" || action === "check-out" || action === "no-show") btn.disabled = isClosure || !canEdit;
+        if (action === "move" || action === "resize" || action === "assign") btn.disabled = !canEdit;
+      });
+
+      ctxMenu.style.left = Math.min(x, window.innerWidth - 200) + "px";
+      ctxMenu.style.top = Math.min(y, window.innerHeight - 300) + "px";
+      ctxMenu.classList.remove("hidden");
+      ctxMenu.hidden = false;
+      ctxMenu._block = blockEl;
+    }
+
+    function hideContextMenu() {
+      ctxMenu.classList.add("hidden");
+      ctxMenu.hidden = true;
+      ctxMenu._block = null;
+    }
+
+    surface.addEventListener("contextmenu", function(e) {
+      const blockEl = e.target.closest("[data-board-block]");
+      if (!blockEl) return;
+      e.preventDefault();
+      selectBlock(blockEl);
+      showContextMenu(blockEl, e.clientX, e.clientY);
+    });
+
+    document.addEventListener("click", function(e) {
+      if (!ctxMenu.contains(e.target)) hideContextMenu();
+    });
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") hideContextMenu();
+    });
+
+    ctxMenu.addEventListener("click", function(e) {
+      const btn = e.target.closest("button[data-ctx]");
+      if (!btn || btn.disabled) return;
+      const blockEl = ctxMenu._block;
+      if (!blockEl) return;
+      const action = btn.dataset.ctx;
+      hideContextMenu();
+
+      if (action === "open") {
+        const link = blockEl.querySelector("a[href*='/staff/reservations/']");
+        if (link) window.location.href = link.href;
+      } else if (action === "front-desk") {
+        const link = blockEl.querySelector("a[href*='/staff/front-desk/reservation/']");
+        if (link) window.location.href = link.href;
+      } else if (action === "check-in") {
+        selectBlock(blockEl);
+        performCheckIn();
+      } else if (action === "check-out") {
+        selectBlock(blockEl);
+        performCheckOut();
+      } else if (action === "no-show") {
+        setFeedback("No-show marking: use the reservation detail page.", "neutral");
+      } else if (action === "move") {
+        selectBlock(blockEl);
+        enterMoveMode();
+      } else if (action === "resize") {
+        selectBlock(blockEl);
+        enterResizeMode();
+      } else if (action === "assign") {
+        selectBlock(blockEl);
+        assignUnallocatedReservation();
+      } else if (action === "export-ics") {
+        const icsLink = blockEl.querySelector("a[href*='export-ical']");
+        if (icsLink) window.location.href = icsLink.href;
+      }
+    });
+  }
+
 })();

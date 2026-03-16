@@ -249,7 +249,7 @@ def test_front_desk_board_route_requires_reservation_view_permission(app_factory
     login_as(client, front_desk_user)
     authorized = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
     assert authorized.status_code == 200
-    assert "Front desk planning board" in authorized.get_data(as_text=True)
+    assert "Planning Board" in authorized.get_data(as_text=True)
     assert "planning-board-cell" not in authorized.get_data(as_text=True)
     assert "--track-bg:" in authorized.get_data(as_text=True)
 
@@ -304,16 +304,17 @@ def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert 'class="toolbar planning-board-filters"' in html
-    assert 'class="planning-board-action-row planning-board-nav-actions"' in html
-    assert 'class="planning-board-command-row planning-board-command-primary"' in html
+    assert 'class="planning-board-filters-inline"' in html
+    assert 'class="planning-board-nav-actions"' in html
+    assert 'class="planning-board-row1"' in html
     assert 'class="planning-board-status-strip"' in html
     assert 'class="planning-board-room-badge' in html
     assert 'aria-pressed="true"' in html
     assert "+ Reservation" in html
-    assert ">Compact</button>" in html
-    assert ">Comfortable</button>" in html
-    assert ">Spacious</button>" in html
+    assert 'data-density="compact"' in html
+    assert 'data-density="comfortable"' in html
+    assert 'data-density="spacious"' in html
+    assert 'data-density="ultra"' in html
 
 
 def test_front_desk_board_data_route_logs_metric_payload(app_factory, monkeypatch):
