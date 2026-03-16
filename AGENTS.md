@@ -66,11 +66,11 @@ Before running commands, detect the actual toolchain from the repo:
 
 After non-trivial changes, run the relevant available checks:
 
-- tests through `python -m pytest`
+- `pre-commit run --all-files` — runs placeholder check, public-surface check, and codex guardrail tests
+- `python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q` — full test suite
 - `python scripts/launch_gate.py` for guest-facing launch, contact, metadata, or operational-readiness work
 - `python scripts/launch_gate.py --strict-launch` before release sign-off when launch readiness is the actual question
 - targeted test modules for the touched flow when that is faster or safer
-- additional lint, typecheck, or build commands only if they actually exist in the repo
 
 If a check does not exist, say so explicitly.
 If a command fails, report the failing area clearly instead of hiding it.
