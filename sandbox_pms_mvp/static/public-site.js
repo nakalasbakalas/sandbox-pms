@@ -371,74 +371,11 @@
       return;
     }
 
-    const menuToggle = event.target.closest(".nav-menu-toggle");
-    if (menuToggle) {
-      const drawer = document.getElementById("nav-drawer");
-      if (drawer) {
-        drawer.toggleAttribute("data-open");
-        menuToggle.setAttribute("aria-expanded", drawer.hasAttribute("data-open"));
-      }
-      return;
-    }
-
-    const drawerClose = event.target.closest(".nav-drawer-close");
-    if (drawerClose) {
-      const drawer = document.getElementById("nav-drawer");
-      if (drawer) {
-        drawer.removeAttribute("data-open");
-        const menuToggle = document.querySelector(".nav-menu-toggle");
-        if (menuToggle) {
-          menuToggle.setAttribute("aria-expanded", "false");
-        }
-      }
-      return;
-    }
-
-    const drawerLink = event.target.closest(".nav-drawer-link");
-    if (drawerLink && !drawerLink.classList.contains("nav-drawer-link-button")) {
-      const drawer = document.getElementById("nav-drawer");
-      if (drawer) {
-        drawer.removeAttribute("data-open");
-        const menuToggle = document.querySelector(".nav-menu-toggle");
-        if (menuToggle) {
-          menuToggle.setAttribute("aria-expanded", "false");
-        }
-      }
-    }
-
     trackContactClick(event.target);
     trackClickEvent(event.target);
   });
 
   document.addEventListener("submit", trackFormSubmit, true);
-
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" || event.key === "Esc") {
-      const drawer = document.getElementById("nav-drawer");
-      if (drawer && drawer.hasAttribute("data-open")) {
-        drawer.removeAttribute("data-open");
-        const menuToggle = document.querySelector(".nav-menu-toggle");
-        if (menuToggle) {
-          menuToggle.setAttribute("aria-expanded", "false");
-          menuToggle.focus();
-        }
-      }
-    }
-  });
-
-  document.addEventListener("click", function (event) {
-    const drawer = document.getElementById("nav-drawer");
-    if (drawer && drawer.hasAttribute("data-open")) {
-      const isInDrawer = event.target.closest(".nav-drawer-content, .nav-drawer-header");
-      if (!isInDrawer && !event.target.closest(".nav-menu-toggle")) {
-        drawer.removeAttribute("data-open");
-        const menuToggle = document.querySelector(".nav-menu-toggle");
-        if (menuToggle) {
-          menuToggle.setAttribute("aria-expanded", "false");
-        }
-      }
-    }
-  });
 
   syncConsentUi();
   setConsentStatusMessage("");

@@ -52,10 +52,35 @@
   data-analytics-consent="pending"
 >
   <a href="#main-content" class="skip-link">{{ t('skip_to_main') }}</a>
+  {% set header_brand_href = url_for('index', lang=current_language) %}
+  {% if not is_public_site and staff_logged_in and default_dashboard_url %}
+    {% set header_brand_href = default_dashboard_url %}
+  {% endif %}
+  {% set header_has_contacts = hotel_contact_phone or hotel_contact_email or hotel_contact_line_href or hotel_contact_whatsapp_href %}
+  {% set header_search_action = '' %}
+  {% set header_search_placeholder = '' %}
+  {% set header_search_value = (request.args.get('q') or '').strip() %}
+  {% set header_mobile_action_href = '' %}
+  {% set header_mobile_action_label = '' %}
+  {% set header_current_language_label = language_labels.get(current_language, current_language|upper) %}
+  {% if is_public_site %}
+    {% set header_mobile_action_href = url_for('booking_entry', lang=current_language) %}
+    {% set header_mobile_action_label = t('search_title') %}
+  {% elif can('reservation.view') %}
+    {% set header_search_action = url_for('staff_reservations') %}
+    {% set header_search_placeholder = 'Search reservations' %}
+    {% set header_mobile_action_href = url_for('staff_reservations') %}
+    {% set header_mobile_action_label = 'Search' %}
+  {% elif can('provider.dashboard.view') %}
+    {% set header_search_action = url_for('provider_bookings') %}
+    {% set header_search_placeholder = 'Search bookings' %}
+    {% set header_mobile_action_href = url_for('provider_bookings') %}
+    {% set header_mobile_action_label = 'Search' %}
+  {% endif %}
   <header class="site-header{% if is_public_site %} public-header{% endif %}">
-    <div class="container topbar{% if is_public_site %} public-topbar{% endif %}">
-      <div class="brand-shell{% if is_public_site %} public-brand-shell{% endif %}">
-        <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ url_for('index', lang=current_language) }}">
+    <div class="container app-header{% if is_public_site %} public-app-header{% endif %}">
+      <div class="header-brand-group">
+        <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ header_brand_href }}">
           {% if hotel_logo_url %}
             <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
           {% else %}
@@ -63,54 +88,178 @@
           {% endif %}
           <span class="brand-copy">
             <strong>{{ hotel_name }}</strong>
-            {% if is_public_site and hotel_address %}<small class="brand-location">{{ hotel_address }}</small>{% endif %}
+            <small>{% if is_public_site and hotel_address %}{{ hotel_address }}{% else %}Hotel operations platform{% endif %}</small>
           </span>
         </a>
-        <small class="brand-contact">
-          {% if hotel_contact_phone %}
-            {% if hotel_contact_phone_href %}<a class="contact-link subtle" href="{{ hotel_contact_phone_href }}" data-analytics-label="header_phone" data-analytics-context="header_contact">{{ hotel_contact_phone }}</a>{% else %}{{ hotel_contact_phone }}{% endif %}
-          {% endif %}
-          {% if hotel_contact_phone and hotel_contact_email %}<span class="contact-separator">/</span>{% endif %}
-          {% if hotel_contact_email %}
-            {% if hotel_contact_email_href %}<a class="contact-link subtle" href="{{ hotel_contact_email_href }}" data-analytics-label="header_email" data-analytics-context="header_contact">{{ hotel_contact_email }}</a>{% else %}{{ hotel_contact_email }}{% endif %}
-          {% endif %}
-          {% if (hotel_contact_phone or hotel_contact_email) and hotel_contact_line_href %}<span class="contact-separator">/</span>{% endif %}
-          {% if hotel_contact_line_href %}
-            <a class="contact-link subtle" href="{{ hotel_contact_line_href }}" data-analytics-label="header_line" data-analytics-context="header_contact" rel="noopener noreferrer">LINE</a>
-          {% endif %}
-          {% if (hotel_contact_phone or hotel_contact_email or hotel_contact_line_href) and hotel_contact_whatsapp_href %}<span class="contact-separator">/</span>{% endif %}
-          {% if hotel_contact_whatsapp_href %}
-            <a class="contact-link subtle" href="{{ hotel_contact_whatsapp_href }}" data-analytics-label="header_whatsapp" data-analytics-context="header_contact" rel="noopener noreferrer">WhatsApp</a>
-          {% endif %}
-        </small>
+        <span class="header-brand-divider" aria-hidden="true"></span>
       </div>
-      <nav class="topnav{% if is_public_site %} public-topnav{% endif %}">
-        <a class="{% if is_public_site %}nav-chip nav-chip-primary{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
-        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
-        <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
+      <nav class="header-main-nav" aria-label="{% if is_public_site %}Primary{% else %}Application{% endif %} navigation">
+        {% if is_public_site %}
+          <a class="header-primary-link{% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %} active{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav" {% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %}aria-current="page"{% endif %}>{{ t('search_title') }}</a>
+          <a class="header-primary-link{% if request.endpoint == 'booking_cancel_request' %} active{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav" {% if request.endpoint == 'booking_cancel_request' %}aria-current="page"{% endif %}>{{ t('nav_cancel') }}</a>
+          <a class="header-primary-link{% if request.endpoint == 'booking_modify_request' %} active{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav" {% if request.endpoint == 'booking_modify_request' %}aria-current="page"{% endif %}>{{ t('nav_modify') }}</a>
+        {% else %}
+          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint == 'staff_dashboard' %} active{% endif %}" href="{{ url_for('staff_dashboard') }}" {% if request.endpoint == 'staff_dashboard' %}aria-current="page"{% endif %}>Staff</a>{% endif %}
+          {% if can('provider.dashboard.view') %}<a class="header-primary-link{% if request.endpoint in ['provider_dashboard', 'provider_bookings', 'provider_booking_detail'] %} active{% endif %}" href="{{ url_for('provider_dashboard') }}" {% if request.endpoint in ['provider_dashboard', 'provider_bookings', 'provider_booking_detail'] %}aria-current="page"{% endif %}>Provider</a>{% endif %}
+          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('staff_front_desk') }}" {% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %}aria-current="page"{% endif %}>Front Desk</a>{% endif %}
+          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_reservation') %} active{% endif %}" href="{{ url_for('staff_reservations') }}" {% if request.endpoint and request.endpoint.startswith('staff_reservation') %}aria-current="page"{% endif %}>Reservations</a>{% endif %}
+          {% if can('housekeeping.view') %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_housekeeping') %} active{% endif %}" href="{{ url_for('staff_housekeeping') }}" {% if request.endpoint and request.endpoint.startswith('staff_housekeeping') %}aria-current="page"{% endif %}>Housekeeping</a>{% endif %}
+          {% if can('provider.calendar.view') %}<a class="header-primary-link{% if request.endpoint in ['provider_calendar'] %} active{% endif %}" href="{{ url_for('provider_calendar') }}" {% if request.endpoint in ['provider_calendar'] %}aria-current="page"{% endif %}>Calendars</a>{% endif %}
+          {% if admin_sections %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}" {% if request.endpoint and request.endpoint.startswith('staff_admin') %}aria-current="page"{% endif %}>Admin</a>{% endif %}
+          {% if can('reports.view') %}<a class="header-primary-link{% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %} active{% endif %}" href="{{ url_for('staff_reports') }}" {% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %}aria-current="page"{% endif %}>Reports</a>{% endif %}
+        {% endif %}
+      </nav>
+      <div class="header-utilities">
+        {% if header_search_action %}
+          <form class="header-search" method="get" action="{{ header_search_action }}">
+            <label class="sr-only" for="app-header-search">Search</label>
+            <input id="app-header-search" type="search" name="q" value="{{ header_search_value }}" placeholder="{{ header_search_placeholder }}">
+            <button type="submit">Go</button>
+          </form>
+        {% endif %}
+        {% if not is_public_site and can('reservation.view') %}
+          <a class="header-utility-link{% if request.endpoint == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}" {% if request.endpoint == 'staff_review_queue' %}aria-current="page"{% endif %}>{{ t('review_queue') }}</a>
+        {% endif %}
+        {% if header_has_contacts %}
+          <details class="header-menu header-contact-menu">
+            <summary class="header-menu-trigger">Contact</summary>
+            <div class="header-menu-panel">
+              {% if hotel_contact_phone %}
+                {% if hotel_contact_phone_href %}<a class="header-menu-link" href="{{ hotel_contact_phone_href }}" data-analytics-label="header_phone" data-analytics-context="header_contact">{{ hotel_contact_phone }}</a>{% else %}<span class="header-menu-text">{{ hotel_contact_phone }}</span>{% endif %}
+              {% endif %}
+              {% if hotel_contact_email %}
+                {% if hotel_contact_email_href %}<a class="header-menu-link" href="{{ hotel_contact_email_href }}" data-analytics-label="header_email" data-analytics-context="header_contact">{{ hotel_contact_email }}</a>{% else %}<span class="header-menu-text">{{ hotel_contact_email }}</span>{% endif %}
+              {% endif %}
+              {% if hotel_contact_line_href %}
+                <a class="header-menu-link" href="{{ hotel_contact_line_href }}" data-analytics-label="header_line" data-analytics-context="header_contact" rel="noopener noreferrer">LINE</a>
+              {% endif %}
+              {% if hotel_contact_whatsapp_href %}
+                <a class="header-menu-link" href="{{ hotel_contact_whatsapp_href }}" data-analytics-label="header_whatsapp" data-analytics-context="header_contact" rel="noopener noreferrer">WhatsApp</a>
+              {% endif %}
+            </div>
+          </details>
+        {% endif %}
+        <details class="header-menu header-language-menu">
+          <summary class="header-menu-trigger">{{ header_current_language_label }}</summary>
+          <div class="header-menu-panel">
+            {% for code, label in language_labels.items() %}
+              <a class="header-menu-link{% if code == current_language %} active{% endif %}" href="{{ make_lang_url(code) }}" {% if code == current_language %}aria-current="true"{% endif %}>{{ label }}</a>
+            {% endfor %}
+          </div>
+        </details>
         {% if staff_logged_in %}
-          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
-          {% if can('provider.dashboard.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
-          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
-          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
-          {% if can('housekeeping.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
-          {% if can('provider.calendar.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
-          {% if admin_sections %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
-          {% if can('reports.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
-          <a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_security') }}">Security</a>
-          {% if can('reservation.view') %}<a class="{% if is_public_site %}nav-chip{% endif %}" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
-          <span class="pill subtle{% if is_public_site %} nav-chip nav-chip-static{% endif %}">{{ current_staff_user.full_name }}</span>
+          <details class="header-menu header-account-menu">
+            <summary class="header-menu-trigger header-account-trigger">{{ current_staff_user.full_name }}</summary>
+            <div class="header-menu-panel">
+              <span class="header-menu-text header-menu-heading">Signed in</span>
+              <span class="header-menu-text">{{ current_staff_user.full_name }}</span>
+              {% if is_public_site %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
+                {% if can('provider.dashboard.view') %}<a class="header-menu-link" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
+                {% if can('housekeeping.view') %}<a class="header-menu-link" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+                {% if can('provider.calendar.view') %}<a class="header-menu-link" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+                {% if admin_sections %}<a class="header-menu-link" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
+                {% if can('reports.view') %}<a class="header-menu-link" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+              {% endif %}
+              <a class="header-menu-link" href="{{ url_for('staff_security') }}">Security</a>
+              {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+            </div>
+          </details>
           <form method="post" action="{{ url_for('staff_logout') }}" class="inline-form">
             {{ csrf_input() }}
-            <button type="submit" class="pill subtle button-link{% if is_public_site %} nav-chip nav-chip-button{% endif %}">Sign out</button>
+            <button type="submit" class="header-signout">Sign out</button>
           </form>
         {% else %}
-          <a class="pill subtle{% if is_public_site %} nav-chip{% endif %}" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
+          <a class="header-utility-link" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
         {% endif %}
-        {% for code, label in language_labels.items() %}
-          <a class="pill subtle{% if is_public_site %} nav-chip nav-chip-small{% endif %}" href="{{ make_lang_url(code) }}">{{ label }}</a>
-        {% endfor %}
-      </nav>
+        {% if header_mobile_action_href %}
+          <a class="header-mobile-action" href="{{ header_mobile_action_href }}"{% if is_public_site %} data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav"{% endif %}>{{ header_mobile_action_label }}</a>
+        {% endif %}
+        <button type="button" class="nav-menu-toggle" aria-expanded="false" aria-controls="nav-drawer" aria-label="Open navigation menu">
+          <span class="nav-menu-icon" aria-hidden="true">
+            <span class="nav-menu-line"></span>
+            <span class="nav-menu-line"></span>
+            <span class="nav-menu-line"></span>
+          </span>
+        </button>
+      </div>
+    </div>
+    <div id="nav-drawer" class="nav-drawer" aria-hidden="true">
+      <div class="nav-drawer-content" role="dialog" aria-modal="true" aria-label="Navigation menu">
+        <div class="nav-drawer-header">
+          <div>
+            <p class="nav-section-label">Navigation</p>
+            <h2 class="nav-drawer-title">{{ hotel_name }}</h2>
+          </div>
+          <button type="button" class="nav-drawer-close" aria-label="Close navigation menu">✕</button>
+        </div>
+        <div class="nav-drawer-section">
+          {% if header_search_action %}
+            <form class="nav-drawer-search" method="get" action="{{ header_search_action }}">
+              <label class="sr-only" for="nav-drawer-search">Search</label>
+              <input id="nav-drawer-search" type="search" name="q" value="{{ header_search_value }}" placeholder="{{ header_search_placeholder }}">
+              <button type="submit">Go</button>
+            </form>
+          {% endif %}
+          <div class="nav-drawer-links">
+            {% if is_public_site %}
+              <a class="nav-drawer-link{% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %} active{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
+              <a class="nav-drawer-link{% if request.endpoint == 'booking_cancel_request' %} active{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
+              <a class="nav-drawer-link{% if request.endpoint == 'booking_modify_request' %} active{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
+            {% else %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_dashboard' %} active{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
+              {% if can('provider.dashboard.view') %}<a class="nav-drawer-link{% if request.endpoint in ['provider_dashboard', 'provider_bookings', 'provider_booking_detail'] %} active{% endif %}" href="{{ url_for('provider_dashboard') }}">Provider</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_reservation') %} active{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
+              {% if can('housekeeping.view') %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_housekeeping') %} active{% endif %}" href="{{ url_for('staff_housekeeping') }}">Housekeeping</a>{% endif %}
+              {% if can('provider.calendar.view') %}<a class="nav-drawer-link{% if request.endpoint in ['provider_calendar'] %} active{% endif %}" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+              {% if admin_sections %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
+              {% if can('reports.view') %}<a class="nav-drawer-link{% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %} active{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+              <a class="nav-drawer-link{% if request.endpoint == 'staff_security' %} active{% endif %}" href="{{ url_for('staff_security') }}">Security</a>
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+        {% if header_has_contacts %}
+          <div class="nav-drawer-section">
+            <p class="nav-section-label">Contact</p>
+            <div class="nav-drawer-links">
+              {% if hotel_contact_phone %}
+                {% if hotel_contact_phone_href %}<a class="nav-drawer-link" href="{{ hotel_contact_phone_href }}" data-analytics-label="header_phone" data-analytics-context="header_contact">{{ hotel_contact_phone }}</a>{% else %}<span class="nav-drawer-text">{{ hotel_contact_phone }}</span>{% endif %}
+              {% endif %}
+              {% if hotel_contact_email %}
+                {% if hotel_contact_email_href %}<a class="nav-drawer-link" href="{{ hotel_contact_email_href }}" data-analytics-label="header_email" data-analytics-context="header_contact">{{ hotel_contact_email }}</a>{% else %}<span class="nav-drawer-text">{{ hotel_contact_email }}</span>{% endif %}
+              {% endif %}
+              {% if hotel_contact_line_href %}<a class="nav-drawer-link" href="{{ hotel_contact_line_href }}" data-analytics-label="header_line" data-analytics-context="header_contact" rel="noopener noreferrer">LINE</a>{% endif %}
+              {% if hotel_contact_whatsapp_href %}<a class="nav-drawer-link" href="{{ hotel_contact_whatsapp_href }}" data-analytics-label="header_whatsapp" data-analytics-context="header_contact" rel="noopener noreferrer">WhatsApp</a>{% endif %}
+            </div>
+          </div>
+        {% endif %}
+        <div class="nav-drawer-section">
+          <p class="nav-section-label">Language</p>
+          <div class="nav-drawer-links">
+            {% for code, label in language_labels.items() %}
+              <a class="nav-drawer-link{% if code == current_language %} active{% endif %}" href="{{ make_lang_url(code) }}">{{ label }}</a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="nav-drawer-section">
+          <p class="nav-section-label">Account</p>
+          <div class="nav-drawer-links">
+            {% if staff_logged_in %}
+              <span class="nav-drawer-user">{{ current_staff_user.full_name }}</span>
+              <form method="post" action="{{ url_for('staff_logout') }}" class="nav-drawer-logout">
+                {{ csrf_input() }}
+                <button type="submit" class="nav-drawer-link nav-drawer-link-button">Sign out</button>
+              </form>
+            {% else %}
+              <a class="nav-drawer-link" href="{{ url_for('staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -126,6 +275,7 @@
     {% endwith %}
     {% block content %}{% endblock %}
   </main>
+  <script src="{{ url_for('static', filename='header-nav.js') }}" defer></script>
   {% if is_public_site %}
   <section class="consent-banner card" data-consent-banner hidden aria-label="{{ t('consent_title') }}">
     <div class="consent-copy">
