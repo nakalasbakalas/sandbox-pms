@@ -306,7 +306,11 @@ def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
     html = response.get_data(as_text=True)
     assert 'class="toolbar planning-board-filters"' in html
     assert 'class="planning-board-action-row planning-board-nav-actions"' in html
+    assert 'class="planning-board-command-row planning-board-command-primary"' in html
+    assert 'class="planning-board-status-strip"' in html
+    assert 'class="planning-board-room-badge' in html
     assert 'aria-pressed="true"' in html
+    assert "+ Reservation" in html
     assert ">Compact</button>" in html
     assert ">Comfortable</button>" in html
     assert ">Spacious</button>" in html

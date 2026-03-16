@@ -1,17 +1,25 @@
-<section class="grid four metric-grid">
-  <article class="metric-card"><small>Window</small><strong>{{ board.current_window_label }}</strong></article>
-  <article class="metric-card"><small>Unallocated stays / holds</small><strong>{{ board.counts.unallocated }}</strong></article>
-  <article class="metric-card"><small>Operational blocks</small><strong>{{ board.counts.closed_or_blocked }}</strong></article>
-  <article class="metric-card"><small>Arrivals / departures today</small><strong>{{ board.counts.arrivals_today }} / {{ board.counts.departures_today }}</strong></article>
+<section class="planning-board-status-strip" aria-label="Planning board live status">
+  <article class="planning-board-status-item"><small>Window</small><strong>{{ board.current_window_label }}</strong></article>
+  <article class="planning-board-status-item"><small>Unallocated stays / holds</small><strong>{{ board.counts.unallocated }}</strong></article>
+  <article class="planning-board-status-item"><small>Operational blocks</small><strong>{{ board.counts.closed_or_blocked }}</strong></article>
+  <article class="planning-board-status-item"><small>Arrivals / departures today</small><strong>{{ board.counts.arrivals_today }} / {{ board.counts.departures_today }}</strong></article>
+  <article class="planning-board-status-item"><small>Occupied / ready rooms</small><strong>{{ board.counts.occupied }} / {{ board.counts.ready_rooms }}</strong></article>
 </section>
 
 {% if board.groups %}
 <section class="planning-board-desktop">
   <div class="planning-board-grid density-{{ user_density or 'comfortable' }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }};">
-    <div class="planning-board-room heading">Rooms</div>
+    <div class="planning-board-room heading">
+      <strong>Rooms</strong>
+      <span>Live status</span>
+    </div>
     <div class="planning-board-days">
       {% for day in board.headers %}
-      <div class="planning-board-day {% if day.is_weekend %}weekend{% endif %} {% if day.is_today %}today{% endif %}" {% if day.is_today %}aria-current="date"{% endif %}>
+      {% set day_classes = ['planning-board-day'] %}
+      {% if day.is_weekend %}{% set _ = day_classes.append('weekend') %}{% endif %}
+      {% if day.is_today %}{% set _ = day_classes.append('today') %}{% endif %}
+      {% if day.is_month_boundary %}{% set _ = day_classes.append('month-boundary') %}{% endif %}
+      <div class="{{ day_classes|join(' ') }}" {% if day.is_today %}aria-current="date"{% endif %}>
         <span>{{ day.day_label }}</span>
         <strong>{{ day.day_number }}</strong>
         <small>{{ day.month_label }}</small>
@@ -25,6 +33,13 @@
       <div class="planning-board-room {% if row.is_unallocated %}unallocated{% endif %}" id="{{ row.anchor_id }}">
         <strong>{{ row.label }}</strong>
         <span>{{ row.secondary_label }}</span>
+        {% if row.status_badges %}
+        <div class="planning-board-room-badges" aria-label="{{ row.label }} operational state">
+          {% for badge in row.status_badges %}
+          <span class="planning-board-room-badge tone-{{ badge.tone }}">{{ badge.label }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
       <div
         class="planning-board-track"

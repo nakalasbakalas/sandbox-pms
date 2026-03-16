@@ -23,6 +23,7 @@ ACTIVE_BOARD_HOLD_STATUSES = {"active"}
 CLOSED_INVENTORY_STATUSES = {"out_of_service", "out_of_order"}
 BOARD_OPERATIONAL_BLOCK_TYPES = {"closure", "blocked", "maintenance"}
 BOARD_VISIBLE_DAY_OPTIONS = (7, 14, 30)
+MAX_ROOM_STATUS_BADGES = 4
 
 
 @dataclass
@@ -177,6 +178,14 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             "isBlocked": bool(_inv.is_blocked) if _inv else False,
             "is_maintenance": bool(_inv.maintenance_flag) if _inv else False,
             "isMaintenance": bool(_inv.maintenance_flag) if _inv else False,
+            "has_arrival_today": False,
+            "hasArrivalToday": False,
+            "has_departure_today": False,
+            "hasDepartureToday": False,
+            "is_occupied": False,
+            "isOccupied": False,
+            "status_badges": [],
+            "statusBadges": [],
             "blocks": [],
             "visible_blocks": [],
             "lane_count": 1,
@@ -209,6 +218,19 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         target_group = _ensure_group(group_map, room_type_meta=room_type_meta, room_type_id=reservation.room_type_id)
         target_row = room_map.get(reservation.assigned_room_id) if reservation.assigned_room_id else None
         allocation_state = "unallocated" if reservation.assigned_room_id is None or reservation.current_status == "waitlist" else "allocated"
+        if target_row is not None:
+            if reservation.check_in_date == today and reservation.current_status in {"tentative", "confirmed", "checked_in", "house_use"}:
+                target_row["has_arrival_today"] = True
+                target_row["hasArrivalToday"] = True
+            if reservation.check_out_date == today and reservation.current_status in {"checked_in", "checked_out", "house_use"}:
+                target_row["has_departure_today"] = True
+                target_row["hasDepartureToday"] = True
+            if (
+                reservation.current_status in {"checked_in", "house_use"}
+                and reservation.check_in_date <= today < reservation.check_out_date
+            ):
+                target_row["is_occupied"] = True
+                target_row["isOccupied"] = True
         block = _reservation_block(
             reservation=reservation,
             window_start=window_start,
@@ -330,6 +352,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                 continue
             row["visible_blocks"] = visible_blocks
             row["visibleBlocks"] = visible_blocks
+            row["status_badges"] = _room_status_badges(row=row, today=today)
+            row["statusBadges"] = row["status_badges"]
             row["lane_count"] = _assign_block_lanes(visible_blocks)
             row["track_height"] = max(74, 18 + (row["lane_count"] * 54))
             rows.append(row)
@@ -341,6 +365,7 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
     headers = _build_headers(window_start, filters.days, today=today)
     weekend_columns = [h["column"] for h in headers if h["is_weekend"]]
+    room_rows = list(room_map.values())
     return {
         "start_date": window_start,
         "startDate": window_start.isoformat(),
@@ -363,6 +388,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             "closed_or_blocked": len(operational_room_ids),
             "arrivals_today": _count_arrivals(today, filters.room_type_id),
             "departures_today": _count_departures(today, filters.room_type_id),
+            "occupied": sum(1 for row in room_rows if row["is_occupied"]),
+            "ready_rooms": sum(1 for row in room_rows if row["is_room_ready"] and not row["is_occupied"]),
         },
         "today_offset": today_offset,
         "todayOffset": today_offset,
@@ -475,6 +502,7 @@ def _build_headers(window_start: date, days: int, *, today: date) -> list[dict[s
                 "month_label": business_date.strftime("%b").upper(),
                 "is_weekend": business_date.weekday() >= 5,
                 "is_today": business_date == today,
+                "is_month_boundary": business_date.day == 1 or offset == 0,
                 "column": offset + 1,
             }
         )
@@ -524,6 +552,8 @@ def _ensure_unallocated_row(group: dict[str, Any]) -> dict[str, Any]:
         "secondary_label": group["room_type_code"] or group["room_type_name"],
         "is_unallocated": True,
         "isUnallocated": True,
+        "status_badges": [],
+        "statusBadges": [],
         "blocks": [],
         "visible_blocks": [],
         "lane_count": 1,
@@ -983,6 +1013,43 @@ def _rows_by_room_and_date(rows: list[InventoryDay]) -> dict[uuid.UUID, list[Inv
     for row in rows:
         grouped.setdefault(row.room_id, []).append(row)
     return grouped
+
+
+def _room_status_badges(*, row: dict[str, Any], today: date) -> list[dict[str, str]]:
+    if row.get("is_unallocated"):
+        return []
+    badges: list[dict[str, str]] = []
+    has_operational_badge = False
+    active_operational_block = None
+    for block in row.get("blocks", []):
+        if block.get("sourceType") not in BOARD_OPERATIONAL_BLOCK_TYPES:
+            continue
+        block_start = date.fromisoformat(block["startDate"])
+        block_end = date.fromisoformat(block["endDateExclusive"])
+        if block_start <= today < block_end:
+            active_operational_block = block
+            break
+    if row.get("is_maintenance") or (active_operational_block and active_operational_block.get("sourceType") == "maintenance"):
+        badges.append({"label": "Maintenance", "tone": "danger"})
+        has_operational_badge = True
+    elif row.get("is_blocked") or (active_operational_block and active_operational_block.get("sourceType") == "blocked"):
+        badges.append({"label": "Blocked", "tone": "warning"})
+        has_operational_badge = True
+    elif active_operational_block:
+        badges.append({"label": "Closed", "tone": "muted"})
+        has_operational_badge = True
+    if not has_operational_badge:
+        badges.append({"label": "Occupied" if row.get("is_occupied") else "Vacant", "tone": "solid" if row.get("is_occupied") else "neutral"})
+    if row.get("has_arrival_today"):
+        badges.append({"label": "Arr today", "tone": "accent"})
+    if row.get("has_departure_today"):
+        badges.append({"label": "Dep today", "tone": "accent-soft"})
+    hk_status = (row.get("housekeeping_status") or "").replace("_", " ").strip()
+    if row.get("is_room_ready") and not row.get("is_occupied"):
+        badges.append({"label": "Ready", "tone": "success"})
+    elif hk_status:
+        badges.append({"label": f"HK {hk_status}", "tone": "muted"})
+    return badges[:MAX_ROOM_STATUS_BADGES]
 
 
 def _assign_block_lanes(blocks: list[dict[str, Any]]) -> int:
