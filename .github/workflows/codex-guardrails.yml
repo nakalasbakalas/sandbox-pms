@@ -10,7 +10,7 @@ on:
 jobs:
   quality-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10  # reduced from 20
 
     steps:
       - name: Check out repository
@@ -20,23 +20,19 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"  # Cache pip dependencies automatically
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+        run: sudo apt-get install -y libpq-dev  # Skip apt-get update (runners are fresh & updated)
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r sandbox_pms_mvp/requirements-dev.txt
+        run: pip install -r sandbox_pms_mvp/requirements-dev.txt
 
       - name: Run placeholder check
         run: python scripts/check_placeholders.py
 
       - name: Run public surface check
         run: python scripts/check_public_surface.py
-
-      - name: Run codex guardrail tests
-        run: python -m pytest sandbox_pms_mvp/tests/test_codex_guardrails.py -q
 
       - name: Run full pytest suite
         run: python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q
