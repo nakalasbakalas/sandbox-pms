@@ -300,6 +300,60 @@ def test_housekeeping_permission_limits(app_factory):
     assert client.get("/staff/settings").status_code == 403
 
 
+@pytest.mark.parametrize(
+    ("username", "password", "allowed_paths", "forbidden_paths"),
+    [
+        (
+            "hui.admin",
+            "6astxSjtq9RF",
+            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+            (),
+        ),
+        (
+            "manager",
+            "jyVCLAzMXL6U",
+            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+            (),
+        ),
+        (
+            "housekeeping",
+            "X3Hp9bnTdKTn",
+            ("/staff/reservations", "/staff/housekeeping", "/staff/housekeeping/tasks"),
+            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+        ),
+        (
+            "frontdesk",
+            "3Y5vyMujqXwU",
+            ("/staff/reservations", "/staff/housekeeping"),
+            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+        ),
+    ],
+)
+def test_seeded_employee_accounts_support_username_login_and_rbac(
+    app_factory,
+    username: str,
+    password: str,
+    allowed_paths: tuple[str, ...],
+    forbidden_paths: tuple[str, ...],
+):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
+    client = app.test_client()
+
+    response = login(client, identifier=username, password=password)
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/staff")
+
+    with app.app_context():
+        user = User.query.filter_by(username=username).one()
+        assert user.email.endswith("@internal.sandbox.local")
+
+    for path in allowed_paths:
+        assert client.get(path).status_code == 200
+    for path in forbidden_paths:
+        assert client.get(path).status_code == 403
+
+
 def test_backend_blocks_unauthorized_mutation(app_factory):
     app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
     client = app.test_client()

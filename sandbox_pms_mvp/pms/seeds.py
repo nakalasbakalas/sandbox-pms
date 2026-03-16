@@ -263,8 +263,8 @@ _EMPLOYEE_ACCOUNTS = [
 def seed_employee_accounts() -> None:
     """Create built-in employee accounts (idempotent).
 
-    These are initial dev/staging credentials seeded for operational staff.
-    Change passwords after first login in production environments.
+    These are bootstrap staff credentials for core operational roles.
+    Rotate passwords after deployment to a live environment.
     """
     existing = {
         u.username
