@@ -23,6 +23,7 @@ ACTIVE_BOARD_HOLD_STATUSES = {"active"}
 CLOSED_INVENTORY_STATUSES = {"out_of_service", "out_of_order"}
 BOARD_OPERATIONAL_BLOCK_TYPES = {"closure", "blocked", "maintenance"}
 BOARD_VISIBLE_DAY_OPTIONS = (7, 14, 30)
+MAX_ROOM_STATUS_BADGES = 4
 
 
 @dataclass
@@ -1018,22 +1019,27 @@ def _room_status_badges(*, row: dict[str, Any], today: date) -> list[dict[str, s
     if row.get("is_unallocated"):
         return []
     badges: list[dict[str, str]] = []
-    active_operational_block = next(
-        (
-            block
-            for block in row.get("blocks", [])
-            if block.get("sourceType") in BOARD_OPERATIONAL_BLOCK_TYPES
-            and date.fromisoformat(block["startDate"]) <= today < date.fromisoformat(block["endDateExclusive"])
-        ),
-        None,
-    )
+    has_operational_badge = False
+    active_operational_block = None
+    for block in row.get("blocks", []):
+        if block.get("sourceType") not in BOARD_OPERATIONAL_BLOCK_TYPES:
+            continue
+        block_start = date.fromisoformat(block["startDate"])
+        block_end = date.fromisoformat(block["endDateExclusive"])
+        if block_start <= today < block_end:
+            active_operational_block = block
+            break
     if row.get("is_maintenance") or (active_operational_block and active_operational_block.get("sourceType") == "maintenance"):
         badges.append({"label": "Maintenance", "tone": "danger"})
+        has_operational_badge = True
     elif row.get("is_blocked") or (active_operational_block and active_operational_block.get("sourceType") == "blocked"):
         badges.append({"label": "Blocked", "tone": "warning"})
+        has_operational_badge = True
     elif active_operational_block:
         badges.append({"label": "Closed", "tone": "muted"})
-    badges.append({"label": "Occupied" if row.get("is_occupied") else "Vacant", "tone": "solid" if row.get("is_occupied") else "neutral"})
+        has_operational_badge = True
+    if not has_operational_badge:
+        badges.append({"label": "Occupied" if row.get("is_occupied") else "Vacant", "tone": "solid" if row.get("is_occupied") else "neutral"})
     if row.get("has_arrival_today"):
         badges.append({"label": "Arr today", "tone": "accent"})
     if row.get("has_departure_today"):
@@ -1043,7 +1049,7 @@ def _room_status_badges(*, row: dict[str, Any], today: date) -> list[dict[str, s
         badges.append({"label": "Ready", "tone": "success"})
     elif hk_status:
         badges.append({"label": f"HK {hk_status}", "tone": "muted"})
-    return badges[:4]
+    return badges[:MAX_ROOM_STATUS_BADGES]
 
 
 def _assign_block_lanes(blocks: list[dict[str, Any]]) -> int:
