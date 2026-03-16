@@ -29,6 +29,21 @@ Primary priorities:
 - Keep behavior stable unless fixing a bug or implementing a requested change.
 - Keep changes cohesive and easy to review in Git.
 
+## Skills
+
+Specialized skill files live under `.agents/skills/`. Each skill defines a focused area of expertise with its own read order, guardrails, and success criteria.
+
+Load the relevant skill at task start when the task matches its trigger conditions:
+
+- `db-schema-migration-review` — schema changes, migrations, indexes, backfills
+- `deploy-env-safety` — deployments, secrets, environment config, rollback planning
+- `hotel-booking-flow-qa` — booking, availability, rates, guest journey, payments
+- `performance-seo-accessibility` — page speed, SEO metadata, ARIA, Core Web Vitals
+- `repo-audit-cleanup` — dead code removal, deduplication, dependency hygiene
+- `sandbox-ui-polish` — visual hierarchy, layout, CTA clarity, mobile UX
+- `security-surface-check` — auth boundaries, input validation, CSRF, secret exposure
+- `thai-first-content-guard` — Thai-first copy correctness, multilingual alignment
+
 ## Change strategy
 
 For any substantial task:

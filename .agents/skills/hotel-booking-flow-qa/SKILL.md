@@ -5,6 +5,36 @@ description: Use when the task touches booking, reservation, availability, room 
 
 # Hotel Booking Flow QA
 
+## Owns
+- guest booking journey integrity
+- availability and rate logic review
+- deposit and payment handoff validation
+- booking confirmation and failure state behavior
+- admin-side booking reflection and audit trail
+
+## Does Not Own
+- general UI polish unrelated to booking
+- deployment config
+- schema migrations
+- content translation
+
+## Trigger When
+- any code touches the booking form, availability query, or rate calculation
+- deposit or payment integration is modified
+- confirmation emails or success pages change
+- admin booking views or status displays are modified
+
+## Read First
+- `sandbox_pms_mvp/pms/app.py` booking-related routes
+- `sandbox_pms_mvp/pms/services/` reservation and availability modules
+- booking templates in `sandbox_pms_mvp/templates/`
+- tests covering the booking and payment flows
+
+## Avoid Reading Unless Needed
+- unrelated admin dashboards
+- housekeeping or reporting modules
+- static assets and styles (unless layout breaks booking UX)
+
 ## Goal
 
 Audit and protect the real guest booking journey and the related admin reflection flow.
@@ -66,12 +96,16 @@ Audit and protect the real guest booking journey and the related admin reflectio
 4. Patch weak states, validation gaps, and misleading UX.
 5. Validate the journey end-to-end where possible.
 
-## Output expectations
-
-Report:
-- broken or risky states
-- weak assumptions
+## Output Format
+- Broken or risky states found
+- Weak assumptions identified
 - UX leaks
-- validation gaps
-- admin reflection gaps
-- exact fixes applied
+- Validation gaps
+- Admin reflection gaps
+- Exact fixes applied
+
+## Success Criteria
+- full booking journey from search to confirmation has no silent failure states
+- duplicate submission risk is addressed
+- admin reflection of guest booking is accurate
+- payment handoff produces correct success and failure outcomes

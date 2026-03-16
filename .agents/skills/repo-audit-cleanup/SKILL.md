@@ -5,6 +5,36 @@ description: Use when the task is to audit, refactor, simplify, condense, de-dup
 
 # Repo Audit Cleanup
 
+## Owns
+- dead code identification and removal
+- duplicate logic consolidation
+- naming normalization
+- dependency hygiene
+- technical debt triage
+
+## Does Not Own
+- new feature implementation
+- business logic changes
+- schema migrations
+- deployment config changes
+
+## Trigger When
+- codebase has accumulated clutter before a feature sprint
+- duplicate logic is slowing new work
+- lint, type, or build issues are caused by clutter
+- a pre-release cleanup pass is requested
+
+## Read First
+- `sandbox_pms_mvp/requirements.txt` and `requirements-dev.txt`
+- entry points: `sandbox_pms_mvp/pms/app.py`
+- the module or directory targeted for cleanup
+- related tests covering the area
+
+## Avoid Reading Unless Needed
+- unrelated service modules
+- deployment runbooks
+- migration history (unless dependency hygiene requires it)
+
 ## Goal
 
 Perform a disciplined cleanup pass that makes the codebase leaner, clearer, and easier to extend without introducing unnecessary behavior changes.
@@ -82,6 +112,14 @@ End with:
 - risks / follow-up
 - validation results
 
+## Output Format
+- Audit summary by category
+- Planned cleanup actions with risk levels
+- Files removed
+- Files refactored
+- Validation results
+- Remaining follow-up items
+
 ## Guardrails
 
 - Preserve intended behavior unless clearly fixing a bug.
@@ -90,3 +128,9 @@ End with:
 - Do not leave partial migrations.
 - Flag ambiguity instead of guessing.
 - Prefer boring, durable code.
+
+## Success Criteria
+- codebase has fewer unused files, duplicate patterns, or stale imports
+- lint, type, and test baseline passes after cleanup
+- no behavior regressions introduced
+- cleanup leaves a reviewable, cohesive diff

@@ -5,6 +5,35 @@ description: Use when the task involves guest-facing copy, translations, Thai-fi
 
 # Thai-First Content Guard
 
+## Owns
+- Thai-first copy quality and consistency
+- cross-language alignment (Thai, English, Chinese)
+- contact details, addresses, and map links accuracy
+- CTA wording coherence across languages
+- removal of translation artifacts and bloated copy
+
+## Does Not Own
+- backend logic
+- schema changes
+- visual layout or CSS
+- booking flow logic
+
+## Trigger When
+- guest-facing copy is added or modified in any language
+- CTA wording or contact details change
+- translation inconsistencies are reported
+- new template sections are added with multilingual content
+
+## Read First
+- affected templates in `sandbox_pms_mvp/templates/`
+- shared content blocks or i18n helpers if present
+- `BRANDING-MANIFEST.md` and `MESSAGING.md` for canonical claims (if present)
+
+## Avoid Reading Unless Needed
+- backend service modules
+- migration files
+- admin-only templates
+
 ## Goal
 
 Protect copy quality and consistency across Thai-first multilingual guest-facing content.
@@ -48,17 +77,21 @@ Protect copy quality and consistency across Thai-first multilingual guest-facing
 - Does the copy support trust and booking intent?
 - Are important details easy to find?
 
-## Output expectations
-
-Report:
-- inconsistencies found
-- copy blocks cleaned
-- details normalized
-- translation risks
-- follow-up content gaps
+## Output Format
+- Inconsistencies found
+- Copy blocks cleaned
+- Details normalized
+- Translation risks
+- Follow-up content gaps
 
 ## Guardrails
 
 - Do not invent translated claims.
 - Do not add marketing fluff.
 - Preserve exact business facts while improving wording.
+
+## Success Criteria
+- Thai and secondary languages convey the same meaning for all key sections
+- contact details, addresses, and CTAs are consistent across languages
+- no machine-translation artifacts remain in reviewed sections
+- no invented claims or policy details introduced
