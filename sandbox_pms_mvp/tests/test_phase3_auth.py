@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 import pyotp
@@ -259,20 +259,30 @@ def test_locked_account_can_log_in_after_lock_window(app_factory):
     assert login(client, identifier=user.email, password="correct horse 123").status_code == 302
 
 
-def test_admin_and_manager_permissions_allow_operational_admin_pages(app_factory):
+def test_admin_and_manager_permissions_reflect_least_privilege_boundaries(app_factory):
     app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
     with app.app_context():
         admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
         manager = make_staff_user(email="test.manager@example.com", password="correct horse 123", role_codes=("manager",))
 
-    for email, password in [(admin.email, "sandbox-admin-123"), (manager.email, "correct horse 123")]:
-        client = app.test_client()
-        assert login(client, identifier=email, password=password).status_code == 302
-        assert client.get("/staff/settings").status_code == 200
-        assert client.get("/staff/rates").status_code == 200
-        assert client.get("/staff/reports").status_code == 200
-        assert client.get("/staff/users").status_code == 200
-        assert client.get("/staff/audit").status_code == 200
+    admin_client = app.test_client()
+    assert login(admin_client, identifier=admin.email, password="sandbox-admin-123").status_code == 302
+    assert admin_client.get("/staff/settings").status_code == 200
+    assert admin_client.get("/staff/rates").status_code == 200
+    assert admin_client.get("/staff/reports").status_code == 200
+    assert admin_client.get("/staff/users").status_code == 200
+    assert admin_client.get("/staff/audit").status_code == 200
+
+    manager_client = app.test_client()
+    assert login(manager_client, identifier=manager.email, password="correct horse 123").status_code == 302
+    assert manager_client.get("/staff").status_code == 200
+    assert manager_client.get("/staff/front-desk").status_code == 200
+    assert manager_client.get("/staff/housekeeping").status_code == 200
+    assert manager_client.get("/staff/reports").status_code == 200
+    assert manager_client.get("/staff/settings").status_code == 403
+    assert manager_client.get("/staff/rates").status_code == 403
+    assert manager_client.get("/staff/users").status_code == 403
+    assert manager_client.get("/staff/audit").status_code == 403
 
 
 def test_front_desk_permission_limits(app_factory):
@@ -283,9 +293,17 @@ def test_front_desk_permission_limits(app_factory):
 
     assert login(client, identifier=user.email, password="correct horse 123").status_code == 302
     assert client.get("/staff/reservations").status_code == 200
+    assert client.get("/staff/housekeeping").status_code == 200
+    assert client.get("/staff/rates").status_code == 403
     assert client.get("/staff/settings").status_code == 403
     assert client.get("/staff/reports").status_code == 403
     assert client.get("/staff/users").status_code == 403
+    response = post_form(
+        client,
+        "/staff/housekeeping/tasks",
+        data={"room_id": "", "business_date": date.today().isoformat(), "task_type": "inspection"},
+    )
+    assert response.status_code == 403
 
 
 def test_housekeeping_permission_limits(app_factory):
@@ -294,38 +312,46 @@ def test_housekeeping_permission_limits(app_factory):
     with app.app_context():
         user = make_staff_user(email="hk@example.com", password="correct horse 123", role_codes=("housekeeping",))
 
-    assert login(client, identifier=user.email, password="correct horse 123").status_code == 302
-    assert client.get("/staff/reservations").status_code == 200
+    login_response = login(client, identifier=user.email, password="correct horse 123")
+    assert login_response.status_code == 302
+    assert login_response.headers["Location"].endswith("/staff/housekeeping")
+    assert client.get("/staff").status_code == 403
+    assert client.get("/staff/housekeeping").status_code == 200
+    assert client.get("/staff/reservations").status_code == 403
     assert client.get("/staff/rates").status_code == 403
     assert client.get("/staff/settings").status_code == 403
 
 
 @pytest.mark.parametrize(
-    ("username", "password", "allowed_paths", "forbidden_paths"),
+    ("username", "password", "redirect_path", "allowed_paths", "forbidden_paths"),
     [
         (
             "hui.admin",
             "6astxSjtq9RF",
+            "/staff",
             ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
             (),
         ),
         (
             "manager",
             "jyVCLAzMXL6U",
-            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
-            (),
+            "/staff",
+            ("/staff", "/staff/front-desk", "/staff/housekeeping", "/staff/reports"),
+            ("/staff/settings", "/staff/users", "/staff/audit", "/staff/rates"),
         ),
         (
             "housekeeping",
             "X3Hp9bnTdKTn",
-            ("/staff/reservations", "/staff/housekeeping", "/staff/housekeeping/tasks"),
-            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+            "/staff/housekeeping",
+            ("/staff/housekeeping", "/staff/housekeeping/tasks"),
+            ("/staff", "/staff/reservations", "/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
         ),
         (
             "frontdesk",
             "3Y5vyMujqXwU",
+            "/staff",
             ("/staff/reservations", "/staff/housekeeping"),
-            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit"),
+            ("/staff/settings", "/staff/users", "/staff/reports", "/staff/audit", "/staff/rates"),
         ),
     ],
 )
@@ -333,6 +359,7 @@ def test_seeded_employee_accounts_support_username_login_and_rbac(
     app_factory,
     username: str,
     password: str,
+    redirect_path: str,
     allowed_paths: tuple[str, ...],
     forbidden_paths: tuple[str, ...],
 ):
@@ -342,7 +369,7 @@ def test_seeded_employee_accounts_support_username_login_and_rbac(
     response = login(client, identifier=username, password=password)
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/staff")
+    assert response.headers["Location"].endswith(redirect_path)
 
     with app.app_context():
         user = User.query.filter_by(username=username).one()

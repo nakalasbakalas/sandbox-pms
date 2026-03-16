@@ -411,7 +411,7 @@ def test_staff_user_manager_and_role_permissions_change_backend_authorization(ap
         admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
         manager = make_staff_user(email="manager.adminpanel@example.com", role_codes=("manager",))
         manager_role = Role.query.filter_by(code="manager").one()
-        retained_permissions = sorted(permission.code for permission in manager_role.permissions if permission.code != "settings.view")
+        retained_permissions = sorted(permission.code for permission in manager_role.permissions if permission.code != "reservation.view")
 
     login_as(client, admin)
     response = post_form(
@@ -444,7 +444,8 @@ def test_staff_user_manager_and_role_permissions_change_backend_authorization(ap
 
     manager_client = app.test_client()
     login_as(manager_client, manager)
-    assert manager_client.get("/staff/reservations").status_code == 200
+    assert manager_client.get("/staff/reservations").status_code == 403
+    assert manager_client.get("/staff/reports").status_code == 200
     assert manager_client.get("/staff/settings").status_code == 403
 
 

@@ -230,6 +230,7 @@
     </div>
   </article>
 
+  {% if can_view_audit %}
   <article class="card">
     <div class="card-head">
       <div>
@@ -254,5 +255,6 @@
       {% endfor %}
     </div>
   </article>
+  {% endif %}
 </section>
 {% endblock %}

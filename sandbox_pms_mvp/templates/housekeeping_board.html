@@ -9,8 +9,10 @@
       <p>Track room readiness, arrival pressure, blocked rooms, and maintenance risk from the operational source of truth.</p>
     </div>
     <div class="actions">
+      {% if can('reservation.view') %}
       <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
       <a class="button secondary" href="{{ url_for('staff_front_desk', date=board.business_date.isoformat()) }}">Front desk</a>
+      {% endif %}
       <a class="pill {% if not filters.mobile %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today, blocked=filters.blocked, maintenance=filters.maintenance, notes=filters.notes) }}">Board</a>
       <a class="pill {% if filters.mobile %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today, blocked=filters.blocked, maintenance=filters.maintenance, notes=filters.notes, view='mobile') }}">Mobile</a>
     </div>

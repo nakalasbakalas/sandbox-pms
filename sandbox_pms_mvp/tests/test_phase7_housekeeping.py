@@ -285,6 +285,62 @@ def test_room_detail_route_hides_guest_name_for_housekeeping_role(app_factory):
     assert "Privacy Guest" not in text
 
 
+def test_room_detail_respects_note_visibility_and_audit_access(app_factory):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
+    with app.app_context():
+        business_date = date.today() + timedelta(days=2)
+        reservation = create_staff_reservation(
+            first_name="Visibility",
+            last_name="Guest",
+            phone="+66810000052",
+            room_type_code="TWN",
+            check_in_date=business_date,
+            check_out_date=business_date + timedelta(days=1),
+        )
+        room_id = reservation.assigned_room_id
+        manager = make_staff_user("manager", "hk-manager-note@example.com")
+        front_desk = make_staff_user("front_desk", "hk-frontdesk-note@example.com")
+        housekeeper = make_staff_user("housekeeping", "hk-note-reader@example.com")
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+        add_room_note(
+            room_id,
+            business_date=business_date,
+            payload=RoomNotePayload(
+                note_text="Manager-only room note",
+                note_type="housekeeping",
+                visibility_scope="manager",
+            ),
+            actor_user_id=manager.id,
+        )
+
+    manager_client = app.test_client()
+    login_as(manager_client, manager)
+    manager_response = manager_client.get(f"/staff/housekeeping/rooms/{room_id}?date={business_date.isoformat()}")
+    assert manager_response.status_code == 200
+    assert "Manager-only room note" in manager_response.get_data(as_text=True)
+    assert "Audit trail" not in manager_response.get_data(as_text=True)
+
+    front_desk_client = app.test_client()
+    login_as(front_desk_client, front_desk)
+    front_desk_response = front_desk_client.get(f"/staff/housekeeping/rooms/{room_id}?date={business_date.isoformat()}")
+    assert front_desk_response.status_code == 200
+    assert "Manager-only room note" not in front_desk_response.get_data(as_text=True)
+    assert "Audit trail" not in front_desk_response.get_data(as_text=True)
+
+    housekeeping_client = app.test_client()
+    login_as(housekeeping_client, housekeeper)
+    housekeeping_response = housekeeping_client.get(f"/staff/housekeeping/rooms/{room_id}?date={business_date.isoformat()}")
+    assert housekeeping_response.status_code == 200
+    assert "Manager-only room note" not in housekeeping_response.get_data(as_text=True)
+    assert "Audit trail" not in housekeeping_response.get_data(as_text=True)
+
+    admin_client = app.test_client()
+    login_as(admin_client, admin)
+    admin_response = admin_client.get(f"/staff/housekeeping/rooms/{room_id}?date={business_date.isoformat()}")
+    assert admin_response.status_code == 200
+    assert "Audit trail" in admin_response.get_data(as_text=True)
+
+
 def test_bulk_updates_apply_per_room_and_report_failures(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
@@ -419,8 +475,7 @@ def test_front_desk_can_view_board_but_cannot_block_room(app_factory):
         follow_redirects=True,
     )
 
-    assert result.status_code == 200
-    assert "Only manager or admin can perform this operational override." in result.get_data(as_text=True)
+    assert result.status_code == 403
     with app.app_context():
         row = InventoryDay.query.filter_by(room_id=room.id, business_date=date.today()).one()
         assert row.is_blocked is False

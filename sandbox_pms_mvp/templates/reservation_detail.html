@@ -194,12 +194,12 @@
       </div>
       {% if can('reservation.edit') %}<button class="button" type="submit">Add note</button>{% endif %}
     </form>
-    {% if detail.reservation.notes %}
+    {% if detail.visible_notes %}
       <div class="list-stack compact subsection">
-        {% for note in detail.reservation.notes %}
-          <div class="list-row no-link">
-            <div>
-              <strong>{{ note.note_type.replace('_', ' ').title() }}</strong>
+        {% for note in detail.visible_notes %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ note.note_type.replace('_', ' ').title() }}</strong>
               <p>{{ note.note_text }}</p>
             </div>
             <div class="right-stack">
