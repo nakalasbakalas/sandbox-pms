@@ -78,3 +78,45 @@ def test_migration_seeds_employee_accounts_without_touching_existing_admin(tmp_p
             assert {role.code for role in user.roles} >= {role_code}
             ok, _ = verify_password_hash(user.password_hash, password)
             assert ok is True
+
+
+def test_migration_preserves_existing_employee_passwords(tmp_path):
+    db_path = tmp_path / "employee-password-preservation.db"
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": f"sqlite:///{db_path.as_posix()}",
+            "AUTO_BOOTSTRAP_SCHEMA": False,
+            "AUTO_SEED_REFERENCE_DATA": False,
+            "ADMIN_EMAIL": "admin@sandbox.local",
+            "ADMIN_PASSWORD": "sandbox-admin-123",
+        }
+    )
+
+    with app.app_context():
+        upgrade(directory=str(MIGRATIONS_DIR), revision=PREVIOUS_REVISION)
+        seed_roles_permissions(sync_existing_roles=True)
+        manager_role = Role.query.filter_by(code="manager").one()
+        existing_manager = User(
+            username="manager",
+            email="manager@internal.sandbox.local",
+            full_name="Old Manager Name",
+            password_hash=hash_password("DifferentManagerPass123"),
+            is_active=False,
+            account_state="disabled",
+        )
+        existing_manager.roles = [manager_role]
+        db.session.add(existing_manager)
+        db.session.commit()
+        original_hash = existing_manager.password_hash
+
+        upgrade(directory=str(MIGRATIONS_DIR))
+        db.session.expire_all()
+
+        refreshed_manager = User.query.filter_by(username="manager").one()
+        assert refreshed_manager.full_name == "Manager"
+        assert refreshed_manager.password_hash == original_hash
+        assert refreshed_manager.is_active is True
+        assert refreshed_manager.account_state == "active"
+        ok, _ = verify_password_hash(refreshed_manager.password_hash, "DifferentManagerPass123")
+        assert ok is True

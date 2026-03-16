@@ -182,14 +182,12 @@ def upgrade():
                 .values(
                     username=account["username"],
                     full_name=account["full_name"],
-                    password_hash=_hash_password(account["password"]),
                     is_active=True,
                     account_state="active",
                     failed_login_count=0,
                     last_failed_login_at=None,
                     locked_until=None,
                     force_password_reset=False,
-                    password_changed_at=now,
                     mfa_required=False,
                     updated_at=now,
                 )
