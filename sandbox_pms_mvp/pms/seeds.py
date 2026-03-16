@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import date, timedelta
@@ -7,9 +8,15 @@ from decimal import Decimal
 
 from flask import current_app
 
+logger = logging.getLogger(__name__)
+
 from .constants import (
+    BOOKING_LANGUAGES,
+    BOOKING_SOURCE_CHANNELS,
+    DOCUMENT_TYPES,
     HOUSEKEEPING_STATUS_CODES,
     PERMISSION_SEEDS,
+    RESERVATION_STATUSES,
     ROLE_PERMISSION_SEEDS,
     ROLE_SEEDS,
 )
@@ -17,12 +24,14 @@ from .extensions import db
 from .models import (
     AppSetting,
     BlackoutPeriod,
+    Guest,
     HousekeepingStatus,
     InventoryDay,
     NotificationTemplate,
     Permission,
     PolicyDocument,
     RateRule,
+    Reservation,
     Role,
     Room,
     RoomType,
@@ -36,6 +45,8 @@ from .settings import APP_SETTINGS_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOC
 def seed_all(inventory_days: int = 730) -> None:
     seed_reference_data(sync_existing_roles=True)
     bootstrap_inventory_horizon(date.today(), inventory_days)
+    if not _is_demo_data_already_seeded():
+        seed_demo_guests_and_reservations()
     db.session.commit()
 
 
@@ -359,3 +370,292 @@ def bootstrap_inventory_horizon(start_date: date, days: int) -> None:
                     notes=room.notes,
                 )
             )
+
+
+def _is_demo_data_already_seeded() -> bool:
+    """Check if demo data has already been seeded by looking for DEMO- phone prefix."""
+    demo_guest_count = Guest.query.filter(Guest.phone.like("DEMO-%")).count()
+    return demo_guest_count > 0
+
+
+def seed_demo_guests_and_reservations(
+    num_guests: int = 30,
+    num_reservations: int = 80
+) -> None:
+    """
+    Create demo guests and reservations for March 2026.
+
+    Distribution:
+    - ~50% checked_out (past 3 weeks, March 1-15)
+    - ~25% confirmed (future 2 weeks, March 16-31)
+    - ~10% cancelled (various dates)
+    - ~5% no_show (early March)
+    """
+    logger.info("Seeding demo guests and reservations for March 2026...")
+
+    # Sample guest data: [(first_name, last_name, nationality)]
+    guest_data = [
+        ("Maria", "Garcia", "ES"),
+        ("John", "Smith", "US"),
+        ("Yuki", "Tanaka", "JP"),
+        ("Carlos", "Rodriguez", "MX"),
+        ("Aisha", "Ahmed", "EG"),
+        ("Petra", "Mueller", "DE"),
+        ("Raj", "Patel", "IN"),
+        ("Sophie", "Bernard", "FR"),
+        ("Chang", "Liu", "CN"),
+        ("Nina", "Kowalski", "PL"),
+        ("Lars", "Eriksson", "SE"),
+        ("Olivia", "Silva", "BR"),
+        ("Marco", "Rossi", "IT"),
+        ("Emma", "Johnson", "AU"),
+        ("Ahmed", "Hassan", "SA"),
+        ("Ingrid", "Bergman", "NO"),
+        ("Diego", "Sanchez", "AR"),
+        ("Yuki", "Suzuki", "JP"),
+        ("Anna", "Novak", "CZ"),
+        ("David", "Cohen", "IL"),
+        ("Lisa", "Schmidt", "AT"),
+        ("Khalid", "Mohammed", "AE"),
+        ("Gabriela", "Santos", "PT"),
+        ("Thomas", "Larsen", "DK"),
+        ("Zara", "Al-Rashid", "KW"),
+        ("Miguel", "Flores", "CO"),
+        ("Elena", "Petrov", "RU"),
+        ("Hassan", "Ibrahim", "SD"),
+        ("Natasha", "Sokolov", "LV"),
+        ("Stefan", "Kovacs", "RO"),
+    ]
+
+    # Create guests
+    admin_user = User.query.join(User.roles).filter(Role.code == "admin").first()
+    admin_id = admin_user.id if admin_user else None
+
+    created_guests = _create_demo_guests(guest_data[:num_guests], admin_id)
+
+    # Get room types efficiently (1 query instead of 2)
+    room_types = {rt.code: rt for rt in RoomType.query.all()}
+    twin_room_type = room_types["TWN"]
+    double_room_type = room_types["DBL"]
+
+    # Pre-compute rooms by type to avoid repeated filtering
+    sellable_rooms = Room.query.filter_by(is_sellable=True).all()
+    rooms_by_type = {
+        twin_room_type.id: [r for r in sellable_rooms if r.room_type_id == twin_room_type.id],
+        double_room_type.id: [r for r in sellable_rooms if r.room_type_id == double_room_type.id],
+    }
+
+    # Base rates (per night)
+    base_rates = {
+        "TWN": 120,
+        "DBL": 150,
+    }
+
+    # March 2026 date range
+    march_start = date(2026, 3, 1)
+    march_end = date(2026, 3, 31)
+    today = date(2026, 3, 16)
+
+    # Distribution: ~50%, ~25%, ~10%, ~5%
+    num_checked_out = int(num_reservations * 0.50)
+    num_confirmed = int(num_reservations * 0.25)
+    num_cancelled = int(num_reservations * 0.10)
+    num_no_show = int(num_reservations * 0.05)
+
+    # Generate all reservations with unified counter
+    res_reservations = []
+    res_counter = 1000
+
+    # Define status configurations: (status, date_range_start, date_range_end, assign_room, count)
+    status_configs = [
+        (RESERVATION_STATUSES[4], march_start, march_end, True, num_checked_out),    # checked_out
+        (RESERVATION_STATUSES[2], today, march_end, False, num_confirmed),           # confirmed
+        (RESERVATION_STATUSES[5], march_start, march_end, False, num_cancelled),     # cancelled
+        (RESERVATION_STATUSES[6], march_start, march_start + timedelta(days=9), True, num_no_show),  # no_show
+    ]
+
+    for status, range_start, range_end, assign_room, count in status_configs:
+        for i in range(count):
+            guest = created_guests[i % len(created_guests)]
+            nights = 1 + (i % 6)
+            start_offset = i % ((range_end - range_start).days + 1)
+            check_in = range_start + timedelta(days=start_offset)
+            check_out = check_in + timedelta(days=nights)
+
+            # Ensure check_out doesn't exceed march_end, and maintain date constraint
+            if check_out > march_end:
+                check_out = march_end
+                # Ensure check_in < check_out (required by database constraint)
+                if check_in >= check_out:
+                    check_in = check_out - timedelta(days=1)
+
+            room_type = double_room_type if i % 3 != 0 else twin_room_type
+            adults = 1 + (i % 3)
+
+            reservation, res_counter = _create_single_reservation(
+                res_counter,
+                guest,
+                check_in,
+                check_out,
+                room_type,
+                status,
+                base_rates,
+                admin_id,
+                assign_room,
+                rooms_by_type if assign_room else None,
+            )
+            res_reservations.append(reservation)
+
+    # Flush all at once
+    for reservation in res_reservations:
+        db.session.add(reservation)
+
+    db.session.flush()
+    logger.info(
+        f"Created demo data: {len(created_guests)} guests and {len(res_reservations)} reservations"
+    )
+
+
+def _create_demo_guests(guest_data: list, admin_id: uuid.UUID | None) -> list[Guest]:
+    """Create demo guests from guest data."""
+    created_guests = []
+    for idx, (first_name, last_name, nationality) in enumerate(guest_data):
+        phone = f"DEMO-{idx + 1:03d}"
+        email = f"{first_name.lower()}.{last_name.lower()}@demo.example.com"
+        full_name = f"{first_name} {last_name}"
+
+        guest = Guest(
+            first_name=first_name,
+            last_name=last_name,
+            full_name=full_name,
+            phone=phone,
+            email=email,
+            nationality=nationality,
+            id_document_type=DOCUMENT_TYPES[0],  # "passport"
+            id_document_number=f"DEMO{idx + 1:05d}",
+            date_of_birth=date(1980 + (idx % 40), 1 + (idx % 12), 1 + (idx % 27)),
+            preferred_language=BOOKING_LANGUAGES[1],  # "en"
+            marketing_opt_in=idx % 3 == 0,
+            blacklist_flag=False,
+            notes_summary=None,
+            created_by_user_id=admin_id,
+        )
+        db.session.add(guest)
+        db.session.flush()
+        created_guests.append(guest)
+    return created_guests
+
+
+def _create_single_reservation(
+    res_counter: int,
+    guest: Guest,
+    check_in: date,
+    check_out: date,
+    room_type: RoomType,
+    status: str,
+    base_rates: dict,
+    admin_id: uuid.UUID | None,
+    assign_room: bool = False,
+    rooms_by_type: dict | None = None,
+) -> tuple:
+    """Create a single reservation. Returns (reservation, updated_counter)."""
+    nights = (check_out - check_in).days
+    room_total = _calculate_room_total(nights, base_rates.get(room_type.code, 140))
+    tax_total = _calculate_tax(room_total)
+    grand_total = room_total + tax_total
+
+    res_code = f"SBX-{res_counter:05d}"
+    res_counter += 1
+
+    assigned_room = None
+    if assign_room and rooms_by_type and room_type.id in rooms_by_type:
+        available_rooms = rooms_by_type[room_type.id]
+        if available_rooms:
+            assigned_room = available_rooms[res_counter % len(available_rooms)]
+
+    reservation = Reservation(
+        reservation_code=res_code,
+        primary_guest_id=guest.id,
+        room_type_id=room_type.id,
+        assigned_room_id=assigned_room.id if assigned_room else None,
+        current_status=status,
+        source_channel=BOOKING_SOURCE_CHANNELS[0],  # "direct"
+        check_in_date=check_in,
+        check_out_date=check_out,
+        adults=1 + (res_counter % 3),
+        children=0,
+        extra_guests=0,
+        special_requests=_get_random_special_request(res_counter),
+        internal_notes=None,
+        quoted_room_total=Decimal(str(round(room_total, 2))),
+        quoted_tax_total=Decimal(str(round(tax_total, 2))),
+        quoted_extras_total=Decimal("0.00"),
+        quoted_grand_total=Decimal(str(round(grand_total, 2))),
+        deposit_required_amount=Decimal(str(round(grand_total * 0.25, 2))),
+        deposit_received_amount=Decimal(str(round(grand_total * 0.25, 2))),
+        booking_language=BOOKING_LANGUAGES[1],  # "en"
+        booked_at=utc_now(),
+        created_by_user_id=admin_id,
+    )
+
+    _apply_status_timestamps(reservation, status, res_counter)
+    return (reservation, res_counter)
+
+
+def _calculate_room_total(nights: int, base_rate: float) -> float:
+    """Calculate room total with long-stay discounts."""
+    room_total = nights * base_rate
+    if nights >= 14:
+        return room_total * 0.85
+    elif nights >= 7:
+        return room_total * 0.90
+    elif nights >= 3:
+        return room_total * 0.95
+    return room_total
+
+
+def _calculate_tax(amount: float, tax_rate: float = 0.10) -> float:
+    """Calculate tax on amount."""
+    return amount * tax_rate
+
+
+def _apply_status_timestamps(reservation: Reservation, status: str, seed: int) -> None:
+    """Apply status-specific timestamps to reservation."""
+    if status == RESERVATION_STATUSES[4]:  # checked_out
+        reservation.checked_in_at = utc_now()
+        reservation.checked_out_at = utc_now()
+    elif status == RESERVATION_STATUSES[5]:  # cancelled
+        reservation.cancelled_at = utc_now()
+        reservation.cancellation_reason = _get_random_cancellation_reason(seed)
+    elif status == RESERVATION_STATUSES[6]:  # no_show
+        reservation.no_show_at = utc_now()
+
+
+def _get_random_special_request(seed: int) -> str | None:
+    """Get a random special request based on seed."""
+    requests = [
+        "Early check-in requested",
+        "Late check-out needed",
+        "Ground floor room preferred",
+        "Quieter room away from elevator",
+        "High floor view preferred",
+        "Wheelchair accessible required",
+        "Non-smoking room",
+        "Baby crib needed",
+        "High floor preferred",
+        "Low floor preferred",
+        None,
+    ]
+    return requests[seed % len(requests)]
+
+
+def _get_random_cancellation_reason(seed: int) -> str:
+    """Get a random cancellation reason based on seed."""
+    reasons = [
+        "Guest requested",
+        "Overbooking resolution",
+        "Invalid payment method",
+        "Duplicate booking",
+        "Change of plans",
+    ]
+    return reasons[seed % len(reasons)]
