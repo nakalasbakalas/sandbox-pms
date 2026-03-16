@@ -26,26 +26,26 @@
   --card-pad: 14px;
   --grid-gap: 12px;
   /* Planning board density defaults (responsive, overridable per-density mode) */
-  --track-height-spacious: 90px;
-  --track-height-comfortable: 68px;
-  --track-height-compact: 50px;
-  --track-height-ultra: 38px;
-  --day-header-height-spacious: 82px;
-  --day-header-height-comfortable: 60px;
-  --day-header-height-compact: 42px;
-  --day-header-height-ultra: 34px;
-  --room-header-width-spacious: 264px;
-  --room-header-width-comfortable: 220px;
-  --room-header-width-compact: 176px;
-  --room-header-width-ultra: 140px;
-  --day-column-min-spacious: 84px;
-  --day-column-min-comfortable: 72px;
-  --day-column-min-compact: 56px;
-  --day-column-min-ultra: 44px;
-  --track-height: var(--track-height-comfortable);
-  --day-header-height: var(--day-header-height-comfortable);
-  --room-header-width: var(--room-header-width-comfortable);
-  --day-column-min: var(--day-column-min-comfortable);
+  --track-height-spacious: 80px;
+  --track-height-comfortable: 56px;
+  --track-height-compact: 40px;
+  --track-height-ultra: 30px;
+  --day-header-height-spacious: 72px;
+  --day-header-height-comfortable: 48px;
+  --day-header-height-compact: 34px;
+  --day-header-height-ultra: 26px;
+  --room-header-width-spacious: 240px;
+  --room-header-width-comfortable: 192px;
+  --room-header-width-compact: 152px;
+  --room-header-width-ultra: 124px;
+  --day-column-min-spacious: 76px;
+  --day-column-min-comfortable: 60px;
+  --day-column-min-compact: 46px;
+  --day-column-min-ultra: 36px;
+  --track-height: var(--track-height-compact);
+  --day-header-height: var(--day-header-height-compact);
+  --room-header-width: var(--room-header-width-compact);
+  --day-column-min: var(--day-column-min-compact);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; scroll-padding-top: 80px; }
@@ -961,6 +961,36 @@ tbody tr:last-child td { border-bottom: 0; }
   font-size: 0.78rem;
   white-space: nowrap;
 }
+/* ── Day-range tabs (7d / 14d / 30d) in row1 ── */
+.board-days-tabs {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.board-days-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.board-days-tab:hover { background: rgba(255,255,255,0.09); color: var(--text); }
+.board-days-tab.active {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-soft-rgb), 0.35);
+  color: var(--accent-soft);
+}
+/* Hide the days <select> in row2 when row1 tabs are present */
 /* ── Row 2: filters + search + density + overflow ── */
 .planning-board-row2 {
   display: flex;
@@ -1101,11 +1131,11 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ── Status strip ── */
 .planning-board-status-strip {
   display: flex;
-  gap: 2px;
-  margin: 6px 0 4px;
-  padding: 4px 6px;
+  gap: 0;
+  margin: 4px 0 3px;
+  padding: 2px 4px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(255,255,255,0.02);
   overflow-x: auto;
 }
@@ -1115,17 +1145,17 @@ tbody tr:last-child td { border-bottom: 0; }
   align-items: center;
   min-width: 0;
   flex: 1 0 0;
-  padding: 2px 6px;
+  padding: 1px 5px;
 }
 .pbs-item small {
   color: var(--muted);
-  font-size: 0.6rem;
+  font-size: 0.56rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   white-space: nowrap;
 }
 .pbs-item strong {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   white-space: nowrap;
 }
 /* ── Board grid ── */
@@ -1221,10 +1251,10 @@ tbody tr:last-child td { border-bottom: 0; }
   left: 0;
   z-index: 4;
   display: grid;
-  gap: 1px;
+  gap: 0;
   align-content: center;
-  min-height: max(42px, calc(var(--track-height) - 8px));
-  padding: 4px 8px;
+  min-height: max(30px, calc(var(--track-height) - 6px));
+  padding: 3px 7px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: rgba(10,12,16,0.98);
@@ -1321,7 +1351,7 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ── Reservation blocks ── */
 .planning-board-block {
   align-self: center;
-  margin: 3px 2px;
+  margin: 2px 1px;
   position: relative;
   z-index: 2;
 }
@@ -1331,13 +1361,13 @@ tbody tr:last-child td { border-bottom: 0; }
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  min-height: 28px;
-  padding: 3px 6px;
-  border-radius: 7px;
+  min-height: 24px;
+  padding: 2px 5px;
+  border-radius: 6px;
   color: white;
   font-weight: 800;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.14);
   overflow: hidden;
   position: relative;
   user-select: none;
@@ -1471,64 +1501,116 @@ tbody tr:last-child td { border-bottom: 0; }
   --day-header-height: var(--day-header-height-comfortable);
   --room-header-width: var(--room-header-width-comfortable);
   --day-column-min: var(--day-column-min-comfortable);
-  --track-height-adjust: 8px;
+  --track-height-adjust: 6px;
 }
 .planning-board-grid.density-compact {
   --track-height: var(--track-height-compact);
   --day-header-height: var(--day-header-height-compact);
   --room-header-width: var(--room-header-width-compact);
   --day-column-min: var(--day-column-min-compact);
-  --track-height-adjust: 18px;
+  --track-height-adjust: 14px;
 }
 .planning-board-grid.density-ultra {
   --track-height: var(--track-height-ultra);
   --day-header-height: var(--day-header-height-ultra);
   --room-header-width: var(--room-header-width-ultra);
   --day-column-min: var(--day-column-min-ultra);
-  --track-height-adjust: 24px;
+  --track-height-adjust: 20px;
+}
+/* ── Per-days adaptive density: 14d auto-compresses comfortable → compact; 30d compresses further ── */
+.planning-board-grid[data-board-days="14"].density-comfortable {
+  --track-height: var(--track-height-compact);
+  --day-header-height: var(--day-header-height-compact);
+  --room-header-width: var(--room-header-width-compact);
+  --day-column-min: var(--day-column-min-compact);
+  --track-height-adjust: 14px;
+}
+.planning-board-grid[data-board-days="30"].density-comfortable,
+.planning-board-grid[data-board-days="30"].density-compact {
+  --track-height: var(--track-height-ultra);
+  --day-header-height: var(--day-header-height-ultra);
+  --room-header-width: var(--room-header-width-ultra);
+  --day-column-min: var(--day-column-min-ultra);
+  --track-height-adjust: 20px;
 }
 /* Day header per density */
 .planning-board-grid.density-spacious .planning-board-days { grid-template-rows: minmax(var(--day-header-height-spacious), auto); }
 .planning-board-grid.density-comfortable .planning-board-days { grid-template-rows: minmax(var(--day-header-height-comfortable), auto); }
-.planning-board-grid.density-compact .planning-board-days { grid-template-rows: minmax(var(--day-header-height-compact), auto); }
-.planning-board-grid.density-ultra .planning-board-days { grid-template-rows: minmax(var(--day-header-height-ultra), auto); }
+.planning-board-grid.density-compact .planning-board-days,
+.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-days { grid-template-rows: minmax(var(--day-header-height-compact), auto); }
+.planning-board-grid.density-ultra .planning-board-days,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-days,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-days { grid-template-rows: minmax(var(--day-header-height-ultra), auto); }
 /* Spacious adjustments */
 .planning-board-grid.density-spacious .planning-board-day { min-height: var(--day-header-height-spacious); font-size: 0.72rem; }
 .planning-board-grid.density-spacious .planning-board-day strong { font-size: 1.1rem; }
-.planning-board-grid.density-spacious .planning-board-room { min-height: 60px; padding: 6px 10px; }
+.planning-board-grid.density-spacious .planning-board-room { min-height: 54px; padding: 5px 10px; }
 /* Comfortable adjustments */
-.planning-board-grid.density-comfortable .planning-board-day { min-height: var(--day-header-height-comfortable); font-size: 0.64rem; }
+.planning-board-grid.density-comfortable .planning-board-day { min-height: var(--day-header-height-comfortable); font-size: 0.62rem; }
+.planning-board-grid.density-comfortable .planning-board-day strong { font-size: 0.92rem; }
 /* Compact adjustments */
-.planning-board-grid.density-compact .planning-board-day { min-height: var(--day-header-height-compact); padding: 2px 3px; font-size: 0.58rem; }
-.planning-board-grid.density-compact .planning-board-day strong { font-size: 0.82rem; }
-.planning-board-grid.density-compact .planning-board-room { min-height: 38px; gap: 1px; padding: 3px 6px; }
-.planning-board-grid.density-compact .planning-board-room strong { font-size: 0.76rem; }
-.planning-board-grid.density-compact .planning-board-room span { font-size: 0.64rem; }
+.planning-board-grid.density-compact .planning-board-day,
+.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day { min-height: var(--day-header-height-compact); padding: 2px 3px; font-size: 0.57rem; }
+.planning-board-grid.density-compact .planning-board-day strong,
+.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day strong { font-size: 0.82rem; }
+.planning-board-grid.density-compact .planning-board-room { min-height: 30px; gap: 0; padding: 2px 6px; }
+.planning-board-grid.density-compact .planning-board-room strong { font-size: 0.75rem; }
+.planning-board-grid.density-compact .planning-board-room span { font-size: 0.62rem; }
 .planning-board-grid.density-compact .planning-board-room-badges { gap: 2px; }
-.planning-board-grid.density-compact .planning-board-room-badge { min-height: 14px; padding: 0 4px; font-size: 0.52rem; }
-.planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(26px, auto)); }
-.planning-board-grid.density-compact .planning-board-block { margin: 2px 2px; }
-.planning-board-grid.density-compact .planning-board-block > summary { min-height: 24px; gap: 3px; padding: 2px 4px; }
-.planning-board-grid.density-compact .planning-board-block-copy strong { font-size: 0.68rem; }
+.planning-board-grid.density-compact .planning-board-room-badge { min-height: 13px; padding: 0 4px; font-size: 0.5rem; }
+.planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(22px, auto)); }
+.planning-board-grid.density-compact .planning-board-block { margin: 2px 1px; }
+.planning-board-grid.density-compact .planning-board-block > summary { min-height: 20px; gap: 3px; padding: 1px 4px; }
+.planning-board-grid.density-compact .planning-board-block-copy strong { font-size: 0.67rem; }
 .planning-board-grid.density-compact .planning-board-block-copy small,
-.planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.52rem; }
-.planning-board-grid.density-compact .planning-board-resize-handle { width: 12px; min-height: 18px; }
+.planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.5rem; }
+.planning-board-grid.density-compact .planning-board-resize-handle { width: 11px; min-height: 16px; }
 /* Ultra compact */
-.planning-board-grid.density-ultra .planning-board-day { min-height: var(--day-header-height-ultra); padding: 1px 2px; font-size: 0.54rem; }
-.planning-board-grid.density-ultra .planning-board-day strong { font-size: 0.76rem; }
-.planning-board-grid.density-ultra .planning-board-day small { display: none; }
-.planning-board-grid.density-ultra .planning-board-room { min-height: 32px; gap: 0; padding: 2px 5px; }
-.planning-board-grid.density-ultra .planning-board-room strong { font-size: 0.7rem; }
-.planning-board-grid.density-ultra .planning-board-room span { font-size: 0.58rem; }
-.planning-board-grid.density-ultra .planning-board-room-badges { display: none; }
-.planning-board-grid.density-ultra .planning-board-group { padding: 2px 8px; font-size: 0.6rem; }
-.planning-board-grid.density-ultra .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(22px, auto)); }
-.planning-board-grid.density-ultra .planning-board-block { margin: 1px 1px; }
-.planning-board-grid.density-ultra .planning-board-block > summary { min-height: 20px; gap: 2px; padding: 1px 3px; border-radius: 5px; }
-.planning-board-grid.density-ultra .planning-board-block-copy strong { font-size: 0.62rem; }
+.planning-board-grid.density-ultra .planning-board-day,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-day { min-height: var(--day-header-height-ultra); padding: 1px 2px; font-size: 0.52rem; }
+.planning-board-grid.density-ultra .planning-board-day strong,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day strong,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-day strong { font-size: 0.72rem; }
+.planning-board-grid.density-ultra .planning-board-day small,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day small,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-day small { display: none; }
+.planning-board-grid.density-ultra .planning-board-room,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room { min-height: 26px; gap: 0; padding: 1px 4px; }
+.planning-board-grid.density-ultra .planning-board-room strong,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room strong,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room strong { font-size: 0.68rem; }
+.planning-board-grid.density-ultra .planning-board-room span,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room span,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room span { font-size: 0.56rem; }
+.planning-board-grid.density-ultra .planning-board-room-badges,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-badges,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room-badges { display: none; }
+.planning-board-grid.density-ultra .planning-board-group,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-group,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-group { padding: 2px 8px; font-size: 0.58rem; }
+.planning-board-grid.density-ultra .planning-board-track,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-track,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(20px, auto)); }
+.planning-board-grid.density-ultra .planning-board-block,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block { margin: 1px 1px; }
+.planning-board-grid.density-ultra .planning-board-block > summary,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block > summary,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block > summary { min-height: 18px; gap: 2px; padding: 1px 3px; border-radius: 4px; }
+.planning-board-grid.density-ultra .planning-board-block-copy strong,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block-copy strong,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block-copy strong { font-size: 0.6rem; }
 .planning-board-grid.density-ultra .planning-board-block-copy small,
-.planning-board-grid.density-ultra .planning-board-block-badges small { display: none; }
-.planning-board-grid.density-ultra .planning-board-resize-handle { width: 10px; min-height: 16px; }
+.planning-board-grid.density-ultra .planning-board-block-badges small,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block-copy small,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block-badges small,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block-copy small,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block-badges small { display: none; }
+.planning-board-grid.density-ultra .planning-board-resize-handle,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-resize-handle,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-resize-handle { width: 9px; min-height: 14px; }
 /* ── Side panel ── */
 .board-side-panel {
   position: fixed;

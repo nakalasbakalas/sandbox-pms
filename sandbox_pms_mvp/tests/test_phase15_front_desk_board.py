@@ -1183,7 +1183,7 @@ class TestBoardDensityPreferences:
     """Test density toggle and user preference persistence."""
 
     def test_default_user_density_is_comfortable(self, app_factory):
-        """New users should default to comfortable density."""
+        """New users should default to compact density."""
         app = app_factory(seed=True)
         with app.app_context():
             from pms.app import front_desk_board_context
@@ -1197,7 +1197,7 @@ class TestBoardDensityPreferences:
 
                 g.current_staff_user = user
                 context = front_desk_board_context(filters)
-                assert context["user_density"] == "comfortable"
+                assert context["user_density"] == "compact"
 
     def test_user_can_save_density_preference(self, app_factory):
         """User should be able to save density preference via endpoint."""
@@ -1305,8 +1305,8 @@ class TestBoardDensityPreferences:
         response = client.get("/staff/front-desk/board")
 
         assert response.status_code == 200
-        # Should have comfortable as default
-        assert b"density-comfortable" in response.data
+        # Should have compact as default
+        assert b"density-compact" in response.data
 
     def test_spacious_density_is_accepted(self, app_factory):
         """Spacious density should be accepted by the preferences endpoint."""
