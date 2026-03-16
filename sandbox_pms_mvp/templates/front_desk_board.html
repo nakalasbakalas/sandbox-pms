@@ -10,74 +10,68 @@
   data-can-edit="{{ 'true' if can_edit else 'false' }}"
   data-board-v2-enabled="{{ 'true' if board_v2_enabled else 'false' }}"
 >
-  <div class="card-head planning-board-head">
-    <div class="planning-board-title">
-      <p class="eyebrow">Front Office</p>
-      <h1>Front desk planning board</h1>
-      <p class="planning-board-intro">Plan reservations, unallocated demand, closures, maintenance, and iCalendar-imported pressure across the visible stay window.</p>
+  {# ── Row 1: Compact title + tabs + date nav + CTA ── #}
+  <div class="planning-board-row1">
+    <div class="planning-board-title-compact">
+      <h1>Planning Board</h1>
+      <nav class="planning-board-utility-links" aria-label="Board navigation">
+        <a href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('staff_front_desk', date=board.start_date.isoformat()) }}">Lists</a>
+        <a href="{{ url_for('staff_reservations') }}">Reservations</a>
+      </nav>
     </div>
-    <div class="actions planning-board-utility-links">
-      <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
-      <a class="button secondary" href="{{ url_for('staff_front_desk', date=board.start_date.isoformat()) }}">Operational lists</a>
-      <a class="button secondary" href="{{ url_for('staff_reservations') }}">Reservations</a>
+    <div class="status-actions front-desk-tabs planning-board-view-tabs">
+      <a class="pill active" href="{{ board_current_url }}">Board</a>
+      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='arrivals', date=board.start_date.isoformat()) }}">Arrivals</a>
+      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='departures', date=board.start_date.isoformat()) }}">Departures</a>
+      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='in_house', date=board.start_date.isoformat()) }}">In-house</a>
     </div>
+    <div class="planning-board-nav-actions">
+      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Previous period" aria-label="Previous period">&lsaquo;</a>
+      <a class="board-nav-btn today" href="{{ url_for('staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Today</a>
+      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
+    </div>
+    {% if can_create %}
+    <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
+    {% endif %}
   </div>
 
-  <div class="planning-board-topbar subsection">
-    <div class="planning-board-command-row planning-board-command-primary">
-      <div class="status-actions front-desk-tabs planning-board-view-tabs">
-        <a class="pill active" href="{{ board_current_url }}">Board</a>
-        <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='arrivals', date=board.start_date.isoformat()) }}">Arrivals</a>
-        <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='departures', date=board.start_date.isoformat()) }}">Departures</a>
-        <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='in_house', date=board.start_date.isoformat()) }}">In-house</a>
-      </div>
+  {# ── Row 2: Filters + search + density + overflow ── #}
+  <div class="planning-board-row2">
+    <form class="planning-board-filters-inline" method="get">
+      <input type="hidden" name="q" value="{{ filters.q }}">
+      <select name="days" aria-label="Days" title="Days">{% for option in board.day_options %}<option value="{{ option }}" {% if filters.days == option %}selected{% endif %}>{{ option }}d</option>{% endfor %}</select>
+      <input type="date" name="start_date" value="{{ board.start_date.isoformat() }}" aria-label="Start date" title="Start date">
+      <select name="room_type_id" aria-label="Room type" title="Room type"><option value="">All types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }}</option>{% endfor %}</select>
+      <select name="show_unallocated" aria-label="Unallocated lane" title="Unallocated"><option value="1" {% if filters.show_unallocated %}selected{% endif %}>Unalloc ✓</option><option value="0" {% if not filters.show_unallocated %}selected{% endif %}>Unalloc ✗</option></select>
+      <select name="show_closed" aria-label="Operational bars" title="Closures"><option value="0" {% if not filters.show_closed %}selected{% endif %}>Closures ✗</option><option value="1" {% if filters.show_closed %}selected{% endif %}>Closures ✓</option></select>
+      <button class="board-apply-btn" type="submit">Apply</button>
+    </form>
 
-      <div class="planning-board-action-row planning-board-nav-actions">
-        <a class="button secondary" href="{{ url_for('staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Previous</a>
-        <a class="button secondary" href="{{ url_for('staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Today</a>
-        <a class="button secondary" href="{{ url_for('staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Next</a>
-      </div>
+    <form class="planning-board-search-inline" method="get">
+      <input type="hidden" name="days" value="{{ filters.days }}">
+      <input type="hidden" name="start_date" value="{{ board.start_date.isoformat() }}">
+      <input type="hidden" name="room_type_id" value="{{ filters.room_type_id or '' }}">
+      <input type="hidden" name="show_unallocated" value="{{ '1' if filters.show_unallocated else '0' }}">
+      <input type="hidden" name="show_closed" value="{{ '1' if filters.show_closed else '0' }}">
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="Search guest, code, room…" aria-label="Search">
+    </form>
 
-      <form class="planning-board-search" method="get">
-        <input type="hidden" name="days" value="{{ filters.days }}">
-        <input type="hidden" name="start_date" value="{{ board.start_date.isoformat() }}">
-        <input type="hidden" name="room_type_id" value="{{ filters.room_type_id or '' }}">
-        <input type="hidden" name="show_unallocated" value="{{ '1' if filters.show_unallocated else '0' }}">
-        <input type="hidden" name="show_closed" value="{{ '1' if filters.show_closed else '0' }}">
-        <label>
-          <span>Search</span>
-          <input type="text" name="q" value="{{ filters.q }}" placeholder="Guest, reservation, room, or room type">
-        </label>
-      </form>
+    <fieldset class="planning-board-density-toggle" data-density-toggle>
+      <legend class="sr-only">Layout density</legend>
+      <button type="button" data-density="spacious" title="Spacious" aria-pressed="{{ 'true' if user_density == 'spacious' else 'false' }}" {% if user_density == 'spacious' %}data-active="true"{% endif %}>S</button>
+      <button type="button" data-density="comfortable" title="Comfortable" aria-pressed="{{ 'true' if user_density == 'comfortable' or not user_density else 'false' }}" {% if user_density == 'comfortable' or not user_density %}data-active="true"{% endif %}>M</button>
+      <button type="button" data-density="compact" title="Compact" aria-pressed="{{ 'true' if user_density == 'compact' else 'false' }}" {% if user_density == 'compact' %}data-active="true"{% endif %}>C</button>
+      <button type="button" data-density="ultra" title="Ultra compact" aria-pressed="{{ 'true' if user_density == 'ultra' else 'false' }}" {% if user_density == 'ultra' %}data-active="true"{% endif %}>U</button>
+    </fieldset>
 
-      {% if can_create %}
-      <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
-      {% endif %}
-    </div>
-
-    <div class="planning-board-command-row planning-board-command-secondary">
-      <form class="toolbar planning-board-filters" method="get">
-        <input type="hidden" name="q" value="{{ filters.q }}">
-        <label><span>Days</span><select name="days">{% for option in board.day_options %}<option value="{{ option }}" {% if filters.days == option %}selected{% endif %}>{{ option }} days</option>{% endfor %}</select></label>
-        <label><span>Start date</span><input type="date" name="start_date" value="{{ board.start_date.isoformat() }}"></label>
-        <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
-        <label><span>Unallocated lane</span><select name="show_unallocated"><option value="1" {% if filters.show_unallocated %}selected{% endif %}>Shown</option><option value="0" {% if not filters.show_unallocated %}selected{% endif %}>Hidden</option></select></label>
-        <label><span>Operational bars</span><select name="show_closed"><option value="0" {% if not filters.show_closed %}selected{% endif %}>Hide</option><option value="1" {% if filters.show_closed %}selected{% endif %}>Show</option></select></label>
-        <button class="button secondary planning-board-refresh" type="submit">Apply</button>
-      </form>
-
-      <div class="actions planning-board-actions">
-        <fieldset class="planning-board-density-toggle" data-density-toggle>
-          <legend>Layout</legend>
-          <button type="button" class="button secondary" data-density="spacious" title="Spacious: more block height and wider room labels" aria-pressed="{{ 'true' if user_density == 'spacious' else 'false' }}" {% if user_density == 'spacious' %}data-active="true"{% endif %}>Spacious</button>
-          <button type="button" class="button secondary" data-density="comfortable" title="Comfortable: balanced height and room labels" aria-pressed="{{ 'true' if user_density == 'comfortable' or not user_density else 'false' }}" {% if user_density == 'comfortable' or not user_density %}data-active="true"{% endif %}>Comfortable</button>
-          <button type="button" class="button secondary" data-density="compact" title="Compact: minimize row height to show more rooms at once" aria-pressed="{{ 'true' if user_density == 'compact' else 'false' }}" {% if user_density == 'compact' %}data-active="true"{% endif %}>Compact</button>
-        </fieldset>
-
-        <div class="planning-board-action-row planning-board-quick-actions planning-board-secondary-actions">
+    <div class="planning-board-overflow">
+      <details class="planning-board-quick">
+        <summary class="board-overflow-btn" title="More actions" aria-label="More actions">⋯</summary>
+        <div class="planning-board-popover planning-board-overflow-menu">
           {% if can_manage_closures and board.room_options %}
-          <details class="planning-board-quick">
-            <summary class="button secondary">Room closure</summary>
+          <details class="planning-board-quick planning-board-nested-quick">
+            <summary class="board-overflow-item">Room closure</summary>
             <form class="card inset stack-form planning-board-popover" method="post" action="{{ url_for('staff_front_desk_board_create_closure') }}">
               {{ csrf_input() }}
               <input type="hidden" name="back_url" value="{{ board_current_url }}">
@@ -93,9 +87,8 @@
             </form>
           </details>
           {% endif %}
-
-          <details class="planning-board-quick{% if ical_import_report %} open-state{% endif %}" {% if ical_import_report %}open{% endif %}>
-            <summary class="button secondary">Import ICS</summary>
+          <details class="planning-board-quick planning-board-nested-quick{% if ical_import_report %} open-state{% endif %}" {% if ical_import_report %}open{% endif %}>
+            <summary class="board-overflow-item">Import ICS</summary>
             <form class="card inset stack-form planning-board-popover" method="post" enctype="multipart/form-data" action="{{ url_for('staff_front_desk_board_import_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">
               {{ csrf_input() }}
               <label><span>.ics file</span><input type="file" name="ical_file" accept=".ics,text/calendar"></label>
@@ -135,10 +128,9 @@
               {% endif %}
             </form>
           </details>
-
-          <a class="button secondary planning-board-secondary-link" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
+          <a class="board-overflow-item" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
         </div>
-      </div>
+      </details>
     </div>
   </div>
 
@@ -157,6 +149,22 @@
   <div class="panel-content">
     <!-- Content dynamically loaded here -->
   </div>
+</div>
+
+{# ── Context menu (populated by JS) ── #}
+<div id="board-context-menu" class="board-context-menu hidden" role="menu" aria-label="Block actions" hidden>
+  <button role="menuitem" data-ctx="open">Open booking</button>
+  <button role="menuitem" data-ctx="front-desk">Front desk detail</button>
+  <hr>
+  <button role="menuitem" data-ctx="check-in">Check in</button>
+  <button role="menuitem" data-ctx="check-out">Check out</button>
+  <button role="menuitem" data-ctx="no-show">Mark no-show</button>
+  <hr>
+  <button role="menuitem" data-ctx="move">Move room</button>
+  <button role="menuitem" data-ctx="resize">Edit dates</button>
+  <button role="menuitem" data-ctx="assign">Assign room</button>
+  <hr>
+  <button role="menuitem" data-ctx="export-ics">Export ICS</button>
 </div>
 
 {% endblock %}

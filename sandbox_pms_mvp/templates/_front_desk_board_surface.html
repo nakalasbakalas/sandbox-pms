@@ -1,10 +1,12 @@
-<section class="planning-board-status-strip" aria-label="Planning board live status">
-  <article class="planning-board-status-item"><small>Window</small><strong>{{ board.current_window_label }}</strong></article>
-  <article class="planning-board-status-item"><small>Unallocated stays / holds</small><strong>{{ board.counts.unallocated }}</strong></article>
-  <article class="planning-board-status-item"><small>Operational blocks</small><strong>{{ board.counts.closed_or_blocked }}</strong></article>
-  <article class="planning-board-status-item"><small>Arrivals / departures today</small><strong>{{ board.counts.arrivals_today }} / {{ board.counts.departures_today }}</strong></article>
-  <article class="planning-board-status-item"><small>Occupied / ready rooms</small><strong>{{ board.counts.occupied }} / {{ board.counts.ready_rooms }}</strong></article>
-</section>
+<div class="planning-board-status-strip" role="region" aria-label="Planning board live status">
+  <span class="pbs-item"><small>Window</small><strong>{{ board.current_window_label }}</strong></span>
+  <span class="pbs-item"><small>Arrivals</small><strong>{{ board.counts.arrivals_today }}</strong></span>
+  <span class="pbs-item"><small>Departures</small><strong>{{ board.counts.departures_today }}</strong></span>
+  <span class="pbs-item"><small>In-house</small><strong>{{ board.counts.occupied }}</strong></span>
+  <span class="pbs-item"><small>Ready</small><strong>{{ board.counts.ready_rooms }}</strong></span>
+  <span class="pbs-item"><small>Unallocated</small><strong>{{ board.counts.unallocated }}</strong></span>
+  <span class="pbs-item"><small>Blocked</small><strong>{{ board.counts.closed_or_blocked }}</strong></span>
+</div>
 
 {% if board.groups %}
 <section class="planning-board-desktop">
