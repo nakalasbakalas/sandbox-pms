@@ -729,9 +729,21 @@ def _format_money_amount(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.01')):,.2f}"
 
 
+def _as_decimal_amount(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0.00"))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal("0.00")
+
+
+def _format_number_input_amount(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('0.01'))}"
+
+
 def _check_in_form_defaults(detail: dict) -> dict[str, str]:
     reservation = detail["reservation"]
     guest = reservation.primary_guest
+    payment_summary = detail["payment_summary"]
     # Pre-check-in submitted data takes precedence for contact/nationality fields
     pc_list = reservation.pre_checkin
     pc = pc_list[0] if pc_list else None
@@ -740,6 +752,11 @@ def _check_in_form_defaults(detail: dict) -> dict[str, str]:
     nationality = (pc.nationality if pc and pc.nationality else None) or guest.nationality or ""
     # Pre-fill arrival note from pre-check-in notes_for_staff if provided
     arrival_note = (pc.notes_for_staff or "") if pc else ""
+    deposit_shortfall = max(
+        Decimal("0.00"),
+        _as_decimal_amount(payment_summary["deposit_required_amount"])
+        - _as_decimal_amount(payment_summary["deposit_received_amount"]),
+    )
     return {
         "first_name": guest.first_name or "",
         "last_name": guest.last_name or "",
@@ -751,7 +768,7 @@ def _check_in_form_defaults(detail: dict) -> dict[str, str]:
         "id_document_number": guest.id_document_number or "",
         "room_id": str(reservation.assigned_room_id or ""),
         "payment_method": "front_desk",
-        "collect_payment_amount": "0.00",
+        "collect_payment_amount": _format_number_input_amount(deposit_shortfall),
         "arrival_note": arrival_note,
         "notes_summary": guest.notes_summary or "",
         "identity_verified": "on" if reservation.identity_verified_at else "",
@@ -760,6 +777,26 @@ def _check_in_form_defaults(detail: dict) -> dict[str, str]:
         "waiver_reason": "",
         "override_payment": "",
     }
+
+
+def _checkout_form_defaults(checkout_prep: dict) -> dict[str, str]:
+    payment_summary = checkout_prep["checkout_payment_summary"]
+    balance_due = max(Decimal("0.00"), _as_decimal_amount(payment_summary["balance_due"]))
+    return {
+        "collect_payment_amount": _format_number_input_amount(balance_due),
+        "payment_method": "front_desk",
+        "departure_note": "",
+        "apply_late_fee": "",
+        "waive_late_fee": "",
+        "waiver_reason": "",
+        "override_balance": "",
+        "process_refund": "",
+        "refund_note": "",
+    }
+
+
+def _build_checkout_form_state(checkout_prep: dict, *, values: dict[str, str] | None = None) -> dict[str, object]:
+    return {"values": values or _checkout_form_defaults(checkout_prep)}
 
 
 def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, object], list[dict[str, str]]]:
@@ -3822,6 +3859,7 @@ def register_routes(app: Flask) -> None:
             can_charge=can("folio.charge_add"),
             can_collect_payment=can("payment.create"),
             check_in_form=_build_check_in_form_state(detail),
+            checkout_form=_build_checkout_form_state(checkout_prep) if checkout_prep else None,
             comm_messages=comm_messages,
         )
 
@@ -3876,6 +3914,7 @@ def register_routes(app: Flask) -> None:
                         allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
                         unexpected_message=unexpected_message,
                     ),
+                    checkout_form=_build_checkout_form_state(checkout_prep) if checkout_prep else None,
                 ),
                 status_code,
             )

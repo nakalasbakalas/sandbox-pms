@@ -633,6 +633,63 @@ def test_front_desk_detail_shows_booked_extras(app_factory):
     assert "Airport transfer" in body
 
 
+def test_front_desk_detail_prefills_check_in_with_outstanding_deposit(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Deposit",
+            last_name="Default",
+            phone="+66800000175",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        user = make_staff_user("front_desk", "fd-checkin-default@example.com")
+    login_as(client, user)
+
+    response = client.get(f"/staff/front-desk/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert (
+        f'name="collect_payment_amount" min="0" step="0.01" value="{reservation.deposit_required_amount}"' in body
+    )
+
+
+def test_front_desk_detail_prefills_check_out_with_current_balance_due(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Checkout",
+            last_name="Default",
+            phone="+66800000176",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=4),
+        )
+        mark_checked_in(reservation)
+        checkout_prep = prepare_checkout(reservation.id)
+        user = make_staff_user("front_desk", "fd-checkout-default@example.com")
+    login_as(client, user)
+
+    response = client.get(f"/staff/front-desk/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert checkout_prep["checkout_payment_summary"]["balance_due"] == reservation.quoted_grand_total
+    assert checkout_prep["checkout_payment_summary"]["balance_due"] > Decimal("1000.00")
+    assert (
+        'name="collect_payment_amount" min="0" step="0.01" '
+        f'value="{checkout_prep["checkout_payment_summary"]["balance_due"]}"' in body
+    )
+    assert (
+        'name="collect_payment_amount" min="0" step="0.01" '
+        f'value="{checkout_prep["checkout_payment_summary"]["balance_due"]:,}"' not in body
+    )
+
+
 def test_check_in_route_updates_guest_identity_fields(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -697,7 +754,10 @@ def test_front_desk_detail_shows_check_in_blockers_before_submit(app_factory):
 
     assert response.status_code == 200
     assert "Resolve these items before completing check-in:" in body
-    assert "Deposit is still outstanding." in body
+    assert "Early check-in fee requires a decision." in body
+    assert (
+        f'name="collect_payment_amount" min="0" step="0.01" value="{reservation.deposit_required_amount}"' in body
+    )
 
 
 def test_check_in_route_returns_structured_field_errors_for_validation_issues(app_factory):
@@ -811,6 +871,7 @@ def test_check_in_route_uses_unexpected_failure_fallback_with_reference(app_fact
             "email": "unexpected@example.com",
             "payment_method": "front_desk",
             "collect_payment_amount": str(reservation.deposit_required_amount),
+            "apply_early_fee": "on",
             "back_url": "/staff/front-desk",
             "business_date": (date.today() + timedelta(days=1)).isoformat(),
         },
