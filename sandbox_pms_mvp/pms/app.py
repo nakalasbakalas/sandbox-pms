@@ -306,6 +306,7 @@ from .services.staff_reservations_service import (
     StayDateChangePayload,
     add_reservation_note,
     assign_room,
+    build_reservation_summary,
     cancel_reservation_workspace,
     change_stay_dates,
     get_reservation_detail,
@@ -3795,6 +3796,12 @@ def register_routes(app: Flask) -> None:
         require_permission("reservation.view")
         arrival_date = parse_request_date_arg("arrival_date", default=None)
         departure_date = parse_request_date_arg("departure_date", default=None)
+        sort_val = request.args.get("sort", "")
+        sort_dir = request.args.get("sort_dir", "asc")
+        if sort_val not in ("arrival", "departure", "status", "reference"):
+            sort_val = ""
+        if sort_dir not in ("asc", "desc"):
+            sort_dir = "asc"
         filters = ReservationWorkspaceFilters(
             q=(request.args.get("q") or "").strip(),
             status=request.args.get("status", ""),
@@ -3808,6 +3815,8 @@ def register_routes(app: Flask) -> None:
             include_closed=request.args.get("include_closed") == "1",
             page=parse_request_int_arg("page", default=1, minimum=1),
             per_page=25,
+            sort=sort_val,
+            sort_dir=sort_dir,
         )
         result = list_reservations(filters)
         return render_template(
@@ -4029,6 +4038,22 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_reservations"))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/panel")
+    def staff_reservation_panel(reservation_id):
+        """Mini HTML fragment for the reservations list drawer."""
+        require_permission("reservation.view")
+        reservation = db.session.get(Reservation, reservation_id)
+        if not reservation:
+            abort(404)
+        summary = build_reservation_summary(reservation)
+        return render_template(
+            "_res_list_drawer.html",
+            item=summary,
+            can_cancel=can("reservation.cancel") and summary["status"] in ("tentative", "confirmed"),
+            can_folio=can("folio.view"),
+            back_url=request.args.get("back", url_for("staff_reservations")),
+        )
 
     @app.route("/staff/reservations/<uuid:reservation_id>/notes", methods=["POST"])
     def staff_reservation_add_note(reservation_id):

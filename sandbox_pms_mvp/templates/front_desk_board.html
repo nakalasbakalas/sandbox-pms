@@ -43,6 +43,18 @@
     {% endif %}
   </div>
 
+  {# ── Board Legend ── #}
+  <div class="board-legend">
+    <strong style="font-size:11px; color:var(--pms-text-secondary); margin-right:4px;">Legend:</strong>
+    <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
+    <span class="board-legend-item"><span class="board-legend-swatch pending"></span>Pending/In-house</span>
+    <span class="board-legend-item"><span class="board-legend-swatch unallocated"></span>Unallocated</span>
+    <span class="board-legend-item"><span class="board-legend-swatch past"></span>Past</span>
+    <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
+    <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
+    <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
+  </div>
+
   {# ── Row 2: Filters + search + density + overflow ── #}
   <div class="planning-board-row2">
     <form class="planning-board-filters-inline" method="get">

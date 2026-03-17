@@ -1,0 +1,67 @@
+<div class="res-drawer-head">
+  <span class="res-drawer-code">{{ item.reservation_code }}</span>
+  <span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
+  {% if can_folio %}
+  <span class="status {{ 'paid' if item.deposit_state == 'paid' else item.deposit_state }}">{{ item.deposit_state.replace('_', ' ') }}</span>
+  {% endif %}
+  <button class="res-drawer-close" type="button" aria-label="Close">✕</button>
+</div>
+<div class="res-drawer-body">
+  <p class="res-drawer-guest">{{ item.guest_name }}</p>
+  <p class="res-drawer-sub">
+    {% if item.guest_phone %}{{ item.guest_phone }}{% endif %}
+    {% if item.guest_email %} · {{ item.guest_email }}{% endif %}
+  </p>
+
+  <div class="res-drawer-meta">
+    <div class="res-drawer-meta-item">
+      <small>Check-in</small>
+      <strong>{{ item.arrival_date }}</strong>
+    </div>
+    <div class="res-drawer-meta-item">
+      <small>Check-out</small>
+      <strong>{{ item.departure_date }}</strong>
+    </div>
+    <div class="res-drawer-meta-item">
+      <small>Nights</small>
+      <strong>{{ item.nights }}</strong>
+    </div>
+    <div class="res-drawer-meta-item">
+      <small>Room</small>
+      <strong>{{ item.room_type_code }}{% if item.assigned_room_number %} · #{{ item.assigned_room_number }}{% endif %}</strong>
+    </div>
+    <div class="res-drawer-meta-item">
+      <small>Source</small>
+      <strong>{{ item.source_channel.replace('_', ' ') }}</strong>
+    </div>
+    {% if can_folio %}
+    <div class="res-drawer-meta-item">
+      <small>Balance due</small>
+      <strong>{{ currency }} {{ item.balance_due|money }}</strong>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if item.duplicate_suspected or item.special_requests_present or item.needs_follow_up %}
+  <div class="res-drawer-flags">
+    {% if item.duplicate_suspected %}<span class="status cancelled">⚑ Duplicate</span>{% endif %}
+    {% if item.special_requests_present %}<span class="status pending">Special request</span>{% endif %}
+    {% if item.needs_follow_up %}<span class="status pending">Follow-up needed</span>{% endif %}
+  </div>
+  {% endif %}
+
+  <div class="res-drawer-actions">
+    <a class="button secondary" href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=back_url) }}">Full detail →</a>
+    {% if can_folio %}
+    <a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=back_url) }}">Cashier →</a>
+    {% endif %}
+    {% if can_cancel %}
+    <form method="post"
+          action="{{ url_for('staff_reservation_cancel', reservation_id=item.id) }}"
+          onsubmit="return confirm('Cancel reservation {{ item.reservation_code }}?')">
+      {{ csrf_input() }}
+      <button type="submit" class="button" style="background:#ffebee;color:#c62828;border-color:#ffcdd2;">Cancel reservation</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
