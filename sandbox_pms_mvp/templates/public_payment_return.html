@@ -10,9 +10,11 @@
       </div>
       <span class="status {{ payment_request.status }}">{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</span>
     </div>
-    <div class="metric-grid grid three">
+    <div class="metric-grid grid four">
       <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
       <article class="metric-card"><small>{{ t('payment_amount_label') }}</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
+      {% set request_kind_label = t('payment_request_deposit') if 'deposit' in (payment_request.request_type or '') else (t('payment_request_full_payment') if 'full_payment' in (payment_request.request_type or '') else t('payment_request_balance')) %}
+      <article class="metric-card"><small>{{ t('payment_request_label') }}</small><strong>{{ request_kind_label }}</strong></article>
       <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</strong></article>
     </div>
     <p>

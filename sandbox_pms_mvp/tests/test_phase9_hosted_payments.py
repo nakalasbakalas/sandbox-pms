@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -496,3 +497,89 @@ def test_postgres_webhook_processing_remains_idempotent_under_repeated_calls():
         process_payment_webhook("test_hosted", payload, headers)
 
         assert FolioCharge.query.filter_by(posting_key=f"provider_deposit:{request_row.id}").count() == 1
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not configured")
+def test_postgres_webhook_processing_remains_idempotent_under_concurrent_calls():
+    from pms.app import create_app
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": os.environ["TEST_DATABASE_URL"],
+            "AUTO_BOOTSTRAP_SCHEMA": False,
+            "AUTO_SEED_REFERENCE_DATA": False,
+            "INVENTORY_BOOTSTRAP_DAYS": 30,
+            "PAYMENT_PROVIDER": "test_hosted",
+            "PAYMENT_BASE_URL": "https://hosted.test",
+        }
+    )
+    with app.app_context():
+        db.session.remove()
+        with db.engine.begin() as connection:
+            connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
+            connection.execute(sa.text("CREATE SCHEMA public"))
+        upgrade(directory=str(MIGRATIONS_DIR))
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        reservation = create_public_reservation()
+        request_row = create_or_reuse_deposit_request(reservation.id, actor_user_id=None, send_email=False, language="en", source="test")
+        payload = __import__("json").dumps(
+            {
+                "event_id": "evt-pg-concurrent",
+                "payment_request_code": request_row.request_code,
+                "payment_request_id": str(request_row.id),
+                "status": "paid",
+                "provider_reference": request_row.provider_reference,
+                "provider_payment_reference": "pi_pg_concurrent",
+                "amount": str(request_row.amount),
+                "currency_code": "THB",
+            }
+        ).encode("utf-8")
+        headers = {"X-Test-Hosted-Signature": sign_test_hosted_webhook(payload)}
+        request_id = request_row.id
+
+    barrier = threading.Barrier(3)
+    results: list[dict[str, int] | tuple[str, str]] = []
+    lock = threading.Lock()
+
+    def worker():
+        worker_app = create_app(
+            {
+                "TESTING": True,
+                "SQLALCHEMY_DATABASE_URI": os.environ["TEST_DATABASE_URL"],
+                "AUTO_BOOTSTRAP_SCHEMA": False,
+                "AUTO_SEED_REFERENCE_DATA": False,
+                "INVENTORY_BOOTSTRAP_DAYS": 30,
+                "PAYMENT_PROVIDER": "test_hosted",
+                "PAYMENT_BASE_URL": "https://hosted.test",
+            }
+        )
+        with worker_app.app_context():
+            barrier.wait()
+            try:
+                outcome = process_payment_webhook("test_hosted", payload, headers)
+            except Exception as exc:  # noqa: BLE001
+                outcome = ("error", str(exc))
+            finally:
+                db.session.remove()
+            with lock:
+                results.append(outcome)
+
+    thread_one = threading.Thread(target=worker)
+    thread_two = threading.Thread(target=worker)
+    thread_one.start()
+    thread_two.start()
+    barrier.wait()
+    thread_one.join()
+    thread_two.join()
+
+    errors = [item for item in results if isinstance(item, tuple)]
+    payloads = [item for item in results if isinstance(item, dict)]
+    assert errors == []
+    assert len(payloads) == 2
+    assert sum(item["processed"] for item in payloads) == 1
+    assert sum(item["duplicates"] for item in payloads) == 1
+
+    with app.app_context():
+        assert PaymentEvent.query.filter_by(provider="test_hosted", provider_event_id="evt-pg-concurrent").count() == 1
+        assert FolioCharge.query.filter_by(posting_key=f"provider_deposit:{request_id}").count() == 1
