@@ -245,7 +245,9 @@ def complete_check_in(
     current_payment = payment_summary(reservation)
     deposit_shortfall = max(Decimal("0.00"), current_payment["deposit_required_amount"] - current_payment["deposit_received_amount"])
     if deposit_shortfall > Decimal("0.00") and not payload.override_payment:
-        raise ValueError("Deposit remains outstanding. Collect payment or request a manager override.")
+        raise ValueError(
+            f"Deposit is still outstanding by THB {deposit_shortfall.quantize(Decimal('0.01'))}. Collect payment or request a manager override before completing check-in."
+        )
     if deposit_shortfall > Decimal("0.00") and payload.override_payment and not _can_override(actor):
         raise ValueError("Only manager or admin can override deposit controls.")
 
@@ -845,7 +847,7 @@ def _resolve_check_in_room(reservation: Reservation, requested_room_id: uuid.UUI
     room_id = requested_room_id or reservation.assigned_room_id
     room = db.session.get(Room, room_id)
     if not room:
-        raise ValueError("A valid room assignment is required before check-in.")
+        raise ValueError("Room assignment is missing. Assign a room to continue.")
     if room.room_type_id != reservation.room_type_id:
         raise ValueError("Check-in room must stay within the booked room type.")
     if room.id != reservation.assigned_room_id:
@@ -865,21 +867,21 @@ def _resolve_check_in_room(reservation: Reservation, requested_room_id: uuid.UUI
 def _locked_room_readiness(reservation: Reservation, room: Room, business_date: date) -> dict:
     rows = _lock_inventory_rows(room.id, business_date, reservation.check_out_date)
     if len(rows) != (reservation.check_out_date - business_date).days:
-        return {"is_ready": False, "label": "missing_inventory", "reason": "Inventory is missing for this room and date."}
+        return {"is_ready": False, "label": "missing_inventory", "reason": "Room availability is missing for part of this stay. Review inventory for the assigned room before check-in."}
     first_row = rows[0]
     housekeeping_code = _housekeeping_code(first_row.housekeeping_status_id)
     if room_has_external_block(room.id, business_date, reservation.check_out_date, for_update=True):
-        return {"is_ready": False, "label": "calendar_conflict", "reason": "Assigned room is blocked by an external calendar sync."}
+        return {"is_ready": False, "label": "calendar_conflict", "reason": "Assigned room is blocked by an external calendar sync. Review the room assignment before check-in."}
     if getattr(first_row, "is_blocked", False):
-        return {"is_ready": False, "label": "blocked", "reason": first_row.blocked_reason or "Assigned room is blocked."}
+        return {"is_ready": False, "label": "blocked", "reason": first_row.blocked_reason or "Assigned room is blocked. Clear the room block or assign another room before check-in."}
     if housekeeping_code not in _ready_housekeeping_codes():
-        return {"is_ready": False, "label": "not_ready", "reason": f"Room is {housekeeping_code or 'not ready'} for arrival."}
+        return {"is_ready": False, "label": "not_ready", "reason": f"Room is marked {housekeeping_code or 'not ready'} for arrival. Update housekeeping to clean or inspected, or assign another ready room."}
     consuming_conflict = any(
         row.reservation_id not in {None, reservation.id} and row.availability_status in {"reserved", "occupied", "house_use"}
         for row in rows
     )
     if consuming_conflict:
-        return {"is_ready": False, "label": "conflict", "reason": "Assigned room conflicts with another active stay."}
+        return {"is_ready": False, "label": "conflict", "reason": "Assigned room conflicts with another active stay. Assign another room before check-in."}
     bad_rows = [
         row
         for row in rows
@@ -888,7 +890,7 @@ def _locked_room_readiness(reservation: Reservation, room: Room, business_date: 
         or getattr(row, "is_blocked", False)
     ]
     if bad_rows:
-        return {"is_ready": False, "label": "not_sellable", "reason": "Assigned room is not sellable for the full stay."}
+        return {"is_ready": False, "label": "not_sellable", "reason": "Assigned room is not sellable for the full stay. Review room status or assign another room before check-in."}
     return {"is_ready": True, "label": "ready", "reason": "Room is ready for arrival."}
 
 
@@ -914,10 +916,12 @@ def _update_guest_from_check_in(guest: Guest, payload: CheckInPayload, *, actor_
     last_name = payload.last_name.strip()
     phone = normalize_phone(payload.phone)
     email = normalize_email(payload.email)
-    if not first_name or not last_name:
-        raise ValueError("Guest first name and last name are required.")
+    if not first_name:
+        raise ValueError("Primary guest first name is required before check-in can be completed.")
+    if not last_name:
+        raise ValueError("Primary guest last name is required before check-in can be completed.")
     if not phone:
-        raise ValueError("A valid phone number is required.")
+        raise ValueError("Primary guest phone number is required before check-in can be completed.")
     guest.first_name = first_name
     guest.last_name = last_name
     guest.full_name = f"{first_name} {last_name}".strip()
@@ -1019,7 +1023,7 @@ def _resolve_fee_decision(
             metadata={"reservation_code": reservation.reservation_code, "decision": "waived", "reason": clean_optional(waiver_reason, limit=255)},
         )
         return
-    raise ValueError(f"{description} decision is required before continuing.")
+    raise ValueError(f"{description} decision is required before continuing. Apply the fee or record an approved waiver.")
 
 
 def _handoff_room_to_housekeeping(

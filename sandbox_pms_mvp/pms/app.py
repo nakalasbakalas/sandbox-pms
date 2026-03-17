@@ -5,7 +5,7 @@ import json
 import secrets
 import time
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from time import perf_counter
 from urllib.parse import urlparse
 from urllib.parse import urlencode
@@ -88,9 +88,10 @@ from .models import (
     UserSession,
     utc_now,
 )
+from .normalization import normalize_phone
 from .pricing import get_setting_value, quote_reservation
 from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
-from .security import configure_app_security, public_error_message, request_client_ip
+from .security import configure_app_security, current_request_id, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
@@ -657,6 +658,209 @@ def register_cli(app: Flask) -> None:
     def sync_ical_sources_command() -> None:
         result = sync_all_external_calendar_sources(actor_user_id=None)
         print(f"iCal sync result: {result}")
+
+
+CHECK_IN_FIELD_TARGETS = {
+    "first_name": "check-in-first-name",
+    "last_name": "check-in-last-name",
+    "phone": "check-in-phone",
+    "email": "check-in-email",
+    "room_id": "check-in-room-id",
+    "payment_method": "check-in-payment-method",
+    "collect_payment_amount": "check-in-collect-payment-amount",
+    "waiver_reason": "check-in-waiver-reason",
+    "override_payment": "check-in-override-payment",
+}
+CHECK_IN_SECTION_TARGETS = {
+    "identity": "check-in-identity-section",
+    "room": "check-in-room-section",
+    "payment": "check-in-payment-section",
+    "fees": "check-in-fee-section",
+}
+CHECK_IN_UNEXPECTED_FALLBACK = (
+    "Check-in could not be completed due to an unexpected system error. "
+    "No data was lost. Please retry. If the issue continues, contact support and provide reference: {reference}"
+)
+
+
+def _check_in_issue(message: str, *, field: str | None = None, section: str | None = None) -> dict[str, str]:
+    target_id = CHECK_IN_FIELD_TARGETS.get(field or "") or CHECK_IN_SECTION_TARGETS.get(section or "") or "check-in-errors"
+    issue = {"message": message, "target_id": target_id, "href": f"#{target_id}"}
+    if field:
+        issue["field"] = field
+    if section:
+        issue["section"] = section
+    return issue
+
+
+def _format_money_amount(value: Decimal) -> str:
+    return f"{value.quantize(Decimal('0.01')):,.2f}"
+
+
+def _check_in_form_defaults(detail: dict) -> dict[str, str]:
+    reservation = detail["reservation"]
+    guest = reservation.primary_guest
+    return {
+        "first_name": guest.first_name or "",
+        "last_name": guest.last_name or "",
+        "phone": guest.phone or "",
+        "email": guest.email or "",
+        "nationality": guest.nationality or "",
+        "preferred_language": guest.preferred_language or reservation.booking_language or "",
+        "id_document_type": guest.id_document_type or "",
+        "id_document_number": guest.id_document_number or "",
+        "room_id": str(reservation.assigned_room_id or ""),
+        "payment_method": "front_desk",
+        "collect_payment_amount": "0.00",
+        "arrival_note": "",
+        "notes_summary": guest.notes_summary or "",
+        "identity_verified": "on" if reservation.identity_verified_at else "",
+        "apply_early_fee": "",
+        "waive_early_fee": "",
+        "waiver_reason": "",
+        "override_payment": "",
+    }
+
+
+def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, object], list[dict[str, str]]]:
+    values = {
+        "first_name": (form_data.get("first_name") or ""),
+        "last_name": (form_data.get("last_name") or ""),
+        "phone": (form_data.get("phone") or ""),
+        "email": (form_data.get("email") or ""),
+        "nationality": (form_data.get("nationality") or ""),
+        "preferred_language": (form_data.get("preferred_language") or ""),
+        "id_document_type": (form_data.get("id_document_type") or ""),
+        "id_document_number": (form_data.get("id_document_number") or ""),
+        "room_id": (form_data.get("room_id") or "").strip(),
+        "payment_method": (form_data.get("payment_method") or "front_desk"),
+        "collect_payment_amount": (form_data.get("collect_payment_amount") or "0.00").strip() or "0.00",
+        "arrival_note": (form_data.get("arrival_note") or ""),
+        "notes_summary": (form_data.get("notes_summary") or ""),
+        "waiver_reason": (form_data.get("waiver_reason") or ""),
+        "identity_verified": "on" if form_data.get("identity_verified") == "on" else "",
+        "apply_early_fee": "on" if form_data.get("apply_early_fee") == "on" else "",
+        "waive_early_fee": "on" if form_data.get("waive_early_fee") == "on" else "",
+        "override_payment": "on" if form_data.get("override_payment") == "on" else "",
+    }
+    parsed: dict[str, object] = {
+        "room_uuid": None,
+        "collect_payment_amount": Decimal("0.00"),
+        "identity_verified": values["identity_verified"] == "on",
+        "apply_early_fee": values["apply_early_fee"] == "on",
+        "waive_early_fee": values["waive_early_fee"] == "on",
+        "override_payment": values["override_payment"] == "on",
+    }
+    issues: list[dict[str, str]] = []
+    if values["room_id"]:
+        try:
+            parsed["room_uuid"] = UUID(values["room_id"])
+        except ValueError:
+            issues.append(_check_in_issue("Room assignment is invalid. Re-select the room to continue.", field="room_id", section="room"))
+    try:
+        parsed["collect_payment_amount"] = Decimal(values["collect_payment_amount"])
+    except InvalidOperation:
+        issues.append(
+            _check_in_issue(
+                "Payment collected now must be a valid amount in THB.",
+                field="collect_payment_amount",
+                section="payment",
+            )
+        )
+    return values, parsed, issues
+
+
+def _check_in_blockers(detail: dict, values: dict[str, str], *, allow_override: bool) -> list[dict[str, str]]:
+    payment_summary = detail["payment_summary"]
+    blockers: list[dict[str, str]] = []
+    if not values["first_name"].strip():
+        blockers.append(_check_in_issue("Primary guest first name is required before check-in can be completed.", field="first_name", section="identity"))
+    if not values["last_name"].strip():
+        blockers.append(_check_in_issue("Primary guest last name is required before check-in can be completed.", field="last_name", section="identity"))
+    if not normalize_phone(values["phone"]):
+        blockers.append(_check_in_issue("Primary guest phone number is required before check-in can be completed.", field="phone", section="identity"))
+    if not values["room_id"].strip():
+        blockers.append(_check_in_issue("Room assignment is missing. Assign a room to continue.", field="room_id", section="room"))
+    if not detail["front_desk"]["room_ready"]:
+        blockers.append(_check_in_issue(detail["front_desk"]["room_readiness_reason"], field="room_id", section="room"))
+    try:
+        collect_payment_amount = Decimal(values["collect_payment_amount"] or "0.00")
+    except InvalidOperation:
+        collect_payment_amount = Decimal("0.00")
+    deposit_shortfall = max(
+        Decimal("0.00"),
+        Decimal(str(payment_summary["deposit_required_amount"])) - Decimal(str(payment_summary["deposit_received_amount"])) - collect_payment_amount,
+    )
+    if deposit_shortfall > Decimal("0.00") and values["override_payment"] != "on":
+        blockers.append(
+            _check_in_issue(
+                f"Deposit is still outstanding. Collect at least THB {_format_money_amount(deposit_shortfall)} or request a manager override.",
+                field="collect_payment_amount",
+                section="payment",
+            )
+        )
+    if deposit_shortfall > Decimal("0.00") and values["override_payment"] == "on" and not allow_override:
+        blockers.append(
+            _check_in_issue(
+                "Only a manager or admin can override a missing deposit. Collect payment or ask an authorized user to approve.",
+                field="override_payment",
+                section="payment",
+            )
+        )
+    if detail["front_desk"]["early_fee"]["applies"] and values["apply_early_fee"] != "on" and values["waive_early_fee"] != "on":
+        blockers.append(
+            _check_in_issue(
+                "Early check-in fee requires a decision. Apply the fee or record an approved waiver before continuing.",
+                section="fees",
+            )
+        )
+    return blockers
+
+
+def _build_check_in_form_state(
+    detail: dict,
+    *,
+    values: dict[str, str] | None = None,
+    errors: list[dict[str, str]] | None = None,
+    allow_override: bool = False,
+    unexpected_message: str | None = None,
+) -> dict[str, object]:
+    resolved_values = values or _check_in_form_defaults(detail)
+    summary_errors = list(errors or [])
+    field_errors = {issue["field"]: issue["message"] for issue in summary_errors if issue.get("field")}
+    blockers = _check_in_blockers(detail, resolved_values, allow_override=allow_override) if not summary_errors and not unexpected_message else []
+    return {
+        "values": resolved_values,
+        "summary_errors": summary_errors,
+        "field_errors": field_errors,
+        "blockers": blockers,
+        "unexpected_message": unexpected_message,
+    }
+
+
+def _unexpected_check_in_reference() -> str:
+    token = str(current_request_id() or secrets.token_hex(4)).upper()
+    raw = "".join(ch for ch in token if ch.isalnum()) or token
+    return f"CHKIN-{raw[:12]}"
+
+
+def _map_check_in_error(message: str) -> dict[str, str]:
+    lowered = message.lower()
+    if "first name" in lowered:
+        return _check_in_issue(message, field="first_name", section="identity")
+    if "last name" in lowered:
+        return _check_in_issue(message, field="last_name", section="identity")
+    if "phone number" in lowered or "phone" in lowered:
+        return _check_in_issue(message, field="phone", section="identity")
+    if "room assignment" in lowered or "assigned room" in lowered or "room is marked" in lowered:
+        return _check_in_issue(message, field="room_id", section="room")
+    if "deposit" in lowered:
+        return _check_in_issue(message, field="collect_payment_amount", section="payment")
+    if "waive this fee" in lowered:
+        return _check_in_issue(message, field="waiver_reason", section="fees")
+    if "fee" in lowered:
+        return _check_in_issue(message, section="fees")
+    return _check_in_issue(message)
 
 
 def register_routes(app: Flask) -> None:
@@ -3256,8 +3460,23 @@ def register_routes(app: Flask) -> None:
             return jsonify(ok=False, error=f"Cannot check in a {reservation.current_status} reservation.")
 
         try:
-            from pms.services.front_desk_service import complete_check_in
-            complete_check_in(reservation_id, actor_user_id=user.id)
+            complete_check_in(
+                reservation_id,
+                CheckInPayload(
+                    room_id=reservation.assigned_room_id,
+                    first_name=reservation.primary_guest.first_name or "",
+                    last_name=reservation.primary_guest.last_name or "",
+                    phone=reservation.primary_guest.phone or "",
+                    email=reservation.primary_guest.email,
+                    nationality=reservation.primary_guest.nationality,
+                    id_document_type=reservation.primary_guest.id_document_type,
+                    id_document_number=reservation.primary_guest.id_document_number,
+                    preferred_language=reservation.primary_guest.preferred_language or reservation.booking_language,
+                    notes_summary=reservation.primary_guest.notes_summary,
+                    identity_verified=reservation.identity_verified_at is not None,
+                ),
+                actor_user_id=user.id,
+            )
 
             write_activity_log(
                 actor_user_id=user.id,
@@ -3498,6 +3717,7 @@ def register_routes(app: Flask) -> None:
             can_folio=can("folio.view"),
             can_charge=can("folio.charge_add"),
             can_collect_payment=can("payment.create"),
+            check_in_form=_build_check_in_form_state(detail),
         )
 
     @app.route("/staff/front-desk/<uuid:reservation_id>/room", methods=["POST"])
@@ -3518,45 +3738,102 @@ def register_routes(app: Flask) -> None:
     @app.route("/staff/front-desk/<uuid:reservation_id>/check-in", methods=["POST"])
     def staff_front_desk_check_in(reservation_id):
         user = require_permission("reservation.check_in")
-        collect_payment_amount = Decimal(request.form.get("collect_payment_amount") or "0.00")
+        business_date_raw = (request.form.get("business_date") or "").strip()
+        try:
+            business_date = date.fromisoformat(business_date_raw) if business_date_raw else date.today()
+        except ValueError:
+            business_date = date.today()
+        back_url = safe_back_path(request.form.get("back_url"), url_for("staff_front_desk"))
+
+        def render_check_in_error(
+            *,
+            errors: list[dict[str, str]] | None = None,
+            unexpected_message: str | None = None,
+            status_code: int = 400,
+            values: dict[str, str] | None = None,
+        ):
+            detail = get_front_desk_detail(reservation_id, business_date=business_date)
+            checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
+            return (
+                render_template(
+                    "front_desk_detail.html",
+                    detail=detail,
+                    checkout_prep=checkout_prep,
+                    back_url=back_url,
+                    business_date=business_date,
+                    can_folio=can("folio.view"),
+                    can_charge=can("folio.charge_add"),
+                    can_collect_payment=can("payment.create"),
+                    check_in_form=_build_check_in_form_state(
+                        detail,
+                        values=values,
+                        errors=errors,
+                        allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
+                        unexpected_message=unexpected_message,
+                    ),
+                ),
+                status_code,
+            )
+
+        values, parsed, parse_errors = _parse_check_in_form_values(request.form)
+        collect_payment_amount = parsed["collect_payment_amount"] if isinstance(parsed["collect_payment_amount"], Decimal) else Decimal("0.00")
+        if parse_errors:
+            return render_check_in_error(errors=parse_errors, values=values)
         if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
             abort(403)
         if request.form.get("apply_early_fee") == "on" and not user.has_permission("folio.charge_add"):
             abort(403)
-        room_id = request.form.get("room_id")
-        if room_id:
+        if values["room_id"]:
             reservation = db.session.get(Reservation, reservation_id)
-            if reservation and str(reservation.assigned_room_id) != room_id and not user.has_permission("reservation.edit"):
+            if reservation and str(reservation.assigned_room_id) != values["room_id"] and not user.has_permission("reservation.edit"):
                 abort(403)
+        detail = get_front_desk_detail(reservation_id, business_date=business_date)
+        blockers = _check_in_blockers(
+            detail,
+            values,
+            allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
+        )
+        if blockers:
+            return render_check_in_error(errors=blockers, values=values)
         try:
             complete_check_in(
                 reservation_id,
                 CheckInPayload(
-                    room_id=UUID(room_id) if room_id else None,
-                    first_name=request.form.get("first_name", ""),
-                    last_name=request.form.get("last_name", ""),
-                    phone=request.form.get("phone", ""),
-                    email=request.form.get("email"),
-                    nationality=request.form.get("nationality"),
-                    id_document_type=request.form.get("id_document_type"),
-                    id_document_number=request.form.get("id_document_number"),
-                    preferred_language=request.form.get("preferred_language"),
-                    notes_summary=request.form.get("notes_summary"),
-                    identity_verified=request.form.get("identity_verified") == "on",
+                    room_id=parsed["room_uuid"],
+                    first_name=values["first_name"],
+                    last_name=values["last_name"],
+                    phone=values["phone"],
+                    email=values["email"],
+                    nationality=values["nationality"],
+                    id_document_type=values["id_document_type"],
+                    id_document_number=values["id_document_number"],
+                    preferred_language=values["preferred_language"],
+                    notes_summary=values["notes_summary"],
+                    identity_verified=bool(parsed["identity_verified"]),
                     collect_payment_amount=collect_payment_amount,
-                    payment_method=request.form.get("payment_method", "front_desk"),
-                    arrival_note=request.form.get("arrival_note"),
-                    apply_early_fee=request.form.get("apply_early_fee") == "on",
-                    waive_early_fee=request.form.get("waive_early_fee") == "on",
-                    waiver_reason=request.form.get("waiver_reason"),
-                    override_payment=request.form.get("override_payment") == "on",
+                    payment_method=values["payment_method"],
+                    arrival_note=values["arrival_note"],
+                    apply_early_fee=bool(parsed["apply_early_fee"]),
+                    waive_early_fee=bool(parsed["waive_early_fee"]),
+                    waiver_reason=values["waiver_reason"],
+                    override_payment=bool(parsed["override_payment"]),
                 ),
                 actor_user_id=user.id,
             )
             flash("Guest checked in.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_front_desk_detail", reservation_id=reservation_id, back=request.form.get("back_url"), date=request.form.get("business_date")))
+        except ValueError as exc:
+            db.session.rollback()
+            return render_check_in_error(errors=[_map_check_in_error(str(exc))], values=values)
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+            error_reference = _unexpected_check_in_reference()
+            current_app.logger.exception("check-in completion failed", extra={"check_in_reference": error_reference})
+            return render_check_in_error(
+                unexpected_message=CHECK_IN_UNEXPECTED_FALLBACK.format(reference=error_reference),
+                status_code=500,
+                values=values,
+            )
+        return redirect(url_for("staff_front_desk_detail", reservation_id=reservation_id, back=back_url, date=business_date.isoformat()))
 
     @app.route("/staff/front-desk/<uuid:reservation_id>/check-out", methods=["POST"])
     def staff_front_desk_check_out(reservation_id):
