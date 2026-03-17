@@ -1,27 +1,88 @@
+{# ── Section 1: Reservation header details ── #}
 <div class="panel-section">
   <h3>Reservation Details</h3>
   <dl>
     <dt>Code</dt>
-    <dd>{{ reservation.reservation_code }}</dd>
+    <dd><strong>{{ reservation.reservation_code }}</strong></dd>
     <dt>Guest</dt>
-    <dd>{{ reservation.guest_name }}</dd>
+    <dd>{{ reservation.primary_guest.full_name if reservation.primary_guest else 'Unknown' }}</dd>
     <dt>Room</dt>
-    <dd>{% if reservation.assigned_room %}Room {{ reservation.assigned_room.room_number }}{% else %}<em>Unallocated</em>{% endif %}</dd>
+    <dd>{% if reservation.assigned_room %}Room {{ reservation.assigned_room.room_number }}{% else %}<em class="panel-unallocated">Unallocated</em>{% endif %}</dd>
+    <dt>Room type</dt>
+    <dd>{{ reservation.room_type.code }} — {{ reservation.room_type.name }}</dd>
     <dt>Check-in</dt>
     <dd>{{ reservation.check_in_date.strftime('%a, %b %d') }}</dd>
     <dt>Check-out</dt>
     <dd>{{ reservation.check_out_date.strftime('%a, %b %d') }}</dd>
+    <dt>Nights</dt>
+    <dd>{{ nights }}</dd>
     <dt>Status</dt>
-    <dd><span class="badge {{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ')|title }}</span></dd>
+    <dd><span class="status {{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ')|title }}</span></dd>
+    <dt>Source</dt>
+    <dd>{{ reservation.source_channel.replace('_', ' ')|title }}</dd>
+    <dt>Occupancy</dt>
+    <dd>{{ reservation.adults }} adult{{ 's' if reservation.adults != 1 else '' }}{% if reservation.children %}, {{ reservation.children }} child{{ 'ren' if reservation.children != 1 else '' }}{% endif %}{% if reservation.extra_guests %} (+{{ reservation.extra_guests }}){% endif %}</dd>
   </dl>
 </div>
 
+{# ── Section 2: Pricing summary ── #}
+<div class="panel-section">
+  <h3>Pricing</h3>
+  <dl>
+    <dt>Room total</dt>
+    <dd>{{ currency }} {{ "%.2f"|format(reservation.quoted_room_total or 0) }}</dd>
+    <dt>Tax</dt>
+    <dd>{{ currency }} {{ "%.2f"|format(reservation.quoted_tax_total or 0) }}</dd>
+    {% if reservation.quoted_extras_total and reservation.quoted_extras_total > 0 %}
+    <dt>Extras</dt>
+    <dd>{{ currency }} {{ "%.2f"|format(reservation.quoted_extras_total) }}</dd>
+    {% endif %}
+    <dt>Grand total</dt>
+    <dd><strong>{{ currency }} {{ "%.2f"|format(reservation.quoted_grand_total or 0) }}</strong></dd>
+    <dt>Deposit received</dt>
+    <dd>{{ currency }} {{ "%.2f"|format(reservation.deposit_received_amount or 0) }}</dd>
+    <dt>Balance due</dt>
+    <dd><span class="status {{ payment_state }}">{{ currency }} {{ "%.2f"|format(balance) }}</span></dd>
+  </dl>
+</div>
+
+{# ── Section 3: Special requests ── #}
+{% if reservation.special_requests %}
+<div class="panel-section">
+  <h3>Special Requests</h3>
+  <p class="panel-note important">{{ reservation.special_requests }}</p>
+</div>
+{% endif %}
+
+{# ── Section 4: Internal notes ── #}
+{% if reservation.internal_notes %}
+<div class="panel-section">
+  <h3>Internal Notes</h3>
+  <p class="panel-note">{{ reservation.internal_notes }}</p>
+</div>
+{% endif %}
+
+{# ── Section 5: Recent notes ── #}
+{% if recent_notes %}
+<div class="panel-section">
+  <h3>Notes</h3>
+  {% for note in recent_notes %}
+  <div class="panel-note {% if note.is_important %}important{% endif %}">
+    <p>{{ note.note_text }}</p>
+    <small class="muted">{{ note.created_at.strftime('%b %d, %H:%M') if note.created_at else '' }}</small>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Section 6: Unallocated warning ── #}
 {% if not reservation.assigned_room %}
 <div class="panel-alert warning">
   <strong>Unallocated</strong> — Choose a room to complete this reservation
 </div>
 {% endif %}
 
+{# ── Section 7: Room assignment form ── #}
 {% if can_reassign %}
 <div class="panel-section">
   <h3>Room Assignment</h3>
@@ -42,6 +103,7 @@
 </div>
 {% endif %}
 
+{# ── Section 8: Date change form ── #}
 {% if can_change_dates %}
 <div class="panel-section">
   <h3>Change Dates</h3>
@@ -58,6 +120,7 @@
 </div>
 {% endif %}
 
+{# ── Section 9: Quick actions ── #}
 <div class="panel-actions">
   {% if can_check_in %}
   <button class="button secondary full-width" data-action="check-in" data-reservation-id="{{ reservation.id }}">Check In</button>
@@ -65,4 +128,12 @@
   {% if can_check_out %}
   <button class="button secondary full-width" data-action="check-out" data-reservation-id="{{ reservation.id }}">Check Out</button>
   {% endif %}
+  {% if can_cancel %}
+  <a class="button secondary full-width panel-btn-danger" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">Cancel Reservation</a>
+  {% endif %}
+  {% if can_no_show %}
+  <a class="button secondary full-width panel-btn-warning" href="{{ url_for('staff_front_desk_detail', reservation_id=reservation.id) }}">Mark No-Show</a>
+  {% endif %}
+  <a class="button secondary full-width" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">Full Detail Page</a>
+  <a class="button secondary full-width" href="{{ url_for('staff_front_desk_detail', reservation_id=reservation.id) }}">Front Desk Detail</a>
 </div>

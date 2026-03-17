@@ -383,14 +383,28 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             }
             for room in rooms
         ],
-        "counts": {
-            "unallocated": unallocated_count,
-            "closed_or_blocked": len(operational_room_ids),
-            "arrivals_today": _count_arrivals(today, filters.room_type_id),
-            "departures_today": _count_departures(today, filters.room_type_id),
-            "occupied": sum(1 for row in room_rows if row["is_occupied"]),
-            "ready_rooms": sum(1 for row in room_rows if row["is_room_ready"] and not row["is_occupied"]),
-        },
+        "counts": _compute_extended_counts(
+            base_counts={
+                "unallocated": unallocated_count,
+                "closed_or_blocked": len(operational_room_ids),
+                "arrivals_today": _count_arrivals(today, filters.room_type_id),
+                "departures_today": _count_departures(today, filters.room_type_id),
+                "occupied": sum(1 for row in room_rows if row["is_occupied"]),
+                "ready_rooms": sum(1 for row in room_rows if row["is_room_ready"] and not row["is_occupied"]),
+            },
+            room_rows=room_rows,
+            today_inv=_today_inv,
+            hk_code_fn=_hk_code,
+            room_ids=room_ids,
+            room_type_meta=room_type_meta,
+            today=today,
+            room_type_id_filter=filters.room_type_id,
+        ),
+        "alerts": _compute_operational_alerts(
+            room_rows=room_rows,
+            today=today,
+            room_type_id_filter=filters.room_type_id,
+        ),
         "today_offset": today_offset,
         "todayOffset": today_offset,
         "current_window_label": f"{window_start.strftime('%d %b %Y')} - {(window_end - timedelta(days=1)).strftime('%d %b %Y')}",
@@ -1084,6 +1098,146 @@ def _serialize_value(value: Any) -> Any:
     if isinstance(value, list):
         return [_serialize_value(item) for item in value]
     return value
+
+
+def _compute_extended_counts(
+    *,
+    base_counts: dict[str, Any],
+    room_rows: list[dict[str, Any]],
+    today_inv: dict[uuid.UUID, InventoryDay],
+    hk_code_fn,
+    room_ids: list[uuid.UUID],
+    room_type_meta: dict[uuid.UUID, dict[str, str]],
+    today: date,
+    room_type_id_filter: str,
+) -> dict[str, Any]:
+    """Extend the base board counts with HK breakdown, availability by type, and payment alerts."""
+    counts = dict(base_counts)
+    counts["total_rooms"] = len(room_ids)
+    counts["stayovers"] = sum(
+        1 for row in room_rows
+        if row.get("is_occupied") and not row.get("has_departure_today")
+    )
+
+    hk_dirty = 0
+    hk_clean = 0
+    hk_inspected = 0
+    ooo = 0
+    oos = 0
+    room_id_set = set(room_ids)
+    for inv in today_inv.values():
+        if inv.room_id not in room_id_set:
+            continue
+        code = hk_code_fn(inv.housekeeping_status_id)
+        if code in ("dirty", "occupied_dirty"):
+            hk_dirty += 1
+        elif code in ("clean", "occupied_clean"):
+            hk_clean += 1
+        elif code == "inspected":
+            hk_inspected += 1
+        if inv.availability_status == "out_of_order":
+            ooo += 1
+        elif inv.availability_status == "out_of_service":
+            oos += 1
+    counts["hk_dirty"] = hk_dirty
+    counts["hk_clean"] = hk_clean
+    counts["hk_inspected"] = hk_inspected
+    counts["out_of_order"] = ooo
+    counts["out_of_service"] = oos
+
+    avail_by_type: dict[str, int] = {}
+    for row in room_rows:
+        if row.get("is_unallocated"):
+            continue
+        code = row.get("room_type_code", "")
+        if not code:
+            continue
+        if code not in avail_by_type:
+            avail_by_type[code] = 0
+        is_available = (
+            not row.get("is_occupied")
+            and not row.get("is_blocked")
+            and not row.get("is_maintenance")
+        )
+        if is_available:
+            avail_by_type[code] += 1
+    counts["available_by_type"] = avail_by_type
+
+    unpaid_q = Reservation.query.filter(
+        Reservation.check_in_date == today,
+        Reservation.current_status.in_(["tentative", "confirmed"]),
+        Reservation.deposit_required_amount > 0,
+        Reservation.deposit_received_amount < Reservation.deposit_required_amount,
+    )
+    if room_type_id_filter:
+        unpaid_q = unpaid_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    counts["unpaid_arrivals"] = unpaid_q.count()
+
+    unassigned_q = Reservation.query.filter(
+        Reservation.check_in_date == today,
+        Reservation.current_status.in_(["tentative", "confirmed"]),
+        Reservation.assigned_room_id.is_(None),
+    )
+    if room_type_id_filter:
+        unassigned_q = unassigned_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    counts["unassigned_arrivals_today"] = unassigned_q.count()
+
+    return counts
+
+
+def _compute_operational_alerts(
+    *,
+    room_rows: list[dict[str, Any]],
+    today: date,
+    room_type_id_filter: str,
+) -> list[dict[str, str]]:
+    """Compute actionable alert messages for the board surface."""
+    alerts: list[dict[str, str]] = []
+
+    unpaid_q = Reservation.query.filter(
+        Reservation.check_in_date == today,
+        Reservation.current_status.in_(["tentative", "confirmed"]),
+        Reservation.deposit_required_amount > 0,
+        Reservation.deposit_received_amount < Reservation.deposit_required_amount,
+    )
+    if room_type_id_filter:
+        unpaid_q = unpaid_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = unpaid_q.count()
+    if n > 0:
+        alerts.append({"message": f"{n} arrival{'s' if n != 1 else ''} with unpaid deposit", "tone": "danger"})
+
+    unassigned_q = Reservation.query.filter(
+        Reservation.check_in_date == today,
+        Reservation.current_status.in_(["tentative", "confirmed"]),
+        Reservation.assigned_room_id.is_(None),
+    )
+    if room_type_id_filter:
+        unassigned_q = unassigned_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = unassigned_q.count()
+    if n > 0:
+        alerts.append({"message": f"{n} today's arrival{'s' if n != 1 else ''} unassigned", "tone": "warning"})
+
+    turnaround_dirty = sum(
+        1 for row in room_rows
+        if row.get("has_departure_today") and row.get("has_arrival_today")
+        and row.get("housekeeping_status") in ("dirty", "occupied_dirty")
+    )
+    if turnaround_dirty > 0:
+        alerts.append({"message": f"{turnaround_dirty} turnaround room{'s' if turnaround_dirty != 1 else ''} still dirty", "tone": "danger"})
+
+    specials_q = Reservation.query.filter(
+        Reservation.check_in_date == today,
+        Reservation.current_status.in_(["tentative", "confirmed"]),
+        Reservation.special_requests.isnot(None),
+        Reservation.special_requests != "",
+    )
+    if room_type_id_filter:
+        specials_q = specials_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = specials_q.count()
+    if n > 0:
+        alerts.append({"message": f"{n} arrival{'s' if n != 1 else ''} with special requests", "tone": "info"})
+
+    return alerts
 
 
 def _count_arrivals(target_date: date, room_type_id: str) -> int:
