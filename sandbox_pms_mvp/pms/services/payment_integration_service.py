@@ -43,6 +43,11 @@ from .admin_service import policy_text, render_notification_template
 from .cashier_service import PaymentPostingPayload, record_payment
 
 
+MAX_PUBLIC_PAYMENT_TOKEN_RETRIES = 10
+DEPOSIT_HOSTED_REQUEST_TYPES = ("deposit_hosted",)
+BALANCE_HOSTED_REQUEST_TYPES = ("stay_balance_hosted", "full_payment_hosted")
+
+
 def as_utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -348,7 +353,7 @@ def create_or_reuse_payment_request(
     now = utc_now()
     request_group = [request_type]
     if request_kind in {"balance", "full_payment"}:
-        request_group = ["stay_balance_hosted", "full_payment_hosted"]
+        request_group = list(BALANCE_HOSTED_REQUEST_TYPES)
     payment_request = (
         db.session.execute(
             sa.select(PaymentRequest)
@@ -1137,11 +1142,12 @@ def _resolve_payment_request_type_and_amount(reservation: Reservation, request_k
 def _ensure_public_payment_token(reservation: Reservation) -> None:
     if reservation.public_confirmation_token:
         return
-    while True:
+    for _ in range(MAX_PUBLIC_PAYMENT_TOKEN_RETRIES):
         token = secrets.token_urlsafe(24)
         if not Reservation.query.filter_by(public_confirmation_token=token).first():
             reservation.public_confirmation_token = token
             return
+    raise ValueError("Could not allocate a unique public payment token.")
 
 
 def normalize_provider_status(value: str) -> str:

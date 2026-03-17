@@ -233,6 +233,7 @@ from .services.ical_service import (
     sync_external_calendar_source,
 )
 from .services.payment_integration_service import (
+    DEPOSIT_HOSTED_REQUEST_TYPES,
     create_or_reuse_payment_request,
     handle_public_payment_start,
     load_public_payment_return,
@@ -1134,7 +1135,7 @@ def register_routes(app: Flask) -> None:
         payment_request = (
             PaymentRequest.query.filter(
                 PaymentRequest.reservation_id == reservation.id,
-                PaymentRequest.request_type.like("deposit%"),
+                PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
             )
             .order_by(PaymentRequest.created_at.desc())
             .first()

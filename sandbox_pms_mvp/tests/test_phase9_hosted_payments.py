@@ -15,6 +15,7 @@ from pms.models import EmailOutbox, FolioCharge, PaymentEvent, PaymentRequest, R
 from pms.seeds import seed_all
 from pms.services.cashier_service import PaymentPostingPayload, folio_summary, record_payment
 from pms.services.payment_integration_service import (
+    BALANCE_HOSTED_REQUEST_TYPES,
     active_payment_provider_name,
     create_or_reuse_payment_request,
     create_or_reuse_deposit_request,
@@ -179,7 +180,7 @@ def test_balance_request_reuses_pending_row_when_balance_changes(app_factory):
         assert refreshed_request.amount < first_amount
         assert PaymentRequest.query.filter(
             PaymentRequest.reservation_id == reservation.id,
-            PaymentRequest.request_type.in_(("stay_balance_hosted", "full_payment_hosted")),
+            PaymentRequest.request_type.in_(BALANCE_HOSTED_REQUEST_TYPES),
             PaymentRequest.status == "pending",
         ).count() == 1
 
