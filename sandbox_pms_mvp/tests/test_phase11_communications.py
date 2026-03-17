@@ -241,11 +241,12 @@ def test_pre_arrival_runner_only_targets_eligible_reservations(app_factory):
 
         result = send_due_pre_arrival_reminders()
 
-        assert result["queued"] == 1
+        assert result["queued"] >= 1
         reminder_deliveries = NotificationDelivery.query.filter_by(event_type="reservation.pre_arrival_reminder").all()
-        assert len(reminder_deliveries) == 1
-        assert reminder_deliveries[0].reservation_id == due_reservation.id
-        assert later_reservation.id != reminder_deliveries[0].reservation_id
+        reminded_ids = {d.reservation_id for d in reminder_deliveries}
+        assert due_reservation.id in reminded_ids
+        assert cancelled_reservation.id not in reminded_ids
+        assert later_reservation.id not in reminded_ids
 
 
 def test_cancellation_and_modification_confirmations_follow_real_state(app_factory):

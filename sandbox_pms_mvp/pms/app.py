@@ -88,7 +88,7 @@ from .models import (
     UserSession,
     utc_now,
 )
-from .pricing import get_setting_value
+from .pricing import get_setting_value, quote_reservation
 from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
 from .security import configure_app_security, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
@@ -3359,6 +3359,12 @@ def register_routes(app: Flask) -> None:
             "can_check_out": can_check_out,
             "available_rooms": available_rooms,
             "csrf_token": ensure_csrf_token(),
+            "nights": (reservation.check_out_date - reservation.check_in_date).days,
+            "balance": max(Decimal(0), Decimal(str(reservation.quoted_grand_total or 0)) - Decimal(str(reservation.deposit_received_amount or 0))),
+            "payment_state": "paid" if Decimal(str(reservation.deposit_received_amount or 0)) >= Decimal(str(reservation.quoted_grand_total or 0)) and Decimal(str(reservation.quoted_grand_total or 0)) > 0 else ("partial" if Decimal(str(reservation.deposit_received_amount or 0)) > 0 else "unpaid"),
+            "recent_notes": list(reservation.notes[:5]) if reservation.notes else [],
+            "can_cancel": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"],
+            "can_no_show": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today(),
         }
 
         return render_template("_panel_reservation_details.html", **context)
@@ -3948,6 +3954,48 @@ def register_routes(app: Flask) -> None:
             booking_sources=BOOKING_SOURCE_CHANNELS,
             staff_status_options=["confirmed", "tentative", "house_use"],
         )
+
+    @app.route("/staff/reservations/rate-preview")
+    def staff_reservation_rate_preview():
+        """Lightweight JSON endpoint for inline rate preview on the reservation form."""
+        require_permission("reservation.create")
+        try:
+            room_type_id = UUID(request.args["room_type_id"])
+            check_in = date.fromisoformat(request.args["check_in"])
+            check_out = date.fromisoformat(request.args["check_out"])
+            adults = int(request.args.get("adults", 2))
+            children = int(request.args.get("children", 0))
+            extra_guests = int(request.args.get("extra_guests", 0))
+        except (KeyError, ValueError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        if check_out <= check_in:
+            return jsonify({"ok": False, "error": "Check-out must be after check-in"}), 400
+
+        room_type = db.session.get(RoomType, room_type_id)
+        if not room_type or not room_type.is_active:
+            return jsonify({"ok": False, "error": "Invalid room type"}), 400
+
+        quote = quote_reservation(
+            room_type=room_type,
+            check_in_date=check_in,
+            check_out_date=check_out,
+            adults=adults + extra_guests,
+            children=children,
+        )
+        nights = (check_out - check_in).days
+
+        return jsonify({
+            "ok": True,
+            "nights": nights,
+            "room_total": float(quote.room_total),
+            "tax_total": float(quote.tax_total),
+            "grand_total": float(quote.grand_total),
+            "nightly_rates": [
+                {"date": d.isoformat(), "rate": float(r)}
+                for d, r in quote.nightly_rates
+            ],
+        })
 
     @app.route("/staff/reservations/<uuid:reservation_id>")
     def staff_reservation_detail(reservation_id):

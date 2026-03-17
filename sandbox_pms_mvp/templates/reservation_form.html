@@ -13,7 +13,7 @@
     </div>
   </div>
 
-  <form method="post" class="stack-form">
+  <form method="post" class="stack-form" id="reservation-form">
     {{ csrf_input() }}
     <input type="hidden" name="back" value="{{ back_url }}">
 
@@ -67,6 +67,18 @@
       <label><span>Special requests</span><input type="text" name="special_requests" value="{{ initial.special_requests or '' }}" placeholder="Late arrival / airport transfer / joining room"></label>
     </div>
 
+    {# ── Rate preview ── #}
+    <div id="rate-preview" class="rate-preview-box" hidden>
+      <h3>Rate Preview</h3>
+      <dl>
+        <dt>Nights</dt><dd id="rp-nights">-</dd>
+        <dt>Room total (net)</dt><dd id="rp-room-total">-</dd>
+        <dt>Tax (VAT)</dt><dd id="rp-tax">-</dd>
+        <dt>Grand total</dt><dd id="rp-grand-total"><strong>-</strong></dd>
+      </dl>
+      <small class="muted" id="rp-nightly"></small>
+    </div>
+
     <label><span>Internal notes</span><textarea name="internal_notes" rows="4">{{ initial.internal_notes or '' }}</textarea></label>
 
     <div class="actions">
@@ -75,4 +87,75 @@
     </div>
   </form>
 </section>
+{% endblock %}
+{% block extra_scripts %}
+<script>
+(function() {
+  var form = document.getElementById('reservation-form');
+  var preview = document.getElementById('rate-preview');
+  if (!form || !preview) return;
+
+  var fields = {
+    roomType: form.querySelector('[name="room_type_id"]'),
+    checkIn: form.querySelector('[name="check_in"]'),
+    checkOut: form.querySelector('[name="check_out"]'),
+    adults: form.querySelector('[name="adults"]'),
+    children: form.querySelector('[name="children"]'),
+    extraGuests: form.querySelector('[name="extra_guests"]')
+  };
+
+  var debounceTimer = null;
+
+  function fmt(n) {
+    return Number(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+
+  function fetchPreview() {
+    var roomTypeId = fields.roomType.value;
+    var checkIn = fields.checkIn.value;
+    var checkOut = fields.checkOut.value;
+    if (!roomTypeId || !checkIn || !checkOut) {
+      preview.hidden = true;
+      return;
+    }
+    var params = new URLSearchParams({
+      room_type_id: roomTypeId,
+      check_in: checkIn,
+      check_out: checkOut,
+      adults: fields.adults.value || '2',
+      children: fields.children.value || '0',
+      extra_guests: fields.extraGuests.value || '0'
+    });
+    fetch('/staff/reservations/rate-preview?' + params.toString())
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.ok) { preview.hidden = true; return; }
+        document.getElementById('rp-nights').textContent = data.nights;
+        document.getElementById('rp-room-total').textContent = fmt(data.room_total);
+        document.getElementById('rp-tax').textContent = fmt(data.tax_total);
+        document.getElementById('rp-grand-total').innerHTML = '<strong>' + fmt(data.grand_total) + '</strong>';
+        var nightlyEl = document.getElementById('rp-nightly');
+        if (data.nightly_rates && data.nightly_rates.length <= 7) {
+          nightlyEl.textContent = data.nightly_rates.map(function(nr) { return nr.date + ': ' + fmt(nr.rate); }).join(' | ');
+        } else {
+          nightlyEl.textContent = '';
+        }
+        preview.hidden = false;
+      })
+      .catch(function() { preview.hidden = true; });
+  }
+
+  Object.keys(fields).forEach(function(key) {
+    if (fields[key]) {
+      fields[key].addEventListener('change', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(fetchPreview, 300);
+      });
+    }
+  });
+
+  // Trigger on load if fields are pre-filled
+  setTimeout(fetchPreview, 500);
+})();
+</script>
 {% endblock %}

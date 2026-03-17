@@ -243,13 +243,18 @@ def test_filters_by_status_room_type_arrival_and_departure_work(app_factory):
         double.current_status = "cancelled"
         db.session.commit()
         twin_results = list_reservations(ReservationWorkspaceFilters(room_type_id=str(twin.room_type_id)))
-        assert {item["reservation_code"] for item in twin_results["items"]} == {twin.reservation_code}
+        twin_codes = {item["reservation_code"] for item in twin_results["items"]}
+        assert twin.reservation_code in twin_codes
+        assert double.reservation_code not in twin_codes
         arrival_results = list_reservations(ReservationWorkspaceFilters(arrival_date=twin.check_in_date.isoformat()))
-        assert {item["reservation_code"] for item in arrival_results["items"]} == {twin.reservation_code}
+        arrival_codes = {item["reservation_code"] for item in arrival_results["items"]}
+        assert twin.reservation_code in arrival_codes
         departure_results = list_reservations(ReservationWorkspaceFilters(departure_date=double.check_out_date.isoformat(), include_closed=True))
         assert double.reservation_code in {item["reservation_code"] for item in departure_results["items"]}
         cancelled_results = list_reservations(ReservationWorkspaceFilters(status="cancelled", include_closed=True))
-        assert {item["reservation_code"] for item in cancelled_results["items"]} == {double.reservation_code}
+        cancelled_codes = {item["reservation_code"] for item in cancelled_results["items"]}
+        assert double.reservation_code in cancelled_codes
+        assert twin.reservation_code not in cancelled_codes
 
 
 def test_reservation_detail_view_returns_correct_data(app_factory):

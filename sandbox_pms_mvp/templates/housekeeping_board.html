@@ -43,7 +43,7 @@
 
 {# ── RESULTS BAR ────────────────────────────── #}
 <div class="hk-results-bar">
-  <span><strong>{{ board.items | length }}</strong> rooms shown{% if filters.floor or filters.status or filters.priority or filters.room_type_id or filters.arrival_today or filters.departure_today %} — filtered{% endif %}</span>
+  <span><strong>{{ board["items"] | length }}</strong> rooms shown{% if filters.floor or filters.status or filters.priority or filters.room_type_id or filters.arrival_today or filters.departure_today %} — filtered{% endif %}</span>
 </div>
 
 {# ── TODAY TABLE SECTION ──────────────────────── #}
@@ -139,7 +139,7 @@
 </div>
 
 {# ── TOMORROW TABLE SECTION (collapsible) ────── #}
-<details class="hk-table-section" {% if tomorrow_board.items %}open{% endif %}>
+<details class="hk-table-section" {% if tomorrow_board["items"] %}open{% endif %}>
   <summary class="hk-section-head">
     {% if board.business_date == today_date %}Tomorrow{% else %}{{ tomorrow_board.business_date.strftime('%a %d %b') }}{% endif %}
     <span class="hk-counts">{{ tomorrow_board.counts.dirty }} dirty | {{ tomorrow_board.counts.clean }} clean | {{ tomorrow_board.counts.inspected }} insp</span>

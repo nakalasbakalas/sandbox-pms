@@ -1,12 +1,30 @@
 <div class="planning-board-status-strip" role="region" aria-label="Planning board live status">
-  <span class="pbs-item"><small>Window</small><strong>{{ board.current_window_label }}</strong></span>
+  <span class="pbs-item"><small>Rooms</small><strong>{{ board.counts.total_rooms }}</strong></span>
   <span class="pbs-item"><small>Arrivals</small><strong>{{ board.counts.arrivals_today }}</strong></span>
   <span class="pbs-item"><small>Departures</small><strong>{{ board.counts.departures_today }}</strong></span>
   <span class="pbs-item"><small>In-house</small><strong>{{ board.counts.occupied }}</strong></span>
+  <span class="pbs-item"><small>Stayovers</small><strong>{{ board.counts.stayovers }}</strong></span>
   <span class="pbs-item"><small>Ready</small><strong>{{ board.counts.ready_rooms }}</strong></span>
   <span class="pbs-item"><small>Unallocated</small><strong>{{ board.counts.unallocated }}</strong></span>
-  <span class="pbs-item"><small>Blocked</small><strong>{{ board.counts.closed_or_blocked }}</strong></span>
+  <span class="pbs-item"><small>OOO/Blocked</small><strong>{{ board.counts.out_of_order + board.counts.closed_or_blocked }}</strong></span>
 </div>
+
+<div class="planning-board-avail-strip" role="region" aria-label="Room availability by type">
+  {% for code, avail in board.counts.available_by_type.items() %}
+  <span class="pbs-avail-item"><small>{{ code }}</small><strong>{{ avail }}</strong><span class="pbs-avail-label">avail</span></span>
+  {% endfor %}
+  <span class="pbs-avail-item tone-hk"><small>Dirty</small><strong>{{ board.counts.hk_dirty }}</strong></span>
+  <span class="pbs-avail-item tone-hk"><small>Clean</small><strong>{{ board.counts.hk_clean }}</strong></span>
+  <span class="pbs-avail-item tone-hk"><small>Inspected</small><strong>{{ board.counts.hk_inspected }}</strong></span>
+</div>
+
+{% if board.alerts %}
+<div class="planning-board-alerts" role="alert">
+  {% for alert in board.alerts %}
+  <span class="pbs-alert tone-{{ alert.tone }}">{{ alert.message }}</span>
+  {% endfor %}
+</div>
+{% endif %}
 
 {% if board.groups %}
 <section class="planning-board-desktop">
