@@ -6,13 +6,11 @@ staff verification, readiness computation, and link delivery hooks.
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from flask import current_app
@@ -27,6 +25,7 @@ from ..models import (
     ReservationDocument,
     utc_now,
 )
+from .storage import StorageBackend, get_storage_backend  # noqa: F401 re-exported
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -96,15 +95,6 @@ def _expiry_from_now(days: int | None = None) -> datetime:
 # ---------------------------------------------------------------------------
 
 
-def _upload_dir() -> Path:
-    base = current_app.config.get("UPLOAD_DIR") or os.path.join(
-        current_app.instance_path, "uploads", "documents"
-    )
-    p = Path(base)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-
 def _sanitize_filename(name: str) -> str:
     name = name.strip()
     name = _SAFE_FILENAME_RE.sub("_", name)
@@ -116,6 +106,8 @@ def _validate_upload(file_storage) -> tuple[str, str, int]:
 
     Raises ``ValueError`` for invalid uploads.
     """
+    import os
+
     if file_storage is None or file_storage.filename == "":
         raise ValueError("No file provided.")
 
@@ -128,7 +120,7 @@ def _validate_upload(file_storage) -> tuple[str, str, int]:
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise ValueError(f"Content type '{content_type}' is not allowed.")
 
-    # Read into memory to check size — for production, stream to storage.
+    # Read into memory to check size; storage backend may stream differently.
     data = file_storage.read()
     size = len(data)
     file_storage.seek(0)
@@ -140,14 +132,27 @@ def _validate_upload(file_storage) -> tuple[str, str, int]:
     return content_type, ext, size
 
 
-def _save_file(file_storage, reservation_id: uuid.UUID, ext: str) -> str:
-    """Persist file to local storage and return the storage key."""
-    res_dir = _upload_dir() / str(reservation_id)
-    res_dir.mkdir(parents=True, exist_ok=True)
-    unique_name = f"{uuid.uuid4().hex}{ext}"
-    dest = res_dir / unique_name
-    file_storage.save(str(dest))
-    return f"{reservation_id}/{unique_name}"
+def read_document_bytes(doc: ReservationDocument) -> bytes:
+    """Read and return the raw bytes for a stored document.
+
+    Delegates to the configured ``StorageBackend``; raises ``FileNotFoundError``
+    if the object does not exist.
+    """
+    return get_storage_backend().read(doc.storage_key)
+
+
+def get_document_serve_url(
+    doc: ReservationDocument, expires_in: int = 3600
+) -> str | None:
+    """Return a pre-signed URL for the document, or *None* to serve directly.
+
+    For ``LocalStorageBackend`` this always returns *None* (the caller reads
+    bytes via ``read_document_bytes``).  For ``S3StorageBackend`` a time-limited
+    presigned URL is returned so the browser fetches the file directly from S3.
+    """
+    return get_storage_backend().generate_url(
+        doc.storage_key, doc.original_filename, doc.content_type, expires_in=expires_in
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +421,7 @@ def upload_document(
 
     content_type, ext, size = _validate_upload(file_storage)
     original_filename = _sanitize_filename(file_storage.filename or "upload")
-    storage_key = _save_file(file_storage, pc.reservation_id, ext)
+    storage_key = get_storage_backend().save(file_storage, pc.reservation_id, ext)
 
     doc = ReservationDocument(
         reservation_id=pc.reservation_id,
@@ -694,3 +699,96 @@ def list_todays_arrivals_with_readiness(business_date) -> list[dict[str, Any]]:
             "docs_verified": all(d.verification_status == "verified" for d in docs) if docs else False,
         })
     return result
+
+
+# ---------------------------------------------------------------------------
+# Pre-check-in reminder automation events
+# ---------------------------------------------------------------------------
+
+#: Statuses that indicate the guest has NOT completed pre-check-in.
+_INCOMPLETE_STATUSES = frozenset({"not_sent", "sent", "opened", "in_progress"})
+
+
+def fire_pre_checkin_not_completed_events(hours_before: int = 48) -> dict[str, int]:
+    """Fire ``pre_checkin_not_completed`` automation events for upcoming arrivals.
+
+    Targets reservations whose check-in date falls *hours_before* hours from now
+    that have no pre-check-in or an incomplete one (status not yet
+    ``submitted``/``verified``/``rejected``).
+
+    Called by the CLI command ``flask fire-pre-checkin-reminders`` or by
+    ``send_due_pre_arrival_reminders`` in *communication_service.py*.
+
+    Returns a summary ``{"fired": N, "skipped": N}`` dict.
+    """
+    from datetime import date
+
+    from .messaging_service import fire_automation_event  # local to avoid circular
+
+    target_date = (utc_now() + timedelta(hours=hours_before)).date()
+    reservations = (
+        db.session.query(Reservation)
+        .filter(
+            Reservation.check_in_date == target_date,
+            Reservation.current_status.in_(["confirmed", "tentative"]),
+        )
+        .all()
+    )
+
+    fired = 0
+    skipped = 0
+    for res in reservations:
+        pc = get_pre_checkin_for_reservation(res.id)
+        if pc is not None and pc.status not in _INCOMPLETE_STATUSES:
+            skipped += 1
+            continue
+
+        guest = res.primary_guest
+        try:
+            fire_automation_event(
+                "pre_checkin_not_completed",
+                reservation_id=str(res.id),
+                guest_id=str(guest.id) if guest else None,
+                context={
+                    "reservation_code": res.reservation_code,
+                    "guest_name": guest.full_name if guest else "",
+                    "check_in_date": str(res.check_in_date),
+                    "pre_checkin_status": pc.status if pc else "not_sent",
+                    "pre_checkin_link": build_pre_checkin_link(pc.token) if pc else "",
+                },
+            )
+            fired += 1
+        except Exception:  # noqa: BLE001
+            skipped += 1
+
+    return {"fired": fired, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# OCR / ID extraction stub
+# ---------------------------------------------------------------------------
+
+
+def suggest_ocr_extraction(doc_id: uuid.UUID) -> dict[str, Any] | None:
+    """Asynchronous stub: extract name/document-number from an uploaded ID image.
+
+    This function is intentionally **not implemented** — it is the hook point
+    for a future background worker that calls an OCR service (e.g. AWS Textract,
+    Google Cloud Vision) and stores extracted fields in
+    ``ReservationDocument.ocr_extracted_data``.
+
+    Workflow (to be implemented):
+    1. A background job calls this function after ``upload_document()`` succeeds.
+    2. The function sends ``doc.storage_key`` to the OCR provider.
+    3. Structured fields (name, document_number, date_of_birth, expiry_date)
+       are stored in ``doc.ocr_extracted_data`` as a JSON dict.
+    4. Staff review the suggestions on the pre-check-in detail page before
+       applying — never auto-update the ``Guest`` record.
+
+    Returns *None* until the worker is implemented.
+    """
+    doc = db.session.get(ReservationDocument, doc_id)
+    if doc is None:
+        raise ValueError("Document not found.")
+    # TODO: integrate OCR provider here and populate doc.ocr_extracted_data
+    return None
