@@ -303,31 +303,32 @@
     <div><small>Late fee</small><strong>{% if checkout_prep.checkout_fee.applies %}{{ currency }} {{ checkout_prep.checkout_fee.amount|money }}{% else %}Not applicable{% endif %}</strong></div>
     <div><small>Turnover</small><strong>Dirty handoff to housekeeping</strong></div>
   </div>
+  {% set checkout_values = checkout_form['values'] %}
   <form class="stack-form" method="post" action="{{ url_for('staff_front_desk_check_out', reservation_id=detail.reservation.id) }}">
     {{ csrf_input() }}
     <input type="hidden" name="back_url" value="{{ back_url }}">
     <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
     <div class="grid two">
       {% if can_collect_payment %}
-      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="0.00"></label>
+      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="{{ checkout_values.get('collect_payment_amount', '0.00') }}"></label>
       {% endif %}
-      <label><span>Payment method</span><select name="payment_method"><option value="front_desk">Front desk</option><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option></select></label>
+      <label><span>Payment method</span><select name="payment_method"><option value="front_desk" {% if checkout_values.get('payment_method') == 'front_desk' %}selected{% endif %}>Front desk</option><option value="cash" {% if checkout_values.get('payment_method') == 'cash' %}selected{% endif %}>Cash</option><option value="qr" {% if checkout_values.get('payment_method') == 'qr' %}selected{% endif %}>QR</option><option value="card" {% if checkout_values.get('payment_method') == 'card' %}selected{% endif %}>Card</option><option value="bank" {% if checkout_values.get('payment_method') == 'bank' %}selected{% endif %}>Bank transfer</option></select></label>
     </div>
-    <label><span>Departure note</span><input type="text" name="departure_note" placeholder="Room checked, key returned, transfer arranged"></label>
+    <label><span>Departure note</span><input type="text" name="departure_note" value="{{ checkout_values.get('departure_note', '') }}" placeholder="Room checked, key returned, transfer arranged"></label>
     {% if checkout_prep.checkout_fee.applies %}
     <div class="grid three">
-      {% if can_charge %}<label class="toggle-row"><span>Apply late fee</span><input type="checkbox" name="apply_late_fee"></label>{% endif %}
-      <label class="toggle-row"><span>Waive late fee</span><input type="checkbox" name="waive_late_fee"></label>
-      {% if checkout_prep.checkout_payment_summary.balance_due > 0 %}<label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance"></label>{% endif %}
+      {% if can_charge %}<label class="toggle-row"><span>Apply late fee</span><input type="checkbox" name="apply_late_fee" {% if checkout_values.get('apply_late_fee') == 'on' %}checked{% endif %}></label>{% endif %}
+      <label class="toggle-row"><span>Waive late fee</span><input type="checkbox" name="waive_late_fee" {% if checkout_values.get('waive_late_fee') == 'on' %}checked{% endif %}></label>
+      {% if checkout_prep.checkout_payment_summary.balance_due > 0 %}<label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance" {% if checkout_values.get('override_balance') == 'on' %}checked{% endif %}></label>{% endif %}
     </div>
-    <label><span>Waiver reason</span><input type="text" name="waiver_reason" placeholder="Loyalty guest / service recovery"></label>
+    <label><span>Waiver reason</span><input type="text" name="waiver_reason" value="{{ checkout_values.get('waiver_reason', '') }}" placeholder="Loyalty guest / service recovery"></label>
     {% elif checkout_prep.checkout_payment_summary.balance_due > 0 %}
-    <label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance"></label>
+    <label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance" {% if checkout_values.get('override_balance') == 'on' %}checked{% endif %}></label>
     {% endif %}
     {% if checkout_prep.checkout_payment_summary.refund_due > 0 %}
     <div class="grid two">
-      <label class="toggle-row"><span>Process refund now</span><input type="checkbox" name="process_refund"></label>
-      <label><span>Refund note</span><input type="text" name="refund_note" placeholder="Cash refund / bank transfer pending"></label>
+      <label class="toggle-row"><span>Process refund now</span><input type="checkbox" name="process_refund" {% if checkout_values.get('process_refund') == 'on' %}checked{% endif %}></label>
+      <label><span>Refund note</span><input type="text" name="refund_note" value="{{ checkout_values.get('refund_note', '') }}" placeholder="Cash refund / bank transfer pending"></label>
     </div>
     {% endif %}
     {% if can('reservation.check_out') %}<button class="button" type="submit">Complete check-out</button>{% endif %}
