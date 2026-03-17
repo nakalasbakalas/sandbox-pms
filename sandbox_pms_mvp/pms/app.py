@@ -4723,6 +4723,8 @@ def register_routes(app: Flask) -> None:
             db.session.rollback()
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/documents/<uuid:doc_id>/verify", methods=["POST"])
     def staff_document_verify(doc_id):
         user = require_permission("reservation.check_in")
         status = request.form.get("verification_status", "verified")
