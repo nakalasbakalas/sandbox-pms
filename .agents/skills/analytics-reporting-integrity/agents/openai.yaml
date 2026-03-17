@@ -1,0 +1,8 @@
+interface:
+  display_name: "Analytics Reporting Integrity"
+  short_description: "Protect conversion tracking, attribution, and KPI-definition consistency."
+  brand_color: "#D97706"
+  default_prompt: "Audit analytics and reporting definitions, preserve stable event taxonomy, and verify consent and KPI integrity."
+
+policy:
+  allow_implicit_invocation: true

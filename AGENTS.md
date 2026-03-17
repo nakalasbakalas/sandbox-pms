@@ -35,14 +35,27 @@ Specialized skill files live under `.agents/skills/`. Each skill defines a focus
 
 Load the relevant skill at task start when the task matches its trigger conditions:
 
+- `analytics-reporting-integrity` — dataLayer / GA4-ready event taxonomy, conversion tracking, attribution, dashboard KPI definition integrity
 - `db-schema-migration-review` — schema changes, migrations, indexes, backfills
 - `deploy-env-safety` — deployments, secrets, environment config, rollback planning
+- `front-desk-cashier-ops` — front desk board, check-in/out, room moves, cashier handoff, dense operational validation states
+- `guest-messaging-workflows` — messaging hub, templates, automation rules, delivery tracking, guest communication workflows
+- `housekeeping-readiness-board` — room status, housekeeping tasks, readiness sync, front-desk handoff
 - `hotel-booking-flow-qa` — booking, availability, rates, guest journey, payments
 - `performance-seo-accessibility` — page speed, SEO metadata, ARIA, Core Web Vitals
 - `repo-audit-cleanup` — dead code removal, deduplication, dependency hygiene
 - `sandbox-ui-polish` — visual hierarchy, layout, CTA clarity, mobile UX
 - `security-surface-check` — auth boundaries, input validation, CSRF, secret exposure
 - `thai-first-content-guard` — Thai-first copy correctness, multilingual alignment
+
+Prefer the narrowest domain skill first, then add only the cross-cutting skills that are truly needed:
+
+- default to one domain skill plus at most one or two cross-cutting skills
+- prefer `front-desk-cashier-ops` over generic UI polish when the task changes board behavior, check-in/out, room moves, cashier actions, or staff validation messaging
+- prefer `housekeeping-readiness-board` when the change touches room status, readiness, turnover tasks, or housekeeping/front-desk reflection
+- prefer `guest-messaging-workflows` when the change touches threads, templates, automations, delivery status, or guest communication context
+- prefer `analytics-reporting-integrity` when the change touches `public-site.js`, conversion events, attribution, manager dashboards, or KPI definitions
+- add `sandbox-ui-polish` only for visual hierarchy and layout work, and add `performance-seo-accessibility` only when semantics, metadata, performance, or accessibility are in scope
 
 ## Change strategy
 

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Guest Messaging Workflows"
+  short_description: "Protect message threads, templates, automations, and delivery-state clarity."
+  brand_color: "#7C3AED"
+  default_prompt: "Audit the messaging workflow end to end, preserve thread integrity, and tighten automation and delivery-state behavior."
+
+policy:
+  allow_implicit_invocation: true

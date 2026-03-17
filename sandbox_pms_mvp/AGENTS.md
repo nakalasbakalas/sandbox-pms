@@ -44,6 +44,13 @@ This file applies to the Flask PMS application under `sandbox_pms_mvp/`, includi
 - Prefer small template changes over broad redesigns unless the task explicitly calls for it.
 - Preserve accessible semantics and obvious validation messaging.
 
+## Skill routing for app work
+
+- Use `front-desk-cashier-ops` for front-desk workspace, planning board, check-in/out, cashier, room-move, and operational validation work.
+- Use `housekeeping-readiness-board` for room-status, housekeeping task, readiness, and front-desk handoff work.
+- Use `guest-messaging-workflows` for inbox, template, automation-rule, and delivery-state changes.
+- Use `analytics-reporting-integrity` for public-site instrumentation, attribution, dashboards, and KPI-definition work.
+
 ## Validation
 
 After non-trivial app changes:
