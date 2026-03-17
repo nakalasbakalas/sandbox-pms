@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import hashlib
 import json
+import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -299,10 +300,29 @@ def get_payment_provider(provider_name: str | None = None) -> PaymentProviderBas
     return DisabledPaymentProvider()
 
 
-def create_or_reuse_deposit_request(
+def payment_request_kind(request_type: str | None) -> str:
+    normalized = (request_type or "").strip().lower()
+    if "deposit" in normalized:
+        return "deposit"
+    if "full_payment" in normalized:
+        return "full_payment"
+    return "balance"
+
+
+def payment_request_label(request_type: str | None) -> str:
+    kind = payment_request_kind(request_type)
+    if kind == "deposit":
+        return "deposit payment"
+    if kind == "full_payment":
+        return "full payment"
+    return "balance payment"
+
+
+def create_or_reuse_payment_request(
     reservation_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID | None,
+    request_kind: str = "deposit",
     send_email: bool = False,
     language: str | None = None,
     force_new_link: bool = False,
@@ -322,19 +342,19 @@ def create_or_reuse_deposit_request(
     )
     if not reservation:
         raise ValueError("Reservation not found.")
-    required_amount = money(reservation.deposit_required_amount)
-    received_amount = money(reservation.deposit_received_amount)
-    outstanding_amount = max(required_amount - received_amount, Decimal("0.00"))
-    if outstanding_amount <= Decimal("0.00"):
-        raise ValueError("No deposit request is required for this reservation.")
 
+    request_type, requested_amount = _resolve_payment_request_type_and_amount(reservation, request_kind)
+    _ensure_public_payment_token(reservation)
     now = utc_now()
+    request_group = [request_type]
+    if request_kind in {"balance", "full_payment"}:
+        request_group = ["stay_balance_hosted", "full_payment_hosted"]
     payment_request = (
         db.session.execute(
             sa.select(PaymentRequest)
             .where(
                 PaymentRequest.reservation_id == reservation.id,
-                PaymentRequest.request_type == "deposit_hosted",
+                PaymentRequest.request_type.in_(request_group),
                 PaymentRequest.status == "pending",
             )
             .order_by(PaymentRequest.created_at.desc())
@@ -357,11 +377,12 @@ def create_or_reuse_deposit_request(
         payment_request = None
 
     created = False
+    amount_changed = False
     if not payment_request:
         payment_request = PaymentRequest(
             reservation_id=reservation.id,
-            request_type="deposit_hosted",
-            amount=outstanding_amount,
+            request_type=request_type,
+            amount=requested_amount,
             currency_code="THB",
             due_at=now,
             status="pending",
@@ -370,6 +391,7 @@ def create_or_reuse_deposit_request(
             guest_name=reservation.primary_guest.full_name if reservation.primary_guest else None,
             metadata_json={
                 "source": source,
+                "request_kind": payment_request_kind(request_type),
                 "created_from_public_booking_flow": reservation.created_from_public_booking_flow,
                 "booking_language": reservation.booking_language,
             },
@@ -384,16 +406,20 @@ def create_or_reuse_deposit_request(
             payment_request=payment_request,
             reservation=reservation,
             event_type="payment.request_created",
-            amount=outstanding_amount,
+            amount=requested_amount,
             provider_event_id=None,
-            raw_payload={"request_code": payment_request.request_code, "source": source},
+            raw_payload={"request_code": payment_request.request_code, "source": source, "request_kind": request_kind},
         )
     else:
-        payment_request.amount = outstanding_amount
+        previous_amount = money(payment_request.amount)
+        amount_changed = previous_amount != requested_amount or payment_request.request_type != request_type
+        payment_request.amount = requested_amount
+        payment_request.request_type = request_type
         payment_request.updated_by_user_id = actor_user_id
         payment_request.provider = active_payment_provider_name()
         metadata = dict(payment_request.metadata_json or {})
         metadata["source"] = source
+        metadata["request_kind"] = payment_request_kind(request_type)
         payment_request.metadata_json = metadata
 
     _sync_review_queue_deposit_state(reservation)
@@ -406,6 +432,7 @@ def create_or_reuse_deposit_request(
         after_data={
             "reservation_id": str(reservation.id),
             "request_code": payment_request.request_code,
+            "request_type": payment_request.request_type,
             "status": payment_request.status,
             "provider": payment_request.provider,
             "amount": str(payment_request.amount),
@@ -417,11 +444,19 @@ def create_or_reuse_deposit_request(
         event_type="payment.request_created" if created else "payment.request_reused",
         entity_table="reservations",
         entity_id=str(reservation.id),
-        metadata={"request_code": payment_request.request_code, "amount": str(payment_request.amount)},
+        metadata={
+            "request_code": payment_request.request_code,
+            "request_type": payment_request.request_type,
+            "amount": str(payment_request.amount),
+        },
     )
     db.session.commit()
 
-    generate_or_refresh_hosted_checkout(payment_request.id, actor_user_id=actor_user_id, force_new=force_new_link)
+    generate_or_refresh_hosted_checkout(
+        payment_request.id,
+        actor_user_id=actor_user_id,
+        force_new=force_new_link or amount_changed,
+    )
     if send_email:
         queue_payment_link_email(
             payment_request.id,
@@ -430,6 +465,26 @@ def create_or_reuse_deposit_request(
             resend=not created,
         )
     return db.session.get(PaymentRequest, payment_request.id)
+
+
+def create_or_reuse_deposit_request(
+    reservation_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID | None,
+    send_email: bool = False,
+    language: str | None = None,
+    force_new_link: bool = False,
+    source: str = "staff",
+) -> PaymentRequest:
+    return create_or_reuse_payment_request(
+        reservation_id,
+        actor_user_id=actor_user_id,
+        request_kind="deposit",
+        send_email=send_email,
+        language=language,
+        force_new_link=force_new_link,
+        source=source,
+    )
 
 
 def generate_or_refresh_hosted_checkout(
@@ -552,10 +607,10 @@ def queue_payment_link_email(
             payment_request=payment_request,
             actor_user_id=actor_user_id,
             summary=(
-                f"Deposit payment link {'resent' if resend else 'sent'} for "
+                f"{payment_request_label(payment_request.request_type).title()} link {'resent' if resend else 'sent'} for "
                 f"{reservation.reservation_code} ({payment_request.request_code})."
             ),
-            event_code="payment.deposit_request_sent",
+            event_code=f"payment.{payment_request_kind(payment_request.request_type)}_request_sent",
             manual=resend,
         )
     )
@@ -566,7 +621,7 @@ def queue_payment_link_email(
             outbox = db.session.get(EmailOutbox, item.email_outbox_id)
             if outbox:
                 return outbox
-    raise ValueError("Deposit payment email outbox entry could not be loaded.")
+    raise ValueError("Payment email outbox entry could not be loaded.")
 
 
 def resend_payment_link(
@@ -587,10 +642,7 @@ def resend_payment_link(
 
 
 def public_payment_context(request_code: str, reservation_code: str, token: str) -> tuple[Reservation, PaymentRequest]:
-    reservation = Reservation.query.filter_by(
-        reservation_code=reservation_code,
-        created_from_public_booking_flow=True,
-    ).first()
+    reservation = Reservation.query.filter_by(reservation_code=reservation_code).first()
     if not reservation or not reservation.public_confirmation_token:
         raise LookupError("Payment request not found.")
     if not hmac.compare_digest(reservation.public_confirmation_token, token):
@@ -645,6 +697,7 @@ def load_public_payment_return(request_code: str, reservation_code: str, token: 
         "payment_request": payment_request,
         "guest": db.session.get(Guest, reservation.primary_guest_id),
         "payment_entry_url": guest_payment_entry_url(payment_request, reservation, external=False),
+        "payment_request_label": payment_request_label(payment_request.request_type),
     }
 
 
@@ -850,7 +903,7 @@ def _apply_provider_event(
     payment_request.status = event.normalized_status
     if event.normalized_status == "paid":
         payment_request.paid_at = payment_request.paid_at or utc_now()
-        _apply_paid_deposit(payment_request, reservation, actor_user_id=actor_user_id, event=event)
+        _apply_paid_request(payment_request, reservation, actor_user_id=actor_user_id, event=event)
         notification_delivery_ids.extend(
             queue_payment_success_email(
                 reservation,
@@ -865,10 +918,10 @@ def _apply_provider_event(
                 payment_request=payment_request,
                 actor_user_id=actor_user_id,
                 summary=(
-                    f"Deposit payment {payment_request.request_code} was confirmed as paid "
+                    f"{payment_request_label(payment_request.request_type).title()} {payment_request.request_code} was confirmed as paid "
                     f"for {reservation.reservation_code}."
                 ),
-                event_code="payment.deposit_paid",
+                event_code=f"payment.{payment_request_kind(payment_request.request_type)}_paid",
                 manual=False,
             )
         )
@@ -880,10 +933,10 @@ def _apply_provider_event(
                 payment_request=payment_request,
                 actor_user_id=actor_user_id,
                 summary=(
-                    f"Deposit payment {payment_request.request_code} failed "
+                    f"{payment_request_label(payment_request.request_type).title()} {payment_request.request_code} failed "
                     f"for {reservation.reservation_code}."
                 ),
-                event_code="payment.deposit_failed",
+                event_code=f"payment.{payment_request_kind(payment_request.request_type)}_failed",
                 manual=False,
             )
         )
@@ -895,10 +948,10 @@ def _apply_provider_event(
                 payment_request=payment_request,
                 actor_user_id=actor_user_id,
                 summary=(
-                    f"Deposit payment link {payment_request.request_code} expired "
+                    f"{payment_request_label(payment_request.request_type).title()} link {payment_request.request_code} expired "
                     f"for {reservation.reservation_code}."
                 ),
-                event_code="payment.deposit_expired",
+                event_code=f"payment.{payment_request_kind(payment_request.request_type)}_expired",
                 manual=False,
             )
         )
@@ -910,10 +963,10 @@ def _apply_provider_event(
                 payment_request=payment_request,
                 actor_user_id=actor_user_id,
                 summary=(
-                    f"Deposit payment request {payment_request.request_code} was cancelled "
+                    f"{payment_request_label(payment_request.request_type).title()} request {payment_request.request_code} was cancelled "
                     f"for {reservation.reservation_code}."
                 ),
-                event_code="payment.deposit_cancelled",
+                event_code=f"payment.{payment_request_kind(payment_request.request_type)}_cancelled",
                 manual=False,
             )
         )
@@ -941,23 +994,25 @@ def _apply_provider_event(
     return "processed", notification_delivery_ids
 
 
-def _apply_paid_deposit(
+def _apply_paid_request(
     payment_request: PaymentRequest,
     reservation: Reservation,
     *,
     actor_user_id: uuid.UUID | None,
     event: NormalizedProviderEvent,
 ) -> None:
+    is_deposit = payment_request_kind(payment_request.request_type) == "deposit"
+    posting_key_prefix = "provider_deposit" if is_deposit else "provider_payment"
     record_payment(
         reservation.id,
         PaymentPostingPayload(
             amount=money(payment_request.amount),
             payment_method="card",
-            note=f"Hosted deposit payment {payment_request.request_code}",
+            note=f"Hosted {payment_request_label(payment_request.request_type)} {payment_request.request_code}",
             request_type=payment_request.request_type,
             related_payment_request_id=payment_request.id,
-            is_deposit=True,
-            posting_key=f"provider_deposit:{payment_request.id}",
+            is_deposit=is_deposit,
+            posting_key=f"{posting_key_prefix}:{payment_request.id}",
             provider_reference=payment_request.provider_reference,
             provider_payment_reference=payment_request.provider_payment_reference,
             metadata={
@@ -968,7 +1023,11 @@ def _apply_paid_deposit(
         actor_user_id=actor_user_id,
         commit=False,
     )
-    if reservation.current_status == "tentative" and money(reservation.deposit_received_amount) >= money(reservation.deposit_required_amount):
+    if (
+        is_deposit
+        and reservation.current_status == "tentative"
+        and money(reservation.deposit_received_amount) >= money(reservation.deposit_required_amount)
+    ):
         reservation.current_status = "confirmed"
         db.session.add(
             ReservationStatusHistory(
@@ -1049,6 +1108,40 @@ def _sync_review_queue_deposit_state(reservation: Reservation) -> None:
         entry.deposit_state = "deposit_expired"
     else:
         entry.deposit_state = "deposit_pending"
+
+
+def _resolve_payment_request_type_and_amount(reservation: Reservation, request_kind: str) -> tuple[str, Decimal]:
+    normalized_kind = (request_kind or "deposit").strip().lower()
+    if normalized_kind == "deposit":
+        required_amount = money(reservation.deposit_required_amount)
+        received_amount = money(reservation.deposit_received_amount)
+        outstanding_amount = max(required_amount - received_amount, Decimal("0.00"))
+        if outstanding_amount <= Decimal("0.00"):
+            raise ValueError("No deposit request is required for this reservation.")
+        return "deposit_hosted", outstanding_amount
+
+    if normalized_kind in {"balance", "full_payment"}:
+        from .staff_reservations_service import payment_summary
+
+        summary = payment_summary(reservation)
+        outstanding_amount = money(summary["balance_due"])
+        if outstanding_amount <= Decimal("0.00"):
+            raise ValueError("No hosted balance request is required for this reservation.")
+        if normalized_kind == "full_payment" or money(summary["credits_total"]) == Decimal("0.00"):
+            return "full_payment_hosted", outstanding_amount
+        return "stay_balance_hosted", outstanding_amount
+
+    raise ValueError("Unsupported payment request type.")
+
+
+def _ensure_public_payment_token(reservation: Reservation) -> None:
+    if reservation.public_confirmation_token:
+        return
+    while True:
+        token = secrets.token_urlsafe(24)
+        if not Reservation.query.filter_by(public_confirmation_token=token).first():
+            reservation.public_confirmation_token = token
+            return
 
 
 def normalize_provider_status(value: str) -> str:

@@ -317,27 +317,28 @@ Operational caveats:
 - printable folio output is guest-facing and omits internal adjustment notes, while the cashier screen retains the internal operational detail
 - tax is stored with the same sign as the line total so discounts and reversals reduce tax correctly instead of inflating it
 
-## Hosted Deposit Payments
+## Hosted Reservation Payments
 
 The hosted payment integration is implemented in [payment_integration_service.py](pms/services/payment_integration_service.py), the payment routes in [app.py](pms/app.py), and the public/staff templates [public_confirmation.html](templates/public_confirmation.html), [public_payment_return.html](templates/public_payment_return.html), and [cashier_folio.html](templates/cashier_folio.html).
 
 Architecture:
 
-- deposit collection is the only supported hosted-payment scope in this phase
+- hosted requests support deposit collection and reservation-balance collection
 - the PMS never collects raw card data; guests are redirected to a provider-hosted checkout page
 - provider-specific logic is isolated behind a payment-provider adapter layer
 - `payment_requests` stores the internal request lifecycle and provider references
 - `payment_events` is the append-only provider/event stream
 - folio application happens only from authoritative provider confirmation, not from redirect return alone
+- staff-created reservations can receive hosted payment links through the same reservation-code plus token handoff used by public bookings
 
 Lifecycle:
 
-1. Create or reuse a pending deposit `payment_request`.
+1. Create or reuse a pending hosted `payment_request` for the reservation deposit due or current balance due.
 2. Generate or refresh a hosted checkout session server-side.
 3. Email the guest a PMS payment link that safely redirects into hosted checkout.
 4. Show a guest return page that may still be pending until webhook confirmation arrives.
 5. Process provider webhooks idempotently and normalize them into internal statuses.
-6. Apply the paid deposit into the cashier ledger exactly once using a deterministic folio `posting_key`.
+6. Apply the confirmed payment into the cashier ledger exactly once using a deterministic folio `posting_key`, as a deposit credit or a stay-balance payment as appropriate.
 
 Normalized statuses:
 
@@ -359,8 +360,8 @@ Routes:
 Permission model:
 
 - `payment.read`: view payment request state and refresh status
-- `payment_request.create`: create deposit requests and resend payment links
-- `folio.view`: see folio-side deposit application results
+- `payment_request.create`: create deposit or balance requests and resend payment links
+- `folio.view`: see folio-side payment application results
 - `settings.edit`: update operational payment settings from the admin payments panel
 
 Operational caveats:
@@ -1115,4 +1116,3 @@ The Flask entrypoint remains [app.py](app.py).
 ```powershell
 .\.venv\Scripts\flask.exe --app app run --debug
 ```
-

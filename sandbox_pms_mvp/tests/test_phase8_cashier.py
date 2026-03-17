@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash
 
 from pms.app import create_app
 from pms.extensions import db
-from pms.models import CashierActivityLog, CashierDocument, FolioCharge, Reservation, Role, RoomType, User
+from pms.models import CashierActivityLog, CashierDocument, FolioCharge, PaymentEvent, Reservation, Role, RoomType, User
 from pms.seeds import seed_all
 from pms.services.cashier_service import (
     DocumentIssuePayload,
@@ -436,6 +436,60 @@ def test_cashier_routes_render_and_store_internal_notes(app_factory):
     assert "Cashier" in detail_response.get_data(as_text=True)
     assert adjustment_response.status_code == 200
     assert "Late room handover" in adjustment_response.get_data(as_text=True)
+
+
+def test_cashier_manual_payment_and_refund_store_transaction_references(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Reference",
+            last_name="Guest",
+            phone="+66810000013",
+            room_type_code="TWN",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        user = make_staff_user("manager", "cashier-reference@example.com")
+    login_as(client, user)
+
+    payment_response = post_form(
+        client,
+        f"/staff/cashier/{reservation.id}/payments",
+        data={
+            "amount": "400.00",
+            "payment_method": "bank",
+            "transaction_reference": "BANK-REF-400",
+            "note": "Bank transfer received",
+            "back_url": f"/staff/cashier/{reservation.id}",
+        },
+    )
+    refund_response = post_form(
+        client,
+        f"/staff/cashier/{reservation.id}/refunds",
+        data={
+            "amount": "150.00",
+            "payment_method": "bank",
+            "transaction_reference": "BANK-RFD-150",
+            "reason": "Returned overpayment",
+            "processed": "1",
+            "back_url": f"/staff/cashier/{reservation.id}",
+        },
+    )
+
+    assert payment_response.status_code == 302
+    assert refund_response.status_code == 302
+
+    with app.app_context():
+        payment_line = FolioCharge.query.filter_by(reservation_id=reservation.id, charge_type="payment").one()
+        refund_line = FolioCharge.query.filter_by(reservation_id=reservation.id, charge_type="refund").one()
+        payment_event = PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="payment_collected").one()
+        refund_event = PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="refund_processed").one()
+
+        assert payment_line.metadata_json["provider_reference"] == "BANK-REF-400"
+        assert refund_line.metadata_json["transaction_reference"] == "BANK-RFD-150"
+        assert payment_event.raw_payload["provider_reference"] == "BANK-REF-400"
+        assert refund_event.raw_payload["transaction_reference"] == "BANK-RFD-150"
 
 
 def test_unauthorized_user_cannot_void_restricted_folio_lines(app_factory):

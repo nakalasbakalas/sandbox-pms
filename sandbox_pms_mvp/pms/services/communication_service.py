@@ -624,10 +624,13 @@ def queue_deposit_request_email(
     resend: bool = False,
 ) -> list[uuid.UUID]:
     selected_language = normalize_language(language_code or _reservation_language(reservation))
+    payment_request_noun = _payment_request_noun(payment_request)
     context = _base_reservation_context(reservation)
     context["deposit_amount"] = f"{money(payment_request.amount):,.2f}"
+    context["payment_amount"] = context["deposit_amount"]
     context["payment_status"] = payment_request.status
     context["payment_expires_at"] = _format_datetime(payment_request.expires_at)
+    context["payment_request_label"] = payment_request_noun
     try:
         context["payment_link"] = _payment_entry_url(payment_request, reservation)
     except RuntimeError as exc:
@@ -656,10 +659,11 @@ def queue_deposit_request_email(
         payment_request=payment_request,
         language_code=selected_language,
         context=context,
-        fallback_subject=f"Deposit payment link {reservation.reservation_code}",
+        fallback_subject=f"Payment link {reservation.reservation_code}",
         fallback_body=(
             f"{context['hotel_name']}\n{context['guest_name']}\n"
-            f"Please pay THB {context['deposit_amount']} for reservation {reservation.reservation_code}\n"
+            f"Please complete the {payment_request_noun} of THB {context['deposit_amount']} "
+            f"for reservation {reservation.reservation_code}\n"
             f"{context['payment_link']}"
         ),
         dedupe_key=_make_key("notification", "deposit_request", payment_request.id, _manual_suffix(resend)),
@@ -681,6 +685,7 @@ def queue_payment_success_email(
     context["payment_status"] = "paid"
     context["amount_received"] = f"{money(payment_request.amount):,.2f}"
     context["deposit_amount"] = f"{money(payment_request.amount):,.2f}"
+    context["payment_amount"] = context["deposit_amount"]
     delivery = _queue_guest_email_delivery(
         template_key="payment_success",
         event_type="payment.success_email",
@@ -711,9 +716,11 @@ def queue_failed_payment_reminder(
     if payment_request.status == "paid":
         return []
     selected_language = normalize_language(language_code or _reservation_language(reservation))
+    payment_request_noun = _payment_request_noun(payment_request)
     context = _base_reservation_context(reservation)
     context["payment_status"] = payment_request.status
     context["deposit_amount"] = f"{money(payment_request.amount):,.2f}"
+    context["payment_amount"] = context["deposit_amount"]
     context["payment_expires_at"] = _format_datetime(payment_request.expires_at)
     try:
         context["payment_link"] = _payment_entry_url(payment_request, reservation)
@@ -746,7 +753,7 @@ def queue_failed_payment_reminder(
         fallback_subject=f"Payment follow-up {reservation.reservation_code}",
         fallback_body=(
             f"{context['hotel_name']}\n{context['guest_name']}\n"
-            f"The deposit payment for reservation {reservation.reservation_code} is {payment_request.status}.\n"
+            f"The {payment_request_noun} for reservation {reservation.reservation_code} is {payment_request.status}.\n"
             f"Retry using {context['payment_link']}"
         ),
         dedupe_key=_make_key("notification", "payment_failed", payment_request.id, _manual_suffix(manual)),
@@ -754,6 +761,15 @@ def queue_failed_payment_reminder(
         metadata={"manual": manual, "request_code": payment_request.request_code},
     )
     return [delivery.id]
+
+
+def _payment_request_noun(payment_request: PaymentRequest) -> str:
+    request_type = (payment_request.request_type or "").lower()
+    if "deposit" in request_type:
+        return "deposit payment"
+    if "full_payment" in request_type:
+        return "full payment"
+    return "balance payment"
 
 
 def queue_pre_arrival_reminder(

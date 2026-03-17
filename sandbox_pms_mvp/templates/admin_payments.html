@@ -19,7 +19,7 @@
             <option value="{{ provider }}" {% if payment_settings.active_provider == provider %}selected{% endif %}>{{ provider }}</option>
           {% endfor %}
         </select></label>
-        <label class="toggle-row"><input type="checkbox" name="deposit_enabled" {% if payment_settings.deposit_enabled %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Enable hosted deposit collection</span></label>
+        <label class="toggle-row"><input type="checkbox" name="deposit_enabled" {% if payment_settings.deposit_enabled %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}> <span>Enable hosted reservation payment collection</span></label>
       </div>
       <div class="grid two">
         <label><span>Link expiry minutes</span><input type="number" min="1" name="link_expiry_minutes" value="{{ payment_settings.link_expiry_minutes }}" {% if not can('settings.edit') %}disabled{% endif %}></label>
@@ -52,7 +52,7 @@
   <div class="card-head">
     <div>
       <p class="eyebrow">Recent payment requests</p>
-      <h2>Deposit collection visibility</h2>
+        <h2>Reservation payment visibility</h2>
     </div>
   </div>
   <div class="table-wrap compact-table">
