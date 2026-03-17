@@ -10,6 +10,7 @@ APP_SETTINGS_SEED = [
     ("hotel.check_in_time", {"value": "14:00"}, "time", "Standard check-in time", True, 3),
     ("hotel.check_out_time", {"value": "11:00"}, "time", "Standard check-out time", True, 4),
     ("hotel.timezone", {"value": "Asia/Bangkok"}, "string", "Operational hotel timezone", True, 5),
+    ("hotel.base_rate", {"value": "750.00"}, "money", "Fallback nightly base room rate when no rate rules apply", False, 6),
     ("hotel.vat_rate", {"value": "0.07"}, "decimal", "VAT rate", False, 5),
     ("hotel.service_charge_rate", {"value": "0.00"}, "decimal", "Service charge rate", False, 6),
     ("hotel.extra_guest_fee", {"value": "200.00"}, "money", "Extra guest nightly fee", False, 7),

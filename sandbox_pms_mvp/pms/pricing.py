@@ -72,6 +72,7 @@ def quote_reservation(
 
 
 def nightly_room_rate(room_type: RoomType, business_date: date, stay_length: int) -> Decimal:
+    fallback_base_rate = money(get_setting_value("hotel.base_rate", "750.00"))
     matching_rules = (
         db.session.execute(
             sa.select(RateRule)
@@ -105,7 +106,7 @@ def nightly_room_rate(room_type: RoomType, business_date: date, stay_length: int
         if rule.adjustment_type == "fixed":
             applied = Decimal(str(rule.adjustment_value))
     if applied == Decimal("0.00"):
-        applied = Decimal("750.00")
+        applied = fallback_base_rate
     for discount in discounts:
         applied = apply_adjustment(applied, Decimal(str(discount.adjustment_value)), discount.adjustment_type)
     return applied.quantize(Decimal("0.01"))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import string
 import uuid
 from dataclasses import dataclass
@@ -48,6 +49,10 @@ from ..url_topology import build_booking_url
 
 
 ACTIVE_RESERVATION_STATUSES = {"tentative", "confirmed", "checked_in", "waitlist", "house_use"}
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_PHONE_RE = re.compile(r"^[0-9+()./\-\s]{6,30}$")
+_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+_CURRENCY_RE = re.compile(r"^[A-Z]{3,10}$")
 
 
 def clean_multiline_list(
@@ -114,7 +119,31 @@ def _setting_value_for_type(value, value_type: str):
         return _int(value)
     if value_type in {"money", "decimal"}:
         return f"{_decimal(value):.2f}"
+    if value_type == "time":
+        candidate = str(value or "").strip()
+        if not _TIME_RE.fullmatch(candidate):
+            raise ValueError("Time values must use 24-hour HH:MM format.")
+        return candidate
     return str(value or "").strip()
+
+
+def _normalize_setting_by_key(key: str, value):
+    if key == "hotel.currency":
+        candidate = str(value or "").strip().upper()
+        if not _CURRENCY_RE.fullmatch(candidate):
+            raise ValueError("Currency must be 3 to 10 letters.")
+        return candidate
+    if key == "hotel.contact_email":
+        candidate = str(value or "").strip().lower()
+        if candidate and not _EMAIL_RE.fullmatch(candidate):
+            raise ValueError("Email must be a valid address.")
+        return candidate
+    if key == "hotel.contact_phone":
+        candidate = str(value or "").strip()
+        if candidate and not _PHONE_RE.fullmatch(candidate):
+            raise ValueError("Phone must contain 6 to 30 digits and standard phone punctuation only.")
+        return candidate
+    return value
 
 
 def upsert_setting(
@@ -144,7 +173,9 @@ def upsert_setting(
         )
         db.session.add(setting)
 
-    setting.value_json = {"value": _setting_value_for_type(value, value_type)}
+    normalized_value = _setting_value_for_type(value, value_type)
+    normalized_value = _normalize_setting_by_key(key, normalized_value)
+    setting.value_json = {"value": normalized_value}
     setting.value_type = value_type
     setting.description = description or setting.description
     if is_public is not None:

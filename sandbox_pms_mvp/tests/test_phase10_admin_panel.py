@@ -4,11 +4,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+import sqlalchemy as sa
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import AuditLog, BookingExtra, HousekeepingStatus, InventoryDay, NotificationTemplate, Role, Room, RoomType, User
-from pms.pricing import get_setting_value
+from pms.models import AuditLog, BookingExtra, HousekeepingStatus, InventoryDay, NotificationTemplate, RateRule, Role, Room, RoomType, User
+from pms.pricing import get_setting_value, nightly_room_rate
 from pms.services.admin_service import (
     BlackoutPayload,
     InventoryOverridePayload,
@@ -22,6 +23,7 @@ from pms.services.admin_service import (
     render_notification_template,
     upsert_blackout_period,
     upsert_rate_rule,
+    upsert_setting,
 )
 from pms.services.front_desk_service import room_readiness_snapshot
 from pms.services.reservation_service import ReservationCreatePayload, calculate_deposit_required, create_reservation
@@ -260,6 +262,92 @@ def test_rate_rule_conflicts_and_blackouts_are_enforced(app_factory):
 
         assert AuditLog.query.filter_by(action="rate_rule_upserted", entity_table="rate_rules").count() >= 1
         assert AuditLog.query.filter_by(action="blackout_upserted", entity_table="blackout_periods").count() >= 1
+
+
+def test_rate_rules_use_configured_base_rate_and_apply_long_stay_after_fixed_override(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+        twin = RoomType(
+            code="ZZT",
+            name="Isolated Rate Test",
+            standard_occupancy=2,
+            max_occupancy=2,
+            extra_bed_allowed=False,
+            is_active=True,
+            created_by_user_id=admin.id,
+        )
+        db.session.add(twin)
+        db.session.commit()
+        business_date = date.today() + timedelta(days=12)
+
+        for rule in RateRule.query.filter(
+            RateRule.deleted_at.is_(None),
+            RateRule.is_active.is_(True),
+            sa.or_(RateRule.start_date.is_(None), RateRule.start_date <= business_date),
+            sa.or_(RateRule.end_date.is_(None), RateRule.end_date >= business_date),
+        ).all():
+            rule.is_active = False
+        db.session.commit()
+
+        upsert_setting("hotel.base_rate", value="920.00", value_type="money", actor_user_id=admin.id)
+        assert nightly_room_rate(twin, business_date, 2) == Decimal("920.00")
+
+        upsert_rate_rule(
+            None,
+            RateRulePayload(
+                name="Fixed Twin Test",
+                room_type_id=twin.id,
+                priority=810,
+                is_active=True,
+                rule_type="seasonal_override",
+                adjustment_type="fixed",
+                adjustment_value=Decimal("1000.00"),
+                start_date=business_date,
+                end_date=business_date,
+                days_of_week=None,
+                min_nights=None,
+                max_nights=None,
+                extra_guest_fee_override=None,
+                child_fee_override=None,
+            ),
+            actor_user_id=admin.id,
+        )
+        upsert_rate_rule(
+            None,
+            RateRulePayload(
+                name="Long Stay Discount Test",
+                room_type_id=twin.id,
+                priority=811,
+                is_active=True,
+                rule_type="long_stay_discount",
+                adjustment_type="percent_delta",
+                adjustment_value=Decimal("-10.00"),
+                start_date=business_date,
+                end_date=business_date,
+                days_of_week=None,
+                min_nights=3,
+                max_nights=None,
+                extra_guest_fee_override=None,
+                child_fee_override=None,
+            ),
+            actor_user_id=admin.id,
+        )
+
+        assert nightly_room_rate(twin, business_date, 4) == Decimal("900.00")
+
+
+def test_upsert_setting_centralizes_validation_for_typed_property_fields(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+
+        with pytest.raises(ValueError, match="HH:MM"):
+            upsert_setting("hotel.check_in_time", value="25:61", value_type="time", actor_user_id=admin.id)
+        with pytest.raises(ValueError, match="valid address"):
+            upsert_setting("hotel.contact_email", value="invalid-email", value_type="string", actor_user_id=admin.id)
+        with pytest.raises(ValueError, match="Currency"):
+            upsert_setting("hotel.currency", value="THB1", value_type="string", actor_user_id=admin.id)
 
 
 def test_inventory_override_changes_live_inventory_and_release_restores_it(app_factory):

@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import sqlalchemy as sa
 from flask import current_app
+from sqlalchemy.exc import IntegrityError
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
@@ -877,15 +878,20 @@ def _apply_provider_event(
 
     payment_request = _resolve_payment_request_for_update(provider_name, event)
     reservation = db.session.get(Reservation, payment_request.reservation_id) if payment_request else None
-    event_row = _append_payment_event(
-        payment_request=payment_request,
-        reservation=reservation,
-        event_type=event.event_type,
-        amount=event.amount,
-        provider_event_id=event.provider_event_id,
-        raw_payload=event.raw_payload,
-        provider=provider_name,
-    )
+    try:
+        with db.session.begin_nested():
+            event_row = _append_payment_event(
+                payment_request=payment_request,
+                reservation=reservation,
+                event_type=event.event_type,
+                amount=event.amount,
+                provider_event_id=event.provider_event_id,
+                raw_payload=event.raw_payload,
+                provider=provider_name,
+            )
+            db.session.flush()
+    except IntegrityError:
+        return "duplicate", []
     if not payment_request or not reservation:
         write_activity_log(
             actor_user_id=actor_user_id,

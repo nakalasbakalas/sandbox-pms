@@ -379,12 +379,13 @@ def test_modification_request_can_be_submitted_and_reviewed(app_factory):
 def test_duplicate_browser_submit_does_not_create_two_bookings(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
+        initial_count = Reservation.query.count()
         twin = RoomType.query.filter_by(code="TWN").first()
         hold = create_reservation_hold(make_hold_payload(twin.id))
         first = confirm_public_booking(make_booking_payload(hold.hold_code))
         second = confirm_public_booking(make_booking_payload(hold.hold_code))
         assert first.id == second.id
-        assert Reservation.query.count() == 1
+        assert Reservation.query.count() == initial_count + 1
 
 
 def test_duplicate_match_releases_redundant_hold_inventory(app_factory):
@@ -407,6 +408,7 @@ def test_duplicate_match_releases_redundant_hold_inventory(app_factory):
 def test_duplicate_detection_respects_selected_extras(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
+        initial_count = Reservation.query.count()
         breakfast = create_public_extra(
             code="BFST",
             name="Daily breakfast",
@@ -428,7 +430,7 @@ def test_duplicate_detection_respects_selected_extras(app_factory):
 
         assert first.id != second.id
         assert second.quoted_extras_total == Decimal("700.00")
-        assert Reservation.query.count() == 2
+        assert Reservation.query.count() == initial_count + 2
 
 
 def test_duplicate_idempotency_key_does_not_create_two_holds_or_bookings(app_factory):
