@@ -1,105 +1,104 @@
 {% extends 'base.html' %}
 {% block title %}Provider Bookings | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="card">
-  <div class="card-head">
-    <div>
-      <p class="eyebrow">Provider Workspace</p>
-      <h1>Bookings</h1>
-      <p>Guest, deposit, and balance visibility for the current property.</p>
-    </div>
-    <div class="actions">
-      <a class="button secondary" href="{{ url_for('provider_dashboard') }}">Back to dashboard</a>
-      <span class="pill subtle">{{ result["total"] }} booking{{ '' if result["total"] == 1 else 's' }}</span>
-    </div>
-  </div>
 
-  <form method="get" class="toolbar">
-    <label>
-      <span>Search</span>
-      <input type="text" name="q" value="{{ filters.search }}" placeholder="Guest, phone, or reservation code">
-    </label>
-    <label>
-      <span>Status</span>
+<h1 class="res-page-title">Provider Bookings</h1>
+
+{# ── Compact dark filter block ── #}
+<div class="res-filter-block">
+  <form class="res-filter-form" method="get" id="provider-filter-form">
+    <label><span>Search</span><input type="text" name="q" value="{{ filters.search }}" placeholder="Guest, phone, or reservation code"></label>
+    <label><span>Status</span>
       <select name="status">
-        <option value="">All</option>
+        <option value="">All statuses</option>
         {% for status in reservation_statuses %}
-          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>
+          <option value="{{ status }}" {% if filters.status == status %}selected{% endif %}>{{ status.replace('_', ' ').title() }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>
-      <span>Deposit</span>
+    <label><span>Deposit</span>
       <select name="deposit_state">
-        <option value="">All</option>
+        <option value="">All deposit states</option>
         {% for state in ['missing', 'partial', 'paid', 'not_required'] %}
           <option value="{{ state }}" {% if filters.deposit_state == state %}selected{% endif %}>{{ state.replace('_', ' ') }}</option>
         {% endfor %}
       </select>
     </label>
-    <label>
-      <span>Arrival from</span>
-      <input type="date" name="date_from" value="{{ filters.date_from }}">
-    </label>
-    <label>
-      <span>Arrival to</span>
-      <input type="date" name="date_to" value="{{ filters.date_to }}">
-    </label>
-    <button class="button" type="submit">Apply</button>
+    <label><span>Arrival from</span><input type="date" name="date_from" value="{{ filters.date_from }}"></label>
+    <label><span>Arrival to</span><input type="date" name="date_to" value="{{ filters.date_to }}"></label>
+    <button class="res-filter-submit" type="submit">Search</button>
   </form>
-</section>
-
-<section class="card">
-  <div class="table-wrap">
-    <table class="compact-table">
-      <thead>
-        <tr>
-          <th>Code</th>
-          <th>Guest</th>
-          <th>Stay</th>
-          <th>Room</th>
-          <th>Deposit</th>
-          <th>Balance</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in result["items"] %}
-          <tr>
-            <td><a href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=request.full_path) }}">{{ item.reservation_code }}</a></td>
-            <td>
-              <strong>{{ item.guest_name }}</strong><br>
-              <span class="small muted">{{ item.guest_phone }}</span>
-            </td>
-            <td>{{ item.arrival_date }} to {{ item.departure_date }}<br><span class="small muted">{{ item.nights }} night{{ '' if item.nights == 1 else 's' }}</span></td>
-            <td>{{ item.assigned_room_number or 'Unassigned' }}<br><span class="small muted">{{ item.room_type_code }}</span></td>
-            <td>
-              <span class="status {{ item.deposit_state }}">{{ item.deposit_state|replace('_', ' ') }}</span><br>
-              <span class="small muted">{{ currency }} {{ item.deposit_received_amount|money }} / {{ item.deposit_required_amount|money }}</span>
-            </td>
-            <td>
-              <span class="status {{ item.payment_state }}">{{ item.payment_state|replace('_', ' ') }}</span><br>
-              <span class="small muted">{{ currency }} {{ item.remaining_balance|money }}</span>
-            </td>
-            <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
-          </tr>
-        {% else %}
-          <tr><td colspan="7">No bookings matched these filters.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <div class="res-filter-row2">
+    <a class="hk-date-btn" href="{{ url_for('provider_dashboard') }}">← Back to dashboard</a>
+    <span style="font-size:11px;color:rgba(255,255,255,0.5);margin-left:8px;">{{ result["total"] }} booking{{ '' if result["total"] == 1 else 's' }}</span>
   </div>
+</div>
 
-  {% if result["pages"] > 1 %}
-    <div class="actions top-gap">
-      {% if result["page"] > 1 %}
-        <a class="button secondary" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] - 1) }}">Previous</a>
-      {% endif %}
-      <span class="pill subtle">Page {{ result["page"] }} of {{ result["pages"] }}</span>
-      {% if result["page"] < result["pages"] %}
-        <a class="button secondary" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] + 1) }}">Next</a>
-      {% endif %}
-    </div>
-  {% endif %}
-</section>
+{# ── Results bar ── #}
+<div class="res-results-bar">
+  <span class="res-results-count"><strong>{{ result["total"] }}</strong> bookings</span>
+</div>
+
+{# ── Dense table ── #}
+<div class="res-table-wrap">
+  <table class="res-table">
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Guest</th>
+        <th>Stay</th>
+        <th>Room</th>
+        <th>Deposit</th>
+        <th>Balance</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in result["items"] %}
+        <tr>
+          <td><a class="cell-code" href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=request.full_path) }}">{{ item.reservation_code }}</a></td>
+          <td>
+            <strong>{{ item.guest_name }}</strong>
+            {% if item.guest_phone %}<span class="cell-muted">{{ item.guest_phone }}</span>{% endif %}
+          </td>
+          <td class="cell-nowrap">
+            {{ item.arrival_date }} → {{ item.departure_date }}
+            <span class="cell-muted">{{ item.nights }} night{{ '' if item.nights == 1 else 's' }}</span>
+          </td>
+          <td>
+            {{ item.room_type_code }}
+            <span class="cell-muted">{{ item.assigned_room_number or '—' }}</span>
+          </td>
+          <td>
+            <span class="status {{ item.deposit_state }}">{{ item.deposit_state|replace('_', ' ') }}</span>
+            <span class="cell-muted">{{ currency }} {{ item.deposit_received_amount|money }} / {{ item.deposit_required_amount|money }}</span>
+          </td>
+          <td>
+            <span class="status {{ item.payment_state }}">{{ item.payment_state|replace('_', ' ') }}</span>
+            <span class="cell-muted">{{ currency }} {{ item.remaining_balance|money }}</span>
+          </td>
+          <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" style="text-align:center;padding:24px;color:var(--pms-text-muted);font-size:13px;">No bookings matched these filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Pagination ── #}
+{% if result["pages"] > 1 %}
+<div class="res-pagination">
+  <span>Page {{ result["page"] }} of {{ result["pages"] }}</span>
+  <div class="actions">
+    {% if result["page"] > 1 %}
+      <a class="button secondary tiny" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] - 1) }}">← Prev</a>
+    {% endif %}
+    {% if result["page"] < result["pages"] %}
+      <a class="button secondary tiny" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] + 1) }}">Next →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}

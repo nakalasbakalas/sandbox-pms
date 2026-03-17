@@ -69,6 +69,8 @@ class ReservationWorkspaceFilters:
     include_closed: bool = False
     page: int = 1
     per_page: int = 25
+    sort: str = ""          # arrival | departure | status | reference
+    sort_dir: str = "asc"   # asc | desc
 
 
 @dataclass
@@ -116,12 +118,22 @@ def list_reservations(filters: ReservationWorkspaceFilters) -> dict:
         else_=3,
     )
     total = query.count()
+
+    _sort_cols = {
+        "arrival": Reservation.check_in_date,
+        "departure": Reservation.check_out_date,
+        "status": Reservation.current_status,
+        "reference": Reservation.reservation_code,
+    }
+    if filters.sort in _sort_cols:
+        col = _sort_cols[filters.sort]
+        primary_order = col.desc() if filters.sort_dir == "desc" else col.asc()
+        order_args = [primary_order, Reservation.booked_at.desc()]
+    else:
+        order_args = [operational_rank.asc(), Reservation.check_in_date.asc(), Reservation.booked_at.desc()]
+
     items = (
-        query.order_by(
-            operational_rank.asc(),
-            Reservation.check_in_date.asc(),
-            Reservation.booked_at.desc(),
-        )
+        query.order_by(*order_args)
         .limit(filters.per_page)
         .offset((filters.page - 1) * filters.per_page)
         .all()
