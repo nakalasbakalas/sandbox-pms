@@ -1965,6 +1965,33 @@ class AutomationRule(AuditMixin, SoftDeleteMixin, db.Model):
     )
 
 
+class PendingAutomationEvent(AuditMixin, db.Model):
+    """Stores deferred automation rule firings to be processed by the CLI scheduler."""
+
+    __tablename__ = "pending_automation_events"
+
+    rule_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("automation_rules.id", ondelete="CASCADE"), nullable=False
+    )
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="CASCADE"), nullable=True
+    )
+    guest_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("guests.id", ondelete="CASCADE"), nullable=True
+    )
+    context_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    fire_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+
+    rule = relationship("AutomationRule", foreign_keys=[rule_id])
+
+    __table_args__ = (
+        Index("ix_pending_automation_events_fire_at", "fire_at"),
+        Index("ix_pending_automation_events_processed_at", "processed_at"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -2005,6 +2032,7 @@ for model in (
     Message,
     MessageTemplate,
     AutomationRule,
+    PendingAutomationEvent,
     HousekeepingTask,
 ):
     event.listen(model, "before_update", _timestamp_before_update)

@@ -288,10 +288,12 @@ from .services.messaging_service import (
     InboxFilters as MessagingInboxFilters,
     assign_thread,
     close_thread,
+    fire_automation_event,
     get_thread_detail,
     list_inbox,
     list_message_templates as list_msg_templates,
     mark_thread_read,
+    process_pending_automations,
     record_inbound_message,
     reopen_thread,
     reservation_messages,
@@ -658,6 +660,14 @@ def register_cli(app: Flask) -> None:
     def sync_ical_sources_command() -> None:
         result = sync_all_external_calendar_sources(actor_user_id=None)
         print(f"iCal sync result: {result}")
+
+    @app.cli.command("process-automation-events")
+    def process_automation_events_command() -> None:
+        result = process_pending_automations()
+        print(
+            f"Automation events processed: {result['processed']} sent, "
+            f"{result['skipped']} skipped, {result['errors']} errors."
+        )
 
 
 CHECK_IN_FIELD_TARGETS = {
@@ -1041,6 +1051,22 @@ def register_routes(app: Flask) -> None:
                     )
                 except Exception:  # noqa: BLE001
                     pass
+            try:
+                fire_automation_event(
+                    "reservation_created",
+                    reservation_id=str(reservation.id),
+                    guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
+                    context={
+                        "reservation_code": reservation.reservation_code,
+                        "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
+                        "check_in_date": str(reservation.check_in_date),
+                        "check_out_date": str(reservation.check_out_date),
+                        "room_type": reservation.room_type.name if reservation.room_type else "",
+                        "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Automation hook failed for reservation_created (public)")
             return redirect(
                 url_for(
                     "booking_confirmation",
@@ -2185,10 +2211,12 @@ def register_routes(app: Flask) -> None:
             abort(404)
         mark_thread_read(str(thread_id))
         templates = list_msg_templates(channel=detail.thread.channel)
+        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
         return render_template(
             "staff_messaging_thread.html",
             detail=detail,
             templates=templates,
+            staff_users=staff_users,
         )
 
     @app.route("/staff/messaging/send", methods=["POST"])
@@ -2221,6 +2249,9 @@ def register_routes(app: Flask) -> None:
             db.session.rollback()
             flash(f"Error sending message: {escape(str(exc))}", "danger")
 
+        back = request.form.get("back_url")
+        if back:
+            return redirect(back)
         if payload.thread_id:
             return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
         return redirect(url_for("staff_messaging_inbox"))
@@ -2242,6 +2273,9 @@ def register_routes(app: Flask) -> None:
             return redirect(back)
         messaging_send_message(payload, actor_user_id=str(actor.id))
         flash("Internal note added.", "success")
+        back = request.form.get("back_url")
+        if back:
+            return redirect(back)
         if payload.thread_id:
             return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
         return redirect(url_for("staff_messaging_inbox"))
@@ -2264,6 +2298,9 @@ def register_routes(app: Flask) -> None:
             return redirect(back)
         messaging_send_message(payload, actor_user_id=str(actor.id))
         flash("Phone call logged.", "success")
+        back = request.form.get("back_url")
+        if back:
+            return redirect(back)
         if payload.thread_id:
             return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
         return redirect(url_for("staff_messaging_inbox"))
@@ -3487,6 +3524,21 @@ def register_routes(app: Flask) -> None:
             )
 
             db.session.refresh(reservation)
+            try:
+                fire_automation_event(
+                    "arrival_today",
+                    reservation_id=str(reservation_id),
+                    guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
+                    context={
+                        "reservation_code": reservation.reservation_code,
+                        "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
+                        "check_in_date": str(reservation.check_in_date),
+                        "check_out_date": str(reservation.check_out_date),
+                        "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Automation hook failed for arrival_today (board)")
             return jsonify(ok=True, message="Checked in.", status=reservation.current_status)
         except Exception as exc:
             write_audit_log(
@@ -3520,6 +3572,21 @@ def register_routes(app: Flask) -> None:
             )
 
             db.session.refresh(reservation)
+            try:
+                fire_automation_event(
+                    "checkout_completed",
+                    reservation_id=str(reservation_id),
+                    guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
+                    context={
+                        "reservation_code": reservation.reservation_code,
+                        "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
+                        "check_in_date": str(reservation.check_in_date),
+                        "check_out_date": str(reservation.check_out_date),
+                        "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Automation hook failed for checkout_completed (board)")
             return jsonify(ok=True, message="Checked out.", status=reservation.current_status)
         except Exception as exc:
             write_audit_log(
@@ -3708,6 +3775,7 @@ def register_routes(app: Flask) -> None:
         business_date = parse_request_date_arg("date", default=date.today())
         detail = get_front_desk_detail(reservation_id, business_date=business_date)
         checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
+        comm_messages = reservation_messages(str(reservation_id)) if can("messaging.view") else []
         return render_template(
             "front_desk_detail.html",
             detail=detail,
@@ -3718,6 +3786,7 @@ def register_routes(app: Flask) -> None:
             can_charge=can("folio.charge_add"),
             can_collect_payment=can("payment.create"),
             check_in_form=_build_check_in_form_state(detail),
+            comm_messages=comm_messages,
         )
 
     @app.route("/staff/front-desk/<uuid:reservation_id>/room", methods=["POST"])
@@ -3821,6 +3890,23 @@ def register_routes(app: Flask) -> None:
                 actor_user_id=user.id,
             )
             flash("Guest checked in.", "success")
+            try:
+                res = db.session.get(Reservation, reservation_id)
+                if res:
+                    fire_automation_event(
+                        "arrival_today",
+                        reservation_id=str(reservation_id),
+                        guest_id=str(res.primary_guest_id) if res.primary_guest_id else None,
+                        context={
+                            "reservation_code": res.reservation_code,
+                            "guest_name": res.primary_guest.full_name if res.primary_guest else "",
+                            "check_in_date": str(res.check_in_date),
+                            "check_out_date": str(res.check_out_date),
+                            "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                        },
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Automation hook failed for arrival_today")
         except ValueError as exc:
             db.session.rollback()
             return render_check_in_error(errors=[_map_check_in_error(str(exc))], values=values)
@@ -3860,6 +3946,23 @@ def register_routes(app: Flask) -> None:
                 actor_user_id=user.id,
             )
             flash("Guest checked out and room handed to housekeeping.", "success")
+            try:
+                res = db.session.get(Reservation, reservation_id)
+                if res:
+                    fire_automation_event(
+                        "checkout_completed",
+                        reservation_id=str(reservation_id),
+                        guest_id=str(res.primary_guest_id) if res.primary_guest_id else None,
+                        context={
+                            "reservation_code": res.reservation_code,
+                            "guest_name": res.primary_guest.full_name if res.primary_guest else "",
+                            "check_in_date": str(res.check_in_date),
+                            "check_out_date": str(res.check_out_date),
+                            "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                        },
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("Automation hook failed for checkout_completed")
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_front_desk_detail", reservation_id=reservation_id, back=request.form.get("back_url"), date=request.form.get("business_date")))
@@ -4219,6 +4322,22 @@ def register_routes(app: Flask) -> None:
                     actor_user_id=user.id,
                 )
                 flash(f"Reservation {reservation.reservation_code} created.", "success")
+                try:
+                    fire_automation_event(
+                        "reservation_created",
+                        reservation_id=str(reservation.id),
+                        guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
+                        context={
+                            "reservation_code": reservation.reservation_code,
+                            "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
+                            "check_in_date": str(reservation.check_in_date),
+                            "check_out_date": str(reservation.check_out_date),
+                            "room_type": reservation.room_type.name if reservation.room_type else "",
+                            "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("Automation hook failed for reservation_created")
                 return redirect(url_for("staff_reservation_detail", reservation_id=reservation.id, back=back_url))
             except Exception as exc:  # noqa: BLE001
                 flash(public_error_message(exc), "error")

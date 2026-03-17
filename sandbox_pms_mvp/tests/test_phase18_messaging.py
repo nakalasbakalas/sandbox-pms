@@ -24,6 +24,7 @@ from pms.models import (
     Guest,
     Message,
     MessageTemplate,
+    PendingAutomationEvent,
     Reservation,
     RoomType,
     User,
@@ -41,6 +42,7 @@ from pms.services.messaging_service import (
     list_inbox,
     list_message_templates,
     mark_thread_read,
+    process_pending_automations,
     record_inbound_message,
     render_message_template,
     reopen_thread,
@@ -578,7 +580,8 @@ class TestUnreadCount:
 
 class TestAutomationHooks:
     def test_fire_automation_no_rules(self, app_ctx, reservation):
-        result = fire_automation_event("reservation_created", reservation_id=str(reservation.id))
+        # Use an event type with no seeded active rules
+        result = fire_automation_event("__no_such_event__", reservation_id=str(reservation.id))
         assert result == []
 
     def test_fire_automation_with_rule(self, app_ctx, guest, reservation, staff_user):
@@ -592,7 +595,7 @@ class TestAutomationHooks:
             actor_user_id=str(staff_user.id),
         )
         rule = AutomationRule(
-            event_type="reservation_created",
+            event_type="__test_res_created__",
             template_id=tpl.id,
             channel="email",
             is_active=True,
@@ -603,7 +606,7 @@ class TestAutomationHooks:
         db.session.commit()
 
         result = fire_automation_event(
-            "reservation_created",
+            "__test_res_created__",
             reservation_id=str(reservation.id),
             guest_id=str(guest.id),
             context={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
@@ -766,3 +769,155 @@ class TestMessagingAuditTrail:
         ).first()
         assert audit is not None
         assert audit.action == "thread.close"
+
+
+# ---------------------------------------------------------------------------
+# Delayed automation (PendingAutomationEvent) tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _delayed_rule(app_ctx, staff_user):
+    """AutomationRule with delay_minutes=60 on a unique test event type."""
+    tpl = upsert_message_template(
+        template_key="delayed_followup_test",
+        template_type="checkout_followup",
+        channel="email",
+        name="Delayed Followup Test",
+        subject_template="Follow-up for {{reservation_code}}",
+        body_template="Dear {{guest_name}}, hope your stay was great!",
+        actor_user_id=str(staff_user.id),
+    )
+    rule = AutomationRule(
+        event_type="__test_checkout_delayed__",
+        template_id=tpl.id,
+        channel="email",
+        is_active=True,
+        delay_minutes=60,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    db.session.add(rule)
+    db.session.commit()
+    return rule, tpl
+
+
+class TestDelayedAutomationEvents:
+    def test_fire_delayed_rule_queues_pending_event(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        _rule, _tpl = _delayed_rule
+        before = datetime.now(timezone.utc)
+        result = fire_automation_event(
+            "__test_checkout_delayed__",
+            reservation_id=str(reservation.id),
+            guest_id=str(guest.id),
+            context={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+        )
+        # Delayed rule does not send immediately
+        assert result == []
+
+        pending = PendingAutomationEvent.query.filter_by(rule_id=_rule.id).first()
+        assert pending is not None
+        assert pending.processed_at is None
+        assert pending.reservation_id == reservation.id
+        assert pending.guest_id == guest.id
+        assert pending.context_json["reservation_code"] == "SBX-TST001"
+        # fire_at should be roughly 60 minutes in the future (SQLite may strip tz)
+        fire_naive = pending.fire_at.replace(tzinfo=None) if pending.fire_at.tzinfo else pending.fire_at
+        before_naive = before.replace(tzinfo=None)
+        assert (fire_naive - before_naive).total_seconds() > 50 * 60
+
+    def test_process_pending_does_not_send_future_events(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        fire_automation_event(
+            "__test_checkout_delayed__",
+            reservation_id=str(reservation.id),
+            guest_id=str(guest.id),
+            context={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+        )
+        # Event is in the future — nothing should be processed
+        result = process_pending_automations()
+        assert result["processed"] == 0
+        assert result["errors"] == 0
+
+    def test_process_pending_sends_due_events(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        _rule, _tpl = _delayed_rule
+        # Insert a due event directly with fire_at in the past
+        now = utc_now()
+        event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(minutes=1),
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        result = process_pending_automations()
+        assert result["processed"] == 1
+        assert result["errors"] == 0
+
+        db.session.refresh(event)
+        assert event.processed_at is not None
+        assert event.error is None
+
+    def test_process_pending_skips_inactive_rule(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        _rule, _tpl = _delayed_rule
+        _rule.is_active = False
+        db.session.commit()
+
+        now = utc_now()
+        event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={},
+            fire_at=now - timedelta(seconds=5),
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        result = process_pending_automations()
+        assert result["processed"] == 0
+        assert result["skipped"] == 1
+
+        db.session.refresh(event)
+        assert event.processed_at is not None
+        assert "inactive" in event.error
+
+    def test_process_pending_idempotent(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        """Already-processed events are not re-sent."""
+        _rule, _tpl = _delayed_rule
+        now = utc_now()
+        event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(minutes=10),
+            processed_at=now,  # already processed
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        result = process_pending_automations()
+        assert result["processed"] == 0
+        assert result["skipped"] == 0

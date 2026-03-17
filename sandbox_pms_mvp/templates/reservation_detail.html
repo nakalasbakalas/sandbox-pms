@@ -279,12 +279,67 @@
         </div>
         <div class="right-stack">
           <span class="small muted">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          {% if msg.thread_id %}<a class="small" href="{{ url_for('staff_messaging_thread', thread_id=msg.thread_id) }}">View thread</a>{% endif %}
         </div>
       </div>
     {% else %}
       <p class="muted">No guest messages linked to this reservation yet.</p>
     {% endfor %}
   </div>
+
+  {% if can('messaging.send') %}
+  <details class="quick-reply-section">
+    <summary class="button small secondary" style="margin-top:0.5rem">Quick reply / note</summary>
+    <div class="quick-reply-tabs" style="margin-top:0.5rem">
+      <button type="button" class="button small qr-tab-btn active" data-qrtab="qr-send">Send</button>
+      <button type="button" class="button small secondary qr-tab-btn" data-qrtab="qr-note">Note</button>
+    </div>
+    <form id="qr-send" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_send') }}" style="margin-top:0.5rem">
+      {{ csrf_input() }}
+      <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
+      <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">
+      {% if detail.reservation.primary_guest %}<input type="hidden" name="guest_id" value="{{ detail.reservation.primary_guest.id }}">{% endif %}
+      {% if comm_messages and comm_messages[0].thread_id %}<input type="hidden" name="thread_id" value="{{ comm_messages[0].thread_id }}">{% endif %}
+      <label><span>Channel</span>
+        <select name="channel">
+          <option value="email">Email</option>
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+      </label>
+      <label><span>To</span>
+        <input type="text" name="recipient_address" value="{{ detail.reservation.primary_guest.email or detail.reservation.primary_guest.phone or '' }}" placeholder="Email or phone">
+      </label>
+      <label class="grow"><span>Message</span>
+        <textarea name="body_text" rows="2" required placeholder="Type your message..."></textarea>
+      </label>
+      <button class="button" type="submit">Send</button>
+    </form>
+    <form id="qr-note" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
+      {{ csrf_input() }}
+      <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
+      <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">
+      {% if detail.reservation.primary_guest %}<input type="hidden" name="guest_id" value="{{ detail.reservation.primary_guest.id }}">{% endif %}
+      {% if comm_messages and comm_messages[0].thread_id %}<input type="hidden" name="thread_id" value="{{ comm_messages[0].thread_id }}">{% endif %}
+      <label class="grow"><span>Internal note (not sent to guest)</span>
+        <textarea name="body_text" rows="2" required placeholder="Add an internal note..."></textarea>
+      </label>
+      <button class="button" type="submit">Save Note</button>
+    </form>
+  </details>
+  <script>
+  (function(){
+    var btns=document.querySelectorAll('.qr-tab-btn');
+    var tabs=document.querySelectorAll('.qr-tab');
+    btns.forEach(function(b){b.addEventListener('click',function(){
+      var t=b.getAttribute('data-qrtab');
+      btns.forEach(function(x){x.classList.remove('active');x.classList.add('secondary')});
+      b.classList.add('active');b.classList.remove('secondary');
+      tabs.forEach(function(x){x.style.display=x.id===t?'flex':'none'});
+    })});
+  })();
+  </script>
+  {% endif %}
 </section>
 {% endif %}
 
