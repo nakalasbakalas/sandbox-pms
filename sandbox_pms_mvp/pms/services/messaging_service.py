@@ -9,7 +9,7 @@ import abc
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import sqlalchemy as sa
@@ -25,6 +25,7 @@ from ..models import (
     Guest,
     Message,
     MessageTemplate,
+    PendingAutomationEvent,
     Reservation,
     utc_now,
 )
@@ -798,17 +799,38 @@ def fire_automation_event(
     guest_id: str | None = None,
     context: dict[str, str] | None = None,
 ) -> list[Message]:
-    """Evaluate automation rules for an event and send messages if matched."""
+    """Evaluate automation rules for an event and send messages if matched.
+
+    Rules with ``delay_minutes == 0`` are sent immediately.  Rules with a
+    positive delay are queued in ``pending_automation_events`` and dispatched
+    later by the ``process-automation-events`` CLI command.
+    """
     rules = AutomationRule.query.filter_by(
         event_type=event_type, is_active=True
     ).filter(AutomationRule.deleted_at.is_(None)).all()
 
     sent_messages: list[Message] = []
+    queued = 0
     for rule in rules:
         if not rule.template_id:
             continue
         template = db.session.get(MessageTemplate, rule.template_id)
         if not template or not template.is_active:
+            continue
+
+        if rule.delay_minutes > 0:
+            # Queue for deferred processing via CLI
+            fire_at = utc_now() + timedelta(minutes=rule.delay_minutes)
+            pending = PendingAutomationEvent(
+                id=uuid.uuid4(),
+                rule_id=rule.id,
+                reservation_id=uuid.UUID(reservation_id) if reservation_id else None,
+                guest_id=uuid.UUID(guest_id) if guest_id else None,
+                context_json=context or {},
+                fire_at=fire_at,
+            )
+            db.session.add(pending)
+            queued += 1
             continue
 
         subject, body = render_message_template(template, context or {})
@@ -826,9 +848,76 @@ def fire_automation_event(
         except Exception:
             logger.exception("Automation rule %s failed for event %s", rule.id, event_type)
 
-    if sent_messages:
+    if sent_messages or queued:
         db.session.commit()
     return sent_messages
+
+
+def process_pending_automations() -> dict[str, int]:
+    """Process all due pending automation events.
+
+    Called by the ``process-automation-events`` CLI command.  Returns a summary
+    dict with keys ``processed``, ``skipped``, and ``errors``.
+    """
+    now = utc_now()
+    due: list[PendingAutomationEvent] = (
+        PendingAutomationEvent.query.filter(
+            PendingAutomationEvent.fire_at <= now,
+            PendingAutomationEvent.processed_at.is_(None),
+        )
+        .order_by(PendingAutomationEvent.fire_at.asc())
+        .all()
+    )
+
+    processed = 0
+    skipped = 0
+    errors = 0
+
+    for event in due:
+        rule = db.session.get(AutomationRule, event.rule_id)
+        if not rule or not rule.is_active or not rule.template_id:
+            event.processed_at = now
+            event.error = "rule inactive or missing template"
+            skipped += 1
+            continue
+
+        template = db.session.get(MessageTemplate, rule.template_id)
+        if not template or not template.is_active:
+            event.processed_at = now
+            event.error = "template inactive or deleted"
+            skipped += 1
+            continue
+
+        context = event.context_json or {}
+        reservation_id = str(event.reservation_id) if event.reservation_id else None
+        guest_id = str(event.guest_id) if event.guest_id else None
+
+        try:
+            subject, body = render_message_template(template, context)
+            payload = ComposePayload(
+                guest_id=guest_id,
+                reservation_id=reservation_id,
+                channel=rule.channel,
+                subject=subject,
+                body_text=body,
+                template_key=template.template_key,
+            )
+            send_message(payload, commit=False)
+            event.processed_at = now
+            event.error = None
+            processed += 1
+        except Exception:
+            logger.exception("Failed to process pending automation event %s", event.id)
+            event.error = "send failed — see server log"
+            errors += 1
+
+    try:
+        db.session.commit()
+    except Exception:
+        logger.exception("Failed to commit pending automation batch")
+        db.session.rollback()
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}
 
 
 # ---------------------------------------------------------------------------

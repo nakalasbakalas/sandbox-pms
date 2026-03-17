@@ -23,10 +23,12 @@ from .constants import (
 from .extensions import db
 from .models import (
     AppSetting,
+    AutomationRule,
     BlackoutPeriod,
     Guest,
     HousekeepingStatus,
     InventoryDay,
+    MessageTemplate,
     NotificationTemplate,
     Permission,
     PolicyDocument,
@@ -39,7 +41,7 @@ from .models import (
     utc_now,
 )
 from .services.auth_service import hash_password
-from .settings import APP_SETTINGS_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOCUMENTS_SEED
+from .settings import APP_SETTINGS_SEED, AUTOMATION_RULES_SEED, MESSAGE_TEMPLATES_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOCUMENTS_SEED
 
 
 def seed_all(inventory_days: int = 730) -> None:
@@ -59,6 +61,7 @@ def seed_reference_data(*, sync_existing_roles: bool = False) -> None:
     seed_app_settings()
     seed_policy_documents()
     seed_notification_templates()
+    seed_message_templates()
     seed_initial_admin()
     seed_employee_accounts()
     db.session.commit()
@@ -337,6 +340,52 @@ def seed_notification_templates() -> None:
                 subject_template=subject_template,
                 body_template=body_template,
                 is_active=True,
+            )
+        )
+
+
+def seed_message_templates() -> None:
+    """Seed Phase 18 messaging hub templates and automation rules."""
+    for template_key, template_type, channel, language_code, name, subject_template, body_template in MESSAGE_TEMPLATES_SEED:
+        existing = MessageTemplate.query.filter_by(
+            template_key=template_key,
+            channel=channel,
+            language_code=language_code,
+        ).first()
+        if existing:
+            continue
+        db.session.add(
+            MessageTemplate(
+                template_key=template_key,
+                template_type=template_type,
+                channel=channel,
+                language_code=language_code,
+                name=name,
+                subject_template=subject_template,
+                body_template=body_template,
+                is_active=True,
+            )
+        )
+    db.session.flush()
+
+    for event_type, template_key, channel, is_active, delay_minutes in AUTOMATION_RULES_SEED:
+        existing = AutomationRule.query.filter_by(
+            event_type=event_type,
+            channel=channel,
+        ).filter(AutomationRule.deleted_at.is_(None)).first()
+        if existing:
+            continue
+        template = MessageTemplate.query.filter_by(
+            template_key=template_key,
+            channel=channel,
+        ).first()
+        db.session.add(
+            AutomationRule(
+                event_type=event_type,
+                template_id=template.id if template else None,
+                channel=channel,
+                is_active=is_active,
+                delay_minutes=delay_minutes,
             )
         )
 

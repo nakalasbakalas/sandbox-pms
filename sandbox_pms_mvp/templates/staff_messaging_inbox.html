@@ -42,6 +42,15 @@
     </label>
     <label class="toggle-row"><span>Unread only</span><input type="checkbox" name="unread" value="1" {% if filters.unread_only %}checked{% endif %}></label>
     <label class="toggle-row"><span>Needs follow-up</span><input type="checkbox" name="followup" value="1" {% if filters.needs_followup %}checked{% endif %}></label>
+    <label><span>Assigned to</span>
+      <select name="assigned">
+        <option value="">Anyone</option>
+        <option value="unassigned" {% if filters.assigned_user_id == 'unassigned' %}selected{% endif %}>Unassigned</option>
+        {% for user in staff_users if staff_users is defined %}
+        <option value="{{ user.id }}" {% if filters.assigned_user_id == user.id|string %}selected{% endif %}>{{ user.full_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button class="button" type="submit">Apply</button>
   </form>
 </section>
@@ -63,6 +72,7 @@
           <th>Status</th>
           <th>Last Activity</th>
           <th>Unread</th>
+          <th>Assigned</th>
           <th></th>
         </tr>
       </thead>
@@ -104,11 +114,18 @@
             {% endif %}
           </td>
           <td>
+            {% if entry.assigned_user_name %}
+            <span class="small">{{ entry.assigned_user_name }}</span>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
             <a class="button small" href="{{ url_for('staff_messaging_thread', thread_id=entry.thread_id) }}">Open</a>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="muted" style="text-align:center;padding:2rem">No conversations match the current filters.</td></tr>
+        <tr><td colspan="9" class="muted" style="text-align:center;padding:2rem">No conversations match the current filters.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -117,7 +134,7 @@
   <div class="pagination">
     {% for p in range(1, total_pages + 1) %}
     <a class="button small {% if p == filters.page %}secondary{% endif %}"
-       href="{{ url_for('staff_messaging_inbox', page=p, q=filters.search, channel=filters.channel, status=filters.status, res_status=filters.reservation_status, unread='1' if filters.unread_only else '', followup='1' if filters.needs_followup else '') }}">{{ p }}</a>
+       href="{{ url_for('staff_messaging_inbox', page=p, q=filters.search, channel=filters.channel, status=filters.status, res_status=filters.reservation_status, unread='1' if filters.unread_only else '', followup='1' if filters.needs_followup else '', assigned=filters.assigned_user_id) }}">{{ p }}</a>
     {% endfor %}
   </div>
   {% endif %}

@@ -221,6 +221,12 @@
         <div><strong>Review queue</strong><p>New public bookings waiting for review.</p></div>
         <span class="status confirmed">{{ queue_entries|length }}</span>
       </a>
+      {% if can('messaging.view') %}
+      <a class="list-row" href="{{ url_for('staff_messaging_inbox') }}">
+        <div><strong>Guest messaging</strong><p>Unified inbox for email, SMS, WhatsApp, and internal notes.</p></div>
+        {% if messaging_unread_count %}<span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}
+      </a>
+      {% endif %}
     </div>
   </article>
 

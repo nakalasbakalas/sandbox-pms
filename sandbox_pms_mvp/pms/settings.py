@@ -654,6 +654,137 @@ for language in BOOKING_LANGUAGES:
             )
 
 
+# ---------------------------------------------------------------------------
+# Messaging hub (Phase 18) – message templates & automation rules
+# ---------------------------------------------------------------------------
+# Each entry: (template_key, template_type, channel, language_code, name,
+#              subject_template, body_template)
+MESSAGE_TEMPLATES_SEED: list[tuple[str, str, str, str, str, str, str]] = [
+    (
+        "booking_confirmation",
+        "booking_confirmation",
+        "email",
+        "en",
+        "Booking Confirmation",
+        "Your booking {{reservation_code}} is confirmed",
+        "Dear {{guest_name}},\n\n"
+        "Thank you for your reservation at {{hotel_name}}.\n\n"
+        "Booking reference: {{reservation_code}}\n"
+        "Check-in: {{check_in_date}}\n"
+        "Check-out: {{check_out_date}}\n"
+        "Room type: {{room_type}}\n\n"
+        "We look forward to welcoming you.\n\n"
+        "Best regards,\n{{hotel_name}}",
+    ),
+    (
+        "pre_checkin_reminder",
+        "pre_checkin_reminder",
+        "email",
+        "en",
+        "Pre-Check-in Reminder",
+        "Your stay at {{hotel_name}} is coming up",
+        "Dear {{guest_name}},\n\n"
+        "This is a friendly reminder that your check-in at {{hotel_name}} is on {{check_in_date}}.\n\n"
+        "Booking reference: {{reservation_code}}\n\n"
+        "Please let us know if you have any special requests or if you need to make changes to your reservation.\n\n"
+        "See you soon!\n{{hotel_name}}",
+    ),
+    (
+        "arrival_day_reminder",
+        "arrival_day_reminder",
+        "email",
+        "en",
+        "Arrival Day Reminder",
+        "Welcome today — {{reservation_code}}",
+        "Dear {{guest_name}},\n\n"
+        "We are looking forward to welcoming you today at {{hotel_name}}!\n\n"
+        "Booking reference: {{reservation_code}}\n"
+        "Check-in time: from 14:00 onwards\n\n"
+        "If you need early check-in or have any requests, please let us know.\n\n"
+        "See you soon!\n{{hotel_name}}",
+    ),
+    (
+        "deposit_reminder",
+        "deposit_reminder",
+        "email",
+        "en",
+        "Deposit Reminder",
+        "Deposit reminder for booking {{reservation_code}}",
+        "Dear {{guest_name}},\n\n"
+        "We noticed that the deposit for your upcoming reservation has not yet been received.\n\n"
+        "Booking reference: {{reservation_code}}\n"
+        "Check-in: {{check_in_date}}\n"
+        "Amount due: {{deposit_amount}}\n\n"
+        "Please complete your payment to secure your reservation. "
+        "If you have already paid, please disregard this message.\n\n"
+        "Thank you,\n{{hotel_name}}",
+    ),
+    (
+        "room_ready_notification",
+        "room_ready_notification",
+        "sms",
+        "en",
+        "Room Ready Notification",
+        "",
+        "Hi {{guest_name}}, your room at {{hotel_name}} is ready! "
+        "Booking ref: {{reservation_code}}. "
+        "Please come to the front desk to collect your key. Welcome!",
+    ),
+    (
+        "checkout_followup",
+        "checkout_followup",
+        "email",
+        "en",
+        "Checkout Follow-up",
+        "Thank you for staying at {{hotel_name}}",
+        "Dear {{guest_name}},\n\n"
+        "Thank you for choosing {{hotel_name}}. We hope you had a wonderful stay.\n\n"
+        "If you have a moment, we would love to hear your feedback.\n\n"
+        "We hope to welcome you again soon.\n\n"
+        "Warm regards,\n{{hotel_name}}",
+    ),
+    (
+        "manual_quote_response",
+        "manual_quote_response",
+        "email",
+        "en",
+        "Manual Quote Response",
+        "Rate quote for your stay at {{hotel_name}}",
+        "Dear {{guest_name}},\n\n"
+        "Thank you for your inquiry. Here are the details we have prepared for you:\n\n"
+        "Check-in: {{check_in_date}}\n"
+        "Check-out: {{check_out_date}}\n"
+        "Room type: {{room_type}}\n"
+        "Quoted rate: {{quoted_rate}}\n\n"
+        "Please let us know if you would like to proceed with this booking.\n\n"
+        "Best regards,\n{{hotel_name}}",
+    ),
+    (
+        "inquiry_followup",
+        "inquiry_followup",
+        "email",
+        "en",
+        "Inquiry Follow-up",
+        "Following up on your inquiry — {{hotel_name}}",
+        "Dear {{guest_name}},\n\n"
+        "We wanted to follow up on your recent inquiry regarding a stay at {{hotel_name}}.\n\n"
+        "If you have any questions or would like to book, please don't hesitate to reply.\n\n"
+        "We'd love to help you plan your visit.\n\n"
+        "Best regards,\n{{hotel_name}}",
+    ),
+]
+
+# Each entry: (event_type, template_key, channel, is_active, delay_minutes)
+AUTOMATION_RULES_SEED: list[tuple[str, str, str, bool, int]] = [
+    ("reservation_created", "booking_confirmation", "email", True, 0),
+    ("arrival_today", "arrival_day_reminder", "email", True, 0),
+    ("room_ready", "room_ready_notification", "sms", True, 0),
+    ("checkout_completed", "checkout_followup", "email", True, 60),
+    ("payment_due", "deposit_reminder", "email", False, 0),
+    ("pre_checkin_not_completed", "pre_checkin_reminder", "email", False, 0),
+]
+
+
 def setting_value(settings: dict[str, dict], key: str, default: str | int | bool) -> str | int | bool:
     return settings.get(key, {}).get("value", default)
 
