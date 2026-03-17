@@ -19,6 +19,7 @@ from pms.models import (
     StaffNotification,
     User,
 )
+from pms.seeds import bootstrap_inventory_horizon, seed_reference_data
 from pms.services.admin_service import (
     NotificationTemplatePayload,
     upsert_notification_template,
@@ -231,8 +232,10 @@ def test_deposit_request_email_tracks_payment_link_and_payment_success_waits_for
 
 
 def test_pre_arrival_runner_only_targets_eligible_reservations(app_factory):
-    app = app_factory(seed=True)
+    app = app_factory(seed=False)
     with app.app_context():
+        seed_reference_data()
+        bootstrap_inventory_horizon(date.today(), app.config["INVENTORY_BOOTSTRAP_DAYS"])
         due_reservation = create_staff_reservation(first_name="Due", offset_days=1)
         cancelled_reservation = create_staff_reservation(first_name="Cancelled", offset_days=1)
         later_reservation = create_staff_reservation(first_name="Later", offset_days=3)

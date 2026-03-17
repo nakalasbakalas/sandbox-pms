@@ -9,7 +9,7 @@ from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
 from pms.models import HousekeepingStatus, Reservation, Role, Room, RoomType, User
-from pms.seeds import bootstrap_inventory_horizon
+from pms.seeds import bootstrap_inventory_horizon, seed_reference_data
 from pms.services.cashier_service import ManualAdjustmentPayload, ensure_room_charges_posted, post_manual_adjustment
 from pms.services.front_desk_service import NoShowPayload, process_no_show
 from pms.services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
@@ -138,6 +138,15 @@ def set_deposit_required(reservation: Reservation, amount: str) -> Reservation:
 def ensure_inventory_date(business_date: date) -> None:
     bootstrap_inventory_horizon(business_date, 1)
     db.session.commit()
+
+
+def make_reporting_app(app_factory):
+    app = app_factory(seed=False, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        seed_reference_data()
+        bootstrap_inventory_horizon(date.today() - timedelta(days=1), app.config["INVENTORY_BOOTSTRAP_DAYS"] + 1)
+        db.session.commit()
+    return app
 
 
 def build_reporting_dataset() -> dict:
@@ -314,7 +323,7 @@ def build_reporting_dataset() -> dict:
 
 
 def test_dashboard_operational_reports_return_expected_reservations(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -339,7 +348,7 @@ def test_dashboard_operational_reports_return_expected_reservations(app_factory)
 
 
 def test_booking_attribution_report_summarizes_public_booking_sources(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     client = app.test_client()
     with app.app_context():
         today = date.today()
@@ -403,7 +412,7 @@ def test_booking_attribution_report_summarizes_public_booking_sources(app_factor
 
 
 def test_occupancy_reports_are_authoritative_and_exclude_tentative_sold_nights(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -421,7 +430,7 @@ def test_occupancy_reports_are_authoritative_and_exclude_tentative_sold_nights(a
 
 
 def test_housekeeping_and_folio_reports_reflect_operational_truth(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -440,7 +449,7 @@ def test_housekeeping_and_folio_reports_reflect_operational_truth(app_factory):
 
 
 def test_deposit_pipeline_and_revenue_summary_use_authoritative_financial_data(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -460,7 +469,7 @@ def test_deposit_pipeline_and_revenue_summary_use_authoritative_financial_data(a
 
 
 def test_room_type_performance_and_exception_summaries_are_correct(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -481,7 +490,7 @@ def test_room_type_performance_and_exception_summaries_are_correct(app_factory):
 
 
 def test_audit_activity_summary_includes_recent_operational_changes(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
@@ -498,7 +507,7 @@ def test_audit_activity_summary_includes_recent_operational_changes(app_factory)
 
 
 def test_reports_route_renders_for_manager_and_blocks_unauthorized_user(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     client = app.test_client()
     with app.app_context():
         dataset = build_reporting_dataset()
@@ -516,7 +525,7 @@ def test_reports_route_renders_for_manager_and_blocks_unauthorized_user(app_fact
 
 
 def test_custom_date_range_filters_consistently_change_report_counts(app_factory):
-    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    app = make_reporting_app(app_factory)
     with app.app_context():
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
