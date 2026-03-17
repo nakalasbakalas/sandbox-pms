@@ -124,6 +124,7 @@
   {% set form_values = check_in_form['values'] %}
   {% set field_errors = check_in_form['field_errors'] %}
   {% set summary_items = check_in_form['summary_errors'] if check_in_form['summary_errors'] else check_in_form['blockers'] %}
+  {% set selected_room_id = form_values.get('room_id', '') %}
   {% if check_in_form['unexpected_message'] or summary_items %}
   <div
     id="check-in-errors"
@@ -190,7 +191,7 @@
         <span>Assigned room <strong aria-hidden="true">*</strong></span>
         <select id="check-in-room-id" name="room_id" aria-invalid="{{ 'true' if field_errors.get('room_id') else 'false' }}">
           {% for room in detail.eligible_rooms %}
-          <option value="{{ room.id }}" {% if form_values.get('room_id', '') == room.id|string %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>
+          <option value="{{ room.id }}" {% if selected_room_id == room.id|string %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>
           {% endfor %}
         </select>
         {% if field_errors.get('room_id') %}<small class="form-error">{{ field_errors.get('room_id') }}</small>{% else %}<small class="form-hint">{{ detail.front_desk.room_readiness_reason }}</small>{% endif %}

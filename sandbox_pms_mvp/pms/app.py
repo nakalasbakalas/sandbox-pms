@@ -694,7 +694,7 @@ def _check_in_issue(message: str, *, field: str | None = None, section: str | No
 
 
 def _format_money_amount(value: Decimal) -> str:
-    return f"{Decimal(str(value)).quantize(Decimal('0.01')):,.2f}"
+    return f"{value.quantize(Decimal('0.01')):,.2f}"
 
 
 def _check_in_form_defaults(detail: dict) -> dict[str, str]:
@@ -839,8 +839,9 @@ def _build_check_in_form_state(
 
 
 def _unexpected_check_in_reference() -> str:
-    raw = "".join(ch for ch in str(current_request_id() or secrets.token_hex(4)).upper() if ch.isalnum())
-    return f"CHKIN-{(raw or secrets.token_hex(4).upper())[:12]}"
+    token = str(current_request_id() or secrets.token_hex(4)).upper()
+    raw = "".join(ch for ch in token if ch.isalnum()) or token
+    return f"CHKIN-{raw[:12]}"
 
 
 def _map_check_in_error(message: str) -> dict[str, str]:
