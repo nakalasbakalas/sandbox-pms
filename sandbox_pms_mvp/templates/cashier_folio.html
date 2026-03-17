@@ -112,6 +112,7 @@
         <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
         <label><span>Note</span><input type="text" name="note" maxlength="255" placeholder="Deposit at check-in / balance collected"></label>
       </div>
+      <label><span>Receipt / transaction reference</span><input type="text" name="transaction_reference" maxlength="255" placeholder="Cash drawer slip, bank ref, card auth code"></label>
     </form>
     {% endif %}
 
@@ -135,6 +136,7 @@
         <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_out_date.isoformat() }}"></label>
         <label><span>Reference charge ID (optional)</span><input type="text" name="reference_charge_id" placeholder="UUID of related charge"></label>
       </div>
+      <label><span>Payout / transaction reference</span><input type="text" name="transaction_reference" maxlength="255" placeholder="Bank transfer ref or cash receipt number"></label>
       <label><span>Reason</span><textarea name="reason" rows="2" maxlength="255" required></textarea></label>
     </form>
     {% endif %}
@@ -187,9 +189,15 @@
         {{ csrf_input() }}
         <input type="hidden" name="back_url" value="{{ back_url }}">
         <div class="split-row">
+          <label><span>Request type</span>
+            <select name="request_kind">
+              <option value="deposit">Deposit due</option>
+              <option value="balance">Outstanding balance</option>
+            </select>
+          </label>
           <label class="toggle-row"><span>Email guest now</span><input type="checkbox" name="send_email" checked></label>
           <label class="toggle-row"><span>Force new link</span><input type="checkbox" name="force_new_link"></label>
-          <button class="button secondary" type="submit">Create deposit request</button>
+          <button class="button secondary" type="submit">Create payment request</button>
         </div>
       </form>
       {% endif %}

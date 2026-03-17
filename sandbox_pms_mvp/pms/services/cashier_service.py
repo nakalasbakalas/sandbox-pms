@@ -67,6 +67,7 @@ class RefundPostingPayload:
     payment_method: str = "front_desk"
     service_date: date | None = None
     reference_charge_id: uuid.UUID | None = None
+    transaction_reference: str | None = None
     processed: bool = True
 
 
@@ -301,6 +302,7 @@ def get_cashier_detail(
     auto_post_through: date | None = None,
 ) -> dict:
     from .communication_service import query_notification_history
+    from .staff_reservations_service import payment_summary
 
     if auto_post_room_charges:
         ensure_room_charges_posted(
@@ -314,7 +316,7 @@ def get_cashier_detail(
         raise ValueError("Reservation not found.")
     return {
         "reservation": reservation,
-        "summary": folio_summary(reservation),
+        "summary": payment_summary(reservation),
         "lines": _folio_lines(reservation.id),
         "activity": (
             CashierActivityLog.query.options(joinedload(CashierActivityLog.actor_user))
@@ -479,7 +481,12 @@ def record_payment(
             currency_code="THB",
             provider=method,
             processed_at=utc_now(),
-            raw_payload={"folio_charge_id": str(line.id), "note": payload.note},
+            raw_payload={
+                "folio_charge_id": str(line.id),
+                "note": payload.note,
+                "provider_reference": payload.provider_reference,
+                "provider_payment_reference": payload.provider_payment_reference,
+            },
             created_by_user_id=actor_user_id,
         )
     )
@@ -491,7 +498,11 @@ def record_payment(
         amount=amount,
         note=payload.note,
         line_id=line.id,
-        metadata={"method": method},
+        metadata={
+            "method": method,
+            "provider_reference": payload.provider_reference,
+            "provider_payment_reference": payload.provider_payment_reference,
+        },
     )
     if commit:
         db.session.commit()
@@ -534,7 +545,7 @@ def record_refund(
             event_type="cashier.refund_pending",
             amount=amount,
             note=payload.reason,
-            metadata={"method": payload.payment_method},
+            metadata={"method": payload.payment_method, "transaction_reference": payload.transaction_reference},
         )
         if commit:
             db.session.commit()
@@ -548,7 +559,7 @@ def record_refund(
         gross_amount=amount,
         service_date=payload.service_date or date.today(),
         actor_user_id=actor_user_id,
-        metadata={"reason": payload.reason},
+        metadata={"reason": payload.reason, "transaction_reference": payload.transaction_reference},
         reversed_charge_id=payload.reference_charge_id,
     )
     db.session.add(
@@ -559,7 +570,11 @@ def record_refund(
             currency_code="THB",
             provider=payload.payment_method,
             processed_at=utc_now(),
-            raw_payload={"folio_charge_id": str(line.id), "reason": payload.reason},
+            raw_payload={
+                "folio_charge_id": str(line.id),
+                "reason": payload.reason,
+                "transaction_reference": payload.transaction_reference,
+            },
             created_by_user_id=actor_user_id,
         )
     )
@@ -571,7 +586,7 @@ def record_refund(
         amount=amount,
         note=payload.reason,
         line_id=line.id,
-        metadata={"method": payload.payment_method},
+        metadata={"method": payload.payment_method, "transaction_reference": payload.transaction_reference},
     )
     if commit:
         db.session.commit()

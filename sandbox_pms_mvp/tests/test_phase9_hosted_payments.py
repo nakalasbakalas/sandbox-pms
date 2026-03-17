@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -12,15 +13,18 @@ from werkzeug.security import generate_password_hash
 from pms.extensions import db
 from pms.models import EmailOutbox, FolioCharge, PaymentEvent, PaymentRequest, Reservation, Role, RoomType, User
 from pms.seeds import seed_all
-from pms.services.cashier_service import folio_summary
+from pms.services.cashier_service import PaymentPostingPayload, folio_summary, record_payment
 from pms.services.payment_integration_service import (
+    BALANCE_HOSTED_REQUEST_TYPES,
     active_payment_provider_name,
+    create_or_reuse_payment_request,
     create_or_reuse_deposit_request,
     process_payment_webhook,
     resend_payment_link,
     sign_test_hosted_webhook,
 )
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
+from pms.services.staff_reservations_service import payment_summary
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +82,24 @@ def create_public_reservation() -> Reservation:
     return reservation
 
 
+def create_staff_reservation() -> Reservation:
+    room_type = RoomType.query.filter_by(code="DBL").one()
+    return create_reservation(
+        ReservationCreatePayload(
+            first_name="Staff",
+            last_name="Linked",
+            phone="+66819990000",
+            email="staff.linked@example.com",
+            room_type_id=room_type.id,
+            check_in_date=date.today() + timedelta(days=7),
+            check_out_date=date.today() + timedelta(days=9),
+            adults=2,
+            children=0,
+            source_channel="admin_manual",
+        )
+    )
+
+
 def test_provider_selection_and_deposit_request_creation(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     with app.app_context():
@@ -95,6 +117,72 @@ def test_provider_selection_and_deposit_request_creation(app_factory):
         assert request_row.provider == "test_hosted"
         assert request_row.payment_url.startswith("https://hosted.test/hosted-checkout/")
         assert request_row.provider_reference
+
+
+def test_balance_request_for_staff_reservation_generates_public_token(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        reservation = create_staff_reservation()
+
+        assert reservation.public_confirmation_token is None
+
+        request_row = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=None,
+            request_kind="balance",
+            send_email=False,
+            language="en",
+            source="test",
+        )
+        db.session.refresh(reservation)
+
+        assert reservation.public_confirmation_token is not None
+        assert request_row.request_type == "full_payment_hosted"
+        assert request_row.payment_url.startswith("https://hosted.test/hosted-checkout/")
+
+
+def test_balance_request_reuses_pending_row_when_balance_changes(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        reservation = create_staff_reservation()
+        actor = make_staff_user("manager", "balance-refresh@example.com")
+        first_request = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=actor.id,
+            request_kind="balance",
+            send_email=False,
+            language="en",
+            source="test",
+        )
+        first_amount = first_request.amount
+
+        record_payment(
+            reservation.id,
+            PaymentPostingPayload(
+                amount=Decimal("100.00"),
+                payment_method="bank",
+                note="Advance bank transfer",
+            ),
+            actor_user_id=actor.id,
+        )
+
+        refreshed_request = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=actor.id,
+            request_kind="balance",
+            send_email=False,
+            language="en",
+            source="test",
+        )
+
+        assert refreshed_request.id == first_request.id
+        assert refreshed_request.request_type == "stay_balance_hosted"
+        assert refreshed_request.amount < first_amount
+        assert PaymentRequest.query.filter(
+            PaymentRequest.reservation_id == reservation.id,
+            PaymentRequest.request_type.in_(BALANCE_HOSTED_REQUEST_TYPES),
+            PaymentRequest.status == "pending",
+        ).count() == 1
 
 
 def test_public_payment_start_and_return_do_not_treat_redirect_as_final_truth(app_factory):
@@ -147,6 +235,56 @@ def test_webhook_paid_event_updates_status_and_applies_folio_deposit(app_factory
         assert updated_request.status == "paid"
         assert summary["deposit_received_amount"] == updated_request.amount
         assert FolioCharge.query.filter_by(posting_key=f"provider_deposit:{request_row.id}").count() == 1
+
+
+def test_webhook_paid_balance_event_updates_reservation_balance_for_staff_booking(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation()
+        request_row = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=None,
+            request_kind="balance",
+            send_email=False,
+            language="en",
+            source="test",
+        )
+        payload = {
+            "event_id": "evt-balance-paid-1",
+            "payment_request_code": request_row.request_code,
+            "payment_request_id": str(request_row.id),
+            "status": "paid",
+            "provider_reference": request_row.provider_reference,
+            "provider_payment_reference": "pi_test_balance_1",
+            "amount": str(request_row.amount),
+            "currency_code": "THB",
+        }
+        body = __import__("json").dumps(payload).encode("utf-8")
+
+        result = process_payment_webhook(
+            "test_hosted",
+            body,
+            {"X-Test-Hosted-Signature": sign_test_hosted_webhook(body)},
+        )
+        db.session.expire_all()
+        updated_request = db.session.get(PaymentRequest, request_row.id)
+        reservation = db.session.get(Reservation, reservation.id)
+        request_code = request_row.request_code
+        reservation_code = reservation.reservation_code
+        confirmation_token = reservation.public_confirmation_token
+
+        assert result["processed"] == 1
+        assert updated_request.status == "paid"
+        assert payment_summary(reservation)["balance_due"] == Decimal("0.00")
+        assert payment_summary(reservation)["deposit_received_amount"] == Decimal("0.00")
+        assert FolioCharge.query.filter_by(posting_key=f"provider_payment:{request_row.id}", charge_type="payment").count() == 1
+
+    return_response = client.get(
+        f"/payments/return/{request_code}?reservation_code={reservation_code}&token={confirmation_token}"
+    )
+    assert return_response.status_code == 200
+    assert reservation_code.encode("utf-8") in return_response.data
 
 
 def test_duplicate_paid_webhook_is_idempotent(app_factory):

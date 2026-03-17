@@ -233,7 +233,8 @@ from .services.ical_service import (
     sync_external_calendar_source,
 )
 from .services.payment_integration_service import (
-    create_or_reuse_deposit_request,
+    DEPOSIT_HOSTED_REQUEST_TYPES,
+    create_or_reuse_payment_request,
     handle_public_payment_start,
     load_public_payment_return,
     payments_enabled,
@@ -1132,7 +1133,10 @@ def register_routes(app: Flask) -> None:
             abort(404)
         g.public_language = reservation.booking_language
         payment_request = (
-            PaymentRequest.query.filter_by(reservation_id=reservation.id)
+            PaymentRequest.query.filter(
+                PaymentRequest.reservation_id == reservation.id,
+                PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
+            )
             .order_by(PaymentRequest.created_at.desc())
             .first()
         )
@@ -1805,7 +1809,7 @@ def register_routes(app: Flask) -> None:
                     upsert_settings_bundle(
                         [
                             {"key": "reservation.deposit_percentage", "value": request.form.get("deposit_percentage"), "value_type": "decimal", "description": "Default reservation deposit percentage", "is_public": False, "sort_order": 40},
-                            {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable hosted deposit payment requests", "is_public": False, "sort_order": 41},
+                            {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable hosted reservation payment requests", "is_public": False, "sort_order": 41},
                         ],
                         actor_user_id=actor.id,
                     )
@@ -2020,7 +2024,7 @@ def register_routes(app: Flask) -> None:
                 upsert_settings_bundle(
                     [
                         {"key": "payment.active_provider", "value": selected_provider, "value_type": "string", "description": "Active hosted payment provider selector", "is_public": False, "sort_order": 90},
-                        {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable deposit collection via hosted payments", "is_public": False, "sort_order": 91},
+                        {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable reservation payment collection via hosted payments", "is_public": False, "sort_order": 91},
                         {"key": "payment.link_expiry_minutes", "value": request.form.get("link_expiry_minutes"), "value_type": "integer", "description": "Hosted payment link expiry in minutes", "is_public": False, "sort_order": 92},
                         {"key": "payment.link_resend_cooldown_seconds", "value": request.form.get("link_resend_cooldown_seconds"), "value_type": "integer", "description": "Minimum cooldown between payment link resends", "is_public": False, "sort_order": 93},
                     ],
@@ -4093,6 +4097,7 @@ def register_routes(app: Flask) -> None:
                     service_date=date.fromisoformat(request.form["service_date"]) if request.form.get("service_date") else None,
                     request_type="cashier_payment",
                     is_deposit=request.form.get("is_deposit") == "on",
+                    provider_reference=(request.form.get("transaction_reference") or "").strip() or None,
                 ),
                 actor_user_id=user.id,
             )
@@ -4105,15 +4110,16 @@ def register_routes(app: Flask) -> None:
     def staff_cashier_payment_request(reservation_id):
         user = require_permission("payment_request.create")
         try:
-            create_or_reuse_deposit_request(
+            create_or_reuse_payment_request(
                 reservation_id,
                 actor_user_id=user.id,
+                request_kind=request.form.get("request_kind", "deposit"),
                 send_email=request.form.get("send_email") == "on",
                 language=request.form.get("language") or None,
                 force_new_link=request.form.get("force_new_link") == "on",
                 source="staff_cashier",
             )
-            flash("Deposit payment request is ready.", "success")
+            flash("Payment request is ready.", "success")
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
@@ -4154,6 +4160,7 @@ def register_routes(app: Flask) -> None:
                     payment_method=request.form.get("payment_method", "cash"),
                     service_date=date.fromisoformat(request.form["service_date"]) if request.form.get("service_date") else None,
                     reference_charge_id=UUID(request.form["reference_charge_id"]) if request.form.get("reference_charge_id") else None,
+                    transaction_reference=(request.form.get("transaction_reference") or "").strip() or None,
                     processed=request.form.get("processed", "1") == "1",
                 ),
                 actor_user_id=user.id,

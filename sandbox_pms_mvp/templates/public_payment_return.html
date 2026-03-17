@@ -12,7 +12,7 @@
     </div>
     <div class="metric-grid grid three">
       <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
-      <article class="metric-card"><small>{{ t('deposit_label') }}</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('payment_amount_label') }}</small><strong>{{ currency }} {{ payment_request.amount|money }}</strong></article>
       <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('payment_' ~ payment_request.status) if payment_request.status in ['pending', 'paid', 'failed', 'expired', 'cancelled'] else t('payment_processing') }}</strong></article>
     </div>
     <p>

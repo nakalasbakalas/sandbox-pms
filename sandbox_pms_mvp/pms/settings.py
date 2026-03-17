@@ -35,7 +35,7 @@ APP_SETTINGS_SEED = [
     ("hotel.brand_mark", {"value": "SBX"}, "string", "Short hotel brand mark", True, 27),
     ("reservation.deposit_percentage", {"value": "50.00"}, "decimal", "Deposit percentage for future reservations", False, 26),
     ("payment.active_provider", {"value": "env"}, "string", "Active hosted payment provider override", False, 27),
-    ("payment.deposit_enabled", {"value": True}, "boolean", "Enable hosted deposit payments", False, 28),
+    ("payment.deposit_enabled", {"value": True}, "boolean", "Enable hosted reservation payments", False, 28),
     ("payment.link_expiry_minutes", {"value": 60}, "integer", "Hosted payment link expiry minutes", False, 29),
     ("payment.link_resend_cooldown_seconds", {"value": 60}, "integer", "Payment link resend cooldown in seconds", False, 30),
     ("housekeeping.require_inspected_for_ready", {"value": False}, "boolean", "Require inspected rooms before check-in readiness", False, 31),
@@ -303,11 +303,11 @@ for language in BOOKING_LANGUAGES:
             "{check_out_policy}\n"
             "ติดต่อ {contact_phone} / {contact_email}"
         )
-        payment_subject = "ชำระมัดจำสำหรับการจอง {reservation_code}"
+        payment_subject = "ลิงก์ชำระเงินสำหรับการจอง {reservation_code}"
         payment_body = (
             "{hotel_name}\n"
             "{guest_name}\n"
-            "กรุณาชำระมัดจำ THB {deposit_amount} ผ่านลิงก์ที่ปลอดภัยด้านล่าง\n"
+            "กรุณาชำระเงิน THB {deposit_amount} ผ่านลิงก์ที่ปลอดภัยด้านล่าง\n"
             "{payment_link}\n"
             "{check_in_policy}\n"
             "ติดต่อ {contact_phone} / {contact_email}"
@@ -327,11 +327,11 @@ for language in BOOKING_LANGUAGES:
             "{check_out_policy}\n"
             "联系 {contact_phone} / {contact_email}"
         )
-        payment_subject = "{reservation_code} 押金付款链接"
+        payment_subject = "{reservation_code} 付款链接"
         payment_body = (
             "{hotel_name}\n"
             "{guest_name}\n"
-            "请通过以下安全支付链接支付押金 THB {deposit_amount}\n"
+            "请通过以下安全支付链接支付 THB {deposit_amount}\n"
             "{payment_link}\n"
             "{check_in_policy}\n"
             "联系 {contact_phone} / {contact_email}"
@@ -351,11 +351,11 @@ for language in BOOKING_LANGUAGES:
             "{check_out_policy}\n"
             "Contact {contact_phone} / {contact_email}"
         )
-        payment_subject = "Deposit payment link {reservation_code}"
+        payment_subject = "Payment link {reservation_code}"
         payment_body = (
             "{hotel_name}\n"
             "{guest_name}\n"
-            "Please pay the deposit of THB {deposit_amount} using the secure payment link below.\n"
+            "Please complete the payment of THB {deposit_amount} using the secure payment link below.\n"
             "{payment_link}\n"
             "{check_in_policy}\n"
             "Contact {contact_phone} / {contact_email}"
@@ -379,7 +379,7 @@ for language in BOOKING_LANGUAGES:
                 language,
                 "Payment failed follow-up",
                 payment_subject,
-                "{hotel_name}\n{guest_name}\nThe deposit payment for reservation {reservation_code} did not complete.\nRetry link: {payment_link}\nContact {contact_phone} / {contact_email}",
+                "{hotel_name}\n{guest_name}\nThe payment for reservation {reservation_code} did not complete.\nRetry link: {payment_link}\nContact {contact_phone} / {contact_email}",
             ),
             (
                 "cancellation_request_received",
@@ -423,8 +423,8 @@ _NOTIFICATION_TEMPLATE_TEXT = {
             "ติดต่อ {contact_phone} / {contact_email}",
         ),
         "deposit_payment_request": (
-            "ชำระมัดจำ {reservation_code}",
-            "{hotel_name}\nเรียน {guest_name}\nกรุณาชำระเงินมัดจำ THB {deposit_amount} สำหรับการจอง {reservation_code}\n"
+            "ลิงก์ชำระเงิน {reservation_code}",
+            "{hotel_name}\nเรียน {guest_name}\nกรุณาชำระเงิน THB {deposit_amount} สำหรับการจอง {reservation_code}\n"
             "ลิงก์ชำระเงิน {payment_link}\nลิงก์หมดอายุ {payment_expires_at}\n"
             "{check_in_policy}\nติดต่อ {contact_phone} / {contact_email}",
         ),
@@ -435,7 +435,7 @@ _NOTIFICATION_TEMPLATE_TEXT = {
         ),
         "payment_failed": (
             "ติดตามการชำระเงิน {reservation_code}",
-            "{hotel_name}\nเรียน {guest_name}\nการชำระเงินมัดจำสำหรับการจอง {reservation_code} ยังไม่สำเร็จ\n"
+            "{hotel_name}\nเรียน {guest_name}\nการชำระเงินสำหรับการจอง {reservation_code} ยังไม่สำเร็จ\n"
             "สถานะ {payment_status}\nลองอีกครั้งได้ที่ {payment_link}\nติดต่อ {contact_phone} / {contact_email}",
         ),
         "pre_arrival_reminder": (
@@ -488,8 +488,8 @@ _NOTIFICATION_TEMPLATE_TEXT = {
             "Contact {contact_phone} / {contact_email}",
         ),
         "deposit_payment_request": (
-            "Deposit payment link {reservation_code}",
-            "{hotel_name}\nDear {guest_name}\nPlease pay the deposit of THB {deposit_amount} for reservation {reservation_code}\n"
+            "Payment link {reservation_code}",
+            "{hotel_name}\nDear {guest_name}\nPlease complete the payment of THB {deposit_amount} for reservation {reservation_code}\n"
             "Payment link {payment_link}\nLink expiry {payment_expires_at}\n"
             "{check_in_policy}\nContact {contact_phone} / {contact_email}",
         ),
@@ -500,7 +500,7 @@ _NOTIFICATION_TEMPLATE_TEXT = {
         ),
         "payment_failed": (
             "Payment follow-up {reservation_code}",
-            "{hotel_name}\nDear {guest_name}\nThe deposit payment for reservation {reservation_code} has not completed.\n"
+            "{hotel_name}\nDear {guest_name}\nThe payment for reservation {reservation_code} has not completed.\n"
             "Current status {payment_status}\nRetry using this link {payment_link}\n"
             "Contact {contact_phone} / {contact_email}",
         ),
@@ -554,8 +554,8 @@ _NOTIFICATION_TEMPLATE_TEXT = {
             "联系 {contact_phone} / {contact_email}",
         ),
         "deposit_payment_request": (
-            "押金付款链接 {reservation_code}",
-            "{hotel_name}\n尊敬的 {guest_name}\n请支付预订 {reservation_code} 的押金 THB {deposit_amount}\n"
+            "付款链接 {reservation_code}",
+            "{hotel_name}\n尊敬的 {guest_name}\n请支付预订 {reservation_code} 的 THB {deposit_amount}\n"
             "支付链接 {payment_link}\n链接有效至 {payment_expires_at}\n"
             "{check_in_policy}\n联系 {contact_phone} / {contact_email}",
         ),
@@ -566,7 +566,7 @@ _NOTIFICATION_TEMPLATE_TEXT = {
         ),
         "payment_failed": (
             "付款跟进 {reservation_code}",
-            "{hotel_name}\n尊敬的 {guest_name}\n预订 {reservation_code} 的押金付款尚未完成。\n"
+            "{hotel_name}\n尊敬的 {guest_name}\n预订 {reservation_code} 的付款尚未完成。\n"
             "当前状态 {payment_status}\n请使用此链接重试 {payment_link}\n"
             "联系 {contact_phone} / {contact_email}",
         ),
