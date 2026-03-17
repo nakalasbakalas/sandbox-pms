@@ -756,3 +756,99 @@ class TestStaffRoutes:
         resp = client.get(f"/staff/reservations/{res_id}/pre-checkin")
         assert resp.status_code == 200
         assert b"Pre-Check-In" in resp.data
+
+    def test_send_email_route(self, seeded_app):
+        """Staff send-email route generates a link and records the email attempt."""
+        with seeded_app.app_context():
+            from pms.extensions import db
+            from pms.models import User, ActivityLog
+            res = _create_reservation(db.session)
+            db.session.commit()
+            res_id = res.id
+            user = db.session.query(User).first()
+            user_id = user.id
+
+        client = seeded_app.test_client()
+        _login_staff(client, user_id)
+        resp = _post_staff(
+            client,
+            f"/staff/reservations/{res_id}/pre-checkin/send-email",
+            follow_redirects=True,
+        )
+        assert resp.status_code == 200
+
+        # Verify an activity log entry was written
+        with seeded_app.app_context():
+            from pms.extensions import db
+            from pms.models import ActivityLog
+            log = db.session.query(ActivityLog).filter(
+                ActivityLog.event_type == "pre_checkin.link_emailed",
+            ).first()
+            assert log is not None
+
+    def test_send_email_no_guest_email_shows_warning(self, seeded_app):
+        """Send-email route gracefully handles missing guest email."""
+        with seeded_app.app_context():
+            from pms.extensions import db
+            from pms.models import User, Guest
+            res = _create_reservation(db.session)
+            # Remove email from guest
+            guest = db.session.get(Guest, res.primary_guest_id)
+            guest.email = None
+            db.session.commit()
+            res_id = res.id
+            user = db.session.query(User).first()
+            user_id = user.id
+
+        client = seeded_app.test_client()
+        _login_staff(client, user_id)
+        resp = _post_staff(
+            client,
+            f"/staff/reservations/{res_id}/pre-checkin/send-email",
+            follow_redirects=True,
+        )
+        # Should still succeed (generates link, warns about no email)
+        assert resp.status_code == 200
+
+
+class TestSendPreCheckInEmail:
+    """Test the send_pre_checkin_link_email service function."""
+
+    def test_send_email_activity_logged(self, seeded_app):
+        """Activity log is written even when no email is sent."""
+        with seeded_app.app_context():
+            from pms.extensions import db
+            from pms.models import ActivityLog
+            res = _create_reservation(db.session)
+            pc = generate_pre_checkin(res.id)
+            db.session.commit()
+
+            from pms.services.pre_checkin_service import send_pre_checkin_link_email
+            send_pre_checkin_link_email(pc)
+            db.session.commit()
+
+            log = db.session.query(ActivityLog).filter(
+                ActivityLog.event_type == "pre_checkin.link_emailed",
+                ActivityLog.entity_table == "pre_checkins",
+            ).first()
+            assert log is not None
+
+    def test_send_email_uses_primary_contact_email(self, seeded_app):
+        """Uses pre_checkin.primary_contact_email when set."""
+        with seeded_app.app_context():
+            from pms.extensions import db
+            from pms.models import ActivityLog
+            res = _create_reservation(db.session)
+            pc = generate_pre_checkin(res.id)
+            pc.primary_contact_email = "override@example.com"
+            db.session.commit()
+
+            from pms.services.pre_checkin_service import send_pre_checkin_link_email
+            send_pre_checkin_link_email(pc)
+            db.session.commit()
+
+            log = db.session.query(ActivityLog).filter(
+                ActivityLog.event_type == "pre_checkin.link_emailed",
+            ).first()
+            assert log is not None
+            assert "override@example.com" in str(log.metadata_json)

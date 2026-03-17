@@ -19,6 +19,7 @@ from ..models import (
     InventoryDay,
     PaymentEvent,
     PaymentRequest,
+    PreCheckIn,
     Reservation,
     ReservationNote,
     ReservationStatusHistory,
@@ -818,6 +819,9 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
     readiness = room_readiness_snapshot(reservation, business_date)
     payment = payment_summary(reservation)
     early_requested = bool(reservation.special_requests and "early" in reservation.special_requests.lower())
+    # Load pre-check-in record for readiness indicators (reservation.pre_checkin is a list backref)
+    pc_list = reservation.pre_checkin
+    pre_checkin = pc_list[0] if pc_list else None
     flagged_issue = any(
         [
             not readiness["is_ready"],
@@ -838,6 +842,7 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
             "early_check_in_requested": early_requested,
             "flagged_issue": flagged_issue,
             "turnover_status": "awaiting_housekeeping" if reservation.current_status == "checked_out" else None,
+            "pre_checkin": pre_checkin,
         }
     )
     return summary

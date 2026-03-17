@@ -88,10 +88,14 @@
                 {% if item.flagged_issue %}<span class="status pending">Issue</span>{% endif %}
                 {% if item.early_check_in_requested %}<span class="status house_use">Early</span>{% endif %}
                 {% if item.special_requests_present %}<span class="status house_use">Request</span>{% endif %}
-                {% set _pc_list = item.reservation_obj.pre_checkin if item.reservation_obj is defined and item.reservation_obj else [] %}
-                {% set _pc = _pc_list[0] if _pc_list else None %}
+                {% set _pc = item.pre_checkin %}
                 {% if _pc %}
-                <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' %}confirmed{% elif _pc.readiness in ('docs_missing', 'signature_missing') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI:{{ _pc.readiness|replace('_',' ')|truncate(12, True, '…') }}</a>
+                <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing', 'signature_missing') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI:{{ _pc.readiness|replace('_',' ')|truncate(12, True, '…') }}</a>
+                {% elif item.status in ('tentative', 'confirmed') %}
+                <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=item.id) }}" style="display:inline;margin:0;">
+                  {{ csrf_input() }}
+                  <button type="submit" class="status pending" style="background:none;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;" title="Send pre-check-in link">PCI: Send</button>
+                </form>
                 {% endif %}
               </div>
             </td>

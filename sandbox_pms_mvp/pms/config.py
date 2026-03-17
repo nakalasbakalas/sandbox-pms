@@ -80,7 +80,10 @@ class Config:
         "script-src 'self'; font-src 'self' data: https:; object-src 'none'; "
         "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     )
-    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "1048576"))
+    # 12 MB default — must be larger than MAX_UPLOAD_SIZE_BYTES in pre_checkin_service
+    # (service validates ≤ 10 MB; this allows a small extra margin for form overhead)
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "12582912"))
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "")
     MAX_FORM_MEMORY_SIZE = int(os.getenv("MAX_FORM_MEMORY_SIZE", "262144"))
     MAX_FORM_PARTS = int(os.getenv("MAX_FORM_PARTS", "200"))
     PAYMENT_BASE_URL = os.getenv("PAYMENT_BASE_URL", "")
