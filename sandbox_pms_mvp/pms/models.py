@@ -1780,6 +1780,10 @@ class ReservationDocument(AuditMixin, db.Model):
     )
     verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    # Populated by the OCR background worker (suggest_ocr_extraction).
+    # Contains extracted fields such as name, document_number, date_of_birth,
+    # expiry_date.  Staff review before applying — never auto-update Guest.
+    ocr_extracted_data: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
     reservation = relationship("Reservation", backref="documents", foreign_keys=[reservation_id])
     guest = relationship("Guest", foreign_keys=[guest_id])

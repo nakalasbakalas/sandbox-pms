@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
+import click
 from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 from markupsafe import Markup, escape
 
@@ -267,7 +268,9 @@ from .services.pre_checkin_service import (
     DocumentVerifyPayload,
     PreCheckInSavePayload,
     build_pre_checkin_link,
+    fire_pre_checkin_not_completed_events,
     generate_pre_checkin,
+    get_document_serve_url,
     get_documents_for_reservation,
     get_pre_checkin_context,
     get_pre_checkin_for_reservation,
@@ -276,6 +279,7 @@ from .services.pre_checkin_service import (
     mark_opened,
     mark_rejected,
     mark_verified,
+    read_document_bytes,
     save_pre_checkin,
     send_pre_checkin_link_email,
     upload_document,
@@ -656,6 +660,22 @@ def register_cli(app: Flask) -> None:
     def send_failed_payment_reminders_command() -> None:
         result = send_due_failed_payment_reminders(actor_user_id=None)
         print(f"Failed payment reminders: {result}")
+
+    @app.cli.command("fire-pre-checkin-reminders")
+    @click.option(
+        "--hours-before",
+        default=48,
+        type=int,
+        help="Hours before check-in to target (default: 48).",
+    )
+    def fire_pre_checkin_reminders_command(hours_before: int) -> None:
+        """Fire pre_checkin_not_completed automation events for upcoming arrivals.
+
+        Run daily via cron ~48 hours before check-in day to nudge guests who
+        have not submitted (or not started) their digital pre-check-in.
+        """
+        result = fire_pre_checkin_not_completed_events(hours_before=hours_before)
+        print(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}")
 
     @app.cli.command("sync-ical-sources")
     def sync_ical_sources_command() -> None:
@@ -1957,6 +1977,9 @@ def register_routes(app: Flask) -> None:
                 elif action == "run_failed_payment":
                     result = send_due_failed_payment_reminders(actor_user_id=actor.id)
                     flash(f"Failed payment reminders queued: {result['queued']}, sent: {result['sent']}.", "success")
+                elif action == "run_pre_checkin_reminders":
+                    result = fire_pre_checkin_not_completed_events(hours_before=48)
+                    flash(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}.", "success")
                 else:
                     abort(400)
             except Exception as exc:  # noqa: BLE001
@@ -4648,7 +4671,51 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
 
-    @app.route("/staff/documents/<uuid:doc_id>/verify", methods=["POST"])
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/update-guest-email", methods=["POST"])
+    def staff_pre_checkin_update_guest_email(reservation_id):
+        """Update the primary guest's email with the address submitted via pre-check-in."""
+        user = require_permission("reservation.edit")
+        reservation = db.session.get(Reservation, reservation_id)
+        if not reservation:
+            abort(404)
+        pc = get_pre_checkin_for_reservation(reservation_id)
+        if not pc or not pc.primary_contact_email:
+            flash("No pre-check-in email to apply.", "error")
+            return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+        guest = reservation.primary_guest
+        if not guest:
+            flash("No primary guest on this reservation.", "error")
+            return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+        new_email = pc.primary_contact_email.strip()
+        old_email = guest.email
+        if old_email == new_email:
+            flash("Guest email is already up to date.", "info")
+            return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+        try:
+            guest.email = new_email
+            guest.updated_by_user_id = user.id
+            db.session.flush()
+            write_audit_log(
+                actor_user_id=user.id,
+                entity_table="guests",
+                entity_id=str(guest.id),
+                action="update",
+                before_data={"email": old_email},
+                after_data={"email": new_email, "source": "pre_checkin_write_back"},
+            )
+            write_activity_log(
+                actor_user_id=user.id,
+                event_type="guest.email_updated_from_pre_checkin",
+                entity_table="guests",
+                entity_id=str(guest.id),
+                metadata={"reservation_id": str(reservation_id), "old_email": old_email or "", "new_email": new_email},
+            )
+            db.session.commit()
+            flash(f"Guest email updated to {new_email}.", "success")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
     def staff_document_verify(doc_id):
         user = require_permission("reservation.check_in")
         status = request.form.get("verification_status", "verified")
@@ -4673,12 +4740,16 @@ def register_routes(app: Flask) -> None:
         doc = db.session.get(ReservationDocument, doc_id)
         if not doc:
             abort(404)
-        from .services.pre_checkin_service import _upload_dir
-        file_path = _upload_dir() / doc.storage_key
-        if not file_path.is_file():
+        # For S3 (or other remote backends) generate_url returns a presigned URL;
+        # redirect the browser there so the app server is not in the data path.
+        url = get_document_serve_url(doc)
+        if url is not None:
+            return redirect(url)
+        # Local backend: stream bytes directly.
+        try:
+            data = read_document_bytes(doc)
+        except FileNotFoundError:
             abort(404)
-        with open(str(file_path), "rb") as f:
-            data = f.read()
         return Response(
             data,
             mimetype=doc.content_type,

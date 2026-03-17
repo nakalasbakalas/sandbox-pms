@@ -43,6 +43,38 @@
   </div>
   {% endif %}
 
+  {# ── Progress Indicator ── #}
+  {% if pc.status in ('submitted', 'verified') %}{% set _step = 3 %}
+  {% elif pc.status == 'in_progress' %}{% set _step = 2 %}
+  {% else %}{% set _step = 1 %}{% endif %}
+  <div style="position:sticky;top:0;z-index:100;background:#fff;border-bottom:1px solid #e0e0e0;
+              padding:0.625rem 1rem;margin:0 -1rem 1.25rem;display:flex;align-items:center;gap:0;
+              box-shadow:0 1px 4px rgba(0,0,0,.06);">
+    {% for _num, _label in [(1,'Your Info'),(2,'Documents'),(3,'Confirmed')] %}
+    {%- set _active = (_step == _num) -%}
+    {%- set _done   = (_step > _num) -%}
+    <div style="display:flex;align-items:center;flex:1;min-width:0;">
+      <div style="display:flex;align-items:center;gap:0.4rem;white-space:nowrap;">
+        <span style="width:1.5rem;height:1.5rem;border-radius:50%;display:inline-flex;align-items:center;
+                     justify-content:center;font-size:0.75rem;font-weight:700;flex-shrink:0;
+                     {% if _done %}background:#28a745;color:#fff;
+                     {% elif _active %}background:#0d6efd;color:#fff;
+                     {% else %}background:#dee2e6;color:#6c757d;{% endif %}">
+          {% if _done %}✓{% else %}{{ _num }}{% endif %}
+        </span>
+        <span style="font-size:0.8rem;font-weight:{% if _active %}700{% else %}400{% endif %};
+                     color:{% if _active %}#0d6efd{% elif _done %}#28a745{% else %}#6c757d{% endif %};">
+          {{ _label }}
+        </span>
+      </div>
+      {% if not loop.last %}
+      <div style="flex:1;height:2px;margin:0 0.4rem;
+                  background:{% if _done %}#28a745{% else %}#dee2e6{% endif %};"></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
   {# ── Guest Information Form ── #}
   <form method="POST" action="/pre-checkin/{{ pc.token }}/save" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
     <h2 style="font-size:1.2rem;margin-bottom:1rem;">👤 Guest Information</h2>

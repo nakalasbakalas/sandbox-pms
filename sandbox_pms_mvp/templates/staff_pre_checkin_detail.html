@@ -104,6 +104,27 @@
     </table>
   </div>
 
+  {# ── Guest Email Write-back ── #}
+  {% set _guest = reservation.primary_guest %}
+  {% if pc.primary_contact_email and _guest
+        and pc.primary_contact_email|lower != (_guest.email or '')|lower %}
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;border-left:4px solid #ffc107;background:#fffbf0;">
+    <h2 style="font-size:1.05rem;margin-bottom:0.5rem;">📧 Guest Email Mismatch</h2>
+    <p style="font-size:0.9rem;margin-bottom:0.75rem;">
+      The guest submitted <strong>{{ pc.primary_contact_email }}</strong> as their contact email,
+      which differs from the profile email
+      <strong>{{ _guest.email or '(none on file)' }}</strong>.
+      Would you like to update the guest profile?
+    </p>
+    {% if can('reservation.edit') %}
+    <form method="POST" action="{{ url_for('staff_pre_checkin_update_guest_email', reservation_id=reservation.id) }}" style="display:inline;">
+      {{ csrf_input() }}
+      <button type="submit" class="btn btn-sm btn-primary">Update Guest Profile Email</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# ── Documents ── #}
   <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
     <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">📄 Documents ({{ documents|length }})</h2>
