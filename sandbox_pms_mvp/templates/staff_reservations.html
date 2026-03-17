@@ -90,6 +90,10 @@
         <td>
           <span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span>
           {% if item.review_status %}<span class="cell-muted">{{ item.review_status.replace('_', ' ') }}</span>{% endif %}
+          {% set _pc = item.pre_checkin %}
+          {% if _pc %}
+          <br><a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing','signature_missing','payment_pending') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;display:inline-block;margin-top:2px;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI: {{ _pc.readiness|replace('_',' ')|truncate(14, True, '…') }}</a>
+          {% endif %}
         </td>
         <td>
           {% if can_folio %}

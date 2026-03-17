@@ -38,6 +38,55 @@
   </div>
 </section>
 
+{% set _fd_pc = detail.front_desk.pre_checkin %}
+{% if _fd_pc %}
+<section class="card" style="border-left:3px solid {% if _fd_pc.readiness == 'ready_for_arrival' or _fd_pc.readiness == 'checked_at_desk' %}#28a745{% elif _fd_pc.readiness in ('docs_missing','signature_missing','payment_pending') %}#ffc107{% else %}#17a2b8{% endif %};">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Digital Pre-Check-In</p>
+      <h2 style="margin-bottom:0;">
+        <span class="status {% if _fd_pc.readiness == 'ready_for_arrival' or _fd_pc.readiness == 'checked_at_desk' %}confirmed{% elif _fd_pc.readiness in ('docs_missing','signature_missing') %}pending{% elif _fd_pc.readiness == 'payment_pending' %}cancelled{% else %}house_use{% endif %}">{{ _fd_pc.readiness|replace('_',' ')|title }}</span>
+        <span class="status {% if _fd_pc.status == 'submitted' or _fd_pc.status == 'verified' %}confirmed{% elif _fd_pc.status == 'in_progress' or _fd_pc.status == 'opened' %}house_use{% else %}pending{% endif %}" style="margin-left:0.4rem;">{{ _fd_pc.status|replace('_',' ')|title }}</span>
+      </h2>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_pre_checkin_detail', reservation_id=detail.reservation.id) }}">View pre-check-in</a>
+    </div>
+  </div>
+  <div class="metric-strip">
+    {% if _fd_pc.primary_contact_name %}<div><small>Pre-check-in name</small><strong>{{ _fd_pc.primary_contact_name }}</strong></div>{% endif %}
+    {% if _fd_pc.primary_contact_phone %}<div><small>Submitted phone</small><strong>{{ _fd_pc.primary_contact_phone }}</strong></div>{% endif %}
+    {% if _fd_pc.eta %}<div><small>ETA</small><strong>{{ _fd_pc.eta }}</strong></div>{% endif %}
+    {% if _fd_pc.number_of_occupants %}<div><small>Occupants</small><strong>{{ _fd_pc.number_of_occupants }}</strong></div>{% endif %}
+    <div><small>Acknowledgment</small><strong>{% if _fd_pc.acknowledgment_accepted %}✅ Signed{% else %}⚠️ Not yet{% endif %}</strong></div>
+    {% set _docs = detail.reservation.reservation_documents %}
+    {% if _docs %}
+    <div><small>Documents</small><strong>{{ _docs|length }} uploaded — {% if _docs|selectattr('verification_status','eq','verified')|list|length == _docs|length %}✅ All verified{% elif _docs|selectattr('verification_status','eq','pending')|list %}⏳ Pending review{% else %}⚠️ Some rejected{% endif %}</strong></div>
+    {% else %}
+    <div><small>Documents</small><strong>⚠️ None uploaded</strong></div>
+    {% endif %}
+  </div>
+  {% if _fd_pc.special_requests %}<p style="font-size:0.85rem;margin:0.5rem 0 0;"><strong>Guest requests:</strong> {{ _fd_pc.special_requests }}</p>{% endif %}
+  {% if _fd_pc.notes_for_staff %}<p style="font-size:0.85rem;margin:0.25rem 0 0;"><strong>Notes for staff:</strong> {{ _fd_pc.notes_for_staff }}</p>{% endif %}
+</section>
+{% elif detail.status in ['tentative', 'confirmed'] %}
+<section class="card" style="border-left:3px solid #6c757d;">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Digital Pre-Check-In</p>
+      <h2 style="margin-bottom:0;">Not sent</h2>
+    </div>
+    <div class="actions">
+      <form method="POST" action="{{ url_for('staff_pre_checkin_send_email', reservation_id=detail.reservation.id) }}">
+        {{ csrf_input() }}
+        <button type="submit" class="button">📧 Send Pre-Check-In Link</button>
+      </form>
+    </div>
+  </div>
+  <p class="muted" style="margin:0;">Guest has not received a digital pre-check-in invitation yet.</p>
+</section>
+{% endif %}
+
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head"><h2>Guest and arrival details</h2></div>

@@ -277,6 +277,7 @@ from .services.pre_checkin_service import (
     mark_rejected,
     mark_verified,
     save_pre_checkin,
+    send_pre_checkin_link_email,
     upload_document,
     validate_token_access,
     verify_document,
@@ -710,19 +711,27 @@ def _format_money_amount(value: Decimal) -> str:
 def _check_in_form_defaults(detail: dict) -> dict[str, str]:
     reservation = detail["reservation"]
     guest = reservation.primary_guest
+    # Pre-check-in submitted data takes precedence for contact/nationality fields
+    pc_list = reservation.pre_checkin
+    pc = pc_list[0] if pc_list else None
+    phone = (pc.primary_contact_phone if pc and pc.primary_contact_phone else None) or guest.phone or ""
+    email = (pc.primary_contact_email if pc and pc.primary_contact_email else None) or guest.email or ""
+    nationality = (pc.nationality if pc and pc.nationality else None) or guest.nationality or ""
+    # Pre-fill arrival note from pre-check-in notes_for_staff if provided
+    arrival_note = (pc.notes_for_staff or "") if pc else ""
     return {
         "first_name": guest.first_name or "",
         "last_name": guest.last_name or "",
-        "phone": guest.phone or "",
-        "email": guest.email or "",
-        "nationality": guest.nationality or "",
+        "phone": phone,
+        "email": email,
+        "nationality": nationality,
         "preferred_language": guest.preferred_language or reservation.booking_language or "",
         "id_document_type": guest.id_document_type or "",
         "id_document_number": guest.id_document_number or "",
         "room_id": str(reservation.assigned_room_id or ""),
         "payment_method": "front_desk",
         "collect_payment_amount": "0.00",
-        "arrival_note": "",
+        "arrival_note": arrival_note,
         "notes_summary": guest.notes_summary or "",
         "identity_verified": "on" if reservation.identity_verified_at else "",
         "apply_early_fee": "",
@@ -4205,6 +4214,13 @@ def register_routes(app: Flask) -> None:
             sort_dir=sort_dir,
         )
         result = list_reservations(filters)
+        # Batch-load pre-check-in status for all reservation IDs on this page
+        if result["items"]:
+            _res_ids = [item["id"] for item in result["items"]]
+            _pc_rows = db.session.query(PreCheckIn).filter(PreCheckIn.reservation_id.in_(_res_ids)).all()
+            _pc_map = {str(pc.reservation_id): pc for pc in _pc_rows}
+            for item in result["items"]:
+                item["pre_checkin"] = _pc_map.get(str(item["id"]))
         return render_template(
             "staff_reservations.html",
             result=result,
@@ -4558,7 +4574,29 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             db.session.rollback()
             flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id))
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/send-email", methods=["POST"])
+    def staff_pre_checkin_send_email(reservation_id):
+        user = require_permission("reservation.edit")
+        try:
+            pc = generate_pre_checkin(reservation_id, actor_user_id=user.id)
+            send_pre_checkin_link_email(pc, actor_user_id=user.id)
+            db.session.commit()
+            reservation = db.session.get(Reservation, reservation_id)
+            guest_email = (
+                pc.primary_contact_email
+                or (reservation.primary_guest.email if reservation and reservation.primary_guest else None)
+            )
+            if guest_email:
+                flash(f"Pre-check-in link sent to {guest_email}.", "success")
+            else:
+                link = build_pre_checkin_link(pc.token)
+                flash(Markup(f'No guest email on file — link generated: <code class="text-xs select-all">{escape(link)}</code>'), "warning")
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
 
     @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin")
     def staff_pre_checkin_detail(reservation_id):

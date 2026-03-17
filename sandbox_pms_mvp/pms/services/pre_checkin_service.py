@@ -612,6 +612,63 @@ def build_pre_checkin_link(token: str) -> str:
     return f"{base}/pre-checkin/{token}"
 
 
+def send_pre_checkin_link_email(
+    pc: PreCheckIn,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    """Send the pre-check-in link to the guest email via the messaging service.
+
+    Uses the unified messaging hub (send_message). Silently skips if the
+    guest has no email address.  Logs the event regardless.
+    """
+    from .messaging_service import ComposePayload, send_message  # local import avoids circular dep
+
+    res = pc.reservation
+    guest = res.primary_guest if res else None
+    recipient_email = (
+        pc.primary_contact_email
+        or (guest.email if guest else None)
+    )
+
+    link = build_pre_checkin_link(pc.token)
+    hotel_name = current_app.config.get("HOTEL_NAME", "the hotel")
+    res_code = res.reservation_code if res else ""
+    check_in = res.check_in_date.strftime("%d %b %Y") if res else ""
+
+    subject = f"Complete your online pre-check-in — {res_code}"
+    body = (
+        f"Dear guest,\n\n"
+        f"Please complete your pre-check-in for reservation {res_code} (check-in: {check_in}) "
+        f"using the link below. This will help speed up your arrival at {hotel_name}.\n\n"
+        f"{link}\n\n"
+        f"The link expires in 7 days. If you have any questions, reply to this message.\n\n"
+        f"Best regards,\n{hotel_name}"
+    )
+
+    if recipient_email:
+        payload = ComposePayload(
+            reservation_id=str(res.id) if res else None,
+            guest_id=str(guest.id) if guest else None,
+            channel="email",
+            subject=subject,
+            body_text=body,
+            recipient_address=recipient_email,
+        )
+        send_message(payload, actor_user_id=str(actor_user_id) if actor_user_id else None, commit=False)
+
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="pre_checkin.link_emailed",
+        entity_table="pre_checkins",
+        entity_id=str(pc.id),
+        metadata={
+            "reservation_id": str(pc.reservation_id),
+            "recipient": recipient_email or "none",
+        },
+    )
+
+
 def list_todays_arrivals_with_readiness(business_date) -> list[dict[str, Any]]:
     """Return today's arriving reservations augmented with pre-check-in status."""
     reservations = (

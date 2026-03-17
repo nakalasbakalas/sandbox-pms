@@ -41,7 +41,12 @@
     </div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
       <form method="POST" action="{{ url_for('staff_pre_checkin_resend', reservation_id=reservation.id) }}">
+        {{ csrf_input() }}
         <button type="submit" class="btn btn-secondary btn-sm">Regenerate & Copy Link</button>
+      </form>
+      <form method="POST" action="{{ url_for('staff_pre_checkin_send_email', reservation_id=reservation.id) }}">
+        {{ csrf_input() }}
+        <button type="submit" class="btn btn-primary btn-sm">📧 Send via Email</button>
       </form>
       {% if pc.expires_at %}
       <span class="muted" style="font-size:0.85rem;align-self:center;">Expires: {{ pc.expires_at.strftime('%Y-%m-%d %H:%M') }}</span>
@@ -50,6 +55,7 @@
     {% else %}
     <p class="muted" style="margin-bottom:0.75rem;">No pre-check-in link has been generated yet.</p>
     <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=reservation.id) }}">
+      {{ csrf_input() }}
       <button type="submit" class="btn btn-primary btn-sm">Generate Pre-Check-In Link</button>
     </form>
     {% endif %}
@@ -119,10 +125,12 @@
         <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
         {% if doc.verification_status == 'pending' %}
         <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          {{ csrf_input() }}
           <input type="hidden" name="verification_status" value="verified" />
           <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
         </form>
         <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          {{ csrf_input() }}
           <input type="hidden" name="verification_status" value="rejected" />
           <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>
         </form>
@@ -141,9 +149,11 @@
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
       {% if pc.status == 'submitted' %}
       <form method="POST" action="{{ url_for('staff_pre_checkin_verify', reservation_id=reservation.id) }}">
+        {{ csrf_input() }}
         <button type="submit" class="btn btn-primary">✅ Mark Verified (Desk Complete)</button>
       </form>
       <form method="POST" action="{{ url_for('staff_pre_checkin_reject', reservation_id=reservation.id) }}">
+        {{ csrf_input() }}
         <input type="hidden" name="reason" value="Staff rejected during desk review" />
         <button type="submit" class="btn btn-secondary" style="color:#721c24;">❌ Reject Pre-Check-In</button>
       </form>

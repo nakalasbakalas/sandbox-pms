@@ -42,6 +42,7 @@
       {% else %}background:#e8f4fd;color:#004085;{% endif %}">Pre-check-in: {{ _pc.readiness|replace('_',' ')|title }}</a>
     {% elif detail.reservation.current_status in ('confirmed', 'tentative') %}
     <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=detail.reservation.id) }}" style="display:inline;">
+      {{ csrf_input() }}
       <button type="submit" class="pill subtle" style="background:#e8f4fd;color:#004085;border:none;cursor:pointer;">+ Send Pre-Check-In</button>
     </form>
     {% endif %}
