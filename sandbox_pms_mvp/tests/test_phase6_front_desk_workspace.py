@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from flask_migrate import upgrade
 from werkzeug.security import generate_password_hash
 
+import pms.app as pms_app
 from pms.app import create_app
 from pms.extensions import db
 from pms.models import (
@@ -674,6 +675,152 @@ def test_check_in_route_updates_guest_identity_fields(app_factory):
         assert refreshed.current_status == "checked_in"
         assert refreshed.primary_guest.phone == "+66800000999"
         assert refreshed.identity_verified_at is not None
+
+
+def test_front_desk_detail_shows_check_in_blockers_before_submit(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Blocker",
+            last_name="Guest",
+            phone="+66800000171",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        user = make_staff_user("front_desk", "fd-checkin-blockers@example.com")
+    login_as(client, user)
+
+    response = client.get(f"/staff/front-desk/{reservation.id}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Resolve these items before completing check-in:" in body
+    assert "Deposit is still outstanding." in body
+
+
+def test_check_in_route_returns_structured_field_errors_for_validation_issues(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Needs",
+            last_name="Validation",
+            phone="+66800000172",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        user = make_staff_user("front_desk", "fd-checkin-validation@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "",
+            "last_name": "Validation",
+            "phone": "",
+            "email": "validation@example.com",
+            "payment_method": "front_desk",
+            "collect_payment_amount": "0.00",
+            "back_url": "/staff/front-desk",
+            "business_date": (date.today() + timedelta(days=1)).isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Check-in could not be completed. Please fix the following:" in body
+    assert "Primary guest first name is required before check-in can be completed." in body
+    assert "Primary guest phone number is required before check-in can be completed." in body
+    assert "Deposit is still outstanding." in body
+    assert 'href="#check-in-first-name"' in body
+    assert 'id="check-in-first-name"' in body
+    assert 'aria-invalid="true"' in body
+    assert 'value="Validation"' in body
+
+
+def test_check_in_route_rejects_invalid_payment_amount_with_field_message(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Amount",
+            last_name="Invalid",
+            phone="+66800000173",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        user = make_staff_user("front_desk", "fd-checkin-amount@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Amount",
+            "last_name": "Invalid",
+            "phone": "+66800000173",
+            "email": "amount@example.com",
+            "payment_method": "front_desk",
+            "collect_payment_amount": "abc",
+            "back_url": "/staff/front-desk",
+            "business_date": (date.today() + timedelta(days=1)).isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Payment collected now must be a valid amount in THB." in body
+    assert "Something went wrong. Please try again or contact the hotel." not in body
+
+
+def test_check_in_route_uses_unexpected_failure_fallback_with_reference(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Unexpected",
+            last_name="Failure",
+            phone="+66800000174",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=1),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        user = make_staff_user("front_desk", "fd-checkin-unexpected@example.com")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("secret token should never leak")
+
+    monkeypatch.setattr(pms_app, "complete_check_in", boom)
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Unexpected",
+            "last_name": "Failure",
+            "phone": "+66800000174",
+            "email": "unexpected@example.com",
+            "payment_method": "front_desk",
+            "collect_payment_amount": str(reservation.deposit_required_amount),
+            "back_url": "/staff/front-desk",
+            "business_date": (date.today() + timedelta(days=1)).isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 500
+    assert "Check-in could not be completed due to an unexpected system error." in body
+    assert "CHKIN-" in body
+    assert "secret token should never leak" not in body
 
 
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is not configured for Postgres front-desk testing")

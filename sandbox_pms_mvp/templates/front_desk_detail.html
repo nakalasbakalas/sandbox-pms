@@ -121,45 +121,117 @@
       <p>Room readiness, identity capture, and deposit/payment checks are revalidated when this form submits.</p>
     </div>
   </div>
+  {% set form_values = check_in_form['values'] %}
+  {% set field_errors = check_in_form['field_errors'] %}
+  {% set summary_items = check_in_form['summary_errors'] if check_in_form['summary_errors'] else check_in_form['blockers'] %}
+  {% if check_in_form['unexpected_message'] or summary_items %}
+  <div
+    id="check-in-errors"
+    class="check-in-summary{% if check_in_form['summary_errors'] or check_in_form['unexpected_message'] %} error{% else %} warning{% endif %}"
+    tabindex="-1"
+    aria-live="polite"
+  >
+    <strong>
+      {% if check_in_form['summary_errors'] or check_in_form['unexpected_message'] %}
+      Check-in could not be completed. Please fix the following:
+      {% else %}
+      Resolve these items before completing check-in:
+      {% endif %}
+    </strong>
+    {% if check_in_form['unexpected_message'] %}
+    <p>{{ check_in_form['unexpected_message'] }}</p>
+    {% endif %}
+    {% if summary_items %}
+    <ul class="check-in-summary-list">
+      {% for issue in summary_items %}
+      <li><a href="{{ issue.href }}">{{ issue.message }}</a></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
   <form class="stack-form" method="post" action="{{ url_for('staff_front_desk_check_in', reservation_id=detail.reservation.id) }}">
     {{ csrf_input() }}
     <input type="hidden" name="back_url" value="{{ back_url }}">
     <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
-    <div class="grid two">
-      <label><span>First name</span><input type="text" name="first_name" value="{{ detail.reservation.primary_guest.first_name }}" required></label>
-      <label><span>Last name</span><input type="text" name="last_name" value="{{ detail.reservation.primary_guest.last_name }}" required></label>
+    <div id="check-in-identity-section" class="grid two">
+      <label>
+        <span>First name <strong aria-hidden="true">*</strong></span>
+        <input id="check-in-first-name" type="text" name="first_name" value="{{ form_values.get('first_name', '') }}" required aria-invalid="{{ 'true' if field_errors.get('first_name') else 'false' }}">
+        {% if field_errors.get('first_name') %}<small class="form-error">{{ field_errors.get('first_name') }}</small>{% endif %}
+      </label>
+      <label>
+        <span>Last name <strong aria-hidden="true">*</strong></span>
+        <input id="check-in-last-name" type="text" name="last_name" value="{{ form_values.get('last_name', '') }}" required aria-invalid="{{ 'true' if field_errors.get('last_name') else 'false' }}">
+        {% if field_errors.get('last_name') %}<small class="form-error">{{ field_errors.get('last_name') }}</small>{% endif %}
+      </label>
     </div>
     <div class="grid two">
-      <label><span>Phone</span><input type="text" name="phone" value="{{ detail.reservation.primary_guest.phone }}" required></label>
-      <label><span>Email</span><input type="email" name="email" value="{{ detail.reservation.primary_guest.email or '' }}"></label>
+      <label>
+        <span>Phone <strong aria-hidden="true">*</strong></span>
+        <input id="check-in-phone" type="text" name="phone" value="{{ form_values.get('phone', '') }}" required aria-invalid="{{ 'true' if field_errors.get('phone') else 'false' }}">
+        {% if field_errors.get('phone') %}<small class="form-error">{{ field_errors.get('phone') }}</small>{% else %}<small class="form-hint">Record the guest’s main arrival contact number before check-in.</small>{% endif %}
+      </label>
+      <label>
+        <span>Email</span>
+        <input id="check-in-email" type="email" name="email" value="{{ form_values.get('email', '') }}">
+      </label>
     </div>
     <div class="grid two">
-      <label><span>Nationality</span><input type="text" name="nationality" value="{{ detail.reservation.primary_guest.nationality or '' }}"></label>
-      <label><span>Preferred language</span><input type="text" name="preferred_language" value="{{ detail.reservation.primary_guest.preferred_language or detail.reservation.booking_language or '' }}"></label>
+      <label><span>Nationality</span><input type="text" name="nationality" value="{{ form_values.get('nationality', '') }}"></label>
+      <label><span>Preferred language</span><input type="text" name="preferred_language" value="{{ form_values.get('preferred_language', '') }}"></label>
     </div>
     <div class="grid two">
-      <label><span>ID / passport type</span><input type="text" name="id_document_type" value="{{ detail.reservation.primary_guest.id_document_type or '' }}"></label>
-      <label><span>ID / passport number</span><input type="text" name="id_document_number" value="{{ detail.reservation.primary_guest.id_document_number or '' }}"></label>
+      <label><span>ID / passport type</span><input type="text" name="id_document_type" value="{{ form_values.get('id_document_type', '') }}"></label>
+      <label><span>ID / passport number</span><input type="text" name="id_document_number" value="{{ form_values.get('id_document_number', '') }}"></label>
     </div>
-    <div class="grid two">
-      <label><span>Assigned room</span><select name="room_id">{% for room in detail.eligible_rooms %}<option value="{{ room.id }}" {% if room.id == detail.reservation.assigned_room_id %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>{% endfor %}</select></label>
-      <label><span>Payment method</span><select name="payment_method"><option value="front_desk">Front desk</option><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option></select></label>
+    <div id="check-in-room-section" class="grid two">
+      <label>
+        <span>Assigned room <strong aria-hidden="true">*</strong></span>
+        <select id="check-in-room-id" name="room_id" aria-invalid="{{ 'true' if field_errors.get('room_id') else 'false' }}">
+          {% for room in detail.eligible_rooms %}
+          <option value="{{ room.id }}" {% if form_values.get('room_id', '') == room.id|string %}selected{% endif %}>{{ room.room_number }} · Floor {{ room.floor_number }}</option>
+          {% endfor %}
+        </select>
+        {% if field_errors.get('room_id') %}<small class="form-error">{{ field_errors.get('room_id') }}</small>{% else %}<small class="form-hint">{{ detail.front_desk.room_readiness_reason }}</small>{% endif %}
+      </label>
+      <label>
+        <span>Payment method</span>
+        <select id="check-in-payment-method" name="payment_method">
+          <option value="front_desk" {% if form_values.get('payment_method') == 'front_desk' %}selected{% endif %}>Front desk</option>
+          <option value="cash" {% if form_values.get('payment_method') == 'cash' %}selected{% endif %}>Cash</option>
+          <option value="qr" {% if form_values.get('payment_method') == 'qr' %}selected{% endif %}>QR</option>
+          <option value="card" {% if form_values.get('payment_method') == 'card' %}selected{% endif %}>Card</option>
+          <option value="bank" {% if form_values.get('payment_method') == 'bank' %}selected{% endif %}>Bank transfer</option>
+        </select>
+      </label>
     </div>
-    <div class="grid two">
+    <div id="check-in-payment-section" class="grid two">
       {% if can_collect_payment %}
-      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="0.00"></label>
+      <label>
+        <span>Payment collected now (THB)</span>
+        <input id="check-in-collect-payment-amount" type="number" name="collect_payment_amount" min="0" step="0.01" value="{{ form_values.get('collect_payment_amount', '0.00') }}" aria-invalid="{{ 'true' if field_errors.get('collect_payment_amount') else 'false' }}">
+        {% if field_errors.get('collect_payment_amount') %}<small class="form-error">{{ field_errors.get('collect_payment_amount') }}</small>{% else %}<small class="form-hint">Collect any outstanding arrival deposit here before completing check-in.</small>{% endif %}
+      </label>
       {% endif %}
-      <label><span>Arrival note</span><input type="text" name="arrival_note" placeholder="Called guest, arrived early, key issued at desk"></label>
+      <label><span>Arrival note</span><input type="text" name="arrival_note" value="{{ form_values.get('arrival_note', '') }}" placeholder="Called guest, arrived early, key issued at desk"></label>
     </div>
-    <label><span>Notes summary</span><textarea name="notes_summary" rows="2">{{ detail.reservation.primary_guest.notes_summary or '' }}</textarea></label>
-    <div class="grid three">
-      <label class="toggle-row"><span>Identity verified</span><input type="checkbox" name="identity_verified" {% if detail.reservation.identity_verified_at %}checked{% endif %}></label>
-      {% if can_charge and detail.front_desk.early_fee.applies %}<label class="toggle-row"><span>Apply early fee ({{ currency }} {{ detail.front_desk.early_fee.amount|money }})</span><input type="checkbox" name="apply_early_fee"></label>{% endif %}
-      {% if detail.payment_summary.deposit_required_amount > detail.payment_summary.deposit_received_amount %}<label class="toggle-row"><span>Override missing deposit</span><input type="checkbox" name="override_payment"></label>{% endif %}
+    <label><span>Notes summary</span><textarea name="notes_summary" rows="2">{{ form_values.get('notes_summary', '') }}</textarea></label>
+    <div id="check-in-fee-section" class="grid three">
+      <label class="toggle-row"><span>Identity verified</span><input type="checkbox" name="identity_verified" {% if form_values.get('identity_verified') == 'on' %}checked{% endif %}></label>
+      {% if can_charge and detail.front_desk.early_fee.applies %}<label class="toggle-row"><span>Apply early fee ({{ currency }} {{ detail.front_desk.early_fee.amount|money }})</span><input type="checkbox" name="apply_early_fee" {% if form_values.get('apply_early_fee') == 'on' %}checked{% endif %}></label>{% endif %}
+      {% if detail.payment_summary.deposit_required_amount > detail.payment_summary.deposit_received_amount %}
+      <label class="toggle-row">
+        <span>Override missing deposit</span>
+        <input id="check-in-override-payment" type="checkbox" name="override_payment" {% if form_values.get('override_payment') == 'on' %}checked{% endif %}>
+      </label>
+      {% endif %}
     </div>
+    {% if field_errors.get('override_payment') %}<small class="form-error">{{ field_errors.get('override_payment') }}</small>{% endif %}
     {% if detail.front_desk.early_fee.applies %}
-    <label><span>Waiver reason if early fee is not applied</span><input type="text" name="waiver_reason" placeholder="Manager goodwill / operational recovery"></label>
-    <label class="toggle-row"><span>Waive early fee</span><input type="checkbox" name="waive_early_fee"></label>
+    <label><span>Waiver reason if early fee is not applied</span><input id="check-in-waiver-reason" type="text" name="waiver_reason" value="{{ form_values.get('waiver_reason', '') }}" placeholder="Manager goodwill / operational recovery"></label>
+    <label class="toggle-row"><span>Waive early fee</span><input type="checkbox" name="waive_early_fee" {% if form_values.get('waive_early_fee') == 'on' %}checked{% endif %}></label>
+    <small class="form-hint">Early arrival needs an explicit fee decision before check-in can be completed.</small>
     {% endif %}
     {% if can('reservation.check_in') %}<button class="button" type="submit">Complete check-in</button>{% endif %}
   </form>
