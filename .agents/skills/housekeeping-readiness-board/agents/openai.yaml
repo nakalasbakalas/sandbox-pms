@@ -1,0 +1,8 @@
+interface:
+  display_name: "Housekeeping Readiness Board"
+  short_description: "Protect room-readiness truth and housekeeping/front-desk handoff states."
+  brand_color: "#059669"
+  default_prompt: "Audit the housekeeping and readiness flow end to end, preserve room-state truth, and verify board reflection."
+
+policy:
+  allow_implicit_invocation: true

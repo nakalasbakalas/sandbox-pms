@@ -1,0 +1,8 @@
+interface:
+  display_name: "Front Desk Cashier Ops"
+  short_description: "Protect check-in, planning-board, and cashier workflow integrity."
+  brand_color: "#2563EB"
+  default_prompt: "Audit the front-desk and cashier workflow end to end, protect dense operational states, and tighten validation clarity."
+
+policy:
+  allow_implicit_invocation: true
