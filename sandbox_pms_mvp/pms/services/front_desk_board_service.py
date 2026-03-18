@@ -8,7 +8,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
-from ..models import ExternalCalendarBlock, HousekeepingStatus, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -62,6 +62,26 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         window_start=window_start,
         window_end=window_end,
     )
+
+    # Batch-fetch folio balance for all visible reservations (single query)
+    _res_ids = [r.id for r in reservations]
+    _balance_map: dict[uuid.UUID, float] = {}
+    if _res_ids:
+        from ..extensions import db as _db
+        _balance_rows = _db.session.execute(
+            sa.select(
+                FolioCharge.reservation_id,
+                sa.func.sum(FolioCharge.total_amount),
+            )
+            .where(
+                FolioCharge.reservation_id.in_(_res_ids),
+                FolioCharge.voided_at.is_(None),
+            )
+            .group_by(FolioCharge.reservation_id)
+        ).all()
+        for rid, net in _balance_rows:
+            _balance_map[rid] = max(float(net or 0), 0.0)
+
     holds = _hold_query(
         room_type_id=filters.room_type_id,
         window_start=window_start,
@@ -238,6 +258,15 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             room=room_by_id.get(reservation.assigned_room_id) if reservation.assigned_room_id else None,
             status="conflict" if str(reservation.id) in conflict_reservation_ids else reservation.current_status,
             allocation_state=allocation_state,
+            balance_due=_balance_map.get(reservation.id, 0.0),
+        )
+        # Flag reservation as ready for check-in: confirmed, arriving today, room assigned & ready
+        block["readyForCheckIn"] = (
+            reservation.current_status == "confirmed"
+            and reservation.check_in_date <= today
+            and allocation_state == "allocated"
+            and target_row is not None
+            and target_row.get("is_room_ready", False)
         )
         if allocation_state == "unallocated" or target_row is None or reservation.assigned_room_id not in room_id_set:
             _ensure_unallocated_row(target_group)["blocks"].append(block)
@@ -586,6 +615,7 @@ def _reservation_block(
     room: Room | None,
     status: str,
     allocation_state: str,
+    balance_due: float = 0.0,
 ) -> dict[str, Any]:
     visible_start = max(window_start, reservation.check_in_date)
     visible_end = min(window_end, reservation.check_out_date)
@@ -651,6 +681,7 @@ def _reservation_block(
             "reservationId": str(reservation.id),
             "checkInAt": reservation.check_in_date.isoformat(),
             "checkOutAt": reservation.check_out_date.isoformat(),
+            "balanceDue": balance_due,
         },
     )
 

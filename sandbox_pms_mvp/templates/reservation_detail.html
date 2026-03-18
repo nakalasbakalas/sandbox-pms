@@ -181,9 +181,53 @@
   </article>
 </section>
 
+{% if detail.modification_requests %}
+<section class="card">
+  <div class="card-head"><h2>Modification Requests</h2></div>
+  <div class="list-stack compact">
+    {% for mr in detail.modification_requests %}
+    <div class="list-row no-link">
+      <div>
+        <strong>{{ mr.request_code }}</strong>
+        <span class="status {{ mr.status }}">{{ mr.status }}</span>
+        {% if mr.requester_contact_hint %}<span class="small muted">from {{ mr.requester_contact_hint }}</span>{% endif %}
+        <div class="small" style="margin-top:0.3rem">
+          {% if mr.requested_check_in %}Check-in: {{ mr.requested_check_in }}{% endif %}
+          {% if mr.requested_check_out %} Check-out: {{ mr.requested_check_out }}{% endif %}
+          {% if mr.requested_adults %} Adults: {{ mr.requested_adults }}{% endif %}
+          {% if mr.requested_children %} Children: {{ mr.requested_children }}{% endif %}
+          {% if mr.contact_correction %}<br>Contact update: {{ mr.contact_correction }}{% endif %}
+          {% if mr.special_requests %}<br>Notes: {{ mr.special_requests }}{% endif %}
+        </div>
+        {% if mr.internal_note %}<p class="small muted">Staff note: {{ mr.internal_note }}</p>{% endif %}
+        {% if mr.reviewed_by %}<p class="small muted">Reviewed by {{ mr.reviewed_by }} at {{ mr.reviewed_at.strftime('%Y-%m-%d %H:%M') if mr.reviewed_at }}</p>{% endif %}
+      </div>
+      <div class="right-stack">
+        <span class="small muted">{{ mr.requested_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        {% if mr.status in ('submitted', 'reviewed') and can('reservation.edit') %}
+        <div style="display:flex;gap:0.3rem;margin-top:0.3rem">
+          <form method="POST" action="{{ url_for('staff_modification_approve', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="back_url" value="{{ back_url }}">
+            <input type="text" name="internal_note" placeholder="Note (optional)" style="width:120px;font-size:0.75rem">
+            <button type="submit" class="button small" onclick="return confirm('Approve and apply changes? The reservation will be repriced.')">Approve</button>
+          </form>
+          <form method="POST" action="{{ url_for('staff_modification_decline', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="back_url" value="{{ back_url }}">
+            <input type="hidden" name="internal_note" value="">
+            <button type="submit" class="button small secondary">Decline</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <section class="grid two gap-lg">
-  <article class="card">
-    <div class="card-head"><h2>Internal notes</h2></div>
     <form class="stack-form" method="post" action="{{ url_for('staff_reservation_add_note', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">

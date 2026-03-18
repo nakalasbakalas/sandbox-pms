@@ -286,7 +286,7 @@ from .services.pre_checkin_service import (
     validate_token_access,
     verify_document,
 )
-from .services.reporting_service import build_daily_report, build_front_desk_dashboard, build_manager_dashboard
+from .services.reporting_service import build_csv_rows, build_daily_report, build_front_desk_dashboard, build_manager_dashboard
 from .services.reservation_service import ReservationCreatePayload, create_reservation
 from .services.messaging_service import (
     ComposePayload as MessagingComposePayload,
@@ -313,15 +313,18 @@ from .services.staff_reservations_service import (
     ReservationWorkspaceFilters,
     StayDateChangePayload,
     add_reservation_note,
+    approve_modification_request,
     assign_room,
     build_reservation_summary,
     cancel_reservation_workspace,
     change_stay_dates,
+    decline_modification_request,
     get_reservation_detail,
     list_arrivals,
     list_departures,
     list_in_house,
     list_reservations,
+    quote_modification_request,
     resend_confirmation,
     update_guest_details,
 )
@@ -2161,6 +2164,32 @@ def register_routes(app: Flask) -> None:
             can_reservation=user.has_permission("reservation.view"),
             can_folio=user.has_permission("folio.view"),
             can_housekeeping=user.has_permission("housekeeping.view"),
+        )
+
+    @app.route("/staff/daily-reports/<report_type>/csv")
+    def staff_daily_report_csv(report_type):
+        if report_type not in DAILY_REPORT_TYPES:
+            abort(404)
+        permission_code, report_title = DAILY_REPORT_TYPES[report_type]
+        require_permission(permission_code)
+        target_date = parse_request_date_arg("date", default=date.today())
+        preset, date_from, date_to = resolve_report_date_range(
+            preset=(request.args.get("preset") or "next_7_days").strip(),
+            requested_start=parse_optional_date(request.args.get("date_from")),
+            requested_end=parse_optional_date(request.args.get("date_to")),
+        )
+        headers, rows = build_csv_rows(report_type, target_date, date_from, date_to)
+        import csv
+        import io
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        filename = f"{report_type}_{date_from.isoformat()}_{date_to.isoformat()}.csv"
+        return Response(
+            buf.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     @app.route("/staff/admin/audit", endpoint="staff_admin_audit")
@@ -4501,6 +4530,49 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_reservations"))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/modification-requests/<uuid:mod_id>/approve", methods=["POST"])
+    def staff_modification_approve(reservation_id, mod_id):
+        user = require_permission("reservation.edit")
+        try:
+            result = approve_modification_request(
+                reservation_id,
+                mod_id,
+                actor_user_id=user.id,
+                internal_note=request.form.get("internal_note", ""),
+            )
+            delta = result["new_total"] - result["old_total"]
+            flash(
+                f"Modification approved. New total {result['new_total']:.2f} THB ({delta:+.2f} THB).",
+                "success",
+            )
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/modification-requests/<uuid:mod_id>/decline", methods=["POST"])
+    def staff_modification_decline(reservation_id, mod_id):
+        user = require_permission("reservation.edit")
+        try:
+            decline_modification_request(
+                reservation_id,
+                mod_id,
+                actor_user_id=user.id,
+                internal_note=request.form.get("internal_note", ""),
+            )
+            flash("Modification request declined.", "info")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_reservation_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+    @app.route("/staff/reservations/<uuid:reservation_id>/modification-requests/<uuid:mod_id>/quote")
+    def staff_modification_quote(reservation_id, mod_id):
+        require_permission("reservation.view")
+        try:
+            quote = quote_modification_request(reservation_id, mod_id)
+            return jsonify(quote)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 400
 
     @app.route("/staff/reservations/<uuid:reservation_id>/panel")
     def staff_reservation_panel(reservation_id):

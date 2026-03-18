@@ -205,10 +205,10 @@ def get_reservation_detail(reservation_id: uuid.UUID, *, actor_user: User | None
         CancellationRequest.reservation_id == reservation.id,
         CancellationRequest.status.in_(["submitted", "needs_review"]),
     ).count()
-    detail["pending_modification_requests"] = ModificationRequest.query.filter(
-        ModificationRequest.reservation_id == reservation.id,
-        ModificationRequest.status.in_(["submitted", "reviewed"]),
-    ).count()
+    detail["modification_requests"] = list_modification_requests(reservation.id)
+    detail["pending_modification_requests"] = sum(
+        1 for mr in detail["modification_requests"] if mr["status"] in ("submitted", "reviewed")
+    )
     detail["communication_history"] = query_notification_history(reservation_id=reservation.id, limit=40)
     detail["room_types"] = RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc()).all()
     return detail
@@ -1128,6 +1128,134 @@ def guest_snapshot(guest: Guest) -> dict:
         "preferred_language": guest.preferred_language,
         "notes_summary": guest.notes_summary,
     }
+
+
+def list_modification_requests(reservation_id: uuid.UUID) -> list[dict]:
+    """Return all modification requests for a reservation, newest first."""
+    rows = (
+        db.session.execute(
+            sa.select(ModificationRequest)
+            .where(ModificationRequest.reservation_id == reservation_id)
+            .order_by(ModificationRequest.requested_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    result = []
+    for mr in rows:
+        reviewer = db.session.get(User, mr.reviewed_by_user_id) if mr.reviewed_by_user_id else None
+        changes = mr.requested_changes_json or {}
+        result.append({
+            "id": mr.id,
+            "request_code": mr.request_code,
+            "status": mr.status,
+            "requested_at": mr.requested_at,
+            "reviewed_at": mr.reviewed_at,
+            "reviewed_by": reviewer.full_name if reviewer else None,
+            "internal_note": mr.internal_note,
+            "requester_contact_hint": mr.requester_contact_hint,
+            "requested_check_in": changes.get("requested_check_in"),
+            "requested_check_out": changes.get("requested_check_out"),
+            "requested_adults": changes.get("requested_adults"),
+            "requested_children": changes.get("requested_children"),
+            "contact_correction": changes.get("contact_correction"),
+            "special_requests": changes.get("special_requests"),
+        })
+    return result
+
+
+def quote_modification_request(reservation_id: uuid.UUID, mod_request_id: uuid.UUID) -> dict:
+    """Generate a price comparison for a pending modification request."""
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        raise ValueError("Reservation not found.")
+    mr = db.session.get(ModificationRequest, mod_request_id)
+    if not mr or mr.reservation_id != reservation_id:
+        raise ValueError("Modification request not found.")
+    changes = mr.requested_changes_json or {}
+    new_check_in = _maybe_date(changes.get("requested_check_in", "")) or reservation.check_in_date
+    new_check_out = _maybe_date(changes.get("requested_check_out", "")) or reservation.check_out_date
+    new_adults = int(changes.get("requested_adults") or reservation.adults)
+    new_children = int(changes.get("requested_children") or reservation.children)
+    if new_check_in >= new_check_out:
+        raise ValueError("Requested check-in must be before check-out.")
+    quote = quote_reservation(
+        room_type=reservation.room_type,
+        check_in_date=new_check_in,
+        check_out_date=new_check_out,
+        adults=new_adults + reservation.extra_guests,
+        children=new_children,
+    )
+    return {
+        "current_total": reservation.quoted_grand_total,
+        "new_total": quote.grand_total,
+        "delta": quote.grand_total - reservation.quoted_grand_total,
+        "new_check_in": new_check_in,
+        "new_check_out": new_check_out,
+        "new_adults": new_adults,
+        "new_children": new_children,
+    }
+
+
+def approve_modification_request(
+    reservation_id: uuid.UUID,
+    mod_request_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    internal_note: str = "",
+) -> dict:
+    """Approve a modification request: apply the requested changes and reprice."""
+    mr = db.session.get(ModificationRequest, mod_request_id)
+    if not mr or mr.reservation_id != reservation_id:
+        raise ValueError("Modification request not found.")
+    if mr.status not in ("submitted", "reviewed"):
+        raise ValueError("This modification request has already been processed.")
+    changes = mr.requested_changes_json or {}
+    reservation = _load_reservation_for_update(reservation_id)
+    if not reservation:
+        raise ValueError("Reservation not found.")
+    new_check_in = _maybe_date(changes.get("requested_check_in", "")) or reservation.check_in_date
+    new_check_out = _maybe_date(changes.get("requested_check_out", "")) or reservation.check_out_date
+    new_adults = int(changes.get("requested_adults") or reservation.adults)
+    new_children = int(changes.get("requested_children") or reservation.children)
+    result = change_stay_dates(
+        reservation_id,
+        StayDateChangePayload(
+            check_in_date=new_check_in,
+            check_out_date=new_check_out,
+            adults=new_adults,
+            children=new_children,
+            extra_guests=reservation.extra_guests,
+        ),
+        actor_user_id=actor_user_id,
+    )
+    mr.status = "approved"
+    mr.reviewed_at = utc_now()
+    mr.reviewed_by_user_id = actor_user_id
+    mr.internal_note = internal_note or None
+    db.session.commit()
+    return result
+
+
+def decline_modification_request(
+    reservation_id: uuid.UUID,
+    mod_request_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    internal_note: str = "",
+) -> ModificationRequest:
+    """Decline a modification request without changing the reservation."""
+    mr = db.session.get(ModificationRequest, mod_request_id)
+    if not mr or mr.reservation_id != reservation_id:
+        raise ValueError("Modification request not found.")
+    if mr.status not in ("submitted", "reviewed"):
+        raise ValueError("This modification request has already been processed.")
+    mr.status = "declined"
+    mr.reviewed_at = utc_now()
+    mr.reviewed_by_user_id = actor_user_id
+    mr.internal_note = internal_note or None
+    db.session.commit()
+    return mr
 
 
 def phone_digits(value: str | None) -> str:
