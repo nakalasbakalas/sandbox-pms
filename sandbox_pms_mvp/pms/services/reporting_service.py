@@ -933,3 +933,131 @@ def _as_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# CSV export helpers
+# ---------------------------------------------------------------------------
+
+CSV_COLUMN_MAPS: dict[str, list[tuple[str, str]]] = {
+    "arrivals": [
+        ("reservation_code", "Reservation"),
+        ("guest_name", "Guest"),
+        ("assigned_room_number", "Room"),
+        ("room_type_code", "Room Type"),
+        ("status", "Status"),
+        ("adults", "Adults"),
+        ("children", "Children"),
+        ("arrival_date", "Arrival"),
+        ("departure_date", "Departure"),
+        ("nights", "Nights"),
+    ],
+    "departures": [
+        ("reservation_code", "Reservation"),
+        ("guest_name", "Guest"),
+        ("assigned_room_number", "Room"),
+        ("room_type_code", "Room Type"),
+        ("status", "Status"),
+        ("arrival_date", "Arrival"),
+        ("departure_date", "Departure"),
+    ],
+    "room_status": [
+        ("room_number", "Room"),
+        ("room_type_code", "Type"),
+        ("housekeeping_status_code", "HK Status"),
+        ("operational_state", "Operational"),
+        ("priority", "Priority"),
+        ("priority_label", "Priority Reason"),
+        ("arrival_today", "Arrival Today"),
+        ("departure_today", "Departure Today"),
+    ],
+    "payment_due": [
+        ("reservation_code", "Reservation"),
+        ("guest_name", "Guest"),
+        ("status", "Status"),
+        ("arrival_date", "Arrival"),
+        ("departure_date", "Departure"),
+        ("quoted_grand_total", "Grand Total"),
+        ("balance_due", "Balance Due"),
+    ],
+    "occupancy": [
+        ("date", "Date"),
+        ("saleable_rooms", "Saleable Rooms"),
+        ("occupied_rooms", "Occupied Rooms"),
+        ("occupancy_percentage", "Occupancy %"),
+    ],
+    "booking_source": [
+        ("reservation_code", "Reservation"),
+        ("guest_name", "Guest"),
+        ("booked_at", "Booked"),
+        ("source_channel", "Channel"),
+        ("source_label", "Source"),
+        ("utm_campaign", "Campaign"),
+        ("utm_medium", "Medium"),
+        ("entry_page", "Entry Page"),
+        ("entry_cta_source", "CTA Source"),
+    ],
+    "no_show_cancellation": [
+        ("reservation_code", "Reservation"),
+        ("guest_name", "Guest"),
+        ("arrival_date", "Arrival"),
+        ("departure_date", "Departure"),
+        ("source_channel", "Channel"),
+        ("room_type_code", "Room Type"),
+        ("changed_at", "Date"),
+        ("reason", "Reason"),
+        ("type", "Type"),
+    ],
+}
+
+
+def build_csv_rows(report_type: str, business_date: date, date_from: date, date_to: date) -> tuple[list[str], list[list[str]]]:
+    """Return (headers, rows) for CSV export of a daily report.
+
+    Items are returned without the dashboard-level limits so the full
+    dataset is exported.
+    """
+    if report_type == "arrivals":
+        data = arrivals_today_report(business_date)
+    elif report_type == "departures":
+        data = departures_today_report(business_date)
+    elif report_type == "room_status":
+        data = housekeeping_room_status_summary_report(business_date)
+    elif report_type == "payment_due":
+        data = folio_balances_outstanding_report(date_from, date_to, limit=5000)
+    elif report_type == "occupancy":
+        data = occupancy_by_date_range_report(date_from, date_to)
+    elif report_type == "booking_source":
+        data = booking_attribution_report(date_from, date_to, limit=5000)
+    elif report_type == "no_show_cancellation":
+        cancellation_data = cancellation_summary_report(date_from, date_to, limit=5000)
+        no_show_data = no_show_summary_report(date_from, date_to, limit=5000)
+        items = [dict(row, type="Cancellation") for row in cancellation_data.get("items", [])]
+        items += [dict(row, type="No-show") for row in no_show_data.get("items", [])]
+        data = {"items": items}
+    else:
+        return [], []
+
+    col_map = CSV_COLUMN_MAPS.get(report_type, [])
+    headers = [label for _, label in col_map]
+    keys = [key for key, _ in col_map]
+    items = data.get("items", [])
+
+    rows: list[list[str]] = []
+    for item in items:
+        row = []
+        for key in keys:
+            val = item.get(key, "")
+            if isinstance(val, (date, datetime)):
+                val = val.isoformat() if val else ""
+            elif isinstance(val, Decimal):
+                val = str(val)
+            elif isinstance(val, bool):
+                val = "Yes" if val else "No"
+            elif val is None:
+                val = ""
+            else:
+                val = str(val)
+            row.append(val)
+        rows.append(row)
+    return headers, rows

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
-from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
@@ -1073,11 +1072,12 @@ class TestBoardV2FeatureFlag:
         from pms.front_desk_board_runtime import is_v2_endpoint
 
         # V2 endpoints that should be gated
-        assert is_v2_endpoint("staff_front_desk_board_events") is True
         assert is_v2_endpoint("staff_front_desk_board_check_in") is True
         assert is_v2_endpoint("staff_front_desk_board_check_out") is True
         assert is_v2_endpoint("staff_front_desk_board_mark_room_ready") is True
         assert is_v2_endpoint("staff_front_desk_board_reservation_panel") is True
+        # SSE events endpoint was removed in favour of polling; no longer gated
+        assert is_v2_endpoint("staff_front_desk_board_events") is False
 
         # Non-v2 endpoints
         assert is_v2_endpoint("staff_front_desk_board_preferences") is False
@@ -1691,90 +1691,41 @@ class TestBoardSidePanel:
         assert 'event.key === "Escape"' in content
 
 
-class TestBoardSSERealtimeSync:
-    """Test Sprint 4: Real-time sync with Server-Sent Events."""
+class TestBoardPollingAutoRefresh:
+    """Test board auto-refresh via JS polling (replaced SSE)."""
 
-    def test_sse_endpoint_requires_auth(self, app_factory):
-        """SSE endpoint should require authentication."""
+    def test_polling_javascript_infrastructure_present(self, app_factory):
+        """JavaScript should include polling start/stop infrastructure."""
         app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
         client = app.test_client()
 
-        response = client.get("/staff/front-desk/board/events")
-
-        assert response.status_code == 401
-
-    def test_sse_endpoint_requires_reservation_view_permission(self, app_factory):
-        """SSE endpoint should require reservation.view permission."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
-        client = app.test_client()
-        with app.app_context():
-            # Create user with no permissions
-            user = User(
-                username="noperms",
-                email="noperms@example.com",
-                full_name="No Perms",
-                password_hash=generate_password_hash("password"),
-                is_active=True,
-                account_state="active",
-            )
-            db.session.add(user)
-            db.session.commit()
-            login_as(client, user)
-
-        response = client.get("/staff/front-desk/board/events")
-
-        assert response.status_code == 403
-
-    def test_sse_endpoint_returns_event_stream_content_type(self, app_factory):
-        """SSE endpoint should return text/event-stream content type."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
-        client = app.test_client()
-        with app.app_context():
-            user = make_staff_user("front_desk", "sse@example.com")
-            login_as(client, user)
-
-        response = client.get("/staff/front-desk/board/events")
+        response = client.get("/static/front-desk-board.js")
 
         assert response.status_code == 200
-        assert response.headers["Content-Type"].startswith("text/event-stream")
-        assert response.headers["Cache-Control"] == "no-cache"
-        assert response.headers["Connection"] == "keep-alive"
+        content = response.get_data(as_text=True)
 
-    def test_sse_emits_event_on_activity_log_write(self, app_factory):
-        """SSE should emit event when activity log is written."""
+        assert "startPolling" in content
+        assert "stopPolling" in content
+        assert "setInterval" in content
+        assert "refreshSurface" in content
+
+    def test_board_events_endpoint_no_longer_exists(self, app_factory):
+        """SSE /board/events endpoint was removed; should return 404."""
         app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
         client = app.test_client()
         with app.app_context():
-            user = make_staff_user("front_desk", "sse-activity@example.com")
+            user = make_staff_user("front_desk", "sse-gone@example.com")
             login_as(client, user)
 
-            # Write an activity log entry
-            activity = ActivityLog(
-                actor_user_id=user.id,
-                event_type="reservation.room_changed",
-                entity_table="reservations",
-                entity_id="test-res-id",
-                metadata_json={"room_id": "new-room"},
-            )
-            db.session.add(activity)
-            db.session.commit()
+        response = client.get("/staff/front-desk/board/events")
+        assert response.status_code == 404
 
-            # Get SSE stream (this will block, so we test the setup, not actual streaming)
-            response = client.get("/staff/front-desk/board/events")
-
-            # Should be able to start the stream
-            assert response.status_code == 200
-            # Content should be iterable/streamable
-            assert response.is_streamed
-
-    def test_sse_filters_board_and_reservation_events(self, app_factory):
-        """SSE endpoint should listen for front_desk.board and reservation events."""
+    def test_activity_log_filter_covers_board_and_reservation_events(self, app_factory):
+        """Activity log query should filter front_desk.board and reservation events."""
         app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
         with app.app_context():
-            # Create sample activity logs
-            user = make_staff_user("front_desk", "sse-filter@example.com")
+            user = make_staff_user("front_desk", "poll-filter@example.com")
 
-            # Add various event types
             events = [
                 ActivityLog(
                     actor_user_id=user.id,
@@ -1790,7 +1741,7 @@ class TestBoardSSERealtimeSync:
                 ),
                 ActivityLog(
                     actor_user_id=user.id,
-                    event_type="auth.login",  # Should NOT match filter
+                    event_type="auth.login",  # Should NOT match
                     entity_table="users",
                     metadata_json={},
                 ),
@@ -1799,66 +1750,22 @@ class TestBoardSSERealtimeSync:
                 db.session.add(event)
             db.session.commit()
 
-            # Query database to verify events can be filtered
             import sqlalchemy as sa
 
-            query = ActivityLog.query.filter(
+            results = ActivityLog.query.filter(
                 sa.or_(
                     ActivityLog.event_type.ilike("front_desk.board_%"),
                     ActivityLog.event_type.ilike("reservation.%"),
                 )
-            )
-            results = query.all()
+            ).all()
 
-            # Should find 2 matching events, not the auth.login event
-            assert len(results) == 2
             event_types = {r.event_type for r in results}
             assert "front_desk.board_check_in" in event_types
             assert "reservation.room_changed" in event_types
             assert "auth.login" not in event_types
 
-    def test_sse_javascript_infrastructure_present(self, app_factory):
-        """JavaScript should include SSE EventSource infrastructure."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
-        client = app.test_client()
-
-        response = client.get("/static/front-desk-board.js")
-
-        assert response.status_code == 200
-        content = response.get_data(as_text=True)
-
-        # Verify EventSource initialization
-        assert "EventSource" in content
-        assert "initSSE" in content
-        assert "closeSSE" in content
-        assert "/staff/front-desk/board/events" in content
-
-        # Verify debouncing
-        assert "debounceRefreshSurface" in content
-        assert "refreshTimeout" in content
-
-        # Verify error handling
-        assert "MAX_SSE_RETRIES" in content
-        assert "eventSource.addEventListener" in content
-        assert "JSON.parse" in content
-        assert "payload.event_type" in content
-        assert "front_desk.board_" in content
-        assert "reservation." in content
-
-    def test_sse_event_payload_contains_extended_fields(self, app_factory):
-        """SSE payload contract should include activity and entity metadata fields."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
-        assert app is not None
-
-        app_source = Path(__file__).resolve().parents[1] / "pms" / "app.py"
-        source_text = app_source.read_text(encoding="utf-8")
-
-        assert '"activity_id": str(event.id)' in source_text
-        assert '"entity_table": event.entity_table' in source_text
-        assert '"metadata": event.metadata_json or {}' in source_text
-
     def test_move_operation_writes_activity_log(self, app_factory):
-        """Move operation should write activity log for SSE to pick up."""
+        """Move operation should write an activity log entry (picked up by polling)."""
         app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
         client = app.test_client()
         with app.app_context():
@@ -1868,7 +1775,6 @@ class TestBoardSSERealtimeSync:
             room_type = RoomType.query.first()
             start_date = date.today()
 
-            # Create reservation first (assigned to a seeded room)
             res = create_reservation(
                 ReservationCreatePayload(
                     room_type_id=room_type.id,
@@ -1885,7 +1791,6 @@ class TestBoardSSERealtimeSync:
                 actor_user_id=user.id,
             )
 
-            # Now create a second room as the move target
             room = Room(room_type_id=room_type.id, room_number=101, floor_number=1, is_active=True)
             db.session.add(room)
             db.session.flush()
@@ -1899,11 +1804,9 @@ class TestBoardSSERealtimeSync:
             db.session.add(inv)
             db.session.commit()
 
-            # Clear activity logs before move
             ActivityLog.query.delete()
             db.session.commit()
 
-            # Perform move
             response = post_json(
                 client,
                 f"/staff/front-desk/board/reservations/{res.id}/move",
@@ -1916,13 +1819,11 @@ class TestBoardSSERealtimeSync:
 
             assert response.status_code == 200
 
-            # Verify activity log was written
             activities = ActivityLog.query.filter(
                 ActivityLog.entity_id == str(res.id)
             ).all()
 
-            # Should have activity from move operation (via service layer)
             assert len(activities) > 0
-            # At least one should be reservation-related
             event_types = {a.event_type for a in activities}
             assert any("reservation" in et or "front_desk.board" in et for et in event_types)
+

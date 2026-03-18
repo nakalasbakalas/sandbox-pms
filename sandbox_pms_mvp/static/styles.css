@@ -1540,6 +1540,19 @@ tbody tr:last-child td { border-bottom: 0; }
   gap: 4px;
   flex: none;
 }
+.planning-board-block-badges .badge-balance {
+  background: rgba(255,255,255,0.25);
+  padding: 0 3px;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.planning-board-block-badges .badge-ready {
+  background: rgba(255,255,255,0.35);
+  padding: 0 3px;
+  border-radius: 2px;
+  font-weight: 600;
+  color: #d4ffd4;
+}
 .planning-board-resize-handle {
   position: relative;
   width: 14px;

@@ -104,6 +104,8 @@
               {% if block.subtitle %}<small>{{ block.subtitle }}</small>{% endif %}
             </span>
             <span class="planning-board-block-badges">
+              {% if block.readyForCheckIn %}<small class="badge-ready">Ready</small>{% endif %}
+              {% if block.balanceDue and block.balanceDue > 0 %}<small class="badge-balance" title="Balance due: {{ currency }}{{ '%.0f'|format(block.balanceDue) }}">{{ currency }}{{ '%g'|format(block.balanceDue) }}</small>{% endif %}
               {% if block.displayVariant == 'unallocated' %}<small>Unallocated</small>{% elif block.status == 'conflict' %}<small>Conflict</small>{% elif block.displayVariant == 'in_house' %}<small>In-house</small>{% elif block.displayVariant == 'past' %}<small>Past</small>{% endif %}
             </span>
             {% if block.resizable %}<span class="planning-board-resize-handle end" data-resize-handle="end" aria-hidden="true"></span>{% endif %}
@@ -115,6 +117,7 @@
               <span>{{ block.startDate }} &rarr; {{ block.endDate }}</span>
               <span>{{ block.status.replace('_', ' ') }}</span>
               <span>{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}</span>
+              {% if block.balanceDue and block.balanceDue > 0 %}<span><strong>Balance due:</strong> {{ currency }}{{ '%.2f'|format(block.balanceDue) }}</span>{% endif %}
             </div>
             <div class="actions">
               {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}

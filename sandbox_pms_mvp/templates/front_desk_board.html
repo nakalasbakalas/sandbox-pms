@@ -79,10 +79,10 @@
 
     <fieldset class="planning-board-density-toggle" data-density-toggle>
       <legend class="sr-only">Layout density</legend>
-      <button type="button" data-density="spacious" title="Spacious" aria-pressed="{{ 'true' if user_density == 'spacious' else 'false' }}" {% if user_density == 'spacious' %}data-active="true"{% endif %}>S</button>
-      <button type="button" data-density="comfortable" title="Comfortable" aria-pressed="{{ 'true' if user_density == 'comfortable' else 'false' }}" {% if user_density == 'comfortable' %}data-active="true"{% endif %}>M</button>
-      <button type="button" data-density="compact" title="Compact" aria-pressed="{{ 'true' if user_density == 'compact' or not user_density else 'false' }}" {% if user_density == 'compact' or not user_density %}data-active="true"{% endif %}>C</button>
-      <button type="button" data-density="ultra" title="Ultra compact" aria-pressed="{{ 'true' if user_density == 'ultra' else 'false' }}" {% if user_density == 'ultra' %}data-active="true"{% endif %}>U</button>
+      <button type="button" data-density="spacious" title="Spacious" aria-label="Spacious" aria-pressed="{{ 'true' if user_density == 'spacious' else 'false' }}" {% if user_density == 'spacious' %}data-active="true"{% endif %}>S</button>
+      <button type="button" data-density="comfortable" title="Comfortable" aria-label="Comfortable" aria-pressed="{{ 'true' if user_density == 'comfortable' else 'false' }}" {% if user_density == 'comfortable' %}data-active="true"{% endif %}>M</button>
+      <button type="button" data-density="compact" title="Compact" aria-label="Compact" aria-pressed="{{ 'true' if user_density == 'compact' or not user_density else 'false' }}" {% if user_density == 'compact' or not user_density %}data-active="true"{% endif %}>C</button>
+      <button type="button" data-density="ultra" title="Ultra compact" aria-label="Ultra compact" aria-pressed="{{ 'true' if user_density == 'ultra' else 'false' }}" {% if user_density == 'ultra' %}data-active="true"{% endif %}>U</button>
     </fieldset>
 
     <div class="planning-board-overflow">

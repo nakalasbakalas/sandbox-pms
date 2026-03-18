@@ -724,7 +724,10 @@ def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
         metadata={"reservation_code": reservation.reservation_code},
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed after booking confirmation")
     return reservation
 
 
@@ -889,7 +892,10 @@ def submit_cancellation_request(payload: VerificationRequestPayload) -> Cancella
             )
         )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed")
     return request_row
 
 
@@ -943,7 +949,10 @@ def submit_modification_request(payload: VerificationRequestPayload) -> Modifica
         )
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed")
     return request_row
 
 
