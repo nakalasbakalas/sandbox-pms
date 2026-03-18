@@ -621,7 +621,10 @@ def queue_payment_link_email(
         )
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed after deposit request")
     for item in query_notification_history(payment_request_id=payment_request.id, limit=20):
         if item.email_outbox_id and item.event_type == "payment.deposit_request_email":
             outbox = db.session.get(EmailOutbox, item.email_outbox_id)
@@ -727,7 +730,10 @@ def sync_payment_request_status(
         return payment_request
     _, delivery_ids = _apply_provider_event(event, provider.provider_name, actor_user_id=actor_user_id)
     db.session.commit()
-    dispatch_notification_deliveries(delivery_ids)
+    try:
+        dispatch_notification_deliveries(delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed after provider event")
     return db.session.get(PaymentRequest, payment_request_id)
 
 
@@ -745,7 +751,10 @@ def process_payment_webhook(provider_name: str, payload: bytes, headers: dict[st
         else:
             processed += 1
     db.session.commit()
-    dispatch_notification_deliveries(delivery_ids)
+    try:
+        dispatch_notification_deliveries(delivery_ids)
+    except Exception:  # noqa: BLE001
+        current_app.logger.exception("dispatch_notification_deliveries failed after webhook processing")
     return {"processed": processed, "duplicates": duplicates}
 
 

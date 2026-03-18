@@ -770,25 +770,14 @@ def fire_pre_checkin_not_completed_events(hours_before: int = 48) -> dict[str, i
 
 
 def suggest_ocr_extraction(doc_id: uuid.UUID) -> dict[str, Any] | None:
-    """Asynchronous stub: extract name/document-number from an uploaded ID image.
+    """Stub: extract name/document-number from an uploaded ID image.
 
-    This function is intentionally **not implemented** — it is the hook point
-    for a future background worker that calls an OCR service (e.g. AWS Textract,
-    Google Cloud Vision) and stores extracted fields in
+    Returns a status dict indicating OCR is not configured rather than
+    silently returning ``None``.  A future implementation will call an
+    external OCR service and populate
     ``ReservationDocument.ocr_extracted_data``.
-
-    Workflow (to be implemented):
-    1. A background job calls this function after ``upload_document()`` succeeds.
-    2. The function sends ``doc.storage_key`` to the OCR provider.
-    3. Structured fields (name, document_number, date_of_birth, expiry_date)
-       are stored in ``doc.ocr_extracted_data`` as a JSON dict.
-    4. Staff review the suggestions on the pre-check-in detail page before
-       applying — never auto-update the ``Guest`` record.
-
-    Returns *None* until the worker is implemented.
     """
     doc = db.session.get(ReservationDocument, doc_id)
     if doc is None:
         raise ValueError("Document not found.")
-    # TODO: integrate OCR provider here and populate doc.ocr_extracted_data
-    return None
+    return {"status": "unavailable", "reason": "OCR provider not configured"}

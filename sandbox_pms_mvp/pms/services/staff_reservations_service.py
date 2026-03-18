@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -53,6 +54,9 @@ from .reservation_service import (
     reservation_snapshot,
     validate_occupancy,
 )
+
+_log = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -616,7 +620,10 @@ def change_stay_dates(
         manual=False,
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        _log.exception("dispatch_notification_deliveries failed after reservation modification")
     return {
         "reservation": reservation,
         "room_changed": previous_room_id != candidate_room.id,
@@ -777,7 +784,10 @@ def cancel_reservation_workspace(
         language_code=reservation.booking_language,
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        _log.exception("dispatch_notification_deliveries failed after reservation cancellation")
     return reservation
 
 
@@ -862,7 +872,10 @@ def resend_confirmation(reservation_id: uuid.UUID, *, actor_user_id: uuid.UUID, 
         metadata={"reservation_code": reservation.reservation_code, "recipient_email": guest.email},
     )
     db.session.commit()
-    dispatch_notification_deliveries(notification_delivery_ids)
+    try:
+        dispatch_notification_deliveries(notification_delivery_ids)
+    except Exception:  # noqa: BLE001
+        _log.exception("dispatch_notification_deliveries failed after resend confirmation")
     delivery = query_notification_history(reservation_id=reservation.id, limit=10)
     for item in delivery:
         if item.id == delivery_id and item.email_outbox_id:

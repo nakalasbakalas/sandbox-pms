@@ -3,7 +3,6 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
-import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from time import perf_counter
@@ -13,7 +12,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 import click
-from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, stream_with_context, url_for
+from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
@@ -2010,8 +2009,11 @@ def register_routes(app: Flask) -> None:
                     )
                     flash("Communication settings updated.", "success")
                 elif action == "dispatch_queue":
-                    result = dispatch_notification_deliveries()
-                    flash(f"Notification queue processed: {result['sent']} sent, {result['failed']} failed.", "success")
+                    try:
+                        result = dispatch_notification_deliveries()
+                        flash(f"Notification queue processed: {result['sent']} sent, {result['failed']} failed.", "success")
+                    except Exception as exc:
+                        flash(f"Notification dispatch failed: {exc}", "error")
                 elif action == "run_pre_arrival":
                     result = send_due_pre_arrival_reminders(actor_user_id=actor.id)
                     flash(f"Pre-arrival reminders queued: {result['queued']}, sent: {result['sent']}.", "success")
@@ -3727,74 +3729,6 @@ def register_routes(app: Flask) -> None:
         }
 
         return render_template("_panel_reservation_details.html", **context)
-
-    @app.route("/staff/front-desk/board/events", methods=["GET"])
-    def staff_front_desk_board_events():
-        """Server-Sent Events endpoint for board changes."""
-        require_permission("reservation.view")
-
-        def event_stream():
-            last_event_id = request.headers.get("Last-Event-ID", request.args.get("last_event_id", ""))
-            last_timestamp = None
-            if last_event_id:
-                try:
-                    last_timestamp = datetime.fromisoformat(last_event_id)
-                except (ValueError, TypeError):
-                    pass
-
-            # Stream events for 5 minutes, then client reconnects
-            start_time = time.time()
-            seen_events = set()
-
-            while (time.time() - start_time) < 300:  # 5 min timeout
-                # Query for new activity log entries (board events or reservation changes)
-                query = ActivityLog.query.filter(
-                    sa.or_(
-                        ActivityLog.event_type.ilike("front_desk.board_%"),
-                        ActivityLog.event_type.ilike("reservation.%"),
-                        ActivityLog.event_type.ilike("housekeeping.%"),
-                    )
-                )
-                if last_timestamp:
-                    query = query.filter(ActivityLog.created_at > last_timestamp)
-
-                events = query.order_by(ActivityLog.created_at).all()
-
-                for event in events:
-                    event_id = f"{event.created_at.isoformat()}:{event.id}"
-                    if event_id not in seen_events:
-                        seen_events.add(event_id)
-
-                        payload = {
-                            "event": "board.changed",
-                            "data": {
-                                "activity_id": str(event.id),
-                                "event_type": event.event_type,
-                                "timestamp": event.created_at.isoformat(),
-                                "entity_table": event.entity_table,
-                                "entity_id": event.entity_id,
-                                "metadata": event.metadata_json or {},
-                            },
-                        }
-
-                        yield f"event: board.changed\n"
-                        yield f"id: {event_id}\n"
-                        yield f"data: {json.dumps(payload['data'])}\n\n"
-
-                        last_timestamp = event.created_at
-
-                # Sleep briefly before next query
-                time.sleep(1)
-
-        return Response(
-            stream_with_context(event_stream()),
-            mimetype="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",  # For Nginx
-                "Connection": "keep-alive",
-            },
-        )
 
     @app.route("/staff/front-desk/walk-in", methods=["POST"])
     def staff_front_desk_walk_in():

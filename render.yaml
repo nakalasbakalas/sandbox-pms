@@ -76,6 +76,161 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: MAX_CONTENT_LENGTH
+        value: "12582912"
+      # Document storage — choose one:
+      # Option A: Render persistent disk (set UPLOAD_DIR to disk mount path)
+      # - key: UPLOAD_DIR
+      #   value: /var/data/uploads/documents
+      # Option B: S3 (set all four keys below)
+      # - key: STORAGE_BACKEND
+      #   value: s3
+      # - key: S3_BUCKET
+      #   sync: false
+      # - key: S3_REGION
+      #   value: ap-southeast-1
+      # - key: AWS_ACCESS_KEY_ID
+      #   sync: false
+      # - key: AWS_SECRET_ACCESS_KEY
+      #   sync: false
+    # Uncomment if using Render persistent disk for document storage:
+    # disk:
+    #   name: pms-document-storage
+    #   mountPath: /var/data/uploads/documents
+    #   sizeGB: 1
+
+  # -- Scheduled background tasks (cron jobs) --
+  - type: cron
+    name: pms-process-notifications
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app process-notifications
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+
+  - type: cron
+    name: pms-process-automation-events
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "*/5 * * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app process-automation-events
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+
+  - type: cron
+    name: pms-sync-ical-sources
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app sync-ical-sources
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: AUTH_ENCRYPTION_KEY
+        sync: false
+
+  - type: cron
+    name: pms-send-pre-arrival-reminders
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "0 9 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app send-pre-arrival-reminders
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        value: reservations@sandboxhotel.com
+
+  - type: cron
+    name: pms-send-failed-payment-reminders
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "0 10 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app send-failed-payment-reminders
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        value: reservations@sandboxhotel.com
+
+  - type: cron
+    name: pms-fire-pre-checkin-reminders
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "0 8 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app fire-pre-checkin-reminders
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
 
 databases:
   - name: sandbox-hotel-pms-db-v43m

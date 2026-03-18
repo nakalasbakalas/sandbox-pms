@@ -1207,94 +1207,33 @@
     setFeedback("Assign unallocated feature coming soon. Select an unallocated block and press M to move.", "neutral");
   }
 
-  // ========== Sprint 4: Real-Time Sync (SSE) ==========
+  // ========== Board Auto-Refresh (Polling) ==========
 
-  let eventSource = null;
-  let sseRetries = 0;
-  const MAX_SSE_RETRIES = 5;
-  let refreshTimeout = null;
+  let pollInterval = null;
 
-  function initSSE() {
-    if (eventSource) {
-      eventSource.close();
+  function startPolling() {
+    if (pollInterval) return;
+    pollInterval = setInterval(() => {
+      if (!mutationInFlight) {
+        refreshSurface();
+      }
+    }, 10000);
+  }
+
+  function stopPolling() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
     }
-
-    const url = "/staff/front-desk/board/events";
-    eventSource = new EventSource(url);
-
-    eventSource.addEventListener("board.changed", (e) => {
-      let payload = null;
-      try {
-        payload = JSON.parse(e.data || "{}");
-      } catch {
-        payload = null;
-      }
-
-      if (!payload || !payload.event_type) {
-        return;
-      }
-
-      const shouldRefresh =
-        payload.event_type.startsWith("front_desk.board_") || payload.event_type.startsWith("reservation.");
-      if (!shouldRefresh) {
-        return;
-      }
-
-      console.log("Board updated via SSE:", payload);
-
-      // Debounce rapid refreshes
-      debounceRefreshSurface();
-    });
-
-    eventSource.addEventListener("error", () => {
-      sseRetries++;
-      if (sseRetries > MAX_SSE_RETRIES) {
-        console.warn("SSE reconnection failed after", MAX_SSE_RETRIES, "attempts, stopping");
-        eventSource.close();
-        eventSource = null;
-        setFeedback("Real-time updates disabled. Refresh page to re-enable.", "warning");
-      } else {
-        // Browser will auto-reconnect with exponential backoff
-        console.log(`SSE error, retry ${sseRetries}/${MAX_SSE_RETRIES}...`);
-      }
-    });
-
-    sseRetries = 0; // Reset on successful connection
   }
 
-  function debounceRefreshSurface() {
-    clearTimeout(refreshTimeout);
-    refreshTimeout = setTimeout(() => {
-      refreshSurface();
-    }, 500);
-  }
+  document.addEventListener("DOMContentLoaded", () => {
+    startPolling();
+  });
 
-  function closeSSE() {
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-    clearTimeout(refreshTimeout);
-  }
-
-  // Graceful degradation if EventSource not supported
-  if ("EventSource" in window) {
-    // Start SSE on page load
-    document.addEventListener("DOMContentLoaded", () => {
-      initSSE();
-    });
-
-    // Close SSE on page unload
-    window.addEventListener("beforeunload", () => {
-      closeSSE();
-    });
-  } else {
-    console.warn("EventSource not supported, falling back to polling");
-    // Fallback: poll every 30 seconds
-    setInterval(() => {
-      refreshSurface();
-    }, 30000);
-  }
+  window.addEventListener("beforeunload", () => {
+    stopPolling();
+  });
 
   setBusyState(false);
 

@@ -71,7 +71,6 @@ def is_v2_endpoint(endpoint: str | None) -> bool:
         return False
 
     v2_endpoints = {
-        "staff_front_desk_board_events",
         "staff_front_desk_board_check_in",
         "staff_front_desk_board_check_out",
         "staff_front_desk_board_mark_room_ready",
