@@ -10,7 +10,7 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ back_url }}">Back to bookings</a>
-      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider_calendar') }}">Calendars</a>{% endif %}
+      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider.provider_calendar') }}">Calendars</a>{% endif %}
       <span class="status {{ detail.summary.status }}">{{ detail.summary.status|replace('_', ' ') }}</span>
       <span class="status {{ detail.summary.deposit_state }}">{{ detail.summary.deposit_state|replace('_', ' ') }}</span>
     </div>
@@ -59,7 +59,7 @@
     </div>
 
     {% if can_manage_payments %}
-      <form class="inline-form top-gap" method="post" action="{{ url_for('provider_booking_payment_request', reservation_id=detail.reservation.id) }}">
+      <form class="inline-form top-gap" method="post" action="{{ url_for('provider.provider_booking_payment_request', reservation_id=detail.reservation.id) }}">
         {{ csrf_input() }}
         <input type="hidden" name="back_url" value="{{ back_url }}">
         <button class="button" type="submit">Create or reuse deposit request</button>
@@ -85,13 +85,13 @@
               {% endif %}
             </span>
             {% if can_manage_payments %}
-              <form method="post" action="{{ url_for('provider_payment_request_refresh', payment_request_id=item.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('provider.provider_payment_request_refresh', payment_request_id=item.id) }}" class="inline-form">
                 {{ csrf_input() }}
                 <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
                 <input type="hidden" name="back_url" value="{{ back_url }}">
                 <button class="button secondary tiny" type="submit">Refresh</button>
               </form>
-              <form method="post" action="{{ url_for('provider_payment_request_resend', payment_request_id=item.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('provider.provider_payment_request_resend', payment_request_id=item.id) }}" class="inline-form">
                 {{ csrf_input() }}
                 <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
                 <input type="hidden" name="back_url" value="{{ back_url }}">
@@ -152,7 +152,7 @@
 {% if can_cancel and detail.summary.status in ['tentative', 'confirmed'] %}
 <section class="card">
   <div class="card-head"><h2>Cancel booking</h2></div>
-  <form class="inline-form" method="post" action="{{ url_for('provider_booking_cancel', reservation_id=detail.reservation.id) }}">
+  <form class="inline-form" method="post" action="{{ url_for('provider.provider_booking_cancel', reservation_id=detail.reservation.id) }}">
     {{ csrf_input() }}
     <input type="hidden" name="back_url" value="{{ back_url }}">
     <label class="grow"><span>Reason</span><input type="text" name="reason" placeholder="Guest cancelled / payment not received" required></label>

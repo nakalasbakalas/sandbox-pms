@@ -118,7 +118,7 @@
         <p>{{ dashboard.housekeeping.counts.sellable_ready }} ready room{{ '' if dashboard.housekeeping.counts.sellable_ready == 1 else 's' }}</p>
       </div>
       <div class="actions">
-        <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Housekeeping board</a>
+        <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Housekeeping board</a>
         <a class="button secondary tiny" href="{{ url_for('staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">Full report</a>
       </div>
     </div>
@@ -136,7 +136,7 @@
         <h2>Urgent tasks</h2>
         <p>{{ dashboard.urgent_tasks.count }} high-priority task{{ '' if dashboard.urgent_tasks.count == 1 else 's' }} today</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open tasks</a>
+      <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open tasks</a>
     </div>
     {% if dashboard.urgent_tasks["items"] %}
       <div class="table-wrap">
@@ -147,7 +147,7 @@
           <tbody>
             {% for task in dashboard.urgent_tasks["items"] %}
               <tr>
-                <td>{% if task.room_id %}<a href="{{ url_for('staff_housekeeping_room_detail', room_id=task.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ task.room_number }}</a>{% else %}-{% endif %}</td>
+                <td>{% if task.room_id %}<a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=task.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ task.room_number }}</a>{% else %}-{% endif %}</td>
                 <td>{{ task.task_type|replace('_', ' ') }}</td>
                 <td><span class="status {{ task.priority }}">{{ task.priority }}</span></td>
                 <td><span class="status {{ task.status }}">{{ task.status|replace('_', ' ') }}</span></td>
@@ -213,7 +213,7 @@
         <div><strong>Reservations</strong><p>Search and manage all reservations.</p></div>
       </a>
       {% if can_housekeeping %}
-      <a class="list-row" href="{{ url_for('staff_housekeeping') }}">
+      <a class="list-row" href="{{ url_for('housekeeping.staff_housekeeping') }}">
         <div><strong>Housekeeping board</strong><p>Room cleaning status and task management.</p></div>
       </a>
       {% endif %}
@@ -222,7 +222,7 @@
         <span class="status confirmed">{{ queue_entries|length }}</span>
       </a>
       {% if can('messaging.view') %}
-      <a class="list-row" href="{{ url_for('staff_messaging_inbox') }}">
+      <a class="list-row" href="{{ url_for('messaging.staff_messaging_inbox') }}">
         <div><strong>Guest messaging</strong><p>Unified inbox for email, SMS, WhatsApp, and internal notes.</p></div>
         {% if messaging_unread_count %}<span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}
       </a>

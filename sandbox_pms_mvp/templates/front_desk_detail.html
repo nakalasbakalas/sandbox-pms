@@ -393,7 +393,7 @@
     <div><h2>Communication history</h2></div>
     {% if can('messaging.send') %}
     <div class="actions">
-      <a class="button small" href="{{ url_for('staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
+      <a class="button small" href="{{ url_for('messaging.staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
     </div>
     {% endif %}
   </div>
@@ -412,11 +412,11 @@
       </div>
       <div class="right-stack">
         <span class="small muted">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
-        {% if msg.thread_id %}<a class="small" href="{{ url_for('staff_messaging_thread', thread_id=msg.thread_id) }}">Thread</a>{% endif %}
+        {% if msg.thread_id %}<a class="small" href="{{ url_for('messaging.staff_messaging_thread', thread_id=msg.thread_id) }}">Thread</a>{% endif %}
       </div>
     </div>
     {% endfor %}
-    {% if comm_messages|length > 10 %}<p class="small muted" style="text-align:center">Showing 10 of {{ comm_messages|length }} messages. <a href="{{ url_for('staff_messaging_inbox', q=detail.reservation.reservation_code) }}">View all in inbox</a></p>{% endif %}
+    {% if comm_messages|length > 10 %}<p class="small muted" style="text-align:center">Showing 10 of {{ comm_messages|length }} messages. <a href="{{ url_for('messaging.staff_messaging_inbox', q=detail.reservation.reservation_code) }}">View all in inbox</a></p>{% endif %}
   </div>
   {% endif %}
   {% if not (comm_messages is defined and comm_messages) %}
@@ -445,7 +445,7 @@
       <button type="button" class="button small fd-qr-btn active" data-fdqr="fd-qr-send">Send</button>
       <button type="button" class="button small secondary fd-qr-btn" data-fdqr="fd-qr-note">Note</button>
     </div>
-    <form id="fd-qr-send" class="fd-qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_send') }}" style="margin-top:0.5rem">
+    <form id="fd-qr-send" class="fd-qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_send') }}" style="margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
       <input type="hidden" name="back_url" value="{{ url_for('staff_front_desk_detail', reservation_id=detail.reservation.id) }}">
@@ -466,7 +466,7 @@
       </label>
       <button class="button" type="submit">Send</button>
     </form>
-    <form id="fd-qr-note" class="fd-qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
+    <form id="fd-qr-note" class="fd-qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
       <input type="hidden" name="back_url" value="{{ url_for('staff_front_desk_detail', reservation_id=detail.reservation.id) }}">

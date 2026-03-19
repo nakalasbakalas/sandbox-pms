@@ -25,11 +25,11 @@ def allowed_note_visibility_scopes(user: User | None) -> set[str]:
 
 def default_dashboard_endpoint_for_user(user: User | None) -> str:
     if user and user.primary_role == "provider" and user.has_permission("provider.dashboard.view"):
-        return "provider_dashboard"
+        return "provider.provider_dashboard"
     if user_has_permission(user, "reservation.view"):
         return "staff_dashboard"
     if user_has_permission(user, "housekeeping.view"):
-        return "staff_housekeeping"
+        return "housekeeping.staff_housekeeping"
     if user_has_permission(user, "reports.view"):
         return "staff_reports"
-    return "staff_security"
+    return "auth.staff_security"

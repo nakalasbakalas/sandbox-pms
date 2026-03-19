@@ -8,7 +8,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
-from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -81,6 +81,23 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         ).all()
         for rid, net in _balance_rows:
             _balance_map[rid] = max(float(net or 0), 0.0)
+
+    # Batch-fetch pending modification request counts (single query)
+    _pending_mod_map: dict[uuid.UUID, int] = {}
+    if _res_ids:
+        _mod_rows = _db.session.execute(
+            sa.select(
+                ModificationRequest.reservation_id,
+                sa.func.count(),
+            )
+            .where(
+                ModificationRequest.reservation_id.in_(_res_ids),
+                ModificationRequest.status.in_(("submitted", "reviewed")),
+            )
+            .group_by(ModificationRequest.reservation_id)
+        ).all()
+        for rid, cnt in _mod_rows:
+            _pending_mod_map[rid] = cnt
 
     holds = _hold_query(
         room_type_id=filters.room_type_id,
@@ -268,6 +285,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             and target_row is not None
             and target_row.get("is_room_ready", False)
         )
+        # Flag reservation with pending modification request(s)
+        block["pendingModification"] = _pending_mod_map.get(reservation.id, 0) > 0
         if allocation_state == "unallocated" or target_row is None or reservation.assigned_room_id not in room_id_set:
             _ensure_unallocated_row(target_group)["blocks"].append(block)
             continue

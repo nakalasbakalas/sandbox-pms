@@ -232,7 +232,7 @@
         <h2>Housekeeping status summary</h2>
         <p>{{ dashboard.housekeeping.counts.sellable_ready }} arrival-ready sellable room{{ '' if dashboard.housekeeping.counts.sellable_ready == 1 else 's' }} right now.</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open housekeeping board</a>
+      <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open housekeeping board</a>
     </div>
     <div class="grid four report-mini-grid">
       <article class="status-card"><span>Dirty</span><strong>{{ dashboard.housekeeping.counts.dirty }}</strong></article>
@@ -258,7 +258,7 @@
           <tbody>
             {% for item in dashboard.housekeeping.priority_rooms %}
               <tr>
-                <td><a href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
+                <td><a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
                 <td><span class="status {{ item.housekeeping_status_code }}">{{ item.housekeeping_status_code|replace('_', ' ') }}</span></td>
                 <td><span class="status {{ item.priority }}">{{ item.priority_label }}</span></td>
                 <td>{{ item.priority_reason }}</td>

@@ -54,6 +54,10 @@ All critical and high-priority fixes from the audit implemented and tested:
 | Modification request approve/decline with auto-pricing | ✅ Done | `approve_modification_request()` (applies `change_stay_dates` + reprices), `decline_modification_request()`, `quote_modification_request()` (JSON API). UI in reservation detail template with confirm dialog. |
 | Folio balance badge on front desk board | ✅ Done | Batch `SUM(FolioCharge.total_amount)` query per visible reservation (single GROUP BY, zero N+1). Badge shown as `currency + amount` on each block; also in popover detail. |
 | Ready-for-check-in badge on front desk board | ✅ Done | `readyForCheckIn` flag computed per block: confirmed + arrival ≤ today + allocated + room ready (clean/inspected, not blocked). Green "Ready" badge on block. |
+| Pending modification indicator on board + workspace | ✅ Done | Batch `COUNT(ModificationRequest)` per visible reservation (single GROUP BY). "Mod" badge on board blocks + "Mod" link badge in workspace Flags column. Front desk workspace includes `pending_modification_requests` count. |
+| Pricing module tests | ✅ Done | 16 direct tests in `test_pricing.py`: `apply_adjustment` (5 tests), `money` helper, `nightly_room_rate` (5 tests: fallback, fixed override, day-of-week filter, min_nights, long-stay discount), `quote_reservation` (5 tests: basic, extra guest fee, child fee, zero VAT, VAT breakdown consistency). |
+| Guest profile fuzzy search | ✅ Done | `search_guests(q)` in `staff_reservations_service.py` — LIKE matching on name/email/phone with batch latest-reservation lookup. `/staff/guests` route + `staff_guests.html` template. Reservation search also enhanced with email matching. Nav links added. |
+| Waitlist promotion/expiry automation | ✅ Done | `promote_eligible_waitlist()` — FIFO promotion when rooms available (assigns room + allocates inventory + confirms). `expire_stale_waitlist(max_age_days=14)` — cancels past-check-in or stale entries. CLI: `flask process-waitlist`. Render cron: every 15 min. |
 
 ---
 
@@ -106,7 +110,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Staff messaging hub (conversations, compose, thread management, delivery) | `messaging_service.py`, `test_phase18_messaging.py` |
 | Admin panel (property settings, rates, inventory overrides, blackouts, users, notification templates, operations, audit) | `admin_service.py`, `test_phase10_admin_panel.py` |
 | Reporting / dashboards (occupancy, revenue, cancellations, attribution, cashier activity) | `reporting_service.py`, `test_phase12_reporting.py`, `test_phase19_dashboards.py` |
-| Notification template delivery pipeline (email, LINE/WhatsApp staff alerts) | `communication_service.py`, `test_phase11_communications.py` |
+| Notification template delivery pipeline (email, LINE staff alerts) | `communication_service.py`, `test_phase11_communications.py` |
 | Audit log (full entity snapshot deltas on all major mutations) | `audit.py`, `admin_audit.html` |
 | Branding system (hotel name, logo, colour, contact from AppSettings) | `branding.py` |
 | i18n — Thai / English / Chinese (simplified) | `i18n.py`, `BOOKING_LANGUAGES` constant |
@@ -122,7 +126,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Module | What's present | What's missing |
 |---|---|---|
 | SMS delivery | `SmsAdapter` class exists | Always returns mock — no real SMS provider (Twilio, SNS, etc.) |
-| WhatsApp guest messaging | `WhatsAppAdapter` ships stub | Logs if `WHATSAPP_STAFF_ALERT_WEBHOOK_URL` set but guest-facing WhatsApp is unstubbed |
+| Line guest messaging | `LineAdapter` ships stub | Logs if `Line_STAFF_ALERT_WEBHOOK_URL` set but guest-facing Line is unstubbed |
 | OTA guest messaging | `OtaMessageAdapter` class | Explicit stub — "not connected to any OTA messaging API" |
 | OCR / ID extraction | `suggest_ocr_extraction()` hook | Explicit `# TODO: integrate OCR provider` comment — returns None only |
 | Board v2 feature flag | `FEATURE_BOARD_V2` env var + `check_board_v2_feature_gate()` | Purpose unclear — flag appears in context but no distinct v2 board implementation found |
@@ -269,7 +273,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [x] Move `send_due_pre_arrival_reminders` and `send_due_failed_payment_reminders` out of the admin-triggered path and ensure they run on schedule *(Render cron jobs added)*
 - [x] Add `try/except` guard around each `dispatch_notification_deliveries()` call to ensure one failed delivery does not abort the batch *(10 call sites wrapped)*
 - [ ] Implement actual `PendingAutomationEvent` processing (ensure `process-automation-events` CLI command reliably consumes and fires all pending events)
-- [ ] Add proper waitlist management: auto-promote waitlisted reservations when rooms become available, or expire them after N days
+- [x] Add proper waitlist management: auto-promote waitlisted reservations when rooms become available, or expire them after N days *(promote_eligible_waitlist + expire_stale_waitlist + CLI + Render cron)*
 - [x] Implement modification request auto-pricing: when staff accept a modification request, re-quote the reservation and present the delta before saving *(approve calls `change_stay_dates`, shows delta in flash)*
 - [ ] Add guest-facing check-out flow: folio summary + balance payment link before key drop
 
@@ -286,7 +290,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [ ] Add group booking / room block feature (block multiple rooms under one group code)
 - [ ] Add reservation duplication (clone an existing reservation to a new date range)
 - [ ] Implement auto-cancel for `no_show` reservations not manually processed by end of business day
-- [ ] Add a "pending modifications" indicator on the front desk workspace when an open modification request exists
+- [x] Add a "pending modifications" indicator on the front desk workspace when an open modification request exists *(batch query + "Mod" badge on board blocks + workspace flags)*
 - [ ] Show `tentative` reservations on the front desk board so staff can track unconverted inquiries
 
 ### Room Inventory
@@ -304,7 +308,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Guest Records
 
-- [ ] Add guest search with fuzzy matching by phone / name
+- [x] Add guest search with fuzzy matching by phone / name *(search_guests() + /staff/guests route)*
 - [ ] Add guest profile merge (deduplicate guests who booked under different contact details)
 - [ ] Add guest visit history view: all reservations linked to this guest profile
 - [ ] Add guest blacklist / block flag (with reason, for repeated no-shows or property damage)
@@ -319,7 +323,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Check-in / Check-out
 
-- [ ] Add explicit "ready for check-in" status flag visible to front desk without navigating into the reservation
+- [x] Add explicit "ready for check-in" status flag visible to front desk without navigating into the reservation *(readyForCheckIn flag on board blocks + "Ready" badge)*
 - [ ] Add early check-in / late check-out fee automation (currently evaluated but requiring manual override)
 - [ ] Add guest self-service digital check-out (folio review + balance payment via hosted payment link)
 - [ ] Validate the `identity_verified` flag is required for check-in completion in production mode (currently gated by `allow_override` which may be too permissive)
@@ -335,7 +339,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [ ] Integrate a real SMS provider (Twilio, AWS SNS, or similar) — replace `SmsAdapter` stub
 - [ ] Add inbound email parsing (reply-to-thread feature for email channel)
-- [ ] Add WhatsApp Business API integration for guest-facing messaging (not just staff alerts)
+- [ ] Add Line Business API integration for guest-facing messaging (not just staff alerts)
 - [ ] Add message delivery retry with exponential back-off (currently delivery attempt is single-shot)
 - [ ] Add auto-response templates for common guest questions
 
@@ -373,7 +377,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 ### QA / Testing
 
 - [x] Investigate and migrate/delete 4 root-level test files (`debug_test.py`, `test_demo_seeding.py`, `test_init_and_seed.py`, `test_template_compile.py`) *(deleted in root cleanup)*
-- [ ] Add tests covering the pricing module (`pricing.py`) — `quote_reservation` and `nightly_room_rate` have zero direct test coverage
+- [x] Add tests covering the pricing module (`pricing.py`) — `quote_reservation` and `nightly_room_rate` have zero direct test coverage *(16 tests in test_pricing.py)*
 - [ ] Add tests for `channel_service.py` mock provider operations
 - [ ] Add a test for the `PendingAutomationEvent` processing flow
 - [ ] Add integration test for `LocalStorageBackend` round-trip (save → read → serve)
@@ -456,13 +460,13 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 **To-dos:**
 - [x] Add modification request auto-pricing (re-quote on accept, show delta to staff) *(approve/decline routes + auto-pricing via `change_stay_dates`)*
-- Add waitlist promotion/expiry automation
+- [x] Add waitlist promotion/expiry automation *(FIFO promotion + 14-day expiry CLI command + Render cron)*
 - Add proforma invoice and receipt generation
-- Add "pending modification" indicator on front desk workspace and board
-- Add guest profile search improvements (fuzzy match by phone/name)
+- [x] Add "pending modification" indicator on front desk workspace and board *(batch COUNT query + "Mod" badge)*
+- [x] Add guest profile search improvements (fuzzy match by phone/name) *(search_guests() + /staff/guests route + email matching in reservation search)*
 - [x] Add report CSV downloads (all report pages) *(7 types: arrivals, departures, room_status, payment_due, occupancy, booking_source, no_show_cancellation)*
 - [x] Add folio balance badge to front desk board reservation card *(batch SUM query, badge + popover)*
-- Migrate pricing module tests (cover `quote_reservation`, `nightly_room_rate`)
+- [x] Migrate pricing module tests (cover `quote_reservation`, `nightly_room_rate`) *(16 tests in test_pricing.py)*
 - [x] Add explicit "ready for check-in" status badge *(computed flag: confirmed + arrival ≤ today + allocated + room ready)*
 
 **Dependencies:** Phase 1 stable.
@@ -476,26 +480,39 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Phase 3 — Operational Workflow Optimisation (Sprint 7–10)
 
+**Status: IN PROGRESS (2026-03-19)**
+
 **Objective:** Make the PMS genuinely fast and frictionless for front desk operations.
 
 **Why this phase:** The core flows exist; now they need to be the right UX.
 
-**To-dos:**
-- Begin Flask Blueprint extraction from `app.py` (start with `auth_bp`, `provider_bp`, `housekeeping_bp`)
+**Completed items:**
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Flask Blueprint extraction — `auth_bp` | ✅ Done | 6 routes extracted (`/staff/login`, `/staff/logout`, etc.) |
+| Flask Blueprint extraction — `provider_bp` | ✅ Done | 12 routes extracted (`/provider/*`) |
+| Flask Blueprint extraction — `housekeeping_bp` | ✅ Done | 17 routes extracted (`/staff/housekeeping/*`, room readiness API) |
+| Shared `helpers.py` module | ✅ Done | ~60 functions extracted (auth, CSRF, parsing, utility, branding, i18n, reports) |
+| Auto-cancel same-day no-shows | ✅ Done | `auto_cancel_no_shows()` service + CLI + render.yaml cron (21:00 UTC) |
+| Guest visit history view | ✅ Done | `GET /staff/guests/<id>` route + `staff_guest_detail.html` template |
+
+**Results:** `app.py` reduced from 5,923 → 4,882 lines (−1,041 lines, 35 routes extracted).
+
+**Remaining to-dos:**
+- Continue Blueprint extraction (messaging, admin, cashier, front desk, reports — to reach <3,000 lines)
 - Migrate legacy `.query.` ORM patterns to modern style (batch by module)
 - Add mobile-optimised housekeeping attendant view
 - Add keyboard shortcuts for check-in, check-out, room assignment
-- Add guest visit history view
 - Add group booking / room block feature
 - Add early/late fee automation
 - Add guest self-service digital check-out
-- Add auto-cancel for same-day no-shows after business-day cutoff
 - Improve accessibility: ARIA labels, skip navigation for staff layout
 
 **Dependencies:** Phase 2 stable.
 
 **Success criteria:**
-- `app.py` is below 3,000 lines after first Blueprint extraction
+- `app.py` is below 3,000 lines after full Blueprint extraction
 - Front desk operations measurably faster (fewer page loads for common actions)
 - Housekeeping attendant can use the app on a tablet without layout issues
 
@@ -511,7 +528,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - Add channel performance report and year-over-year comparison
 - Add debtors/outstanding-balance report
 - Implement real SMS provider (Twilio or AWS SNS)
-- Add WhatsApp Business API integration for guest messaging
+- Add Line Business API integration for guest messaging
 - Add OTA channel push adapter (inventory/rate updates via CM API)
 - Add revenue management dashboard (ADR, RevPAR, occupancy forecast)
 - Add Sentry error tracking
@@ -663,7 +680,7 @@ The following is a strict ordered sequence from highest-leverage to later-stage 
 18. **Begin Flask Blueprint extraction from `app.py`** — structural stability
 19. **Begin ORM query style migration (.query → session.execute)** — technical debt reduction
 20. **Add SMS provider integration** — activates SMS notification channel
-21. **Add Line Business guest messaging** — activates WhatsApp channel
+21. **Add Line Business guest messaging** — activates line channel
 22. **Add channel manager OTA push adapter** — enables live rate/inventory sync
 23. **Add revenue management dashboard** — gives management yield visibility
 24. **Add Redis-backed rate limiting** — replaces DB count rate limiting under load

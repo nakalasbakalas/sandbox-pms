@@ -305,7 +305,7 @@
     <div><h2>Guest Messages</h2></div>
     <div class="actions">
       {% if can('messaging.send') %}
-      <a class="button small" href="{{ url_for('staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
+      <a class="button small" href="{{ url_for('messaging.staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
       {% endif %}
     </div>
   </div>
@@ -324,7 +324,7 @@
         </div>
         <div class="right-stack">
           <span class="small muted">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
-          {% if msg.thread_id %}<a class="small" href="{{ url_for('staff_messaging_thread', thread_id=msg.thread_id) }}">View thread</a>{% endif %}
+          {% if msg.thread_id %}<a class="small" href="{{ url_for('messaging.staff_messaging_thread', thread_id=msg.thread_id) }}">View thread</a>{% endif %}
         </div>
       </div>
     {% else %}
@@ -339,7 +339,7 @@
       <button type="button" class="button small qr-tab-btn active" data-qrtab="qr-send">Send</button>
       <button type="button" class="button small secondary qr-tab-btn" data-qrtab="qr-note">Note</button>
     </div>
-    <form id="qr-send" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_send') }}" style="margin-top:0.5rem">
+    <form id="qr-send" class="qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_send') }}" style="margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
       <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">
@@ -360,7 +360,7 @@
       </label>
       <button class="button" type="submit">Send</button>
     </form>
-    <form id="qr-note" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
+    <form id="qr-note" class="qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
       <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">

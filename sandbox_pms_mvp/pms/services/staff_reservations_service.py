@@ -16,9 +16,11 @@ from ..models import (
     ActivityLog,
     AuditLog,
     CancellationRequest,
+    ConversationThread,
     EmailOutbox,
     FolioCharge,
     Guest,
+    GuestNote,
     InventoryDay,
     ModificationRequest,
     PaymentRequest,
@@ -927,6 +929,7 @@ def _apply_search_filter(query, raw_query: str):
     conditions = [
         sa.func.lower(Guest.full_name).like(like),
         sa.func.lower(Reservation.reservation_code).like(f"{q.lower()}%"),
+        sa.func.lower(sa.func.coalesce(Guest.email, "")).like(like),
     ]
     if digits:
         conditions.append(_normalized_phone_expression(Guest.phone).like(f"%{digits}%"))
@@ -1290,3 +1293,162 @@ def _maybe_date(value: str) -> date | None:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Guest search — fuzzy matching by name, phone, email
+# ---------------------------------------------------------------------------
+
+
+def search_guests(q: str, *, limit: int = 50) -> list[dict]:
+    """Search guests by name, phone, or email with fuzzy (LIKE) matching.
+
+    Returns a list of guest dicts with their most recent reservation info.
+    """
+    q = q.strip()
+    if not q:
+        return []
+
+    like = f"%{q.lower()}%"
+    digits = phone_digits(q)
+
+    conditions = [
+        sa.func.lower(Guest.full_name).like(like),
+        sa.func.lower(sa.func.coalesce(Guest.email, "")).like(like),
+    ]
+    if digits:
+        conditions.append(_normalized_phone_expression(Guest.phone).like(f"%{digits}%"))
+
+    guests = (
+        db.session.execute(
+            sa.select(Guest)
+            .where(Guest.deleted_at.is_(None), sa.or_(*conditions))
+            .order_by(Guest.updated_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+    if not guests:
+        return []
+
+    # Batch-fetch most recent reservation per guest
+    guest_ids = [g.id for g in guests]
+    latest_res_subq = (
+        sa.select(
+            Reservation.primary_guest_id,
+            sa.func.max(Reservation.created_at).label("latest"),
+        )
+        .where(Reservation.primary_guest_id.in_(guest_ids))
+        .group_by(Reservation.primary_guest_id)
+        .subquery()
+    )
+    latest_reservations = (
+        db.session.execute(
+            sa.select(Reservation)
+            .join(
+                latest_res_subq,
+                sa.and_(
+                    Reservation.primary_guest_id == latest_res_subq.c.primary_guest_id,
+                    Reservation.created_at == latest_res_subq.c.latest,
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    res_by_guest = {r.primary_guest_id: r for r in latest_reservations}
+
+    # Count total reservations per guest
+    count_rows = db.session.execute(
+        sa.select(
+            Reservation.primary_guest_id,
+            sa.func.count(),
+        )
+        .where(Reservation.primary_guest_id.in_(guest_ids))
+        .group_by(Reservation.primary_guest_id)
+    ).all()
+    count_by_guest = dict(count_rows)
+
+    results = []
+    for guest in guests:
+        latest_res = res_by_guest.get(guest.id)
+        results.append({
+            "id": guest.id,
+            "full_name": guest.full_name,
+            "phone": guest.phone,
+            "email": guest.email,
+            "nationality": guest.nationality,
+            "blacklist_flag": guest.blacklist_flag,
+            "reservation_count": count_by_guest.get(guest.id, 0),
+            "latest_reservation_code": latest_res.reservation_code if latest_res else None,
+            "latest_reservation_id": latest_res.id if latest_res else None,
+            "latest_reservation_status": latest_res.current_status if latest_res else None,
+            "latest_check_in": latest_res.check_in_date if latest_res else None,
+            "latest_check_out": latest_res.check_out_date if latest_res else None,
+        })
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Guest detail — visit history + profile
+# ---------------------------------------------------------------------------
+
+
+def get_guest_detail(guest_id: uuid.UUID) -> dict:
+    """Load a guest profile with reservation history and stats."""
+    guest = db.session.get(Guest, guest_id)
+    if not guest or guest.deleted_at:
+        raise ValueError("Guest not found.")
+
+    reservations = (
+        Reservation.query
+        .filter_by(primary_guest_id=guest.id)
+        .options(joinedload(Reservation.room_type), joinedload(Reservation.assigned_room))
+        .order_by(Reservation.check_in_date.desc())
+        .all()
+    )
+
+    completed = [r for r in reservations if r.current_status == "checked_out"]
+    cancelled = [r for r in reservations if r.current_status == "cancelled"]
+    no_shows = [r for r in reservations if r.current_status == "no_show"]
+
+    total_nights = sum(
+        (r.check_out_date - r.check_in_date).days
+        for r in completed
+    )
+    total_revenue = sum(Decimal(str(r.quoted_grand_total or 0)) for r in completed)
+
+    notes = (
+        GuestNote.query
+        .filter_by(guest_id=guest.id)
+        .filter(GuestNote.deleted_at.is_(None))
+        .order_by(GuestNote.created_at.desc())
+        .all()
+    )
+
+    threads = (
+        ConversationThread.query
+        .filter_by(guest_id=guest.id)
+        .order_by(ConversationThread.updated_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    return {
+        "guest": guest,
+        "reservations": reservations,
+        "notes": notes,
+        "threads": threads,
+        "stats": {
+            "total_reservations": len(reservations),
+            "completed_stays": len(completed),
+            "cancelled": len(cancelled),
+            "no_shows": len(no_shows),
+            "total_nights": total_nights,
+            "total_revenue": total_revenue,
+            "first_stay": min((r.check_in_date for r in reservations), default=None),
+            "last_stay": max((r.check_in_date for r in reservations), default=None),
+        },
+    }

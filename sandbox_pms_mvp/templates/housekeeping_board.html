@@ -9,12 +9,12 @@
 <div class="hk-header-bar">
   <div class="hk-date-toggle">
     <a class="hk-date-btn {% if board.business_date == today_date %}active{% endif %}"
-       href="{{ url_for('staff_housekeeping') }}">Today</a>
+       href="{{ url_for('housekeeping.staff_housekeeping') }}">Today</a>
     <a class="hk-date-btn {% if board.business_date == tomorrow_board.business_date %}active{% endif %}"
-       href="{{ url_for('staff_housekeeping', date=tomorrow_board.business_date.isoformat()) }}">Tomorrow</a>
+       href="{{ url_for('housekeeping.staff_housekeeping', date=tomorrow_board.business_date.isoformat()) }}">Tomorrow</a>
   </div>
   <input type="date" name="nav_date" value="{{ board.business_date.isoformat() }}" style="height:28px; padding:0 6px; font-size:12px;"
-         onchange="window.location.href='{{ url_for('staff_housekeeping') }}?date=' + this.value" aria-label="Go to date">
+         onchange="window.location.href='{{ url_for('housekeeping.staff_housekeeping') }}?date=' + this.value" aria-label="Go to date">
   <span class="hk-date-label">
     Last: {{ board.refreshed_at.strftime('%H:%M') if board.refreshed_at is defined and board.refreshed_at else '—' }}
   </span>
@@ -36,7 +36,7 @@
     <label><span>Departure</span><select name="departure_today"><option value="">Any</option><option value="1" {% if filters.departure_today == '1' %}selected{% endif %}>Yes</option></select></label>
     <div class="hk-filter-actions">
       <button class="button tiny" type="submit">Apply</button>
-      <a class="button tiny secondary" href="{{ url_for('staff_housekeeping') }}">Reset</a>
+      <a class="button tiny secondary" href="{{ url_for('housekeeping.staff_housekeeping') }}">Reset</a>
     </div>
   </form>
 </div>
@@ -52,7 +52,7 @@
   {% if can('housekeeping.status_change') %}
   <details class="hk-bulk-header">
     <summary>Bulk actions — {{ board.business_date.strftime('%d %b') }}</summary>
-    <form id="bulk-hk-today" class="hk-bulk-form" method="post" action="{{ url_for('staff_housekeeping_bulk') }}">
+    <form id="bulk-hk-today" class="hk-bulk-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_bulk') }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
       <label><span>Action</span><select name="action" required>
@@ -101,7 +101,7 @@
           {% if can('housekeeping.status_change') %}
           <td><input type="checkbox" name="room_ids" value="{{ item.room_id }}" form="bulk-hk-today" class="hk-check"></td>
           {% endif %}
-          <td><a style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">{{ item.room_number }}</a>{% if item.note_count %}<span style="color:var(--pms-status-info); font-size:9px;" title="{{ item.note_count }} note(s)"> ●</span>{% endif %}{% if item.maintenance_flag %}<span style="color:var(--pms-status-warning); font-size:9px;" title="Maintenance flagged"> ⚠</span>{% endif %}{% if item.is_blocked %}<span style="color:var(--pms-status-danger); font-size:9px;" title="Room blocked"> ⊘</span>{% endif %}</td>
+          <td><a style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">{{ item.room_number }}</a>{% if item.note_count %}<span style="color:var(--pms-status-info); font-size:9px;" title="{{ item.note_count }} note(s)"> ●</span>{% endif %}{% if item.maintenance_flag %}<span style="color:var(--pms-status-warning); font-size:9px;" title="Maintenance flagged"> ⚠</span>{% endif %}{% if item.is_blocked %}<span style="color:var(--pms-status-danger); font-size:9px;" title="Room blocked"> ⊘</span>{% endif %}</td>
           <td>{{ item.floor_number }}</td>
           <td>{{ item.room_type_code }}</td>
           <td><span class="status {{ item.housekeeping_status_code or 'pending' }}">{{ (item.housekeeping_status_code or '—').replace('_', ' ') }}</span></td>
@@ -117,9 +117,9 @@
           </td>
           <td style="color:var(--pms-text-muted); font-size:10px;">{{ item.last_updated_at.strftime('%H:%M') if item.last_updated_at else '—' }}</td>
           <td class="hk-row-actions">
-            <a class="button tiny secondary" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
+            <a class="button tiny secondary" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
             {% if can('housekeeping.status_change') %}
-            <form class="hk-inline-form" method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+            <form class="hk-inline-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_status', room_id=item.room_id) }}">
               {{ csrf_input() }}
               <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
               <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
@@ -149,7 +149,7 @@
   {% if can('housekeeping.status_change') %}
   <details class="hk-bulk-header">
     <summary>Bulk actions — {{ tomorrow_board.business_date.strftime('%d %b') }}</summary>
-    <form id="bulk-hk-tomorrow" class="hk-bulk-form" method="post" action="{{ url_for('staff_housekeeping_bulk') }}">
+    <form id="bulk-hk-tomorrow" class="hk-bulk-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_bulk') }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ tomorrow_board.business_date.isoformat() }}">
       <label><span>Action</span><select name="action" required>
@@ -198,7 +198,7 @@
           {% if can('housekeeping.status_change') %}
           <td><input type="checkbox" name="room_ids" value="{{ item.room_id }}" form="bulk-hk-tomorrow" class="hk-check"></td>
           {% endif %}
-          <td><a style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=tomorrow_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">{{ item.room_number }}</a>{% if item.note_count %}<span style="color:var(--pms-status-info); font-size:9px;"> ●</span>{% endif %}{% if item.maintenance_flag %}<span style="color:var(--pms-status-warning); font-size:9px;"> ⚠</span>{% endif %}{% if item.is_blocked %}<span style="color:var(--pms-status-danger); font-size:9px;"> ⊘</span>{% endif %}</td>
+          <td><a style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=tomorrow_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">{{ item.room_number }}</a>{% if item.note_count %}<span style="color:var(--pms-status-info); font-size:9px;"> ●</span>{% endif %}{% if item.maintenance_flag %}<span style="color:var(--pms-status-warning); font-size:9px;"> ⚠</span>{% endif %}{% if item.is_blocked %}<span style="color:var(--pms-status-danger); font-size:9px;"> ⊘</span>{% endif %}</td>
           <td>{{ item.floor_number }}</td>
           <td>{{ item.room_type_code }}</td>
           <td><span class="status {{ item.housekeeping_status_code or 'pending' }}">{{ (item.housekeeping_status_code or '—').replace('_', ' ') }}</span></td>
@@ -214,9 +214,9 @@
           </td>
           <td style="color:var(--pms-text-muted); font-size:10px;">{{ item.last_updated_at.strftime('%H:%M') if item.last_updated_at else '—' }}</td>
           <td class="hk-row-actions">
-            <a class="button tiny secondary" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=tomorrow_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
+            <a class="button tiny secondary" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=tomorrow_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
             {% if can('housekeeping.status_change') %}
-            <form class="hk-inline-form" method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+            <form class="hk-inline-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_status', room_id=item.room_id) }}">
               {{ csrf_input() }}
               <input type="hidden" name="business_date" value="{{ tomorrow_board.business_date.isoformat() }}">
               <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">

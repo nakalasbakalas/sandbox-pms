@@ -95,6 +95,51 @@ from .security import configure_app_security, current_request_id, public_error_m
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
+from .helpers import (
+    absolute_public_url,
+    action_datetime_for_form_date,
+    add_anchor_to_path,
+    available_admin_sections,
+    can,
+    can_access_admin_workspace,
+    _contact_link,
+    current_app_testing,
+    current_language,
+    current_settings,
+    current_user,
+    default_dashboard_endpoint,
+    default_dashboard_url,
+    email_href,
+    ensure_csrf_token,
+    format_report_date_range,
+    is_admin_user,
+    is_staff_or_provider_endpoint,
+    make_language_url,
+    parse_booking_extra_ids,
+    parse_decimal,
+    parse_optional_date,
+    parse_optional_datetime,
+    parse_optional_decimal,
+    parse_optional_int,
+    parse_optional_uuid,
+    parse_request_date_arg,
+    parse_request_form_date,
+    parse_request_int_arg,
+    parse_request_uuid_arg,
+    phone_href,
+    public_base_url,
+    report_date_presets,
+    require_admin_role,
+    require_admin_workspace_access,
+    require_any_permission,
+    require_permission,
+    require_user,
+    resolve_report_date_range,
+    rotate_csrf_token,
+    safe_back_path,
+    truthy_setting,
+    validate_csrf_request,
+)
 from .services.admin_service import (
     BlackoutPayload,
     InventoryOverridePayload,
@@ -176,6 +221,7 @@ from .services.front_desk_service import (
     FrontDeskFilters,
     NoShowPayload,
     WalkInCheckInPayload,
+    auto_cancel_no_shows,
     complete_check_in,
     complete_checkout,
     create_walk_in_and_check_in,
@@ -190,34 +236,6 @@ from .services.front_desk_board_service import (
     flatten_front_desk_blocks,
     list_front_desk_room_groups,
     serialize_front_desk_board,
-)
-from .services.housekeeping_service import (
-    BlockRoomPayload,
-    BulkHousekeepingPayload,
-    CreateTaskPayload,
-    HousekeepingBoardFilters,
-    MaintenanceFlagPayload,
-    RoomNotePayload as HousekeepingRoomNotePayload,
-    RoomStatusUpdatePayload,
-    TaskListFilters,
-    add_room_note as add_housekeeping_room_note,
-    assign_housekeeping_task,
-    bulk_update_housekeeping,
-    cancel_housekeeping_task,
-    complete_housekeeping_task,
-    create_housekeeping_task,
-    get_housekeeping_room_detail,
-    inspect_housekeeping_task,
-    list_housekeeping_board,
-    list_housekeeping_tasks,
-    set_blocked_state,
-    set_maintenance_flag,
-    start_housekeeping_task,
-    update_housekeeping_status,
-)
-from .services.room_readiness_service import (
-    is_room_assignable,
-    room_readiness_board,
 )
 from .services.ical_service import (
     calendar_timezone,
@@ -287,7 +305,7 @@ from .services.pre_checkin_service import (
     verify_document,
 )
 from .services.reporting_service import build_csv_rows, build_daily_report, build_front_desk_dashboard, build_manager_dashboard
-from .services.reservation_service import ReservationCreatePayload, create_reservation
+from .services.reservation_service import ReservationCreatePayload, create_reservation, expire_stale_waitlist, promote_eligible_waitlist
 from .services.messaging_service import (
     ComposePayload as MessagingComposePayload,
     InboxFilters as MessagingInboxFilters,
@@ -326,6 +344,8 @@ from .services.staff_reservations_service import (
     list_reservations,
     quote_modification_request,
     resend_confirmation,
+    search_guests,
+    get_guest_detail,
     update_guest_details,
 )
 
@@ -360,6 +380,16 @@ def create_app(test_config: dict | None = None) -> Flask:
     register_board_v2_feature_gates(app)
     register_auth_hooks(app)
     register_cli(app)
+
+    from .routes.auth import auth_bp
+    from .routes.provider import provider_bp
+    from .routes.housekeeping import housekeeping_bp
+    from .routes.messaging import messaging_bp
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(provider_bp)
+    app.register_blueprint(housekeeping_bp)
+    app.register_blueprint(messaging_bp)
+
     register_routes(app)
 
     with app.app_context():
@@ -396,25 +426,25 @@ def register_auth_hooks(app: Flask) -> None:
 
         if g.pending_mfa_user:
             allowed_endpoints = {
-                "staff_mfa_verify",
-                "staff_logout",
+                "auth.staff_mfa_verify",
+                "auth.staff_logout",
                 "static",
             }
             if request.endpoint not in allowed_endpoints:
-                return redirect(url_for("staff_mfa_verify"))
+                return redirect(url_for("auth.staff_mfa_verify"))
 
         if g.current_staff_user and (g.current_staff_user.force_password_reset or g.current_staff_user.account_state == "password_reset_required"):
             allowed_endpoints = {
-                "staff_security",
-                "staff_logout",
-                "staff_mfa_verify",
+                "auth.staff_security",
+                "auth.staff_logout",
+                "auth.staff_mfa_verify",
                 "static",
             }
             if request.endpoint not in allowed_endpoints:
                 flash("Password reset is required before continuing.", "warning")
-                return redirect(url_for("staff_security"))
+                return redirect(url_for("auth.staff_security"))
 
-        if g.current_staff_user and request.endpoint in {"staff_login", "staff_forgot_password", "staff_reset_password"}:
+        if g.current_staff_user and request.endpoint in {"auth.staff_login", "auth.staff_forgot_password", "auth.staff_reset_password"}:
             return redirect(default_dashboard_url(g.current_staff_user))
 
     @app.after_request
@@ -538,16 +568,14 @@ def register_template_helpers(app: Flask) -> None:
             candidate = str(path or "").strip()
             if not candidate:
                 return ""
-            if request.endpoint and (
-                request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
-            ):
+            if is_staff_or_provider_endpoint(request.endpoint):
                 normalized_path = candidate if candidate.startswith("/") else f"/{candidate.lstrip('/')}"
                 return f"{staff_app_base_url()}{normalized_path}"
             return absolute_public_url(candidate)
 
         canonical_url = _absolute_route_url(_language_url(language, preserve_query=False))
         language_alternate_urls = {}
-        if request.endpoint and not request.endpoint.startswith("staff_") and not request.endpoint.startswith("provider_"):
+        if request.endpoint and not is_staff_or_provider_endpoint(request.endpoint):
             language_alternate_urls = {
                 code: _absolute_route_url(_language_url(code, preserve_query=False))
                 for code in LANGUAGE_LABELS
@@ -555,8 +583,7 @@ def register_template_helpers(app: Flask) -> None:
         is_public_site = bool(
             request.endpoint
             and request.endpoint != "static"
-            and not request.endpoint.startswith("staff_")
-            and not request.endpoint.startswith("provider_")
+            and not is_staff_or_provider_endpoint(request.endpoint)
         )
         current_staff = current_user()
         marketing_site_url = marketing_site_base_url(required=False)
@@ -617,9 +644,7 @@ def register_template_helpers(app: Flask) -> None:
             ),
             "messaging_unread_count": total_unread_count() if (
                 current_staff and current_staff.has_permission("messaging.view")
-                and request.endpoint and (
-                    request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
-                )
+                and request.endpoint and is_staff_or_provider_endpoint(request.endpoint)
             ) else 0,
             "CONVERSATION_CHANNEL_TYPES": CONVERSATION_CHANNEL_TYPES,
             "CONVERSATION_STATUSES": CONVERSATION_STATUSES,
@@ -691,6 +716,29 @@ def register_cli(app: Flask) -> None:
         print(
             f"Automation events processed: {result['processed']} sent, "
             f"{result['skipped']} skipped, {result['errors']} errors."
+        )
+
+    @app.cli.command("process-waitlist")
+    @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
+    def process_waitlist_command(max_age_days: int) -> None:
+        """Promote eligible waitlisted reservations and expire stale ones."""
+        promo = promote_eligible_waitlist()
+        expiry = expire_stale_waitlist(max_age_days=max_age_days)
+        print(
+            f"Waitlist: {promo['promoted']} promoted, {promo['skipped']} skipped, "
+            f"{expiry['expired']} expired."
+        )
+
+    @app.cli.command("auto-cancel-no-shows")
+    @click.option("--date", "target_date", default=None, type=click.DateTime(formats=["%Y-%m-%d"]), help="Business date (default: today).")
+    def auto_cancel_no_shows_command(target_date: datetime | None) -> None:
+        """Auto-cancel same-day no-shows after cutoff hour."""
+        biz_date = target_date.date() if target_date else None
+        result = auto_cancel_no_shows(business_date=biz_date)
+        print(
+            f"No-show auto-cancel: {result['processed']} processed, "
+            f"{result['skipped']} skipped, {result['errors']} errors."
+            + (f" ({result.get('reason', '')})" if result.get("reason") else "")
         )
 
 
@@ -1379,151 +1427,6 @@ def register_routes(app: Flask) -> None:
         ctx = get_pre_checkin_context(pc)
         return render_template("pre_checkin_form.html", error=None, ctx=ctx, uploaded=True)
 
-    @app.route("/staff/login", methods=["GET", "POST"])
-    def staff_login():
-        if request.method == "POST":
-            identifier = (request.form.get("email") or request.form.get("username") or "").strip().lower()
-            password = request.form.get("password", "")
-            result = login_with_password(
-                identifier,
-                password,
-                ip_address=request.remote_addr,
-                user_agent=request.user_agent.string,
-            )
-            if result.success:
-                session.clear()
-                rotate_csrf_token()
-                g.auth_cookie_value = result.cookie_value
-                if result.requires_mfa:
-                    flash("Multi-factor verification is required.", "info")
-                    return redirect(url_for("staff_mfa_verify"))
-                return redirect(default_dashboard_url(result.user))
-            return render_template("staff_login.html", error=result.error), 401
-        return render_template("staff_login.html")
-
-    @app.route("/staff/logout", methods=["POST"])
-    def staff_logout():
-        user = current_user()
-        if user:
-            write_activity_log(
-                actor_user_id=user.id,
-                event_type="auth.logout",
-                entity_table="users",
-                entity_id=str(user.id),
-            )
-        if getattr(g, "current_auth_session", None):
-            revoke_session(g.current_auth_session)
-            db.session.commit()
-        session.clear()
-        rotate_csrf_token()
-        g.clear_auth_cookie = True
-        return redirect(url_for("index"))
-
-    @app.route("/staff/forgot-password", methods=["GET", "POST"])
-    def staff_forgot_password():
-        if request.method == "POST":
-            request_password_reset(request.form.get("identifier", ""), ip_address=request.remote_addr)
-            flash("If the account exists, a reset link has been sent.", "success")
-            return redirect(url_for("staff_login"))
-        return render_template("staff_forgot_password.html")
-
-    @app.route("/staff/reset-password/<token>", methods=["GET", "POST"])
-    def staff_reset_password(token):
-        if request.method == "POST":
-            try:
-                reset_password_with_token(token, request.form.get("password", ""))
-                session.clear()
-                rotate_csrf_token()
-                g.clear_auth_cookie = True
-                flash("Password updated. Please sign in.", "success")
-                return redirect(url_for("staff_login"))
-            except Exception as exc:  # noqa: BLE001
-                return render_template("staff_reset_password.html", error=public_error_message(exc), token=token), 400
-        return render_template("staff_reset_password.html", token=token)
-
-    @app.route("/staff/mfa/verify", methods=["GET", "POST"])
-    def staff_mfa_verify():
-        if not getattr(g, "current_auth_session", None) or not getattr(g, "pending_mfa_user", None):
-            return redirect(url_for("staff_login"))
-        if request.method == "POST":
-            try:
-                _, cookie_value = verify_mfa_for_session(g.current_auth_session, request.form.get("code", ""))
-                session.clear()
-                rotate_csrf_token()
-                g.auth_cookie_value = cookie_value
-                flash("Multi-factor verification complete.", "success")
-                return redirect(default_dashboard_url(g.pending_mfa_user))
-            except Exception as exc:  # noqa: BLE001
-                return render_template("staff_mfa_verify.html", error=public_error_message(exc)), 400
-        return render_template("staff_mfa_verify.html", user=g.pending_mfa_user)
-
-    @app.route("/staff/security", methods=["GET", "POST"])
-    def staff_security():
-        user = require_user()
-        recovery_codes: list[str] | None = None
-        provisioning_uri = None
-        factor = active_mfa_factor(user)
-        pending_factor = pending_mfa_factor(user)
-        if request.method == "POST":
-            action = request.form.get("action")
-            try:
-                if action == "change_password":
-                    current_password = request.form.get("current_password", "")
-                    new_password = request.form.get("new_password", "")
-                    ok, _ = verify_password_hash(user.password_hash, current_password)
-                    if not ok and not user.force_password_reset:
-                        raise ValueError("Current password is incorrect.")
-                    update_user_password(user, new_password, actor_user_id=user.id)
-                    user.force_password_reset = False
-                    user.account_state = "active"
-                    revoke_all_user_sessions(user.id, except_session_id=g.current_auth_session.id if getattr(g, "current_auth_session", None) else None)
-                    if getattr(g, "current_auth_session", None):
-                        revoke_session(g.current_auth_session)
-                    db.session.commit()
-                    result = login_with_password(user.email, new_password, ip_address=request.remote_addr, user_agent=request.user_agent.string)
-                    session.clear()
-                    rotate_csrf_token()
-                    g.auth_cookie_value = result.cookie_value
-                    if result.requires_mfa:
-                        flash("Password updated. Please complete multi-factor verification.", "info")
-                        return redirect(url_for("staff_mfa_verify"))
-                    flash("Password updated.", "success")
-                    return redirect(url_for("staff_security"))
-                if action == "start_mfa":
-                    pending_factor, provisioning_uri = create_totp_factor(user)
-                elif action == "confirm_mfa":
-                    recovery_codes = confirm_totp_enrollment(user, UUID(request.form["factor_id"]), request.form.get("code", ""))
-                    factor = active_mfa_factor(user)
-                elif action == "disable_mfa":
-                    disable_mfa(user)
-                    factor = None
-                    pending_factor = None
-                    flash("MFA disabled.", "success")
-                elif action == "revoke_session":
-                    target = db.session.get(UserSession, UUID(request.form["session_id"]))
-                    if target and target.user_id == user.id:
-                        revoke_session(target)
-                        db.session.commit()
-                        flash("Session revoked.", "success")
-                else:
-                    abort(400)
-            except Exception as exc:  # noqa: BLE001
-                flash(public_error_message(exc), "error")
-        sessions = (
-            UserSession.query.filter_by(user_id=user.id)
-            .order_by(UserSession.created_at.desc())
-            .all()
-        )
-        return render_template(
-            "staff_security.html",
-            user=user,
-            factor=factor,
-            pending_factor=pending_factor,
-            sessions=sessions,
-            recovery_codes=recovery_codes,
-            provisioning_uri=provisioning_uri,
-        )
-
     def permission_groups() -> dict[str, list[Permission]]:
         grouped: dict[str, list[Permission]] = {}
         permissions = Permission.query.order_by(Permission.module.asc(), Permission.code.asc()).all()
@@ -1533,18 +1436,6 @@ def register_routes(app: Flask) -> None:
 
     def property_settings_context() -> dict[str, str]:
         return branding_settings_context()
-        return {
-            "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
-            "brand_mark": str(get_setting_value("hotel.brand_mark", "SBX")),
-            "logo_url": str(get_setting_value("hotel.logo_url", "") or ""),
-            "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-            "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
-            "address": str(get_setting_value("hotel.address", "")),
-            "currency": str(get_setting_value("hotel.currency", "THB")),
-            "check_in_time": str(get_setting_value("hotel.check_in_time", "14:00")),
-            "check_out_time": str(get_setting_value("hotel.check_out_time", "11:00")),
-            "tax_id": str(get_setting_value("hotel.tax_id", "") or ""),
-        }
 
     def payment_settings_context() -> dict[str, object]:
         return {
@@ -2275,757 +2166,6 @@ def register_routes(app: Flask) -> None:
         notification.read_at = utc_now()
         db.session.commit()
         return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
-
-    # ------------------------------------------------------------------
-    # Unified Guest Messaging Hub routes
-    # ------------------------------------------------------------------
-
-    @app.route("/staff/messaging")
-    def staff_messaging_inbox():
-        actor = require_permission("messaging.view")
-        filters = MessagingInboxFilters(
-            channel=request.args.get("channel", ""),
-            status=request.args.get("status", ""),
-            unread_only=request.args.get("unread") == "1",
-            needs_followup=request.args.get("followup") == "1",
-            reservation_status=request.args.get("res_status", ""),
-            search=(request.args.get("q") or "").strip(),
-            assigned_user_id=request.args.get("assigned", ""),
-            page=parse_request_int_arg("page", default=1, minimum=1),
-        )
-        entries, total = list_inbox(filters)
-        total_pages = max(1, (total + filters.per_page - 1) // filters.per_page)
-        templates = list_msg_templates()
-        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
-        return render_template(
-            "staff_messaging_inbox.html",
-            entries=entries,
-            filters=filters,
-            total=total,
-            total_pages=total_pages,
-            templates=templates,
-            staff_users=staff_users,
-        )
-
-    @app.route("/staff/messaging/thread/<uuid:thread_id>")
-    def staff_messaging_thread(thread_id):
-        require_permission("messaging.view")
-        detail = get_thread_detail(str(thread_id))
-        if not detail or not detail.thread:
-            abort(404)
-        mark_thread_read(str(thread_id))
-        templates = list_msg_templates(channel=detail.thread.channel)
-        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
-        return render_template(
-            "staff_messaging_thread.html",
-            detail=detail,
-            templates=templates,
-            staff_users=staff_users,
-        )
-
-    @app.route("/staff/messaging/send", methods=["POST"])
-    def staff_messaging_send():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel=request.form.get("channel", "email"),
-            subject=request.form.get("subject", "").strip(),
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=request.form.get("is_internal_note") == "1",
-            template_key=request.form.get("template_key") or None,
-            recipient_address=request.form.get("recipient_address") or None,
-        )
-        if not payload.body_text:
-            flash("Message body cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        try:
-            msg = messaging_send_message(payload, actor_user_id=str(actor.id))
-            if msg.status == "sent":
-                flash("Message sent successfully.", "success")
-            elif msg.status == "failed":
-                flash(f"Message delivery failed: {msg.provider_error or 'unknown error'}", "danger")
-            else:
-                flash("Message queued.", "info")
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"Error sending message: {escape(str(exc))}", "danger")
-
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
-
-    @app.route("/staff/messaging/note", methods=["POST"])
-    def staff_messaging_add_note():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel="internal_note",
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=True,
-        )
-        if not payload.body_text:
-            flash("Note text cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        messaging_send_message(payload, actor_user_id=str(actor.id))
-        flash("Internal note added.", "success")
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
-
-    @app.route("/staff/messaging/call-log", methods=["POST"])
-    def staff_messaging_call_log():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel="manual_call_log",
-            subject="Phone call",
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=True,
-        )
-        if not payload.body_text:
-            flash("Call log notes cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        messaging_send_message(payload, actor_user_id=str(actor.id))
-        flash("Phone call logged.", "success")
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
-
-    @app.route("/staff/messaging/thread/<uuid:thread_id>/close", methods=["POST"])
-    def staff_messaging_close_thread(thread_id):
-        actor = require_permission("messaging.send")
-        close_thread(str(thread_id), actor_user_id=str(actor.id))
-        flash("Conversation closed.", "success")
-        return redirect(url_for("staff_messaging_inbox"))
-
-    @app.route("/staff/messaging/thread/<uuid:thread_id>/reopen", methods=["POST"])
-    def staff_messaging_reopen_thread(thread_id):
-        actor = require_permission("messaging.send")
-        reopen_thread(str(thread_id), actor_user_id=str(actor.id))
-        flash("Conversation reopened.", "success")
-        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
-
-    @app.route("/staff/messaging/thread/<uuid:thread_id>/followup", methods=["POST"])
-    def staff_messaging_toggle_followup(thread_id):
-        actor = require_permission("messaging.send")
-        is_followup = toggle_followup(str(thread_id), actor_user_id=str(actor.id))
-        flash("Follow-up " + ("marked" if is_followup else "cleared") + ".", "success")
-        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
-
-    @app.route("/staff/messaging/thread/<uuid:thread_id>/assign", methods=["POST"])
-    def staff_messaging_assign_thread(thread_id):
-        actor = require_permission("messaging.send")
-        user_id = request.form.get("user_id") or None
-        assign_thread(str(thread_id), user_id, actor_user_id=str(actor.id))
-        flash("Thread assignment updated.", "success")
-        return redirect(url_for("staff_messaging_thread", thread_id=thread_id))
-
-    @app.route("/staff/messaging/compose")
-    def staff_messaging_compose():
-        require_permission("messaging.send")
-        reservation_id = request.args.get("reservation_id", "")
-        guest_id = request.args.get("guest_id", "")
-        reservation = None
-        guest = None
-        if reservation_id:
-            reservation = db.session.get(Reservation, UUID(reservation_id))
-            if reservation and reservation.primary_guest:
-                guest = reservation.primary_guest
-        elif guest_id:
-            guest = db.session.get(Guest, UUID(guest_id))
-        templates = list_msg_templates()
-        return render_template(
-            "staff_messaging_compose.html",
-            reservation=reservation,
-            guest=guest,
-            templates=templates,
-        )
-
-    @app.route("/staff/messaging/inbound", methods=["POST"])
-    def staff_messaging_inbound_webhook():
-        """Webhook endpoint for inbound messages from providers."""
-        data = request.get_json(silent=True) or {}
-        channel = data.get("channel", "email")
-        sender = data.get("sender_address", "")
-        body = data.get("body_text", "")
-        subject = data.get("subject")
-        provider_id = data.get("provider_message_id")
-        if not sender or not body:
-            return jsonify({"error": "sender_address and body_text required"}), 400
-        try:
-            msg = record_inbound_message(
-                channel=channel,
-                sender_address=sender,
-                body_text=body,
-                subject=subject,
-                provider_message_id=provider_id,
-            )
-            return jsonify({"status": "ok", "message_id": str(msg.id)})
-        except Exception as exc:
-            db.session.rollback()
-            return jsonify({"error": str(exc)}), 500
-
-    @app.route("/provider")
-    def provider_dashboard():
-        require_permission("provider.dashboard.view")
-        target_date = parse_request_date_arg("date", default=date.today())
-        dashboard = provider_dashboard_context(business_date=target_date)
-        return render_template(
-            "provider_dashboard.html",
-            dashboard=dashboard,
-            target_date=target_date,
-            can_manage_payments=can("provider.payment_request.create"),
-            can_manage_calendar=can("provider.calendar.manage"),
-        )
-
-    @app.route("/provider/bookings")
-    def provider_bookings():
-        require_permission("provider.booking.view")
-        filters = ProviderBookingFilters(
-            search=(request.args.get("q") or "").strip(),
-            status=request.args.get("status", ""),
-            date_from=request.args.get("date_from", ""),
-            date_to=request.args.get("date_to", ""),
-            deposit_state=request.args.get("deposit_state", ""),
-            page=parse_request_int_arg("page", default=1, minimum=1),
-            per_page=20,
-        )
-        result = list_provider_bookings(filters)
-        return render_template(
-            "provider_bookings.html",
-            result=result,
-            filters=filters,
-            reservation_statuses=RESERVATION_STATUSES,
-        )
-
-    @app.route("/provider/bookings/<uuid:reservation_id>")
-    def provider_booking_detail(reservation_id):
-        require_permission("provider.booking.view")
-        detail = get_provider_booking_detail(reservation_id)
-        return render_template(
-            "provider_booking_detail.html",
-            detail=detail,
-            back_url=safe_back_path(request.args.get("back"), url_for("provider_bookings")),
-            can_manage_payments=can("provider.payment_request.create"),
-            can_cancel=can("provider.booking.cancel"),
-        )
-
-    @app.route("/provider/bookings/<uuid:reservation_id>/payment-requests", methods=["POST"])
-    def provider_booking_payment_request(reservation_id):
-        user = require_permission("provider.payment_request.create")
-        try:
-            provider_create_deposit_request(reservation_id, actor_user_id=user.id)
-            flash("Deposit payment request sent to the guest.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_booking_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
-
-    @app.route("/provider/payment-requests/<uuid:payment_request_id>/resend", methods=["POST"])
-    def provider_payment_request_resend(payment_request_id):
-        user = require_permission("provider.payment_request.create")
-        reservation_id = request.form.get("reservation_id")
-        try:
-            provider_resend_payment_link(
-                payment_request_id,
-                actor_user_id=user.id,
-                force_new=request.form.get("force_new_link") == "on",
-            )
-            flash("Payment link resent.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_booking_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
-
-    @app.route("/provider/payment-requests/<uuid:payment_request_id>/refresh", methods=["POST"])
-    def provider_payment_request_refresh(payment_request_id):
-        user = require_permission("provider.payment_request.create")
-        reservation_id = request.form.get("reservation_id")
-        try:
-            provider_refresh_payment_status(payment_request_id, actor_user_id=user.id)
-            flash("Payment status refreshed.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_booking_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
-
-    @app.route("/provider/bookings/<uuid:reservation_id>/cancel", methods=["POST"])
-    def provider_booking_cancel(reservation_id):
-        user = require_permission("provider.booking.cancel")
-        try:
-            provider_cancel_booking(
-                reservation_id,
-                actor_user_id=user.id,
-                reason=request.form.get("reason", ""),
-            )
-            flash("Booking cancelled.", "success")
-            return redirect(url_for("provider_bookings"))
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-            return redirect(url_for("provider_booking_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
-
-    @app.route("/provider/calendar")
-    def provider_calendar():
-        require_permission("provider.calendar.view")
-        return render_template(
-            "provider_calendar.html",
-            calendar=provider_calendar_context(),
-            rooms=Room.query.filter_by(is_active=True).order_by(Room.room_number.asc()).all(),
-            can_manage_calendar=can("provider.calendar.manage"),
-        )
-
-    @app.route("/provider/calendar/feeds", methods=["POST"])
-    def provider_calendar_feed_create():
-        user = require_permission("provider.calendar.manage")
-        scope_type = request.form.get("scope_type", "property")
-        room_id = parse_optional_uuid(request.form.get("room_id"))
-        try:
-            create_calendar_feed(
-                scope_type=scope_type,
-                room_id=room_id,
-                name=request.form.get("name"),
-                actor_user_id=user.id,
-            )
-            flash("Private calendar feed created.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_calendar"))
-
-    @app.route("/provider/calendar/feeds/<uuid:feed_id>/rotate", methods=["POST"])
-    def provider_calendar_feed_rotate(feed_id):
-        user = require_permission("provider.calendar.manage")
-        try:
-            rotate_calendar_feed(feed_id, actor_user_id=user.id)
-            flash("Calendar feed rotated. Replace the old URL anywhere it was subscribed.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_calendar"))
-
-    @app.route("/provider/calendar/sources", methods=["POST"])
-    def provider_calendar_source_create():
-        user = require_permission("provider.calendar.manage")
-        try:
-            source = create_external_calendar_source(
-                room_id=UUID(request.form["room_id"]),
-                name=request.form.get("name", ""),
-                feed_url=request.form.get("feed_url", ""),
-                actor_user_id=user.id,
-            )
-            if request.form.get("sync_now") == "on":
-                sync_external_calendar_source(source.id, actor_user_id=user.id)
-            flash("External calendar source saved.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_calendar"))
-
-    @app.route("/provider/calendar/sources/<uuid:source_id>/sync", methods=["POST"])
-    def provider_calendar_source_sync(source_id):
-        user = require_permission("provider.calendar.manage")
-        try:
-            result = sync_external_calendar_source(source_id, actor_user_id=user.id)
-            flash(
-                f"Calendar sync completed with status {result['run'].status}.",
-                "success" if result["run"].status == "success" else "warning",
-            )
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("provider_calendar"))
-
-    @app.route("/staff/housekeeping")
-    def staff_housekeeping():
-        user = require_permission("housekeeping.view")
-        target_date = parse_request_date_arg("date", default=date.today())
-        filters = HousekeepingBoardFilters(
-            business_date=target_date,
-            floor=request.args.get("floor", ""),
-            status=request.args.get("status", ""),
-            priority=request.args.get("priority", ""),
-            room_type_id=parse_request_uuid_arg("room_type_id") or "",
-            arrival_today=request.args.get("arrival_today", ""),
-            departure_today=request.args.get("departure_today", ""),
-            blocked=request.args.get("blocked", ""),
-            maintenance=request.args.get("maintenance", ""),
-            notes=request.args.get("notes", ""),
-            mobile=request.args.get("view") == "mobile",
-        )
-        board = list_housekeeping_board(filters, actor_user=user)
-        tomorrow_date = target_date + timedelta(days=1)
-        tomorrow_filters = HousekeepingBoardFilters(
-            business_date=tomorrow_date,
-            floor=filters.floor,
-            status=filters.status,
-            priority=filters.priority,
-            room_type_id=filters.room_type_id,
-            arrival_today=filters.arrival_today,
-            departure_today=filters.departure_today,
-            blocked=filters.blocked,
-            maintenance=filters.maintenance,
-            notes=filters.notes,
-            mobile=filters.mobile,
-        )
-        tomorrow_board = list_housekeeping_board(tomorrow_filters, actor_user=user)
-        tasks = list_housekeeping_tasks(TaskListFilters(business_date=target_date))
-        return render_template(
-            "housekeeping_board.html",
-            board=board,
-            tomorrow_board=tomorrow_board,
-            today_date=date.today(),
-            tasks=tasks,
-            filters=filters,
-            room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
-            housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service", "cleaning_in_progress"],
-            room_note_types=ROOM_NOTE_TYPES,
-            can_manage_controls=can_manage_operational_overrides(user),
-        )
-
-    @app.route("/staff/housekeeping/rooms/<uuid:room_id>")
-    def staff_housekeeping_room_detail(room_id):
-        user = require_permission("housekeeping.view")
-        business_date = parse_request_date_arg("date", default=date.today())
-        detail = get_housekeeping_room_detail(room_id, business_date=business_date, actor_user=user)
-        return render_template(
-            "housekeeping_room_detail.html",
-            detail=detail,
-            business_date=business_date,
-            back_url=safe_back_path(
-                request.args.get("back"),
-                url_for("staff_housekeeping", date=business_date.isoformat()),
-            ),
-            housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service"],
-            room_note_types=ROOM_NOTE_TYPES,
-            can_manage_controls=can_manage_operational_overrides(user),
-            can_view_audit=user.has_permission("audit.view"),
-        )
-
-    @app.route("/staff/housekeeping/rooms/<uuid:room_id>/status", methods=["POST"])
-    def staff_housekeeping_room_status(room_id):
-        user = require_permission("housekeeping.status_change")
-        business_date = date.fromisoformat(request.form["business_date"])
-        try:
-            update_housekeeping_status(
-                room_id,
-                business_date=business_date,
-                payload=RoomStatusUpdatePayload(
-                    status_code=request.form.get("status_code", ""),
-                    note=request.form.get("note"),
-                ),
-                actor_user_id=user.id,
-            )
-            flash("Room status updated.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_housekeeping_room_detail", room_id=room_id, date=business_date.isoformat(), back=request.form.get("back_url")))
-
-    @app.route("/staff/housekeeping/rooms/<uuid:room_id>/notes", methods=["POST"])
-    def staff_housekeeping_room_note(room_id):
-        user = require_permission("housekeeping.status_change")
-        business_date = date.fromisoformat(request.form["business_date"])
-        try:
-            add_housekeeping_room_note(
-                room_id,
-                business_date=business_date,
-                payload=HousekeepingRoomNotePayload(
-                    note_text=request.form.get("note_text", ""),
-                    note_type=request.form.get("note_type", "housekeeping"),
-                    is_important=request.form.get("is_important") == "on",
-                    visibility_scope=request.form.get("visibility_scope", "all_staff"),
-                ),
-                actor_user_id=user.id,
-            )
-            flash("Room note added.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_housekeeping_room_detail", room_id=room_id, date=business_date.isoformat(), back=request.form.get("back_url")))
-
-    @app.route("/staff/housekeeping/rooms/<uuid:room_id>/maintenance", methods=["POST"])
-    def staff_housekeeping_room_maintenance(room_id):
-        user = require_permission("housekeeping.status_change")
-        business_date = date.fromisoformat(request.form["business_date"])
-        try:
-            set_maintenance_flag(
-                room_id,
-                business_date=business_date,
-                payload=MaintenanceFlagPayload(
-                    enabled=request.form.get("enabled") == "1",
-                    note=request.form.get("note"),
-                ),
-                actor_user_id=user.id,
-            )
-            flash("Maintenance flag updated.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_housekeeping_room_detail", room_id=room_id, date=business_date.isoformat(), back=request.form.get("back_url")))
-
-    @app.route("/staff/housekeeping/rooms/<uuid:room_id>/block", methods=["POST"])
-    def staff_housekeeping_room_block(room_id):
-        user = require_permission("housekeeping.status_change")
-        business_date = date.fromisoformat(request.form["business_date"])
-        blocked_until_raw = request.form.get("blocked_until")
-        blocked_until = datetime.fromisoformat(blocked_until_raw) if blocked_until_raw else None
-        try:
-            set_blocked_state(
-                room_id,
-                business_date=business_date,
-                payload=BlockRoomPayload(
-                    blocked=request.form.get("blocked") == "1",
-                    reason=request.form.get("reason"),
-                    blocked_until=blocked_until,
-                ),
-                actor_user_id=user.id,
-            )
-            flash("Blocked-room state updated.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_housekeeping_room_detail", room_id=room_id, date=business_date.isoformat(), back=request.form.get("back_url")))
-
-    @app.route("/staff/housekeeping/bulk", methods=["POST"])
-    def staff_housekeeping_bulk():
-        user = require_permission("housekeeping.status_change")
-        business_date = date.fromisoformat(request.form["business_date"])
-        room_ids = [UUID(item) for item in request.form.getlist("room_ids") if item]
-        blocked_until_raw = request.form.get("blocked_until")
-        blocked_until = datetime.fromisoformat(blocked_until_raw) if blocked_until_raw else None
-        try:
-            result = bulk_update_housekeeping(
-                BulkHousekeepingPayload(
-                    room_ids=room_ids,
-                    business_date=business_date,
-                    action=request.form.get("action", ""),
-                    status_code=request.form.get("status_code") or None,
-                    note=request.form.get("note") or None,
-                    room_note_type=request.form.get("room_note_type", "housekeeping"),
-                    is_important=request.form.get("is_important") == "on",
-                    blocked_until=blocked_until,
-                ),
-                actor_user_id=user.id,
-            )
-            flash(
-                f"Bulk update completed: {result['success_count']} success, {result['failure_count']} failed.",
-                "success" if result["failure_count"] == 0 else "warning",
-            )
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(url_for("staff_housekeeping", date=business_date.isoformat(), view=request.form.get("view")))
-
-    # ------------------------------------------------------------------
-    # Housekeeping task management routes
-    # ------------------------------------------------------------------
-
-    @app.route("/staff/housekeeping/tasks")
-    def staff_housekeeping_tasks():
-        user = require_permission("housekeeping.view")
-        target_date = parse_request_date_arg("date", default=date.today())
-        filters = TaskListFilters(
-            business_date=target_date,
-            status=request.args.get("status", ""),
-            room_id=request.args.get("room_id", ""),
-            assigned_to_user_id=request.args.get("assigned_to_user_id", ""),
-            task_type=request.args.get("task_type", ""),
-            priority=request.args.get("priority", ""),
-        )
-        tasks = list_housekeeping_tasks(filters)
-        return jsonify({"tasks": tasks, "business_date": target_date.isoformat()})
-
-    @app.route("/staff/housekeeping/tasks", methods=["POST"])
-    def staff_housekeeping_task_create():
-        user = require_permission("housekeeping.task_manage")
-        try:
-            room_id = UUID(request.form["room_id"])
-            business_date = date.fromisoformat(request.form["business_date"])
-            assigned_to = request.form.get("assigned_to_user_id")
-            due_at_raw = request.form.get("due_at")
-            task = create_housekeeping_task(
-                CreateTaskPayload(
-                    room_id=room_id,
-                    business_date=business_date,
-                    task_type=request.form.get("task_type", "checkout_clean"),
-                    priority=request.form.get("priority", "normal"),
-                    notes=request.form.get("notes"),
-                    assigned_to_user_id=UUID(assigned_to) if assigned_to else None,
-                    reservation_id=UUID(request.form["reservation_id"]) if request.form.get("reservation_id") else None,
-                    due_at=datetime.fromisoformat(due_at_raw) if due_at_raw else None,
-                ),
-                actor_user_id=user.id,
-            )
-            flash("Housekeeping task created.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping", date=request.form.get("business_date", date.today().isoformat())))
-
-    @app.route("/staff/housekeeping/tasks/<task_id>/assign", methods=["POST"])
-    def staff_housekeeping_task_assign(task_id):
-        user = require_permission("housekeeping.task_manage")
-        try:
-            assigned_to = UUID(request.form["assigned_to_user_id"])
-            assign_housekeeping_task(UUID(task_id), assigned_to_user_id=assigned_to, actor_user_id=user.id)
-            flash("Task assigned.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
-
-    @app.route("/staff/housekeeping/tasks/<task_id>/start", methods=["POST"])
-    def staff_housekeeping_task_start(task_id):
-        user = require_permission("housekeeping.task_manage")
-        try:
-            start_housekeeping_task(UUID(task_id), actor_user_id=user.id)
-            flash("Task started — room set to cleaning in progress.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
-
-    @app.route("/staff/housekeeping/tasks/<task_id>/complete", methods=["POST"])
-    def staff_housekeeping_task_complete(task_id):
-        user = require_permission("housekeeping.task_manage")
-        try:
-            complete_housekeeping_task(UUID(task_id), actor_user_id=user.id, notes=request.form.get("notes"))
-            flash("Task completed — room marked clean.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
-
-    @app.route("/staff/housekeeping/tasks/<task_id>/inspect", methods=["POST"])
-    def staff_housekeeping_task_inspect(task_id):
-        user = require_permission("housekeeping.task_manage")
-        try:
-            inspect_housekeeping_task(UUID(task_id), actor_user_id=user.id, notes=request.form.get("notes"))
-            flash("Inspection passed — room ready for assignment.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
-
-    @app.route("/staff/housekeeping/tasks/<task_id>/cancel", methods=["POST"])
-    def staff_housekeeping_task_cancel(task_id):
-        user = require_permission("housekeeping.task_manage")
-        try:
-            cancel_housekeeping_task(UUID(task_id), actor_user_id=user.id, reason=request.form.get("reason"))
-            flash("Task cancelled.", "success")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping"))
-
-    # ------------------------------------------------------------------
-    # Room readiness API
-    # ------------------------------------------------------------------
-
-    @app.route("/staff/api/room-readiness")
-    def staff_api_room_readiness():
-        """JSON endpoint returning readiness state of all rooms for a given date."""
-        require_any_permission("reservation.view", "housekeeping.view")
-        target_date = parse_request_date_arg("date", default=date.today())
-        board = room_readiness_board(target_date)
-        return jsonify({
-            "business_date": target_date.isoformat(),
-            "rooms": [
-                {
-                    "room_id": str(r.room_id),
-                    "room_number": r.room_number,
-                    "room_type_code": r.room_type_code,
-                    "floor_number": r.floor_number,
-                    "is_ready": r.is_ready,
-                    "label": r.label,
-                    "reason": r.reason,
-                    "housekeeping_status_code": r.housekeeping_status_code,
-                    "availability_status": r.availability_status,
-                    "is_blocked": r.is_blocked,
-                    "is_maintenance": r.is_maintenance,
-                    "has_active_task": r.has_active_task,
-                    "active_task_status": r.active_task_status,
-                    "reservation_code": r.reservation_code,
-                }
-                for r in board
-            ],
-        })
-
-    @app.route("/staff/api/room-readiness/<room_id>")
-    def staff_api_room_readiness_single(room_id):
-        """JSON endpoint returning readiness state of a single room."""
-        require_any_permission("reservation.view", "housekeeping.view")
-        target_date = parse_request_date_arg("date", default=date.today())
-        try:
-            r = is_room_assignable(UUID(room_id), target_date)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 404
-        return jsonify({
-            "room_id": str(r.room_id),
-            "room_number": r.room_number,
-            "room_type_code": r.room_type_code,
-            "floor_number": r.floor_number,
-            "is_ready": r.is_ready,
-            "label": r.label,
-            "reason": r.reason,
-            "housekeeping_status_code": r.housekeeping_status_code,
-            "availability_status": r.availability_status,
-            "is_blocked": r.is_blocked,
-            "is_maintenance": r.is_maintenance,
-            "has_active_task": r.has_active_task,
-            "active_task_status": r.active_task_status,
-            "reservation_code": r.reservation_code,
-        })
-
-    # ------------------------------------------------------------------
-    # Quick actions for room status changes
-    # ------------------------------------------------------------------
-
-    @app.route("/staff/housekeeping/quick-action", methods=["POST"])
-    def staff_housekeeping_quick_action():
-        """Compact front-desk / supervisor quick actions for room status changes."""
-        user = require_permission("housekeeping.status_change")
-        action = request.form.get("action", "")
-        room_id = UUID(request.form["room_id"])
-        business_date = date.fromisoformat(request.form.get("business_date", date.today().isoformat()))
-        try:
-            if action == "mark_dirty":
-                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="dirty"), actor_user_id=user.id)
-                flash("Room marked dirty.", "success")
-            elif action == "mark_cleaning":
-                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="cleaning_in_progress"), actor_user_id=user.id)
-                flash("Room marked cleaning in progress.", "success")
-            elif action == "mark_clean":
-                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="clean"), actor_user_id=user.id)
-                flash("Room marked clean.", "success")
-            elif action == "mark_inspected":
-                update_housekeeping_status(room_id, business_date=business_date, payload=RoomStatusUpdatePayload(status_code="inspected"), actor_user_id=user.id)
-                flash("Room marked inspected / ready.", "success")
-            elif action == "block_room":
-                reason = request.form.get("reason", "")
-                set_blocked_state(room_id, business_date=business_date, payload=BlockRoomPayload(blocked=True, reason=reason or "Blocked via quick action"), actor_user_id=user.id)
-                flash("Room blocked.", "success")
-            elif action == "unblock_room":
-                set_blocked_state(room_id, business_date=business_date, payload=BlockRoomPayload(blocked=False), actor_user_id=user.id)
-                flash("Room unblocked.", "success")
-            elif action == "maintenance_on":
-                note = request.form.get("note", "")
-                set_maintenance_flag(room_id, business_date=business_date, payload=MaintenanceFlagPayload(enabled=True, note=note or "Maintenance issue via quick action"), actor_user_id=user.id)
-                flash("Maintenance flag set.", "success")
-            elif action == "maintenance_off":
-                set_maintenance_flag(room_id, business_date=business_date, payload=MaintenanceFlagPayload(enabled=False), actor_user_id=user.id)
-                flash("Maintenance flag cleared.", "success")
-            elif action == "rush_clean":
-                create_housekeeping_task(
-                    CreateTaskPayload(room_id=room_id, business_date=business_date, task_type="rush_clean", priority="urgent", notes=request.form.get("notes", "Urgent clean requested")),
-                    actor_user_id=user.id,
-                )
-                flash("Rush clean task created.", "success")
-            else:
-                flash("Unknown quick action.", "error")
-        except Exception as exc:  # noqa: BLE001
-            flash(public_error_message(exc), "error")
-        return redirect(request.form.get("back_url") or url_for("staff_housekeeping", date=business_date.isoformat()))
 
     @app.route("/staff/front-desk")
     def staff_front_desk():
@@ -4218,6 +3358,23 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
             return redirect(url_for("staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
 
+    @app.route("/staff/guests")
+    def staff_guests():
+        require_permission("reservation.view")
+        q = (request.args.get("q") or "").strip()
+        guests = search_guests(q) if q else []
+        return render_template("staff_guests.html", q=q, guests=guests)
+
+    @app.route("/staff/guests/<uuid:guest_id>")
+    def staff_guest_detail(guest_id):
+        require_permission("reservation.view")
+        try:
+            detail = get_guest_detail(guest_id)
+        except ValueError:
+            abort(404)
+        back_url = safe_back_path(request.args.get("back"), url_for("staff_guests"))
+        return render_template("staff_guest_detail.html", detail=detail, back_url=back_url)
+
     @app.route("/staff/reservations")
     def staff_reservations():
         require_permission("reservation.view")
@@ -4852,108 +4009,10 @@ def register_routes(app: Flask) -> None:
         return render_template("staff_review_queue.html", entries=entries)
 
 
-def current_language() -> str:
-    return normalize_language(getattr(g, "public_language", None) or request.args.get("lang") or request.form.get("language") or "th")
 
 
-def make_language_url(language_code: str) -> str:
-    args = request.args.to_dict(flat=False)
-    args["lang"] = [normalize_language(language_code)]
-    query_string = urlencode(args, doseq=True)
-    if query_string:
-        return f"{request.path}?{query_string}"
-    return request.path
 
 
-def _public_asset_url(value: str | None) -> str:
-    candidate = str(value or "").strip()
-    if not candidate:
-        return ""
-    if candidate.startswith(("http://", "https://", "data:")):
-        return candidate
-    if candidate.startswith("/"):
-        return f"{request.url_root.rstrip('/')}{candidate}"
-    return f"{request.url_root.rstrip('/')}/{candidate.lstrip('/')}"
-
-
-def _phone_href(phone_number: str) -> str:
-    normalized = "".join(character for character in str(phone_number or "") if character.isdigit() or character == "+")
-    if not normalized:
-        return ""
-    return f"tel:{normalized}"
-
-
-def _email_href(email_address: str) -> str:
-    normalized = str(email_address or "").strip()
-    if not normalized:
-        return ""
-    return f"mailto:{normalized}"
-
-
-def _contact_link(href: str, label: str) -> Markup | str:
-    safe_label = escape(label or "")
-    if not href:
-        return safe_label
-    return Markup('<a class="contact-link subtle" href="{0}">{1}</a>').format(escape(href), safe_label)
-
-
-def _hotel_structured_data(
-    *,
-    hotel_name: str,
-    hotel_address: str,
-    hotel_contact_phone: str,
-    hotel_contact_email: str,
-    hotel_check_in_time: str,
-    hotel_check_out_time: str,
-    share_image_url: str,
-) -> dict[str, object]:
-    structured_data: dict[str, object] = {
-        "@context": "https://schema.org",
-        "@type": "Hotel",
-        "name": hotel_name,
-        "url": booking_engine_base_url(),
-    }
-    if hotel_address:
-        structured_data["address"] = {
-            "@type": "PostalAddress",
-            "streetAddress": hotel_address,
-        }
-    if hotel_contact_phone:
-        structured_data["telephone"] = hotel_contact_phone
-    if hotel_contact_email:
-        structured_data["email"] = hotel_contact_email
-    if hotel_check_in_time:
-        structured_data["checkinTime"] = hotel_check_in_time
-    if hotel_check_out_time:
-        structured_data["checkoutTime"] = hotel_check_out_time
-    if share_image_url:
-        structured_data["image"] = share_image_url
-    return structured_data
-
-
-def ensure_csrf_token() -> str:
-    token = session.get("_csrf_token")
-    if not token:
-        token = secrets.token_urlsafe(32)
-        session["_csrf_token"] = token
-    return token
-
-
-def rotate_csrf_token() -> str:
-    token = secrets.token_urlsafe(32)
-    session["_csrf_token"] = token
-    return token
-
-
-def validate_csrf_request() -> None:
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return
-    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload", "staff_messaging_inbound_webhook"}:
-        return
-    expected = session.get("_csrf_token")
-    provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
-    if not expected or not provided or not hmac.compare_digest(expected, provided):
-        abort(400, description="CSRF validation failed.")
 
 
 def resolve_public_room_type_query() -> RoomType | None:
@@ -5258,7 +4317,7 @@ def resolve_booking_source_channel(explicit_source_channel: str | None, attribut
 def _should_track_booking_attribution() -> bool:
     if request.endpoint in {None, "static", "payment_webhook"}:
         return False
-    if request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_"):
+    if is_staff_or_provider_endpoint(request.endpoint):
         return False
     return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
 
@@ -5339,102 +4398,10 @@ def public_booking_form_context(
     }
 
 
-def current_user() -> User | None:
-    if getattr(g, "current_staff_user", None) is not None:
-        return g.current_staff_user
-    if current_app_testing() and session.get("staff_user_id"):
-        return db.session.get(User, UUID(session["staff_user_id"]))
-    return None
 
 
-def require_user() -> User:
-    user = current_user()
-    if not user:
-        abort(401)
-    return user
 
 
-def require_permission(permission_code: str) -> User:
-    user = require_user()
-    if not user.has_permission(permission_code):
-        abort(403)
-    return user
-
-
-def require_any_permission(*permission_codes: str) -> User:
-    user = require_user()
-    if not any(user.has_permission(permission_code) for permission_code in permission_codes):
-        abort(403)
-    return user
-
-
-def can(permission_code: str) -> bool:
-    user = current_user()
-    if not user:
-        return False
-    return user.has_permission(permission_code)
-
-def default_dashboard_endpoint(user: User | None) -> str:
-    return default_dashboard_endpoint_for_user(user)
-
-
-def default_dashboard_url(user: User | None) -> str:
-    return url_for(default_dashboard_endpoint(user))
-
-
-def current_settings() -> dict[str, dict]:
-    return {setting.key: setting.value_json for setting in AppSetting.query.filter_by(deleted_at=None).all()}
-
-
-def current_app_testing() -> bool:
-    try:
-        from flask import current_app
-
-        return bool(current_app.config.get("TESTING"))
-    except RuntimeError:
-        return False
-
-
-def truthy_setting(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
-
-
-def parse_optional_uuid(value: str | None) -> UUID | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    return UUID(candidate)
-
-
-def parse_booking_extra_ids(values: list[str] | tuple[str, ...] | None) -> tuple[UUID, ...]:
-    parsed: list[UUID] = []
-    for raw_value in values or []:
-        candidate = (raw_value or "").strip()
-        if not candidate:
-            continue
-        try:
-            parsed.append(UUID(candidate))
-        except ValueError as exc:
-            raise ValueError("One or more selected extras are invalid.") from exc
-    return tuple(parsed)
-
-
-def safe_back_path(value: str | None, fallback: str) -> str:
-    candidate = (value or "").strip()
-    if candidate.startswith("/") and not candidate.startswith("//"):
-        return candidate
-    return fallback
-
-
-def add_anchor_to_path(path: str, anchor: str | None) -> str:
-    candidate = (path or "").strip()
-    fragment = (anchor or "").strip().lstrip("#")
-    if not fragment:
-        return candidate
-    base = candidate.split("#", 1)[0]
-    return f"{base}#{fragment}"
 
 
 def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
@@ -5695,210 +4662,16 @@ def _inventory_override_snapshot_for_audit(override_id: UUID) -> dict | None:
     }
 
 
-def public_base_url() -> str:
-    return resolve_public_base_url()
 
 
-def absolute_public_url(value: str | None) -> str:
-    return branding_absolute_public_url(value)
 
 
-def email_href(value: str | None) -> str:
-    return branding_email_href(value)
 
 
-def phone_href(value: str | None) -> str:
-    return branding_phone_href(value)
 
 
-def parse_optional_date(value: str | None) -> date | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    return date.fromisoformat(candidate)
 
 
-def parse_request_form_date(name: str, *, default: date | None) -> date | None:
-    candidate = (request.form.get(name) or "").strip()
-    if not candidate:
-        return default
-    try:
-        return date.fromisoformat(candidate)
-    except ValueError:
-        abort(400, description=f"Invalid {name} form value.")
 
 
-def action_datetime_for_form_date(name: str, *, default: date | None = None) -> datetime:
-    business_date = parse_request_form_date(name, default=default or date.today())
-    hotel_tz = calendar_timezone()
-    now = datetime.now(hotel_tz)
-    return datetime.combine(
-        business_date,
-        now.time().replace(tzinfo=None),
-        tzinfo=hotel_tz,
-    )
 
-
-def parse_request_date_arg(name: str, *, default: date | None) -> date | None:
-    candidate = (request.args.get(name) or "").strip()
-    if not candidate:
-        return default
-    try:
-        return date.fromisoformat(candidate)
-    except ValueError:
-        abort(400, description=f"Invalid {name} query parameter.")
-
-
-def parse_request_int_arg(name: str, *, default: int, minimum: int = 1, maximum: int | None = None) -> int:
-    candidate = (request.args.get(name) or "").strip()
-    if not candidate:
-        return default
-    try:
-        value = int(candidate)
-    except ValueError:
-        abort(400, description=f"Invalid {name} query parameter.")
-    if value < minimum or (maximum is not None and value > maximum):
-        abort(400, description=f"Invalid {name} query parameter.")
-    return value
-
-
-def parse_request_uuid_arg(name: str) -> str | None:
-    candidate = (request.args.get(name) or "").strip()
-    if not candidate:
-        return None
-    try:
-        return str(UUID(candidate))
-    except ValueError:
-        abort(400, description=f"Invalid {name} query parameter.")
-
-
-def parse_optional_datetime(value: str | None) -> datetime | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    parsed = datetime.fromisoformat(candidate)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
-    return parsed
-
-
-def resolve_report_date_range(*, preset: str, requested_start: date | None, requested_end: date | None) -> tuple[str, date, date]:
-    today = date.today()
-    normalized = preset or "next_7_days"
-    if normalized == "today":
-        return normalized, today, today
-    if normalized == "tomorrow":
-        tomorrow = today + timedelta(days=1)
-        return normalized, tomorrow, tomorrow
-    if normalized == "next_30_days":
-        return normalized, today, today + timedelta(days=29)
-    if normalized == "current_month":
-        month_start = today.replace(day=1)
-        if today.month == 12:
-            month_end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1)
-        else:
-            month_end = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
-        return normalized, month_start, month_end
-    if normalized == "custom" and requested_start and requested_end and requested_start <= requested_end:
-        return normalized, requested_start, requested_end
-    return "next_7_days", today, today + timedelta(days=6)
-
-
-def report_date_presets() -> list[dict[str, str]]:
-    return [
-        {"value": "today", "label": "Today"},
-        {"value": "tomorrow", "label": "Tomorrow"},
-        {"value": "next_7_days", "label": "Next 7 days"},
-        {"value": "next_30_days", "label": "Next 30 days"},
-        {"value": "current_month", "label": "Current month"},
-        {"value": "custom", "label": "Custom"},
-    ]
-
-
-def format_report_date_range(start_date: date, end_date: date) -> str:
-    if start_date == end_date:
-        return start_date.strftime("%d %b %Y")
-    return f"{start_date.strftime('%d %b %Y')} - {end_date.strftime('%d %b %Y')}"
-
-
-def parse_optional_int(value: str | None) -> int | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    return int(candidate)
-
-
-def parse_decimal(value: str | None, *, default: str | None = None) -> Decimal:
-    candidate = default if (value is None or str(value).strip() == "") and default is not None else value
-    if candidate is None:
-        raise ValueError("A decimal value is required.")
-    return Decimal(str(candidate))
-
-
-def parse_optional_decimal(value: str | None) -> Decimal | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    return Decimal(candidate)
-
-
-def is_admin_user(user: User | None = None) -> bool:
-    subject = user or current_user()
-    if not subject:
-        return False
-    return any(role.code == "admin" for role in subject.roles)
-
-
-def require_admin_role(user: User | None = None) -> User:
-    subject = user or require_user()
-    if not is_admin_user(subject):
-        abort(403)
-    return subject
-
-
-def can_access_admin_workspace(user: User | None = None) -> bool:
-    subject = user or current_user()
-    if not subject:
-        return False
-    required = {"settings.view", "user.view", "rate_rule.view", "audit.view"}
-    return bool(subject.permission_codes.intersection(required))
-
-
-def require_admin_workspace_access() -> User:
-    user = require_user()
-    if not can_access_admin_workspace(user):
-        abort(403)
-    return user
-
-
-def available_admin_sections() -> list[dict[str, str]]:
-    user = current_user()
-    if not user:
-        return []
-    sections: list[dict[str, str]] = []
-    if can("settings.view"):
-        sections.append(
-            {"key": "property", "label": "Property Setup", "endpoint": "staff_admin_property", "description": "Rooms, room types, branding"}
-        )
-        sections.append(
-            {"key": "operations", "label": "Operations Settings", "endpoint": "staff_admin_operations", "description": "Policies, templates, housekeeping defaults"}
-        )
-        sections.append(
-            {"key": "communications", "label": "Communications", "endpoint": "staff_admin_communications", "description": "Notification settings, delivery history, reminder runs"}
-        )
-        sections.append(
-            {"key": "payments", "label": "Payments", "endpoint": "staff_admin_payments", "description": "Hosted payment behavior"}
-        )
-    if can("rate_rule.view") or can("settings.view"):
-        sections.append(
-            {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}
-        )
-    if can("user.view"):
-        sections.append(
-            {"key": "staff_access", "label": "Staff & Access", "endpoint": "staff_admin_staff_access", "description": "Users, roles, permissions"}
-        )
-    if can("audit.view"):
-        sections.append(
-            {"key": "audit", "label": "Audit", "endpoint": "staff_admin_audit", "description": "Configuration and system history"}
-        )
-    return sections

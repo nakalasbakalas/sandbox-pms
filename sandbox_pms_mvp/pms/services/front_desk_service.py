@@ -17,6 +17,7 @@ from ..models import (
     Guest,
     HousekeepingStatus,
     InventoryDay,
+    ModificationRequest,
     PaymentEvent,
     PaymentRequest,
     PreCheckIn,
@@ -831,6 +832,15 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
             summary["special_requests_present"],
         ]
     )
+    # Count pending modification requests
+    pending_mod_count = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(ModificationRequest)
+        .where(
+            ModificationRequest.reservation_id == reservation.id,
+            ModificationRequest.status.in_(("submitted", "reviewed")),
+        )
+    ).scalar_one()
     summary.update(
         {
             "room_ready": readiness["is_ready"],
@@ -843,6 +853,7 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
             "flagged_issue": flagged_issue,
             "turnover_status": "awaiting_housekeeping" if reservation.current_status == "checked_out" else None,
             "pre_checkin": pre_checkin,
+            "pending_modification_requests": pending_mod_count,
         }
     )
     return summary
@@ -1152,3 +1163,58 @@ def _front_desk_snapshot(reservation: Reservation) -> dict:
         "checked_out_at": reservation.checked_out_at.isoformat() if reservation.checked_out_at else None,
         "identity_verified_at": reservation.identity_verified_at.isoformat() if reservation.identity_verified_at else None,
     }
+
+
+_log = logging.getLogger(__name__)
+
+
+def auto_cancel_no_shows(
+    *,
+    business_date: date | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> dict:
+    """Auto-cancel reservations that are no-shows after the cutoff hour.
+
+    Only runs if the current local time is past the configured cutoff
+    (``reservation.no_show_cutoff_hour``, default ``"21:00"``).
+
+    Returns ``{"processed": N, "skipped": N, "errors": N}``.
+    """
+    target_date = business_date or date.today()
+    cutoff = _setting_time("reservation.no_show_cutoff_hour", "21:00")
+    now_local = _current_time()
+    if now_local < cutoff:
+        return {"processed": 0, "skipped": 0, "errors": 0, "reason": "before_cutoff"}
+
+    eligible = (
+        Reservation.query
+        .filter(
+            Reservation.check_in_date == target_date,
+            Reservation.current_status.in_(["tentative", "confirmed"]),
+            Reservation.deleted_at.is_(None),
+        )
+        .all()
+    )
+
+    processed = 0
+    skipped = 0
+    errors = 0
+    for reservation in eligible:
+        try:
+            process_no_show(
+                reservation.id,
+                NoShowPayload(
+                    action_at=datetime.now(timezone.utc),
+                    reason="auto_cancel_no_show",
+                ),
+                actor_user_id=actor_user_id or reservation.updated_by_user_id or reservation.created_by_user_id,
+            )
+            processed += 1
+        except ValueError:
+            skipped += 1
+        except Exception:
+            _log.exception("Error auto-cancelling no-show for reservation %s", reservation.id)
+            db.session.rollback()
+            errors += 1
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}

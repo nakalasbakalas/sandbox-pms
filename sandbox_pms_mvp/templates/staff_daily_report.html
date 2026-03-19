@@ -162,7 +162,7 @@
           <tbody>
             {% for item in data["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=target_date.isoformat(), back=url_for('staff_daily_report', report_type='room_status', date=target_date.isoformat())) }}">{{ item.room_number }}</a></td>
+                <td><a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=target_date.isoformat(), back=url_for('staff_daily_report', report_type='room_status', date=target_date.isoformat())) }}">{{ item.room_number }}</a></td>
                 <td>{{ item.room_type_code }}</td>
                 <td><span class="status {{ item.housekeeping_status_code }}">{{ item.housekeeping_status_code|replace('_', ' ') }}</span></td>
                 <td><span class="status {{ item.priority }}">{{ item.priority_label }}</span></td>

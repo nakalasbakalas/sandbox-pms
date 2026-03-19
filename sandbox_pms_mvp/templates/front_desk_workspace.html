@@ -88,6 +88,7 @@
                 {% if item.flagged_issue %}<span class="status pending">Issue</span>{% endif %}
                 {% if item.early_check_in_requested %}<span class="status house_use">Early</span>{% endif %}
                 {% if item.special_requests_present %}<span class="status house_use">Request</span>{% endif %}
+                {% if item.pending_modification_requests %}<a href="{{ url_for('staff_reservation_detail', reservation_id=item.id) }}" class="status pending" style="text-decoration:none;font-size:0.75rem;" title="Pending modification request">Mod</a>{% endif %}
                 {% set _pc = item.pre_checkin %}
                 {% if _pc %}
                 <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing', 'signature_missing') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI:{{ _pc.readiness|replace('_',' ')|truncate(12, True, '…') }}</a>

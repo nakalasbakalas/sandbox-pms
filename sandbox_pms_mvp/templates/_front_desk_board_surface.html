@@ -105,6 +105,7 @@
             </span>
             <span class="planning-board-block-badges">
               {% if block.readyForCheckIn %}<small class="badge-ready">Ready</small>{% endif %}
+              {% if block.pendingModification %}<small class="badge-mod">Mod</small>{% endif %}
               {% if block.balanceDue and block.balanceDue > 0 %}<small class="badge-balance" title="Balance due: {{ currency }}{{ '%.0f'|format(block.balanceDue) }}">{{ currency }}{{ '%g'|format(block.balanceDue) }}</small>{% endif %}
               {% if block.displayVariant == 'unallocated' %}<small>Unallocated</small>{% elif block.status == 'conflict' %}<small>Conflict</small>{% elif block.displayVariant == 'in_house' %}<small>In-house</small>{% elif block.displayVariant == 'past' %}<small>Past</small>{% endif %}
             </span>
