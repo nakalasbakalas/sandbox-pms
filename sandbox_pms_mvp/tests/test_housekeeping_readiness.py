@@ -831,3 +831,46 @@ def test_housekeeping_tasks_api_endpoint(app_factory):
             assert resp.status_code == 200
             data = resp.get_json()
             assert len(data["tasks"]) >= 1
+
+
+def test_housekeeping_mobile_board_renders_with_offline_hooks(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        manager = make_staff_user("manager", "mgr-mobilehk@example.com")
+        business_date = date.today() + timedelta(days=1)
+
+        with app.test_client() as client:
+            login_as(client, manager)
+            resp = client.get(f"/staff/housekeeping?date={business_date.isoformat()}&view=mobile")
+            assert resp.status_code == 200
+            text = resp.get_data(as_text=True)
+            assert "Mobile board" in text
+            assert "serviceWorker.register" in text
+            assert "stay available offline" in text
+
+
+def test_housekeeping_desktop_board_renders_after_template_refresh(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        manager = make_staff_user("manager", "mgr-desktophk@example.com")
+        business_date = date.today() + timedelta(days=1)
+
+        with app.test_client() as client:
+            login_as(client, manager)
+            resp = client.get(f"/staff/housekeeping?date={business_date.isoformat()}")
+            assert resp.status_code == 200
+            text = resp.get_data(as_text=True)
+            assert "Housekeeping" in text
+            assert "Bulk actions" in text
+            assert "Today" in text
+
+
+def test_housekeeping_service_worker_route_serves_cache_script(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    response = client.get("/staff/sw.js")
+    assert response.status_code == 200
+    assert response.mimetype == "application/javascript"
+    text = response.get_data(as_text=True)
+    assert "sandbox-hk-mobile-v1" in text
+    assert "/staff/housekeeping" in text

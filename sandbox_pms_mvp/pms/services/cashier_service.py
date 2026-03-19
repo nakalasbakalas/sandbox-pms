@@ -82,6 +82,21 @@ class DocumentIssuePayload:
     note: str | None = None
 
 
+@dataclass
+class PosChargePayload:
+    amount: Decimal
+    outlet_name: str
+    outlet_type: str
+    external_check_id: str
+    system_name: str = "pos"
+    item_summary: str | None = None
+    note: str | None = None
+    service_date: date | None = None
+    covers: int | None = None
+    metadata: dict | None = None
+    posting_key: str | None = None
+
+
 def post_fee_charge(
     reservation_id: uuid.UUID,
     *,
@@ -120,6 +135,78 @@ def post_fee_charge(
         note=description,
         line_id=line.id,
         metadata={"charge_code": charge_code},
+    )
+    if commit:
+        db.session.commit()
+    return line
+
+
+def post_pos_charge(
+    reservation_id: uuid.UUID,
+    payload: PosChargePayload,
+    *,
+    actor_user_id: uuid.UUID | None,
+    commit: bool = True,
+) -> FolioCharge:
+    amount = money(payload.amount)
+    if amount <= Decimal("0.00"):
+        raise ValueError("POS charge amount must be greater than zero.")
+    outlet_name = (payload.outlet_name or "").strip()
+    outlet_type = (payload.outlet_type or "").strip().lower()
+    external_check_id = (payload.external_check_id or "").strip()
+    system_name = (payload.system_name or "pos").strip().lower()
+    if not outlet_name:
+        raise ValueError("Outlet name is required.")
+    if not external_check_id:
+        raise ValueError("External POS check ID is required.")
+
+    posting_key = payload.posting_key or (
+        f"pos:{_posting_key_segment(system_name)}:"
+        f"{_posting_key_segment(outlet_type or outlet_name)}:"
+        f"{_posting_key_segment(external_check_id)}"
+    )[:160]
+    existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+    if existing:
+        return existing
+
+    description = (
+        payload.item_summary.strip()
+        if payload.item_summary and payload.item_summary.strip()
+        else f"{outlet_name} POS charge"
+    )
+    line = post_fee_charge(
+        reservation_id,
+        charge_code=_pos_charge_code(outlet_type),
+        description=description,
+        amount=amount,
+        service_date=payload.service_date or date.today(),
+        actor_user_id=actor_user_id,
+        metadata={
+            "source": "pos_integration",
+            "system_name": system_name,
+            "outlet_name": outlet_name,
+            "outlet_type": outlet_type or None,
+            "external_check_id": external_check_id,
+            "covers": payload.covers,
+            "note": payload.note,
+            **(payload.metadata or {}),
+        },
+        posting_key=posting_key,
+        commit=False,
+    )
+    _log_cashier_event(
+        reservation_id=line.reservation_id,
+        actor_user_id=actor_user_id,
+        event_type="cashier.pos_charge_posted",
+        amount=money(line.total_amount),
+        note=payload.note or description,
+        line_id=line.id,
+        metadata={
+            "system_name": system_name,
+            "outlet_name": outlet_name,
+            "outlet_type": outlet_type or None,
+            "external_check_id": external_check_id,
+        },
     )
     if commit:
         db.session.commit()
@@ -936,6 +1023,25 @@ def _folio_line_snapshot(charge: FolioCharge) -> dict:
         "void_reason": charge.void_reason,
         "reversed_charge_id": str(charge.reversed_charge_id) if charge.reversed_charge_id else None,
     }
+
+
+def _pos_charge_code(outlet_type: str) -> str:
+    normalized = (outlet_type or "").strip().lower()
+    if normalized == "minibar":
+        return "SNK"
+    if normalized == "laundry":
+        return "LND"
+    if normalized == "telephone":
+        return "TEL"
+    return "XTR"
+
+
+def _posting_key_segment(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
+    cleaned = cleaned.strip("-")
+    while "--" in cleaned:
+        cleaned = cleaned.replace("--", "-")
+    return cleaned[:40] or "unknown"
 
 
 def _next_document_number(document_type: str, *, issue_date: date) -> str:

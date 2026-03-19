@@ -21,10 +21,13 @@ Adding a new provider
 
 from __future__ import annotations
 
+import json
 import uuid
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -33,14 +36,16 @@ import sqlalchemy as sa
 from ..audit import write_audit_log
 from ..extensions import db
 from ..models import (
-    AppSetting,
     ExternalCalendarBlock,
     ExternalCalendarSource,
     ExternalCalendarSyncRun,
+    InventoryDay,
     Reservation,
+    Room,
     RoomType,
     utc_now,
 )
+from ..pricing import get_setting_value, money, quote_reservation
 
 
 # ---------------------------------------------------------------------------
@@ -238,12 +243,121 @@ class ICalChannelProvider(ChannelProvider):
 
 
 # ---------------------------------------------------------------------------
+# Configurable API push providers
+# ---------------------------------------------------------------------------
+
+
+class ConfiguredPushChannelProvider(ChannelProvider):
+    """Outbound-only provider that posts normalized inventory payloads to a configured endpoint.
+
+    This intentionally does not hard-code a third-party OTA schema. Each provider
+    posts a stable JSON envelope to a hotel-configured integration endpoint so we
+    fail clearly until a real Booking.com / Expedia connector is wired.
+    """
+
+    provider_key_name = ""
+
+    @property
+    def provider_key(self) -> str:
+        return self.provider_key_name
+
+    def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
+        return []
+
+    def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
+        endpoint = _channel_provider_setting(self.provider_key, "endpoint", "")
+        token = _channel_provider_setting(self.provider_key, "api_token", "")
+        account_id = _channel_provider_setting(self.provider_key, "account_id", "")
+        if not endpoint:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"{self.provider_key} endpoint is not configured."],
+            )
+
+        payload = {
+            "provider": self.provider_key,
+            "generated_at": utc_now().isoformat(),
+            "account_id": account_id or None,
+            "updates": [
+                {
+                    "room_type_code": item.room_type_code,
+                    "date_from": item.date_from.isoformat(),
+                    "date_to": item.date_to.isoformat(),
+                    "available_count": item.available_count,
+                    "rate_amount": str(item.rate_amount) if item.rate_amount is not None else None,
+                    "currency": item.currency,
+                    "closed_to_arrival": item.closed_to_arrival,
+                    "closed_to_departure": item.closed_to_departure,
+                    "min_stay": item.min_stay,
+                }
+                for item in updates
+            ],
+        }
+        headers = {"Content-Type": "application/json", "User-Agent": "SandboxHotelPMS/1.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - endpoint is operator configured
+                body = response.read().decode("utf-8", errors="ignore")
+                details = {"http_status": response.status}
+                if body.strip():
+                    try:
+                        details["response"] = json.loads(body)
+                    except json.JSONDecodeError:
+                        details["response_text"] = body[:500]
+                return SyncResult(
+                    provider=self.provider_key,
+                    direction="outbound",
+                    success=200 <= response.status < 300,
+                    records_processed=len(updates),
+                    details=details,
+                )
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="ignore")
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"HTTP {exc.code}: {body[:240] or exc.reason}"],
+                details={"http_status": exc.code},
+            )
+        except urllib.error.URLError as exc:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[str(exc.reason or exc)],
+            )
+
+    def test_connection(self) -> bool:
+        return bool(_channel_provider_setting(self.provider_key, "endpoint", ""))
+
+
+class BookingComChannelProvider(ConfiguredPushChannelProvider):
+    provider_key_name = "booking_com"
+
+
+class ExpediaChannelProvider(ConfiguredPushChannelProvider):
+    provider_key_name = "expedia"
+
+
+# ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
 
 PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
+    "booking_com": BookingComChannelProvider,
+    "expedia": ExpediaChannelProvider,
 }
 
 
@@ -256,6 +370,78 @@ def get_provider(provider_key: str) -> ChannelProvider:
     if not cls:
         raise ValueError(f"Unknown channel provider: {provider_key!r}")
     return cls()
+
+
+def build_outbound_inventory_updates(
+    *,
+    date_from: date,
+    date_to: date,
+    room_type_id: uuid.UUID | None = None,
+) -> list[OutboundInventoryUpdate]:
+    room_type_query = RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc())
+    if room_type_id:
+        room_type_query = room_type_query.filter(RoomType.id == room_type_id)
+    room_types = room_type_query.all()
+    if not room_types:
+        return []
+
+    availability_query = (
+        db.session.query(
+            InventoryDay.business_date,
+            InventoryDay.room_type_id,
+            sa.func.count(InventoryDay.id),
+        )
+        .join(Room, Room.id == InventoryDay.room_id)
+        .filter(
+            InventoryDay.business_date >= date_from,
+            InventoryDay.business_date <= date_to,
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+            InventoryDay.is_blocked.is_(False),
+            InventoryDay.availability_status == "available",
+        )
+    )
+    if room_type_id:
+        availability_query = availability_query.filter(InventoryDay.room_type_id == room_type_id)
+    availability_counts = {
+        (business_date, inventory_room_type_id): int(available_count or 0)
+        for business_date, inventory_room_type_id, available_count in availability_query.group_by(
+            InventoryDay.business_date,
+            InventoryDay.room_type_id,
+        ).all()
+    }
+
+    updates: list[OutboundInventoryUpdate] = []
+    currency_code = str(get_setting_value("hotel.currency", "THB") or "THB")
+    for room_type in room_types:
+        current = date_from
+        while current <= date_to:
+            updates.append(
+                OutboundInventoryUpdate(
+                    room_type_code=room_type.code,
+                    date_from=current,
+                    date_to=current + timedelta(days=1),
+                    available_count=availability_counts.get((current, room_type.id), 0),
+                    rate_amount=_default_rate_for_room_type(room_type, current),
+                    currency=currency_code,
+                    closed_to_arrival=False,
+                    closed_to_departure=False,
+                )
+            )
+            current += timedelta(days=1)
+    return updates
+
+
+def provider_push_context() -> dict[str, dict[str, Any]]:
+    return {
+        provider_key: {
+            "configured": bool(_channel_provider_setting(provider_key, "endpoint", "")),
+            "endpoint": _channel_provider_setting(provider_key, "endpoint", ""),
+            "has_api_token": bool(_channel_provider_setting(provider_key, "api_token", "")),
+            "account_id": _channel_provider_setting(provider_key, "account_id", ""),
+        }
+        for provider_key in ("booking_com", "expedia")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -348,3 +534,18 @@ class ChannelSyncService:
 
     def test_connection(self) -> bool:
         return self.provider.test_connection()
+
+
+def _default_rate_for_room_type(room_type: RoomType, business_date: date) -> Decimal:
+    quote = quote_reservation(
+        room_type=room_type,
+        check_in_date=business_date,
+        check_out_date=business_date + timedelta(days=1),
+        adults=room_type.standard_occupancy,
+        children=0,
+    )
+    return money(quote.grand_total)
+
+
+def _channel_provider_setting(provider_key: str, field_name: str, default: str) -> str:
+    return str(get_setting_value(f"channel_push.{provider_key}.{field_name}", default) or default).strip()

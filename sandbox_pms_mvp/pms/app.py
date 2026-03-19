@@ -144,6 +144,7 @@ from .services.cashier_service import (
     DocumentIssuePayload,
     ManualAdjustmentPayload,
     PaymentPostingPayload,
+    PosChargePayload,
     RefundPostingPayload,
     VoidChargePayload,
     cashier_print_context,
@@ -151,9 +152,16 @@ from .services.cashier_service import (
     get_cashier_detail,
     issue_cashier_document,
     post_manual_adjustment,
+    post_pos_charge,
     record_payment,
     record_refund,
     void_folio_charge,
+)
+from .services.channel_service import (
+    ChannelSyncService,
+    build_outbound_inventory_updates,
+    get_provider,
+    provider_push_context,
 )
 from .services.communication_service import (
     communication_settings_context,
@@ -215,6 +223,13 @@ from .services.housekeeping_service import (
     start_housekeeping_task,
     update_housekeeping_status,
 )
+from .services.group_booking_service import (
+    GroupBlockCreatePayload,
+    create_group_room_block,
+    get_group_block_detail,
+    list_group_room_blocks,
+    release_group_room_block,
+)
 from .services.room_readiness_service import (
     is_room_assignable,
     room_readiness_board,
@@ -265,6 +280,8 @@ from .services.provider_portal_service import (
     provider_resend_payment_link,
 )
 from .services.pre_checkin_service import (
+    ScannerCapturePayload,
+    apply_document_ocr_to_guest,
     DocumentVerifyPayload,
     PreCheckInSavePayload,
     build_pre_checkin_link,
@@ -279,6 +296,7 @@ from .services.pre_checkin_service import (
     mark_opened,
     mark_rejected,
     mark_verified,
+    ingest_scanner_capture,
     read_document_bytes,
     save_pre_checkin,
     send_pre_checkin_link_email,
@@ -996,6 +1014,51 @@ def register_routes(app: Flask) -> None:
             "start_url": "/",
         }
         return Response(json.dumps(manifest), mimetype="application/manifest+json")
+
+    @app.route("/staff/sw.js")
+    def staff_service_worker():
+        script = """
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") {
+    return;
+  }
+  const url = new URL(event.request.url);
+  const cacheName = "sandbox-hk-mobile-v1";
+  if (url.pathname.startsWith("/staff/housekeeping")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(cacheName).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+  if (url.pathname.startsWith("/static/") || url.pathname === "/manifest.json") {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) {
+          return cached;
+        }
+        return fetch(event.request).then((response) => {
+          const copy = response.clone();
+          caches.open(cacheName).then((cache) => cache.put(event.request, copy));
+          return response;
+        });
+      })
+    );
+  }
+});
+""".strip()
+        return Response(script, mimetype="application/javascript")
 
     @app.route("/sitemap.xml")
     def sitemap_xml():
@@ -2582,10 +2645,17 @@ def register_routes(app: Flask) -> None:
     @app.route("/provider/calendar")
     def provider_calendar():
         require_permission("provider.calendar.view")
+        today_value = date.today()
         return render_template(
             "provider_calendar.html",
             calendar=provider_calendar_context(),
+            ota_push=provider_push_context(),
             rooms=Room.query.filter_by(is_active=True).order_by(Room.room_number.asc()).all(),
+            room_types=RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc()).all(),
+            push_defaults={
+                "date_from": today_value,
+                "date_to": today_value + timedelta(days=30),
+            },
             can_manage_calendar=can("provider.calendar.manage"),
         )
 
@@ -2642,6 +2712,33 @@ def register_routes(app: Flask) -> None:
                 f"Calendar sync completed with status {result['run'].status}.",
                 "success" if result["run"].status == "success" else "warning",
             )
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("provider_calendar"))
+
+    @app.route("/provider/calendar/push", methods=["POST"])
+    def provider_calendar_push():
+        user = require_permission("provider.calendar.manage")
+        provider_key = (request.form.get("provider_key") or "").strip()
+        room_type_id = parse_optional_uuid(request.form.get("room_type_id"))
+        try:
+            date_from = date.fromisoformat(request.form.get("date_from") or date.today().isoformat())
+            date_to = date.fromisoformat(request.form.get("date_to") or (date_from + timedelta(days=30)).isoformat())
+            if date_to < date_from:
+                raise ValueError("End date must be on or after start date.")
+            updates = build_outbound_inventory_updates(
+                date_from=date_from,
+                date_to=date_to,
+                room_type_id=room_type_id,
+            )
+            result = ChannelSyncService(get_provider(provider_key)).push_inventory_updates(
+                updates,
+                actor_user_id=user.id,
+            )
+            if result.success:
+                flash(f"Pushed {result.records_processed} inventory update(s) to {provider_key.replace('_', ' ')}.", "success")
+            else:
+                flash("; ".join(result.errors) or f"{provider_key.replace('_', ' ')} push failed.", "error")
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("provider_calendar"))
@@ -4108,6 +4205,29 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
 
+    @app.route("/staff/cashier/<uuid:reservation_id>/pos-charges", methods=["POST"])
+    def staff_cashier_pos_charge(reservation_id):
+        user = require_permission("folio.charge_add")
+        try:
+            post_pos_charge(
+                reservation_id,
+                PosChargePayload(
+                    amount=Decimal(request.form.get("amount") or "0.00"),
+                    outlet_name=request.form.get("outlet_name", ""),
+                    outlet_type=request.form.get("outlet_type", "fnb"),
+                    external_check_id=request.form.get("external_check_id", ""),
+                    system_name=request.form.get("system_name", "pos"),
+                    item_summary=request.form.get("item_summary"),
+                    note=request.form.get("note"),
+                    service_date=date.fromisoformat(request.form["service_date"]) if request.form.get("service_date") else None,
+                ),
+                actor_user_id=user.id,
+            )
+            flash("POS charge posted to folio.", "success")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
     @app.route("/staff/cashier/<uuid:reservation_id>/payment-requests", methods=["POST"])
     def staff_cashier_payment_request(reservation_id):
         user = require_permission("payment_request.create")
@@ -4139,6 +4259,42 @@ def register_routes(app: Flask) -> None:
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+    @app.route("/api/integrations/pos/charges", methods=["POST"])
+    def integration_pos_charge():
+        require_integration_token("pos")
+        payload = request.get_json(silent=True) or {}
+        try:
+            reservation = resolve_reservation_identifier(
+                reservation_id_value=payload.get("reservation_id"),
+                reservation_code_value=payload.get("reservation_code"),
+            )
+            line = post_pos_charge(
+                reservation.id,
+                PosChargePayload(
+                    amount=Decimal(str(payload.get("amount") or "0.00")),
+                    outlet_name=payload.get("outlet_name", ""),
+                    outlet_type=payload.get("outlet_type", "fnb"),
+                    external_check_id=payload.get("external_check_id", ""),
+                    system_name=payload.get("system_name", "pos"),
+                    item_summary=payload.get("item_summary"),
+                    note=payload.get("note"),
+                    service_date=date.fromisoformat(payload["service_date"]) if payload.get("service_date") else None,
+                    covers=int(payload["covers"]) if payload.get("covers") is not None else None,
+                    metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+                ),
+                actor_user_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"ok": False, "error": public_error_message(exc)}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "folio_charge_id": str(line.id),
+                "posting_key": line.posting_key,
+                "reservation_id": str(line.reservation_id),
+            }
+        )
 
     @app.route("/staff/cashier/<uuid:reservation_id>/payment-requests/<uuid:payment_request_id>/refresh", methods=["POST"])
     def staff_cashier_refresh_payment_request(reservation_id, payment_request_id):
@@ -4257,13 +4413,70 @@ def register_routes(app: Flask) -> None:
             "staff_reservations.html",
             result=result,
             filters=filters,
+            group_blocks=list_group_room_blocks(limit=8),
             room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
             reservation_statuses=RESERVATION_STATUSES,
             booking_sources=BOOKING_SOURCE_CHANNELS,
             review_statuses=REVIEW_QUEUE_STATUSES,
             today=date.today(),
+            tomorrow=date.today() + timedelta(days=1),
             can_folio=can("folio.view"),
         )
+
+    @app.route("/staff/group-blocks", methods=["POST"])
+    def staff_group_block_create():
+        user = require_permission("reservation.edit")
+        try:
+            detail = create_group_room_block(
+                GroupBlockCreatePayload(
+                    group_name=request.form.get("group_name", ""),
+                    check_in_date=date.fromisoformat(request.form["check_in_date"]),
+                    check_out_date=date.fromisoformat(request.form["check_out_date"]),
+                    room_type_id=UUID(request.form["room_type_id"]),
+                    room_count=int(request.form.get("room_count") or "0"),
+                    adults=int(request.form.get("adults") or "2"),
+                    children=int(request.form.get("children") or "0"),
+                    extra_guests=int(request.form.get("extra_guests") or "0"),
+                    contact_name=request.form.get("contact_name"),
+                    contact_email=request.form.get("contact_email"),
+                    notes=request.form.get("notes"),
+                ),
+                actor_user_id=user.id,
+            )
+            flash(
+                f"Group block {detail['group_block_code']} created with {detail['active_count']} held room(s).",
+                "success",
+            )
+            return redirect(url_for("staff_group_block_detail", group_block_code=detail["group_block_code"]))
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_reservations"))
+
+    @app.route("/staff/group-blocks/<group_block_code>")
+    def staff_group_block_detail(group_block_code):
+        require_permission("reservation.view")
+        try:
+            detail = get_group_block_detail(group_block_code)
+        except Exception:
+            abort(404)
+        return render_template(
+            "group_block_detail.html",
+            block=detail,
+            back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations")),
+        )
+
+    @app.route("/staff/group-blocks/<group_block_code>/release", methods=["POST"])
+    def staff_group_block_release(group_block_code):
+        user = require_permission("reservation.edit")
+        try:
+            detail = release_group_room_block(group_block_code, actor_user_id=user.id)
+            flash(
+                f"Released {detail['released_count']} room block(s) from {detail['group_block_code']}.",
+                "success",
+            )
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_group_block_detail", group_block_code=group_block_code))
 
     @app.route("/staff/reservations/arrivals")
     def staff_reservation_arrivals():
@@ -4680,7 +4893,7 @@ def register_routes(app: Flask) -> None:
         if not reservation:
             abort(404)
         pc = get_pre_checkin_for_reservation(reservation_id)
-        docs = get_documents_for_reservation(reservation_id) if pc else []
+        docs = get_documents_for_reservation(reservation_id)
         link = build_pre_checkin_link(pc.token) if pc else None
         return render_template(
             "staff_pre_checkin_detail.html",
@@ -4688,6 +4901,7 @@ def register_routes(app: Flask) -> None:
             pc=pc,
             documents=docs,
             pre_checkin_link=link,
+            scanner_integration_enabled=bool(integration_shared_token("scanner")),
         )
 
     @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/verify", methods=["POST"])
@@ -4769,6 +4983,43 @@ def register_routes(app: Flask) -> None:
             flash(public_error_message(exc), "error")
         return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
 
+    @app.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/scanner-capture", methods=["POST"])
+    def staff_pre_checkin_scanner_capture(reservation_id):
+        user = require_permission("reservation.edit")
+        try:
+            document = ingest_scanner_capture(
+                reservation_id,
+                ScannerCapturePayload(
+                    document_type=request.form.get("document_type", "passport"),
+                    raw_text=request.form.get("raw_text"),
+                    raw_payload=None,
+                    filename=request.form.get("filename"),
+                    content_type=request.form.get("content_type") or None,
+                    scanner_name=request.form.get("scanner_name"),
+                    source="staff_scanner_capture",
+                ),
+                actor_user_id=user.id,
+            )
+            extracted = document.ocr_extracted_data or {}
+            if extracted.get("status") == "parsed":
+                flash("Scanner payload saved and parsed for staff review.", "success")
+            else:
+                flash("Scanner payload saved, but no structured fields were parsed.", "warning")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+        return redirect(url_for("staff_pre_checkin_detail", reservation_id=reservation_id))
+
+    @app.route("/staff/documents/<uuid:doc_id>/apply-ocr", methods=["POST"])
+    def staff_document_apply_ocr(doc_id):
+        user = require_permission("reservation.edit")
+        try:
+            document = apply_document_ocr_to_guest(doc_id, actor_user_id=user.id)
+            flash("Parsed document details applied to the guest profile.", "success")
+            return redirect(url_for("staff_pre_checkin_detail", reservation_id=document.reservation_id))
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+            return redirect(request.referrer or url_for("staff_reservations"))
+
     @app.route("/staff/documents/<uuid:doc_id>/verify", methods=["POST"])
     def staff_document_verify(doc_id):
         user = require_permission("reservation.check_in")
@@ -4808,6 +5059,39 @@ def register_routes(app: Flask) -> None:
             data,
             mimetype=doc.content_type,
             headers={"Content-Disposition": f'inline; filename="{doc.original_filename}"'},
+        )
+
+    @app.route("/api/integrations/scanner/capture", methods=["POST"])
+    def integration_scanner_capture():
+        require_integration_token("scanner")
+        payload = request.get_json(silent=True) or {}
+        try:
+            reservation = resolve_reservation_identifier(
+                reservation_id_value=payload.get("reservation_id"),
+                reservation_code_value=payload.get("reservation_code"),
+            )
+            document = ingest_scanner_capture(
+                reservation.id,
+                ScannerCapturePayload(
+                    document_type=payload.get("document_type", "passport"),
+                    raw_text=payload.get("raw_text"),
+                    raw_payload=payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else None,
+                    filename=payload.get("filename"),
+                    content_type=payload.get("content_type"),
+                    scanner_name=payload.get("scanner_name"),
+                    source=payload.get("source") or "scanner_api",
+                ),
+                actor_user_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"ok": False, "error": public_error_message(exc)}), 400
+        return jsonify(
+            {
+                "ok": True,
+                "document_id": str(document.id),
+                "reservation_id": str(document.reservation_id),
+                "ocr_extracted_data": document.ocr_extracted_data,
+            }
         )
 
     @app.route("/staff/review-queue", methods=["GET", "POST"])
@@ -4948,12 +5232,58 @@ def rotate_csrf_token() -> str:
 def validate_csrf_request() -> None:
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload", "staff_messaging_inbound_webhook"}:
+    if request.endpoint in {
+        None,
+        "static",
+        "payment_webhook",
+        "pre_checkin_save",
+        "pre_checkin_upload",
+        "staff_messaging_inbound_webhook",
+        "integration_scanner_capture",
+        "integration_pos_charge",
+    }:
         return
     expected = session.get("_csrf_token")
     provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
     if not expected or not provided or not hmac.compare_digest(expected, provided):
         abort(400, description="CSRF validation failed.")
+
+
+def integration_shared_token(name: str) -> str:
+    config_key = f"{name.upper()}_SHARED_TOKEN"
+    default = current_app.config.get(config_key, "")
+    return str(get_setting_value(f"integrations.{name}.shared_token", default) or "").strip()
+
+
+def require_integration_token(name: str) -> None:
+    expected = integration_shared_token(name)
+    if not expected:
+        abort(503, description=f"{name} integration token is not configured.")
+    provided = (
+        request.headers.get("X-Integration-Token")
+        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    )
+    if not provided or not hmac.compare_digest(expected, provided):
+        abort(403)
+
+
+def resolve_reservation_identifier(
+    *,
+    reservation_id_value: str | None = None,
+    reservation_code_value: str | None = None,
+) -> Reservation:
+    if reservation_id_value:
+        try:
+            reservation = db.session.get(Reservation, UUID(reservation_id_value))
+        except ValueError as exc:
+            raise ValueError("Invalid reservation ID.") from exc
+        if reservation:
+            return reservation
+    if reservation_code_value:
+        reservation = Reservation.query.filter_by(reservation_code=reservation_code_value.strip()).first()
+        if reservation:
+            return reservation
+    raise ValueError("Reservation not found.")
 
 
 def resolve_public_room_type_query() -> RoomType | None:
