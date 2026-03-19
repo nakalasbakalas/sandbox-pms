@@ -10,7 +10,7 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ back_url }}">Back</a>
-      <a class="button secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
       <span class="status {{ detail.summary.settlement_state }}">{{ detail.summary.settlement_state.replace('_', ' ') }}</span>
       <span class="status {{ 'paid' if detail.summary.deposit_state in ['paid', 'not_required'] else 'pending' }}">{{ detail.summary.deposit_state.replace('_', ' ') }}</span>
     </div>
@@ -49,7 +49,7 @@
     </div>
 
     {% if can_charge %}
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_post_room_charges', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_post_room_charges', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">
@@ -64,7 +64,7 @@
     {% endif %}
 
     {% if can_charge or can_adjust %}
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_adjustment', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_adjustment', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">
@@ -93,7 +93,7 @@
     {% endif %}
 
     {% if can_payment %}
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_payment', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_payment', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">
@@ -117,7 +117,7 @@
     {% endif %}
 
     {% if can_refund %}
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_refund', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_refund', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">
@@ -141,7 +141,7 @@
     </form>
     {% endif %}
 
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_issue_document', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_issue_document', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">
@@ -174,7 +174,7 @@
         </div>
         <div class="right-stack">
           <span class="small muted">{{ document.issued_at.strftime('%Y-%m-%d %H:%M') }}</span>
-          <a class="button tiny secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type=document.document_type) }}" target="_blank" rel="noopener">Open print view</a>
+          <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type=document.document_type) }}" target="_blank" rel="noopener">Open print view</a>
         </div>
       </div>
       {% else %}
@@ -185,7 +185,7 @@
     <div class="subsection">
       <h3>Payment requests</h3>
       {% if payments_enabled and can_payment_request %}
-      <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_payment_request', reservation_id=detail.reservation.id) }}">
+      <form class="stack-form compact-form" method="post" action="{{ url_for('cashier.staff_cashier_payment_request', reservation_id=detail.reservation.id) }}">
         {{ csrf_input() }}
         <input type="hidden" name="back_url" value="{{ back_url }}">
         <div class="split-row">
@@ -214,7 +214,7 @@
             <strong>{{ currency }} {{ request_item.amount|money }}</strong>
             <span class="small muted">{{ request_item.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
             {% if can_payment_request and request_item.status != 'paid' %}
-            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_resend_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
+            <form class="stack-form compact-form" method="post" action="{{ url_for('cashier.staff_cashier_resend_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
               {{ csrf_input() }}
               <input type="hidden" name="back_url" value="{{ back_url }}">
               <label class="toggle-row"><span>New link</span><input type="checkbox" name="force_new_link"></label>
@@ -222,7 +222,7 @@
             </form>
             {% endif %}
             {% if can('payment.read') %}
-            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_refresh_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
+            <form class="stack-form compact-form" method="post" action="{{ url_for('cashier.staff_cashier_refresh_payment_request', reservation_id=detail.reservation.id, payment_request_id=request_item.id) }}">
               {{ csrf_input() }}
               <input type="hidden" name="back_url" value="{{ back_url }}">
               <button class="button tiny secondary" type="submit">Refresh</button>
@@ -324,7 +324,7 @@
             <td>{{ line.posted_by_user.full_name if line.posted_by_user else 'system' }}<div class="small muted">{{ line.posted_at.strftime('%Y-%m-%d %H:%M') }}</div></td>
             <td>
               {% if can_adjust and not line.voided_at and not line.is_reversal %}
-              <form class="stack-form compact-form" method="post" action="{{ url_for('staff_cashier_void_charge', reservation_id=detail.reservation.id, charge_id=line.id) }}">
+              <form class="stack-form compact-form" method="post" action="{{ url_for('cashier.staff_cashier_void_charge', reservation_id=detail.reservation.id, charge_id=line.id) }}">
                 {{ csrf_input() }}
                 <input type="hidden" name="back_url" value="{{ back_url }}">
                 <input type="text" name="reason" maxlength="255" placeholder="Void reason" required>

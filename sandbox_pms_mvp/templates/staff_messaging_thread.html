@@ -63,7 +63,7 @@
         {% if reservation.assigned_room %}
         <p>Room: {{ reservation.assigned_room.room_number }}</p>
         {% endif %}
-        <a class="button small" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">View reservation</a>
+        <a class="button small" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">View reservation</a>
       </div>
       {% endif %}
       <div class="context-block">

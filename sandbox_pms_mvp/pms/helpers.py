@@ -114,28 +114,28 @@ def available_admin_sections() -> list[dict[str, str]]:
     sections: list[dict[str, str]] = []
     if can("settings.view"):
         sections.append(
-            {"key": "property", "label": "Property Setup", "endpoint": "staff_admin_property", "description": "Rooms, room types, branding"}
+            {"key": "property", "label": "Property Setup", "endpoint": "admin.staff_admin_property", "description": "Rooms, room types, branding"}
         )
         sections.append(
-            {"key": "operations", "label": "Operations Settings", "endpoint": "staff_admin_operations", "description": "Policies, templates, housekeeping defaults"}
+            {"key": "operations", "label": "Operations Settings", "endpoint": "admin.staff_admin_operations", "description": "Policies, templates, housekeeping defaults"}
         )
         sections.append(
-            {"key": "communications", "label": "Communications", "endpoint": "staff_admin_communications", "description": "Notification settings, delivery history, reminder runs"}
+            {"key": "communications", "label": "Communications", "endpoint": "admin.staff_admin_communications", "description": "Notification settings, delivery history, reminder runs"}
         )
         sections.append(
-            {"key": "payments", "label": "Payments", "endpoint": "staff_admin_payments", "description": "Hosted payment behavior"}
+            {"key": "payments", "label": "Payments", "endpoint": "admin.staff_admin_payments", "description": "Hosted payment behavior"}
         )
     if can("rate_rule.view") or can("settings.view"):
         sections.append(
-            {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}
+            {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "admin.staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}
         )
     if can("user.view"):
         sections.append(
-            {"key": "staff_access", "label": "Staff & Access", "endpoint": "staff_admin_staff_access", "description": "Users, roles, permissions"}
+            {"key": "staff_access", "label": "Staff & Access", "endpoint": "admin.staff_admin_staff_access", "description": "Users, roles, permissions"}
         )
     if can("audit.view"):
         sections.append(
-            {"key": "audit", "label": "Audit", "endpoint": "staff_admin_audit", "description": "Configuration and system history"}
+            {"key": "audit", "label": "Audit", "endpoint": "reports.staff_admin_audit", "description": "Configuration and system history"}
         )
     return sections
 

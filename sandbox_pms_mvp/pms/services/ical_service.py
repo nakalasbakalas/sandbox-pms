@@ -169,10 +169,10 @@ def resolve_calendar_feed_by_token(token: str) -> CalendarFeed | None:
 def calendar_feed_export_url(feed: CalendarFeed) -> str:
     token = decrypt_secret(feed.token_encrypted)
     base = str(current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
-    path = url_for("calendar_feed_export", token=token)
+    path = url_for("public.calendar_feed_export", token=token)
     if base:
         return f"{base}{path}"
-    return url_for("calendar_feed_export", token=token, _external=True)
+    return url_for("public.calendar_feed_export", token=token, _external=True)
 
 
 def export_feed_ical(token: str) -> tuple[CalendarFeed, bytes]:

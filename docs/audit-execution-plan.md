@@ -248,8 +248,8 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Architecture
 
-- [ ] Extract Flask Blueprints from `app.py` — split into at minimum: `auth_bp`, `public_bp`, `staff_bp`, `provider_bp`, `housekeeping_bp`, `cashier_bp`, `admin_bp`, `board_bp`
-- [ ] Move shared route helpers (CSRF, URL builders, form parsers, date parsers) out of `app.py` into dedicated `helpers/` or `utils/` module
+- [ ] Extract remaining Flask Blueprints from `app.py` — still needed: `admin_bp`, `board_bp`, `front_desk_bp`, `public_bp` (auth, provider, housekeeping, messaging, cashier, reports, staff_reservations already extracted)
+- [x] Move shared route helpers (CSRF, URL builders, form parsers, date parsers) out of `app.py` into dedicated `helpers/` or `utils/` module *(~60 functions extracted to `helpers.py`)*
 - [x] Remove or fully enable `FEATURE_BOARD_V2` flag — confirm what it gates or delete it *(documented: gates board v2 action endpoints)*
 - [ ] Standardise ORM query style — migrate all 278 legacy `.query.` usages to `db.session.execute(sa.select(...))`
 - [x] Introduce a proper background task infrastructure (Render Cron Job or APScheduler/RQ) for all CLI automation tasks *(6 Render cron jobs added)*
@@ -290,7 +290,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [ ] Add group booking / room block feature (block multiple rooms under one group code)
 - [ ] Add reservation duplication (clone an existing reservation to a new date range)
-- [ ] Implement auto-cancel for `no_show` reservations not manually processed by end of business day
+- [x] Implement auto-cancel for `no_show` reservations not manually processed by end of business day *(`auto_cancel_no_shows()` + CLI + Render cron at 21:00 UTC — done in Phase 3)*
 - [x] Add a "pending modifications" indicator on the front desk workspace when an open modification request exists *(batch query + "Mod" badge on board blocks + workspace flags)*
 - [ ] Show `tentative` reservations on the front desk board so staff can track unconverted inquiries
 
@@ -311,7 +311,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [x] Add guest search with fuzzy matching by phone / name *(search_guests() + /staff/guests route)*
 - [ ] Add guest profile merge (deduplicate guests who booked under different contact details)
-- [ ] Add guest visit history view: all reservations linked to this guest profile
+- [x] Add guest visit history view: all reservations linked to this guest profile *(`GET /staff/guests/<id>` + `staff_guest_detail.html` — done in Phase 3)*
 - [ ] Add guest blacklist / block flag (with reason, for repeated no-shows or property damage)
 
 ### Billing / Payments
@@ -346,7 +346,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Reporting
 
-- [ ] Add CSV download to all report pages (occupancy, revenue, booking attribution, cancellations)
+- [x] Add CSV download to all report pages (occupancy, revenue, booking attribution, cancellations) *(7 types done in Phase 2)*
 - [ ] Add PDF/print-ready folio export
 - [ ] Add channel performance report (ADR, reservations, cancellation rate by source channel)
 - [ ] Add year-over-year comparison view to the occupancy dashboard
@@ -494,15 +494,20 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Flask Blueprint extraction — `auth_bp` | ✅ Done | 6 routes extracted (`/staff/login`, `/staff/logout`, etc.) |
 | Flask Blueprint extraction — `provider_bp` | ✅ Done | 12 routes extracted (`/provider/*`) |
 | Flask Blueprint extraction — `housekeeping_bp` | ✅ Done | 17 routes extracted (`/staff/housekeeping/*`, room readiness API) |
+| Flask Blueprint extraction — `messaging_bp` | ✅ Done | 242-line module; all messaging/thread/template/automation routes extracted |
+| Flask Blueprint extraction — `cashier_bp` | ✅ Done | 249-line module; all cashier/folio/charge/payment/refund routes extracted |
+| Flask Blueprint extraction — `reports_bp` | ✅ Done | 178-line module; all staff report + CSV download routes extracted |
+| Flask Blueprint extraction — `staff_reservations_bp` | ✅ Done | 770-line module; reservation list, detail, create, edit, notes, pre-checkin, cancel routes extracted |
 | Shared `helpers.py` module | ✅ Done | ~60 functions extracted (auth, CSRF, parsing, utility, branding, i18n, reports) |
 | Auto-cancel same-day no-shows | ✅ Done | `auto_cancel_no_shows()` service + CLI + render.yaml cron (21:00 UTC) |
 | Guest visit history view | ✅ Done | `GET /staff/guests/<id>` route + `staff_guest_detail.html` template |
 | Service layer refactoring — business logic extraction | ✅ Done | `front_desk_service`, `front_desk_board_service`, `reservation_service`, `staff_reservations_service` — handlers refactored to call service layer instead of inline logic. Routes module structure added. |
+| Template URL endpoint updates | ✅ Done | 18 templates updated to use blueprint-prefixed `url_for()` calls after route extractions |
 
-**Results:** `app.py` reduced from 5,923 → 4,677 lines (−1,246 lines, 35+ routes extracted to Blueprints + handlers delegated to service layer). Service layer now handles all request→business→response flows, improving testability and reducing handler complexity.
+**Results:** `app.py` reduced from 5,923 → 3,693 lines (−2,230 lines, 7 Blueprints extracted + service layer delegation). Blueprints now cover: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations. Remaining in `app.py`: front desk board, check-in/out, admin, public booking, walk-in.
 
 **Remaining to-dos:**
-- Continue Blueprint extraction (messaging, admin, cashier, front desk, reports — to reach <3,000 lines)
+- Continue Blueprint extraction (admin_bp, board_bp, front_desk_bp — to reach <2,000 lines)
 - Migrate legacy `.query.` ORM patterns to modern style (batch by module)
 - Add mobile-optimised housekeeping attendant view
 - Add keyboard shortcuts for check-in, check-out, room assignment

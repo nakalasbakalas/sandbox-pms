@@ -123,7 +123,7 @@
             <div class="actions">
               {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
               {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}
-              <a class="button tiny secondary" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
+              <a class="button tiny secondary" href="{{ url_for('front_desk.staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
             </div>
             {% if can_edit and block.reassignUrl and block.reassignOptions %}
             <form class="stack-form compact-form" method="post" action="{{ block.reassignUrl }}">
@@ -205,7 +205,7 @@
                 <div class="actions">
                   {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
                   {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}
-                  <a class="button tiny secondary" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
+                  <a class="button tiny secondary" href="{{ url_for('front_desk.staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, block_id=block.id) }}">Export ICS</a>
                 </div>
               </div>
             </details>

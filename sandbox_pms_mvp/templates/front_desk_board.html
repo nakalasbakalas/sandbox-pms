@@ -16,30 +16,30 @@
       <h1>Planning Board</h1>
       <nav class="planning-board-utility-links" aria-label="Board navigation">
         <a href="{{ url_for('staff_dashboard') }}">Dashboard</a>
-        <a href="{{ url_for('staff_front_desk', date=board.start_date.isoformat()) }}">Lists</a>
-        <a href="{{ url_for('staff_reservations') }}">Reservations</a>
+        <a href="{{ url_for('front_desk.staff_front_desk', date=board.start_date.isoformat()) }}">Lists</a>
+        <a href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
       </nav>
     </div>
     <div class="status-actions front-desk-tabs planning-board-view-tabs">
       <a class="pill active" href="{{ board_current_url }}">Board</a>
-      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='arrivals', date=board.start_date.isoformat()) }}">Arrivals</a>
-      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='departures', date=board.start_date.isoformat()) }}">Departures</a>
-      <a class="pill subtle" href="{{ url_for('staff_front_desk', mode='in_house', date=board.start_date.isoformat()) }}">In-house</a>
+      <a class="pill subtle" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=board.start_date.isoformat()) }}">Arrivals</a>
+      <a class="pill subtle" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=board.start_date.isoformat()) }}">Departures</a>
+      <a class="pill subtle" href="{{ url_for('front_desk.staff_front_desk', mode='in_house', date=board.start_date.isoformat()) }}">In-house</a>
     </div>
     <div class="board-days-tabs" role="group" aria-label="Day range">
       {% for opt in board.day_options %}
       <a class="board-days-tab{% if filters.days == opt %} active{% endif %}"
-         href="{{ url_for('staff_front_desk_board', start_date=board.start_date.isoformat(), days=opt, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}"
+         href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.start_date.isoformat(), days=opt, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}"
          aria-current="{{ 'page' if filters.days == opt else 'false' }}">{{ opt }}d</a>
       {% endfor %}
     </div>
     <div class="planning-board-nav-actions">
-      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Previous period" aria-label="Previous period">&lsaquo;</a>
-      <a class="board-nav-btn today" href="{{ url_for('staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Today</a>
-      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
+      <a class="board-nav-btn" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Previous period" aria-label="Previous period">&lsaquo;</a>
+      <a class="board-nav-btn today" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Today</a>
+      <a class="board-nav-btn" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
     </div>
     {% if can_create %}
-    <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
+    <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservations.staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
     {% endif %}
   </div>
 
@@ -92,7 +92,7 @@
           {% if can_manage_closures and board.room_options %}
           <details class="planning-board-quick planning-board-nested-quick">
             <summary class="board-overflow-item">Room closure</summary>
-            <form class="card inset stack-form planning-board-popover" method="post" action="{{ url_for('staff_front_desk_board_create_closure') }}">
+            <form class="card inset stack-form planning-board-popover" method="post" action="{{ url_for('front_desk.staff_front_desk_board_create_closure') }}">
               {{ csrf_input() }}
               <input type="hidden" name="back_url" value="{{ board_current_url }}">
               <input type="hidden" name="return_anchor" value="board-top">
@@ -109,7 +109,7 @@
           {% endif %}
           <details class="planning-board-quick planning-board-nested-quick{% if ical_import_report %} open-state{% endif %}" {% if ical_import_report %}open{% endif %}>
             <summary class="board-overflow-item">Import ICS</summary>
-            <form class="card inset stack-form planning-board-popover" method="post" enctype="multipart/form-data" action="{{ url_for('staff_front_desk_board_import_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">
+            <form class="card inset stack-form planning-board-popover" method="post" enctype="multipart/form-data" action="{{ url_for('front_desk.staff_front_desk_board_import_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">
               {{ csrf_input() }}
               <label><span>.ics file</span><input type="file" name="ical_file" accept=".ics,text/calendar"></label>
               <label><span>Or paste VCALENDAR</span><textarea name="ical_text" rows="5" placeholder="BEGIN:VCALENDAR..."></textarea></label>
@@ -148,7 +148,7 @@
               {% endif %}
             </form>
           </details>
-          <a class="board-overflow-item" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
+          <a class="board-overflow-item" href="{{ url_for('front_desk.staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
         </div>
       </details>
     </div>

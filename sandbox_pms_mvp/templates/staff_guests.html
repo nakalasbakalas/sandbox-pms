@@ -29,7 +29,7 @@
       {% for guest in guests %}
       <tr class="res-table-row">
         <td>
-          <a href="{{ url_for('staff_guest_detail', guest_id=guest.id, back=request.full_path.rstrip('?')) }}" style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;">{{ guest.full_name }}</a>
+          <a href="{{ url_for('staff_reservations.staff_guest_detail', guest_id=guest.id, back=request.full_path.rstrip('?')) }}" style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;">{{ guest.full_name }}</a>
           {% if guest.blacklist_flag %}<span class="status cancelled" style="font-size:0.7rem">Blacklisted</span>{% endif %}
         </td>
         <td>{{ guest.phone }}</td>
@@ -46,7 +46,7 @@
         </td>
         <td>
           {% if guest.latest_reservation_id %}
-          <a class="button tiny" href="{{ url_for('staff_reservation_detail', reservation_id=guest.latest_reservation_id) }}">Open</a>
+          <a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=guest.latest_reservation_id) }}">Open</a>
           {% endif %}
         </td>
       </tr>

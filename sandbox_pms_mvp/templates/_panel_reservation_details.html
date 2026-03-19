@@ -86,9 +86,9 @@
 {% if can_reassign %}
 <div class="panel-section">
   <h3>Room Assignment</h3>
-  <form method="POST" action="{{ url_for('staff_front_desk_board_assign_room', reservation_id=reservation.id) }}" class="stack-form compact">
+  <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_assign_room', reservation_id=reservation.id) }}" class="stack-form compact">
     {{ csrf_input() }}
-    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('staff_front_desk_board') }}">
+    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
     <label><span>Select room</span>
       <select name="room_id" required>
         <option value="">-- Choose room --</option>
@@ -107,9 +107,9 @@
 {% if can_change_dates %}
 <div class="panel-section">
   <h3>Change Dates</h3>
-  <form method="POST" action="{{ url_for('staff_front_desk_board_change_dates', reservation_id=reservation.id) }}" class="stack-form compact">
+  <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_change_dates', reservation_id=reservation.id) }}" class="stack-form compact">
     {{ csrf_input() }}
-    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('staff_front_desk_board') }}">
+    <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
     <div class="grid two">
       <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ reservation.check_in_date.isoformat() }}" required></label>
       <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ reservation.check_out_date.isoformat() }}" required></label>
@@ -129,11 +129,11 @@
   <button class="button secondary full-width" data-action="check-out" data-reservation-id="{{ reservation.id }}">Check Out</button>
   {% endif %}
   {% if can_cancel %}
-  <a class="button secondary full-width panel-btn-danger" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">Cancel Reservation</a>
+  <a class="button secondary full-width panel-btn-danger" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Cancel Reservation</a>
   {% endif %}
   {% if can_no_show %}
-  <a class="button secondary full-width panel-btn-warning" href="{{ url_for('staff_front_desk_detail', reservation_id=reservation.id) }}">Mark No-Show</a>
+  <a class="button secondary full-width panel-btn-warning" href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=reservation.id) }}">Mark No-Show</a>
   {% endif %}
-  <a class="button secondary full-width" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">Full Detail Page</a>
-  <a class="button secondary full-width" href="{{ url_for('staff_front_desk_detail', reservation_id=reservation.id) }}">Front Desk Detail</a>
+  <a class="button secondary full-width" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Full Detail Page</a>
+  <a class="button secondary full-width" href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=reservation.id) }}">Front Desk Detail</a>
 </div>

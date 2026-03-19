@@ -54,7 +54,7 @@
         <p>{{ dashboard.arrivals.count }} arrival{{ '' if dashboard.arrivals.count == 1 else 's' }} due on {{ dashboard.business_date.strftime('%d %b %Y') }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals workspace</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals workspace</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -79,7 +79,7 @@
           <tbody>
             {% for item in dashboard.arrivals["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or 'Unassigned' }} · {{ item.room_type_code }}</td>
                 <td><span class="status {{ item.room_readiness_label }}">{{ item.room_readiness_label|replace('_', ' ') }}</span></td>
@@ -102,7 +102,7 @@
         <p>{{ dashboard.departures.count }} departure{{ '' if dashboard.departures.count == 1 else 's' }} due on {{ dashboard.business_date.strftime('%d %b %Y') }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures workspace</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures workspace</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -124,7 +124,7 @@
           <tbody>
             {% for item in dashboard.departures["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or '-' }}</td>
                 <td>{{ item.payment_summary.balance_due | money }}</td>
@@ -186,7 +186,7 @@
         <p>{{ dashboard.checked_in_guests.count }} guest{{ '' if dashboard.checked_in_guests.count == 1 else 's' }} currently checked in.</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='in_house', date=dashboard.business_date.isoformat()) }}">Open in-house list</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='in_house', date=dashboard.business_date.isoformat()) }}">Open in-house list</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -209,7 +209,7 @@
           <tbody>
             {% for item in dashboard.checked_in_guests["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or '-' }}</td>
                 <td>{{ item.departure_date.strftime('%d %b %Y') }}</td>
@@ -258,7 +258,7 @@
           <tbody>
             {% for item in dashboard.housekeeping.priority_rooms %}
               <tr>
-                <td><a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
+                <td><a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
                 <td><span class="status {{ item.housekeeping_status_code }}">{{ item.housekeeping_status_code|replace('_', ' ') }}</span></td>
                 <td><span class="status {{ item.priority }}">{{ item.priority_label }}</span></td>
                 <td>{{ item.priority_reason }}</td>
@@ -279,7 +279,7 @@
         <p>{{ dashboard.definitions.pending_reservations }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_reservations', status='tentative') }}">Open reservations</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', status='tentative') }}">Open reservations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -301,7 +301,7 @@
           <tbody>
             {% for item in dashboard.pending_reservations["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.source_channel }}</td>
@@ -323,7 +323,7 @@
         <p>{{ dashboard.definitions.confirmed_reservations }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_reservations', status='confirmed') }}">Open reservations</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', status='confirmed') }}">Open reservations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -346,7 +346,7 @@
           <tbody>
             {% for item in dashboard.confirmed_reservations["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.source_channel }}</td>
@@ -415,7 +415,7 @@
               <tbody>
                 {% for item in dashboard.booking_attribution["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.source_label }}<div class="small muted">{{ item.source_channel }}</div></td>
                     <td>{{ item.utm_campaign or 'untagged' }}<div class="small muted">{{ item.utm_medium or 'n/a' }}</div></td>
                     <td>{{ item.entry_page or '/' }}<div class="small muted">{{ item.entry_cta_source or 'n/a' }}</div></td>
@@ -461,7 +461,7 @@
             <tbody>
               {% for item in dashboard.folio_balances["items"] %}
                 <tr>
-                  <td><a href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                  <td><a href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                   <td>{{ item.guest_name }}</td>
                   <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
                   <td>{{ item.departure_date.strftime('%d %b %Y') }}</td>
@@ -503,7 +503,7 @@
         <p>{{ dashboard.definitions.deposit_requested_vs_paid }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_admin_payments') }}">Open payment operations</a>
+        <a class="button secondary tiny" href="{{ url_for('admin.staff_admin_payments') }}">Open payment operations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -528,7 +528,7 @@
           <tbody>
             {% for item in dashboard.deposit_pipeline["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.deposit_required_amount | money }}</td>
@@ -604,7 +604,7 @@
               <tbody>
                 {% for item in dashboard.cancellation_summary["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                     <td>{{ item.source_channel }}</td>
                   </tr>
@@ -631,7 +631,7 @@
               <tbody>
                 {% for item in dashboard.no_show_summary["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                     <td>{{ item.deposit_received_amount | money }}</td>
                   </tr>
@@ -654,7 +654,7 @@
         <h2>Audit activity summary</h2>
         <p>{{ dashboard.definitions.audit_activity }}</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('staff_audit', date_from=filters.date_from, date_to=filters.date_to) }}">Open full audit log</a>
+      <a class="button secondary tiny" href="{{ url_for('reports.staff_audit', date_from=filters.date_from, date_to=filters.date_to) }}">Open full audit log</a>
     </div>
     <div class="metric-strip">
       <div><small>Total audit entries</small><strong>{{ dashboard.audit_activity.count }}</strong></div>

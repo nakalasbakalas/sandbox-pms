@@ -4,7 +4,7 @@
 <div class="staff-page" style="max-width:900px;margin:0 auto;padding:1.5rem;">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
     <div>
-      <a href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}" style="font-size:0.9rem;">&larr; Back to Reservation</a>
+      <a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}" style="font-size:0.9rem;">&larr; Back to Reservation</a>
       <h1 style="font-size:1.4rem;margin:0.25rem 0 0;">Pre-Check-In: {{ reservation.reservation_code }}</h1>
     </div>
     <div style="display:flex;gap:0.5rem;">
@@ -40,11 +40,11 @@
       <code style="font-size:0.85rem;">{{ pre_checkin_link }}</code>
     </div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-      <form method="POST" action="{{ url_for('staff_pre_checkin_resend', reservation_id=reservation.id) }}">
+      <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_resend', reservation_id=reservation.id) }}">
         {{ csrf_input() }}
         <button type="submit" class="btn btn-secondary btn-sm">Regenerate & Copy Link</button>
       </form>
-      <form method="POST" action="{{ url_for('staff_pre_checkin_send_email', reservation_id=reservation.id) }}">
+      <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_send_email', reservation_id=reservation.id) }}">
         {{ csrf_input() }}
         <button type="submit" class="btn btn-primary btn-sm">📧 Send via Email</button>
       </form>
@@ -54,7 +54,7 @@
     </div>
     {% else %}
     <p class="muted" style="margin-bottom:0.75rem;">No pre-check-in link has been generated yet.</p>
-    <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=reservation.id) }}">
+    <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_generate', reservation_id=reservation.id) }}">
       {{ csrf_input() }}
       <button type="submit" class="btn btn-primary btn-sm">Generate Pre-Check-In Link</button>
     </form>
@@ -117,7 +117,7 @@
       Would you like to update the guest profile?
     </p>
     {% if can('reservation.edit') %}
-    <form method="POST" action="{{ url_for('staff_pre_checkin_update_guest_email', reservation_id=reservation.id) }}" style="display:inline;">
+    <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_update_guest_email', reservation_id=reservation.id) }}" style="display:inline;">
       {{ csrf_input() }}
       <button type="submit" class="btn btn-sm btn-primary">Update Guest Profile Email</button>
     </form>
@@ -143,14 +143,14 @@
           {% else %}background:#fff3cd;color:#856404;{% endif %}">
           {{ doc.verification_status|title }}
         </span>
-        <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
+        <a href="{{ url_for('staff_reservations.staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
         {% if doc.verification_status == 'pending' %}
-        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+        <form method="POST" action="{{ url_for('staff_reservations.staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
           {{ csrf_input() }}
           <input type="hidden" name="verification_status" value="verified" />
           <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
         </form>
-        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+        <form method="POST" action="{{ url_for('staff_reservations.staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
           {{ csrf_input() }}
           <input type="hidden" name="verification_status" value="rejected" />
           <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>
@@ -169,11 +169,11 @@
     <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">⚡ Staff Actions</h2>
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
       {% if pc.status == 'submitted' %}
-      <form method="POST" action="{{ url_for('staff_pre_checkin_verify', reservation_id=reservation.id) }}">
+      <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_verify', reservation_id=reservation.id) }}">
         {{ csrf_input() }}
         <button type="submit" class="btn btn-primary">✅ Mark Verified (Desk Complete)</button>
       </form>
-      <form method="POST" action="{{ url_for('staff_pre_checkin_reject', reservation_id=reservation.id) }}">
+      <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_reject', reservation_id=reservation.id) }}">
         {{ csrf_input() }}
         <input type="hidden" name="reason" value="Staff rejected during desk review" />
         <button type="submit" class="btn btn-secondary" style="color:#721c24;">❌ Reject Pre-Check-In</button>

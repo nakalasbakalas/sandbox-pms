@@ -74,7 +74,7 @@
       <tbody>
         {% for res in detail.reservations %}
         <tr>
-          <td><a href="{{ url_for('staff_reservation_detail', reservation_id=res.id, back=request.full_path.rstrip('?')) }}">{{ res.reservation_code }}</a></td>
+          <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=res.id, back=request.full_path.rstrip('?')) }}">{{ res.reservation_code }}</a></td>
           <td><span class="status {{ res.current_status }}">{{ res.current_status.replace('_', ' ') }}</span></td>
           <td>{{ res.room_type.code if res.room_type else '—' }}</td>
           <td>{{ res.assigned_room.room_number if res.assigned_room else '—' }}</td>

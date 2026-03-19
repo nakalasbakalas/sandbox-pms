@@ -11,8 +11,8 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
-      <a class="button secondary" href="{{ url_for('staff_reservations') }}">Reservations</a>
-      <a class="button secondary" href="{{ url_for('staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Planning board</a>
+      <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
+      <a class="button secondary" href="{{ url_for('front_desk.staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Planning board</a>
     </div>
   </div>
 
@@ -23,10 +23,10 @@
   </section>
 
   <div class="status-actions front-desk-tabs">
-    <a class="pill subtle" href="{{ url_for('staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Board</a>
-    <a class="pill {% if mode == 'arrivals' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='arrivals', date=workspace.business_date.isoformat()) }}">Arrivals</a>
-    <a class="pill {% if mode == 'departures' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='departures', date=workspace.business_date.isoformat()) }}">Departures</a>
-    <a class="pill {% if mode == 'in_house' %}active{% else %}subtle{% endif %}" href="{{ url_for('staff_front_desk', mode='in_house', date=workspace.business_date.isoformat()) }}">In-house</a>
+    <a class="pill subtle" href="{{ url_for('front_desk.staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Board</a>
+    <a class="pill {% if mode == 'arrivals' %}active{% else %}subtle{% endif %}" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=workspace.business_date.isoformat()) }}">Arrivals</a>
+    <a class="pill {% if mode == 'departures' %}active{% else %}subtle{% endif %}" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=workspace.business_date.isoformat()) }}">Departures</a>
+    <a class="pill {% if mode == 'in_house' %}active{% else %}subtle{% endif %}" href="{{ url_for('front_desk.staff_front_desk', mode='in_house', date=workspace.business_date.isoformat()) }}">In-house</a>
   </div>
 
   <form class="toolbar subsection" method="get">
@@ -88,12 +88,12 @@
                 {% if item.flagged_issue %}<span class="status pending">Issue</span>{% endif %}
                 {% if item.early_check_in_requested %}<span class="status house_use">Early</span>{% endif %}
                 {% if item.special_requests_present %}<span class="status house_use">Request</span>{% endif %}
-                {% if item.pending_modification_requests %}<a href="{{ url_for('staff_reservation_detail', reservation_id=item.id) }}" class="status pending" style="text-decoration:none;font-size:0.75rem;" title="Pending modification request">Mod</a>{% endif %}
+                {% if item.pending_modification_requests %}<a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id) }}" class="status pending" style="text-decoration:none;font-size:0.75rem;" title="Pending modification request">Mod</a>{% endif %}
                 {% set _pc = item.pre_checkin %}
                 {% if _pc %}
-                <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing', 'signature_missing') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI:{{ _pc.readiness|replace('_',' ')|truncate(12, True, '…') }}</a>
+                <a href="{{ url_for('staff_reservations.staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing', 'signature_missing') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI:{{ _pc.readiness|replace('_',' ')|truncate(12, True, '…') }}</a>
                 {% elif item.status in ('tentative', 'confirmed') %}
-                <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=item.id) }}" style="display:inline;margin:0;">
+                <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_generate', reservation_id=item.id) }}" style="display:inline;margin:0;">
                   {{ csrf_input() }}
                   <button type="submit" class="status pending" style="background:none;border:1px solid #ccc;cursor:pointer;font-size:0.75rem;" title="Send pre-check-in link">PCI: Send</button>
                 </form>
@@ -102,7 +102,7 @@
             </td>
             <td>
               <div class="right-stack">
-                <a class="button tiny" href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=workspace.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Open</a>
+                <a class="button tiny" href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=workspace.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Open</a>
                 {% if can_check_in and item.status in ['tentative', 'confirmed'] %}
                 <span class="small muted">Ready for check-in</span>
                 {% elif can_check_out and item.status == 'checked_in' %}
@@ -128,7 +128,7 @@
         <p>Use the same reservation and inventory logic as other stays.</p>
       </div>
     </div>
-    <form class="stack-form compact-form" method="post" action="{{ url_for('staff_front_desk_walk_in') }}">
+    <form class="stack-form compact-form" method="post" action="{{ url_for('front_desk.staff_front_desk_walk_in') }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_mode" value="{{ mode }}">
       <input type="hidden" name="back_date" value="{{ workspace.business_date.isoformat() }}">

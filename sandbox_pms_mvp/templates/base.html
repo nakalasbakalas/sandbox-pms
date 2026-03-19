@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="{{ current_language }}">
 <head>
-  {% set suppress_social_metadata = (request.endpoint and (request.endpoint.startswith('staff_') or request.endpoint.startswith('provider_'))) or request.endpoint in ['booking_confirmation', 'booking_cancel_request', 'booking_modify_request', 'public_payment_return', 'public_payment_start'] %}
+  {% set suppress_social_metadata = (request.endpoint and (request.endpoint.startswith('staff_') or request.endpoint.startswith('provider_'))) or request.endpoint in ['public.booking_confirmation', 'public.booking_cancel_request', 'public.booking_modify_request', 'public.public_payment_return', 'public.public_payment_start'] %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
@@ -64,12 +64,12 @@
   {% set header_mobile_action_label = '' %}
   {% set header_current_language_label = language_labels.get(current_language, current_language|upper) %}
   {% if is_public_site %}
-    {% set header_mobile_action_href = url_for('booking_entry', lang=current_language) %}
+    {% set header_mobile_action_href = url_for('public.booking_entry', lang=current_language) %}
     {% set header_mobile_action_label = t('search_title') %}
   {% elif can('reservation.view') %}
-    {% set header_search_action = url_for('staff_reservations') %}
+    {% set header_search_action = url_for('staff_reservations.staff_reservations') %}
     {% set header_search_placeholder = 'Search reservations' %}
-    {% set header_mobile_action_href = url_for('staff_reservations') %}
+    {% set header_mobile_action_href = url_for('staff_reservations.staff_reservations') %}
     {% set header_mobile_action_label = 'Search' %}
   {% elif can('provider.dashboard.view') %}
     {% set header_search_action = url_for('provider.provider_bookings') %}
@@ -95,19 +95,19 @@
       </div>
       <nav class="header-main-nav" aria-label="{% if is_public_site %}Primary{% else %}Application{% endif %} navigation">
         {% if is_public_site %}
-          <a class="header-primary-link{% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %} active{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav" {% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %}aria-current="page"{% endif %}>{{ t('search_title') }}</a>
-          <a class="header-primary-link{% if request.endpoint == 'booking_cancel_request' %} active{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav" {% if request.endpoint == 'booking_cancel_request' %}aria-current="page"{% endif %}>{{ t('nav_cancel') }}</a>
-          <a class="header-primary-link{% if request.endpoint == 'booking_modify_request' %} active{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav" {% if request.endpoint == 'booking_modify_request' %}aria-current="page"{% endif %}>{{ t('nav_modify') }}</a>
+          <a class="header-primary-link{% if request.endpoint in ['public.index', 'public.booking_entry', 'public.booking_form', 'public.availability'] %} active{% endif %}" href="{{ url_for('public.booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav" {% if request.endpoint in ['public.index', 'public.booking_entry', 'public.booking_form', 'public.availability'] %}aria-current="page"{% endif %}>{{ t('search_title') }}</a>
+          <a class="header-primary-link{% if request.endpoint == 'public.booking_cancel_request' %} active{% endif %}" href="{{ url_for('public.booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav" {% if request.endpoint == 'public.booking_cancel_request' %}aria-current="page"{% endif %}>{{ t('nav_cancel') }}</a>
+          <a class="header-primary-link{% if request.endpoint == 'public.booking_modify_request' %} active{% endif %}" href="{{ url_for('public.booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav" {% if request.endpoint == 'public.booking_modify_request' %}aria-current="page"{% endif %}>{{ t('nav_modify') }}</a>
         {% else %}
           {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint == 'staff_dashboard' %} active{% endif %}" href="{{ url_for('staff_dashboard') }}" {% if request.endpoint == 'staff_dashboard' %}aria-current="page"{% endif %}>Staff</a>{% endif %}
           {% if can('provider.dashboard.view') %}<a class="header-primary-link{% if request.endpoint in ['provider.provider_dashboard', 'provider.provider_bookings', 'provider.provider_booking_detail'] %} active{% endif %}" href="{{ url_for('provider.provider_dashboard') }}" {% if request.endpoint in ['provider.provider_dashboard', 'provider.provider_bookings', 'provider.provider_booking_detail'] %}aria-current="page"{% endif %}>Provider</a>{% endif %}
-          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('staff_front_desk') }}" {% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %}aria-current="page"{% endif %}>Front Desk</a>{% endif %}
-          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_reservation') %} active{% endif %}" href="{{ url_for('staff_reservations') }}" {% if request.endpoint and request.endpoint.startswith('staff_reservation') %}aria-current="page"{% endif %}>Reservations</a>{% endif %}
+          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint in ['front_desk.staff_front_desk', 'front_desk.staff_front_desk_detail', 'front_desk.staff_front_desk_board', 'front_desk.staff_front_desk_board_surface', 'front_desk.staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('front_desk.staff_front_desk') }}" {% if request.endpoint in ['front_desk.staff_front_desk', 'front_desk.staff_front_desk_detail', 'front_desk.staff_front_desk_board', 'front_desk.staff_front_desk_board_surface', 'front_desk.staff_front_desk_board_ical_import'] %}aria-current="page"{% endif %}>Front Desk</a>{% endif %}
+          {% if can('reservation.view') %}<a class="header-primary-link{% if request.endpoint and (request.endpoint.startswith('staff_reservation') or request.endpoint.startswith('staff_reservations.')) %} active{% endif %}" href="{{ url_for('staff_reservations.staff_reservations') }}" {% if request.endpoint and (request.endpoint.startswith('staff_reservation') or request.endpoint.startswith('staff_reservations.')) %}aria-current="page"{% endif %}>Reservations</a>{% endif %}
           {% if can('housekeeping.view') %}<a class="header-primary-link{% if request.endpoint and (request.endpoint.startswith('staff_housekeeping') or request.endpoint.startswith('housekeeping.')) %} active{% endif %}" href="{{ url_for('housekeeping.staff_housekeeping') }}" {% if request.endpoint and (request.endpoint.startswith('staff_housekeeping') or request.endpoint.startswith('housekeeping.')) %}aria-current="page"{% endif %}>Housekeeping</a>{% endif %}
           {% if can('messaging.view') %}<a class="header-primary-link{% if request.endpoint and (request.endpoint.startswith('staff_messaging') or request.endpoint.startswith('messaging.')) %} active{% endif %}" href="{{ url_for('messaging.staff_messaging_inbox') }}" {% if request.endpoint and (request.endpoint.startswith('staff_messaging') or request.endpoint.startswith('messaging.')) %}aria-current="page"{% endif %}>Messaging{% if messaging_unread_count %} <span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}</a>{% endif %}
           {% if can('provider.calendar.view') %}<a class="header-primary-link{% if request.endpoint in ['provider.provider_calendar'] %} active{% endif %}" href="{{ url_for('provider.provider_calendar') }}" {% if request.endpoint in ['provider.provider_calendar'] %}aria-current="page"{% endif %}>Calendars</a>{% endif %}
-          {% if admin_sections %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}" {% if request.endpoint and request.endpoint.startswith('staff_admin') %}aria-current="page"{% endif %}>Admin</a>{% endif %}
-          {% if can('reports.view') %}<a class="header-primary-link{% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %} active{% endif %}" href="{{ url_for('staff_reports') }}" {% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %}aria-current="page"{% endif %}>Reports</a>{% endif %}
+          {% if admin_sections %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('admin.staff_admin_dashboard') }}" {% if request.endpoint and request.endpoint.startswith('staff_admin') %}aria-current="page"{% endif %}>Admin</a>{% endif %}
+          {% if can('reports.view') %}<a class="header-primary-link{% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %} active{% endif %}" href="{{ url_for('reports.staff_reports') }}" {% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %}aria-current="page"{% endif %}>Reports</a>{% endif %}
         {% endif %}
       </nav>
       <div class="header-utilities">
@@ -119,7 +119,7 @@
           </form>
         {% endif %}
         {% if not is_public_site and can('reservation.view') %}
-          <a class="header-utility-link{% if request.endpoint == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}" {% if request.endpoint == 'staff_review_queue' %}aria-current="page"{% endif %}>{{ t('review_queue') }}</a>
+          <a class="header-utility-link{% if request.endpoint == 'staff_reservations.staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_reservations.staff_review_queue') }}" {% if request.endpoint == 'staff_reservations.staff_review_queue' %}aria-current="page"{% endif %}>{{ t('review_queue') }}</a>
         {% endif %}
         {% if header_has_contacts %}
           <details class="header-menu header-contact-menu">
@@ -157,16 +157,16 @@
               {% if is_public_site %}
                 {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
                 {% if can('provider.dashboard.view') %}<a class="header-menu-link" href="{{ url_for('provider.provider_dashboard') }}">Provider</a>{% endif %}
-                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
-                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
-                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_guests') }}">Guest Search</a>{% endif %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('front_desk.staff_front_desk') }}">Front Desk</a>{% endif %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>{% endif %}
+                {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_reservations.staff_guests') }}">Guest Search</a>{% endif %}
                 {% if can('housekeeping.view') %}<a class="header-menu-link" href="{{ url_for('housekeeping.staff_housekeeping') }}">Housekeeping</a>{% endif %}
                 {% if can('provider.calendar.view') %}<a class="header-menu-link" href="{{ url_for('provider.provider_calendar') }}">Calendars</a>{% endif %}
-                {% if admin_sections %}<a class="header-menu-link" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
-                {% if can('reports.view') %}<a class="header-menu-link" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+                {% if admin_sections %}<a class="header-menu-link" href="{{ url_for('admin.staff_admin_dashboard') }}">Admin</a>{% endif %}
+                {% if can('reports.view') %}<a class="header-menu-link" href="{{ url_for('reports.staff_reports') }}">Reports</a>{% endif %}
               {% endif %}
               <a class="header-menu-link" href="{{ url_for('auth.staff_security') }}">Security</a>
-              {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+              {% if can('reservation.view') %}<a class="header-menu-link" href="{{ url_for('staff_reservations.staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
             </div>
           </details>
           <form method="post" action="{{ url_for('auth.staff_logout') }}" class="inline-form">
@@ -207,22 +207,22 @@
           {% endif %}
           <div class="nav-drawer-links">
             {% if is_public_site %}
-              <a class="nav-drawer-link{% if request.endpoint in ['index', 'booking_entry', 'booking_form', 'availability'] %} active{% endif %}" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
-              <a class="nav-drawer-link{% if request.endpoint == 'booking_cancel_request' %} active{% endif %}" href="{{ url_for('booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
-              <a class="nav-drawer-link{% if request.endpoint == 'booking_modify_request' %} active{% endif %}" href="{{ url_for('booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
+              <a class="nav-drawer-link{% if request.endpoint in ['public.index', 'public.booking_entry', 'public.booking_form', 'public.availability'] %} active{% endif %}" href="{{ url_for('public.booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav">{{ t('search_title') }}</a>
+              <a class="nav-drawer-link{% if request.endpoint == 'public.booking_cancel_request' %} active{% endif %}" href="{{ url_for('public.booking_cancel_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_cancel" data-analytics-context="header_nav">{{ t('nav_cancel') }}</a>
+              <a class="nav-drawer-link{% if request.endpoint == 'public.booking_modify_request' %} active{% endif %}" href="{{ url_for('public.booking_modify_request', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="header_modify" data-analytics-context="header_nav">{{ t('nav_modify') }}</a>
             {% else %}
               {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_dashboard' %} active{% endif %}" href="{{ url_for('staff_dashboard') }}">Staff</a>{% endif %}
               {% if can('provider.dashboard.view') %}<a class="nav-drawer-link{% if request.endpoint in ['provider.provider_dashboard', 'provider.provider_bookings', 'provider.provider_booking_detail'] %} active{% endif %}" href="{{ url_for('provider.provider_dashboard') }}">Provider</a>{% endif %}
-              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint in ['staff_front_desk', 'staff_front_desk_detail', 'staff_front_desk_board', 'staff_front_desk_board_surface', 'staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('staff_front_desk') }}">Front Desk</a>{% endif %}
-              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_reservation') %} active{% endif %}" href="{{ url_for('staff_reservations') }}">Reservations</a>{% endif %}
-              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_guests' %} active{% endif %}" href="{{ url_for('staff_guests') }}">Guest Search</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint in ['front_desk.staff_front_desk', 'front_desk.staff_front_desk_detail', 'front_desk.staff_front_desk_board', 'front_desk.staff_front_desk_board_surface', 'front_desk.staff_front_desk_board_ical_import'] %} active{% endif %}" href="{{ url_for('front_desk.staff_front_desk') }}">Front Desk</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint and (request.endpoint.startswith('staff_reservation') or request.endpoint.startswith('staff_reservations.')) %} active{% endif %}" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_reservations.staff_guests' %} active{% endif %}" href="{{ url_for('staff_reservations.staff_guests') }}">Guest Search</a>{% endif %}
               {% if can('housekeeping.view') %}<a class="nav-drawer-link{% if request.endpoint and (request.endpoint.startswith('staff_housekeeping') or request.endpoint.startswith('housekeeping.')) %} active{% endif %}" href="{{ url_for('housekeeping.staff_housekeeping') }}">Housekeeping</a>{% endif %}
               {% if can('messaging.view') %}<a class="nav-drawer-link{% if request.endpoint and (request.endpoint.startswith('staff_messaging') or request.endpoint.startswith('messaging.')) %} active{% endif %}" href="{{ url_for('messaging.staff_messaging_inbox') }}">Messaging{% if messaging_unread_count %} <span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}</a>{% endif %}
               {% if can('provider.calendar.view') %}<a class="nav-drawer-link{% if request.endpoint in ['provider.provider_calendar'] %} active{% endif %}" href="{{ url_for('provider.provider_calendar') }}">Calendars</a>{% endif %}
-              {% if admin_sections %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Admin</a>{% endif %}
-              {% if can('reports.view') %}<a class="nav-drawer-link{% if request.endpoint in ['staff_reports'] or (request.endpoint and request.endpoint.startswith('staff_daily_report')) %} active{% endif %}" href="{{ url_for('staff_reports') }}">Reports</a>{% endif %}
+              {% if admin_sections %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('admin.staff_admin_dashboard') }}">Admin</a>{% endif %}
+              {% if can('reports.view') %}<a class="nav-drawer-link{% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %} active{% endif %}" href="{{ url_for('reports.staff_reports') }}">Reports</a>{% endif %}
               <a class="nav-drawer-link{% if request.endpoint == 'auth.staff_security' %} active{% endif %}" href="{{ url_for('auth.staff_security') }}">Security</a>
-              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
+              {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_reservations.staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_reservations.staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
             {% endif %}
           </div>
         </div>
@@ -301,7 +301,7 @@
         {% if hotel_address %}<p class="footer-meta">{{ hotel_address }}</p>{% endif %}
         {% if is_public_site %}
         <div class="actions footer-actions">
-          <a class="button" href="{{ url_for('booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="footer_search" data-analytics-context="footer_cta">{{ t('search_title') }}</a>
+          <a class="button" href="{{ url_for('public.booking_entry', lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="footer_search" data-analytics-context="footer_cta">{{ t('search_title') }}</a>
         </div>
         {% endif %}
       </div>

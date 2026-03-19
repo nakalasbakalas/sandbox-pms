@@ -21,7 +21,7 @@
       <label><span>Action</span><select name="action"><option value="">All actions</option>{% for item in action_codes %}<option value="{{ item }}" {% if filters.action == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></label>
       <div class="actions">
         <button class="button secondary" type="submit">Apply filters</button>
-        <a class="button subtle" href="{{ url_for('staff_audit') }}">Reset</a>
+        <a class="button subtle" href="{{ url_for('reports.staff_audit') }}">Reset</a>
       </div>
     </div>
   </form>
