@@ -46,7 +46,7 @@ All critical and high-priority fixes from the audit implemented and tested:
 
 ## Phase 2 Execution Progress
 
-**Status: 🔄 IN PROGRESS**
+**Status: ✅ COMPLETE (2026-03-19)**
 
 | Phase 2 Item | Status | Notes |
 |--------------|--------|-------|
@@ -58,6 +58,7 @@ All critical and high-priority fixes from the audit implemented and tested:
 | Pricing module tests | ✅ Done | 16 direct tests in `test_pricing.py`: `apply_adjustment` (5 tests), `money` helper, `nightly_room_rate` (5 tests: fallback, fixed override, day-of-week filter, min_nights, long-stay discount), `quote_reservation` (5 tests: basic, extra guest fee, child fee, zero VAT, VAT breakdown consistency). |
 | Guest profile fuzzy search | ✅ Done | `search_guests(q)` in `staff_reservations_service.py` — LIKE matching on name/email/phone with batch latest-reservation lookup. `/staff/guests` route + `staff_guests.html` template. Reservation search also enhanced with email matching. Nav links added. |
 | Waitlist promotion/expiry automation | ✅ Done | `promote_eligible_waitlist()` — FIFO promotion when rooms available (assigns room + allocates inventory + confirms). `expire_stale_waitlist(max_age_days=14)` — cancels past-check-in or stale entries. CLI: `flask process-waitlist`. Render cron: every 15 min. |
+| Proforma invoice and receipt generation | ⏳ Backlog | Deferred to Phase 4 (not critical path). |
 
 ---
 
@@ -496,8 +497,9 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Shared `helpers.py` module | ✅ Done | ~60 functions extracted (auth, CSRF, parsing, utility, branding, i18n, reports) |
 | Auto-cancel same-day no-shows | ✅ Done | `auto_cancel_no_shows()` service + CLI + render.yaml cron (21:00 UTC) |
 | Guest visit history view | ✅ Done | `GET /staff/guests/<id>` route + `staff_guest_detail.html` template |
+| Service layer refactoring — business logic extraction | ✅ Done | `front_desk_service`, `front_desk_board_service`, `reservation_service`, `staff_reservations_service` — handlers refactored to call service layer instead of inline logic. Routes module structure added. |
 
-**Results:** `app.py` reduced from 5,923 → 4,882 lines (−1,041 lines, 35 routes extracted).
+**Results:** `app.py` reduced from 5,923 → 4,677 lines (−1,246 lines, 35+ routes extracted to Blueprints + handlers delegated to service layer). Service layer now handles all request→business→response flows, improving testability and reducing handler complexity.
 
 **Remaining to-dos:**
 - Continue Blueprint extraction (messaging, admin, cashier, front desk, reports — to reach <3,000 lines)
