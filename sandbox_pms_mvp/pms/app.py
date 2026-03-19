@@ -362,7 +362,31 @@ BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
     "landing_path",
     "entry_cta_source",
 }
-BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {"index", "availability", "booking_entry", "booking_hold", "booking_confirm"}
+BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {
+    "index",
+    "availability",
+    "booking_entry",
+    "booking_hold",
+    "booking_confirm",
+    "public.availability",
+    "public.booking_entry",
+    "public.booking_hold",
+    "public.booking_confirm",
+}
+PUBLIC_BOOKING_LANDING_ENDPOINTS = {"index", "availability", "booking_entry", "public.availability", "public.booking_entry"}
+PUBLIC_NON_CACHEABLE_ENDPOINTS = {
+    "booking_confirmation",
+    "booking_cancel_request",
+    "booking_modify_request",
+    "public_payment_return",
+    "public_payment_start",
+    "public.booking_confirmation",
+    "public.booking_cancel_request",
+    "public.booking_modify_request",
+    "public.public_payment_return",
+    "public.public_payment_start",
+}
+PUBLIC_WEBHOOK_ENDPOINTS = {"payment_webhook", "public.payment_webhook"}
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -475,13 +499,7 @@ def register_auth_hooks(app: Flask) -> None:
 
         if getattr(g, "current_auth_session", None):
             db.session.commit()
-        if request.endpoint in {
-            "booking_confirmation",
-            "booking_cancel_request",
-            "booking_modify_request",
-            "public_payment_return",
-            "public_payment_start",
-        }:
+        if request.endpoint in PUBLIC_NON_CACHEABLE_ENDPOINTS:
             response.headers["Cache-Control"] = "no-store, private, max-age=0"
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
         return response
@@ -816,9 +834,9 @@ def register_routes(app: Flask) -> None:
     def sitemap_xml():
         public_pages = [
             ("index", {}),
-            ("booking_entry", {}),
-            ("booking_cancel_request", {}),
-            ("booking_modify_request", {}),
+            ("public.booking_entry", {}),
+            ("public.booking_cancel_request", {}),
+            ("public.booking_modify_request", {}),
         ]
         urls: list[str] = []
         for endpoint, values in public_pages:
@@ -1041,11 +1059,11 @@ def booking_request_starts_new_attribution() -> bool:
         for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
     ):
         return True
-    return bool(external_referrer_host() and request.endpoint in {"index", "availability", "booking_entry"})
+    return bool(external_referrer_host() and request.endpoint in PUBLIC_BOOKING_LANDING_ENDPOINTS)
 
 
 def default_booking_attribution() -> dict:
-    if request.method != "GET" or request.endpoint not in {"index", "availability", "booking_entry"}:
+    if request.method != "GET" or request.endpoint not in PUBLIC_BOOKING_LANDING_ENDPOINTS:
         return {}
     entry_page = clean_public_path(request.path)
     referrer_host = external_referrer_host()
@@ -1186,7 +1204,7 @@ def resolve_booking_source_channel(explicit_source_channel: str | None, attribut
 
 
 def _should_track_booking_attribution() -> bool:
-    if request.endpoint in {None, "static", "payment_webhook"}:
+    if request.endpoint in {None, "static", *PUBLIC_WEBHOOK_ENDPOINTS}:
         return False
     if is_staff_or_provider_endpoint(request.endpoint):
         return False
@@ -1268,12 +1286,6 @@ def public_booking_form_context(
         },
     }
 
-
-
-
-
-
-
-
-
+# Compatibility export for tests and transitional imports.
 # Front desk board helpers moved to front_desk_bp
+from .routes.front_desk import front_desk_board_context

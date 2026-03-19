@@ -161,7 +161,17 @@ def rotate_csrf_token() -> str:
 def validate_csrf_request() -> None:
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
-    if request.endpoint in {None, "static", "payment_webhook", "pre_checkin_save", "pre_checkin_upload", "messaging.staff_messaging_inbound_webhook"}:
+    if request.endpoint in {
+        None,
+        "static",
+        "payment_webhook",
+        "public.payment_webhook",
+        "pre_checkin_save",
+        "public.pre_checkin_save",
+        "pre_checkin_upload",
+        "public.pre_checkin_upload",
+        "messaging.staff_messaging_inbound_webhook",
+    }:
         return
     expected = session.get("_csrf_token")
     provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")

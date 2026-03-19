@@ -506,20 +506,24 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 **Results:** `app.py` reduced from 5,923 → 3,693 lines (−2,230 lines, 7 Blueprints extracted + service layer delegation). Blueprints now cover: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations. Remaining in `app.py`: front desk board, check-in/out, admin, public booking, walk-in.
 
+**Reconciled update (2026-03-19):**
+- `front_desk_bp`, `admin_bp`, and `public_bp` are already extracted and registered in `create_app()`; the earlier blueprint-extraction backlog entry is stale.
+- `pms/app.py` is currently 1,273 lines, not 3,693, and now mostly contains app-factory wiring plus shared helpers rather than large route clusters.
+- Front-desk board density persistence and keyboard shortcuts are verified by `test_phase15_front_desk_board.py` (`62 passed` on 2026-03-19).
+- Staff skip-link / accessibility baseline remains in place via `templates/base.html`, and the existing guardrail coverage still passes.
+- Early / late fee handling is implemented in front-desk check-in/out flows; `test_phase6_front_desk_workspace.py` is green (`21 passed, 1 skipped` on 2026-03-19).
+
 **Remaining to-dos:**
 - Continue Blueprint extraction (admin_bp, board_bp, front_desk_bp — to reach <2,000 lines)
 - Migrate legacy `.query.` ORM patterns to modern style (batch by module)
 - Add mobile-optimised housekeeping attendant view
-- Add keyboard shortcuts for check-in, check-out, room assignment
 - Add group booking / room block feature
-- Add early/late fee automation
 - Add guest self-service digital check-out
-- Improve accessibility: ARIA labels, skip navigation for staff layout
 
 **Dependencies:** Phase 2 stable.
 
 **Success criteria:**
-- `app.py` is below 3,000 lines after full Blueprint extraction
+- `pms/app.py` stays below 2,000 lines while the remaining operational backlog lands
 - Front desk operations measurably faster (fewer page loads for common actions)
 - Housekeeping attendant can use the app on a tablet without layout issues
 

@@ -35,10 +35,12 @@ from ..helpers import (
     action_datetime_for_form_date,
     add_anchor_to_path,
     can,
+    current_user,
     ensure_csrf_token,
     parse_optional_datetime,
     parse_optional_uuid,
     parse_request_date_arg,
+    parse_request_int_arg,
     parse_request_uuid_arg,
     require_any_permission,
     require_permission,
@@ -125,6 +127,7 @@ CHECK_IN_UNEXPECTED_FALLBACK = (
     "Check-in could not be completed due to an unexpected system error. "
     "No data was lost. Please retry. If the issue continues, contact support and provide reference: {reference}"
 )
+BOARD_DENSITY_OPTIONS = {"comfortable", "compact", "spacious", "ultra"}
 
 
 def _check_in_issue(message: str, *, field: str | None = None, section: str | None = None) -> dict[str, str]:
@@ -152,6 +155,13 @@ def _format_number_input_amount(value: Decimal) -> str:
     return f"{value:.2f}"
 
 
+def _check_in_deposit_shortfall(reservation: Reservation) -> Decimal:
+    return max(
+        Decimal("0.00"),
+        _as_decimal_amount(reservation.deposit_required_amount) - _as_decimal_amount(reservation.deposit_received_amount),
+    )
+
+
 def _check_in_form_defaults(detail: dict) -> dict[str, str]:
     reservation = detail["reservation"]
     guest = reservation.primary_guest
@@ -167,9 +177,7 @@ def _check_in_form_defaults(detail: dict) -> dict[str, str]:
         "notes_summary": guest.notes_summary or "" if guest else "",
         "identity_verified": "",
         "room_id": str(reservation.assigned_room_id) if reservation.assigned_room_id else "",
-        "collect_payment_amount": _format_number_input_amount(
-            max(Decimal("0.00"), _as_decimal_amount(reservation.quoted_grand_total) - _as_decimal_amount(reservation.deposit_received_amount))
-        ),
+        "collect_payment_amount": _format_number_input_amount(_check_in_deposit_shortfall(reservation)),
         "payment_method": "front_desk",
         "arrival_note": "",
         "apply_early_fee": "",
@@ -228,7 +236,10 @@ def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, ob
         "payment_method": (form_data.get("payment_method") or "front_desk").strip(),
         "arrival_note": (form_data.get("arrival_note") or "").strip(),
         "waiver_reason": (form_data.get("waiver_reason") or "").strip(),
-        "override_payment": "",
+        "identity_verified": "on" if form_data.get("identity_verified") == "on" else "",
+        "apply_early_fee": "on" if form_data.get("apply_early_fee") == "on" else "",
+        "waive_early_fee": "on" if form_data.get("waive_early_fee") == "on" else "",
+        "override_payment": "on" if form_data.get("override_payment") == "on" else "",
     }
 
     parsed: dict[str, object] = {
@@ -241,11 +252,11 @@ def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, ob
     }
 
     if not values["first_name"]:
-        errors.append(_check_in_issue("First name is required.", field="first_name"))
+        errors.append(_check_in_issue("Primary guest first name is required before check-in can be completed.", field="first_name"))
     if not values["last_name"]:
-        errors.append(_check_in_issue("Last name is required.", field="last_name"))
+        errors.append(_check_in_issue("Primary guest last name is required before check-in can be completed.", field="last_name"))
     if not values["phone"]:
-        errors.append(_check_in_issue("Phone number is required.", field="phone"))
+        errors.append(_check_in_issue("Primary guest phone number is required before check-in can be completed.", field="phone"))
 
     if values["room_id"]:
         try:
@@ -256,10 +267,10 @@ def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, ob
     try:
         amount = Decimal(values["collect_payment_amount"])
         if amount < Decimal("0.00"):
-            errors.append(_check_in_issue("Payment amount cannot be negative.", field="collect_payment_amount"))
+            errors.append(_check_in_issue("Payment collected now cannot be negative.", field="collect_payment_amount"))
         parsed["collect_payment_amount"] = amount
     except Exception:  # noqa: BLE001
-        errors.append(_check_in_issue("Invalid payment amount.", field="collect_payment_amount"))
+        errors.append(_check_in_issue("Payment collected now must be a valid amount in THB.", field="collect_payment_amount"))
 
     return values, parsed, errors
 
@@ -284,22 +295,27 @@ def _check_in_blockers(detail: dict, values: dict[str, str], *, allow_override: 
         if not room:
             blockers.append(_check_in_issue("Selected room not found.", field="room_id"))
 
-    outstanding = max(
-        Decimal("0.00"),
-        _as_decimal_amount(reservation.quoted_grand_total) - _as_decimal_amount(reservation.deposit_received_amount),
-    )
-    collect = Decimal(values.get("collect_payment_amount") or "0.00")
+    outstanding = _check_in_deposit_shortfall(reservation)
+    collect = _as_decimal_amount(values.get("collect_payment_amount"))
     if outstanding > Decimal("0.00") and collect < outstanding:
-        override_payment = values.get("override_payment") == "on" or (allow_override and values.get("override_payment") == "on")
+        override_payment = allow_override and values.get("override_payment") == "on"
         if not override_payment:
-            blockers.append(
-                _check_in_issue(
-                    f"Outstanding balance of {_format_money_amount(outstanding)} must be collected or overridden.",
-                    section="payment",
-                )
-            )
+            blockers.append(_check_in_issue("Deposit is still outstanding.", section="payment"))
+
+    early_fee = ((detail.get("front_desk") or {}).get("early_fee") or {})
+    if early_fee.get("applies") and values.get("apply_early_fee") != "on" and values.get("waive_early_fee") != "on":
+        blockers.append(_check_in_issue("Early check-in fee requires a decision.", section="fees"))
 
     return blockers
+
+
+def _build_check_in_field_errors(issues: list[dict[str, str]]) -> dict[str, str]:
+    field_errors: dict[str, str] = {}
+    for issue in issues:
+        field = issue.get("field")
+        if field and field not in field_errors:
+            field_errors[field] = issue["message"]
+    return field_errors
 
 
 def _build_check_in_form_state(
@@ -307,27 +323,51 @@ def _build_check_in_form_state(
     *,
     values: dict[str, str] | None = None,
     errors: list[dict[str, str]] | None = None,
+    blockers: list[dict[str, str]] | None = None,
     allow_override: bool = False,
     unexpected_message: str | None = None,
 ) -> dict[str, object]:
     defaults = _check_in_form_defaults(detail)
+    form_values = dict(defaults)
+    if values:
+        form_values.update(values)
+    summary_errors = list(errors or [])
+    form_blockers = list(blockers or [])
+    if not summary_errors and not unexpected_message and not form_blockers:
+        form_blockers = _check_in_blockers(detail, form_values, allow_override=allow_override)
     form_state: dict[str, object] = {
         "defaults": defaults,
-        "values": values or defaults,
-        "errors": errors or [],
+        "values": form_values,
+        "errors": summary_errors,
+        "field_errors": _build_check_in_field_errors(summary_errors),
+        "summary_errors": summary_errors,
+        "blockers": form_blockers,
         "allow_override": allow_override,
+        "unexpected_message": unexpected_message,
     }
-    if unexpected_message:
-        form_state["unexpected_message"] = unexpected_message
     return form_state
 
 
 def _unexpected_check_in_reference() -> str:
-    return f"CHK-{secrets.token_hex(4).upper()}"
+    return f"CHKIN-{secrets.token_hex(4).upper()}"
 
 
 def _map_check_in_error(message: str) -> dict[str, str]:
     lower = message.lower()
+    if "primary guest first name" in lower:
+        return _check_in_issue("Primary guest first name is required before check-in can be completed.", field="first_name")
+    if "primary guest last name" in lower:
+        return _check_in_issue("Primary guest last name is required before check-in can be completed.", field="last_name")
+    if "primary guest phone number" in lower:
+        return _check_in_issue("Primary guest phone number is required before check-in can be completed.", field="phone")
+    if "payment collected now must be a valid amount" in lower or ("invalid" in lower and "payment amount" in lower):
+        return _check_in_issue("Payment collected now must be a valid amount in THB.", field="collect_payment_amount")
+    if "payment collected now cannot be negative" in lower or ("cannot be negative" in lower and "payment" in lower):
+        return _check_in_issue("Payment collected now cannot be negative.", field="collect_payment_amount")
+    if "deposit is still outstanding" in lower:
+        return _check_in_issue("Deposit is still outstanding.", section="payment")
+    if "early check-in fee" in lower and "decision is required" in lower:
+        return _check_in_issue("Early check-in fee requires a decision.", section="fees")
     if "room" in lower and ("assign" in lower or "conflict" in lower or "occupied" in lower):
         return _check_in_issue(message, field="room_id")
     if "payment" in lower or "balance" in lower or "deposit" in lower:
@@ -339,15 +379,31 @@ def _map_check_in_error(message: str) -> dict[str, str]:
 
 # ── Board helper functions ────────────────────────────────────────────
 
+def _front_desk_board_start_date_from_request() -> date:
+    if request.args.get("start_date"):
+        return parse_request_date_arg("start_date", default=date.today())
+    if request.args.get("date"):
+        return parse_request_date_arg("date", default=date.today())
+    return date.today()
+
+
+def _front_desk_board_user_density() -> str:
+    user = current_user()
+    if not user:
+        return "compact"
+    preference = db.session.get(UserPreference, user.id)
+    density = (((preference.preferences if preference else {}) or {}).get("frontDeskBoard") or {}).get("density")
+    return density if density in BOARD_DENSITY_OPTIONS else "compact"
+
+
 def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
     return FrontDeskBoardFilters(
-        board_date=parse_request_date_arg("date", default=date.today()),
-        days=max(1, min(90, int(request.args.get("days", 14)))),
+        start_date=_front_desk_board_start_date_from_request(),
+        days=parse_request_int_arg("days", default=14, minimum=1, maximum=90),
         room_type_id=parse_request_uuid_arg("room_type_id") or "",
         q=(request.args.get("q") or "").strip(),
         show_unallocated=request.args.get("show_unallocated", "1") == "1",
-        show_closed=request.args.get("show_closed", "1") == "1",
-        density=request.args.get("density", "compact"),
+        show_closed=request.args.get("show_closed", "0") == "1",
     )
 
 
@@ -358,16 +414,21 @@ def front_desk_board_context(
 ) -> dict:
     from ..helpers import can as can_perm
     board = build_front_desk_board(filters)
-    back_url = url_for("front_desk.staff_front_desk_board", **front_desk_board_filter_query(filters))
-    hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.board_date)
+    board_current_url = front_desk_board_url(filters)
+    board_fragment_url = url_for("front_desk.staff_front_desk_board_fragment", **front_desk_board_filter_query(filters))
+    hydrate_front_desk_board_urls(board, back_url=board_current_url, board_date=filters.start_date)
     can_create = can_perm("reservation.create")
     can_edit = can_perm("reservation.edit")
     can_manage_closures = can_perm("operations.override")
     return {
         "board": board,
         "board_v2_enabled": front_desk_board_v2_enabled(),
+        "board_current_url": board_current_url,
+        "board_fragment_url": board_fragment_url,
+        "default_checkout_date": filters.start_date + timedelta(days=1),
         "filters": filters,
         "room_types": RoomType.query.order_by(RoomType.code.asc()).all(),
+        "user_density": _front_desk_board_user_density(),
         "can_create": can_create,
         "can_edit": can_edit,
         "can_manage_closures": can_manage_closures,
@@ -379,8 +440,8 @@ def front_desk_board_context(
 
 def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, str]:
     params: dict[str, str] = {}
-    if filters.board_date != date.today():
-        params["date"] = filters.board_date.isoformat()
+    if filters.start_date != date.today():
+        params["start_date"] = filters.start_date.isoformat()
     if filters.days != 14:
         params["days"] = str(filters.days)
     if filters.room_type_id:
@@ -399,56 +460,69 @@ def front_desk_board_url(filters: FrontDeskBoardFilters) -> str:
 
 
 def hydrate_front_desk_board_urls(board: dict, *, back_url: str, board_date: date) -> None:
-    for group in board.get("room_groups", []):
-        for room_row in group.get("rooms", []):
-            room_row["detail_url"] = ""
-            for block in room_row.get("blocks", []):
-                if block.get("type") == "reservation" and block.get("reservation_id"):
-                    block["detail_url"] = url_for(
+    for group in board.get("groups", []):
+        reassign_options = list(group.get("room_options", []))
+        for row in group.get("rows", []):
+            for block in row.get("blocks", []):
+                reservation_id = block.get("reservation_id") or block.get("reservationId")
+                source_type = block.get("sourceType") or block.get("source_type") or block.get("type")
+                if source_type == "reservation" and reservation_id:
+                    front_desk_url = url_for(
                         "front_desk.staff_front_desk_detail",
-                        reservation_id=block["reservation_id"],
+                        reservation_id=reservation_id,
                         back=back_url,
                         date=board_date.isoformat(),
                     )
-                    block["reservation_detail_url"] = url_for(
+                    reservation_detail_url = url_for(
                         "staff_reservations.staff_reservation_detail",
-                        reservation_id=block["reservation_id"],
+                        reservation_id=reservation_id,
                         back=back_url,
                     )
-                    block["cashier_url"] = url_for(
+                    cashier_url = url_for(
                         "cashier.staff_cashier_detail",
-                        reservation_id=block["reservation_id"],
+                        reservation_id=reservation_id,
                         back=back_url,
                     )
-    for block in board.get("unallocated_blocks", []):
-        if block.get("reservation_id"):
-            block["detail_url"] = url_for(
-                "front_desk.staff_front_desk_detail",
-                reservation_id=block["reservation_id"],
-                back=back_url,
-                date=board_date.isoformat(),
-            )
-            block["reservation_detail_url"] = url_for(
-                "staff_reservations.staff_reservation_detail",
-                reservation_id=block["reservation_id"],
-                back=back_url,
-            )
-            block["cashier_url"] = url_for(
-                "cashier.staff_cashier_detail",
-                reservation_id=block["reservation_id"],
-                back=back_url,
-            )
+                    block["detail_url"] = front_desk_url
+                    block["frontDeskUrl"] = front_desk_url
+                    block["reservation_detail_url"] = reservation_detail_url
+                    block["detailUrl"] = reservation_detail_url
+                    block["cashier_url"] = cashier_url
+                    block["cashierUrl"] = cashier_url
+                    block["reassignUrl"] = url_for(
+                        "front_desk.staff_front_desk_board_assign_room",
+                        reservation_id=reservation_id,
+                    )
+                    block["moveUrl"] = url_for(
+                        "front_desk.staff_front_desk_board_move_reservation",
+                        reservation_id=reservation_id,
+                    )
+                    block["resizeUrl"] = url_for(
+                        "front_desk.staff_front_desk_board_resize_reservation",
+                        reservation_id=reservation_id,
+                    )
+                    block["datesFormUrl"] = block["resizeUrl"]
+                    block["reassignOptions"] = reassign_options
+                override_id = block.get("override_id") or block.get("overrideId")
+                if override_id:
+                    block["editUrl"] = url_for(
+                        "front_desk.staff_front_desk_board_update_closure",
+                        override_id=override_id,
+                    )
+                    block["releaseUrl"] = url_for(
+                        "front_desk.staff_front_desk_board_release_closure",
+                        override_id=override_id,
+                    )
 
 
 def _front_desk_filters_payload(filters: FrontDeskBoardFilters) -> dict[str, str | bool]:
     return {
-        "board_date": filters.board_date.isoformat(),
+        "start_date": filters.start_date.isoformat(),
         "days": filters.days,
         "room_type_id": str(filters.room_type_id) if filters.room_type_id else "",
         "q": filters.q,
         "show_unallocated": filters.show_unallocated,
         "show_closed": filters.show_closed,
-        "density": filters.density,
     }
 
 
@@ -523,6 +597,7 @@ def record_board_mutation_rejection(
     reason: str,
 ) -> None:
     try:
+        request_payload = {k: str(v) for k, v in (payload or {}).items()}
         write_audit_log(
             actor_user_id=actor_user_id,
             entity_table=entity_table,
@@ -530,11 +605,24 @@ def record_board_mutation_rejection(
             action=action,
             before_data=before_data,
             after_data={
-                "payload": {k: str(v) for k, v in (payload or {}).items()},
-                "reason": reason,
+                "request": request_payload,
+                "failure_reason": reason,
             },
         )
+        write_activity_log(
+            actor_user_id=actor_user_id,
+            event_type="front_desk.board_mutation_rejected",
+            entity_table=entity_table,
+            entity_id=entity_id,
+            metadata={
+                "action": action,
+                "failure_reason": reason,
+                "request": request_payload,
+            },
+        )
+        db.session.commit()
     except Exception:  # noqa: BLE001
+        db.session.rollback()
         logger.warning("Failed to write board mutation rejection audit log", exc_info=True)
 
 
@@ -825,6 +913,7 @@ def staff_front_desk_board_move_reservation(reservation_id):
         message = "Room assignment updated."
         return jsonify({"ok": True, "message": message})
     except BoardMutationRequestError as exc:
+        db.session.rollback()
         outcome = "invalid_request"
         status_code = 400
         message = str(exc)
@@ -839,6 +928,7 @@ def staff_front_desk_board_move_reservation(reservation_id):
         )
         return jsonify({"ok": False, "error": message}), 400
     except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
         outcome = "rejected"
         status_code = 409
         message = public_error_message(exc)
@@ -918,6 +1008,7 @@ def staff_front_desk_board_resize_reservation(reservation_id):
             }
         )
     except BoardMutationRequestError as exc:
+        db.session.rollback()
         outcome = "invalid_request"
         status_code = 400
         message = str(exc)
@@ -932,6 +1023,7 @@ def staff_front_desk_board_resize_reservation(reservation_id):
         )
         return jsonify({"ok": False, "error": message}), 400
     except Exception as exc:  # noqa: BLE001
+        db.session.rollback()
         outcome = "rejected"
         status_code = 409
         message = public_error_message(exc)
@@ -1119,18 +1211,19 @@ def staff_front_desk_board_preferences():
     payload = request.get_json() or {}
     density = payload.get("density", "compact")
 
-    if density not in ["comfortable", "compact", "spacious", "ultra"]:
+    if density not in BOARD_DENSITY_OPTIONS:
         abort(400, "Invalid density value")
 
-    pref = UserPreference.query.filter_by(user_id=user.id).first()
+    pref = db.session.get(UserPreference, user.id)
     if not pref:
         pref = UserPreference(user_id=user.id, preferences={})
         db.session.add(pref)
 
-    if "frontDeskBoard" not in pref.preferences:
-        pref.preferences["frontDeskBoard"] = {}
-
-    pref.preferences["frontDeskBoard"]["density"] = density
+    preferences = dict(pref.preferences or {})
+    board_preferences = dict(preferences.get("frontDeskBoard") or {})
+    board_preferences["density"] = density
+    preferences["frontDeskBoard"] = board_preferences
+    pref.preferences = preferences
     db.session.commit()
 
     write_activity_log(
@@ -1357,7 +1450,7 @@ def staff_front_desk_walk_in():
 
 @front_desk_bp.route("/staff/front-desk/<uuid:reservation_id>")
 def staff_front_desk_detail(reservation_id):
-    require_permission("reservation.view")
+    user = require_permission("reservation.view")
     business_date = parse_request_date_arg("date", default=date.today())
     detail = get_front_desk_detail(reservation_id, business_date=business_date)
     checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
@@ -1371,7 +1464,10 @@ def staff_front_desk_detail(reservation_id):
         can_folio=can("folio.view"),
         can_charge=can("folio.charge_add"),
         can_collect_payment=can("payment.create"),
-        check_in_form=_build_check_in_form_state(detail),
+        check_in_form=_build_check_in_form_state(
+            detail,
+            allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
+        ),
         checkout_form=_build_checkout_form_state(checkout_prep) if checkout_prep else None,
         comm_messages=comm_messages,
     )
@@ -1406,12 +1502,14 @@ def staff_front_desk_check_in(reservation_id):
     def render_check_in_error(
         *,
         errors: list[dict[str, str]] | None = None,
+        blockers: list[dict[str, str]] | None = None,
         unexpected_message: str | None = None,
         status_code: int = 400,
         values: dict[str, str] | None = None,
     ):
         detail = get_front_desk_detail(reservation_id, business_date=business_date)
         checkout_prep = prepare_checkout(reservation_id) if detail["reservation"].current_status == "checked_in" else None
+        comm_messages = reservation_messages(str(reservation_id)) if can("messaging.view") else []
         return (
             render_template(
                 "front_desk_detail.html",
@@ -1426,10 +1524,12 @@ def staff_front_desk_check_in(reservation_id):
                     detail,
                     values=values,
                     errors=errors,
+                    blockers=blockers,
                     allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
                     unexpected_message=unexpected_message,
                 ),
                 checkout_form=_build_checkout_form_state(checkout_prep) if checkout_prep else None,
+                comm_messages=comm_messages,
             ),
             status_code,
         )
@@ -1437,7 +1537,18 @@ def staff_front_desk_check_in(reservation_id):
     values, parsed, parse_errors = _parse_check_in_form_values(request.form)
     collect_payment_amount = parsed["collect_payment_amount"] if isinstance(parsed["collect_payment_amount"], Decimal) else Decimal("0.00")
     if parse_errors:
-        return render_check_in_error(errors=parse_errors, values=values)
+        detail = get_front_desk_detail(reservation_id, business_date=business_date)
+        validation_errors = list(parse_errors)
+        seen_messages = {issue["message"] for issue in validation_errors}
+        for blocker in _check_in_blockers(
+            detail,
+            values,
+            allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
+        ):
+            if blocker["message"] not in seen_messages:
+                validation_errors.append(blocker)
+                seen_messages.add(blocker["message"])
+        return render_check_in_error(errors=validation_errors, values=values)
     if collect_payment_amount > Decimal("0.00") and not user.has_permission("payment.create"):
         abort(403)
     if request.form.get("apply_early_fee") == "on" and not user.has_permission("folio.charge_add"):
@@ -1453,9 +1564,11 @@ def staff_front_desk_check_in(reservation_id):
         allow_override=any(role.code in {"admin", "manager"} for role in user.roles),
     )
     if blockers:
-        return render_check_in_error(errors=blockers, values=values)
+        return render_check_in_error(blockers=blockers, values=values)
     try:
-        complete_check_in(
+        from .. import app as pms_app
+
+        pms_app.complete_check_in(
             reservation_id,
             CheckInPayload(
                 room_id=parsed["room_uuid"],
