@@ -32,6 +32,7 @@
   <script type="application/ld+json">{{ hotel_structured_data | tojson }}</script>
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <link rel="manifest" href="{{ url_for('web_manifest') }}">
   <style>
     :root {
       --accent: {{ hotel_accent_color }};

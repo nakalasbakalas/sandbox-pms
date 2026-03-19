@@ -78,6 +78,10 @@ def report_metric_definitions() -> dict[str, str]:
             "Posted folio activity by service date in the selected reporting range. This is posted room and operational charge "
             "revenue, not booked revenue or cash collected."
         ),
+        "revenue_management": (
+            "Revenue management trends combine posted room revenue with on-books room-night forecasts from the inventory ledger. "
+            "ADR and RevPAR use gross room revenue for the selected dates."
+        ),
         "room_type_performance": (
             "Reservation count is based on confirmed or stayed reservations overlapping the selected reporting range. "
             "Sold nights come from consuming inventory ledger rows for confirmed or in-house stays, and room revenue "
@@ -131,6 +135,11 @@ def build_manager_dashboard(
     if include_financials:
         dashboard["folio_balances"] = folio_balances_outstanding_report(date_from, date_to)
         dashboard["revenue_summary"] = revenue_summary_report(date_from, date_to)
+        dashboard["revenue_management"] = revenue_management_dashboard_report(
+            business_date=business_date,
+            date_from=date_from,
+            date_to=date_to,
+        )
     if include_payments:
         dashboard["deposit_pipeline"] = deposit_requested_vs_paid_report(date_from, date_to)
     if include_audit:
@@ -596,6 +605,103 @@ def revenue_summary_report(date_from: date, date_to: date) -> dict:
         "refund_total": refund_total.quantize(Decimal("0.01")),
         "net_revenue_total": net_revenue,
         "posted_line_count": len(lines),
+    }
+
+
+def revenue_management_dashboard_report(
+    *,
+    business_date: date,
+    date_from: date,
+    date_to: date,
+) -> dict:
+    occupancy_rows = _occupancy_rows(date_from, date_to)
+    actual_room_revenue = {
+        service_date: money(amount or Decimal("0.00"))
+        for service_date, amount in db.session.query(
+            FolioCharge.service_date,
+            sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
+        )
+        .filter(
+            FolioCharge.voided_at.is_(None),
+            FolioCharge.charge_type == "room",
+            FolioCharge.service_date >= date_from,
+            FolioCharge.service_date <= date_to,
+        )
+        .group_by(FolioCharge.service_date)
+        .all()
+    }
+    forecast_room_revenue = {
+        service_date: money(amount or Decimal("0.00"))
+        for service_date, amount in db.session.query(
+            InventoryDay.business_date,
+            sa.func.coalesce(sa.func.sum(InventoryDay.nightly_rate), 0),
+        )
+        .join(Room, Room.id == InventoryDay.room_id)
+        .join(Reservation, Reservation.id == InventoryDay.reservation_id)
+        .filter(
+            InventoryDay.business_date >= date_from,
+            InventoryDay.business_date <= date_to,
+            InventoryDay.nightly_rate.is_not(None),
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+            Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
+            InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
+        )
+        .group_by(InventoryDay.business_date)
+        .all()
+    }
+
+    rows: list[dict] = []
+    total_saleable = 0
+    total_occupied = 0
+    total_actual = Decimal("0.00")
+    total_projected = Decimal("0.00")
+    for row in occupancy_rows:
+        service_date = row["date"]
+        actual = actual_room_revenue.get(service_date, Decimal("0.00"))
+        forecast = forecast_room_revenue.get(service_date, Decimal("0.00"))
+        if service_date < business_date:
+            projected = actual
+        elif actual > Decimal("0.00"):
+            projected = actual
+        else:
+            projected = forecast
+        occupied_rooms = int(row["occupied_rooms"] or 0)
+        saleable_rooms = int(row["saleable_rooms"] or 0)
+        adr = money(projected / Decimal(occupied_rooms)) if occupied_rooms else Decimal("0.00")
+        revpar = money(projected / Decimal(saleable_rooms)) if saleable_rooms else Decimal("0.00")
+        rows.append(
+            {
+                "date": service_date,
+                "saleable_rooms": saleable_rooms,
+                "occupied_rooms": occupied_rooms,
+                "occupancy_percentage": row["occupancy_percentage"],
+                "actual_room_revenue": actual,
+                "forecast_room_revenue": forecast if service_date >= business_date else Decimal("0.00"),
+                "projected_room_revenue": projected,
+                "adr": adr,
+                "revpar": revpar,
+                "pace_label": "actual" if service_date < business_date else ("forecast" if actual == Decimal("0.00") else "posted"),
+            }
+        )
+        total_saleable += saleable_rooms
+        total_occupied += occupied_rooms
+        total_actual += actual
+        total_projected += projected
+
+    peak_adr = max(rows, key=lambda item: item["adr"], default=None)
+    peak_revpar = max(rows, key=lambda item: item["revpar"], default=None)
+    return {
+        "rows": rows,
+        "total_actual_room_revenue": money(total_actual),
+        "total_projected_room_revenue": money(total_projected),
+        "forecast_room_revenue": money(total_projected - total_actual),
+        "average_adr": money(total_projected / Decimal(total_occupied)) if total_occupied else Decimal("0.00"),
+        "average_revpar": money(total_projected / Decimal(total_saleable)) if total_saleable else Decimal("0.00"),
+        "occupied_room_nights": total_occupied,
+        "saleable_room_nights": total_saleable,
+        "peak_adr": peak_adr,
+        "peak_revpar": peak_revpar,
     }
 
 

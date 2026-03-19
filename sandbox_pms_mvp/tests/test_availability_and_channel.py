@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -9,6 +10,7 @@ import pytest
 
 from pms.extensions import db
 from pms.models import (
+    AppSetting,
     InventoryDay,
     Reservation,
     Room,
@@ -27,7 +29,9 @@ from pms.services.channel_service import (
     InboundReservation,
     MockChannelProvider,
     OutboundInventoryUpdate,
+    build_outbound_inventory_updates,
     get_provider,
+    provider_push_context,
 )
 from pms.services.reservation_service import (
     ReservationCreatePayload,
@@ -332,3 +336,83 @@ class TestChannelService:
         with app.app_context():
             provider = get_provider("ical")
             assert provider.test_connection() is True
+
+    def test_booking_com_provider_fails_clearly_without_endpoint(self, app_factory):
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("booking_com")
+            result = provider.push_inventory([])
+            assert result.success is False
+            assert "endpoint is not configured" in result.errors[0]
+
+    def test_build_outbound_inventory_updates_and_provider_context(self, app_factory, monkeypatch):
+        app = app_factory(seed=True)
+        captured: dict[str, object] = {}
+
+        class _FakeResponse:
+            status = 202
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return b'{"accepted": true}'
+
+        def fake_urlopen(request, timeout):  # noqa: ANN001
+            captured["url"] = request.full_url
+            captured["auth"] = request.headers.get("Authorization")
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return _FakeResponse()
+
+        with app.app_context():
+            db.session.add_all(
+                [
+                    AppSetting(
+                        key="channel_push.booking_com.endpoint",
+                        value_json={"value": "https://channels.example.test/booking"},
+                        value_type="string",
+                    ),
+                    AppSetting(
+                        key="channel_push.booking_com.api_token",
+                        value_json={"value": "booking-token"},
+                        value_type="string",
+                    ),
+                    AppSetting(
+                        key="channel_push.booking_com.account_id",
+                        value_json={"value": "hotel-123"},
+                        value_type="string",
+                    ),
+                ]
+            )
+            db.session.commit()
+
+            room_type = RoomType.query.filter_by(code="TWN").one()
+            updates = build_outbound_inventory_updates(
+                date_from=date.today(),
+                date_to=date.today() + timedelta(days=1),
+                room_type_id=room_type.id,
+            )
+            assert len(updates) == 2
+            assert all(update.room_type_code == "TWN" for update in updates)
+            assert all(update.date_to == update.date_from + timedelta(days=1) for update in updates)
+
+            context = provider_push_context()
+            assert context["booking_com"]["configured"] is True
+            assert context["booking_com"]["has_api_token"] is True
+            assert context["booking_com"]["account_id"] == "hotel-123"
+
+            monkeypatch.setattr("pms.services.channel_service.urllib.request.urlopen", fake_urlopen)
+            provider = get_provider("booking_com")
+            result = provider.push_inventory(updates)
+
+        assert result.success is True
+        assert result.records_processed == 2
+        assert captured["url"] == "https://channels.example.test/booking"
+        assert captured["auth"] == "Bearer booking-token"
+        assert captured["body"]["provider"] == "booking_com"
+        assert captured["body"]["account_id"] == "hotel-123"
+        assert len(captured["body"]["updates"]) == 2

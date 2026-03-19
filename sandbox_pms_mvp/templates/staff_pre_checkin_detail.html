@@ -61,6 +61,96 @@
     {% endif %}
   </div>
 
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+      <div>
+        <h2 style="font-size:1.1rem;margin:0;">🪪 Scanner Capture</h2>
+        <p class="muted" style="margin:0.35rem 0 0;">Paste MRZ lines, structured scanner text, or JSON from the passport / ID device.</p>
+      </div>
+      <span class="status {{ 'confirmed' if scanner_integration_enabled else 'pending' }}">
+        {{ 'Machine endpoint ready' if scanner_integration_enabled else 'Machine token not configured' }}
+      </span>
+    </div>
+    {% if can('reservation.edit') %}
+    <form method="POST" action="{{ url_for('staff_pre_checkin_scanner_capture', reservation_id=reservation.id) }}" class="stack-form">
+      {{ csrf_input() }}
+      <div class="grid four">
+        <label><span>Document type</span><select name="document_type"><option value="passport">Passport</option><option value="national_id">National ID</option><option value="driving_license">Driving licence</option><option value="other">Other</option></select></label>
+        <label><span>Scanner name</span><input type="text" name="scanner_name" placeholder="Desk scanner"></label>
+        <label><span>Filename</span><input type="text" name="filename" placeholder="passport-scan.txt"></label>
+        <label><span>Content type</span><input type="text" name="content_type" value="text/plain"></label>
+      </div>
+      <label><span>Raw scanner payload</span><textarea name="raw_text" rows="6" placeholder="Paste passport MRZ, key:value text, or JSON payload here" required></textarea></label>
+      <button type="submit" class="btn btn-primary btn-sm">Save scanner capture</button>
+    </form>
+    {% else %}
+    <p class="muted">Reservation edit permission is required to save scanner captures.</p>
+    {% endif %}
+  </div>
+
+  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
+    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">📄 Documents ({{ documents|length }})</h2>
+    {% if documents %}
+    {% for doc in documents %}
+    <div style="padding:0.9rem 0;border-bottom:1px solid #eee;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;flex-wrap:wrap;">
+        <div>
+          <strong>{{ doc.document_type|replace('_',' ')|title }}</strong>
+          <span class="muted" style="font-size:0.85rem;">— {{ doc.original_filename }}</span>
+          <br><span class="muted" style="font-size:0.8rem;">Uploaded {{ doc.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+          <span style="padding:0.25rem 0.5rem;border-radius:4px;font-size:0.8rem;
+            {% if doc.verification_status == 'verified' %}background:#d4edda;color:#155724;
+            {% elif doc.verification_status == 'rejected' %}background:#f8d7da;color:#721c24;
+            {% else %}background:#fff3cd;color:#856404;{% endif %}">
+            {{ doc.verification_status|title }}
+          </span>
+          <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
+          {% if doc.verification_status == 'pending' %}
+          <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+            {{ csrf_input() }}
+            <input type="hidden" name="verification_status" value="verified" />
+            <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
+          </form>
+          <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+            {{ csrf_input() }}
+            <input type="hidden" name="verification_status" value="rejected" />
+            <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>
+          </form>
+          {% endif %}
+          {% if can('reservation.edit') and doc.ocr_extracted_data and doc.ocr_extracted_data.status == 'parsed' %}
+          <form method="POST" action="{{ url_for('staff_document_apply_ocr', doc_id=doc.id) }}" style="display:inline;">
+            {{ csrf_input() }}
+            <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">Apply to guest</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% if doc.ocr_extracted_data %}
+      <div style="margin-top:0.75rem;padding:0.75rem;border-radius:6px;background:#f8f9fa;font-size:0.85rem;">
+        <strong style="display:block;margin-bottom:0.4rem;">Parsed fields</strong>
+        {% if doc.ocr_extracted_data.status == 'parsed' %}
+        <div class="grid two" style="gap:0.5rem 1rem;">
+          <div><span class="muted">Name</span><br>{{ doc.ocr_extracted_data.full_name or '—' }}</div>
+          <div><span class="muted">Document number</span><br>{{ doc.ocr_extracted_data.document_number or '—' }}</div>
+          <div><span class="muted">Nationality</span><br>{{ doc.ocr_extracted_data.nationality or '—' }}</div>
+          <div><span class="muted">Date of birth</span><br>{{ doc.ocr_extracted_data.date_of_birth or '—' }}</div>
+          <div><span class="muted">Expiry</span><br>{{ doc.ocr_extracted_data.expiry_date or '—' }}</div>
+          <div><span class="muted">Source</span><br>{{ doc.ocr_extracted_data.source_format or doc.ocr_extracted_data.source or 'structured_text' }}</div>
+        </div>
+        {% else %}
+        <p class="muted" style="margin:0;">{{ doc.ocr_extracted_data.reason or 'No parsed fields available.' }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No documents uploaded yet.</p>
+    {% endif %}
+  </div>
+
   {% if pc %}
   {# ── Guest Submitted Information ── #}
   <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
@@ -124,45 +214,6 @@
     {% endif %}
   </div>
   {% endif %}
-
-  {# ── Documents ── #}
-  <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">
-    <h2 style="font-size:1.1rem;margin-bottom:0.75rem;">📄 Documents ({{ documents|length }})</h2>
-    {% if documents %}
-    {% for doc in documents %}
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 0;border-bottom:1px solid #eee;">
-      <div>
-        <strong>{{ doc.document_type|replace('_',' ')|title }}</strong>
-        <span class="muted" style="font-size:0.85rem;">— {{ doc.original_filename }}</span>
-        <br><span class="muted" style="font-size:0.8rem;">Uploaded {{ doc.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:0.5rem;">
-        <span style="padding:0.25rem 0.5rem;border-radius:4px;font-size:0.8rem;
-          {% if doc.verification_status == 'verified' %}background:#d4edda;color:#155724;
-          {% elif doc.verification_status == 'rejected' %}background:#f8d7da;color:#721c24;
-          {% else %}background:#fff3cd;color:#856404;{% endif %}">
-          {{ doc.verification_status|title }}
-        </span>
-        <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
-        {% if doc.verification_status == 'pending' %}
-        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
-          {{ csrf_input() }}
-          <input type="hidden" name="verification_status" value="verified" />
-          <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
-        </form>
-        <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
-          {{ csrf_input() }}
-          <input type="hidden" name="verification_status" value="rejected" />
-          <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>
-        </form>
-        {% endif %}
-      </div>
-    </div>
-    {% endfor %}
-    {% else %}
-    <p class="muted">No documents uploaded yet.</p>
-    {% endif %}
-  </div>
 
   {# ── Staff Actions ── #}
   <div class="card" style="padding:1.25rem;margin-bottom:1.5rem;">

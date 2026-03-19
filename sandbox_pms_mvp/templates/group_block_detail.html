@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}{{ block.group_block_code }} | Group Block | {{ hotel_name }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Group Room Block</p>
+      <h1>{{ block.group_name }}</h1>
+      <p>{{ block.group_block_code }} · {{ block.room_type_code or 'Room type pending' }} · {{ block.check_in_date }} to {{ block.check_out_date }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back</a>
+      <span class="status {{ block.status }}">{{ block.status.replace('_', ' ') }}</span>
+      {% if can('reservation.edit') and block.active_count %}
+      <form method="post" action="{{ url_for('staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
+        {{ csrf_input() }}
+        <button class="button" type="submit">Release active holds</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <section class="grid four metric-grid">
+    <article class="metric-card"><small>Active holds</small><strong>{{ block.active_count }}</strong></article>
+    <article class="metric-card"><small>Released</small><strong>{{ block.released_count }}</strong></article>
+    <article class="metric-card"><small>Converted</small><strong>{{ block.converted_count }}</strong></article>
+    <article class="metric-card"><small>Projected gross</small><strong>{{ currency }} {{ block.total_grand_total|money }}</strong></article>
+  </section>
+  <div class="actions">
+    {% if block.contact_name %}<span class="pill subtle">Contact {{ block.contact_name }}</span>{% endif %}
+    {% if block.contact_email %}<span class="pill subtle">{{ block.contact_email }}</span>{% endif %}
+    {% if block.notes %}<span class="pill subtle">{{ block.notes }}</span>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Held rooms</h2>
+      <p>Each line is backed by a real reservation hold and inventory lock.</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Hold code</th>
+          <th>Room</th>
+          <th>Status</th>
+          <th>Expires</th>
+          <th>Projected gross</th>
+          <th>Converted reservation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in block.holds %}
+        <tr>
+          <td>{{ item.hold_code }}</td>
+          <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
+          <td><span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span></td>
+          <td>{% if item.expires_at %}{{ item.expires_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+          <td>{{ currency }} {{ item.quoted_grand_total|money }}</td>
+          <td>
+            {% if item.converted_reservation_id %}
+            <a href="{{ url_for('staff_reservation_detail', reservation_id=item.converted_reservation_id, back=url_for('staff_group_block_detail', group_block_code=block.group_block_code)) }}">{{ item.converted_reservation_code or item.converted_reservation_id }}</a>
+            {% else %}
+            —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
