@@ -92,6 +92,32 @@
     </form>
     {% endif %}
 
+    {% if can_charge %}
+    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_pos_charge', reservation_id=detail.reservation.id) }}">
+      {{ csrf_input() }}
+      <input type="hidden" name="back_url" value="{{ back_url }}">
+      <div class="split-row">
+        <div>
+          <h3>POS integration charge</h3>
+          <p>Post duplicate-safe outlet charges from F&B, spa, minibar, or another connected POS check.</p>
+        </div>
+        <button class="button" type="submit">Post POS charge</button>
+      </div>
+      <div class="grid four">
+        <label><span>Outlet name</span><input type="text" name="outlet_name" placeholder="Lobby Bar" required></label>
+        <label><span>Outlet type</span><select name="outlet_type"><option value="fnb">F&B</option><option value="spa">Spa</option><option value="minibar">Minibar</option><option value="laundry">Laundry</option><option value="telephone">Telephone</option><option value="other">Other</option></select></label>
+        <label><span>System</span><input type="text" name="system_name" value="pos"></label>
+        <label><span>External check ID</span><input type="text" name="external_check_id" placeholder="CHK-10452" required></label>
+      </div>
+      <div class="grid three">
+        <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
+        <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
+        <label><span>Item summary</span><input type="text" name="item_summary" maxlength="255" placeholder="Dinner charge or spa treatment"></label>
+      </div>
+      <label><span>Note</span><input type="text" name="note" maxlength="255" placeholder="Optional staff note or outlet reference"></label>
+    </form>
+    {% endif %}
+
     {% if can_payment %}
     <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_payment', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}

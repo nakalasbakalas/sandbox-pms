@@ -21,6 +21,7 @@ from pms.models import (
     InventoryDay,
     PaymentRequest,
     Reservation,
+    ReservationHold,
     ReservationNote,
     Role,
     Room,
@@ -183,6 +184,90 @@ def test_reservation_list_loads_correctly(app_factory):
     response = client.get("/staff/reservations")
     assert response.status_code == 200
     assert "Alice Walker" in response.get_data(as_text=True)
+
+
+def test_group_room_block_routes_hold_and_release_inventory(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        room_type = RoomType.query.filter_by(code="TWN").one()
+        user = make_staff_user("manager", "group-blocks@example.com")
+        check_in_date = date.today() + timedelta(days=7)
+        check_out_date = check_in_date + timedelta(days=2)
+    login_as(client, user)
+
+    create_response = post_form(
+        client,
+        "/staff/group-blocks",
+        data={
+            "group_name": "Wedding Buyout",
+            "room_type_id": str(room_type.id),
+            "check_in_date": check_in_date.isoformat(),
+            "check_out_date": check_out_date.isoformat(),
+            "room_count": "2",
+            "adults": "2",
+            "children": "0",
+            "extra_guests": "0",
+            "contact_name": "Mae Planner",
+            "contact_email": "planner@example.com",
+        },
+        follow_redirects=True,
+    )
+    assert create_response.status_code == 200
+    assert "Wedding Buyout" in create_response.get_data(as_text=True)
+
+    with app.app_context():
+        holds = [
+            hold
+            for hold in ReservationHold.query.order_by(ReservationHold.created_at.asc()).all()
+            if (hold.source_metadata_json or {}).get("group_name") == "Wedding Buyout"
+        ]
+        assert len(holds) == 2
+        assert all(hold.status == "active" for hold in holds)
+        group_block_code = (holds[0].source_metadata_json or {})["group_block_code"]
+        room_ids = [hold.assigned_room_id for hold in holds if hold.assigned_room_id]
+        held_rows = (
+            InventoryDay.query.filter(
+                InventoryDay.room_id.in_(room_ids),
+                InventoryDay.business_date >= check_in_date,
+                InventoryDay.business_date < check_out_date,
+            )
+            .order_by(InventoryDay.business_date.asc())
+            .all()
+        )
+        assert len(held_rows) == 4
+        assert all(row.availability_status == "held" for row in held_rows)
+        assert all(row.hold_id in {hold.id for hold in holds} for row in held_rows)
+
+    release_response = post_form(
+        client,
+        f"/staff/group-blocks/{group_block_code}/release",
+        data={},
+        follow_redirects=True,
+    )
+    assert release_response.status_code == 200
+    assert "Released 2 room block(s)" in release_response.get_data(as_text=True)
+
+    with app.app_context():
+        released_holds = [
+            hold
+            for hold in ReservationHold.query.order_by(ReservationHold.created_at.asc()).all()
+            if (hold.source_metadata_json or {}).get("group_block_code") == group_block_code
+        ]
+        assert len(released_holds) == 2
+        assert all(hold.status == "released" for hold in released_holds)
+        released_rows = (
+            InventoryDay.query.filter(
+                InventoryDay.room_id.in_([hold.assigned_room_id for hold in released_holds if hold.assigned_room_id]),
+                InventoryDay.business_date >= check_in_date,
+                InventoryDay.business_date < check_out_date,
+            )
+            .order_by(InventoryDay.business_date.asc())
+            .all()
+        )
+        assert len(released_rows) == 4
+        assert all(row.availability_status == "available" for row in released_rows)
+        assert all(row.hold_id is None for row in released_rows)
 
 
 def test_staff_operational_routes_render_for_authorized_user(app_factory):

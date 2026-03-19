@@ -32,9 +32,12 @@ from pms.models import (
 from pms.services.pre_checkin_service import (
     DocumentVerifyPayload,
     PreCheckInSavePayload,
+    ScannerCapturePayload,
+    apply_document_ocr_to_guest,
     generate_pre_checkin,
     get_documents_for_reservation,
     get_pre_checkin_for_reservation,
+    ingest_scanner_capture,
     load_pre_checkin_by_token,
     mark_opened,
     mark_rejected,
@@ -374,6 +377,54 @@ class TestDocumentUpload:
             file = self._make_file(content=big_content)
             with pytest.raises(ValueError, match="exceeds maximum"):
                 upload_document(pc, file, "passport")
+
+
+class TestScannerCapture:
+    """Test structured scanner capture parsing and guest write-back."""
+
+    def test_scanner_capture_parses_and_applies_guest_fields(self, seeded_app):
+        with seeded_app.app_context():
+            from pms.extensions import db
+
+            res = _create_reservation(db.session)
+            guest = db.session.get(Guest, res.primary_guest_id)
+            guest.first_name = "Original"
+            guest.last_name = "Guest"
+            guest.full_name = "Original Guest"
+            db.session.commit()
+
+            doc = ingest_scanner_capture(
+                res.id,
+                ScannerCapturePayload(
+                    document_type="passport",
+                    raw_text=(
+                        "first_name: Maria\n"
+                        "last_name: Lopez\n"
+                        "document_number: AA1234567\n"
+                        "nationality: ESP\n"
+                        "date_of_birth: 1990-02-03\n"
+                    ),
+                    scanner_name="Front desk scanner",
+                    source="unit_test",
+                ),
+                actor_user_id=None,
+            )
+            db.session.commit()
+
+            assert doc.ocr_extracted_data["status"] == "parsed"
+            assert doc.ocr_extracted_data["document_number"] == "AA1234567"
+            assert doc.ocr_extracted_data["scanner_name"] == "Front desk scanner"
+
+            apply_document_ocr_to_guest(doc.id, actor_user_id=uuid.uuid4())
+            db.session.commit()
+
+            refreshed_guest = db.session.get(Guest, res.primary_guest_id)
+            assert refreshed_guest.first_name == "Maria"
+            assert refreshed_guest.last_name == "Lopez"
+            assert refreshed_guest.id_document_number == "AA1234567"
+            assert refreshed_guest.id_document_type == "passport"
+            assert refreshed_guest.nationality == "ESP"
+            assert refreshed_guest.date_of_birth == date(1990, 2, 3)
 
 
 class TestReadinessComputation:
@@ -756,6 +807,47 @@ class TestStaffRoutes:
         resp = client.get(f"/staff/reservations/{res_id}/pre-checkin")
         assert resp.status_code == 200
         assert b"Pre-Check-In" in resp.data
+
+    def test_scanner_integration_api_requires_token_and_returns_parsed_data(self, app_factory):
+        app = app_factory(seed=True, config={"SCANNER_SHARED_TOKEN": "scanner-secret"})
+        with app.app_context():
+            from pms.extensions import db
+
+            res = _create_reservation(db.session)
+            db.session.commit()
+            reservation_code = res.reservation_code
+
+        client = app.test_client()
+        forbidden = client.post(
+            "/api/integrations/scanner/capture",
+            json={
+                "reservation_code": reservation_code,
+                "document_type": "passport",
+                "raw_text": "first_name: Ana\nlast_name: Silva\ndocument_number: P998877\n",
+            },
+        )
+        assert forbidden.status_code == 403
+
+        response = client.post(
+            "/api/integrations/scanner/capture",
+            json={
+                "reservation_code": reservation_code,
+                "document_type": "passport",
+                "raw_text": (
+                    "first_name: Ana\n"
+                    "last_name: Silva\n"
+                    "document_number: P998877\n"
+                    "nationality: BRA\n"
+                ),
+                "scanner_name": "API scanner",
+            },
+            headers={"X-Integration-Token": "scanner-secret"},
+        )
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["ok"] is True
+        assert payload["ocr_extracted_data"]["status"] == "parsed"
+        assert payload["ocr_extracted_data"]["document_number"] == "P998877"
 
     def test_send_email_route(self, seeded_app):
         """Staff send-email route generates a link and records the email attempt."""

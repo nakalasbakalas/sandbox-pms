@@ -157,6 +157,47 @@
 <section class="card">
   <div class="card-head">
     <div>
+      <h2>OTA inventory push</h2>
+      <p>Send normalized availability and rate payloads to configured Booking.com or Expedia connectors.</p>
+    </div>
+  </div>
+  <div class="grid two gap-lg">
+    <div>
+      {% if can_manage_calendar %}
+      <form method="post" action="{{ url_for('provider_calendar_push') }}" class="stack-form">
+        {{ csrf_input() }}
+        <div class="grid two">
+          <label><span>Provider</span><select name="provider_key"><option value="booking_com">Booking.com</option><option value="expedia">Expedia</option></select></label>
+          <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }} · {{ room_type.name }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="grid two">
+          <label><span>Date from</span><input type="date" name="date_from" value="{{ push_defaults.date_from.isoformat() }}" required></label>
+          <label><span>Date to</span><input type="date" name="date_to" value="{{ push_defaults.date_to.isoformat() }}" required></label>
+        </div>
+        <button class="button" type="submit">Push OTA inventory</button>
+      </form>
+      {% endif %}
+    </div>
+    <div class="list-stack compact">
+      {% for provider_key, item in ota_push.items() %}
+      <div class="list-row no-link">
+        <div>
+          <strong>{{ provider_key.replace('_', ' ')|title }}</strong>
+          <p>{% if item.endpoint %}{{ item.endpoint }}{% else %}No endpoint configured{% endif %}</p>
+          <p class="small muted">{% if item.has_api_token %}API token configured{% else %}API token missing{% endif %}{% if item.account_id %} · Account {{ item.account_id }}{% endif %}</p>
+        </div>
+        <div class="right-stack">
+          <span class="status {{ 'confirmed' if item.configured else 'pending' }}">{{ 'configured' if item.configured else 'not ready' }}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
       <h2>Recent conflicts</h2>
       <p>External calendar events that overlap internal PMS reservations.</p>
     </div>

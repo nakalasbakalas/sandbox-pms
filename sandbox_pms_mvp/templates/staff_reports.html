@@ -614,6 +614,55 @@
   </section>
 {% endif %}
 
+{% if can_folio and dashboard.revenue_management %}
+  <section class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Revenue management</h2>
+        <p>{{ dashboard.definitions.revenue_management }}</p>
+      </div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Projected room revenue</small><strong>{{ dashboard.revenue_management.total_projected_room_revenue | money }}</strong></div>
+      <div><small>Actual room revenue</small><strong>{{ dashboard.revenue_management.total_actual_room_revenue | money }}</strong></div>
+      <div><small>Forecast remainder</small><strong>{{ dashboard.revenue_management.forecast_room_revenue | money }}</strong></div>
+      <div><small>Avg ADR</small><strong>{{ dashboard.revenue_management.average_adr | money }}</strong></div>
+      <div><small>Avg RevPAR</small><strong>{{ dashboard.revenue_management.average_revpar | money }}</strong></div>
+      <div><small>Occupied nights</small><strong>{{ dashboard.revenue_management.occupied_room_nights }}</strong></div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Pace</th>
+            <th>Occ %</th>
+            <th>Projected revenue</th>
+            <th>ADR</th>
+            <th>RevPAR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.revenue_management.rows %}
+            <tr>
+              <td>{{ item.date.strftime('%d %b %Y') }}</td>
+              <td><span class="status {{ 'confirmed' if item.pace_label == 'actual' else 'pending' }}">{{ item.pace_label }}</span></td>
+              <td>{{ item.occupancy_percentage }}%</td>
+              <td>{{ item.projected_room_revenue | money }}</td>
+              <td>{{ item.adr | money }}</td>
+              <td>{{ item.revpar | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="metric-strip" style="margin-top:1rem;">
+      <div><small>Peak ADR</small><strong>{% if dashboard.revenue_management.peak_adr %}{{ dashboard.revenue_management.peak_adr.adr | money }} on {{ dashboard.revenue_management.peak_adr.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
+      <div><small>Peak RevPAR</small><strong>{% if dashboard.revenue_management.peak_revpar %}{{ dashboard.revenue_management.peak_revpar.revpar | money }} on {{ dashboard.revenue_management.peak_revpar.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
+    </div>
+  </section>
+{% endif %}
+
 {% if can_payments %}
   <section class="card inset">
     <div class="card-head">

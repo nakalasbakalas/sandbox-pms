@@ -2,97 +2,18 @@
 {% block title %}Housekeeping | {{ hotel_name }}{% endblock %}
 {% block content %}
 
-{% macro render_housekeeping_mobile_section(section_title, section_board) %}
-<section class="hk-mobile-section card">
-  <div class="card-head hk-mobile-section-head">
-    <div>
-      <p class="eyebrow">{{ section_title }}</p>
-      <h2>{{ section_board.business_date.strftime('%A, %d %b') }}</h2>
-      <p>{{ section_board["items"] | length }} rooms in view</p>
-    </div>
-    <div class="hk-mobile-section-stats">
-      <span>{{ section_board.counts.dirty }} dirty</span>
-      <span>{{ section_board.counts.clean }} clean</span>
-      <span>{{ section_board.counts.inspected }} inspected</span>
-    </div>
-  </div>
-  <div class="hk-mobile-list">
-    {% for item in section_board["items"] %}
-    <article class="hk-mobile-card{% if item.priority in ['urgent', 'high'] %} attention{% endif %}{% if item.is_blocked %} blocked{% endif %}{% if item.maintenance_flag %} maintenance{% endif %}">
-      <div class="hk-mobile-card-head">
-        <div>
-          <a class="hk-mobile-room" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=section_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Room {{ item.room_number }}</a>
-          <p class="hk-mobile-ref">
-            {% if item.reservation_code %}
-            <span>{{ item.reservation_code }}</span>
-            {% if item.guest_name %}<span>{{ item.guest_name }}</span>{% endif %}
-            {% else %}
-            <span>No active stay</span>
-            {% endif %}
-          </p>
-        </div>
-        <span class="status {{ item.priority }}">{{ item.priority_label }}</span>
-      </div>
-      <div class="hk-mobile-badges">
-        <span class="status {{ item.housekeeping_status_code or 'pending' }}">{{ (item.housekeeping_status_code or 'pending').replace('_', ' ') }}</span>
-        {% if item.arrival_today %}<span class="status confirmed">Arrival</span>{% endif %}
-        {% if item.departure_today %}<span class="status checked_out">Departure</span>{% endif %}
-        {% if item.in_house and not item.arrival_today and not item.departure_today %}<span class="status checked_in">Stayover</span>{% endif %}
-        {% if item.is_blocked %}<span class="status canceled">Blocked</span>{% endif %}
-        {% if item.maintenance_flag %}<span class="status warning">Maintenance</span>{% endif %}
-        {% if item.note_count %}<span class="status pending">{{ item.note_count }} note{% if item.note_count != 1 %}s{% endif %}</span>{% endif %}
-      </div>
-      <div class="hk-mobile-meta">
-        <div><small>Type</small><strong>{{ item.room_type_code }} · Floor {{ item.floor_number }}</strong></div>
-        <div>
-          <small>State</small>
-          <strong>
-            {% if item.arrival_today %}Arrival due{% elif item.departure_today %}Departure turnover{% elif item.in_house %}In house{% else %}Vacant{% endif %}
-          </strong>
-        </div>
-        <div><small>Updated</small><strong>{{ item.last_updated_at.strftime('%H:%M') if item.last_updated_at else '—' }}</strong></div>
-      </div>
-      <p class="hk-mobile-reason">{{ item.priority_reason }}</p>
-      {% if item.blocked_reason %}<p class="hk-mobile-note">Blocked: {{ item.blocked_reason }}</p>{% endif %}
-      {% if item.maintenance_note %}<p class="hk-mobile-note">Maintenance: {{ item.maintenance_note }}</p>{% endif %}
-      <div class="hk-mobile-actions">
-        <a class="button secondary" href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=section_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
-        {% if can('housekeeping.status_change') %}
-        <form class="hk-mobile-quick-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_status', room_id=item.room_id) }}">
-          {{ csrf_input() }}
-          <input type="hidden" name="business_date" value="{{ section_board.business_date.isoformat() }}">
-          <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
-          <button class="button secondary" type="submit" name="status_code" value="dirty">Dirty</button>
-          <button class="button secondary" type="submit" name="status_code" value="clean">Clean</button>
-          <button class="button" type="submit" name="status_code" value="inspected">Inspect</button>
-        </form>
-        {% endif %}
-      </div>
-    </article>
-    {% else %}
-    <article class="hk-mobile-empty">No rooms matched the current filters for {{ section_title|lower }}.</article>
-    {% endfor %}
-  </div>
-</section>
-{% endmacro %}
-
-{# ── PAGE TITLE AND HEADER ─────────────────────── #}
 <h1 class="hk-page-title">Housekeeping</h1>
 <p style="margin:0 0 6px; font-size:11px; color:var(--pms-text-muted);">Daily housekeeping board — {{ board.business_date.strftime('%A, %d %B %Y') }}</p>
 
 <div class="hk-header-bar">
   <div class="hk-date-toggle">
     <a class="hk-date-btn {% if board.business_date == today_date %}active{% endif %}"
-       href="{{ today_url }}">Today</a>
+       href="{{ url_for('staff_housekeeping', view='mobile' if filters.mobile else None) }}">Today</a>
     <a class="hk-date-btn {% if board.business_date == tomorrow_board.business_date %}active{% endif %}"
-       href="{{ tomorrow_url }}">Tomorrow</a>
-  </div>
-  <div class="hk-view-toggle" aria-label="Housekeeping view mode">
-    <a class="hk-view-btn {% if not filters.mobile %}active{% endif %}" href="{{ desk_view_url }}">Desk</a>
-    <a class="hk-view-btn {% if filters.mobile %}active{% endif %}" href="{{ mobile_view_url }}">Mobile</a>
+       href="{{ url_for('staff_housekeeping', date=tomorrow_board.business_date.isoformat(), view='mobile' if filters.mobile else None) }}">Tomorrow</a>
   </div>
   <input type="date" name="nav_date" value="{{ board.business_date.isoformat() }}" style="height:28px; padding:0 6px; font-size:12px;"
-         onchange="const nextUrl = new URL(window.location.href); nextUrl.searchParams.set('date', this.value); window.location.href = nextUrl.toString();" aria-label="Go to date">
+         onchange="window.location.href='{{ url_for('staff_housekeeping') }}?date=' + this.value{% if filters.mobile %} + '&view=mobile'{% endif %}" aria-label="Go to date">
   <span class="hk-date-label">
     Last: {{ board.refreshed_at.strftime('%H:%M') if board.refreshed_at is defined and board.refreshed_at else '—' }}
   </span>
@@ -100,10 +21,11 @@
   <a class="button secondary tiny" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
   <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', date=board.business_date.isoformat()) }}">Front desk</a>
   {% endif %}
+  <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today) }}">Desktop</a>
+  <a class="button tiny" href="{{ url_for('staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today, view='mobile') }}">Mobile</a>
   <button class="hk-print-btn" onclick="window.print()">⌨️ Print</button>
 </div>
 
-{# ── DARK FILTER BLOCK (always visible) ──────── #}
 <div class="hk-filter-block">
   <form class="hk-filter-form" method="get">
     {% if filters.mobile %}<input type="hidden" name="view" value="mobile">{% endif %}
@@ -115,43 +37,131 @@
     <label><span>Departure</span><select name="departure_today"><option value="">Any</option><option value="1" {% if filters.departure_today == '1' %}selected{% endif %}>Yes</option></select></label>
     <div class="hk-filter-actions">
       <button class="button tiny" type="submit">Apply</button>
-      <a class="button tiny secondary" href="{% if filters.mobile %}{{ url_for('housekeeping.staff_housekeeping', date=board.business_date.isoformat(), view='mobile') }}{% else %}{{ url_for('housekeeping.staff_housekeeping', date=board.business_date.isoformat()) }}{% endif %}">Reset</a>
+      <a class="button tiny secondary" href="{{ url_for('staff_housekeeping', view='mobile' if filters.mobile else None) }}">Reset</a>
     </div>
   </form>
 </div>
 
-{# ── RESULTS BAR ────────────────────────────── #}
 <div class="hk-results-bar">
   <span><strong>{{ board["items"] | length }}</strong> rooms shown{% if filters.floor or filters.status or filters.priority or filters.room_type_id or filters.arrival_today or filters.departure_today %} — filtered{% endif %}</span>
+  {% if filters.mobile %}
+  <span class="small muted">Last opened housekeeping pages stay available offline after they load once.</span>
+  {% endif %}
 </div>
 
-{# ── TODAY TABLE SECTION ──────────────────────── #}
 {% if filters.mobile %}
-<div class="hk-mobile-summary">
-  <article class="hk-mobile-summary-card">
-    <small>Today</small>
-    <strong>{{ board["items"] | length }} rooms</strong>
-    <span>{{ board.counts.dirty }} dirty · {{ board.counts.clean }} clean · {{ board.counts.inspected }} inspected</span>
-  </article>
-  <article class="hk-mobile-summary-card">
-    <small>Tomorrow</small>
-    <strong>{{ tomorrow_board["items"] | length }} rooms</strong>
-    <span>{{ tomorrow_board.counts.dirty }} dirty · {{ tomorrow_board.counts.clean }} clean · {{ tomorrow_board.counts.inspected }} inspected</span>
-  </article>
-</div>
+<section class="card" style="margin-bottom:1rem;">
+  <div class="card-head">
+    <div>
+      <h2>Mobile board</h2>
+      <p>Phone-first cards with quick dirty / clean / inspected actions and offline caching for the last viewed board.</p>
+    </div>
+    <div class="actions">
+      <span class="pill subtle">{{ board.counts.dirty }} dirty</span>
+      <span class="pill subtle">{{ board.counts.clean }} clean</span>
+      <span class="pill subtle">{{ board.counts.inspected }} inspected</span>
+    </div>
+  </div>
+  <div class="grid two gap-lg">
+    {% for item in board["items"] %}
+    <article class="card inset" style="margin:0;">
+      <div class="card-head">
+        <div>
+          <h3 style="margin:0;">Room {{ item.room_number }}</h3>
+          <p style="margin:0.25rem 0 0;">{{ item.room_type_code }} · Floor {{ item.floor_number }}</p>
+        </div>
+        <span class="status {{ item.priority }}">{{ item.priority_label }}</span>
+      </div>
+      <div class="metric-strip">
+        <div><small>HK</small><strong>{{ (item.housekeeping_status_code or 'pending').replace('_', ' ') }}</strong></div>
+        <div><small>State</small><strong>{% if item.arrival_today %}Arrival{% elif item.departure_today %}Departure{% elif item.in_house %}Stay{% else %}Vacant{% endif %}</strong></div>
+      </div>
+      <p style="margin:0 0 0.5rem;">{% if item.reservation_code %}<strong>{{ item.reservation_code }}</strong> {{ item.guest_name or '' }}{% else %}<span class="muted">No guest assigned</span>{% endif %}</p>
+      {% if item.note_count or item.maintenance_flag or item.is_blocked %}
+      <p class="small muted" style="margin:0 0 0.75rem;">
+        {% if item.note_count %}Notes {{ item.note_count }}{% endif %}
+        {% if item.maintenance_flag %}{% if item.note_count %} · {% endif %}Maintenance flagged{% endif %}
+        {% if item.is_blocked %}{% if item.note_count or item.maintenance_flag %} · {% endif %}Room blocked{% endif %}
+      </p>
+      {% endif %}
+      <div class="actions">
+        <a class="button tiny secondary" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Detail</a>
+        {% if can('housekeeping.status_change') %}
+        <form class="hk-inline-form" method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=item.room_id) }}">
+          {{ csrf_input() }}
+          <input type="hidden" name="business_date" value="{{ board.business_date.isoformat() }}">
+          <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+          <button class="button tiny secondary" type="submit" name="status_code" value="dirty">Dirty</button>
+          <button class="button tiny secondary" type="submit" name="status_code" value="clean">Clean</button>
+          <button class="button tiny" type="submit" name="status_code" value="inspected">Insp</button>
+        </form>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <p class="empty-state">No rooms matched the current filters for today.</p>
+    {% endfor %}
+  </div>
+</section>
 
-{{ render_housekeeping_mobile_section('Today', board) }}
+<section class="card" style="margin-bottom:1rem;">
+  <div class="card-head">
+    <div>
+      <h2>{% if board.business_date == today_date %}Tomorrow{% else %}{{ tomorrow_board.business_date.strftime('%A') }}{% endif %}</h2>
+      <p>{{ tomorrow_board["items"] | length }} rooms in the next-turn board.</p>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for item in tomorrow_board["items"] %}
+    <div class="list-row no-link">
+      <div>
+        <strong>Room {{ item.room_number }}</strong>
+        <p>{{ item.room_type_code }} · {{ (item.housekeeping_status_code or 'pending').replace('_', ' ') }} · {{ item.priority_label }}</p>
+      </div>
+      <div class="right-stack">
+        <span class="small muted">{% if item.arrival_today %}Arrival{% elif item.departure_today %}Departure{% elif item.in_house %}Stay{% else %}Vacant{% endif %}</span>
+        <a class="button tiny secondary" href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=tomorrow_board.business_date.isoformat(), back=request.full_path.rstrip('?')) }}">Open</a>
+      </div>
+    </div>
+    {% else %}
+    <p class="empty-state">No rooms matched the tomorrow view.</p>
+    {% endfor %}
+  </div>
+</section>
 
-<details class="hk-mobile-following-day" {% if tomorrow_board["items"] %}open{% endif %}>
-  <summary class="hk-section-head">
-    {% if board.business_date == today_date %}Tomorrow{% else %}{{ tomorrow_board.business_date.strftime('%a %d %b') }}{% endif %}
-    <span class="hk-counts">{{ tomorrow_board.counts.dirty }} dirty | {{ tomorrow_board.counts.clean }} clean | {{ tomorrow_board.counts.inspected }} insp</span>
-  </summary>
-  {{ render_housekeeping_mobile_section('Tomorrow', tomorrow_board) }}
-</details>
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Tasks</h2>
+      <p>Open housekeeping tasks for {{ board.business_date.strftime('%d %b %Y') }}.</p>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for task in tasks %}
+    <div class="list-row no-link">
+      <div>
+        <strong>{{ task.task_type.replace('_', ' ') }}</strong>
+        <p>Room {{ task.room.room_number if task.room else '—' }} · {{ task.status.replace('_', ' ') }}</p>
+      </div>
+      <div class="right-stack">
+        <span class="status {{ task.priority }}">{{ task.priority }}</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="empty-state">No housekeeping tasks are queued for this date.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('{{ url_for("staff_service_worker") }}').catch(function () {});
+  });
+}
+</script>
 {% else %}
 <div class="hk-table-section">
-  {# Bulk actions (collapsible) #}
   {% if can('housekeeping.status_change') %}
   <details class="hk-bulk-header">
     <summary>Bulk actions — {{ board.business_date.strftime('%d %b') }}</summary>
@@ -175,12 +185,10 @@
   </details>
   {% endif %}
 
-  {# Table header with status counts #}
   <div class="hk-table-head">
     <h2>Today <span class="hk-counts">{{ board.counts.dirty }} dirty | {{ board.counts.clean }} clean | {{ board.counts.inspected }} insp</span></h2>
   </div>
 
-  {# Dense table #}
   <div class="hk-scroll">
     <table class="hk-sheet">
       <thead>
@@ -241,14 +249,12 @@
   </div>
 </div>
 
-{# ── TOMORROW TABLE SECTION (collapsible) ────── #}
 <details class="hk-table-section" {% if tomorrow_board["items"] %}open{% endif %}>
   <summary class="hk-section-head">
     {% if board.business_date == today_date %}Tomorrow{% else %}{{ tomorrow_board.business_date.strftime('%a %d %b') }}{% endif %}
     <span class="hk-counts">{{ tomorrow_board.counts.dirty }} dirty | {{ tomorrow_board.counts.clean }} clean | {{ tomorrow_board.counts.inspected }} insp</span>
   </summary>
 
-  {# Bulk actions (collapsible) #}
   {% if can('housekeeping.status_change') %}
   <details class="hk-bulk-header">
     <summary>Bulk actions — {{ tomorrow_board.business_date.strftime('%d %b') }}</summary>
@@ -272,12 +278,10 @@
   </details>
   {% endif %}
 
-  {# Table header with status counts #}
   <div class="hk-table-head" style="margin-top:4px;">
     <h2>{{ tomorrow_board.business_date.strftime('%A') }}</h2>
   </div>
 
-  {# Dense table #}
   <div class="hk-scroll">
     <table class="hk-sheet">
       <thead>

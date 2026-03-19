@@ -6,14 +6,17 @@ staff verification, readiness computation, and link delivery hooks.
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 from typing import Any
 
 from flask import current_app
+from werkzeug.datastructures import FileStorage
 
 from ..audit import write_audit_log
 from ..activity import write_activity_log
@@ -74,6 +77,19 @@ class DocumentVerifyPayload:
 
     verification_status: str  # "verified" or "rejected"
     rejection_reason: str | None = None
+
+
+@dataclass
+class ScannerCapturePayload:
+    """Structured document capture received from a scanner workstation."""
+
+    document_type: str
+    raw_text: str | None = None
+    raw_payload: dict[str, Any] | None = None
+    filename: str | None = None
+    content_type: str | None = None
+    scanner_name: str | None = None
+    source: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -765,19 +781,408 @@ def fire_pre_checkin_not_completed_events(hours_before: int = 48) -> dict[str, i
 
 
 # ---------------------------------------------------------------------------
-# OCR / ID extraction stub
+# OCR / ID extraction and structured scanner capture
 # ---------------------------------------------------------------------------
 
 
-def suggest_ocr_extraction(doc_id: uuid.UUID) -> dict[str, Any] | None:
-    """Stub: extract name/document-number from an uploaded ID image.
+def ingest_scanner_capture(
+    reservation_id: uuid.UUID,
+    payload: ScannerCapturePayload,
+    *,
+    actor_user_id: uuid.UUID | None,
+    commit: bool = True,
+) -> ReservationDocument:
+    from ..constants import DOCUMENT_TYPES
 
-    Returns a status dict indicating OCR is not configured rather than
-    silently returning ``None``.  A future implementation will call an
-    external OCR service and populate
-    ``ReservationDocument.ocr_extracted_data``.
-    """
+    reservation = db.session.get(Reservation, reservation_id)
+    if reservation is None:
+        raise ValueError("Reservation not found.")
+    if payload.document_type not in DOCUMENT_TYPES:
+        raise ValueError(f"Invalid document type. Must be one of: {', '.join(DOCUMENT_TYPES)}")
+
+    raw_text = _scanner_capture_text(payload)
+    if not raw_text.strip():
+        raise ValueError("Scanner payload is empty.")
+
+    content_type = _scanner_capture_content_type(payload)
+    encoded = raw_text.encode("utf-8")
+    storage_key = get_storage_backend().save(
+        FileStorage(
+            stream=BytesIO(encoded),
+            filename=_scanner_capture_filename(payload, content_type),
+            content_type=content_type,
+        ),
+        reservation.id,
+        _scanner_capture_extension(content_type),
+    )
+
+    document = ReservationDocument(
+        reservation_id=reservation.id,
+        guest_id=reservation.primary_guest_id,
+        document_type=payload.document_type,
+        storage_key=storage_key,
+        original_filename=_scanner_capture_filename(payload, content_type),
+        content_type=content_type,
+        file_size_bytes=len(encoded),
+        created_by_user_id=actor_user_id,
+        updated_by_user_id=actor_user_id,
+    )
+    db.session.add(document)
+    db.session.flush()
+
+    extraction = suggest_ocr_extraction(document.id) or {}
+    if extraction:
+        document.ocr_extracted_data = {
+            **extraction,
+            "scanner_name": (payload.scanner_name or "").strip()[:120] or None,
+            "source": (payload.source or "scanner_capture").strip()[:80],
+        }
+
+    pc = get_pre_checkin_for_reservation(reservation.id)
+    if pc is not None:
+        _recompute_readiness(pc)
+
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="reservation_documents",
+        entity_id=str(document.id),
+        action="create",
+        after_data={
+            "reservation_id": str(reservation.id),
+            "document_type": payload.document_type,
+            "content_type": content_type,
+            "scanner_name": payload.scanner_name,
+            "source": payload.source or "scanner_capture",
+        },
+    )
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="pre_checkin.scanner_capture_ingested",
+        entity_table="reservation_documents",
+        entity_id=str(document.id),
+        metadata={
+            "reservation_id": str(reservation.id),
+            "document_type": payload.document_type,
+            "scanner_name": payload.scanner_name,
+            "source": payload.source or "scanner_capture",
+        },
+    )
+    if commit:
+        db.session.commit()
+    return document
+
+
+def apply_document_ocr_to_guest(
+    doc_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    commit: bool = True,
+) -> ReservationDocument:
+    document = db.session.get(ReservationDocument, doc_id)
+    if document is None:
+        raise ValueError("Document not found.")
+    reservation = db.session.get(Reservation, document.reservation_id)
+    if reservation is None or reservation.primary_guest is None:
+        raise ValueError("Primary guest not found for this reservation.")
+
+    extracted = document.ocr_extracted_data or {}
+    if extracted.get("status") != "parsed":
+        raise ValueError("This document does not contain parsed scanner or OCR data yet.")
+
+    guest = reservation.primary_guest
+    before_data = {
+        "first_name": guest.first_name,
+        "last_name": guest.last_name,
+        "nationality": guest.nationality,
+        "id_document_type": guest.id_document_type,
+        "id_document_number": guest.id_document_number,
+        "date_of_birth": guest.date_of_birth.isoformat() if guest.date_of_birth else None,
+    }
+
+    first_name = (_clean_text(extracted.get("first_name")) or "").strip()
+    last_name = (_clean_text(extracted.get("last_name")) or "").strip()
+    if not first_name and not last_name:
+        first_name, last_name = _split_full_name(extracted.get("full_name"))
+    if first_name:
+        guest.first_name = first_name[:120]
+    if last_name:
+        guest.last_name = last_name[:120]
+    if first_name or last_name:
+        guest.full_name = f"{guest.first_name} {guest.last_name}".strip()
+
+    nationality = _clean_text(extracted.get("nationality"))
+    document_number = _clean_text(extracted.get("document_number"))
+    document_type = _clean_text(extracted.get("document_type")) or document.document_type
+    date_of_birth = _parse_date_string(extracted.get("date_of_birth"))
+    if nationality:
+        guest.nationality = nationality[:80]
+    if document_number:
+        guest.id_document_number = document_number[:120]
+    if document_type:
+        guest.id_document_type = document_type[:80]
+    if date_of_birth:
+        guest.date_of_birth = date_of_birth
+
+    guest.updated_by_user_id = actor_user_id
+    document.guest_id = guest.id
+    document.updated_by_user_id = actor_user_id
+    db.session.flush()
+
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="guests",
+        entity_id=str(guest.id),
+        action="update",
+        before_data=before_data,
+        after_data={
+            "first_name": guest.first_name,
+            "last_name": guest.last_name,
+            "nationality": guest.nationality,
+            "id_document_type": guest.id_document_type,
+            "id_document_number": guest.id_document_number,
+            "date_of_birth": guest.date_of_birth.isoformat() if guest.date_of_birth else None,
+            "source_document_id": str(document.id),
+        },
+    )
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="guest.document_data_applied",
+        entity_table="guests",
+        entity_id=str(guest.id),
+        metadata={
+            "reservation_id": str(reservation.id),
+            "document_id": str(document.id),
+            "document_type": document.document_type,
+        },
+    )
+    if commit:
+        db.session.commit()
+    return document
+
+
+def suggest_ocr_extraction(doc_id: uuid.UUID) -> dict[str, Any] | None:
     doc = db.session.get(ReservationDocument, doc_id)
     if doc is None:
         raise ValueError("Document not found.")
-    return {"status": "unavailable", "reason": "OCR provider not configured"}
+    if _is_text_scanner_document(doc):
+        extracted = _extract_document_fields(
+            read_document_bytes(doc).decode("utf-8", errors="ignore"),
+            document_type=doc.document_type,
+        )
+        if extracted:
+            doc.ocr_extracted_data = extracted
+            db.session.flush()
+            return extracted
+        result = {"status": "unavailable", "reason": "Structured scanner text could not be parsed."}
+        doc.ocr_extracted_data = result
+        db.session.flush()
+        return result
+    result = {"status": "unavailable", "reason": "OCR provider not configured for image-based documents."}
+    doc.ocr_extracted_data = result
+    db.session.flush()
+    return result
+
+
+def _is_text_scanner_document(doc: ReservationDocument) -> bool:
+    content_type = (doc.content_type or "").lower()
+    return (
+        content_type.startswith("text/")
+        or content_type == "application/json"
+        or doc.original_filename.lower().endswith((".txt", ".json", ".mrz"))
+    )
+
+
+def _scanner_capture_text(payload: ScannerCapturePayload) -> str:
+    if payload.raw_text and payload.raw_text.strip():
+        return payload.raw_text
+    if payload.raw_payload:
+        return json.dumps(payload.raw_payload, ensure_ascii=False, indent=2)
+    return ""
+
+
+def _scanner_capture_content_type(payload: ScannerCapturePayload) -> str:
+    if payload.content_type:
+        return payload.content_type.strip().lower()
+    return "application/json" if payload.raw_payload else "text/plain"
+
+
+def _scanner_capture_filename(payload: ScannerCapturePayload, content_type: str) -> str:
+    if payload.filename:
+        return _sanitize_filename(payload.filename)
+    return f"scanner-capture{_scanner_capture_extension(content_type)}"
+
+
+def _scanner_capture_extension(content_type: str) -> str:
+    normalized = (content_type or "").lower()
+    if "json" in normalized:
+        return ".json"
+    if "pdf" in normalized:
+        return ".pdf"
+    if "png" in normalized:
+        return ".png"
+    if "jpeg" in normalized or "jpg" in normalized:
+        return ".jpg"
+    if "webp" in normalized:
+        return ".webp"
+    if normalized.startswith("text/"):
+        return ".txt"
+    return ".bin"
+
+
+def _extract_document_fields(text: str, *, document_type: str | None) -> dict[str, Any] | None:
+    for candidate in (
+        _extract_from_json_text(text),
+        _extract_from_key_value_text(text),
+        _extract_from_mrz(text),
+    ):
+        normalized = _normalize_extracted_fields(candidate, document_type=document_type)
+        if normalized:
+            return normalized
+    return None
+
+
+def _extract_from_json_text(text: str) -> dict[str, Any] | None:
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _extract_from_key_value_text(text: str) -> dict[str, Any] | None:
+    data: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        separator = ":" if ":" in line else "=" if "=" in line else None
+        if not separator:
+            continue
+        key, value = line.split(separator, 1)
+        normalized_key = re.sub(r"[^a-z0-9]+", "_", key.strip().lower()).strip("_")
+        cleaned_value = value.strip()
+        if normalized_key and cleaned_value:
+            data[normalized_key] = cleaned_value
+    return data or None
+
+
+def _extract_from_mrz(text: str) -> dict[str, Any] | None:
+    lines = [line.strip().replace(" ", "") for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+    first_line, second_line = lines[0], lines[1]
+    if "<" not in first_line or "<" not in second_line or len(first_line) < 40 or len(second_line) < 40:
+        return None
+    surname_raw, _, given_raw = first_line[5:].partition("<<")
+    surname = surname_raw.replace("<", " ").strip()
+    given_names = given_raw.replace("<", " ").strip()
+    return {
+        "document_type": "passport",
+        "first_name": given_names,
+        "last_name": surname,
+        "full_name": f"{given_names} {surname}".strip(),
+        "document_number": second_line[0:9].replace("<", "").strip(),
+        "nationality": second_line[10:13].replace("<", "").strip(),
+        "date_of_birth": _parse_mrz_date(second_line[13:19], future_bias=False),
+        "expiry_date": _parse_mrz_date(second_line[21:27], future_bias=True),
+        "source_format": "mrz",
+    }
+
+
+def _normalize_extracted_fields(candidate: dict[str, Any] | None, *, document_type: str | None) -> dict[str, Any] | None:
+    if not candidate:
+        return None
+
+    def lookup(*keys: str) -> Any:
+        for key in keys:
+            value = candidate.get(key)
+            if value not in {None, ""}:
+                return value
+        return None
+
+    first_name = _clean_text(lookup("first_name", "firstname", "given_name", "given_names", "givenname"))
+    last_name = _clean_text(lookup("last_name", "lastname", "surname", "family_name", "familyname"))
+    full_name = _clean_text(lookup("full_name", "fullname", "name"))
+    if not first_name and not last_name and full_name:
+        first_name, last_name = _split_full_name(full_name)
+
+    date_of_birth = _parse_date_string(lookup("date_of_birth", "dob", "birth_date", "birthdate"))
+    expiry_date = _parse_date_string(lookup("expiry_date", "expiration_date", "date_of_expiry", "valid_until"))
+    normalized = {
+        "status": "parsed",
+        "document_type": _clean_text(lookup("document_type", "doc_type")) or document_type,
+        "first_name": first_name,
+        "last_name": last_name,
+        "full_name": full_name or f"{first_name or ''} {last_name or ''}".strip() or None,
+        "document_number": _clean_text(
+            lookup(
+                "document_number",
+                "passport_number",
+                "id_document_number",
+                "id_number",
+                "license_number",
+                "doc_no",
+                "number",
+            )
+        ),
+        "nationality": _clean_text(lookup("nationality", "country", "issuing_country")),
+        "date_of_birth": date_of_birth.isoformat() if date_of_birth else None,
+        "expiry_date": expiry_date.isoformat() if expiry_date else None,
+        "source_format": _clean_text(candidate.get("source_format")) or "structured_text",
+    }
+    normalized["fields_detected"] = [key for key, value in normalized.items() if key not in {"status", "source_format"} and value]
+    return normalized if normalized["fields_detected"] else None
+
+
+def _parse_mrz_date(value: str | None, *, future_bias: bool) -> str | None:
+    raw = (value or "").strip()
+    if len(raw) != 6 or not raw.isdigit():
+        return None
+    year = int(raw[0:2])
+    month = int(raw[2:4])
+    day = int(raw[4:6])
+    current_year = date.today().year
+    century = (current_year // 100) * 100
+    resolved_year = century + year
+    if future_bias and resolved_year < current_year - 1:
+        resolved_year += 100
+    if not future_bias and resolved_year > current_year:
+        resolved_year -= 100
+    try:
+        return date(resolved_year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _parse_date_string(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    raw = str(value).strip() if value not in {None, ""} else ""
+    if not raw:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _split_full_name(full_name: Any) -> tuple[str, str]:
+    cleaned = _clean_text(full_name)
+    if not cleaned:
+        return "", ""
+    parts = cleaned.split()
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[:-1]), parts[-1]
+
+
+def _clean_text(value: Any) -> str | None:
+    if value in {None, ""}:
+        return None
+    cleaned = re.sub(r"\s+", " ", str(value)).strip()
+    return cleaned or None
