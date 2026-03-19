@@ -106,6 +106,32 @@
               <button class="button" type="submit">Create closure</button>
             </form>
           </details>
+          <details class="planning-board-quick planning-board-nested-quick">
+            <summary class="board-overflow-item">Group room block</summary>
+            <form class="card inset stack-form planning-board-popover" method="post" action="{{ url_for('front_desk.staff_front_desk_board_create_group_block') }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="board-top">
+              <div class="grid two">
+                <label><span>Group code</span><input type="text" name="group_code" placeholder="GRP-APRIL" required></label>
+                <label><span>Rooms to block</span><input type="number" name="room_count" min="1" step="1" value="2" required></label>
+              </div>
+              <label><span>Room type</span><select name="room_type_id" required>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
+              <div class="grid two">
+                <label><span>Start date</span><input type="date" name="start_date" value="{{ board.start_date.isoformat() }}" required></label>
+                <label><span>End date</span><input type="date" name="end_date" value="{{ board.start_date.isoformat() }}" required></label>
+              </div>
+              <label><span>Reason</span><textarea name="reason" rows="2" placeholder="Wedding allotment / tour series hold"></textarea></label>
+              <button class="button" type="submit">Create room block</button>
+            </form>
+            <form class="card inset stack-form planning-board-popover" method="post" action="{{ url_for('front_desk.staff_front_desk_board_release_group_block') }}">
+              {{ csrf_input() }}
+              <input type="hidden" name="back_url" value="{{ board_current_url }}">
+              <input type="hidden" name="return_anchor" value="board-top">
+              <label><span>Release group code</span><input type="text" name="group_code" placeholder="GRP-APRIL" required></label>
+              <button class="button secondary" type="submit">Release group block</button>
+            </form>
+          </details>
           {% endif %}
           <details class="planning-board-quick planning-board-nested-quick{% if ical_import_report %} open-state{% endif %}" {% if ical_import_report %}open{% endif %}>
             <summary class="board-overflow-item">Import ICS</summary>

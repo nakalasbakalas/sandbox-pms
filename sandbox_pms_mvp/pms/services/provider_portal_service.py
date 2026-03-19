@@ -35,14 +35,21 @@ class ProviderBookingFilters:
 
 
 def provider_dashboard_context(*, business_date: date) -> dict:
-    upcoming_query = _base_booking_query().filter(
+    upcoming_query = _base_booking_query().where(
         Reservation.current_status.in_(["tentative", "confirmed", "checked_in"]),
         Reservation.check_out_date >= business_date,
     )
-    upcoming_reservations = upcoming_query.order_by(
-        Reservation.check_in_date.asc(),
-        Reservation.booked_at.asc(),
-    ).limit(30).all()
+    upcoming_reservations = (
+        db.session.execute(
+            upcoming_query.order_by(
+                Reservation.check_in_date.asc(),
+                Reservation.booked_at.asc(),
+            ).limit(30)
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
     upcoming_rows = [_provider_booking_summary(item) for item in upcoming_reservations]
 
     pending_deposit_rows = [row for row in upcoming_rows if row["deposit_state"] in {"missing", "partial"}][:8]
@@ -72,17 +79,22 @@ def list_provider_bookings(filters: ProviderBookingFilters) -> dict:
     query = _base_booking_query()
     query = _apply_provider_search(query, (filters.search or "").strip().lower())
     if filters.status:
-        query = query.filter(Reservation.current_status == filters.status)
+        query = query.where(Reservation.current_status == filters.status)
     date_from = _parse_date(filters.date_from)
     if date_from:
-        query = query.filter(Reservation.check_in_date >= date_from)
+        query = query.where(Reservation.check_in_date >= date_from)
     date_to = _parse_date(filters.date_to)
     if date_to:
-        query = query.filter(Reservation.check_in_date <= date_to)
+        query = query.where(Reservation.check_in_date <= date_to)
 
     rows = [
         _provider_booking_summary(item)
-        for item in query.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.desc()).all()
+        for item in db.session.execute(
+            query.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.desc())
+        )
+        .unique()
+        .scalars()
+        .all()
     ]
     if filters.deposit_state:
         rows = [row for row in rows if row["deposit_state"] == filters.deposit_state]
@@ -105,19 +117,31 @@ def get_provider_booking_detail(reservation_id: uuid.UUID) -> dict:
         raise ValueError("Reservation not found.")
     summary = _provider_booking_summary(reservation)
     latest_payment_request = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     payment_requests = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .all()
     )
     payment_events = (
-        PaymentEvent.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentEvent.created_at.desc())
-        .limit(20)
+        db.session.execute(
+            sa.select(PaymentEvent)
+            .where(PaymentEvent.reservation_id == reservation.id)
+            .order_by(PaymentEvent.created_at.desc())
+            .limit(20)
+        )
+        .scalars()
         .all()
     )
     calendar_conflicts = []
@@ -229,7 +253,7 @@ def provider_cancel_booking(reservation_id: uuid.UUID, *, actor_user_id: uuid.UU
 
 
 def _base_booking_query():
-    return Reservation.query.options(
+    return sa.select(Reservation).options(
         joinedload(Reservation.primary_guest),
         joinedload(Reservation.room_type),
         joinedload(Reservation.assigned_room),
@@ -257,17 +281,21 @@ def _apply_provider_search(query, search: str):
                 "",
             ).like(f"%{digits}%")
         )
-    return query.join(Guest, Reservation.primary_guest_id == Guest.id).filter(sa.or_(*predicate))
+    return query.join(Guest, Reservation.primary_guest_id == Guest.id).where(sa.or_(*predicate))
 
 
 def _load_reservation(reservation_id: uuid.UUID) -> Reservation | None:
     return (
-        Reservation.query.options(
-            joinedload(Reservation.primary_guest),
-            joinedload(Reservation.room_type),
-            joinedload(Reservation.assigned_room),
+        db.session.execute(
+            sa.select(Reservation).options(
+                joinedload(Reservation.primary_guest),
+                joinedload(Reservation.room_type),
+                joinedload(Reservation.assigned_room),
+            )
+            .where(Reservation.id == reservation_id)
         )
-        .filter(Reservation.id == reservation_id)
+        .unique()
+        .scalars()
         .first()
     )
 
@@ -276,8 +304,12 @@ def _provider_booking_summary(reservation: Reservation) -> dict:
     summary = build_reservation_summary(reservation)
     folio = folio_summary(reservation)
     latest_request = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     return {
@@ -314,31 +346,36 @@ def _provider_booking_summary(reservation: Reservation) -> dict:
 
 def _recent_provider_activity(limit: int = 15) -> list[dict]:
     rows = (
-        ActivityLog.query.filter(
-            ActivityLog.event_type.in_(
-                [
-                    "booking.public_confirmed",
-                    "reservation.cancelled",
-                    "payment.deposit_received",
-                    "provider.deposit_request_created",
-                    "provider.payment_link_resent",
-                    "provider.booking_cancelled",
-                    "calendar.sync_completed",
-                    "calendar.sync_failed",
-                    "calendar.feed_created",
-                    "calendar.feed_rotated",
-                ]
+        db.session.execute(
+            sa.select(ActivityLog).where(
+                ActivityLog.event_type.in_(
+                    [
+                        "booking.public_confirmed",
+                        "reservation.cancelled",
+                        "payment.deposit_received",
+                        "provider.deposit_request_created",
+                        "provider.payment_link_resent",
+                        "provider.booking_cancelled",
+                        "calendar.sync_completed",
+                        "calendar.sync_failed",
+                        "calendar.feed_created",
+                        "calendar.feed_rotated",
+                    ]
+                )
             )
+            .order_by(ActivityLog.created_at.desc())
+            .limit(limit)
         )
-        .order_by(ActivityLog.created_at.desc())
-        .limit(limit)
+        .scalars()
         .all()
     )
     actor_ids = [item.actor_user_id for item in rows if item.actor_user_id]
     actors = (
         {
-            item.id: item.full_name
-            for item in User.query.filter(User.id.in_(actor_ids)).all()
+            item_id: full_name
+            for item_id, full_name in db.session.execute(
+                sa.select(User.id, User.full_name).where(User.id.in_(actor_ids))
+            ).all()
         }
         if actor_ids
         else {}

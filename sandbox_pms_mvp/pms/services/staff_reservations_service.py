@@ -123,7 +123,9 @@ def list_reservations(filters: ReservationWorkspaceFilters) -> dict:
         (Reservation.current_status == "checked_in", 2),
         else_=3,
     )
-    total = query.count()
+    total = db.session.execute(
+        sa.select(sa.func.count()).select_from(query.order_by(None).subquery())
+    ).scalar()
 
     _sort_cols = {
         "arrival": Reservation.check_in_date,
@@ -139,9 +141,13 @@ def list_reservations(filters: ReservationWorkspaceFilters) -> dict:
         order_args = [operational_rank.asc(), Reservation.check_in_date.asc(), Reservation.booked_at.desc()]
 
     items = (
-        query.order_by(*order_args)
-        .limit(filters.per_page)
-        .offset((filters.page - 1) * filters.per_page)
+        db.session.execute(
+            query.order_by(*order_args)
+            .limit(filters.per_page)
+            .offset((filters.page - 1) * filters.per_page)
+        )
+        .unique()
+        .scalars()
         .all()
     )
     return {
@@ -163,8 +169,14 @@ def list_arrivals(*, arrival_date: date, room_type_id: str = "", payment_state: 
         per_page=200,
     )
     query = _apply_workspace_filters(_reservation_workspace_query(), filters)
-    query = query.filter(Reservation.current_status.in_(["tentative", "confirmed", "checked_in"]))
-    return [build_reservation_summary(item) for item in query.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc()).all()]
+    query = query.where(Reservation.current_status.in_(["tentative", "confirmed", "checked_in"]))
+    items = (
+        db.session.execute(query.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
+    return [build_reservation_summary(item) for item in items]
 
 
 def list_departures(*, departure_date: date, room_type_id: str = "", payment_state: str = "") -> list[dict]:
@@ -176,17 +188,29 @@ def list_departures(*, departure_date: date, room_type_id: str = "", payment_sta
         per_page=200,
     )
     query = _apply_workspace_filters(_reservation_workspace_query(), filters)
-    query = query.filter(Reservation.current_status.in_(["checked_in", "checked_out"]))
-    return [build_reservation_summary(item) for item in query.order_by(Reservation.check_out_date.asc(), Reservation.booked_at.asc()).all()]
+    query = query.where(Reservation.current_status.in_(["checked_in", "checked_out"]))
+    items = (
+        db.session.execute(query.order_by(Reservation.check_out_date.asc(), Reservation.booked_at.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
+    return [build_reservation_summary(item) for item in items]
 
 
 def list_in_house(*, business_date: date) -> list[dict]:
-    query = _reservation_workspace_query().filter(
+    query = _reservation_workspace_query().where(
         Reservation.current_status == "checked_in",
         Reservation.check_in_date <= business_date,
         Reservation.check_out_date > business_date,
     )
-    return [build_reservation_summary(item) for item in query.order_by(Reservation.check_out_date.asc()).all()]
+    items = (
+        db.session.execute(query.order_by(Reservation.check_out_date.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
+    return [build_reservation_summary(item) for item in items]
 
 
 def get_reservation_detail(reservation_id: uuid.UUID, *, actor_user: User | None = None) -> dict:
@@ -203,16 +227,28 @@ def get_reservation_detail(reservation_id: uuid.UUID, *, actor_user: User | None
     detail["extras"] = reservation_extra_summary(reservation)
     detail["eligible_rooms"] = eligible_rooms(reservation)
     detail["timeline"] = reservation_timeline(reservation)
-    detail["pending_cancellation_requests"] = CancellationRequest.query.filter(
-        CancellationRequest.reservation_id == reservation.id,
-        CancellationRequest.status.in_(["submitted", "needs_review"]),
-    ).count()
+    detail["pending_cancellation_requests"] = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(CancellationRequest)
+        .where(
+            CancellationRequest.reservation_id == reservation.id,
+            CancellationRequest.status.in_(["submitted", "needs_review"]),
+        )
+    ).scalar()
     detail["modification_requests"] = list_modification_requests(reservation.id)
     detail["pending_modification_requests"] = sum(
         1 for mr in detail["modification_requests"] if mr["status"] in ("submitted", "reviewed")
     )
     detail["communication_history"] = query_notification_history(reservation_id=reservation.id, limit=40)
-    detail["room_types"] = RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc()).all()
+    detail["room_types"] = (
+        db.session.execute(
+            sa.select(RoomType)
+            .where(RoomType.is_active.is_(True))
+            .order_by(RoomType.code.asc())
+        )
+        .scalars()
+        .all()
+    )
     return detail
 
 
@@ -244,7 +280,13 @@ def reservation_attribution_summary(reservation: Reservation) -> dict:
 
 def build_reservation_summary(reservation: Reservation) -> dict:
     payment = payment_summary(reservation)
-    review_entry = ReservationReviewQueue.query.filter_by(reservation_id=reservation.id).first()
+    review_entry = (
+        db.session.execute(
+            sa.select(ReservationReviewQueue).where(ReservationReviewQueue.reservation_id == reservation.id)
+        )
+        .scalars()
+        .first()
+    )
     attribution = reservation_attribution_summary(reservation)
     return {
         "id": reservation.id,
@@ -282,12 +324,25 @@ def payment_summary(reservation: Reservation) -> dict:
     summary = folio_summary(reservation)
     lines = [
         line
-        for line in FolioCharge.query.filter_by(reservation_id=reservation.id)
-        .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc())
+        for line in db.session.execute(
+            sa.select(FolioCharge)
+            .where(FolioCharge.reservation_id == reservation.id)
+            .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc())
+        )
+        .scalars()
         .all()
         if line.voided_at is None
     ]
-    paid_requests = PaymentRequest.query.filter_by(reservation_id=reservation.id, status="paid").all()
+    paid_requests = (
+        db.session.execute(
+            sa.select(PaymentRequest).where(
+                PaymentRequest.reservation_id == reservation.id,
+                PaymentRequest.status == "paid",
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     legacy_deposit_total = sum(
         (
@@ -422,12 +477,16 @@ def reservation_timeline(reservation: Reservation) -> list[dict]:
             "important": False,
             "actor": _actor_name(item.actor_user_id),
         }
-        for item in AuditLog.query.filter(
-            AuditLog.entity_table == "reservations",
-            AuditLog.entity_id == str(reservation.id),
+        for item in db.session.execute(
+            sa.select(AuditLog)
+            .where(
+                AuditLog.entity_table == "reservations",
+                AuditLog.entity_id == str(reservation.id),
+            )
+            .order_by(AuditLog.created_at.desc())
+            .limit(20)
         )
-        .order_by(AuditLog.created_at.desc())
-        .limit(20)
+        .scalars()
         .all()
     ]
     activities = [
@@ -439,12 +498,16 @@ def reservation_timeline(reservation: Reservation) -> list[dict]:
             "important": False,
             "actor": _actor_name(item.actor_user_id),
         }
-        for item in ActivityLog.query.filter(
-            ActivityLog.entity_table == "reservations",
-            ActivityLog.entity_id == str(reservation.id),
+        for item in db.session.execute(
+            sa.select(ActivityLog)
+            .where(
+                ActivityLog.entity_table == "reservations",
+                ActivityLog.entity_id == str(reservation.id),
+            )
+            .order_by(ActivityLog.created_at.desc())
+            .limit(30)
         )
-        .order_by(ActivityLog.created_at.desc())
-        .limit(30)
+        .scalars()
         .all()
     ]
     timeline = sorted(notes + history + audits + activities, key=lambda item: item["created_at"], reverse=True)
@@ -842,8 +905,15 @@ def resend_confirmation(reservation_id: uuid.UUID, *, actor_user_id: uuid.UUID, 
         raise ValueError("This reservation does not have a guest email address.")
 
     recent_send = (
-        EmailOutbox.query.filter_by(reservation_id=reservation.id, email_type="guest_confirmation")
-        .order_by(EmailOutbox.created_at.desc())
+        db.session.execute(
+            sa.select(EmailOutbox)
+            .where(
+                EmailOutbox.reservation_id == reservation.id,
+                EmailOutbox.email_type == "guest_confirmation",
+            )
+            .order_by(EmailOutbox.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     if recent_send and recent_send.created_at >= utc_now() - timedelta(minutes=5):
@@ -886,34 +956,38 @@ def resend_confirmation(reservation_id: uuid.UUID, *, actor_user_id: uuid.UUID, 
 
 
 def _reservation_workspace_query():
-    return Reservation.query.options(
-        joinedload(Reservation.primary_guest),
-        joinedload(Reservation.room_type),
-        joinedload(Reservation.assigned_room),
-        joinedload(Reservation.notes),
-        joinedload(Reservation.status_history),
-    ).outerjoin(ReservationReviewQueue, ReservationReviewQueue.reservation_id == Reservation.id)
+    return (
+        sa.select(Reservation)
+        .options(
+            joinedload(Reservation.primary_guest),
+            joinedload(Reservation.room_type),
+            joinedload(Reservation.assigned_room),
+            joinedload(Reservation.notes),
+            joinedload(Reservation.status_history),
+        )
+        .outerjoin(ReservationReviewQueue, ReservationReviewQueue.reservation_id == Reservation.id)
+    )
 
 
 def _apply_workspace_filters(query, filters: ReservationWorkspaceFilters):
     if not filters.include_closed and not filters.status:
-        query = query.filter(Reservation.current_status.not_in(["cancelled", "no_show", "checked_out"]))
+        query = query.where(Reservation.current_status.not_in(["cancelled", "no_show", "checked_out"]))
     if filters.status:
-        query = query.filter(Reservation.current_status == filters.status)
+        query = query.where(Reservation.current_status == filters.status)
     if filters.room_type_id:
-        query = query.filter(Reservation.room_type_id == uuid.UUID(filters.room_type_id))
+        query = query.where(Reservation.room_type_id == uuid.UUID(filters.room_type_id))
     if filters.arrival_date:
-        query = query.filter(Reservation.check_in_date == date.fromisoformat(filters.arrival_date))
+        query = query.where(Reservation.check_in_date == date.fromisoformat(filters.arrival_date))
     if filters.departure_date:
-        query = query.filter(Reservation.check_out_date == date.fromisoformat(filters.departure_date))
+        query = query.where(Reservation.check_out_date == date.fromisoformat(filters.departure_date))
     if filters.booking_source:
-        query = query.filter(Reservation.source_channel == filters.booking_source)
+        query = query.where(Reservation.source_channel == filters.booking_source)
     if filters.review_status:
-        query = query.filter(ReservationReviewQueue.review_status == filters.review_status)
+        query = query.where(ReservationReviewQueue.review_status == filters.review_status)
     if filters.assigned == "assigned":
-        query = query.filter(Reservation.assigned_room_id.is_not(None))
+        query = query.where(Reservation.assigned_room_id.is_not(None))
     if filters.assigned == "unassigned":
-        query = query.filter(Reservation.assigned_room_id.is_(None))
+        query = query.where(Reservation.assigned_room_id.is_(None))
     if filters.payment_state:
         query = _apply_payment_state_filter(query, filters.payment_state)
     if filters.q:
@@ -942,7 +1016,7 @@ def _apply_search_filter(query, raw_query: str):
                 sa.and_(Reservation.check_in_date <= parsed_date, Reservation.check_out_date > parsed_date),
             ]
         )
-    return query.filter(sa.or_(*conditions))
+    return query.where(sa.or_(*conditions))
 
 
 def _apply_payment_state_filter(query, payment_state: str):
@@ -959,30 +1033,35 @@ def _apply_payment_state_filter(query, payment_state: str):
         )
     )
     if payment_state == "missing":
-        return query.filter(Reservation.deposit_required_amount > 0, Reservation.deposit_received_amount <= 0)
+        return query.where(Reservation.deposit_required_amount > 0, Reservation.deposit_received_amount <= 0)
     if payment_state == "partial":
-        return query.filter(
+        return query.where(
             Reservation.deposit_required_amount > 0,
             Reservation.deposit_received_amount > 0,
             Reservation.deposit_received_amount < Reservation.deposit_required_amount,
         )
     if payment_state == "paid":
-        return query.filter(sa.or_(Reservation.deposit_received_amount >= Reservation.deposit_required_amount, paid_request_exists))
+        return query.where(sa.or_(Reservation.deposit_received_amount >= Reservation.deposit_required_amount, paid_request_exists))
     if payment_state == "failed":
-        return query.filter(failed_request_exists)
+        return query.where(failed_request_exists)
     return query
 
 
 def _load_reservation(reservation_id: uuid.UUID) -> Reservation | None:
     return (
-        Reservation.query.options(
-            joinedload(Reservation.primary_guest),
-            joinedload(Reservation.room_type),
-            joinedload(Reservation.assigned_room),
-            joinedload(Reservation.notes),
-            joinedload(Reservation.status_history),
+        db.session.execute(
+            sa.select(Reservation)
+            .options(
+                joinedload(Reservation.primary_guest),
+                joinedload(Reservation.room_type),
+                joinedload(Reservation.assigned_room),
+                joinedload(Reservation.notes),
+                joinedload(Reservation.status_history),
+            )
+            .where(Reservation.id == reservation_id)
         )
-        .filter(Reservation.id == reservation_id)
+        .unique()
+        .scalars()
         .first()
     )
 
@@ -1015,7 +1094,19 @@ def _eligible_room_list(
     check_out_date: date,
     include_current_reservation_rows: bool,
 ) -> list[Room]:
-    rooms = Room.query.filter_by(room_type_id=room_type_id, is_active=True, is_sellable=True).order_by(Room.room_number.asc()).all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room)
+            .where(
+                Room.room_type_id == room_type_id,
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+            )
+            .order_by(Room.room_number.asc())
+        )
+        .scalars()
+        .all()
+    )
     eligible: list[Room] = []
     for room in rooms:
         if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):

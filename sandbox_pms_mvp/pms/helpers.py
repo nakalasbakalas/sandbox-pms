@@ -8,6 +8,7 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import abort, current_app, g, request, session, url_for
 from markupsafe import Markup, escape
 
@@ -184,7 +185,14 @@ def validate_csrf_request() -> None:
 # ---------------------------------------------------------------------------
 
 def current_settings() -> dict[str, dict]:
-    return {s.key: s.value_json for s in AppSetting.query.filter_by(deleted_at=None).all()}
+    return {
+        setting.key: setting.value_json
+        for setting in db.session.execute(
+            sa.select(AppSetting).where(AppSetting.deleted_at.is_(None))
+        )
+        .scalars()
+        .all()
+    }
 
 
 def truthy_setting(value) -> bool:

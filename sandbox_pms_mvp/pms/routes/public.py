@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
 from ..extensions import db
@@ -15,7 +16,7 @@ from ..helpers import (
     current_settings,
     parse_booking_extra_ids,
 )
-from ..i18n import normalize_language
+from ..i18n import normalize_language, t
 from ..models import (
     PaymentRequest,
     ReservationHold,
@@ -47,9 +48,11 @@ from ..services.public_booking_service import (
     PublicBookingPayload,
     PublicSearchPayload,
     VerificationRequestPayload,
+    complete_public_digital_checkout,
     confirm_public_booking,
     create_reservation_hold,
     load_public_confirmation,
+    public_digital_checkout_context,
     submit_cancellation_request,
     submit_modification_request,
 )
@@ -157,7 +160,9 @@ def booking_confirm():
     settings = current_settings()
     published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
     selected_extra_ids: tuple[UUID, ...] = ()
-    hold = ReservationHold.query.filter_by(hold_code=request.form.get("hold_code")).first()
+    hold = db.session.execute(
+        sa.select(ReservationHold).where(ReservationHold.hold_code == request.form.get("hold_code"))
+    ).scalar_one_or_none()
     try:
         selected_extra_ids = parse_booking_extra_ids(request.form.getlist("extra_ids"))
         attribution = helpers["source_metadata_from_request"](
@@ -245,12 +250,14 @@ def booking_confirmation(reservation_code):
         abort(404)
     g.public_language = reservation.booking_language
     payment_request = (
-        PaymentRequest.query.filter(
-            PaymentRequest.reservation_id == reservation.id,
-            PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
-        )
-        .order_by(PaymentRequest.created_at.desc())
-        .first()
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(
+                PaymentRequest.reservation_id == reservation.id,
+                PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
+            )
+            .order_by(PaymentRequest.created_at.desc())
+        ).scalars().first()
     )
     return render_template(
         "public_confirmation.html",
@@ -258,6 +265,111 @@ def booking_confirmation(reservation_code):
         guest=reservation.primary_guest,
         payment_request=payment_request,
         extras_summary=reservation_extra_summary(reservation),
+        digital_checkout_url=(
+            url_for(
+                "public.public_digital_checkout",
+                reservation_code=reservation.reservation_code,
+                token=reservation.public_confirmation_token,
+                lang=current_language(),
+            )
+            if reservation.current_status == "checked_in"
+            else None
+        ),
+    )
+
+
+@public_bp.route("/booking/checkout/<reservation_code>")
+def public_digital_checkout(reservation_code):
+    context = public_digital_checkout_context(reservation_code, request.args.get("token", ""))
+    if not context:
+        abort(404)
+    reservation = context["reservation"]
+    g.public_language = reservation.booking_language
+    return render_template("public_digital_checkout.html", **context)
+
+
+@public_bp.route("/booking/checkout/<reservation_code>/pay-balance", methods=["POST"])
+def public_digital_checkout_pay_balance(reservation_code):
+    token = (request.form.get("token") or "").strip()
+    context = public_digital_checkout_context(reservation_code, token)
+    if not context:
+        abort(404)
+    reservation = context["reservation"]
+    g.public_language = reservation.booking_language
+    if not context["can_create_balance_payment"]:
+        flash(public_error_message(ValueError("Balance payment link is not available for this stay.")), "error")
+        return redirect(
+            url_for(
+                "public.public_digital_checkout",
+                reservation_code=reservation.reservation_code,
+                token=reservation.public_confirmation_token,
+                lang=current_language(),
+            )
+        )
+    try:
+        payment_request = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=None,
+            request_kind="balance",
+            send_email=False,
+            language=reservation.booking_language,
+            source="public_digital_checkout",
+        )
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+        return redirect(
+            url_for(
+                "public.public_digital_checkout",
+                reservation_code=reservation.reservation_code,
+                token=reservation.public_confirmation_token,
+                lang=current_language(),
+            )
+        )
+    return redirect(
+        url_for(
+            "public.public_payment_start",
+            request_code=payment_request.request_code,
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+            lang=current_language(),
+        )
+    )
+
+
+@public_bp.route("/booking/checkout/<reservation_code>/complete", methods=["POST"])
+def public_digital_checkout_complete(reservation_code):
+    token = (request.form.get("token") or "").strip()
+    checkout_context = public_digital_checkout_context(reservation_code, token)
+    if not checkout_context:
+        abort(404)
+    reservation = checkout_context["reservation"]
+    g.public_language = reservation.booking_language
+    try:
+        reservation = complete_public_digital_checkout(reservation_code, token)
+        try:
+            fire_automation_event(
+                "checkout_completed",
+                reservation_id=str(reservation.id),
+                guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
+                context={
+                    "reservation_code": reservation.reservation_code,
+                    "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
+                    "check_in_date": str(reservation.check_in_date),
+                    "check_out_date": str(reservation.check_out_date),
+                    "hotel_name": current_app.config.get("HOTEL_NAME", ""),
+                },
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Automation hook failed for checkout_completed (public)")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(
+        url_for(
+            "public.public_digital_checkout",
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+            lang=current_language(),
+        )
     )
 
 
@@ -288,6 +400,37 @@ def public_payment_return(request_code):
     except LookupError:
         abort(404)
     g.public_language = context["reservation"].booking_language
+    reservation = context["reservation"]
+    payment_request = context["payment_request"]
+    if reservation.current_status == "checked_in" and "deposit" not in (payment_request.request_type or ""):
+        context["return_url"] = url_for(
+            "public.public_digital_checkout",
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+            lang=current_language(),
+        )
+        context["return_label"] = t(current_language(), "digital_checkout_title")
+    elif reservation.created_from_public_booking_flow:
+        context["return_url"] = url_for(
+            "public.booking_confirmation",
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+            lang=current_language(),
+        )
+        context["return_label"] = t(current_language(), "confirmation_title")
+    else:
+        context["return_url"] = url_for(
+            "public.public_digital_checkout",
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+            lang=current_language(),
+        )
+        context["return_label"] = t(current_language(), "digital_checkout_title")
+    context["payment_action_label"] = (
+        t(current_language(), "payment_pay_deposit")
+        if "deposit" in (payment_request.request_type or "")
+        else t(current_language(), "digital_checkout_pay_balance")
+    )
     return render_template("public_payment_return.html", **context)
 
 

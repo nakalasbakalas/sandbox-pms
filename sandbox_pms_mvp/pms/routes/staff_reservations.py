@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 from markupsafe import Markup, escape
 
@@ -144,7 +145,7 @@ def staff_reservations():
         "staff_reservations.html",
         result=result,
         filters=filters,
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         reservation_statuses=RESERVATION_STATUSES,
         booking_sources=BOOKING_SOURCE_CHANNELS,
         review_statuses=REVIEW_QUEUE_STATUSES,
@@ -170,7 +171,7 @@ def staff_reservation_arrivals():
         items=items,
         target_date=target_date,
         mode="arrivals",
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         can_folio=can("folio.view"),
     )
 
@@ -191,7 +192,7 @@ def staff_reservation_departures():
         items=items,
         target_date=target_date,
         mode="departures",
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         can_folio=can("folio.view"),
     )
 
@@ -208,7 +209,7 @@ def staff_reservation_in_house():
         items=items,
         target_date=target_date,
         mode="in_house",
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         can_folio=can("folio.view"),
     )
 
@@ -286,7 +287,15 @@ def staff_reservation_create():
         "reservation_form.html",
         is_staff=True,
         initial=initial,
-        room_types=RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc()).all(),
+        room_types=(
+            db.session.execute(
+                sa.select(RoomType)
+                .where(RoomType.is_active.is_(True))
+                .order_by(RoomType.code.asc())
+            )
+            .scalars()
+            .all()
+        ),
         back_url=back_url,
         booking_sources=BOOKING_SOURCE_CHANNELS,
         staff_status_options=["confirmed", "tentative", "house_use"],
@@ -752,19 +761,19 @@ def staff_review_queue():
         db.session.commit()
         return redirect(url_for("staff_reservations.staff_review_queue"))
 
-    query = ReservationReviewQueue.query.join(Reservation, Reservation.id == ReservationReviewQueue.reservation_id)
+    query = sa.select(ReservationReviewQueue).join(Reservation, Reservation.id == ReservationReviewQueue.reservation_id)
     arrival_date = parse_request_date_arg("arrival_date", default=None)
     if request.args.get("status"):
-        query = query.filter(ReservationReviewQueue.review_status == request.args["status"])
+        query = query.where(ReservationReviewQueue.review_status == request.args["status"])
     if arrival_date:
-        query = query.filter(Reservation.check_in_date == arrival_date)
+        query = query.where(Reservation.check_in_date == arrival_date)
     if request.args.get("booking_source"):
-        query = query.filter(Reservation.source_channel == request.args["booking_source"])
+        query = query.where(Reservation.source_channel == request.args["booking_source"])
     if request.args.get("deposit_state"):
-        query = query.filter(ReservationReviewQueue.deposit_state == request.args["deposit_state"])
+        query = query.where(ReservationReviewQueue.deposit_state == request.args["deposit_state"])
     if request.args.get("flagged_duplicate") == "1":
-        query = query.filter(ReservationReviewQueue.flagged_duplicate_suspected.is_(True))
+        query = query.where(ReservationReviewQueue.flagged_duplicate_suspected.is_(True))
     if request.args.get("special_requests") == "1":
-        query = query.filter(ReservationReviewQueue.special_requests_present.is_(True))
-    entries = query.order_by(ReservationReviewQueue.created_at.desc()).all()
+        query = query.where(ReservationReviewQueue.special_requests_present.is_(True))
+    entries = db.session.execute(query.order_by(ReservationReviewQueue.created_at.desc())).scalars().all()
     return render_template("staff_review_queue.html", entries=entries)

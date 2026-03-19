@@ -4,9 +4,11 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, url_for
 
 from ..constants import ROOM_NOTE_TYPES
+from ..extensions import db
 from ..helpers import (
     can,
     parse_request_date_arg,
@@ -45,6 +47,36 @@ from ..services.housekeeping_service import (
 from ..services.room_readiness_service import is_room_assignable, room_readiness_board
 
 housekeeping_bp = Blueprint("housekeeping", __name__)
+
+
+def _housekeeping_filter_query(
+    filters: HousekeepingBoardFilters,
+    *,
+    business_date: date | None = None,
+    mobile: bool | None = None,
+) -> dict[str, str]:
+    params = {"date": (business_date or filters.business_date).isoformat()}
+    if filters.floor:
+        params["floor"] = filters.floor
+    if filters.status:
+        params["status"] = filters.status
+    if filters.priority:
+        params["priority"] = filters.priority
+    if filters.room_type_id:
+        params["room_type_id"] = str(filters.room_type_id)
+    if filters.arrival_today:
+        params["arrival_today"] = filters.arrival_today
+    if filters.departure_today:
+        params["departure_today"] = filters.departure_today
+    if filters.blocked:
+        params["blocked"] = filters.blocked
+    if filters.maintenance:
+        params["maintenance"] = filters.maintenance
+    if filters.notes:
+        params["notes"] = filters.notes
+    if filters.mobile if mobile is None else mobile:
+        params["view"] = "mobile"
+    return params
 
 
 @housekeeping_bp.route("/staff/housekeeping")
@@ -88,10 +120,18 @@ def staff_housekeeping():
         today_date=date.today(),
         tasks=tasks,
         filters=filters,
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=(
+            db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc()))
+            .scalars()
+            .all()
+        ),
         housekeeping_statuses=["dirty", "clean", "inspected", "pickup", "occupied_clean", "occupied_dirty", "do_not_disturb", "sleep", "out_of_order", "out_of_service", "cleaning_in_progress"],
         room_note_types=ROOM_NOTE_TYPES,
         can_manage_controls=can_manage_operational_overrides(user),
+        today_url=url_for("housekeeping.staff_housekeeping", **_housekeeping_filter_query(filters, business_date=target_date)),
+        tomorrow_url=url_for("housekeeping.staff_housekeeping", **_housekeeping_filter_query(filters, business_date=tomorrow_date)),
+        desk_view_url=url_for("housekeeping.staff_housekeeping", **_housekeeping_filter_query(filters, mobile=False)),
+        mobile_view_url=url_for("housekeeping.staff_housekeeping", **_housekeeping_filter_query(filters, mobile=True)),
     )
 
 

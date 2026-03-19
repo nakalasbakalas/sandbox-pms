@@ -49,12 +49,12 @@ class BookingExtrasQuote:
 
 
 def list_booking_extras(*, include_inactive: bool = False, public_only: bool = False) -> list[BookingExtra]:
-    query = BookingExtra.query.order_by(BookingExtra.sort_order.asc(), BookingExtra.name.asc())
+    query = sa.select(BookingExtra).order_by(BookingExtra.sort_order.asc(), BookingExtra.name.asc())
     if not include_inactive:
-        query = query.filter(BookingExtra.is_active.is_(True))
+        query = query.where(BookingExtra.is_active.is_(True))
     if public_only:
-        query = query.filter(BookingExtra.is_public.is_(True), BookingExtra.is_active.is_(True))
-    return query.all()
+        query = query.where(BookingExtra.is_public.is_(True), BookingExtra.is_active.is_(True))
+    return db.session.execute(query).scalars().all()
 
 
 def upsert_booking_extra(
@@ -74,7 +74,9 @@ def upsert_booking_extra(
     if payload.sort_order < 0:
         raise ValueError("Sort order must be zero or greater.")
 
-    existing = BookingExtra.query.filter(sa.func.upper(BookingExtra.code) == code).first()
+    existing = db.session.execute(
+        sa.select(BookingExtra).where(sa.func.upper(BookingExtra.code) == code)
+    ).scalar_one_or_none()
     if existing and existing.id != extra_id:
         raise ValueError("Extra code must be unique.")
 
@@ -257,7 +259,11 @@ def post_reservation_extras_to_folio(
     posted: list[ReservationExtra] = []
     active_folio_lines = [
         line
-        for line in FolioCharge.query.filter_by(reservation_id=reservation.id).all()
+        for line in db.session.execute(
+            sa.select(FolioCharge).where(FolioCharge.reservation_id == reservation.id)
+        )
+        .scalars()
+        .all()
         if line.voided_at is None
     ]
     for item in _sorted_reservation_extras(reservation):

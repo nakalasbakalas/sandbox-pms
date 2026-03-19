@@ -42,6 +42,7 @@ from .communication_service import (
 )
 from .admin_service import policy_text, render_notification_template
 from .cashier_service import PaymentPostingPayload, record_payment
+from .public_booking_service import load_public_reservation_access
 
 
 MAX_PUBLIC_PAYMENT_TOKEN_RETRIES = 10
@@ -651,15 +652,19 @@ def resend_payment_link(
 
 
 def public_payment_context(request_code: str, reservation_code: str, token: str) -> tuple[Reservation, PaymentRequest]:
-    reservation = Reservation.query.filter_by(reservation_code=reservation_code).first()
-    if not reservation or not reservation.public_confirmation_token:
+    reservation = load_public_reservation_access(reservation_code, token)
+    if not reservation:
         raise LookupError("Payment request not found.")
-    if not hmac.compare_digest(reservation.public_confirmation_token, token):
-        raise LookupError("Payment request not found.")
-    payment_request = PaymentRequest.query.filter_by(
-        reservation_id=reservation.id,
-        request_code=request_code,
-    ).first()
+    payment_request = (
+        db.session.execute(
+            sa.select(PaymentRequest).where(
+                PaymentRequest.reservation_id == reservation.id,
+                PaymentRequest.request_code == request_code,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not payment_request:
         raise LookupError("Payment request not found.")
     return reservation, payment_request
@@ -881,7 +886,16 @@ def _apply_provider_event(
     actor_user_id: uuid.UUID | None,
 ) -> tuple[str, list[uuid.UUID]]:
     if event.provider_event_id:
-        duplicate = PaymentEvent.query.filter_by(provider=provider_name, provider_event_id=event.provider_event_id).first()
+        duplicate = (
+            db.session.execute(
+                sa.select(PaymentEvent).where(
+                    PaymentEvent.provider == provider_name,
+                    PaymentEvent.provider_event_id == event.provider_event_id,
+                )
+            )
+            .scalars()
+            .first()
+        )
         if duplicate:
             return "duplicate", []
 
@@ -1106,14 +1120,24 @@ def _resolve_payment_request_for_update(provider_name: str, event: NormalizedPro
 
 
 def _sync_review_queue_deposit_state(reservation: Reservation) -> None:
-    entry = ReservationReviewQueue.query.filter_by(reservation_id=reservation.id).first()
+    entry = (
+        db.session.execute(
+            sa.select(ReservationReviewQueue).where(ReservationReviewQueue.reservation_id == reservation.id)
+        )
+        .scalars()
+        .first()
+    )
     if not entry:
         return
     required_amount = money(reservation.deposit_required_amount)
     received_amount = money(reservation.deposit_received_amount)
     latest_request = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     if required_amount <= Decimal("0.00"):
@@ -1159,7 +1183,13 @@ def _ensure_public_payment_token(reservation: Reservation) -> None:
         return
     for _ in range(MAX_PUBLIC_PAYMENT_TOKEN_RETRIES):
         token = secrets.token_urlsafe(24)
-        if not Reservation.query.filter_by(public_confirmation_token=token).first():
+        if not (
+            db.session.execute(
+                sa.select(Reservation).where(Reservation.public_confirmation_token == token)
+            )
+            .scalars()
+            .first()
+        ):
             reservation.public_confirmation_token = token
             return
     raise ValueError("Could not allocate a unique public payment token.")

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 
 from ..constants import RESERVATION_STATUSES
@@ -148,7 +149,15 @@ def provider_calendar():
     return render_template(
         "provider_calendar.html",
         calendar=provider_calendar_context(),
-        rooms=Room.query.filter_by(is_active=True).order_by(Room.room_number.asc()).all(),
+        rooms=(
+            db.session.execute(
+                sa.select(Room)
+                .where(Room.is_active.is_(True))
+                .order_by(Room.room_number.asc())
+            )
+            .scalars()
+            .all()
+        ),
         can_manage_calendar=can("provider.calendar.manage"),
     )
 

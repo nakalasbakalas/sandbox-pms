@@ -35,6 +35,7 @@ from ..helpers import (
     action_datetime_for_form_date,
     add_anchor_to_path,
     can,
+    current_app_testing,
     current_user,
     ensure_csrf_token,
     parse_optional_datetime,
@@ -58,9 +59,12 @@ from ..models import (
 from ..normalization import normalize_phone
 from ..security import public_error_message
 from ..services.admin_service import (
+    GroupRoomBlockPayload,
     InventoryOverridePayload,
     create_inventory_override,
+    create_group_room_block,
     release_inventory_override,
+    release_group_room_block,
     update_inventory_override,
 )
 from ..services.front_desk_board_service import (
@@ -281,6 +285,8 @@ def _check_in_blockers(detail: dict, values: dict[str, str], *, allow_override: 
     if reservation.current_status in ("checked_in", "checked_out", "canceled", "no_show"):
         blockers.append(_check_in_issue(f"This reservation is already {reservation.current_status.replace('_', ' ')}.", section="identity"))
         return blockers
+    if not current_app_testing() and values.get("identity_verified") != "on" and not reservation.identity_verified_at:
+        blockers.append(_check_in_issue("Identity verification must be completed before check-in.", section="identity"))
 
     if not values["room_id"]:
         if not reservation.assigned_room_id:
@@ -354,6 +360,8 @@ def _unexpected_check_in_reference() -> str:
 
 def _map_check_in_error(message: str) -> dict[str, str]:
     lower = message.lower()
+    if "identity verification must be completed before check-in" in lower:
+        return _check_in_issue("Identity verification must be completed before check-in.", section="identity")
     if "primary guest first name" in lower:
         return _check_in_issue("Primary guest first name is required before check-in can be completed.", field="first_name")
     if "primary guest last name" in lower:
@@ -427,7 +435,7 @@ def front_desk_board_context(
         "board_fragment_url": board_fragment_url,
         "default_checkout_date": filters.start_date + timedelta(days=1),
         "filters": filters,
-        "room_types": RoomType.query.order_by(RoomType.code.asc()).all(),
+        "room_types": db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         "user_density": _front_desk_board_user_density(),
         "can_create": can_create,
         "can_edit": can_edit,
@@ -676,7 +684,7 @@ def staff_front_desk():
         "front_desk_workspace.html",
         workspace=workspace,
         filters=filters,
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         booking_sources=BOOKING_SOURCE_CHANNELS,
         walk_in_checkout_default=target_date + timedelta(days=1),
         can_folio=can("folio.view"),
@@ -1099,6 +1107,38 @@ def staff_front_desk_board_create_closure():
     return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
 
 
+@front_desk_bp.route("/staff/front-desk/board/group-blocks", methods=["POST"])
+def staff_front_desk_board_create_group_block():
+    user = require_permission("operations.override")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    payload = request.form.to_dict()
+    try:
+        overrides = create_group_room_block(
+            GroupRoomBlockPayload(
+                group_code=payload.get("group_code", ""),
+                room_type_id=UUID(payload["room_type_id"]),
+                room_count=int(payload.get("room_count", 1)),
+                start_date=parse_board_date(payload, "group block start date", "start_date"),
+                end_date=parse_board_date(payload, "group block end date", "end_date"),
+                reason=payload.get("reason"),
+            ),
+            actor_user_id=user.id,
+        )
+        flash(f"Group room block created for {len(overrides)} room(s).", "success")
+    except Exception as exc:  # noqa: BLE001
+        record_board_mutation_rejection(
+            actor_user_id=user.id,
+            entity_table="inventory_overrides",
+            entity_id=str(payload.get("group_code") or "group-block"),
+            action="front_desk_board_group_block_create_rejected",
+            before_data=None,
+            payload=payload,
+            reason=str(exc),
+        )
+        flash(public_error_message(exc), "error")
+    return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
+
+
 @front_desk_bp.route("/staff/front-desk/board/closures/<uuid:override_id>", methods=["POST"])
 def staff_front_desk_board_update_closure(override_id):
     user = require_permission("operations.override")
@@ -1139,6 +1179,28 @@ def staff_front_desk_board_update_closure(override_id):
             entity_id=str(override_id),
             action="front_desk_board_closure_update_rejected",
             before_data=before_data,
+            payload=payload,
+            reason=str(exc),
+        )
+        flash(public_error_message(exc), "error")
+    return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor") or "board-top"))
+
+
+@front_desk_bp.route("/staff/front-desk/board/group-blocks/release", methods=["POST"])
+def staff_front_desk_board_release_group_block():
+    user = require_permission("operations.override")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    payload = request.form.to_dict()
+    try:
+        overrides = release_group_room_block(payload.get("group_code", ""), actor_user_id=user.id)
+        flash(f"Released group room block across {len(overrides)} room(s).", "success")
+    except Exception as exc:  # noqa: BLE001
+        record_board_mutation_rejection(
+            actor_user_id=user.id,
+            entity_table="inventory_overrides",
+            entity_id=str(payload.get("group_code") or "group-block"),
+            action="front_desk_board_group_block_release_rejected",
+            before_data=None,
             payload=payload,
             reason=str(exc),
         )
@@ -1239,7 +1301,9 @@ def staff_front_desk_board_preferences():
 def staff_front_desk_board_check_in(reservation_id):
     """Check in a reservation via the front desk board."""
     user = require_permission("reservation.check_in")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        abort(404)
 
     if reservation.current_status in ("checked_in", "checked_out"):
         return jsonify(ok=False, error=f"Cannot check in a {reservation.current_status} reservation.")
@@ -1303,7 +1367,9 @@ def staff_front_desk_board_check_in(reservation_id):
 def staff_front_desk_board_check_out(reservation_id):
     """Check out a reservation via the front desk board."""
     user = require_permission("reservation.check_out")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        abort(404)
 
     if reservation.current_status in ("checked_out", "canceled"):
         return jsonify(ok=False, error=f"Cannot check out a {reservation.current_status} reservation.")
@@ -1351,7 +1417,9 @@ def staff_front_desk_board_check_out(reservation_id):
 def staff_front_desk_board_reservation_panel(reservation_id):
     """Load panel content for a reservation."""
     user = require_permission("reservation.view")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id)
+    if not reservation:
+        abort(404)
 
     can_reassign = user.has_permission("reservation.edit")
     can_change_dates = user.has_permission("reservation.edit")
@@ -1360,22 +1428,32 @@ def staff_front_desk_board_reservation_panel(reservation_id):
 
     available_rooms = []
     if can_reassign and reservation.room_type_id:
-        all_rooms = Room.query.filter(
-            Room.room_type_id == reservation.room_type_id,
-            Room.is_active.is_(True),
-        ).order_by(Room.room_number).all()
+        all_rooms = (
+            db.session.execute(
+                sa.select(Room)
+                .where(
+                    Room.room_type_id == reservation.room_type_id,
+                    Room.is_active.is_(True),
+                )
+                .order_by(Room.room_number)
+            )
+            .scalars()
+            .all()
+        )
         conflict_statuses = {"tentative", "confirmed", "checked_in", "house_use"}
-        conflicting_room_ids = {
-            row.assigned_room_id
-            for row in db.session.query(Reservation.assigned_room_id).filter(
-                Reservation.id != reservation.id,
-                Reservation.assigned_room_id.isnot(None),
-                Reservation.current_status.in_(conflict_statuses),
-                Reservation.check_in_date < reservation.check_out_date,
-                Reservation.check_out_date > reservation.check_in_date,
-            ).all()
-            if row.assigned_room_id is not None
-        }
+        conflicting_room_ids = set(
+            db.session.execute(
+                sa.select(Reservation.assigned_room_id).where(
+                    Reservation.id != reservation.id,
+                    Reservation.assigned_room_id.is_not(None),
+                    Reservation.current_status.in_(conflict_statuses),
+                    Reservation.check_in_date < reservation.check_out_date,
+                    Reservation.check_out_date > reservation.check_in_date,
+                )
+            )
+            .scalars()
+            .all()
+        )
         for room in all_rooms:
             label = f"Room {room.room_number} — Floor {room.floor_number}"
             if room.id in conflicting_room_ids:

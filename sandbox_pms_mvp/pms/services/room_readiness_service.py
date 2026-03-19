@@ -50,11 +50,29 @@ class RoomReadiness:
 
 def is_room_assignable(room_id: uuid.UUID, business_date: date) -> RoomReadiness:
     """Central check: can a room be assigned to a guest for *business_date*?"""
-    room = Room.query.options(joinedload(Room.room_type)).filter_by(id=room_id).first()
+    room = (
+        db.session.execute(
+            sa.select(Room)
+            .options(joinedload(Room.room_type))
+            .where(Room.id == room_id)
+        )
+        .unique()
+        .scalars()
+        .first()
+    )
     if not room:
         raise ValueError("Room not found.")
 
-    inv = InventoryDay.query.filter_by(room_id=room_id, business_date=business_date).first()
+    inv = (
+        db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == room_id,
+                InventoryDay.business_date == business_date,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not inv:
         return _readiness(room, None, False, "missing_inventory", "No inventory row for this date.")
 
@@ -84,7 +102,15 @@ def is_room_assignable(room_id: uuid.UUID, business_date: date) -> RoomReadiness
 
 def get_assignable_rooms(room_type_id: uuid.UUID, business_date: date) -> list[RoomReadiness]:
     """Return all rooms of a given type that are ready for assignment on *business_date*."""
-    rooms = Room.query.filter_by(room_type_id=room_type_id, is_active=True).order_by(Room.room_number).all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room)
+            .where(Room.room_type_id == room_type_id, Room.is_active.is_(True))
+            .order_by(Room.room_number)
+        )
+        .scalars()
+        .all()
+    )
     results: list[RoomReadiness] = []
     for room in rooms:
         readiness = is_room_assignable(room.id, business_date)
@@ -96,14 +122,23 @@ def get_assignable_rooms(room_type_id: uuid.UUID, business_date: date) -> list[R
 def room_readiness_board(business_date: date) -> list[RoomReadiness]:
     """Return readiness snapshots for *every* active room on *business_date*."""
     rooms = (
-        Room.query.options(joinedload(Room.room_type))
-        .filter_by(is_active=True)
-        .order_by(Room.floor_number, Room.room_number)
+        db.session.execute(
+            sa.select(Room)
+            .options(joinedload(Room.room_type))
+            .where(Room.is_active.is_(True))
+            .order_by(Room.floor_number, Room.room_number)
+        )
+        .unique()
+        .scalars()
         .all()
     )
     inv_map = {
         row.room_id: row
-        for row in InventoryDay.query.filter_by(business_date=business_date).all()
+        for row in db.session.execute(
+            sa.select(InventoryDay).where(InventoryDay.business_date == business_date)
+        )
+        .scalars()
+        .all()
     }
     task_map = _active_tasks_map(business_date)
     results: list[RoomReadiness] = []
@@ -175,23 +210,29 @@ def _hk_code(status_id: uuid.UUID | None) -> str | None:
 
 def _active_task(room_id: uuid.UUID, business_date: date) -> HousekeepingTask | None:
     return (
-        HousekeepingTask.query.filter(
-            HousekeepingTask.room_id == room_id,
-            HousekeepingTask.business_date == business_date,
-            HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
+        db.session.execute(
+            sa.select(HousekeepingTask).where(
+                HousekeepingTask.room_id == room_id,
+                HousekeepingTask.business_date == business_date,
+                HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
+            )
+            .order_by(HousekeepingTask.created_at.desc())
         )
-        .order_by(HousekeepingTask.created_at.desc())
+        .scalars()
         .first()
     )
 
 
 def _active_tasks_map(business_date: date) -> dict[uuid.UUID, HousekeepingTask]:
     tasks = (
-        HousekeepingTask.query.filter(
-            HousekeepingTask.business_date == business_date,
-            HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
+        db.session.execute(
+            sa.select(HousekeepingTask).where(
+                HousekeepingTask.business_date == business_date,
+                HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
+            )
+            .order_by(HousekeepingTask.created_at.desc())
         )
-        .order_by(HousekeepingTask.created_at.desc())
+        .scalars()
         .all()
     )
     result: dict[uuid.UUID, HousekeepingTask] = {}

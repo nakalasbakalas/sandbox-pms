@@ -28,7 +28,14 @@ from pms.models import (
 from pms.seeds import bootstrap_inventory_horizon
 from pms.services.cashier_service import ManualAdjustmentPayload, ensure_room_charges_posted, post_manual_adjustment
 from pms.services.front_desk_service import NoShowPayload, process_no_show
-from pms.services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
+from pms.services.housekeeping_service import (
+    CreateTaskPayload,
+    RoomStatusUpdatePayload,
+    complete_housekeeping_task,
+    create_housekeeping_task,
+    start_housekeeping_task,
+    update_housekeeping_status,
+)
 from pms.services.payment_integration_service import create_or_reuse_deposit_request
 from pms.services.reporting_service import build_daily_report, build_front_desk_dashboard
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
@@ -332,6 +339,65 @@ def test_daily_report_arrivals_returns_correct_data(app_factory):
         assert dataset["arrival_today"].reservation_code in {item["reservation_code"] for item in report["data"]["items"]}
 
 
+def test_daily_report_channel_performance_returns_channel_metrics(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        dataset = build_dashboard_dataset()
+        report = build_daily_report(
+            report_type="channel_performance",
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"] + timedelta(days=6),
+        )
+
+        assert report["report_type"] == "channel_performance"
+        assert report["data"]["channel_count"] >= 1
+        assert report["data"]["reservation_count"] >= 1
+        assert report["data"]["items"]
+
+
+def test_daily_report_housekeeping_performance_returns_attendant_metrics(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        dataset = build_dashboard_dataset()
+        reserved_room_ids = {reservation.assigned_room_id for reservation in Reservation.query.all() if reservation.assigned_room_id}
+        room = (
+            Room.query.filter(Room.is_active.is_(True), Room.is_sellable.is_(True), Room.id.notin_(reserved_room_ids))
+            .order_by(Room.room_number.asc())
+            .first()
+        )
+        assert room is not None
+
+        task = create_housekeeping_task(
+            CreateTaskPayload(
+                room_id=room.id,
+                business_date=dataset["today"],
+                task_type="checkout_clean",
+                priority="high",
+                assigned_to_user_id=dataset["housekeeper"].id,
+            ),
+            actor_user_id=dataset["manager"].id,
+        )
+        start_housekeeping_task(task.id, actor_user_id=dataset["housekeeper"].id)
+        complete_housekeeping_task(task.id, actor_user_id=dataset["housekeeper"].id)
+
+        report = build_daily_report(
+            report_type="housekeeping_performance",
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"],
+        )
+
+        rows = {item["attendant_name"]: item for item in report["data"]["items"]}
+        assert report["report_type"] == "housekeeping_performance"
+        assert report["data"]["task_count"] == 2
+        assert report["data"]["completed_count"] == 1
+        assert report["data"]["attendant_count"] == 1
+        assert report["data"]["unassigned_task_count"] == 1
+        assert rows[dataset["housekeeper"].full_name]["completed_count"] == 1
+        assert rows[dataset["housekeeper"].full_name]["checkout_clean_count"] == 1
+
+
 def test_daily_report_room_status_returns_housekeeping_data(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     with app.app_context():
@@ -361,7 +427,7 @@ def test_daily_report_no_show_cancellation_returns_both_sections(app_factory):
                 check_in_date=dataset["today"] + timedelta(days=4),
                 check_out_date=dataset["today"] + timedelta(days=6),
                 source_channel="line",
-            )
+        )
         )
         cancel_reservation_workspace(cancel_target.id, actor_user_id=dataset["manager"].id, reason="guest_request")
 
@@ -376,12 +442,16 @@ def test_daily_report_no_show_cancellation_returns_both_sections(app_factory):
                 source_channel="whatsapp",
             )
         )
-        process_no_show(no_show_target.id, NoShowPayload(reason="cutoff passed"), actor_user_id=dataset["manager"].id)
+        process_no_show(
+            no_show_target.id,
+            NoShowPayload(action_at=utc_dt(no_show_target.check_in_date, 12), reason="cutoff passed"),
+            actor_user_id=dataset["manager"].id,
+        )
 
         report = build_daily_report(
             report_type="no_show_cancellation",
             business_date=dataset["today"],
-            date_from=dataset["today"],
+            date_from=dataset["today"] - timedelta(days=1),
             date_to=dataset["today"] + timedelta(days=6),
         )
 
@@ -433,7 +503,7 @@ def test_daily_report_routes_render_for_authorized_users(app_factory):
     login_as(client, dataset["manager"])
 
     # Test each report type
-    for report_type in ["arrivals", "departures", "room_status", "payment_due", "occupancy", "booking_source", "no_show_cancellation"]:
+    for report_type in ["arrivals", "departures", "room_status", "payment_due", "housekeeping_performance", "occupancy", "channel_performance", "booking_source", "no_show_cancellation"]:
         response = client.get(f"/staff/daily-reports/{report_type}")
         assert response.status_code == 200, f"Report {report_type} failed with {response.status_code}"
         assert b"Daily Report" in response.data

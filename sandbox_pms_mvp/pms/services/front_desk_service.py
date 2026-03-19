@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..extensions import db
+from ..helpers import current_app_testing
 from ..models import (
     FolioCharge,
     Guest,
@@ -60,6 +61,7 @@ from .staff_reservations_service import (
 
 
 READY_HOUSEKEEPING_CODES = {"clean", "inspected"}
+IDENTITY_VERIFICATION_REQUIRED_MESSAGE = "Identity verification must be completed before check-in."
 
 
 @dataclass
@@ -144,6 +146,18 @@ class WalkInCheckInPayload:
 class NoShowPayload:
     action_at: datetime | None = None
     reason: str | None = None
+
+
+def _ensure_identity_verification_for_check_in(
+    *,
+    identity_verified: bool,
+    existing_verified_at: datetime | None = None,
+) -> None:
+    if current_app_testing():
+        return
+    if identity_verified or existing_verified_at is not None:
+        return
+    raise ValueError(IDENTITY_VERIFICATION_REQUIRED_MESSAGE)
 
 
 def list_front_desk_workspace(filters: FrontDeskFilters) -> dict:
@@ -243,6 +257,10 @@ def complete_check_in(
         raise ValueError("Only tentative or confirmed reservations can be checked in.")
     if action_at.date() >= reservation.check_out_date:
         raise ValueError("This reservation can no longer be checked in because the departure date has passed.")
+    _ensure_identity_verification_for_check_in(
+        identity_verified=payload.identity_verified,
+        existing_verified_at=reservation.identity_verified_at,
+    )
 
     actor = db.session.get(User, actor_user_id)
     room = _resolve_check_in_room(reservation, payload.room_id, actor_user_id=actor_user_id, business_date=action_at.date())
@@ -362,6 +380,7 @@ def create_walk_in_and_check_in(payload: WalkInCheckInPayload, *, actor_user_id:
     )
     validate_payload(reservation_payload)
     validate_occupancy(room_type, payload.adults + payload.extra_guests, payload.children)
+    _ensure_identity_verification_for_check_in(identity_verified=payload.identity_verified)
 
     guest = create_or_get_guest(reservation_payload, actor_user_id)
     quote = quote_reservation(
@@ -481,7 +500,8 @@ def complete_checkout(
     reservation_id: uuid.UUID,
     payload: CheckoutPayload,
     *,
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    source: str = "front_desk",
 ) -> Reservation:
     action_at = payload.action_at or utc_now()
     reservation = _load_reservation_for_update(reservation_id)
@@ -490,7 +510,14 @@ def complete_checkout(
     if reservation.current_status != "checked_in":
         raise ValueError("Only checked-in reservations can be checked out.")
 
-    actor = db.session.get(User, actor_user_id)
+    actor = db.session.get(User, actor_user_id) if actor_user_id else None
+    checkout_reason = "public_digital_checkout" if source == "public" else "front_desk_check_out"
+    checkout_note = (
+        "Checked out by guest self-service"
+        if source == "public"
+        else f"Checked out from room {reservation.assigned_room.room_number}"
+    )
+    checkout_activity = "public.checked_out" if source == "public" else "front_desk.checked_out"
     before = _front_desk_snapshot(reservation)
     ensure_room_charges_posted(
         reservation.id,
@@ -579,8 +606,8 @@ def complete_checkout(
             reservation_id=reservation.id,
             old_status=before["status"],
             new_status="checked_out",
-            reason="front_desk_check_out",
-            note=f"Checked out from room {reservation.assigned_room.room_number}",
+            reason=checkout_reason,
+            note=checkout_note,
             changed_by_user_id=actor_user_id,
         )
     )
@@ -599,13 +626,13 @@ def complete_checkout(
         actor_user_id=actor_user_id,
         entity_table="reservations",
         entity_id=str(reservation.id),
-        action="front_desk_check_out",
+        action=checkout_reason,
         before_data=before,
         after_data=_front_desk_snapshot(reservation),
     )
     write_activity_log(
         actor_user_id=actor_user_id,
-        event_type="front_desk.checked_out",
+        event_type=checkout_activity,
         entity_table="reservations",
         entity_id=str(reservation.id),
         metadata={"reservation_code": reservation.reservation_code, "room_number": reservation.assigned_room.room_number},

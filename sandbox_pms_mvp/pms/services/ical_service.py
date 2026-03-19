@@ -60,10 +60,15 @@ def calendar_timezone() -> ZoneInfo:
 
 
 def list_calendar_feeds(*, scope_type: str | None = None) -> list[CalendarFeed]:
-    query = CalendarFeed.query.options(sa.orm.joinedload(CalendarFeed.room))
+    query = sa.select(CalendarFeed).options(sa.orm.joinedload(CalendarFeed.room))
     if scope_type:
-        query = query.filter(CalendarFeed.scope_type == scope_type)
-    return query.order_by(CalendarFeed.scope_type.asc(), CalendarFeed.name.asc()).all()
+        query = query.where(CalendarFeed.scope_type == scope_type)
+    return (
+        db.session.execute(query.order_by(CalendarFeed.scope_type.asc(), CalendarFeed.name.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
 
 
 def create_calendar_feed(
@@ -159,7 +164,16 @@ def resolve_calendar_feed_by_token(token: str) -> CalendarFeed | None:
     candidate = (token or "").strip()
     if not candidate:
         return None
-    feed = CalendarFeed.query.filter_by(token_hash=_token_hash(candidate), is_active=True).first()
+    feed = (
+        db.session.execute(
+            sa.select(CalendarFeed).where(
+                CalendarFeed.token_hash == _token_hash(candidate),
+                CalendarFeed.is_active.is_(True),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if feed:
         feed.last_accessed_at = utc_now()
         db.session.commit()
@@ -198,9 +212,14 @@ def export_feed_ical(token: str) -> tuple[CalendarFeed, bytes]:
 
 def list_external_calendar_sources() -> list[ExternalCalendarSource]:
     return (
-        ExternalCalendarSource.query.options(sa.orm.joinedload(ExternalCalendarSource.room))
-        .filter(ExternalCalendarSource.deleted_at.is_(None))
-        .order_by(ExternalCalendarSource.is_active.desc(), ExternalCalendarSource.name.asc())
+        db.session.execute(
+            sa.select(ExternalCalendarSource)
+            .options(sa.orm.joinedload(ExternalCalendarSource.room))
+            .where(ExternalCalendarSource.deleted_at.is_(None))
+            .order_by(ExternalCalendarSource.is_active.desc(), ExternalCalendarSource.name.asc())
+        )
+        .unique()
+        .scalars()
         .all()
     )
 
@@ -355,11 +374,15 @@ def sync_all_external_calendar_sources(*, actor_user_id: uuid.UUID | None) -> di
     totals = {"sources": 0, "success": 0, "conflict": 0, "failed": 0}
     source_ids = [
         item.id
-        for item in ExternalCalendarSource.query.filter(
-            ExternalCalendarSource.deleted_at.is_(None),
-            ExternalCalendarSource.is_active.is_(True),
+        for item in db.session.execute(
+            sa.select(ExternalCalendarSource)
+            .where(
+                ExternalCalendarSource.deleted_at.is_(None),
+                ExternalCalendarSource.is_active.is_(True),
+            )
+            .order_by(ExternalCalendarSource.created_at.asc())
         )
-        .order_by(ExternalCalendarSource.created_at.asc())
+        .scalars()
         .all()
     ]
     for source_id in source_ids:
@@ -393,16 +416,20 @@ def overlapping_external_blocks(
     limit: int | None = None,
     for_update: bool = False,
 ) -> list[ExternalCalendarBlock]:
-    query = ExternalCalendarBlock.query.filter(
-        ExternalCalendarBlock.room_id == room_id,
-        ExternalCalendarBlock.starts_on < end_date,
-        ExternalCalendarBlock.ends_on > start_date,
-    ).order_by(ExternalCalendarBlock.starts_on.asc(), ExternalCalendarBlock.external_uid.asc())
+    query = (
+        sa.select(ExternalCalendarBlock)
+        .where(
+            ExternalCalendarBlock.room_id == room_id,
+            ExternalCalendarBlock.starts_on < end_date,
+            ExternalCalendarBlock.ends_on > start_date,
+        )
+        .order_by(ExternalCalendarBlock.starts_on.asc(), ExternalCalendarBlock.external_uid.asc())
+    )
     if for_update:
         query = query.with_for_update()
     if limit:
         query = query.limit(limit)
-    return query.all()
+    return db.session.execute(query).scalars().all()
 
 
 def provider_calendar_context() -> dict[str, Any]:
@@ -412,19 +439,27 @@ def provider_calendar_context() -> dict[str, Any]:
     source_ids = [item.id for item in sources]
     conflict_counts = {
         source_id: count
-        for source_id, count in db.session.query(
-            ExternalCalendarBlock.source_id,
-            sa.func.count(ExternalCalendarBlock.id),
-        )
-        .filter(ExternalCalendarBlock.source_id.in_(source_ids), ExternalCalendarBlock.is_conflict.is_(True))
-        .group_by(ExternalCalendarBlock.source_id)
-        .all()
+        for source_id, count in db.session.execute(
+            sa.select(
+                ExternalCalendarBlock.source_id,
+                sa.func.count(ExternalCalendarBlock.id),
+            )
+            .where(
+                ExternalCalendarBlock.source_id.in_(source_ids),
+                ExternalCalendarBlock.is_conflict.is_(True),
+            )
+            .group_by(ExternalCalendarBlock.source_id)
+        ).all()
     } if source_ids else {}
     latest_runs = {}
     if source_ids:
         run_rows = (
-            ExternalCalendarSyncRun.query.filter(ExternalCalendarSyncRun.source_id.in_(source_ids))
-            .order_by(ExternalCalendarSyncRun.started_at.desc())
+            db.session.execute(
+                sa.select(ExternalCalendarSyncRun)
+                .where(ExternalCalendarSyncRun.source_id.in_(source_ids))
+                .order_by(ExternalCalendarSyncRun.started_at.desc())
+            )
+            .scalars()
             .all()
         )
         for run in run_rows:
@@ -442,18 +477,27 @@ def provider_calendar_context() -> dict[str, Any]:
         ],
         "rooms_without_feed": [
             room
-            for room in Room.query.filter_by(is_active=True).order_by(Room.room_number.asc()).all()
+            for room in db.session.execute(
+                sa.select(Room).where(Room.is_active.is_(True)).order_by(Room.room_number.asc())
+            )
+            .scalars()
+            .all()
             if room.id not in {feed.room_id for feed in room_feeds if feed.room_id}
         ],
         "recent_conflicts": [
             _serialize_conflict(item)
-            for item in ExternalCalendarBlock.query.options(
-                sa.orm.joinedload(ExternalCalendarBlock.room),
-                sa.orm.joinedload(ExternalCalendarBlock.conflict_reservation),
+            for item in db.session.execute(
+                sa.select(ExternalCalendarBlock)
+                .options(
+                    sa.orm.joinedload(ExternalCalendarBlock.room),
+                    sa.orm.joinedload(ExternalCalendarBlock.conflict_reservation),
+                )
+                .where(ExternalCalendarBlock.is_conflict.is_(True))
+                .order_by(ExternalCalendarBlock.last_seen_at.desc())
+                .limit(20)
             )
-            .filter(ExternalCalendarBlock.is_conflict.is_(True))
-            .order_by(ExternalCalendarBlock.last_seen_at.desc())
-            .limit(20)
+            .unique()
+            .scalars()
             .all()
         ],
     }
@@ -668,7 +712,11 @@ def _apply_sync_events(
 
     existing_rows = {
         item.external_uid: item
-        for item in ExternalCalendarBlock.query.filter_by(source_id=source.id).all()
+        for item in db.session.execute(
+            sa.select(ExternalCalendarBlock).where(ExternalCalendarBlock.source_id == source.id)
+        )
+        .scalars()
+        .all()
     }
 
     for event in events:
@@ -729,11 +777,16 @@ def _apply_sync_events(
 
 
 def _internal_feed_events(feed: CalendarFeed) -> list[Event]:
-    query = Reservation.query.options(sa.orm.joinedload(Reservation.assigned_room))
-    query = query.filter(Reservation.current_status.in_(tuple(ACTIVE_CALENDAR_RESERVATION_STATUSES)))
+    query = sa.select(Reservation).options(sa.orm.joinedload(Reservation.assigned_room))
+    query = query.where(Reservation.current_status.in_(tuple(ACTIVE_CALENDAR_RESERVATION_STATUSES)))
     if feed.scope_type == "room":
-        query = query.filter(Reservation.assigned_room_id == feed.room_id)
-    reservations = query.order_by(Reservation.check_in_date.asc(), Reservation.reservation_code.asc()).all()
+        query = query.where(Reservation.assigned_room_id == feed.room_id)
+    reservations = (
+        db.session.execute(query.order_by(Reservation.check_in_date.asc(), Reservation.reservation_code.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
     host = _calendar_uid_host()
     events: list[Event] = []
     for reservation in reservations:
@@ -754,16 +807,21 @@ def _internal_feed_events(feed: CalendarFeed) -> list[Event]:
 
 
 def _external_block_feed_events(feed: CalendarFeed) -> list[Event]:
-    query = ExternalCalendarBlock.query.options(sa.orm.joinedload(ExternalCalendarBlock.room))
+    query = sa.select(ExternalCalendarBlock).options(sa.orm.joinedload(ExternalCalendarBlock.room))
     if feed.scope_type == "room":
-        query = query.filter(ExternalCalendarBlock.room_id == feed.room_id)
-    query = query.filter(
+        query = query.where(ExternalCalendarBlock.room_id == feed.room_id)
+    query = query.where(
         sa.or_(
             ExternalCalendarBlock.is_conflict.is_(False),
             ExternalCalendarBlock.conflict_reservation_id.is_(None),
         )
     )
-    blocks = query.order_by(ExternalCalendarBlock.starts_on.asc(), ExternalCalendarBlock.external_uid.asc()).all()
+    blocks = (
+        db.session.execute(query.order_by(ExternalCalendarBlock.starts_on.asc(), ExternalCalendarBlock.external_uid.asc()))
+        .unique()
+        .scalars()
+        .all()
+    )
     host = _calendar_uid_host()
     events: list[Event] = []
     for block in blocks:
@@ -1024,13 +1082,16 @@ def _component_timezone_issue(component) -> str | None:
 
 def _conflicting_internal_reservation(room_id: uuid.UUID, starts_on: date, ends_on: date) -> Reservation | None:
     return (
-        Reservation.query.filter(
-            Reservation.assigned_room_id == room_id,
-            Reservation.current_status.in_(tuple(ACTIVE_CALENDAR_RESERVATION_STATUSES)),
-            Reservation.check_in_date < ends_on,
-            Reservation.check_out_date > starts_on,
+        db.session.execute(
+            sa.select(Reservation).where(
+                Reservation.assigned_room_id == room_id,
+                Reservation.current_status.in_(tuple(ACTIVE_CALENDAR_RESERVATION_STATUSES)),
+                Reservation.check_in_date < ends_on,
+                Reservation.check_out_date > starts_on,
+            )
+            .order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc())
         )
-        .order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc())
+        .scalars()
         .first()
     )
 
@@ -1045,12 +1106,16 @@ def _validate_scope(scope_type: str, room_id: uuid.UUID | None) -> None:
 
 
 def _find_existing_feed(*, scope_type: str, room_id: uuid.UUID | None) -> CalendarFeed | None:
-    query = CalendarFeed.query.filter_by(scope_type=scope_type)
+    query = sa.select(CalendarFeed).where(CalendarFeed.scope_type == scope_type)
     if scope_type == "property":
-        query = query.filter(CalendarFeed.room_id.is_(None))
+        query = query.where(CalendarFeed.room_id.is_(None))
     else:
-        query = query.filter(CalendarFeed.room_id == room_id)
-    return query.order_by(CalendarFeed.created_at.desc()).first()
+        query = query.where(CalendarFeed.room_id == room_id)
+    return (
+        db.session.execute(query.order_by(CalendarFeed.created_at.desc()))
+        .scalars()
+        .first()
+    )
 
 
 def _default_feed_name(scope_type: str, room: Room | None) -> str:

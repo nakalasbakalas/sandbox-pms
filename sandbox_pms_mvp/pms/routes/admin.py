@@ -6,6 +6,7 @@ import logging
 from datetime import date
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from ..branding import branding_settings_context, clean_branding_form
@@ -106,7 +107,13 @@ admin_bp = Blueprint("admin", __name__)
 
 def _permission_groups() -> dict[str, list[Permission]]:
     grouped: dict[str, list[Permission]] = {}
-    permissions = Permission.query.order_by(Permission.module.asc(), Permission.code.asc()).all()
+    permissions = (
+        db.session.execute(
+            sa.select(Permission).order_by(Permission.module.asc(), Permission.code.asc())
+        )
+        .scalars()
+        .all()
+    )
     for permission in permissions:
         grouped.setdefault(permission.module, []).append(permission)
     return grouped
@@ -147,7 +154,13 @@ def _housekeeping_defaults_context() -> dict[str, object]:
 
 
 def _policy_documents_context() -> dict[str, PolicyDocument | None]:
-    documents = PolicyDocument.query.filter(PolicyDocument.deleted_at.is_(None)).all()
+    documents = (
+        db.session.execute(
+            sa.select(PolicyDocument).where(PolicyDocument.deleted_at.is_(None))
+        )
+        .scalars()
+        .all()
+    )
     return {item.code: item for item in documents}
 
 
@@ -159,13 +172,23 @@ def staff_admin_dashboard():
     return render_template(
         "admin.html",
         active_section="dashboard",
-        room_type_count=RoomType.query.count(),
-        room_count=Room.query.count(),
-        active_override_count=InventoryOverride.query.filter_by(is_active=True).count(),
-        active_blackout_count=BlackoutPeriod.query.filter_by(is_active=True).count(),
-        policy_count=PolicyDocument.query.filter(PolicyDocument.deleted_at.is_(None)).count(),
-        template_count=NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None)).count(),
-        user_count=User.query.filter(User.deleted_at.is_(None)).count(),
+        room_type_count=db.session.execute(sa.select(sa.func.count()).select_from(RoomType)).scalar_one(),
+        room_count=db.session.execute(sa.select(sa.func.count()).select_from(Room)).scalar_one(),
+        active_override_count=db.session.execute(
+            sa.select(sa.func.count()).select_from(InventoryOverride).where(InventoryOverride.is_active.is_(True))
+        ).scalar_one(),
+        active_blackout_count=db.session.execute(
+            sa.select(sa.func.count()).select_from(BlackoutPeriod).where(BlackoutPeriod.is_active.is_(True))
+        ).scalar_one(),
+        policy_count=db.session.execute(
+            sa.select(sa.func.count()).select_from(PolicyDocument).where(PolicyDocument.deleted_at.is_(None))
+        ).scalar_one(),
+        template_count=db.session.execute(
+            sa.select(sa.func.count()).select_from(NotificationTemplate).where(NotificationTemplate.deleted_at.is_(None))
+        ).scalar_one(),
+        user_count=db.session.execute(
+            sa.select(sa.func.count()).select_from(User).where(User.deleted_at.is_(None))
+        ).scalar_one(),
         recent_audit=query_audit_entries(limit=12),
     )
 
@@ -220,9 +243,33 @@ def staff_users():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_users"))
 
-    users = User.query.filter(User.deleted_at.is_(None)).order_by(User.full_name.asc()).all()
-    roles = Role.query.order_by(Role.sort_order.asc()).all()
-    recent_activity = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(20).all()
+    users = (
+        db.session.execute(
+            sa.select(User)
+            .where(User.deleted_at.is_(None))
+            .order_by(User.full_name.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    roles = (
+        db.session.execute(
+            sa.select(Role).order_by(Role.sort_order.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    recent_activity = (
+        db.session.execute(
+            sa.select(ActivityLog)
+            .order_by(ActivityLog.created_at.desc())
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
     return render_template(
         "admin_staff_access.html",
         active_section="staff_access",
@@ -245,7 +292,12 @@ def staff_settings():
             if action == "legacy_setting":
                 actor = require_permission("settings.edit")
                 key = request.form.get("key", "")
-                setting = AppSetting.query.filter_by(key=key, deleted_at=None).first()
+                setting = db.session.execute(
+                    sa.select(AppSetting).where(
+                        AppSetting.key == key,
+                        AppSetting.deleted_at.is_(None),
+                    )
+                ).scalar_one_or_none()
                 if not setting:
                     abort(404)
                 upsert_setting(
@@ -343,8 +395,16 @@ def staff_settings():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_settings"))
 
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
-    rooms = Room.query.join(RoomType).order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room)
+            .join(RoomType)
+            .order_by(Room.floor_number.asc(), Room.room_number.asc())
+        )
+        .scalars()
+        .all()
+    )
     return render_template(
         "admin_property.html",
         active_section="property",
@@ -439,21 +499,41 @@ def staff_rates():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_rates"))
 
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
-    rooms = Room.query.order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room).order_by(Room.floor_number.asc(), Room.room_number.asc())
+        )
+        .scalars()
+        .all()
+    )
     rate_rules = (
-        RateRule.query.filter(RateRule.deleted_at.is_(None))
-        .order_by(RateRule.priority.asc(), RateRule.name.asc())
+        db.session.execute(
+            sa.select(RateRule)
+            .where(RateRule.deleted_at.is_(None))
+            .order_by(RateRule.priority.asc(), RateRule.name.asc())
+        )
+        .scalars()
         .all()
     )
     overrides = (
-        InventoryOverride.query.order_by(
-            InventoryOverride.is_active.desc(),
-            InventoryOverride.start_date.asc(),
-            InventoryOverride.created_at.desc(),
-        ).all()
+        db.session.execute(
+            sa.select(InventoryOverride).order_by(
+                InventoryOverride.is_active.desc(),
+                InventoryOverride.start_date.asc(),
+                InventoryOverride.created_at.desc(),
+            )
+        )
+        .scalars()
+        .all()
     )
-    blackouts = BlackoutPeriod.query.order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc()).all()
+    blackouts = (
+        db.session.execute(
+            sa.select(BlackoutPeriod).order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc())
+        )
+        .scalars()
+        .all()
+    )
     return render_template(
         "admin_rates_inventory.html",
         active_section="rates_inventory",
@@ -548,8 +628,16 @@ def staff_admin_operations():
 
     documents_by_code = _policy_documents_context()
     templates = (
-        NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None))
-        .order_by(NotificationTemplate.template_key.asc(), NotificationTemplate.channel.asc(), NotificationTemplate.language_code.asc())
+        db.session.execute(
+            sa.select(NotificationTemplate)
+            .where(NotificationTemplate.deleted_at.is_(None))
+            .order_by(
+                NotificationTemplate.template_key.asc(),
+                NotificationTemplate.channel.asc(),
+                NotificationTemplate.language_code.asc(),
+            )
+        )
+        .scalars()
         .all()
     )
     if template_preview is None:
@@ -660,7 +748,15 @@ def staff_admin_payments():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_admin_payments"))
 
-    recent_requests = PaymentRequest.query.order_by(PaymentRequest.created_at.desc()).limit(20).all()
+    recent_requests = (
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .order_by(PaymentRequest.created_at.desc())
+            .limit(20)
+        )
+        .scalars()
+        .all()
+    )
     return render_template(
         "admin_payments.html",
         active_section="payments",

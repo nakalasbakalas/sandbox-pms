@@ -382,11 +382,50 @@ PUBLIC_NON_CACHEABLE_ENDPOINTS = {
     "public_payment_start",
     "public.booking_confirmation",
     "public.booking_cancel_request",
+    "public.public_digital_checkout",
+    "public.public_digital_checkout_complete",
+    "public.public_digital_checkout_pay_balance",
     "public.booking_modify_request",
     "public.public_payment_return",
     "public.public_payment_start",
 }
 PUBLIC_WEBHOOK_ENDPOINTS = {"payment_webhook", "public.payment_webhook"}
+
+
+def _load_sentry_sdk():
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    except ImportError:
+        return None, []
+    return sentry_sdk, [FlaskIntegration(), SqlalchemyIntegration()]
+
+
+def _sentry_before_send(event, hint):  # noqa: ARG001
+    request_id = current_request_id()
+    if request_id:
+        event.setdefault("tags", {})["request_id"] = request_id
+    return event
+
+
+def configure_error_monitoring(app: Flask) -> None:
+    dsn = str(app.config.get("SENTRY_DSN") or "").strip()
+    if not dsn:
+        return
+    sentry_sdk, integrations = _load_sentry_sdk()
+    if sentry_sdk is None:
+        app.logger.warning("SENTRY_DSN is set but sentry-sdk is not installed; skipping Sentry initialization.")
+        return
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=str(app.config.get("SENTRY_ENVIRONMENT") or app.config.get("APP_ENV") or "development"),
+        release=str(app.config.get("SENTRY_RELEASE") or "") or None,
+        traces_sample_rate=float(app.config.get("SENTRY_TRACES_SAMPLE_RATE") or 0.0),
+        integrations=integrations,
+        send_default_pii=False,
+        before_send=_sentry_before_send,
+    )
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -398,6 +437,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     configure_app_security(app)
     db.init_app(app)
     migrate.init_app(app, db)
+    configure_error_monitoring(app)
 
     register_template_helpers(app)
     register_url_topology_hooks(app)
@@ -745,7 +785,8 @@ def register_cli(app: Flask) -> None:
         result = process_pending_automations()
         print(
             f"Automation events processed: {result['processed']} sent, "
-            f"{result['skipped']} skipped, {result['errors']} errors."
+            f"{result['skipped']} skipped, {result['errors']} errors, "
+            f"{result.get('cleaned_up', 0)} cleaned up."
         )
 
     @app.cli.command("process-waitlist")
@@ -778,7 +819,10 @@ def register_cli(app: Flask) -> None:
 def register_routes(app: Flask) -> None:
     @app.route("/")
     def index():
-        return render_template("index.html", room_types=RoomType.query.order_by(RoomType.code.asc()).all())
+        return render_template(
+            "index.html",
+            room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
+        )
 
     @app.route("/health")
     def health():
@@ -861,10 +905,29 @@ def register_routes(app: Flask) -> None:
         user = require_permission("reservation.view")
         today = date.today()
         queue_entries = (
-            ReservationReviewQueue.query.order_by(ReservationReviewQueue.created_at.desc()).limit(10).all()
+            db.session.execute(
+                sa.select(ReservationReviewQueue)
+                .order_by(ReservationReviewQueue.created_at.desc())
+                .limit(10)
+            )
+            .scalars()
+            .all()
         )
-        notifications = StaffNotification.query.filter_by(status="new").order_by(StaffNotification.created_at.desc()).limit(10).all()
-        pending_emails = EmailOutbox.query.filter(EmailOutbox.status.in_(["pending", "failed"])).count()
+        notifications = (
+            db.session.execute(
+                sa.select(StaffNotification)
+                .where(StaffNotification.status == "new")
+                .order_by(StaffNotification.created_at.desc())
+                .limit(10)
+            )
+            .scalars()
+            .all()
+        )
+        pending_emails = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(EmailOutbox)
+            .where(EmailOutbox.status.in_(["pending", "failed"]))
+        ).scalar_one()
         dashboard = build_front_desk_dashboard(
             business_date=today,
             include_housekeeping=user.has_permission("housekeeping.view"),
@@ -907,14 +970,14 @@ def register_routes(app: Flask) -> None:
 def resolve_public_room_type_query() -> RoomType | None:
     room_type_code = (request.args.get("room_type") or "").strip()
     if room_type_code:
-        room_type = (
-            RoomType.query.filter(
+        room_type = db.session.execute(
+            sa.select(RoomType)
+            .where(
                 sa.func.lower(RoomType.code) == room_type_code.lower(),
                 RoomType.is_active.is_(True),
             )
             .order_by(RoomType.code.asc())
-            .first()
-        )
+        ).scalars().first()
         if not room_type:
             abort(400, description="Invalid room_type query parameter.")
         return room_type
@@ -982,7 +1045,7 @@ def build_public_booking_entry_context() -> dict[str, object]:
             "language": language,
         },
         "error": error,
-        "room_types": RoomType.query.order_by(RoomType.code.asc()).all(),
+        "room_types": db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         "booking_nonce": ensure_booking_nonce(),
     }
 

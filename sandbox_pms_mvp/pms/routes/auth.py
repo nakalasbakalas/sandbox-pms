@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, session, url_for
 
 from ..activity import write_activity_log
@@ -170,8 +171,12 @@ def staff_security():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
     sessions = (
-        UserSession.query.filter_by(user_id=user.id)
-        .order_by(UserSession.created_at.desc())
+        db.session.execute(
+            sa.select(UserSession)
+            .where(UserSession.user_id == user.id)
+            .order_by(UserSession.created_at.desc())
+        )
+        .scalars()
         .all()
     )
     return render_template(

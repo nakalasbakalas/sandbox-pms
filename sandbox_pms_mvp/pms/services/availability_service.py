@@ -101,25 +101,41 @@ def query_room_type_availability(
     rt_filter = [RoomType.is_active.is_(True)]
     if room_type_id:
         rt_filter.append(RoomType.id == room_type_id)
-    room_types = RoomType.query.filter(*rt_filter).order_by(RoomType.name.asc()).all()
+    room_types = (
+        db.session.execute(sa.select(RoomType).where(*rt_filter).order_by(RoomType.name.asc()))
+        .scalars()
+        .all()
+    )
 
     # Pre-fetch blackout dates that block booking
     blackout_dates = _blackout_dates(check_in, check_out)
 
     results: list[RoomTypeAvailability] = []
     for rt in room_types:
-        rooms = Room.query.filter_by(
-            room_type_id=rt.id, is_active=True, is_sellable=True,
-        ).all()
+        rooms = (
+            db.session.execute(
+                sa.select(Room).where(
+                    Room.room_type_id == rt.id,
+                    Room.is_active.is_(True),
+                    Room.is_sellable.is_(True),
+                )
+            )
+            .scalars()
+            .all()
+        )
         total_rooms = len(rooms)
         room_ids = [r.id for r in rooms]
 
         # Fetch inventory rows for all rooms of this type
         inv_rows = (
-            InventoryDay.query.filter(
-                InventoryDay.room_id.in_(room_ids),
-                InventoryDay.business_date.in_(nights),
-            ).all()
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id.in_(room_ids),
+                    InventoryDay.business_date.in_(nights),
+                )
+            )
+            .scalars()
+            .all()
             if room_ids
             else []
         )
@@ -226,10 +242,16 @@ def can_move_reservation(
         )
 
     # Check inventory
-    rows = InventoryDay.query.filter(
-        InventoryDay.room_id == room.id,
-        InventoryDay.business_date.in_(nights),
-    ).all()
+    rows = (
+        db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == room.id,
+                InventoryDay.business_date.in_(nights),
+            )
+        )
+        .scalars()
+        .all()
+    )
     if len(rows) != len(nights):
         return RoomAssignability(
             room_id=target_room_id, room_number=room.room_number,
@@ -258,9 +280,19 @@ def list_assignable_rooms(
     exclude_reservation_id: uuid.UUID | None = None,
 ) -> list[RoomAssignability]:
     """Return all rooms of *room_type_id* that are assignable for the dates."""
-    rooms = Room.query.filter_by(
-        room_type_id=room_type_id, is_active=True, is_sellable=True,
-    ).order_by(Room.room_number.asc()).all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room)
+            .where(
+                Room.room_type_id == room_type_id,
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+            )
+            .order_by(Room.room_number.asc())
+        )
+        .scalars()
+        .all()
+    )
     nights = list(_stay_dates(check_in, check_out))
     result: list[RoomAssignability] = []
     for room in rooms:
@@ -270,10 +302,16 @@ def list_assignable_rooms(
                 is_assignable=False, blocking_reason="External calendar block.",
             ))
             continue
-        rows = InventoryDay.query.filter(
-            InventoryDay.room_id == room.id,
-            InventoryDay.business_date.in_(nights),
-        ).all()
+        rows = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == room.id,
+                    InventoryDay.business_date.in_(nights),
+                )
+            )
+            .scalars()
+            .all()
+        )
         if len(rows) != len(nights):
             result.append(RoomAssignability(
                 room_id=room.id, room_number=room.room_number,
@@ -355,12 +393,18 @@ def _row_is_available(row: InventoryDay) -> bool:
 
 def _blackout_dates(check_in: date, check_out: date) -> set[date]:
     """Return set of dates blocked by active blackout periods."""
-    blackouts = BlackoutPeriod.query.filter(
-        BlackoutPeriod.is_active.is_(True),
-        BlackoutPeriod.start_date < check_out,
-        BlackoutPeriod.end_date > check_in,
-        BlackoutPeriod.blackout_type.in_(["closed_to_booking", "property_closed"]),
-    ).all()
+    blackouts = (
+        db.session.execute(
+            sa.select(BlackoutPeriod).where(
+                BlackoutPeriod.is_active.is_(True),
+                BlackoutPeriod.start_date < check_out,
+                BlackoutPeriod.end_date > check_in,
+                BlackoutPeriod.blackout_type.in_(["closed_to_booking", "property_closed"]),
+            )
+        )
+        .scalars()
+        .all()
+    )
     blocked: set[date] = set()
     for bp in blackouts:
         cursor = max(bp.start_date, check_in)
@@ -376,11 +420,17 @@ def _external_blocked_room_dates(
 ) -> set[tuple[uuid.UUID, date]]:
     if not room_ids:
         return set()
-    blocks = ExternalCalendarBlock.query.filter(
-        ExternalCalendarBlock.room_id.in_(room_ids),
-        ExternalCalendarBlock.starts_on < check_out,
-        ExternalCalendarBlock.ends_on > check_in,
-    ).all()
+    blocks = (
+        db.session.execute(
+            sa.select(ExternalCalendarBlock).where(
+                ExternalCalendarBlock.room_id.in_(room_ids),
+                ExternalCalendarBlock.starts_on < check_out,
+                ExternalCalendarBlock.ends_on > check_in,
+            )
+        )
+        .scalars()
+        .all()
+    )
     result: set[tuple[uuid.UUID, date]] = set()
     for block in blocks:
         cursor = max(block.starts_on, check_in)
@@ -396,22 +446,28 @@ def _override_closed_room_dates(
     check_in: date, check_out: date,
 ) -> set[tuple[uuid.UUID, date]]:
     """Return (room_id, date) pairs closed by inventory overrides."""
-    overrides = InventoryOverride.query.filter(
-        InventoryOverride.is_active.is_(True),
-        InventoryOverride.override_action == "close",
-        InventoryOverride.start_date < check_out,
-        InventoryOverride.end_date > check_in,
-        sa.or_(
-            sa.and_(
-                InventoryOverride.scope_type == "room",
-                InventoryOverride.room_id.in_(room_ids),
-            ),
-            sa.and_(
-                InventoryOverride.scope_type == "room_type",
-                InventoryOverride.room_type_id == room_type_id,
-            ),
-        ),
-    ).all()
+    overrides = (
+        db.session.execute(
+            sa.select(InventoryOverride).where(
+                InventoryOverride.is_active.is_(True),
+                InventoryOverride.override_action == "close",
+                InventoryOverride.start_date < check_out,
+                InventoryOverride.end_date > check_in,
+                sa.or_(
+                    sa.and_(
+                        InventoryOverride.scope_type == "room",
+                        InventoryOverride.room_id.in_(room_ids),
+                    ),
+                    sa.and_(
+                        InventoryOverride.scope_type == "room_type",
+                        InventoryOverride.room_type_id == room_type_id,
+                    ),
+                ),
+            )
+        )
+        .scalars()
+        .all()
+    )
     result: set[tuple[uuid.UUID, date]] = set()
     for ov in overrides:
         cursor = max(ov.start_date, check_in)
@@ -427,10 +483,14 @@ def _override_closed_room_dates(
 def _room_has_external_block(
     room_id: uuid.UUID, check_in: date, check_out: date,
 ) -> bool:
-    return db.session.query(
-        ExternalCalendarBlock.query.filter(
-            ExternalCalendarBlock.room_id == room_id,
-            ExternalCalendarBlock.starts_on < check_out,
-            ExternalCalendarBlock.ends_on > check_in,
-        ).exists()
-    ).scalar()
+    return bool(
+        db.session.execute(
+            sa.select(
+                sa.exists().where(
+                    ExternalCalendarBlock.room_id == room_id,
+                    ExternalCalendarBlock.starts_on < check_out,
+                    ExternalCalendarBlock.ends_on > check_in,
+                )
+            )
+        ).scalar_one()
+    )

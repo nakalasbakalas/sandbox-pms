@@ -6,6 +6,7 @@ import csv
 import io
 from datetime import date
 
+import sqlalchemy as sa
 from flask import Blueprint, Response, abort, render_template, request
 
 from ..extensions import db
@@ -29,7 +30,9 @@ DAILY_REPORT_TYPES = {
     "departures": ("reservation.view", "Departures Report"),
     "room_status": ("housekeeping.view", "Room Status Report"),
     "payment_due": ("folio.view", "Payment Due Report"),
+    "housekeeping_performance": ("reports.view", "Housekeeping Performance Report"),
     "occupancy": ("reports.view", "Occupancy Report"),
+    "channel_performance": ("reports.view", "Channel Performance Report"),
     "booking_source": ("reports.view", "Booking Source Report"),
     "no_show_cancellation": ("reports.view", "No-show & Cancellation Report"),
 }
@@ -149,16 +152,29 @@ def staff_audit():
         date_to=date_to,
         limit=200,
     )
-    users = User.query.filter(User.deleted_at.is_(None)).order_by(User.full_name.asc()).all()
+    users = (
+        db.session.execute(
+            sa.select(User)
+            .where(User.deleted_at.is_(None))
+            .order_by(User.full_name.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
     entity_tables = sorted(
-        item[0]
-        for item in AuditLog.query.with_entities(AuditLog.entity_table).distinct().all()
-        if item[0]
+        item
+        for item in db.session.execute(
+            sa.select(AuditLog.entity_table).distinct()
+        ).scalars().all()
+        if item
     )
     action_codes = sorted(
-        item[0]
-        for item in AuditLog.query.with_entities(AuditLog.action).distinct().all()
-        if item[0]
+        item
+        for item in db.session.execute(
+            sa.select(AuditLog.action).distinct()
+        ).scalars().all()
+        if item
     )
     return render_template(
         "admin_audit.html",

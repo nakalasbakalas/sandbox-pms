@@ -202,13 +202,13 @@ class ICalChannelProvider(ChannelProvider):
         Converts ``ExternalCalendarBlock`` records to ``InboundReservation``
         DTOs so the caller has a unified format.
         """
-        query = ExternalCalendarBlock.query.filter(
+        query = sa.select(ExternalCalendarBlock).where(
             ExternalCalendarBlock.is_conflict.is_(False),
         )
         if since:
-            query = query.filter(ExternalCalendarBlock.last_seen_at >= since)
+            query = query.where(ExternalCalendarBlock.last_seen_at >= since)
 
-        blocks = query.all()
+        blocks = db.session.execute(query).scalars().all()
         results: list[InboundReservation] = []
         for block in blocks:
             source = db.session.get(ExternalCalendarSource, block.source_id)

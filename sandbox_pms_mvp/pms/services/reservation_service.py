@@ -248,7 +248,12 @@ def validate_occupancy(room_type: RoomType, adults: int, children: int) -> None:
 
 
 def create_or_get_guest(payload: ReservationCreatePayload, actor_user_id: uuid.UUID | None) -> Guest:
-    guest = Guest.query.filter_by(phone=payload.phone, deleted_at=None).first()
+    guest = db.session.execute(
+        sa.select(Guest).where(
+            Guest.phone == payload.phone,
+            Guest.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     full_name = f"{payload.first_name.strip()} {payload.last_name.strip()}".strip()
     if guest:
         guest.first_name = payload.first_name.strip()
@@ -278,16 +283,25 @@ def choose_available_room(
     check_out_date: date,
     assigned_room_id: uuid.UUID | None,
 ) -> Room:
-    candidates = Room.query.filter_by(
-        room_type_id=room_type_id, is_active=True, is_sellable=True
-    ).order_by(Room.room_number.asc())
     if assigned_room_id:
         room = db.session.get(Room, assigned_room_id)
         if not room or room.room_type_id != room_type_id:
             raise ValueError("Assigned room does not match room type.")
         candidates = [room]
     else:
-        candidates = candidates.all()
+        candidates = (
+            db.session.execute(
+                sa.select(Room)
+                .where(
+                    Room.room_type_id == room_type_id,
+                    Room.is_active.is_(True),
+                    Room.is_sellable.is_(True),
+                )
+                .order_by(Room.room_number.asc())
+            )
+            .scalars()
+            .all()
+        )
     nights = list(_stay_dates(check_in_date, check_out_date))
     for room in candidates:
         if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
@@ -361,13 +375,22 @@ def release_inventory(reservation: Reservation, actor_user_id: uuid.UUID | None)
 
 
 def next_reservation_code() -> str:
-    prefix_setting = AppSetting.query.filter_by(key="reservation.code_prefix", deleted_at=None).first()
+    prefix_setting = db.session.execute(
+        sa.select(AppSetting).where(
+            AppSetting.key == "reservation.code_prefix",
+            AppSetting.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     prefix = prefix_setting.value_json.get("value", "SBX") if prefix_setting else "SBX"
     bind = db.session.get_bind()
     if bind.dialect.name == "postgresql":
         next_value = db.session.execute(sa.text("SELECT nextval('reservation_code_seq')")).scalar_one()
     else:
-        sequence = ReservationCodeSequence.query.filter_by(sequence_name="reservation_code").with_for_update().first()
+        sequence = db.session.execute(
+            sa.select(ReservationCodeSequence)
+            .where(ReservationCodeSequence.sequence_name == "reservation_code")
+            .with_for_update()
+        ).scalar_one_or_none()
         if not sequence:
             sequence = ReservationCodeSequence(sequence_name="reservation_code", next_value=1)
             db.session.add(sequence)

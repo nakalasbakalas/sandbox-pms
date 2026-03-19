@@ -852,6 +852,75 @@ def test_board_closure_create_and_release_actions_round_trip(app_factory):
         assert refreshed.is_active is False
 
 
+def test_board_group_room_block_create_and_release_actions_round_trip(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today() + timedelta(days=12)
+        end_date = start_date + timedelta(days=2)
+        room_type = RoomType.query.filter_by(code="DBL").one()
+        room_one = find_open_room(room_type_id=room_type.id, start_date=start_date, end_date=end_date + timedelta(days=1))
+        room_two = find_open_room(
+            room_type_id=room_type.id,
+            start_date=start_date,
+            end_date=end_date + timedelta(days=1),
+            exclude_room_ids={room_one.id},
+        )
+        manager = make_staff_user("manager", "board-group-blocks@example.com")
+
+    login_as(client, manager)
+    create_response = post_form(
+        client,
+        "/staff/front-desk/board/group-blocks",
+        data={
+            "group_code": "GRP-APRIL",
+            "room_type_id": str(room_type.id),
+            "room_count": "2",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "reason": "Wedding allotment",
+            "back_url": f"/staff/front-desk/board?start_date={start_date.isoformat()}&show_closed=1",
+            "return_anchor": "board-top",
+        },
+    )
+
+    assert create_response.status_code == 302
+    assert create_response.headers["Location"].endswith(f"show_closed=1#board-top")
+
+    with app.app_context():
+        overrides = InventoryOverride.query.filter_by(name="Group GRP-APRIL", is_active=True).all()
+        assert len(overrides) == 2
+        assert {override.room_id for override in overrides} == {room_one.id, room_two.id}
+        rows = (
+            InventoryDay.query.filter(
+                InventoryDay.room_id.in_([room_one.id, room_two.id]),
+                InventoryDay.business_date >= start_date,
+                InventoryDay.business_date <= end_date,
+            )
+            .all()
+        )
+        assert rows
+        assert all(row.availability_status == "out_of_service" for row in rows)
+
+    release_response = post_form(
+        client,
+        "/staff/front-desk/board/group-blocks/release",
+        data={
+            "group_code": "GRP-APRIL",
+            "back_url": f"/staff/front-desk/board?start_date={start_date.isoformat()}&show_closed=1",
+            "return_anchor": "board-top",
+        },
+    )
+
+    assert release_response.status_code == 302
+    assert release_response.headers["Location"].endswith(f"show_closed=1#board-top")
+
+    with app.app_context():
+        refreshed = InventoryOverride.query.filter_by(name="Group GRP-APRIL").all()
+        assert refreshed
+        assert all(override.is_active is False for override in refreshed)
+
+
 def test_front_desk_board_move_json_requires_edit_permission(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()

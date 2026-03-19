@@ -155,6 +155,15 @@
       <div><small>Average in range</small><strong>{{ '%.2f'|format(dashboard.occupancy_range.average_occupancy_percentage) }}%</strong></div>
       <div><small>Peak in range</small><strong>{{ '%.2f'|format(dashboard.occupancy_range.peak_occupancy_percentage) }}%</strong></div>
     </div>
+    <div class="metric-strip">
+      <div><small>Previous year avg</small><strong>{% if dashboard.occupancy_year_over_year.has_previous_data %}{{ '%.2f'|format(dashboard.occupancy_year_over_year.previous_average_occupancy_percentage) }}%{% else %}n/a{% endif %}</strong></div>
+      <div><small>YoY delta</small><strong>{% if dashboard.occupancy_year_over_year.average_delta_percentage_points is not none %}{{ '%+.2f'|format(dashboard.occupancy_year_over_year.average_delta_percentage_points) }} pts{% else %}n/a{% endif %}</strong></div>
+      <div><small>Previous peak</small><strong>{% if dashboard.occupancy_year_over_year.previous_peak_occupancy_percentage is not none %}{{ '%.2f'|format(dashboard.occupancy_year_over_year.previous_peak_occupancy_percentage) }}%{% else %}n/a{% endif %}</strong></div>
+      <div><small>Previous window</small><strong>{{ dashboard.occupancy_year_over_year.previous_date_from.strftime('%d %b %Y') }} - {{ dashboard.occupancy_year_over_year.previous_date_to.strftime('%d %b %Y') }}</strong></div>
+    </div>
+    {% if not dashboard.occupancy_year_over_year.has_previous_data %}
+      <p class="small muted">Year-over-year comparison appears once historical inventory exists for the same dates last year.</p>
+    {% endif %}
     <div class="table-wrap">
       <table class="compact-table">
         <thead>
@@ -271,6 +280,61 @@
   </section>
 {% endif %}
 
+<section class="card inset">
+  <div class="card-head">
+    <div>
+      <h2>Housekeeping performance</h2>
+      <p>{{ dashboard.definitions.housekeeping_performance }}</p>
+    </div>
+    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='housekeeping_performance', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open housekeeping report</a>
+  </div>
+  <div class="metric-strip">
+    <div><small>Tasks</small><strong>{{ dashboard.housekeeping_performance.task_count }}</strong></div>
+    <div><small>Completed</small><strong>{{ dashboard.housekeeping_performance.completed_count }}</strong></div>
+    <div><small>Inspected</small><strong>{{ dashboard.housekeeping_performance.inspected_count }}</strong></div>
+    <div><small>Avg completion</small><strong>{% if dashboard.housekeeping_performance.average_completion_minutes is not none %}{{ '%.1f'|format(dashboard.housekeeping_performance.average_completion_minutes) }} min{% else %}n/a{% endif %}</strong></div>
+  </div>
+  {% if not dashboard.housekeeping_performance.has_explicit_shifts %}
+    <p class="small muted">Roster shift codes are not stored yet, so rows are grouped by business date and assigned attendant with raw timestamps preserved for reconciliation.</p>
+  {% endif %}
+  {% if dashboard.housekeeping_performance["items"] %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Attendant</th>
+            <th>Tasks</th>
+            <th>Completed</th>
+            <th>Inspected</th>
+            <th>Active</th>
+            <th>Rooms</th>
+            <th>Avg min</th>
+            <th>Last completion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.housekeeping_performance["items"] %}
+            <tr>
+              <td>{{ item.business_date.strftime('%d %b %Y') }}</td>
+              <td>{{ item.attendant_name }}{% if item.attendant_email %}<div class="small muted">{{ item.attendant_email }}</div>{% endif %}</td>
+              <td>{{ item.task_count }}</td>
+              <td>{{ item.completed_count }}</td>
+              <td>{{ item.inspected_count }}</td>
+              <td>{{ item.active_count }}</td>
+              <td>{{ item.room_count }}</td>
+              <td>{% if item.average_completion_minutes is not none %}{{ '%.1f'|format(item.average_completion_minutes) }}{% else %}-{% endif %}</td>
+              <td>{{ item.last_completed_at.strftime('%d %b %H:%M') if item.last_completed_at else '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No housekeeping task performance data inside the selected range.</p>
+  {% endif %}
+</section>
+
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
@@ -360,6 +424,61 @@
       <p class="empty-state">No confirmed reservations inside the selected range.</p>
     {% endif %}
   </article>
+</section>
+
+<section class="card inset">
+  <div class="card-head">
+    <div>
+      <h2>Channel performance</h2>
+      <p>{{ dashboard.definitions.channel_performance }}</p>
+    </div>
+    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='channel_performance', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open channel report</a>
+  </div>
+  <div class="metric-strip">
+    <div><small>Channels</small><strong>{{ dashboard.channel_performance.channel_count }}</strong></div>
+    <div><small>Reservations</small><strong>{{ dashboard.channel_performance.reservation_count }}</strong></div>
+    <div><small>Room revenue</small><strong>{{ dashboard.channel_performance.room_revenue_total | money }}</strong></div>
+    <div><small>Overall ADR</small><strong>{{ dashboard.channel_performance.overall_adr | money }}</strong></div>
+  </div>
+  {% if dashboard.channel_performance["items"] %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th>Reservations</th>
+            <th>Cancelled</th>
+            <th>Cancel rate</th>
+            <th>Sold nights</th>
+            <th>ADR</th>
+            <th>Room revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.channel_performance["items"] %}
+            <tr>
+              <td>
+                {% if can_reservation %}
+                  <a href="{{ url_for('staff_reservations.staff_reservations', booking_source=item.source_channel) }}">{{ item.source_label }}</a>
+                {% else %}
+                  {{ item.source_label }}
+                {% endif %}
+                <div class="small muted">{{ item.source_channel }}</div>
+              </td>
+              <td>{{ item.reservation_count }}</td>
+              <td>{{ item.cancelled_count }}</td>
+              <td>{{ '%.2f'|format(item.cancellation_rate_percentage) }}%</td>
+              <td>{{ item.sold_nights }}</td>
+              <td>{{ item.adr | money }}</td>
+              <td>{{ item.room_revenue_total | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No channel performance data inside the selected range.</p>
+  {% endif %}
 </section>
 
 {% if can_reservation %}

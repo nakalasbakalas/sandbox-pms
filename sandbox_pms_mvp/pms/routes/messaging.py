@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 from markupsafe import escape
 
@@ -44,7 +45,16 @@ def staff_messaging_inbox():
     entries, total = list_inbox(filters)
     total_pages = max(1, (total + filters.per_page - 1) // filters.per_page)
     templates = list_msg_templates()
-    staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
+    staff_users = (
+        db.session.execute(
+            sa.select(User)
+            .where(User.deleted_at.is_(None), User.account_state == "active")
+            .order_by(User.full_name)
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
     return render_template(
         "staff_messaging_inbox.html",
         entries=entries,
@@ -64,7 +74,16 @@ def staff_messaging_thread(thread_id):
         abort(404)
     mark_thread_read(str(thread_id))
     templates = list_msg_templates(channel=detail.thread.channel)
-    staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
+    staff_users = (
+        db.session.execute(
+            sa.select(User)
+            .where(User.deleted_at.is_(None), User.account_state == "active")
+            .order_by(User.full_name)
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
     return render_template(
         "staff_messaging_thread.html",
         detail=detail,
