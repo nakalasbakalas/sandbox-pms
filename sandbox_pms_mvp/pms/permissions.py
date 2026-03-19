@@ -31,5 +31,5 @@ def default_dashboard_endpoint_for_user(user: User | None) -> str:
     if user_has_permission(user, "housekeeping.view"):
         return "housekeeping.staff_housekeeping"
     if user_has_permission(user, "reports.view"):
-        return "staff_reports"
+        return "reports.staff_reports"
     return "auth.staff_security"
