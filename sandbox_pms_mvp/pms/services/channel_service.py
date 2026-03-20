@@ -296,6 +296,18 @@ class WebhookChannelProvider(ChannelProvider):
                     errors=[] if success else [body[:200] or f"Webhook returned {getattr(response, 'status', 'unknown')}"],
                     details={"response": body[:200]},
                 )
+        except urllib.error.HTTPError as exc:
+            try:
+                error_body = exc.read(512).decode("utf-8", errors="ignore")
+            except Exception:
+                error_body = ""
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"HTTP {exc.code}: {error_body[:200] or str(exc)}"],
+                details={"status": exc.code, "response": error_body[:200]},
+            )
         except urllib.error.URLError as exc:
             return SyncResult(
                 provider=self.provider_key,

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import os
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -239,6 +242,13 @@ def staff_messaging_compose():
 @messaging_bp.route("/staff/messaging/inbound", methods=["POST"])
 def staff_messaging_inbound_webhook():
     """Webhook endpoint for inbound messages from providers."""
+    secret = os.environ.get("INBOUND_WEBHOOK_SECRET", "").encode()
+    if secret:
+        sig_header = request.headers.get("X-Webhook-Signature", "")
+        raw_body = request.get_data()
+        expected = hmac.new(secret, raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig_header, expected):
+            return jsonify({"error": "invalid signature"}), 401
     data = request.get_json(silent=True) or {}
     channel = data.get("channel", "email")
     sender = data.get("sender_address", "")
