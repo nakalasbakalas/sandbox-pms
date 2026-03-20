@@ -33,12 +33,14 @@ from pms.services.pre_checkin_service import (
     DocumentVerifyPayload,
     PreCheckInSavePayload,
     generate_pre_checkin,
+    get_document_serve_url,
     get_documents_for_reservation,
     get_pre_checkin_for_reservation,
     load_pre_checkin_by_token,
     mark_opened,
     mark_rejected,
     mark_verified,
+    read_document_bytes,
     save_pre_checkin,
     upload_document,
     validate_token_access,
@@ -374,6 +376,25 @@ class TestDocumentUpload:
             file = self._make_file(content=big_content)
             with pytest.raises(ValueError, match="exceeds maximum"):
                 upload_document(pc, file, "passport")
+
+    def test_local_storage_backend_round_trip_reads_uploaded_bytes(self, seeded_app, tmp_path):
+        with seeded_app.app_context():
+            from flask import current_app
+            from pms.extensions import db
+
+            current_app.config["UPLOAD_DIR"] = str(tmp_path / "uploads")
+            res = _create_reservation(db.session)
+            pc = generate_pre_checkin(res.id)
+            db.session.commit()
+
+            content = b"passport-image-bytes"
+            doc = upload_document(pc, self._make_file(content=content), "passport")
+            db.session.commit()
+
+            stored_path = tmp_path / "uploads" / doc.storage_key
+            assert stored_path.is_file()
+            assert read_document_bytes(doc) == content
+            assert get_document_serve_url(doc) is None
 
 
 class TestReadinessComputation:

@@ -1199,6 +1199,66 @@ tbody tr:last-child td { border-bottom: 0; }
   min-width: 180px;
   z-index: 20;
 }
+.planning-board-surface {
+  position: relative;
+  min-height: 360px;
+}
+.planning-board-surface.is-loading > [data-board-surface-content] {
+  visibility: hidden;
+}
+.planning-board-skeleton {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 8px 0 0;
+  background:
+    linear-gradient(180deg, rgba(8,15,28,0.92), rgba(8,15,28,0.88));
+  z-index: 2;
+}
+.planning-board-skeleton-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.planning-board-skeleton-strip span,
+.planning-board-skeleton-room,
+.planning-board-skeleton-track {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+}
+.planning-board-skeleton-strip span::after,
+.planning-board-skeleton-room::after,
+.planning-board-skeleton-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  animation: planning-board-skeleton-shimmer 1.2s ease-in-out infinite;
+}
+.planning-board-skeleton-strip span {
+  height: 42px;
+}
+.planning-board-skeleton-grid {
+  display: grid;
+  gap: 10px 14px;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+}
+.planning-board-skeleton-room {
+  min-height: 54px;
+}
+.planning-board-skeleton-track {
+  min-height: 54px;
+}
+@keyframes planning-board-skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
 .board-overflow-item {
   display: block;
   width: 100%;

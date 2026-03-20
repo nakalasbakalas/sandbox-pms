@@ -84,6 +84,8 @@ services:
         sync: false
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.0"
+      - key: AUDIT_LOG_RETENTION_DAYS
+        value: "0"
       - key: MAX_CONTENT_LENGTH
         value: "12582912"
       # Document storage — choose one:
@@ -258,6 +260,27 @@ services:
           property: connectionString
       - key: SECRET_KEY
         sync: false
+
+  - type: cron
+    name: pms-cleanup-audit-logs
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "30 3 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app cleanup-audit-logs
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: AUDIT_LOG_RETENTION_DAYS
+        value: "0"
 
   - type: cron
     name: pms-auto-cancel-no-shows

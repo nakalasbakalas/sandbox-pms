@@ -199,4 +199,18 @@ def upgrade():
 
 
 def downgrade():
-    pass
+    connection = op.get_bind()
+    usernames = [account["username"].lower() for account in _EMPLOYEE_ACCOUNTS]
+    seed_user_ids = [
+        row[0]
+        for row in connection.execute(
+            sa.select(users.c.id).where(
+                sa.func.lower(users.c.username).in_(usernames),
+                sa.func.lower(users.c.email).like("%@internal.sandbox.local"),
+            )
+        ).all()
+    ]
+    if not seed_user_ids:
+        return
+    connection.execute(user_roles.delete().where(user_roles.c.user_id.in_(seed_user_ids)))
+    connection.execute(users.delete().where(users.c.id.in_(seed_user_ids)))

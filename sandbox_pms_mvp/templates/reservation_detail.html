@@ -10,6 +10,7 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ back_url }}">Back to list</a>
+      {% if can('reservation.create') %}<a class="button secondary" href="{{ url_for('staff_reservations.staff_reservation_duplicate', reservation_id=detail.reservation.id, back=back_url) }}">Duplicate reservation</a>{% endif %}
       {% if can_folio %}<a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
       <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ') }}</span>
       <span class="status {{ 'paid' if detail.deposit_state == 'paid' else 'pending' }}">{{ detail.deposit_state.replace('_', ' ') }}</span>

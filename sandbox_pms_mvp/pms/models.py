@@ -1203,6 +1203,7 @@ class FolioCharge(db.Model):
             name="ck_folio_charges_tax_amount",
         ),
         Index("ix_folio_charges_reservation_id", "reservation_id"),
+        Index("ix_folio_charges_reservation_voided", "reservation_id", "voided_at"),
         Index("ix_folio_charges_posted_at", "posted_at"),
         Index("ix_folio_charges_service_date", "service_date"),
     )

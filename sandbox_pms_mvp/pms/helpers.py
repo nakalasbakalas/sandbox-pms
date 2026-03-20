@@ -196,14 +196,18 @@ def validate_csrf_request() -> None:
 # ---------------------------------------------------------------------------
 
 def current_settings() -> dict[str, dict]:
-    return {
-        setting.key: setting.value_json
-        for setting in db.session.execute(
-            sa.select(AppSetting).where(AppSetting.deleted_at.is_(None))
-        )
-        .scalars()
-        .all()
-    }
+    cached = getattr(g, "_current_settings_cache", None)
+    if cached is None:
+        cached = {
+            setting.key: setting.value_json
+            for setting in db.session.execute(
+                sa.select(AppSetting).where(AppSetting.deleted_at.is_(None))
+            )
+            .scalars()
+            .all()
+        }
+        g._current_settings_cache = cached
+    return cached
 
 
 def truthy_setting(value) -> bool:

@@ -302,6 +302,41 @@ def staff_reservation_create():
     )
 
 
+@staff_reservations_bp.route("/staff/reservations/<uuid:reservation_id>/duplicate")
+def staff_reservation_duplicate(reservation_id):
+    require_permission("reservation.view")
+    require_permission("reservation.create")
+    reservation = db.session.get(Reservation, reservation_id)
+    if reservation is None:
+        abort(404)
+    guest = reservation.primary_guest
+    stay_length = max((reservation.check_out_date - reservation.check_in_date).days, 1)
+    clone_check_in = max(date.today() + timedelta(days=1), reservation.check_out_date)
+    clone_check_out = clone_check_in + timedelta(days=stay_length)
+    clone_status = reservation.current_status if reservation.current_status in {"tentative", "house_use"} else "confirmed"
+    back_url = safe_back_path(request.args.get("back"), url_for("staff_reservations.staff_reservations"))
+    return redirect(
+        url_for(
+            "staff_reservations.staff_reservation_create",
+            back=back_url,
+            first_name=guest.first_name if guest else "",
+            last_name=guest.last_name if guest else "",
+            guest_phone=guest.phone if guest else "",
+            guest_email=guest.email if guest else "",
+            source_channel=reservation.source_channel or "admin_manual",
+            room_type_id=reservation.room_type_id,
+            check_in=clone_check_in.isoformat(),
+            check_out=clone_check_out.isoformat(),
+            adults=reservation.adults,
+            children=reservation.children,
+            extra_guests=reservation.extra_guests,
+            status=clone_status,
+            special_requests=reservation.special_requests or "",
+            internal_notes=f"Cloned from {reservation.reservation_code}",
+        )
+    )
+
+
 @staff_reservations_bp.route("/staff/reservations/rate-preview")
 def staff_reservation_rate_preview():
     """Lightweight JSON endpoint for inline rate preview on the reservation form."""

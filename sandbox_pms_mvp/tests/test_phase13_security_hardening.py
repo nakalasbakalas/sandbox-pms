@@ -15,10 +15,10 @@ from cryptography.fernet import Fernet
 import pms.app as app_module
 import pms.config as config_module
 import pms.security as security_module
-from pms.audit import write_audit_log
+from pms.audit import cleanup_audit_logs, write_audit_log
 from pms.extensions import db
 from pms.models import AuditLog, Role, Room, User, UserSession
-from pms.models import Reservation, RoomType
+from pms.models import Reservation, RoomType, utc_now
 from pms.services.auth_service import hash_password
 from pms.services.public_booking_service import (
     HoldRequestPayload,
@@ -356,6 +356,42 @@ def test_audit_log_redacts_sensitive_fields(app_factory):
         assert row.before_data["nested"]["api_token"] == "[redacted]"
         assert row.after_data["smtp_password"] == "[redacted]"
         assert row.after_data["notes"] == "kept"
+
+
+def test_cleanup_audit_logs_respects_configured_retention_window(app_factory):
+    app = app_factory(config={"AUDIT_LOG_RETENTION_DAYS": 30})
+    with app.app_context():
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="old-row",
+                action="audit_old",
+                before_data=None,
+                after_data={"status": "old"},
+                created_at=utc_now() - timedelta(days=45),
+            )
+        )
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="fresh-row",
+                action="audit_fresh",
+                before_data=None,
+                after_data={"status": "fresh"},
+                created_at=utc_now() - timedelta(days=5),
+            )
+        )
+        db.session.commit()
+
+        result = cleanup_audit_logs()
+
+        assert result["enabled"] is True
+        assert result["deleted"] == 1
+        remaining_ids = AuditLog.query.with_entities(AuditLog.entity_id).all()
+        remaining_ids = [entity_id for (entity_id,) in remaining_ids]
+        assert remaining_ids == ["fresh-row"]
 
 
 def test_append_only_audit_log_blocks_update_and_delete(app_factory):

@@ -65,6 +65,21 @@ class TestAvailabilityService:
             assert isinstance(count, int)
             assert count >= 0
 
+    def test_availability_queries_handle_200_plus_inventory_days(self, app_factory):
+        """Long-horizon availability queries should stay correct on bootstrapped inventory."""
+        app = app_factory(seed=True, config={"INVENTORY_BOOTSTRAP_DAYS": 240})
+        with app.app_context():
+            rt = RoomType.query.first()
+            check_in = date.today()
+            check_out = check_in + timedelta(days=210)
+
+            result = query_room_type_availability(check_in, check_out, rt.id)
+
+            assert len(result) == 1
+            assert len(result[0].dates) == 210
+            assert result[0].available_rooms == min(day.available_count for day in result[0].dates)
+            assert count_available_rooms(rt.id, check_in, check_out) == result[0].available_rooms
+
     def test_availability_decreases_after_booking(self, app_factory):
         """Creating a reservation should reduce available rooms."""
         app = app_factory(seed=True)

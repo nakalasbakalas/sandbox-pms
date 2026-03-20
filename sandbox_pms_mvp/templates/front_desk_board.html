@@ -68,13 +68,13 @@
       <button class="board-apply-btn" type="submit">Apply</button>
     </form>
 
-    <form class="planning-board-search-inline" method="get">
+    <form class="planning-board-search-inline" method="get" data-board-search-form>
       <input type="hidden" name="days" value="{{ filters.days }}">
       <input type="hidden" name="start_date" value="{{ board.start_date.isoformat() }}">
       <input type="hidden" name="room_type_id" value="{{ filters.room_type_id or '' }}">
       <input type="hidden" name="show_unallocated" value="{{ '1' if filters.show_unallocated else '0' }}">
       <input type="hidden" name="show_closed" value="{{ '1' if filters.show_closed else '0' }}">
-      <input type="text" name="q" value="{{ filters.q }}" placeholder="Search guest, code, room…" aria-label="Search">
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="Search guest, code, room…" aria-label="Search" data-board-search-input>
     </form>
 
     <fieldset class="planning-board-density-toggle" data-density-toggle>
@@ -183,8 +183,26 @@
   <p class="small muted planning-board-feedback" data-board-feedback role="status" aria-live="polite" aria-atomic="true" hidden></p>
 </section>
 
-<div id="front-desk-board-surface" aria-busy="false">
-  {% include '_front_desk_board_surface.html' %}
+<div id="front-desk-board-surface" class="planning-board-surface" aria-busy="false">
+  <div class="planning-board-skeleton" data-board-skeleton hidden aria-hidden="true">
+    <div class="planning-board-skeleton-strip">
+      <span></span>
+      <span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="planning-board-skeleton-grid">
+      <div class="planning-board-skeleton-room"></div>
+      <div class="planning-board-skeleton-track"></div>
+      <div class="planning-board-skeleton-room"></div>
+      <div class="planning-board-skeleton-track"></div>
+      <div class="planning-board-skeleton-room"></div>
+      <div class="planning-board-skeleton-track"></div>
+    </div>
+  </div>
+  <div data-board-surface-content>
+    {% include '_front_desk_board_surface.html' %}
+  </div>
 </div>
 
 <div id="board-side-panel" class="board-side-panel hidden" role="dialog" aria-modal="true" aria-labelledby="board-panel-title" aria-hidden="true">

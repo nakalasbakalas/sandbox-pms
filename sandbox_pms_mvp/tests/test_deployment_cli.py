@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from pms.extensions import db
-from pms.models import Permission, Role, RoomType, User
+from pms.models import AuditLog, Permission, Role, RoomType, User, utc_now
 
 
 def test_seed_reference_data_cli_matches_deployment_runbook(app_factory):
@@ -57,3 +59,59 @@ def test_seed_reference_data_cli_can_be_rerun_after_admin_exists_without_bootstr
 
     assert second_result.exit_code == 0
     assert "Reference data seeded." in second_result.output
+
+
+def test_cleanup_audit_logs_cli_deletes_rows_older_than_retention_window(app_factory):
+    app = app_factory(seed=False, config={"AUDIT_LOG_RETENTION_DAYS": 30})
+    runner = app.test_cli_runner()
+
+    with app.app_context():
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="cli-old",
+                action="cli_audit_old",
+                before_data=None,
+                after_data={"status": "old"},
+                created_at=utc_now() - timedelta(days=45),
+            )
+        )
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="cli-fresh",
+                action="cli_audit_fresh",
+                before_data=None,
+                after_data={"status": "fresh"},
+                created_at=utc_now() - timedelta(days=5),
+            )
+        )
+        db.session.commit()
+
+    result = runner.invoke(args=["cleanup-audit-logs"])
+
+    assert result.exit_code == 0
+    assert "Audit log cleanup:" in result.output
+    assert "1 rows deleted" in result.output
+
+    with app.app_context():
+        remaining_ids = [row.entity_id for row in AuditLog.query.order_by(AuditLog.entity_id.asc()).all()]
+        assert remaining_ids == ["cli-fresh"]
+
+
+def test_health_endpoint_reports_db_liveness_and_sla_metadata(app_factory):
+    app = app_factory(seed=False, config={"HEALTHCHECK_SLA_MS": 5000})
+    client = app.test_client()
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["db"] == "ok"
+    assert payload["within_sla"] is True
+    assert payload["sla_ms"] == 5000
+    assert isinstance(payload["response_ms"], float)
+    assert payload["response_ms"] >= 0

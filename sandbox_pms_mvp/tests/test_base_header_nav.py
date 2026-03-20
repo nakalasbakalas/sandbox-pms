@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import pms.helpers as helpers
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import Role, User
+from pms.models import AppSetting, Role, User
 
 
 def make_staff_user(role_code: str, email: str) -> User:
@@ -65,3 +66,26 @@ def test_staff_header_preserves_compact_nav_search_and_logout(app_factory):
     assert 'action="/staff/logout"' in html
     assert 'name="csrf_token"' in html
     assert "brand-contact" not in html
+
+
+def test_current_settings_uses_request_scoped_cache(app_factory, monkeypatch):
+    app = app_factory(seed=False)
+    with app.app_context():
+        db.session.add(AppSetting(key="hotel.name", value_json="Sandbox Hotel", value_type="string"))
+        db.session.commit()
+
+    call_count = {"execute": 0}
+    real_execute = db.session.execute
+
+    def counting_execute(*args, **kwargs):
+        call_count["execute"] += 1
+        return real_execute(*args, **kwargs)
+
+    with app.test_request_context("/"):
+        monkeypatch.setattr(helpers.db.session, "execute", counting_execute)
+        first = helpers.current_settings()
+        second = helpers.current_settings()
+
+    assert first["hotel.name"] == "Sandbox Hotel"
+    assert second["hotel.name"] == "Sandbox Hotel"
+    assert call_count["execute"] == 1

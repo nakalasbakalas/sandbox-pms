@@ -21,6 +21,7 @@ from pms.services.cashier_service import (
     PaymentPostingPayload,
     RefundPostingPayload,
     VoidChargePayload,
+    cashier_print_context,
     ensure_room_charges_posted,
     folio_summary,
     issue_cashier_document,
@@ -556,6 +557,99 @@ def test_printable_folio_and_document_issue_routes_work(app_factory):
     text = print_response.get_data(as_text=True)
     assert reservation.reservation_code in text
     assert "Invoice" in text
+
+
+def test_future_stay_invoice_uses_proforma_preview_totals(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Preview",
+            last_name="Guest",
+            phone="+66810000015",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=10),
+            check_out_date=date.today() + timedelta(days=12),
+        )
+        user = make_staff_user("manager", "cashier-proforma@example.com")
+        document = issue_cashier_document(
+            reservation.id,
+            DocumentIssuePayload(document_type="invoice", note="Pre-stay preview"),
+            actor_user_id=user.id,
+        )
+        context = cashier_print_context(reservation.id, document_type="invoice")
+
+        assert document.total_amount == reservation.quoted_grand_total
+        assert context["is_proforma_invoice"] is True
+        assert context["print_summary"]["balance_due"] == reservation.quoted_grand_total
+        assert any(line["description"] == "Quoted room total" for line in context["print_lines"])
+
+    login_as(client, user)
+    response = client.get(f"/staff/cashier/{reservation.id}/print?document_type=invoice")
+
+    assert response.status_code == 200
+    text = response.get_data(as_text=True)
+    assert "Proforma Invoice" in text
+    assert "Quoted room total" in text
+    assert "No folio lines posted." not in text
+
+
+def test_partial_refund_cannot_exceed_remaining_amount_on_referenced_line(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Partial",
+            last_name="Refund",
+            phone="+66810000016",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        manager = make_staff_user("manager", "cashier-partial-refund@example.com")
+        payment = record_payment(
+            reservation.id,
+            PaymentPostingPayload(
+                amount=Decimal("500.00"),
+                payment_method="cash",
+                note="Advance payment",
+            ),
+            actor_user_id=manager.id,
+        )
+        record_payment(
+            reservation.id,
+            PaymentPostingPayload(
+                amount=Decimal("300.00"),
+                payment_method="card",
+                note="Second payment",
+            ),
+            actor_user_id=manager.id,
+        )
+
+        refund = record_refund(
+            reservation.id,
+            RefundPostingPayload(
+                amount=Decimal("200.00"),
+                reason="Partial goodwill refund",
+                payment_method="cash",
+                reference_charge_id=payment.id,
+            ),
+            actor_user_id=manager.id,
+        )
+
+        assert refund is not None
+        assert refund.reversed_charge_id == payment.id
+
+        with pytest.raises(ValueError, match="remaining refundable amount"):
+            record_refund(
+                reservation.id,
+                RefundPostingPayload(
+                    amount=Decimal("400.00"),
+                    reason="Excess refund attempt",
+                    payment_method="cash",
+                    reference_charge_id=payment.id,
+                ),
+                actor_user_id=manager.id,
+            )
 
 
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL is not configured for Postgres cashier testing")

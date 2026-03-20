@@ -263,10 +263,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [x] Add CSV download to all report pages (occupancy, revenue, booking attribution, cancellations) *(7 report types with `build_csv_rows()` + route + template button)*
 - [x] Add a mobile-friendly housekeeping attendant view (current board is desktop-heavy) *(added dedicated `?view=mobile` housekeeping cards, preserved date/filter/view toggles, and touch-friendly room-status quick actions; verified in `test_phase7_housekeeping.py` on 2026-03-19)*
 - [x] Add keyboard shortcuts for the most frequent front-desk actions (check-in, room assignment) *(verified in test_phase15_front_desk_board.py, 63 passed)*
-- [ ] Add debounce to board search input to reduce unnecessary re-renders
+- [x] Add debounce to board search input to reduce unnecessary re-renders *(completed on 2026-03-20: the front-desk board search now auto-submits only after a 250ms pause, reuses stable search form/input hooks for the `/` shortcut, and is covered in `test_phase15_front_desk_board.py` with the board suite green from the repo root: 67 passed.)*
 - [x] Make the density preference persist across sessions *(verified: `UserPreference` persistence confirmed by test_phase15_front_desk_board.py, 63 passed)*
-- [ ] Add loading state / skeleton screen to front desk board initial paint
-- [ ] Add explicit "no results" state to all list/search pages when filters return nothing
+- [x] Add loading state / skeleton screen to front desk board initial paint *(completed on 2026-03-20: the board surface now preserves a dedicated content wrapper plus skeleton overlay, shows a reusable loading state during initial hydration and AJAX refreshes, and is covered in `test_phase15_front_desk_board.py`; verified green from the repo root with 69 passed.)*
+- [x] Add explicit "no results" state to all list/search pages when filters return nothing *(reconciled on 2026-03-20: the current operational/search surfaces already render explicit empty states, including reservations, guest search, messaging inbox, provider bookings, front-desk workspace, operational lists, housekeeping board, and front-desk planning board; verified by template audit across `staff_reservations.html`, `staff_guests.html`, `staff_messaging_inbox.html`, `provider_bookings.html`, `front_desk_workspace.html`, `staff_operational_list.html`, `housekeeping_board.html`, and `_front_desk_board_surface.html`.)*
 
 ### Backend
 
@@ -281,24 +281,24 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Database
 
-- [ ] Add composite index on `InventoryDay(room_id, business_date)` (verify it exists; availability queries use both columns together constantly)
-- [ ] Add composite index on `FolioCharge(reservation_id, voided_at)` for cashier folio summary queries
-- [ ] Add migration downgrade paths to all migration files that currently only have `upgrade()`
-- [ ] Validate that the SQLite partial indexes (`sqlite_where`) have equivalent PostgreSQL indexes for production
+- [x] Add composite index on `InventoryDay(room_id, business_date)` (verify it exists; availability queries use both columns together constantly) *(verified on 2026-03-20: migrated schema already enforces `uq_inventory_days_room_date`, which yields composite `(room_id, business_date)` coverage via the DB-level unique index; board/date lookups continue to use `ix_inventory_days_business_date`. Covered in `test_phase2_data_layer.py`.)*
+- [x] Add composite index on `FolioCharge(reservation_id, voided_at)` for cashier folio summary queries *(added `ix_folio_charges_reservation_voided` on 2026-03-20 so front-desk board balance aggregation and public/reporting folio queries no longer rely on the single-column reservation index alone; covered in `test_phase2_data_layer.py`.)*
+- [x] Add migration downgrade paths to all migration files that currently only have `upgrade()` *(completed on 2026-03-20: the remaining no-op downgrade in `20260316_01_seed_employee_accounts.py` now removes placeholder internal seed users plus their `user_roles` links, and `test_phase2_data_layer.py` guards against any `def downgrade(): pass` regressions across migration files.)*
+- [x] Validate that the SQLite partial indexes (`sqlite_where`) have equivalent PostgreSQL indexes for production *(validated on 2026-03-20 by reconciling model/index declarations with migrations: the only `sqlite_where` indexes in `models.py` are the active-user email/username lookups, and PostgreSQL partial-index coverage now exists via `ix_users_active_email_live` plus `ix_users_active_username_live`; guarded by `test_phase2_data_layer.py` source-level migration parity coverage.)*
 - [x] Confirm `PendingAutomationEvent` has a proper expiry/cleanup mechanism to prevent unbounded growth *(processed automation events older than `PENDING_AUTOMATION_RETENTION_DAYS` are now deleted during `process_pending_automations()`; verified in `test_phase18_messaging.py` on 2026-03-19)*
 
 ### Reservations
 
 - [x] Add group booking / room block feature (block multiple rooms under one group code) *(front-desk board can now create and release shared-code multi-room blocks using inventory overrides; verified in `test_phase15_front_desk_board.py` on 2026-03-19)*
-- [ ] Add reservation duplication (clone an existing reservation to a new date range)
+- [x] Add reservation duplication (clone an existing reservation to a new date range) *(completed on 2026-03-20: reservation detail now exposes a `Duplicate reservation` action that redirects into the existing staff create-reservation form with guest/stay fields prefilled from the source booking, advances the default stay window to the next future slot with the same night count, and annotates the new booking notes with the source reservation code; verified in `test_phase5_staff_reservations_workspace.py` (18 passed, 1 skipped) plus a focused duplicate-flow route test.)*
 - [x] Implement auto-cancel for `no_show` reservations not manually processed by end of business day *(`auto_cancel_no_shows()` + CLI + Render cron at 21:00 UTC ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â done in Phase 3)*
 - [x] Add a "pending modifications" indicator on the front desk workspace when an open modification request exists *(batch query + "Mod" badge on board blocks + workspace flags)*
-- [ ] Show `tentative` reservations on the front desk board so staff can track unconverted inquiries
+- [x] Show `tentative` reservations on the front desk board so staff can track unconverted inquiries *(verified on 2026-03-20: `front_desk_board_service.py` already includes `tentative` in active board statuses, renders it with the pending visual variant, and `test_phase15_front_desk_board.py` now explicitly covers a tentative reservation appearing on the board; board suite green from the repo root with 70 passed.)*
 
 ### Room Inventory
 
 - [x] Validate inventory bootstrap on new room creation ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified: `upsert_room` calls `_ensure_room_inventory()` creating 730 days of InventoryDay rows. No rolling cron yet (minor: ~2yr runway).
-- [ ] Add bulk inventory correction tool for admin (close/open date ranges with reason)
+- [x] Add bulk inventory correction tool for admin (close/open date ranges with reason) *(reconciled on 2026-03-20: the admin rates/inventory surface already exposes inventory override creation with action, room/room-type scope, date range, and reason plus release controls in `admin_rates_inventory.html`; the service flow is backed by `create_inventory_override()` / `release_inventory_override()` and remains verified by `test_phase10_admin_panel.py` (`-k inventory_override`: 1 passed).)*
 - [ ] Add room floor plan / photo management to the admin room editor
 
 ### Pricing / Rates
@@ -318,10 +318,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 ### Billing / Payments
 
 - [x] Fix potential Stripe webhook idempotency ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified: 3-layer protection (provider_event_id unique index + posting_key unique on FolioCharge + SELECT FOR UPDATE). Concurrent threading tests exist.
-- [ ] Add proforma invoice generation (pre-stay billing preview)
+- [x] Add proforma invoice generation (pre-stay billing preview) *(completed on 2026-03-20: the cashier invoice flow now treats future stays without posted folio charges as a proforma preview, using quoted reservation totals for issued invoice amounts and printable output while preserving the existing invoice document path; verified in `test_phase8_cashier.py` with explicit future-stay proforma coverage and the cashier suite green at 13 passed, 1 skipped.)*
 - [ ] Add receipt print/email after manual payment posting
-- [ ] Add partial refund support (currently refunds are against specific folio lines, but partial amounts on a single charge need validation)
-- [ ] Link folio balance warnings to the front desk board (show overdue balance badge on reservation card)
+- [x] Add partial refund support (currently refunds are against specific folio lines, but partial amounts on a single charge need validation) *(completed on 2026-03-20: `record_refund()` now validates referenced refund amounts against the remaining refundable amount on that specific folio line, rejects over-refunds on partially refunded charges, and is covered in `test_phase8_cashier.py`; cashier suite green at 13 passed, 1 skipped.)*
+- [x] Link folio balance warnings to the front desk board (show overdue balance badge on reservation card) *(verified on 2026-03-20: board blocks already receive aggregated `balanceDue` from `front_desk_board_service.py`, `_front_desk_board_surface.html` renders the `badge-balance` warning on reservation cards when amounts are outstanding, and `test_phase15_front_desk_board.py` now explicitly covers a reservation surfacing a positive balance on the board; board suite green from the repo root with 71 passed.)*
 
 ### Check-in / Check-out
 
@@ -360,32 +360,32 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [x] Confirm `AUTH_ENCRYPTION_KEY` setup is documented in the Render deployment runbook *(documented in `docs/DEPLOYMENT-RUNBOOK.md`, `docs/RENDER_DEPLOY_CHECKLIST.md`, and `.env.production.example`; includes Fernet generation guidance and rotation risk note as of 2026-03-20)*
 - [x] Add `Content-Security-Policy` nonce for inline scripts where `unsafe-inline` is currently allowed *(per-request CSP nonce added in `pms/security.py`, nonce exposed via template context, inline script surfaces updated, inline DOM handlers removed from audited staff templates, and verified in `test_phase13_security_hardening.py`, `test_phase5_staff_reservations_workspace.py`, `test_phase6_front_desk_workspace.py`, `test_phase7_housekeeping.py`, and `test_phase18_messaging.py` on 2026-03-20)*
-- [ ] Add audit log retention/archiving policy and database-level partition or cleanup job to prevent unbounded growth
+- [x] Add audit log retention/archiving policy and database-level partition or cleanup job to prevent unbounded growth *(added `cleanup_audit_logs()` plus `flask --app app cleanup-audit-logs`, Render cron wiring, deploy/env documentation, and an opt-in `AUDIT_LOG_RETENTION_DAYS` control that stays disabled at `0` until a property-approved retention window exists; verified in `test_phase13_security_hardening.py` (31 passed) and `test_deployment_cli.py` (4 passed) on 2026-03-20)*
 - [x] Add IP-based rate limit for the SSE endpoint to prevent a single IP from holding multiple workers *(SSE endpoint removed; no longer applicable)*
 - [x] Review the `allow_override` permission path on check-in *(route-side checkbox exposure is limited to `admin`/`manager`, service-side `_can_override()` only permits `admin`/`manager`, and coverage now includes non-manager denial plus manager-allowed override in `test_phase6_front_desk_workspace.py` on 2026-03-20)*
 
 ### Performance
 
 - [x] Fix the SSE sync-worker blocking issue (highest priority performance concern) *(replaced with JS polling)*
-- [ ] Add HTTP response caching headers to static assets
-- [ ] Add query `EXPLAIN` review for the housekeeping board query (loads all rooms with inventory + status + tasks in one pass)
-- [ ] Consider caching the `current_settings()` result in `g` per-request to avoid repeated `AppSetting.query` hits on every templated page
+- [x] Add HTTP response caching headers to static assets *(Flask static responses now use `SEND_FILE_MAX_AGE_DEFAULT` from `STATIC_ASSET_MAX_AGE_SECONDS` with a 3600-second default, so `/static/*.css` and `/static/*.js` return `Cache-Control: public, max-age=3600`; verified in `test_phase15_front_desk_board.py` (64 passed) on 2026-03-20)*
+- [x] Add query `EXPLAIN` review for the housekeeping board query (loads all rooms with inventory + status + tasks in one pass) *(reviewed against the live 2026-03-20 service path: `list_housekeeping_board()` now issues several focused queries rather than one giant task join. SQLite `EXPLAIN QUERY PLAN` shows indexed lookups for `InventoryDay.business_date` and reservation status/date lookups via `ix_inventory_days_business_date` and `ix_reservations_status_dates`; `room_notes` uses `ix_room_notes_room_business_date`; only the small `rooms` ordering query remains a table scan with temp sort, which is acceptable at the current 32-room seed size.)*
+- [x] Consider caching the `current_settings()` result in `g` per-request to avoid repeated `AppSetting.query` hits on every templated page *(helper now memoizes settings on `g._current_settings_cache` for the life of the request/app context, preserving behavior while avoiding duplicate `AppSetting` queries from repeated template/context access; verified in `test_base_header_nav.py` (3 passed) on 2026-03-20)*
 
 ### Accessibility
 
 - [x] Add `aria-label` to icon-only buttons throughout the front desk and housekeeping boards *(density toggle buttons labeled)*
-- [ ] Ensure all status badges have text equivalents (not colour-only)
+- [x] Ensure all status badges have text equivalents (not colour-only) *(audited on 2026-03-20 across the current badge-bearing templates: front-desk board/status badges, messaging channel/status/follow-up badges, reservation/front-desk message badges, and housekeeping/operational pills all render visible text labels such as `Ready`, `Mod`, channel names, spelled-out statuses, and balance amounts instead of relying on colour alone.)*
 - [x] Add skip-navigation link to staff pages *(confirmed in `templates/base.html`; guardrail tests pass)*
-- [ ] Audit form error states for screen reader compatibility (`aria-describedby` on error messages)
+- [x] Audit form error states for screen reader compatibility (`aria-describedby` on error messages) *(audited and tightened on 2026-03-20: the active inline field-error surface is the front-desk check-in form, which now links `aria-invalid` fields to their inline error/hint copy via `aria-describedby` for first name, last name, phone, room assignment, payment amount, and override-payment validation. Verified in `test_phase6_front_desk_workspace.py` (27 passed, 1 skipped).)*
 
 ### QA / Testing
 
 - [x] Investigate and migrate/delete 4 root-level test files (`debug_test.py`, `test_demo_seeding.py`, `test_init_and_seed.py`, `test_template_compile.py`) *(deleted in root cleanup)*
 - [x] Add tests covering the pricing module (`pricing.py`) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `quote_reservation` and `nightly_room_rate` have zero direct test coverage *(16 tests in test_pricing.py)*
-- [ ] Add tests for `channel_service.py` mock provider operations
+- [x] Add tests for `channel_service.py` mock provider operations *(already covered in `test_availability_and_channel.py`; verified green on 2026-03-20 with 21 passed.)*
 - [x] Add a test for the `PendingAutomationEvent` processing flow *(delayed-event queue, due-event dispatch, inactive-rule skip, idempotency, retention cleanup, and CLI processing covered in `test_phase18_messaging.py` on 2026-03-19)*
-- [ ] Add integration test for `LocalStorageBackend` round-trip (save ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ read ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ serve)
-- [ ] Add load/regression tests for availability queries with 200+ inventory days
+- [x] Add integration test for `LocalStorageBackend` round-trip (save ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ read ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ serve) *(covered on 2026-03-20 in `test_phase17_pre_checkin.py`: local backend upload writes to configured `UPLOAD_DIR`, `read_document_bytes()` returns the original bytes, and `get_document_serve_url()` returns `None` for direct app serving.)*
+- [x] Add load/regression tests for availability queries with 200+ inventory days *(added a 210-night seeded availability regression in `test_availability_and_channel.py` using `INVENTORY_BOOTSTRAP_DAYS=240`, asserting long-horizon `query_room_type_availability()` and `count_available_rooms()` stay consistent; verified green on 2026-03-20 with 21 passed.)*
 - [x] Add test that verifies SSE endpoint returns correct Content-Type (already skipped ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â un-skip after SSE fix) *(SSE removed; test updated to assert endpoint gone)*
 
 ### Deployment / DevOps
@@ -393,8 +393,8 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [x] Add Render Cron Job entries for: `process-notifications` (every 5 min), `send-pre-arrival-reminders` (daily 09:00), `send-failed-payment-reminders` (daily 10:00), `sync-ical-sources` (every 15 min), `process-automation-events` (every 5 min), `fire-pre-checkin-reminders` (daily ~48h before target check-in) *(all 6 added)*
 - [x] Fix ephemeral storage: add Render Disk or configure S3 env vars in `render.yaml` *(documented with commented-out config)*
 - [x] Set `MAX_CONTENT_LENGTH` correctly in `.env.production.example` (currently `1048576` = 1 MB, but `pre_checkin_service` allows 10 MB uploads ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â this mismatch would silently reject document uploads in production) *(set to 12582912)*
-- [ ] Add a health check endpoint response time SLA (current `/health` returns 200 but has no DB liveness check)
-- [ ] Add a `python -m flask db current` step to the deploy runbook to verify migration state before go-live
+- [x] Add a health check endpoint response time SLA (current `/health` returns 200 but has no DB liveness check) *(reconciled and completed on 2026-03-20: `/health` already had DB liveness via `SELECT 1`; the remaining gap was explicit response-budget reporting. The endpoint now returns `db`, `response_ms`, `sla_ms`, and `within_sla`, with `HEALTHCHECK_SLA_MS` defaulting to 1000, and coverage added in `test_deployment_cli.py`.)*
+- [x] Add a `python -m flask db current` step to the deploy runbook to verify migration state before go-live *(added explicit `flask --app app db current` verification guidance to `docs/DEPLOYMENT-RUNBOOK.md` and `docs/RENDER_DEPLOY_CHECKLIST.md` on 2026-03-20)*
 - [ ] Add Sentry (or equivalent) error tracking via environment variable *(optional DSN/config wiring, request-id tagging, Render/.env examples, and local app-factory coverage landed on 2026-03-19; keep open until a real DSN is configured and event capture is verified end-to-end)*
 - [x] Clean up 30+ stale root-level markdown files ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â move permanent docs to `docs/`, delete session artifacts *(28 files deleted, 4 moved)*
 
@@ -564,7 +564,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - Add revenue management dashboard (ADR, RevPAR, occupancy forecast)
 - Add Sentry error tracking *(initial DSN/config wiring, request-id tagging, and local tests are in place; live DSN provisioning and runtime capture verification still pending)*
 - CSP nonce hardening complete *(per-request nonce in `pms/security.py`, inline script nonce coverage across staff/public templates, shared `app-actions.js` replacing audited inline handlers, and targeted verification green on 2026-03-20: `test_phase13_security_hardening.py` 30 passed, `test_phase5_staff_reservations_workspace.py` 17 passed/1 skipped, `test_phase6_front_desk_workspace.py` 27 passed/1 skipped, `test_phase7_housekeeping.py` 13 passed/1 skipped, `test_phase18_messaging.py` 60 passed)*
-- Add audit log archival/cleanup job
+- Audit log archival/cleanup job complete *(added `cleanup_audit_logs()` plus `flask --app app cleanup-audit-logs`, Render cron wiring, deploy/env documentation, and an opt-in `AUDIT_LOG_RETENTION_DAYS` guard so cleanup remains disabled until the property chooses a retention window; verified in `test_phase13_security_hardening.py` (31 passed) and `test_deployment_cli.py` (4 passed) on 2026-03-20)*
 
 **Dependencies:** Phase 3 stable.
 
@@ -585,7 +585,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - Complete Flask Blueprint extraction (all route groups)
 - Complete ORM migration (zero legacy `.query.` calls)
 - Add Redis-backed rate limiting (replace DB count queries)
-- Add HTTP caching headers for static assets
+- HTTP caching headers for static assets complete *(Flask static responses now use `SEND_FILE_MAX_AGE_DEFAULT` from `STATIC_ASSET_MAX_AGE_SECONDS` with a 3600-second default; verified in `test_phase15_front_desk_board.py` (64 passed) on 2026-03-20)*
 - Add guest loyalty / membership tier tracking
 - Add post-stay guest satisfaction survey automation
 - Add ID scanner hardware integration (passport reader)

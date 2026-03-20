@@ -16,7 +16,7 @@ from flask import Flask, Response, abort, current_app, flash, g, jsonify, redire
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
-from .audit import write_audit_log
+from .audit import cleanup_audit_logs, write_audit_log
 from .branding import (
     absolute_public_url as branding_absolute_public_url,
     branding_settings_context,
@@ -435,6 +435,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
     normalize_runtime_config(app.config, override_keys=set((test_config or {}).keys()))
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = int(app.config.get("STATIC_ASSET_MAX_AGE_SECONDS", 3600) or 0)
     configure_app_security(app)
     db.init_app(app)
     migrate.init_app(app, db)
@@ -791,6 +792,26 @@ def register_cli(app: Flask) -> None:
             f"{result.get('cleaned_up', 0)} cleaned up."
         )
 
+    @app.cli.command("cleanup-audit-logs")
+    @click.option(
+        "--retention-days",
+        default=None,
+        type=int,
+        help="Delete audit logs older than N days. Defaults to AUDIT_LOG_RETENTION_DAYS.",
+    )
+    @click.option("--dry-run", is_flag=True, help="Report matching audit-log rows without deleting them.")
+    def cleanup_audit_logs_command(retention_days: int | None, dry_run: bool) -> None:
+        result = cleanup_audit_logs(retention_days=retention_days, dry_run=dry_run)
+        if not result["enabled"]:
+            print("Audit log cleanup skipped: AUDIT_LOG_RETENTION_DAYS is not set to a positive value.")
+            return
+        mode = "would delete" if dry_run else "deleted"
+        cutoff = result["cutoff"].isoformat() if result["cutoff"] else "n/a"
+        print(
+            f"Audit log cleanup: {result['deleted']} rows {mode}, "
+            f"retention_days={result['retention_days']}, cutoff={cutoff}"
+        )
+
     @app.cli.command("process-waitlist")
     @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
     def process_waitlist_command(max_age_days: int) -> None:
@@ -828,11 +849,32 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/health")
     def health():
+        started_at = perf_counter()
+        threshold_ms = int(app.config.get("HEALTHCHECK_SLA_MS", 1000) or 0)
         try:
             db.session.execute(sa.text("SELECT 1"))
         except Exception:  # noqa: BLE001
-            return jsonify({"status": "db_error"}), 503
-        return jsonify({"status": "ok"})
+            elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+            return jsonify(
+                {
+                    "status": "db_error",
+                    "db": "error",
+                    "response_ms": elapsed_ms,
+                    "sla_ms": threshold_ms,
+                    "within_sla": False,
+                }
+            ), 503
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        within_sla = threshold_ms <= 0 or elapsed_ms <= threshold_ms
+        return jsonify(
+            {
+                "status": "ok" if within_sla else "degraded",
+                "db": "ok",
+                "response_ms": elapsed_ms,
+                "sla_ms": threshold_ms,
+                "within_sla": within_sla,
+            }
+        )
 
     @app.route("/robots.txt")
     def robots_txt():

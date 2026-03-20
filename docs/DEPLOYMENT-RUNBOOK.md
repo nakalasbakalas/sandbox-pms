@@ -36,6 +36,7 @@ Set at minimum:
 - `DATABASE_URL`
 - `SECRET_KEY`
 - `AUTH_ENCRYPTION_KEY`
+- `AUDIT_LOG_RETENTION_DAYS` only after the property approves a retention window. Leave at `0` to retain all audit history.
 
 Render-managed Postgres URLs may be provided as `postgres://` or `postgresql://`.
 The app normalizes those values to the SQLAlchemy `postgresql+psycopg://` driver automatically.
@@ -48,6 +49,14 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 Treat it as a long-lived secret. Rotating or clearing it without a coordinated migration will invalidate stored MFA secrets and existing encrypted iCal/feed tokens.
+
+## Audit Log Retention
+
+Audit-log cleanup is available through `flask --app app cleanup-audit-logs` and the Render cron service `pms-cleanup-audit-logs`.
+
+- `AUDIT_LOG_RETENTION_DAYS=0` keeps cleanup disabled.
+- Set it to a positive integer only after the property has approved the retention window.
+- The scheduled cleanup deletes audit-log rows older than the configured cutoff; it is intentionally a no-op until the retention window is set.
 
 ## Payment Provider Registration
 
@@ -79,9 +88,11 @@ For the exact provider cutover checklist, see [PAYMENT-CUTOVER-RUNBOOK.md](PAYME
 
 After cutover:
 
-1. Visit `https://www.sandboxhotel.com/book` and confirm it redirects to `https://book.sandboxhotel.com/`.
-2. Visit `https://www.sandboxhotel.com/staff/login` and confirm it redirects to `https://staff.sandboxhotel.com/staff/login`.
-3. Visit `https://book.sandboxhotel.com/staff/login` and confirm canonical redirect sends you to `staff`.
-4. Visit `https://staff.sandboxhotel.com/` and confirm canonical redirect sends you to `book`.
-5. Create a deposit payment request and confirm the link uses `book`.
-6. Trigger a password reset and confirm the email link uses `staff`.
+1. Run `flask --app app db current` in a shell on the deployed service and confirm the database is at the expected head revision.
+2. Visit `/health` on the deployed service and confirm it returns `db: "ok"` with `within_sla: true`.
+3. Visit `https://www.sandboxhotel.com/book` and confirm it redirects to `https://book.sandboxhotel.com/`.
+4. Visit `https://www.sandboxhotel.com/staff/login` and confirm it redirects to `https://staff.sandboxhotel.com/staff/login`.
+5. Visit `https://book.sandboxhotel.com/staff/login` and confirm canonical redirect sends you to `staff`.
+6. Visit `https://staff.sandboxhotel.com/` and confirm canonical redirect sends you to `book`.
+7. Create a deposit payment request and confirm the link uses `book`.
+8. Trigger a password reset and confirm the email link uses `staff`.

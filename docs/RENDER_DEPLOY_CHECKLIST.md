@@ -88,6 +88,7 @@ flask --app app bootstrap-inventory
 ```
 
 Run `flask --app app sync-role-permissions` only when you intentionally want to apply seeded permission changes to existing system roles.
+Before go-live, also run `flask --app app db current` and confirm the database is at the expected head revision after `db upgrade`.
 
 ## 5. First login
 
@@ -151,7 +152,7 @@ When enabling them later, set:
 
 Check all of these manually:
 
-1. `/health` returns `{"status":"ok"}`
+1. `/health` returns `{"status":"ok","db":"ok",...}` and `within_sla: true`
 2. homepage loads
 3. availability search works
 4. booking hold page opens

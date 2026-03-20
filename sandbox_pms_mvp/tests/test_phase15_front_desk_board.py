@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import ActivityLog, AppSetting, AuditLog, ExternalCalendarBlock, ExternalCalendarSource, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
+from pms.models import ActivityLog, AppSetting, AuditLog, ExternalCalendarBlock, ExternalCalendarSource, FolioCharge, InventoryDay, InventoryOverride, Reservation, Role, Room, RoomType, User
 from pms.services.admin_service import InventoryOverridePayload, create_inventory_override
 from pms.services.front_desk_board_service import FrontDeskBoardFilters, build_front_desk_board
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
@@ -230,6 +230,93 @@ def test_build_front_desk_board_groups_unallocated_clips_stays_and_surfaces_spec
         assert "closure" not in hidden_kinds
 
 
+def test_build_front_desk_board_surfaces_tentative_reservations(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        window_start = date.today()
+        tentative = create_staff_reservation(
+            first_name="Tentative",
+            last_name="Inquiry",
+            phone="+66810000004",
+            room_type_code="DBL",
+            check_in_date=window_start + timedelta(days=1),
+            check_out_date=window_start + timedelta(days=3),
+            initial_status="tentative",
+        )
+
+        board = build_front_desk_board(
+            FrontDeskBoardFilters(
+                start_date=window_start,
+                days=14,
+                show_unallocated=True,
+                show_closed=True,
+            )
+        )
+
+        all_blocks = [
+            block
+            for group in board["groups"]
+            for row in group["rows"]
+            for block in row["visible_blocks"]
+        ]
+        tentative_block = next(block for block in all_blocks if block["reservationId"] == str(tentative.id))
+
+        assert tentative_block["sourceType"] == "reservation"
+        assert tentative_block["status"] == "tentative"
+        assert tentative_block["displayVariant"] == "pending"
+        assert tentative_block["subtitle"].endswith("tentative")
+
+
+def test_build_front_desk_board_surfaces_balance_due_on_reservation_cards(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        window_start = date.today()
+        reservation = create_staff_reservation(
+            first_name="Balance",
+            last_name="Due",
+            phone="+66810000005",
+            room_type_code="DBL",
+            check_in_date=window_start,
+            check_out_date=window_start + timedelta(days=2),
+            initial_status="confirmed",
+        )
+        db.session.add(
+            FolioCharge(
+                reservation_id=reservation.id,
+                charge_code="XTR",
+                charge_type="manual_charge",
+                description="Airport transfer",
+                quantity=1,
+                unit_amount=1250,
+                line_amount=1250,
+                tax_amount=0,
+                total_amount=1250,
+                service_date=reservation.check_in_date,
+            )
+        )
+        db.session.commit()
+
+        board = build_front_desk_board(
+            FrontDeskBoardFilters(
+                start_date=window_start,
+                days=14,
+                show_unallocated=True,
+                show_closed=True,
+            )
+        )
+
+        all_blocks = [
+            block
+            for group in board["groups"]
+            for row in group["rows"]
+            for block in row["visible_blocks"]
+        ]
+        balance_block = next(block for block in all_blocks if block["reservationId"] == str(reservation.id))
+
+        assert balance_block["sourceType"] == "reservation"
+        assert balance_block["balanceDue"] == 1250.0
+
+
 def test_front_desk_board_route_requires_reservation_view_permission(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -314,6 +401,9 @@ def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
     assert 'data-density="comfortable"' in html
     assert 'data-density="spacious"' in html
     assert 'data-density="ultra"' in html
+    assert 'class="planning-board-surface"' in html
+    assert 'data-board-skeleton' in html
+    assert 'data-board-surface-content' in html
 
 
 def test_front_desk_board_data_route_logs_metric_payload(app_factory, monkeypatch):
@@ -1483,6 +1573,32 @@ class TestBoardKeyboardSelection:
         assert b".planning-board-block.selected > summary" in response.data
         assert b"outline:" in response.data
 
+    def test_static_assets_send_cache_headers(self, app_factory):
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        css_response = client.get("/static/styles.css")
+        js_response = client.get("/static/front-desk-board.js")
+
+        assert css_response.status_code == 200
+        assert js_response.status_code == 200
+        assert "public" in css_response.headers["Cache-Control"]
+        assert "max-age=3600" in css_response.headers["Cache-Control"]
+        assert "public" in js_response.headers["Cache-Control"]
+        assert "max-age=3600" in js_response.headers["Cache-Control"]
+
+    def test_board_css_has_loading_skeleton_styles(self, app_factory):
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        css = response.get_data(as_text=True)
+        assert ".planning-board-surface.is-loading" in css
+        assert ".planning-board-skeleton" in css
+        assert "@keyframes planning-board-skeleton-shimmer" in css
+
 
 class TestBoardKeyboardMoveResize:
     """Test keyboard move/resize modes with room-target navigation."""
@@ -1600,6 +1716,34 @@ class TestBoardGlobalActionShortcuts:
         assert "case \"c\":" in content or "case 'c':" in content
         assert "case \"o\":" in content or "case 'o':" in content
 
+    def test_search_shortcut_targets_live_board_search_input(self, app_factory):
+        """Search shortcut should target the real board filter-bar search input."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert 'const searchInput = root.querySelector("[data-board-search-input]");' in content
+        assert "searchInput.focus()" in content
+        assert "searchInput.select()" in content
+
+    def test_search_input_uses_data_hooks_on_board_page(self, app_factory):
+        """Board page should expose stable search hooks for the debounced filter form."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+        with app.app_context():
+            user = make_staff_user("front_desk", "board-search-hooks@example.com")
+
+        login_as(client, user)
+        response = client.get("/staff/front-desk/board")
+
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert 'data-board-search-form' in html
+        assert 'data-board-search-input' in html
+
     def test_check_in_and_checkout_endpoints_in_app(self, app_factory):
         """App should register check-in and check-out endpoints."""
         from sandbox_pms_mvp.pms.app import create_app
@@ -1642,6 +1786,36 @@ class TestBoardCommandPalette:
         assert response.status_code == 200
         # Verify search panel function exists
         assert b"openSearchPanel" in response.data
+
+    def test_search_form_submission_is_debounced(self, app_factory):
+        """Board search should debounce auto-submit instead of reloading on every keystroke."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert "initializeBoardSearch" in content
+        assert 'searchInput.addEventListener("input"' in content
+        assert "clearBoardSearchTimer" in content
+        assert "window.setTimeout(submitBoardSearchIfChanged, 250)" in content
+        assert 'typeof searchForm.requestSubmit === "function"' in content
+
+    def test_board_surface_loading_state_is_managed_in_script(self, app_factory):
+        """Board script should toggle a reusable loading state around the surface refresh path."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert 'const surfaceContent = surface.querySelector("[data-board-surface-content]");' in content
+        assert 'const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");' in content
+        assert "function setSurfaceLoading(isLoading)" in content
+        assert "setSurfaceLoading(true);" in content
+        assert "surfaceContent.innerHTML = await response.text();" in content
 
     def test_command_palette_infrastructure_in_place(self, app_factory):
         """Global keyboard event listener should  handle command palette triggers."""

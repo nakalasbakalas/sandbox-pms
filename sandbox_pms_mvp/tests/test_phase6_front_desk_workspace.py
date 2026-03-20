@@ -1042,6 +1042,10 @@ def test_check_in_route_returns_structured_field_errors_for_validation_issues(ap
     assert "Deposit is still outstanding." in body
     assert 'href="#check-in-first-name"' in body
     assert 'id="check-in-first-name"' in body
+    assert 'aria-describedby="check-in-first-name-error"' in body
+    assert 'id="check-in-first-name-error"' in body
+    assert 'aria-describedby="check-in-phone-error"' in body
+    assert 'id="check-in-phone-error"' in body
     assert 'aria-invalid="true"' in body
     assert 'value="Validation"' in body
 
@@ -1080,6 +1084,8 @@ def test_check_in_route_rejects_invalid_payment_amount_with_field_message(app_fa
 
     assert response.status_code == 400
     assert "Payment collected now must be a valid amount in THB." in body
+    assert 'aria-describedby="check-in-collect-payment-amount-error"' in body
+    assert 'id="check-in-collect-payment-amount-error"' in body
     assert "Something went wrong. Please try again or contact the hotel." not in body
 
 
