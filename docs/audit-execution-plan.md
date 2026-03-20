@@ -16,8 +16,8 @@ All critical and high-priority fixes from the audit implemented and tested:
 | Finding | Status | Notes |
 |---------|--------|-------|
 | **F-01** SSE blocks workers | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | SSE endpoint removed; replaced with 10s JS polling |
-| **F-02** Render storage config | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | render.yaml updated with storage options & examples |
-| **F-03** Background tasks unwired | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | 6 render.yaml cron jobs added (notifications, sync, etc.) |
+| **F-02** Render storage config | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | `Config` now loads local/S3 storage env vars and `render.yaml` enables a persistent Render disk at `/var/data/uploads/documents` |
+| **F-03** Background tasks unwired | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | 9 Render cron jobs wired, including notifications, automation, iCal sync, waitlist, audit cleanup, and no-show auto-cancel |
 | **F-07** Root cleanup | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | 28 artifacts deleted, 4 docs moved to `docs/`, 4 root tests removed |
 | **F-09** FEATURE_BOARD_V2 unclear | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Flag documented; gates board v2 action endpoints |
 | **F-10** OCR returns None silently | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Now returns status dict: `{"status": "unavailable", ...}` |
@@ -127,17 +127,17 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 | Module | What's present | What's missing |
 |---|---|---|
-| SMS delivery | `SmsAdapter` class exists | Always returns mock ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â no real SMS provider (Twilio, SNS, etc.) |
-| Line guest messaging | `LineAdapter` ships stub | Logs if `Line_STAFF_ALERT_WEBHOOK_URL` set but guest-facing Line is unstubbed |
+| SMS delivery | `WebhookSmsAdapter` posts to `SMS_OUTBOUND_WEBHOOK_URL` when configured | Direct Twilio/SNS-specific connector is still optional rather than bundled |
+| Line guest messaging | `LineAdapter` supports LINE push API via `LINE_CHANNEL_ACCESS_TOKEN` and a fallback outbound webhook | Guest records do not yet store a dedicated LINE user ID field, so staff must provide the recipient explicitly |
 | OTA guest messaging | `OtaMessageAdapter` class | Explicit stub ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â "not connected to any OTA messaging API" |
-| OCR / ID extraction | `suggest_ocr_extraction()` hook | Explicit `# TODO: integrate OCR provider` comment ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â returns None only |
+| OCR / ID extraction | `suggest_ocr_extraction()` hook returns explicit unavailability status | OCR provider integration itself is still not connected |
 | Board v2 feature flag | `FEATURE_BOARD_V2` env var + `check_board_v2_feature_gate()` | Purpose unclear ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â flag appears in context but no distinct v2 board implementation found |
-| Scheduled/cron task wiring | 8 Flask CLI commands for automation | render.yaml has zero cron jobs ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â tasks never fire automatically in production |
-| File storage in production | `LocalStorageBackend` (default) + `S3StorageBackend` (optional) | `UPLOAD_DIR` not configured in `render.yaml` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â defaults to ephemeral instance path; `boto3` missing from `requirements.txt` |
+| Scheduled/cron task wiring | Render blueprint now defines 9 cron jobs for notifications, reminders, iCal sync, automation, waitlist, audit cleanup, and no-show handling | Property-specific secrets and retention values still need production provisioning |
+| File storage in production | `LocalStorageBackend` (default) + `S3StorageBackend` (optional), `boto3` installed, storage env vars loaded, Render disk wired by default | If the property prefers S3/R2 over the Render disk, credentials still need to be provisioned |
 | Waitlist | `waitlist` reservation status constant exists | No automation to process, promote, or expire waitlist entries |
 | Modification request processing | Staff review queue UI + model exists | No automated processing ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â staff must manually accept/reject then manually re-price |
 | Revenue / yield management | Rate rules with priority/day-of-week/stay-length | No occupancy-based pricing, no min-rate floors, no last-minute discount engine |
-| Report exports | Reports render in HTML | No CSV/PDF download for any report |
+| Report exports | Daily reports render in HTML and CSV | PDF / print-ready exports remain incomplete |
 | Guest profile merge / deduplication | `Guest` model + search | No merge endpoint or dedup tooling |
 
 ### Unclear / Unverified
@@ -341,9 +341,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Messaging
 
-- [ ] Integrate a real SMS provider (Twilio, AWS SNS, or similar) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â replace `SmsAdapter` stub
+- [x] Add operator-facing automation rule management *(the admin communications workspace now lists, edits, and creates `AutomationRule` records against existing message templates; verified in `test_phase11_communications.py` on 2026-03-20)*
+- [ ] Integrate a direct SMS vendor (Twilio, AWS SNS, or similar) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â repo now supports a real outbound webhook adapter via `SMS_OUTBOUND_WEBHOOK_URL`, but a bundled vendor-specific connector is still optional
 - [ ] Add inbound email parsing (reply-to-thread feature for email channel)
-- [ ] Add Line Business API integration for guest-facing messaging (not just staff alerts)
+- [x] Add Line Business API integration for guest-facing messaging *(guest messaging now supports LINE push delivery via `LINE_CHANNEL_ACCESS_TOKEN` with a webhook fallback; verified by targeted adapter coverage in `test_phase18_messaging.py` on 2026-03-20)*
 - [ ] Add message delivery retry with exponential back-off (currently delivery attempt is single-shot)
 - [ ] Add auto-response templates for common guest questions
 
@@ -558,9 +559,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 **To-dos:**
 - Channel performance report and year-over-year comparison complete *(manager dashboard, daily report view, and CSV export verified in `test_phase12_reporting.py` and `test_phase19_dashboards.py` on 2026-03-19)*
 - Debtors/outstanding-balance report complete *(covered by `folio_balances_outstanding_report()` and the `payment_due` daily report / staff dashboard surfaces; verified in `test_phase12_reporting.py` and `test_phase19_dashboards.py` on 2026-03-19)*
-- Implement real SMS provider (Twilio or AWS SNS)
-- Add Line Business API integration for guest messaging
-- Add OTA channel push adapter (inventory/rate updates via CM API)
+- SMS outbound adapter depth improved *(repo now supports `SMS_OUTBOUND_WEBHOOK_URL`; direct vendor-specific Twilio/SNS connector still optional)*
+- Line Business API integration for guest messaging complete *(via `LINE_CHANNEL_ACCESS_TOKEN` with webhook fallback; targeted adapter coverage added in `test_phase18_messaging.py` on 2026-03-20)*
+- OTA channel push adapter complete *(generic `WebhookChannelProvider` added for inventory/rate pushes through an external channel bridge; verified in `test_availability_and_channel.py` on 2026-03-20)*
+- Automation rule editor complete *(admin communications now manages seeded and custom `AutomationRule` records; verified in `test_phase11_communications.py` on 2026-03-20)*
 - Add revenue management dashboard (ADR, RevPAR, occupancy forecast)
 - Add Sentry error tracking *(initial DSN/config wiring, request-id tagging, and local tests are in place; live DSN provisioning and runtime capture verification still pending)*
 - CSP nonce hardening complete *(per-request nonce in `pms/security.py`, inline script nonce coverage across staff/public templates, shared `app-actions.js` replacing audited inline handlers, and targeted verification green on 2026-03-20: `test_phase13_security_hardening.py` 30 passed, `test_phase5_staff_reservations_workspace.py` 17 passed/1 skipped, `test_phase6_front_desk_workspace.py` 27 passed/1 skipped, `test_phase7_housekeeping.py` 13 passed/1 skipped, `test_phase18_messaging.py` 60 passed)*
@@ -683,7 +685,7 @@ All `downgrade()` functions are empty or have `pass`. If a bad migration is depl
 | Q-03 | **Render disk vs. S3**: The deployment blueprint does not include a persistent disk. Render free/starter plans do not include persistent disks. Is a Render disk available on the chosen plan, or is S3 the intended path for document storage? |
 | Q-04 | **Stripe live credentials**: The `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are `sync: false` in `render.yaml`. Has a live Stripe account been connected, or is the property still using `PAYMENT_PROVIDER=disabled`? This determines urgency of the Stripe idempotency fix (F-04). |
 | Q-05 | **OCR provider intent**: Is OCR ID extraction a committed product feature or a speculative placeholder? If committed, what provider (AWS Textract, Google Vision, Mindee) is preferred? |
-| Q-06 | **Automation rules**: The `AutomationRule` and `PendingAutomationEvent` models exist and the CLI command processes them. Are automation rules actually configured via seed data or admin UI? The admin panel does not appear to expose an automation rules editor. |
+| Q-06 | **Automation rules**: Seed data is present and the admin communications workspace now exposes an automation-rules editor. Remaining gap is higher-order queue management UX and retry policy, not rule creation/editing. |
 
 ---
 
