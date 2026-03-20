@@ -1596,18 +1596,6 @@ self.addEventListener("fetch", (event) => {
 
     def property_settings_context() -> dict[str, str]:
         return branding_settings_context()
-        return {
-            "hotel_name": str(get_setting_value("hotel.name", "Sandbox Hotel")),
-            "brand_mark": str(get_setting_value("hotel.brand_mark", "SBX")),
-            "logo_url": str(get_setting_value("hotel.logo_url", "") or ""),
-            "contact_phone": str(get_setting_value("hotel.contact_phone", "+66 000 000 000")),
-            "contact_email": str(get_setting_value("hotel.contact_email", "reservations@sandbox-hotel.local")),
-            "address": str(get_setting_value("hotel.address", "")),
-            "currency": str(get_setting_value("hotel.currency", "THB")),
-            "check_in_time": str(get_setting_value("hotel.check_in_time", "14:00")),
-            "check_out_time": str(get_setting_value("hotel.check_out_time", "11:00")),
-            "tax_id": str(get_setting_value("hotel.tax_id", "") or ""),
-        }
 
     def payment_settings_context() -> dict[str, object]:
         return {
