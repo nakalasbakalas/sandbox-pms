@@ -1,103 +1,944 @@
-{% extends 'base.html' %}
-{% block title %}Coupon Studio | {{ hotel_name }}{% endblock %}
-{% block content %}
-<style>
-  /* ── Coupon Studio ── all rules scoped to #cs to avoid PMS conflicts ──
-     Color tokens defer to PMS injected CSS variables (--accent, --accent-dark,
-     --accent-soft, --accent-rgb supplied by base.html <style> block).          */
-  #cs {
-    --cs-bg:      #f4f5f7;
-    --cs-bg-2:    #eef0f4;
-    --cs-surface: #ffffff;
-    --cs-sur-2:   #f8f9fb;
-    --cs-sur-3:   #eef2f7;
-    --cs-text:    #151924;
-    --cs-muted:   #5f6876;
-    --cs-muted2:  #7f8897;
-    --cs-a:       var(--accent);
-    --cs-a2:      var(--accent-dark);
-    --cs-asoft:   var(--accent-soft);
-    --cs-aborder: rgba(var(--accent-rgb), .24);
-    --cs-line:    rgba(21,25,36,.10);
-    --cs-shadow:  0 16px 34px rgba(15,23,42,.10);
-    --cs-shsoft:  0 10px 20px rgba(15,23,42,.08);
-    --cs-r:  22px;
-    --cs-rmd: 16px;
-    --cs-rsm: 12px;
-    --max: 1500px;
-    --page: #ffffff;
-    --page-ink: #111111;
-    --page-line: rgba(0,0,0,.12);
-    --page-muted: #545454;
-    --coupon-height-print: 53.2mm;
-    --page-gap: 3mm;
-    --page-height-safe: 279mm;
-  }
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Coupon Studio | Sandbox Hotel PMS</title>
+  <style>
+    :root {
+      --bg: #f4f5f7;
+      --bg-2: #eef0f4;
+      --surface: #ffffff;
+      --surface-2: #f8f9fb;
+      --surface-3: #eef2f7;
+      --text: #151924;
+      --muted: #5f6876;
+      --muted-2: #7f8897;
+      --accent: #b76a2b;
+      --accent-2: #d18b50;
+      --accent-soft: rgba(209, 139, 80, .14);
+      --line: rgba(21, 25, 36, .10);
+      --shadow: 0 16px 34px rgba(15, 23, 42, .10);
+      --shadow-soft: 0 10px 20px rgba(15, 23, 42, .08);
+      --radius: 22px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+      --max: 1500px;
+      --page: #ffffff;
+      --page-ink: #111111;
+      --page-line: rgba(0, 0, 0, .12);
+      --page-muted: #545454;
+      --page-gap: 3mm;
+      --page-height-safe: 279mm;
+    }
 
-  /* hero section ─────────────────────────────────────────────────────── */
-  .cs-hero-wrap {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    margin-bottom: 20px;
-    border: 1px solid var(--cs-line);
-    border-radius: var(--cs-r);
-    background: linear-gradient(135deg, var(--cs-surface), var(--cs-bg-2));
-    box-shadow: var(--cs-shadow);
-    overflow: hidden;
-  }
-  .cs-hero-body {
-    flex: 1;
-    padding: 24px 28px;
-    min-width: 0;
-  }
-  .cs-hero-body .eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: var(--cs-asoft);
-    border: 1px solid var(--cs-aborder);
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    color: var(--cs-a);
-    margin-bottom: 12px;
-  }
-  .cs-hero-body h1 {
-    margin: 0 0 8px;
-    font-size: clamp(22px, 2.4vw, 32px);
-    line-height: 1.08;
-    color: var(--cs-text);
-    font-family: Georgia, "Times New Roman", serif;
-  }
-  .cs-hero-body p {
-    margin: 0;
-    color: var(--cs-muted);
-    font-size: 13px;
-    max-width: 72ch;
-    line-height: 1.5;
-  }
-  .cs-hero-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-top: 18px;
-  }
-  .cs-hero-img {
-    width: 200px;
-    flex-shrink: 0;
-    background: linear-gradient(135deg,
-      rgba(var(--accent-rgb), .14) 0%,
-      rgba(var(--accent-rgb), .04) 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px 20px;
-    border-left: 1px solid var(--cs-line);
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.45;
+      min-height: 100vh;
+    }
+    button, input, select, textarea { font: inherit; color: inherit; }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; }
+
+    .app { max-width: var(--max); margin: 0 auto; padding: 18px; }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .03)), var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .hero h1 { margin: 10px 0 8px; font-size: clamp(28px, 3vw, 40px); line-height: 1.05; font-family: Georgia, "Times New Roman", serif; }
+    .hero p { margin: 0; color: var(--muted); max-width: 76ch; }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(209, 139, 80, .24);
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .heroActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 44px;
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, .6);
+      color: var(--text);
+      font-weight: 900;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform .14s ease, box-shadow .14s ease, background .14s ease;
+      box-shadow: var(--shadow-soft);
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn.primary { border: none; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+    .btn.secondary { background: var(--surface-2); }
+    .btn.ghost { background: transparent; box-shadow: none; }
+    .btn.sm { min-height: 38px; padding: 9px 12px; border-radius: 12px; font-size: 13px; }
+
+    .grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px; align-items: start; }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panelHead { padding: 16px 18px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, 0)); }
+    .panelHead h2 { margin: 0; font-size: 17px; }
+    .panelHead p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+    .panelBody { padding: 16px 18px; }
+
+    .couponList { display: grid; gap: 10px; }
+    .couponTab {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      cursor: pointer;
+      text-align: left;
+    }
+    .couponTab.active { border-color: rgba(209, 139, 80, .34); background: linear-gradient(180deg, rgba(209, 139, 80, .12), rgba(255, 255, 255, .02)), var(--surface-2); }
+    .couponTabTitle { font-size: 14px; font-weight: 900; color: var(--text); }
+    .couponTabMeta { font-size: 12px; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: rgba(255, 255, 255, .18); border: 1px solid rgba(255, 255, 255, .25); }
+    .dot.selected { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: rgba(209, 139, 80, .54); }
+
+    .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .stat { padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface-2); }
+    .stat b { display: block; font-size: 20px; color: var(--text); }
+    .stat span { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+    .editorTop { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 14px; }
+    .editorTitle h2 { margin: 0; font-size: 22px; }
+    .editorTitle p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+    .editorActions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .layout { display: grid; grid-template-columns: minmax(0, 1.1fr) 380px; gap: 18px; align-items: start; }
+    .stage { display: grid; gap: 18px; }
+    .box { padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface-2); }
+    .box h3 { margin: 0 0 12px; font-size: 16px; }
+    .box p { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    .field input, .field textarea, .field select {
+      width: 100%;
+      padding: 12px 13px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--surface-3);
+      color: var(--text);
+      outline: none;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: rgba(209, 139, 80, .42); box-shadow: 0 0 0 4px rgba(209, 139, 80, .14); }
+    .field textarea { min-height: 88px; resize: vertical; }
+    .help { font-size: 12px; color: var(--muted-2); }
+    .checks { display: grid; gap: 10px; margin-top: 14px; }
+    .check {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--surface-3);
+    }
+    .check strong { display: block; font-size: 14px; }
+    .check span { display: block; font-size: 12px; color: var(--muted); }
+    .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+    .imageTools { display: grid; gap: 10px; }
+    .imageQuick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .imageQuick .btn { width: 100%; }
+    .imageStatus { padding: 12px 14px; border-radius: 14px; border: 1px dashed rgba(209, 139, 80, .32); background: rgba(209, 139, 80, .08); font-size: 13px; color: var(--muted); }
+
+    .couponPreview, .printCoupon {
+      position: relative;
+      display: grid;
+      grid-template-columns: 130px minmax(0, 1.55fr) 170px;
+      gap: 14px;
+      align-items: center;
+      min-height: 144px;
+      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--local-bg, linear-gradient(90deg, rgba(183, 106, 43, .14), rgba(183, 106, 43, 0) 20%), linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, .02)), var(--surface));
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+    .couponPreview::before, .printCoupon::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      background: var(--local-bar, linear-gradient(180deg, var(--accent), var(--accent-2)));
+    }
+    .couponPreview::after, .printCoupon::after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      top: 12px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--text);
+      background: var(--local-badge-bg, rgba(255, 255, 255, .06));
+      border: 1px solid var(--local-badge-border, rgba(255, 255, 255, .12));
+    }
+    .couponPreview[data-badge]:not([data-badge=""])::after, .printCoupon[data-badge]:not([data-badge=""])::after { content: attr(data-badge); }
+
+    .couponImage, .printImage {
+      width: 100%;
+      height: 110px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--surface-3);
+      overflow: hidden;
+      position: relative;
+    }
+    .couponImage img, .printImage img { width: 100%; height: 100%; object-fit: cover; }
+    .placeholder {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 10px;
+      text-align: center;
+      background: linear-gradient(135deg, rgba(209, 139, 80, .16), rgba(209, 139, 80, .04)), repeating-linear-gradient(135deg, rgba(255, 255, 255, .06) 0 10px, rgba(255, 255, 255, .02) 10px 20px);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .couponMain { min-width: 0; }
+    .couponTitle { font-size: 24px; line-height: 1.06; font-weight: 1000; color: var(--text); margin: 0 0 8px; }
+    .couponDesc { margin: 0; color: var(--muted); font-size: 14px; }
+    .couponTerms { margin: 8px 0 0; color: var(--muted-2); font-size: 12px; }
+    .codeBox {
+      display: grid;
+      gap: 10px;
+      justify-items: center;
+      text-align: center;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px dashed rgba(209, 139, 80, .42);
+      background: rgba(255, 255, 255, .04);
+    }
+    .codeLabel { font-size: 11px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); }
+    .codeValue { font-size: 22px; line-height: 1; font-weight: 1000; letter-spacing: .10em; color: var(--text); }
+    .ctaTag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 13px;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      color: #fff;
+      min-width: 112px;
+    }
+
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .toolbarLeft, .toolbarRight { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .note { font-size: 12px; color: var(--muted); }
+    .sheet {
+      background: #fff;
+      color: #111;
+      border-radius: 22px;
+      border: 1px solid rgba(0, 0, 0, .08);
+      box-shadow: 0 24px 50px rgba(0, 0, 0, .18);
+      padding: 10mm;
+      aspect-ratio: 210 / 297;
+      overflow: hidden;
+      position: relative;
+    }
+    .sheet::before {
+      content: "A4 preview • 5 coupons per page";
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 11px;
+      font-weight: 800;
+      color: #777;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .sheetPage { height: 100%; display: grid; grid-template-rows: repeat(5, 1fr); gap: var(--page-gap); }
+    .sheetPreviewCoupon {
+      height: 100%;
+      display: grid;
+      grid-template-columns: 30mm minmax(0, 1fr) 34mm;
+      gap: 3mm;
+      align-items: center;
+      padding: 3.1mm;
+      border: 1px solid rgba(0, 0, 0, .10);
+      border-radius: 4mm;
+      background: #fff;
+      color: #111;
+      overflow: hidden;
+      position: relative;
+    }
+    .sheetPreviewCoupon::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 2.3mm;
+      background: var(--local-bar, linear-gradient(180deg, var(--accent), var(--accent-2)));
+    }
+    .sheetPreviewCoupon::after {
+      content: attr(data-badge);
+      position: absolute;
+      right: 3mm;
+      top: 2.6mm;
+      font-size: 8px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: #444;
+      background: var(--local-print-badge-bg, #f5efe8);
+      border: 1px solid rgba(183, 106, 43, .20);
+      border-radius: 999px;
+      padding: 1mm 1.8mm;
+      max-width: 28mm;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sheetPreviewCoupon[data-badge=""]::after { display: none; }
+    .sheetPreviewImg { height: 100%; border-radius: 3mm; border: 1px solid rgba(0, 0, 0, .10); overflow: hidden; background: #f4f4f4; }
+    .sheetPreviewImg img { width: 100%; height: 100%; object-fit: cover; }
+    .sheetPreviewPh { width: 100%; height: 100%; display: grid; place-items: center; background: linear-gradient(135deg, rgba(209, 139, 80, .14), rgba(209, 139, 80, .04)); color: #7a746d; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; text-align: center; padding: 2mm; }
+    .sheetPreviewMain { min-width: 0; padding-left: 1mm; }
+    .sheetPreviewTitle { font-size: 14px; line-height: 1.06; font-weight: 1000; margin: 0 0 1.5mm; color: #111; }
+    .sheetPreviewDesc { font-size: 10px; line-height: 1.25; margin: 0; color: #444; }
+    .sheetPreviewTerms { font-size: 8px; line-height: 1.25; margin: 1.6mm 0 0; color: #666; }
+    .sheetPreviewCode { display: grid; gap: 1.5mm; justify-items: center; text-align: center; border: 1px dashed rgba(183, 106, 43, .38); border-radius: 3mm; padding: 2.3mm; background: #fffaf6; }
+    .sheetPreviewCode small { font-size: 7px; letter-spacing: .16em; text-transform: uppercase; color: #7a746d; font-weight: 900; }
+    .sheetPreviewCode strong { font-size: 11px; line-height: 1; font-weight: 1000; letter-spacing: .08em; color: #111; }
+    .sheetPreviewCode span { display: inline-flex; align-items: center; justify-content: center; border-radius: 2.4mm; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-size: 8px; font-weight: 900; padding: 1.6mm 2.2mm; min-width: 22mm; }
+
+    .miniGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+    .muted { color: var(--muted); }
+    .screenOnly { display: block; }
+    .printOnly { display: none; }
+
+    @media (max-width: 1260px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 1120px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 860px) {
+      .fields { grid-template-columns: 1fr; }
+      .couponPreview { grid-template-columns: 1fr; }
+      .couponImage { height: 180px; }
+      .codeBox { justify-items: start; text-align: left; }
+      .hero { padding: 16px; }
+      .app { padding: 14px; }
+    }
+    @media (max-width: 620px) {
+      .imageQuick, .miniGrid { grid-template-columns: 1fr; }
+      .heroActions, .editorActions, .toolbar { flex-direction: column; align-items: stretch; }
+      .toolbarLeft, .toolbarRight { width: 100%; }
+      .btn { width: 100%; }
+      .sheet { padding: 8mm; }
+      .sheetPreviewCoupon { grid-template-columns: 26mm minmax(0, 1fr) 30mm; }
+      .sheetPreviewTitle { font-size: 11px; }
+      .sheetPreviewDesc { font-size: 8px; }
+      .sheetPreviewTerms { font-size: 7px; }
+    }
+
+    @page { size: A4 portrait; margin: 8mm; }
+    @media print {
+      html, body { background: #fff !important; color: #111 !important; }
+      .screenOnly, .app { display: none !important; }
+      .printOnly { display: block !important; }
+      .printRoot { display: block; }
+      .printPage {
+        height: var(--page-height-safe);
+        display: grid;
+        grid-template-rows: repeat(5, 1fr);
+        gap: var(--page-gap);
+        page-break-after: always;
+        break-after: page;
+      }
+      .printPage:last-child { page-break-after: auto; break-after: auto; }
+      .printCoupon {
+        height: 100%;
+        min-height: 0;
+        grid-template-columns: 36mm minmax(0, 1fr) 38mm;
+        gap: 4mm;
+        padding: 4.2mm;
+        border: 1px solid var(--page-line);
+        border-radius: 4.5mm;
+        background: #fff !important;
+        box-shadow: none !important;
+        color: var(--page-ink);
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .printCoupon::after {
+        color: #444;
+        background: var(--local-print-badge-bg, #f6f1eb);
+        border-color: rgba(183, 106, 43, .20);
+        top: 3.2mm;
+        right: 4mm;
+        font-size: 8px;
+        padding: 1mm 2mm;
+        max-width: 30mm;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .printCoupon[data-badge=""]::after { display: none; }
+      .printImage { height: 100%; border-radius: 3.4mm; border-color: var(--page-line); background: #f3f3f3; }
+      .printImage .placeholder { background: linear-gradient(135deg, rgba(209, 139, 80, .14), rgba(209, 139, 80, .04)); color: #7a746d; font-size: 8px; padding: 2.4mm; }
+      .printTitle { font-size: 15pt; line-height: 1.05; margin: 0 0 1.4mm; font-weight: 1000; color: var(--page-ink); }
+      .printDesc { margin: 0; color: #404040; font-size: 9.4pt; line-height: 1.24; }
+      .printTerms { margin: 1.8mm 0 0; color: #666; font-size: 7.6pt; line-height: 1.24; }
+      .printCode {
+        display: grid;
+        gap: 1.8mm;
+        justify-items: center;
+        text-align: center;
+        padding: 2.8mm;
+        border-radius: 3.4mm;
+        border: 1px dashed rgba(183, 106, 43, .38);
+        background: #fffaf6;
+      }
+      .printCode small { font-size: 6.6pt; letter-spacing: .16em; text-transform: uppercase; color: #7a746d; font-weight: 900; }
+      .printCode strong { font-size: 11pt; line-height: 1; font-weight: 1000; letter-spacing: .08em; color: var(--page-ink); }
+      .printCode span { display: inline-flex; align-items: center; justify-content: center; min-width: 26mm; padding: 1.4mm 2mm; border-radius: 2.8mm; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; font-size: 7pt; font-weight: 900; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app screenOnly">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Sandbox Hotel • Coupon Studio</div>
+        <h1>Editable coupon banner stripes</h1>
+        <p>Create, edit, select, and print coupon stripes with image placeholders. The print layout is locked so up to 5 coupons fit cleanly on each A4 page.</p>
+      </div>
+      <div class="heroActions">
+        <button class="btn secondary" id="selectTopFiveBtn" type="button">Select first 5</button>
+        <button class="btn secondary" id="clearSelectionBtn" type="button">Clear selection</button>
+        <button class="btn secondary" id="resetBtn" type="button">Reset defaults</button>
+        <button class="btn primary" id="printBtn" type="button">Print selected coupons</button>
+      </div>
+    </section>
+
+    <div class="grid">
+      <aside class="panel">
+        <div class="panelHead">
+          <h2>Voucher list</h2>
+          <p>Choose a voucher to edit. Tick the ones you want to print.</p>
+        </div>
+        <div class="panelBody">
+          <div class="couponList" id="couponList"></div>
+          <div class="stats">
+            <div class="stat"><b id="selectedCount">0</b><span>Selected for print</span></div>
+            <div class="stat"><b id="pageCount">0</b><span>A4 pages</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel">
+        <div class="panelBody">
+          <div class="editorTop">
+            <div class="editorTitle">
+              <h2 id="editorTitle">Edit coupon</h2>
+              <p>Use the editor to update copy, promo code, image placeholder, and print selection.</p>
+            </div>
+            <div class="editorActions">
+              <button class="btn sm secondary" id="duplicateBtn" type="button">Duplicate current text to next</button>
+              <button class="btn sm secondary" id="resetCurrentBtn" type="button">Reset current voucher</button>
+            </div>
+          </div>
+
+          <div class="layout">
+            <div class="stage">
+              <div class="box">
+                <h3>Live coupon preview</h3>
+                <div id="livePreview"></div>
+              </div>
+
+              <div class="box">
+                <div class="toolbar">
+                  <div class="toolbarLeft">
+                    <h3 style="margin:0">A4 print preview</h3>
+                    <span class="note">Preview shows the first page. Print uses 5 coupons per page automatically.</span>
+                  </div>
+                  <div class="toolbarRight">
+                    <button class="btn sm secondary" id="previewPagePrev" type="button">Previous</button>
+                    <span class="note" id="previewPageLabel">Page 1 of 1</span>
+                    <button class="btn sm secondary" id="previewPageNext" type="button">Next</button>
+                  </div>
+                </div>
+                <div class="sheet" id="sheetPreview"></div>
+              </div>
+            </div>
+
+            <aside class="box">
+              <h3>Voucher editor</h3>
+              <div class="fields">
+                <div class="field full">
+                  <label for="titleInput">Offer title</label>
+                  <input id="titleInput" type="text">
+                </div>
+                <div class="field">
+                  <label for="badgeInput">Badge</label>
+                  <input id="badgeInput" type="text" placeholder="Top Seller">
+                </div>
+                <div class="field">
+                  <label for="codeInput">Promo code</label>
+                  <input id="codeInput" type="text" maxlength="18">
+                </div>
+                <div class="field full">
+                  <label for="descInput">Description</label>
+                  <textarea id="descInput"></textarea>
+                </div>
+                <div class="field full">
+                  <label for="termsInput">Terms / conditions</label>
+                  <textarea id="termsInput"></textarea>
+                </div>
+                <div class="field">
+                  <label for="ctaInput">CTA label</label>
+                  <input id="ctaInput" type="text" maxlength="28">
+                </div>
+                <div class="field">
+                  <label for="styleInput">Stripe accent style</label>
+                  <select id="styleInput">
+                    <option value="copper">Copper</option>
+                    <option value="champagne">Champagne</option>
+                    <option value="ember">Ember</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="checks">
+                <label class="check">
+                  <div>
+                    <strong>Include this voucher in print</strong>
+                    <span>Selected coupons will be placed into the A4 print pages.</span>
+                  </div>
+                  <input id="selectedInput" type="checkbox">
+                </label>
+              </div>
+
+              <div class="box" style="padding:14px;margin-top:14px;background:var(--surface-3)">
+                <h3 style="margin-bottom:10px">Image placeholder / artwork</h3>
+                <div class="imageTools">
+                  <div class="imageQuick">
+                    <button class="btn sm secondary imagePresetBtn" type="button" data-image="">Placeholder only</button>
+                    <button class="btn sm secondary imagePresetBtn" type="button" data-image="sandbox-hotel-nakhon-si-thammarat-Sandbox-Hotel-Hero-Banner.png">Exterior day</button>
+                    <button class="btn sm secondary imagePresetBtn" type="button" data-image="sandbox-hotel-nakhon-si-thammarat-flower-view.png">Exterior dusk</button>
+                    <button class="btn sm secondary imagePresetBtn" type="button" data-image="sandbox-hotel-nakhon-si-thammarat-lobby.png">Lobby</button>
+                  </div>
+                  <div class="miniGrid">
+                    <label class="btn sm ghost" for="uploadImageInput" style="cursor:pointer">Upload custom image</label>
+                    <button class="btn sm secondary" id="removeCustomImageBtn" type="button">Remove custom image</button>
+                  </div>
+                  <input id="uploadImageInput" type="file" accept="image/*" hidden>
+                  <div class="imageStatus" id="imageStatus">Current image: placeholder only.</div>
+                  <div class="help">Preset hotel images are loaded from / themes. Custom uploads stay in the current session.</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="printOnly printRoot" id="printRoot"></div>
+
+  <script>
+    const STORAGE_KEY = "sandbox_hotel_coupon_studio_v1";
+    const PAGE_SIZE = 5;
+
+    const defaultCoupons = [
+      {title:"Direct Booking Welcome", badge:"Top Seller", desc:"Save 10% on your stay when you book directly with the hotel.", terms:"Direct bookings only • Subject to availability • Not combinable with other promotions", code:"DIRECT10", cta:"Book Direct", style:"copper", image:"sandbox-hotel-nakhon-si-thammarat-Sandbox-Hotel-Hero-Banner.png", selected:true},
+      {title:"Stay 2 Nights, Save More", badge:"High Conversion", desc:"Get 12% off when you stay for 2 nights or more.", terms:"Minimum 2 nights • Best for weekend and short business stays • Direct booking only", code:"STAY2SAVE", cta:"Check Dates", style:"champagne", image:"sandbox-hotel-nakhon-si-thammarat-lobby.png", selected:true},
+      {title:"Weekday Smart Rate", badge:"Mon–Thu", desc:"Enjoy a weekday special rate from Monday to Thursday.", terms:"Valid on selected weekdays • Ideal for business travel • Limited rooms per day", code:"WEEKDAY", cta:"Book Weekday", style:"ember", image:"", selected:true},
+      {title:"Long Stay Advantage", badge:"7+ Nights", desc:"Stay 7 nights or more and unlock a stronger long-stay rate.", terms:"Best for project stays and extended visits • Subject to room availability and season", code:"LONGSTAY7", cta:"Ask for Rate", style:"copper", image:"sandbox-hotel-nakhon-si-thammarat-Sandbox-Hotel-Hero-Banner.png", selected:true},
+      {title:"Early Bird Saver", badge:"Advance Booking", desc:"Book early and receive 10% off eligible future stays.", terms:"Advance purchase offer • Good for planned travel • Non-peak blackout dates may apply", code:"EARLY10", cta:"Reserve Early", style:"champagne", image:"", selected:true},
+      {title:"LINE Exclusive Deal", badge:"Direct Message", desc:"Message the hotel on LINE and receive a special direct-booking offer.", terms:"For LINE enquiries only • Good for fast confirmation flow", code:"LINEBEST", cta:"Message on LINE", style:"ember", image:"sandbox-hotel-nakhon-si-thammarat-lobby.png", selected:false},
+      {title:"Call & Confirm Special", badge:"Fastest Route", desc:"Call directly and receive a same-day booking benefit when available.", terms:"Best for urgent stays • Rate and perk depend on live availability", code:"CALLFAST", cta:"Call to Book", style:"copper", image:"", selected:false},
+      {title:"Free Late Check-Out", badge:"Value Add", desc:"Book direct and enjoy free late check-out subject to availability.", terms:"Availability-based benefit • Great for leisure guests • Not valid with every rate plan", code:"LATEOUT", cta:"Claim Perk", style:"champagne", image:"sandbox-hotel-nakhon-si-thammarat-flower-view.png", selected:false},
+      {title:"Free Room Upgrade Request", badge:"Subject to Availability", desc:"Book direct and request a complimentary room upgrade when possible.", terms:"Upgrade not guaranteed • Strong perceived value without always discounting rate", code:"UPGRADEME", cta:"Request Upgrade", style:"ember", image:"", selected:false},
+      {title:"Direct Booking Best Value", badge:"Signature Offer", desc:"Best-value direct package: rate support plus priority confirmation for direct guests.", terms:"Strong evergreen website banner offer • Easy to rotate by channel or season", code:"BESTDIRECT", cta:"Unlock Offer", style:"copper", image:"sandbox-hotel-nakhon-si-thammarat-Sandbox-Hotel-Hero-Banner.png", selected:false}
+    ];
+
+    const styleThemes = {
+      copper: {
+        bg: 'linear-gradient(90deg, rgba(183,106,43,.14), rgba(183,106,43,0) 20%), linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--surface)',
+        bar: 'linear-gradient(180deg, #b76a2b, #d18b50)',
+        badgeBg: 'rgba(209,139,80,.14)',
+        badgeBorder: 'rgba(209,139,80,.24)',
+        printBadgeBg:'#f5efe8'
+      },
+      champagne: {
+        bg: 'linear-gradient(90deg, rgba(240,195,154,.16), rgba(240,195,154,0) 20%), linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--surface)',
+        bar: 'linear-gradient(180deg, #d79b67, #f0c39a)',
+        badgeBg: 'rgba(240,195,154,.18)',
+        badgeBorder: 'rgba(240,195,154,.26)',
+        printBadgeBg:'#fbf1e7'
+      },
+      ember: {
+        bg: 'linear-gradient(90deg, rgba(209,139,80,.18), rgba(209,139,80,0) 20%), linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--surface)',
+        bar: 'linear-gradient(180deg, #8a4d1d, #d18b50)',
+        badgeBg: 'rgba(209,139,80,.16)',
+        badgeBorder: 'rgba(183,106,43,.32)',
+        printBadgeBg:'#f6ece3'
+      }
+    };
+
+    let coupons = loadCoupons();
+    let activeIndex = 0;
+    let previewPageIndex = 0;
+
+    const couponList = document.getElementById('couponList');
+    const livePreview = document.getElementById('livePreview');
+    const sheetPreview = document.getElementById('sheetPreview');
+    const printRoot = document.getElementById('printRoot');
+    const selectedCount = document.getElementById('selectedCount');
+    const pageCount = document.getElementById('pageCount');
+    const previewPageLabel = document.getElementById('previewPageLabel');
+    const editorTitle = document.getElementById('editorTitle');
+    const imageStatus = document.getElementById('imageStatus');
+
+    const titleInput = document.getElementById('titleInput');
+    const badgeInput = document.getElementById('badgeInput');
+    const descInput = document.getElementById('descInput');
+    const termsInput = document.getElementById('termsInput');
+    const codeInput = document.getElementById('codeInput');
+    const ctaInput = document.getElementById('ctaInput');
+    const styleInput = document.getElementById('styleInput');
+    const selectedInput = document.getElementById('selectedInput');
+    const uploadImageInput = document.getElementById('uploadImageInput');
+
+    function loadCoupons(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return structuredClone(defaultCoupons);
+        const parsed = JSON.parse(raw);
+        if(!Array.isArray(parsed) || parsed.length !== defaultCoupons.length) return structuredClone(defaultCoupons);
+        return parsed.map((item, i) => ({...structuredClone(defaultCoupons[i]), ...item}));
+      }catch(err){
+        return structuredClone(defaultCoupons);
+      }
+    }
+
+    function saveCoupons(){
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(coupons)); }catch(err){}
+    }
+
+    function chunk(arr, size){
+      const out = [];
+      for(let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    }
+
+    function escapeHtml(str){
+      return String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+    }
+
+    function getImageMarkup(coupon, mode = 'screen'){
+      const img = coupon.customImage || coupon.image || '';
+      const alt = escapeHtml(coupon.title || 'Coupon image');
+      const placeholderText = mode === 'print' ? 'Image placeholder' : 'Image placeholder';
+      if(img){
+        return `<img src="/static/branding/${escapeHtml(img)}" alt="${alt}">`;
+      }
+      return `<div class="placeholder">${placeholderText}</div>`;
+    }
+
+    function getTheme(coupon){
+      return styleThemes[coupon.style] || styleThemes.copper;
+    }
+
+    function renderCouponCard(coupon, mode = 'screen'){
+      const theme = getTheme(coupon);
+      if(mode === 'screen'){
+        return `
+          <article class="couponPreview" data-badge="${escapeHtml(coupon.badge || '')}" style="--local-bg:${theme.bg};--local-bar:${theme.bar};--local-badge-bg:${theme.badgeBg};--local-badge-border:${theme.badgeBorder};">
+            <div class="couponImage" style="border-color:var(--line)">${getImageMarkup(coupon, mode)}</div>
+            <div class="couponMain">
+              <h3 class="couponTitle">${escapeHtml(coupon.title)}</h3>
+              <p class="couponDesc">${escapeHtml(coupon.desc)}</p>
+              <p class="couponTerms">${escapeHtml(coupon.terms)}</p>
+            </div>
+            <div class="codeBox">
+              <span class="codeLabel">Promo Code</span>
+              <strong class="codeValue">${escapeHtml(coupon.code)}</strong>
+              <span class="ctaTag">${escapeHtml(coupon.cta)}</span>
+            </div>
+          </article>`;
+      }
+      if(mode === 'sheet'){
+        return `
+          <article class="sheetPreviewCoupon" data-badge="${escapeHtml(coupon.badge || '')}" style="--local-bar:${theme.bar};--local-print-badge-bg:${theme.printBadgeBg};">
+            <div class="sheetPreviewImg">${coupon.customImage || coupon.image ? `<img src="/static/branding/${escapeHtml(coupon.customImage || coupon.image)}" alt="${escapeHtml(coupon.title)}">` : `<div class="sheetPreviewPh">Image placeholder</div>`}</div>
+            <div class="sheetPreviewMain">
+              <h4 class="sheetPreviewTitle">${escapeHtml(coupon.title)}</h4>
+              <p class="sheetPreviewDesc">${escapeHtml(coupon.desc)}</p>
+              <p class="sheetPreviewTerms">${escapeHtml(coupon.terms)}</p>
+            </div>
+            <div class="sheetPreviewCode">
+              <small>Promo Code</small>
+              <strong>${escapeHtml(coupon.code)}</strong>
+              <span>${escapeHtml(coupon.cta)}</span>
+            </div>
+          </article>`;
+      }
+      return `
+        <article class="printCoupon" data-badge="${escapeHtml(coupon.badge || '')}" style="--local-bar:${theme.bar};--local-print-badge-bg:${theme.printBadgeBg};background:#fff">
+          <div class="printImage">${getImageMarkup(coupon, mode)}</div>
+          <div class="couponMain">
+            <h3 class="printTitle">${escapeHtml(coupon.title)}</h3>
+            <p class="printDesc">${escapeHtml(coupon.desc)}</p>
+            <p class="printTerms">${escapeHtml(coupon.terms)}</p>
+          </div>
+          <div class="printCode">
+            <small>Promo Code</small>
+            <strong>${escapeHtml(coupon.code)}</strong>
+            <span>${escapeHtml(coupon.cta)}</span>
+          </div>
+        </article>`;
+    }
+
+    function renderList(){
+      couponList.innerHTML = coupons.map((coupon, index) => `
+        <button class="couponTab ${index === activeIndex ? 'active' : ''}" type="button" data-index="${index}">
+          <span class="dot ${coupon.selected ? 'selected' : ''}"></span>
+          <span>
+            <span class="couponTabTitle">${escapeHtml(coupon.title)}</span>
+            <span class="couponTabMeta">${escapeHtml(coupon.code)} • ${coupon.selected ? 'Selected for print' : 'Not selected'}</span>
+          </span>
+          <span class="couponTabMeta">#${index + 1}</span>
+        </button>
+      `).join('');
+
+      couponList.querySelectorAll('.couponTab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeIndex = Number(btn.dataset.index);
+          renderAll();
+        });
+      });
+    }
+
+    function updateEditor(){
+      const coupon = coupons[activeIndex];
+      editorTitle.textContent = `Editing: ${coupon.title}`;
+      titleInput.value = coupon.title;
+      badgeInput.value = coupon.badge;
+      descInput.value = coupon.desc;
+      termsInput.value = coupon.terms;
+      codeInput.value = coupon.code;
+      ctaInput.value = coupon.cta;
+      styleInput.value = coupon.style;
+      selectedInput.checked = !!coupon.selected;
+      const imageLabel = coupon.customImage ? 'custom upload' : (coupon.image ? coupon.image.split('/').pop() : 'placeholder only');
+      imageStatus.textContent = `Current image: ${imageLabel}.`;
+    }
+
+    function getSelectedCoupons(){
+      return coupons.filter(c => c.selected);
+    }
+
+    function renderStats(){
+      const selected = getSelectedCoupons();
+      const pages = Math.max(1, Math.ceil(selected.length / PAGE_SIZE));
+      selectedCount.textContent = String(selected.length);
+      pageCount.textContent = String(selected.length ? pages : 0);
+      previewPageIndex = Math.min(previewPageIndex, Math.max(0, pages - 1));
+      previewPageLabel.textContent = selected.length ? `Page ${previewPageIndex + 1} of ${pages}` : 'Page 0 of 0';
+    }
+
+    function renderLivePreview(){
+      livePreview.innerHTML = renderCouponCard(coupons[activeIndex], 'screen');
+    }
+
+    function renderSheetPreview(){
+      const selected = getSelectedCoupons();
+      if(!selected.length){
+        sheetPreview.innerHTML = '<div class="sheetPage"><div class="sheetPreviewCoupon"><div class="sheetPreviewImg"><div class="sheetPreviewPh">No coupons selected</div></div><div class="sheetPreviewMain"><h4 class="sheetPreviewTitle">Nothing selected for print</h4><p class="sheetPreviewDesc">Tick vouchers in the left column or use "Select first 5".</p><p class="sheetPreviewTerms">The A4 preview will update automatically.</p></div><div class="sheetPreviewCode"><small>Promo Code</small><strong>—</strong><span>Preview</span></div></div></div>';
+        return;
+      }
+      const pages = chunk(selected, PAGE_SIZE);
+      const page = pages[previewPageIndex] || pages[0];
+      const cards = [...page];
+      while(cards.length < PAGE_SIZE){
+        cards.push(null);
+      }
+      sheetPreview.innerHTML = `<div class="sheetPage">${cards.map(c => c ? renderCouponCard(c, 'sheet') : '<div></div>').join('')}</div>`;
+    }
+
+    function renderPrintPages(){
+      const selected = getSelectedCoupons();
+      if(!selected.length){
+        printRoot.innerHTML = '<div class="printPage"><article class="printCoupon" data-badge=""><div class="printImage"><div class="placeholder">No coupons selected</div></div><div class="couponMain"><h3 class="printTitle">No coupons selected for print</h3><p class="printDesc">Go back to the editor and choose the vouchers you want to print.</p><p class="printTerms">Each A4 page is designed for a maximum of five coupons.</p></div><div class="printCode"><small>Promo Code</small><strong>—</strong><span>Preview</span></div></article></div>';
+        return;
+      }
+      const pages = chunk(selected, PAGE_SIZE);
+      printRoot.innerHTML = pages.map(page => {
+        const cards = [...page];
+        while(cards.length < PAGE_SIZE) cards.push(null);
+        return `<section class="printPage">${cards.map(c => c ? renderCouponCard(c, 'print') : '<div></div>').join('')}</section>`;
+      }).join('');
+    }
+
+    function renderAll(){
+      renderList();
+      updateEditor();
+      renderStats();
+      renderLivePreview();
+      renderSheetPreview();
+      renderPrintPages();
+      saveCoupons();
+    }
+
+    function updateCurrent(fields){
+      coupons[activeIndex] = {...coupons[activeIndex], ...fields};
+      renderAll();
+    }
+
+    titleInput.addEventListener('input', e => updateCurrent({title:e.target.value}));
+    badgeInput.addEventListener('input', e => updateCurrent({badge:e.target.value}));
+    descInput.addEventListener('input', e => updateCurrent({desc:e.target.value}));
+    termsInput.addEventListener('input', e => updateCurrent({terms:e.target.value}));
+    codeInput.addEventListener('input', e => updateCurrent({code:e.target.value.toUpperCase().replace(/\s+/g,'').slice(0,18)}));
+    ctaInput.addEventListener('input', e => updateCurrent({cta:e.target.value}));
+    styleInput.addEventListener('change', e => updateCurrent({style:e.target.value}));
+    selectedInput.addEventListener('change', e => updateCurrent({selected:e.target.checked}));
+
+    document.querySelectorAll('.imagePresetBtn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const value = btn.dataset.image || '';
+        coupons[activeIndex].customImage = '';
+        coupons[activeIndex].image = value;
+        renderAll();
+      });
+    });
+
+    uploadImageInput.addEventListener('change', event => {
+      const file = event.target.files && event.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        coupons[activeIndex].customImage = String(reader.result || '');
+        renderAll();
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('removeCustomImageBtn').addEventListener('click', () => {
+      coupons[activeIndex].customImage = '';
+      renderAll();
+    });
+
+    document.getElementById('resetCurrentBtn').addEventListener('click', () => {
+      coupons[activeIndex] = structuredClone(defaultCoupons[activeIndex]);
+      renderAll();
+    });
+
+    document.getElementById('duplicateBtn').addEventListener('click', () => {
+      const next = Math.min(coupons.length - 1, activeIndex + 1);
+      if(next === activeIndex) return;
+      const current = coupons[activeIndex];
+      coupons[next] = {...coupons[next], title:current.title, badge:current.badge, desc:current.desc, terms:current.terms, code:current.code, cta:current.cta, style:current.style, image:current.image, customImage:current.customImage};
+      activeIndex = next;
+      renderAll();
+    });
+
+    document.getElementById('selectTopFiveBtn').addEventListener('click', () => {
+      coupons = coupons.map((coupon, index) => ({...coupon, selected:index < 5}));
+      previewPageIndex = 0;
+      renderAll();
+    });
+
+    document.getElementById('clearSelectionBtn').addEventListener('click', () => {
+      coupons = coupons.map(coupon => ({...coupon, selected:false}));
+      previewPageIndex = 0;
+      renderAll();
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      coupons = structuredClone(defaultCoupons);
+      activeIndex = 0;
+      previewPageIndex = 0;
+      renderAll();
+    });
+
+    document.getElementById('previewPagePrev').addEventListener('click', () => {
+      const pages = Math.max(1, Math.ceil(getSelectedCoupons().length / PAGE_SIZE));
+      previewPageIndex = Math.max(0, previewPageIndex - 1);
+      if(pages === 0) previewPageIndex = 0;
+      renderAll();
+    });
+
+    document.getElementById('previewPageNext').addEventListener('click', () => {
+      const pages = Math.max(1, Math.ceil(getSelectedCoupons().length / PAGE_SIZE));
+      previewPageIndex = Math.min(Math.max(0, pages - 1), previewPageIndex + 1);
+      renderAll();
+    });
+
+    document.getElementById('printBtn').addEventListener('click', () => {
+      renderPrintPages();
+      window.print();
+    });
+
+    window.addEventListener('beforeprint', renderPrintPages);
+
+    renderAll();
+  </script>
+</body>
+</html>
   }
   .cs-hero-img img {
     width: 100%;
