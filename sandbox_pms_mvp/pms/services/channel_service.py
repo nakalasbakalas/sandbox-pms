@@ -567,7 +567,8 @@ def upsert_ota_channel(
     from .auth_service import encrypt_secret
 
     record = get_ota_channel(provider_key)
-    if record is None:
+    is_create = record is None
+    if is_create:
         record = OtaChannel(
             provider_key=provider_key,
             display_name=display_name,
@@ -590,6 +591,19 @@ def upsert_ota_channel(
         record.api_secret_hint = api_secret[-4:] if len(api_secret) >= 4 else api_secret
 
     record.updated_at = utc_now()
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="ota_channels",
+        entity_id=provider_key,
+        action="create" if is_create else "update",
+        after_data={
+            "provider_key": provider_key,
+            "is_active": is_active,
+            "hotel_id": hotel_id,
+            "api_key_updated": bool(api_key),
+            "api_secret_updated": bool(api_secret),
+        },
+    )
     return record
 
 
