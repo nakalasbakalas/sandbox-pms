@@ -3265,6 +3265,16 @@ self.addEventListener("fetch", (event) => {
                 row_count=sum(len(group.get("rooms", [])) for group in groups),
             )
 
+    @app.route("/staff/front-desk/board/stats-panel")
+    def staff_front_desk_board_stats_panel():
+        require_permission("reservation.view")
+        try:
+            filters = front_desk_board_filters_from_request()
+            context = front_desk_board_context(filters)
+            return render_template("_front_desk_board_stats_panel.html", **context)
+        except Exception:  # noqa: BLE001
+            return "<p class='small muted'>Stats unavailable.</p>", 200
+
     @app.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room", methods=["POST"])
     def staff_front_desk_board_assign_room(reservation_id):
         user = require_permission("reservation.edit")
@@ -5784,6 +5794,7 @@ def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
         room_type_id=parse_request_uuid_arg("room_type_id") or "",
         show_unallocated=request.args.get("show_unallocated", "1") != "0",
         show_closed=request.args.get("show_closed") == "1",
+        group_by=request.args.get("group_by", "type") if request.args.get("group_by") in {"type", "floor"} else "type",
     )
 
 
@@ -5837,6 +5848,8 @@ def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, s
         query["room_type_id"] = filters.room_type_id
     if filters.show_closed:
         query["show_closed"] = "1"
+    if filters.group_by == "floor":
+        query["group_by"] = "floor"
     return query
 
 
@@ -5903,6 +5916,7 @@ def _front_desk_filters_payload(filters: FrontDeskBoardFilters) -> dict[str, str
         "roomTypeId": filters.room_type_id,
         "showUnallocated": filters.show_unallocated,
         "showClosed": filters.show_closed,
+        "groupBy": filters.group_by,
     }
 
 

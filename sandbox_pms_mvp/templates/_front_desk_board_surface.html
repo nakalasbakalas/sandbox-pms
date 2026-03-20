@@ -1,3 +1,56 @@
+{# ── Daily Snapshot Panel ── #}
+{% set occ_pct = board.counts.occupancy_pct %}
+{% set ready_of_arrivals = board.counts.ready_rooms ~ ' of ' ~ board.counts.arrivals_today %}
+<details class="board-snapshot-panel" open>
+  <summary class="board-snapshot-toggle" aria-label="Toggle daily snapshot">
+    <span>Today's Overview</span>
+    <span class="board-snapshot-date">{{ board.today.strftime('%a %d %b') }}</span>
+  </summary>
+  <div class="board-snapshot-cards" role="region" aria-label="Daily operational snapshot">
+    <div class="board-snapshot-card{% if occ_pct >= 90 %} tone-danger{% elif occ_pct >= 70 %} tone-warning{% endif %}">
+      <span class="bsc-label">Occupancy</span>
+      <strong class="bsc-value">{{ occ_pct }}%</strong>
+      <span class="bsc-sub">{{ board.counts.occupied }}/{{ board.counts.total_rooms }} rooms</span>
+    </div>
+    <div class="board-snapshot-card tone-accent">
+      <span class="bsc-label">Arrivals</span>
+      <strong class="bsc-value">{{ board.counts.arrivals_today }}</strong>
+      <span class="bsc-sub">today</span>
+    </div>
+    <div class="board-snapshot-card">
+      <span class="bsc-label">Departures</span>
+      <strong class="bsc-value">{{ board.counts.departures_today }}</strong>
+      <span class="bsc-sub">today</span>
+    </div>
+    <div class="board-snapshot-card{% if board.counts.ready_rooms < board.counts.arrivals_today %} tone-warning{% else %} tone-success{% endif %}">
+      <span class="bsc-label">Room Ready</span>
+      <strong class="bsc-value">{{ ready_of_arrivals }}</strong>
+      <span class="bsc-sub">arrivals</span>
+    </div>
+    {% if board.counts.turnaround_dirty > 0 %}
+    <div class="board-snapshot-card tone-danger">
+      <span class="bsc-label">Turnaround</span>
+      <strong class="bsc-value">{{ board.counts.turnaround_dirty }}</strong>
+      <span class="bsc-sub">still dirty</span>
+    </div>
+    {% endif %}
+    {% if board.counts.unpaid_arrivals > 0 %}
+    <div class="board-snapshot-card tone-danger">
+      <span class="bsc-label">Unpaid</span>
+      <strong class="bsc-value">{{ board.counts.unpaid_arrivals }}</strong>
+      <span class="bsc-sub">arrivals</span>
+    </div>
+    {% endif %}
+    {% if board.counts.unassigned_arrivals_today > 0 %}
+    <div class="board-snapshot-card tone-warning">
+      <span class="bsc-label">Unallocated</span>
+      <strong class="bsc-value">{{ board.counts.unassigned_arrivals_today }}</strong>
+      <span class="bsc-sub">arrivals</span>
+    </div>
+    {% endif %}
+  </div>
+</details>
+
 <div class="planning-board-status-strip" role="region" aria-label="Planning board live status">
   <span class="pbs-item"><small>Rooms</small><strong>{{ board.counts.total_rooms }}</strong></span>
   <span class="pbs-item"><small>Arrivals</small><strong>{{ board.counts.arrivals_today }}</strong></span>
@@ -11,7 +64,18 @@
 
 <div class="planning-board-avail-strip" role="region" aria-label="Room availability by type">
   {% for code, avail in board.counts.available_by_type.items() %}
-  <span class="pbs-avail-item"><small>{{ code }}</small><strong>{{ avail }}</strong><span class="pbs-avail-label">avail</span></span>
+  {% set total = board.counts.total_by_type.get(code, 0) if board.counts.total_by_type else 0 %}
+  {% set avail_pct = ((avail / total * 100) | int) if total else 0 %}
+  <span class="pbs-avail-item">
+    <small>{{ code }}</small>
+    <strong>{{ avail }}</strong>
+    <span class="pbs-avail-label">avail</span>
+    {% if total > 0 %}
+    <span class="pbs-avail-bar" aria-hidden="true" title="{{ avail }} of {{ total }} available">
+      <span class="pbs-avail-bar-fill" style="width:{{ avail_pct }}%"></span>
+    </span>
+    {% endif %}
+  </span>
   {% endfor %}
   <span class="pbs-avail-item tone-hk"><small>Dirty</small><strong>{{ board.counts.hk_dirty }}</strong></span>
   <span class="pbs-avail-item tone-hk"><small>Clean</small><strong>{{ board.counts.hk_clean }}</strong></span>
@@ -39,7 +103,7 @@
       {% if day.is_weekend %}{% set _ = day_classes.append('weekend') %}{% endif %}
       {% if day.is_today %}{% set _ = day_classes.append('today') %}{% endif %}
       {% if day.is_month_boundary %}{% set _ = day_classes.append('month-boundary') %}{% endif %}
-      <div class="{{ day_classes|join(' ') }}" {% if day.is_today %}aria-current="date"{% endif %}>
+      <div class="{{ day_classes|join(' ') }}" {% if day.is_today %}aria-current="date"{% endif %} data-occupancy-pct="{{ board.per_day_occupancy[loop.index0] if board.per_day_occupancy else 0 }}">
         <span>{{ day.day_label }}</span>
         <strong>{{ day.day_number }}</strong>
         <small>{{ day.month_label }}</small>
@@ -69,6 +133,12 @@
         data-lane-kind="{{ row.laneKind }}"
         data-anchor-id="{{ row.anchor_id }}"
         data-has-today="{{ 'true' if board.todayOffset else 'false' }}"
+        data-hk-status="{{ row.housekeeping_status or '' }}"
+        data-is-occupied="{{ 'true' if row.is_occupied else 'false' }}"
+        data-is-maintenance="{{ 'true' if row.is_maintenance else 'false' }}"
+        data-has-arrival-today="{{ 'true' if row.has_arrival_today else 'false' }}"
+        data-has-departure-today="{{ 'true' if row.has_departure_today else 'false' }}"
+        data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"
         aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
       >
@@ -119,6 +189,14 @@
               <span>{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}</span>
               {% if block.balanceDue and block.balanceDue > 0 %}<span><strong>Balance due:</strong> {{ currency }}{{ '%.2f'|format(block.balanceDue) }}</span>{% endif %}
             </div>
+            {% if block.startDate == board.today.isoformat() and block.status in ('confirmed', 'tentative') %}
+            <div class="arrival-readiness-checklist" aria-label="Arrival readiness">
+              <span class="arc-item{% if block.allocationState == 'allocated' %} arc-ok{% else %} arc-warn{% endif %}" title="Room assignment">{% if block.allocationState == 'allocated' %}✓{% else %}✗{% endif %} Room assigned</span>
+              <span class="arc-item{% if block.readyForCheckIn %} arc-ok{% else %} arc-warn{% endif %}" title="Room ready for check-in">{% if block.readyForCheckIn %}✓{% else %}✗{% endif %} Room ready</span>
+              <span class="arc-item{% if not block.balanceDue or block.balanceDue == 0 %} arc-ok{% else %} arc-warn{% endif %}" title="Deposit/balance status">{% if not block.balanceDue or block.balanceDue == 0 %}✓{% else %}✗{% endif %} Balance clear</span>
+              {% if block.hasSpecialRequests %}<span class="arc-item arc-info" title="Special requests noted" aria-label="Special requests noted">&#9733; Special requests</span>{% endif %}
+            </div>
+            {% endif %}
             <div class="actions">
               {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
               {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}
