@@ -102,6 +102,7 @@ from ..services.messaging_service import (
 )
 from ..services.pre_checkin_service import fire_pre_checkin_not_completed_events
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
+from ..constants import OTA_PROVIDER_KEYS, OTA_PROVIDER_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -782,4 +783,88 @@ def staff_admin_payments():
         payment_settings=_payment_settings_context(),
         recent_requests=recent_requests,
         is_super_admin=is_admin_user(viewer),
+    )
+
+
+@admin_bp.route("/staff/admin/channels", methods=["GET", "POST"], endpoint="staff_admin_channels")
+def staff_admin_channels():
+    """OTA channel manager configuration panel.
+
+    Lists all known OTA providers (Booking.com, Expedia, Agoda), shows their
+    current API credential status, and allows admins to save credentials or
+    test the connection for each provider.
+    """
+    from ..services.channel_service import (
+        list_ota_channels,
+        test_ota_channel_connection,
+        upsert_ota_channel,
+    )
+
+    require_permission("settings.view")
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        provider_key = (request.form.get("provider_key") or "").strip()
+        if provider_key not in OTA_PROVIDER_KEYS:
+            flash("Unknown OTA provider.", "error")
+            return redirect(url_for("admin.staff_admin_channels"))
+
+        try:
+            if action == "save_channel":
+                actor = require_permission("settings.edit")
+                api_key = (request.form.get("api_key") or "").strip() or None
+                api_secret = (request.form.get("api_secret") or "").strip() or None
+                upsert_ota_channel(
+                    provider_key=provider_key,
+                    display_name=OTA_PROVIDER_LABELS.get(provider_key, provider_key),
+                    is_active=truthy_setting(request.form.get("is_active")),
+                    hotel_id=(request.form.get("hotel_id") or "").strip() or None,
+                    endpoint_url=(request.form.get("endpoint_url") or "").strip() or None,
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    actor_user_id=actor.id,
+                )
+                db.session.commit()
+                flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)} configuration saved.", "success")
+
+            elif action == "test_connection":
+                actor = require_permission("settings.view")
+                result = test_ota_channel_connection(provider_key, actor_user_id=actor.id)
+                if result["success"]:
+                    flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: connection test passed.", "success")
+                else:
+                    flash(
+                        f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: connection test failed — "
+                        f"{result.get('error') or 'no credentials configured'}.",
+                        "error",
+                    )
+
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+
+        return redirect(url_for("admin.staff_admin_channels"))
+
+    # Build per-provider context so the template has a single list to iterate.
+    existing = {ch.provider_key: ch for ch in list_ota_channels()}
+    channels_context = []
+    for key in OTA_PROVIDER_KEYS:
+        record = existing.get(key)
+        channels_context.append({
+            "provider_key": key,
+            "display_name": OTA_PROVIDER_LABELS.get(key, key),
+            "is_active": record.is_active if record else False,
+            "hotel_id": record.hotel_id if record else "",
+            "endpoint_url": record.endpoint_url if record else "",
+            "api_key_hint": record.api_key_hint if record else None,
+            "api_secret_hint": record.api_secret_hint if record else None,
+            "last_tested_at": record.last_tested_at if record else None,
+            "last_test_ok": record.last_test_ok if record else None,
+            "last_test_error": record.last_test_error if record else None,
+        })
+
+    return render_template(
+        "admin_channels.html",
+        active_section="channels",
+        channels=channels_context,
     )

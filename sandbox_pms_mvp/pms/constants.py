@@ -255,6 +255,24 @@ DOCUMENT_VERIFICATION_STATUSES = [
 ]
 
 # ---------------------------------------------------------------------------
+# OTA / Channel Manager constants
+# ---------------------------------------------------------------------------
+
+OTA_PROVIDER_KEYS = [
+    "booking_com",
+    "expedia",
+    "agoda",
+]
+
+OTA_PROVIDER_LABELS: dict[str, str] = {
+    "booking_com": "Booking.com",
+    "expedia": "Expedia",
+    "agoda": "Agoda",
+}
+
+OTA_CHANNEL_STATUSES = ["active", "inactive", "error"]
+
+# ---------------------------------------------------------------------------
 # Unified Guest Messaging Hub constants
 # ---------------------------------------------------------------------------
 

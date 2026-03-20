@@ -41,6 +41,7 @@ from ..models import (
     ExternalCalendarBlock,
     ExternalCalendarSource,
     ExternalCalendarSyncRun,
+    OtaChannel,
     Reservation,
     RoomType,
     utc_now,
@@ -309,6 +310,92 @@ class WebhookChannelProvider(ChannelProvider):
 
 
 # ---------------------------------------------------------------------------
+# API-key-backed OTA providers
+# ---------------------------------------------------------------------------
+
+
+class _OtaApiProvider(ChannelProvider):
+    """Base for OTA providers backed by a persisted ``OtaChannel`` record.
+
+    Concrete subclasses set ``provider_key_name``.  The provider is
+    *read-only* at provider level: credentials come from the database row
+    so that the admin panel is the single source of truth for API keys.
+
+    At this stage the provider:
+    - Reports its key / active status honestly.
+    - Returns ``success=False`` with a clear message when the API key is not
+      yet configured, instead of silently no-oping.
+    - Implements ``test_connection()`` which can be expanded once live API
+      access is available.
+
+    Pull reservations and push inventory are stubs that will be replaced
+    once the real OTA API client libraries are wired.
+    """
+
+    provider_key_name: str = ""
+
+    @property
+    def provider_key(self) -> str:
+        return self.provider_key_name
+
+    def _channel_record(self) -> OtaChannel | None:
+        return db.session.execute(
+            sa.select(OtaChannel).where(
+                OtaChannel.provider_key == self.provider_key_name,
+                OtaChannel.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+
+    def _is_configured(self) -> bool:
+        record = self._channel_record()
+        return bool(record and record.api_key_encrypted)
+
+    def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
+        if not self._is_configured():
+            return []
+        # Stub: real pull logic will be added once API keys are live.
+        return []
+
+    def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
+        if not self._is_configured():
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"{self.provider_key}: API key not configured. Add credentials in Admin → Channels."],
+            )
+        # Stub: real push logic will be added once API keys are live.
+        return SyncResult(
+            provider=self.provider_key,
+            direction="outbound",
+            success=True,
+            records_processed=len(updates),
+            details={"note": "Stub — live API push not yet implemented."},
+        )
+
+    def test_connection(self) -> bool:
+        return self._is_configured()
+
+
+class BookingComChannelProvider(_OtaApiProvider):
+    """Booking.com connectivity channel provider."""
+
+    provider_key_name = "booking_com"
+
+
+class ExpediaChannelProvider(_OtaApiProvider):
+    """Expedia connectivity channel provider."""
+
+    provider_key_name = "expedia"
+
+
+class AgodaChannelProvider(_OtaApiProvider):
+    """Agoda connectivity channel provider."""
+
+    provider_key_name = "agoda"
+
+
+# ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
 
@@ -316,6 +403,9 @@ PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
     "webhook": WebhookChannelProvider,
+    "booking_com": BookingComChannelProvider,
+    "expedia": ExpediaChannelProvider,
+    "agoda": AgodaChannelProvider,
 }
 
 
@@ -331,7 +421,34 @@ def get_provider(provider_key: str) -> ChannelProvider:
 
 
 # ---------------------------------------------------------------------------
-# Sync orchestrator
+# OTA channel management helpers
+# ---------------------------------------------------------------------------
+
+
+def list_ota_channels() -> list[OtaChannel]:
+    """Return all non-deleted OtaChannel records ordered by provider_key."""
+    return (
+        db.session.execute(
+            sa.select(OtaChannel)
+            .where(OtaChannel.deleted_at.is_(None))
+            .order_by(OtaChannel.provider_key.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_ota_channel(provider_key: str) -> OtaChannel | None:
+    """Return the OtaChannel for *provider_key*, or None if not configured."""
+    return db.session.execute(
+        sa.select(OtaChannel).where(
+            OtaChannel.provider_key == provider_key,
+            OtaChannel.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+
+
 # ---------------------------------------------------------------------------
 
 class ChannelSyncService:
@@ -420,3 +537,95 @@ class ChannelSyncService:
 
     def test_connection(self) -> bool:
         return self.provider.test_connection()
+
+
+# ---------------------------------------------------------------------------
+# OTA channel credential management
+# ---------------------------------------------------------------------------
+
+
+def upsert_ota_channel(
+    *,
+    provider_key: str,
+    display_name: str,
+    is_active: bool,
+    hotel_id: str | None = None,
+    endpoint_url: str | None = None,
+    api_key: str | None = None,
+    api_secret: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaChannel:
+    """Create or update an OtaChannel record.
+
+    Credentials are encrypted before storage.  Passing ``None`` for
+    ``api_key`` / ``api_secret`` leaves any previously stored encrypted value
+    unchanged so that a form submit that omits the key field does not clear
+    existing credentials.
+
+    Returns the persisted OtaChannel instance (not yet committed).
+    """
+    from .auth_service import encrypt_secret
+
+    record = get_ota_channel(provider_key)
+    if record is None:
+        record = OtaChannel(
+            provider_key=provider_key,
+            display_name=display_name,
+        )
+        db.session.add(record)
+    else:
+        record.display_name = display_name
+
+    record.is_active = is_active
+    record.hotel_id = hotel_id or None
+    record.endpoint_url = endpoint_url or None
+    record.updated_by_user_id = actor_user_id
+
+    if api_key:
+        record.api_key_encrypted = encrypt_secret(api_key)
+        record.api_key_hint = api_key[-4:] if len(api_key) >= 4 else api_key
+
+    if api_secret:
+        record.api_secret_encrypted = encrypt_secret(api_secret)
+        record.api_secret_hint = api_secret[-4:] if len(api_secret) >= 4 else api_secret
+
+    record.updated_at = utc_now()
+    return record
+
+
+def test_ota_channel_connection(
+    provider_key: str,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    """Test the connection for an OTA provider and persist the result.
+
+    Returns a dict with ``success`` (bool) and ``error`` (str or None).
+    """
+    record = get_ota_channel(provider_key)
+    if record is None:
+        return {"success": False, "error": "Channel not configured."}
+
+    try:
+        provider = get_provider(provider_key)
+        ok = provider.test_connection()
+        error: str | None = None
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        error = str(exc)
+
+    record.last_tested_at = utc_now()
+    record.last_test_ok = ok
+    record.last_test_error = error
+    record.updated_by_user_id = actor_user_id
+
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="ota_channels",
+        entity_id=str(record.id),
+        action="test",
+        after_data={"provider_key": provider_key, "success": ok, "error": error},
+    )
+    db.session.commit()
+    return {"success": ok, "error": error}
+

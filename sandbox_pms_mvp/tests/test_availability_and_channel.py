@@ -11,6 +11,7 @@ import pytest
 from pms.extensions import db
 from pms.models import (
     InventoryDay,
+    OtaChannel,
     Reservation,
     Room,
     RoomType,
@@ -24,11 +25,17 @@ from pms.services.availability_service import (
     query_room_type_availability,
 )
 from pms.services.channel_service import (
+    AgodaChannelProvider,
+    BookingComChannelProvider,
     ChannelSyncService,
+    ExpediaChannelProvider,
     InboundReservation,
     MockChannelProvider,
     OutboundInventoryUpdate,
+    get_ota_channel,
     get_provider,
+    list_ota_channels,
+    upsert_ota_channel,
 )
 from pms.services.reservation_service import (
     ReservationCreatePayload,
@@ -396,3 +403,174 @@ class TestChannelService:
             assert captured["url"] == "https://channel.example.invalid/push"
             assert captured["body"]["provider"] == "webhook"
             assert captured["body"]["updates"][0]["room_type_code"] == "STD"
+
+
+# ---------------------------------------------------------------------------
+# OTA provider and channel management tests
+# ---------------------------------------------------------------------------
+
+class TestOtaProviders:
+    """Tests for the API-key-backed OTA providers and channel management."""
+
+    def test_get_provider_booking_com(self, app_factory):
+        """get_provider('booking_com') returns BookingComChannelProvider."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("booking_com")
+            assert provider.provider_key == "booking_com"
+            assert isinstance(provider, BookingComChannelProvider)
+
+    def test_get_provider_expedia(self, app_factory):
+        """get_provider('expedia') returns ExpediaChannelProvider."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("expedia")
+            assert provider.provider_key == "expedia"
+            assert isinstance(provider, ExpediaChannelProvider)
+
+    def test_get_provider_agoda(self, app_factory):
+        """get_provider('agoda') returns AgodaChannelProvider."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("agoda")
+            assert provider.provider_key == "agoda"
+            assert isinstance(provider, AgodaChannelProvider)
+
+    def test_ota_provider_not_configured_returns_false(self, app_factory):
+        """OTA provider test_connection returns False when no credentials exist."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            for key in ("booking_com", "expedia", "agoda"):
+                provider = get_provider(key)
+                assert provider.test_connection() is False
+
+    def test_ota_provider_pull_returns_empty_when_unconfigured(self, app_factory):
+        """OTA provider pull_reservations returns [] when not configured."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("booking_com")
+            assert provider.pull_reservations() == []
+
+    def test_ota_provider_push_fails_when_unconfigured(self, app_factory):
+        """OTA provider push_inventory returns failure when not configured."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("booking_com")
+            result = provider.push_inventory([
+                OutboundInventoryUpdate(
+                    room_type_code="STD",
+                    date_from=date.today(),
+                    date_to=date.today() + timedelta(days=1),
+                    available_count=2,
+                ),
+            ])
+            assert result.success is False
+            assert result.provider == "booking_com"
+            assert any("API key not configured" in e or "not configured" in e for e in result.errors)
+
+    def test_upsert_ota_channel_creates_record(self, app_factory):
+        """upsert_ota_channel creates a new OtaChannel record."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            assert get_ota_channel("expedia") is None
+            upsert_ota_channel(
+                provider_key="expedia",
+                display_name="Expedia",
+                is_active=True,
+                hotel_id="TEST-HOTEL-001",
+                api_key="test-api-key-expedia",
+                api_secret="test-api-secret-expedia",
+            )
+            db.session.commit()
+
+            record = get_ota_channel("expedia")
+            assert record is not None
+            assert record.provider_key == "expedia"
+            assert record.is_active is True
+            assert record.hotel_id == "TEST-HOTEL-001"
+            assert record.api_key_hint == "edia"
+            assert record.api_secret_hint == "edia"
+            assert record.api_key_encrypted is not None
+            assert "test-api-key-expedia" not in (record.api_key_encrypted or "")
+
+    def test_upsert_ota_channel_updates_existing(self, app_factory):
+        """upsert_ota_channel updates an existing record without duplicating."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="agoda",
+                display_name="Agoda",
+                is_active=False,
+                hotel_id="HOTEL-A",
+            )
+            db.session.commit()
+
+            upsert_ota_channel(
+                provider_key="agoda",
+                display_name="Agoda",
+                is_active=True,
+                hotel_id="HOTEL-B",
+            )
+            db.session.commit()
+
+            records = list_ota_channels()
+            agoda_records = [r for r in records if r.provider_key == "agoda"]
+            assert len(agoda_records) == 1
+            assert agoda_records[0].hotel_id == "HOTEL-B"
+            assert agoda_records[0].is_active is True
+
+    def test_upsert_ota_channel_preserves_key_when_blank(self, app_factory):
+        """Passing api_key=None does not clear an existing encrypted key."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key="initial-key-1234",
+            )
+            db.session.commit()
+
+            first_hint = get_ota_channel("booking_com").api_key_hint
+            first_encrypted = get_ota_channel("booking_com").api_key_encrypted
+
+            # Update without providing key — should preserve existing
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key=None,  # blank — do not overwrite
+            )
+            db.session.commit()
+
+            record = get_ota_channel("booking_com")
+            assert record.api_key_hint == first_hint
+            assert record.api_key_encrypted == first_encrypted
+
+    def test_ota_provider_configured_connection_test(self, app_factory):
+        """OTA provider test_connection returns True after credentials are saved."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key="some-key-abcd",
+            )
+            db.session.commit()
+
+            provider = get_provider("booking_com")
+            assert provider.test_connection() is True
+
+    def test_list_ota_channels_returns_all(self, app_factory):
+        """list_ota_channels returns all non-deleted records."""
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(provider_key="booking_com", display_name="Booking.com", is_active=True)
+            upsert_ota_channel(provider_key="agoda", display_name="Agoda", is_active=False)
+            db.session.commit()
+
+            channels = list_ota_channels()
+            keys = {ch.provider_key for ch in channels}
+            assert "booking_com" in keys
+            assert "agoda" in keys
