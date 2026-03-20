@@ -270,10 +270,13 @@ def get_live_available_rooms(
     check_out_date: date,
 ) -> list[Room]:
     nights = stay_dates(check_in_date, check_out_date)
-    candidate_query = Room.query.filter_by(is_active=True, is_sellable=True).order_by(Room.room_number.asc())
+    candidate_query = sa.select(Room).where(
+        Room.is_active.is_(True),
+        Room.is_sellable.is_(True),
+    ).order_by(Room.room_number.asc())
     if room_type_id:
-        candidate_query = candidate_query.filter_by(room_type_id=room_type_id)
-    candidates = candidate_query.all()
+        candidate_query = candidate_query.where(Room.room_type_id == room_type_id)
+    candidates = db.session.execute(candidate_query).scalars().all()
     available_rooms: list[Room] = []
     for room in candidates:
         if room_has_external_block(room.id, check_in_date, check_out_date):
@@ -308,7 +311,9 @@ def search_public_availability(payload: PublicSearchPayload) -> list[dict]:
     cleanup_expired_holds()
     db.session.flush()
 
-    room_types = [room_type] if room_type else RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc()).all()
+    room_types = [room_type] if room_type else db.session.execute(
+        sa.select(RoomType).where(RoomType.is_active.is_(True)).order_by(RoomType.code.asc())
+    ).scalars().all()
     results: list[dict] = []
     for item in room_types:
         validate_occupancy(item, payload.adults, payload.children)
@@ -401,7 +406,9 @@ def create_reservation_hold(payload: HoldRequestPayload) -> ReservationHold:
         )
     )
     cleanup_expired_holds()
-    existing = ReservationHold.query.filter_by(idempotency_key=payload.idempotency_key).first()
+    existing = db.session.execute(
+        sa.select(ReservationHold).where(ReservationHold.idempotency_key == payload.idempotency_key)
+    ).scalar_one_or_none()
     if existing:
         if existing.status == "converted" and existing.converted_reservation_id:
             return existing
@@ -409,17 +416,17 @@ def create_reservation_hold(payload: HoldRequestPayload) -> ReservationHold:
             return existing
 
     if payload.guest_email:
-        matching_hold = (
-            ReservationHold.query.filter_by(
-                guest_email=normalize_email(payload.guest_email),
-                room_type_id=payload.room_type_id,
-                check_in_date=payload.check_in_date,
-                check_out_date=payload.check_out_date,
-                status="active",
+        matching_hold = db.session.execute(
+            sa.select(ReservationHold)
+            .where(
+                ReservationHold.guest_email == normalize_email(payload.guest_email),
+                ReservationHold.room_type_id == payload.room_type_id,
+                ReservationHold.check_in_date == payload.check_in_date,
+                ReservationHold.check_out_date == payload.check_out_date,
+                ReservationHold.status == "active",
             )
             .order_by(ReservationHold.created_at.desc())
-            .first()
-        )
+        ).scalars().first()
         if matching_hold and as_utc(matching_hold.expires_at) and as_utc(matching_hold.expires_at) > utc_now():
             return matching_hold
 
@@ -441,7 +448,15 @@ def create_reservation_hold(payload: HoldRequestPayload) -> ReservationHold:
 
 def _create_hold_once(payload: HoldRequestPayload, room_type: RoomType, quote: QuoteResult) -> ReservationHold:
     nights = stay_dates(payload.check_in_date, payload.check_out_date)
-    rooms = Room.query.filter_by(room_type_id=room_type.id, is_active=True, is_sellable=True).order_by(Room.room_number.asc()).all()
+    rooms = db.session.execute(
+        sa.select(Room)
+        .where(
+            Room.room_type_id == room_type.id,
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+        )
+        .order_by(Room.room_number.asc())
+    ).scalars().all()
     now = utc_now()
     expires_at = now + timedelta(minutes=current_app.config["PUBLIC_BOOKING_HOLD_MINUTES"])
     for room in rooms:
@@ -519,15 +534,17 @@ def _duplicate_reservation(
     phone = normalize_phone(payload.phone)
     guest_ids = [
         item.id
-        for item in Guest.query.filter(
-            sa.or_(Guest.email == email, Guest.phone == phone),
-            Guest.deleted_at.is_(None),
-        ).all()
+        for item in db.session.execute(
+            sa.select(Guest).where(
+                sa.or_(Guest.email == email, Guest.phone == phone),
+                Guest.deleted_at.is_(None),
+            )
+        ).scalars().all()
     ]
     if not guest_ids:
         return None
-    return (
-        Reservation.query.filter(
+    return db.session.execute(
+        sa.select(Reservation).where(
             Reservation.primary_guest_id.in_(guest_ids),
             Reservation.check_in_date == hold.check_in_date,
             Reservation.check_out_date == hold.check_out_date,
@@ -539,8 +556,7 @@ def _duplicate_reservation(
             Reservation.current_status.in_(["tentative", "confirmed", "checked_in"]),
         )
         .order_by(Reservation.booked_at.desc())
-        .first()
-    )
+    ).scalars().first()
 
 
 def confirm_public_booking(payload: PublicBookingPayload) -> Reservation:
@@ -798,7 +814,12 @@ def render_guest_confirmation_message(reservation: Reservation, guest_name: str,
 
 
 def load_public_confirmation(reservation_code: str, token: str) -> Reservation | None:
-    reservation = Reservation.query.filter_by(reservation_code=reservation_code, created_from_public_booking_flow=True).first()
+    reservation = db.session.execute(
+        sa.select(Reservation).where(
+            Reservation.reservation_code == reservation_code,
+            Reservation.created_from_public_booking_flow.is_(True),
+        )
+    ).scalar_one_or_none()
     if not reservation or not reservation.public_confirmation_token:
         return None
     if not hmac.compare_digest(reservation.public_confirmation_token, token):
@@ -815,11 +836,13 @@ def submit_cancellation_request(payload: VerificationRequestPayload) -> Cancella
     reservation = _verified_public_reservation(payload.booking_reference, payload.contact_value)
     if not reservation:
         return None
-    existing = CancellationRequest.query.filter_by(
-        booking_reference=payload.booking_reference,
-        requester_contact_hash=hash_contact(payload.contact_value.strip().lower()),
-        status="submitted",
-    ).first()
+    existing = db.session.execute(
+        sa.select(CancellationRequest).where(
+            CancellationRequest.booking_reference == payload.booking_reference,
+            CancellationRequest.requester_contact_hash == hash_contact(payload.contact_value.strip().lower()),
+            CancellationRequest.status == "submitted",
+        )
+    ).scalar_one_or_none()
     if existing:
         return existing
     notification_delivery_ids: list[uuid.UUID] = []
@@ -959,7 +982,9 @@ def submit_modification_request(payload: VerificationRequestPayload) -> Modifica
 def _verified_public_reservation(booking_reference: str, contact_value: str) -> Reservation | None:
     normalized_email = normalize_email(contact_value)
     normalized_phone = normalize_phone(contact_value)
-    reservation = Reservation.query.filter_by(reservation_code=booking_reference).first()
+    reservation = db.session.execute(
+        sa.select(Reservation).where(Reservation.reservation_code == booking_reference)
+    ).scalar_one_or_none()
     if not reservation:
         return None
     guest = db.session.get(Guest, reservation.primary_guest_id)

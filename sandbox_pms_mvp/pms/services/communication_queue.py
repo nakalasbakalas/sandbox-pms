@@ -1,6 +1,20 @@
 from __future__ import annotations
 
 from .communication_base import *  # noqa: F401,F403
+from . import communication_base as _base
+
+_format_datetime = _base._format_datetime
+_make_key = _base._make_key
+_manual_suffix = _base._manual_suffix
+_reservation_language = _base._reservation_language
+_payment_entry_url = _base._payment_entry_url
+_base_reservation_context = _base._base_reservation_context
+_staff_notification_type = _base._staff_notification_type
+_existing_delivery = _base._existing_delivery
+_create_delivery = _base._create_delivery
+_queue_delivery_safe = _base._queue_delivery_safe
+_bool_setting = _base._bool_setting
+_staff_alert_recipients = _base._staff_alert_recipients
 
 def _create_invalid_delivery(
     *,
@@ -438,6 +452,46 @@ def queue_payment_success_email(
         dedupe_key=_make_key("notification", "payment_success", payment_request.id),
         actor_user_id=actor_user_id,
         metadata={"request_code": payment_request.request_code},
+    )
+    return [delivery.id]
+
+
+def queue_cashier_receipt_email(
+    reservation: Reservation,
+    payment_request: PaymentRequest,
+    document: CashierDocument,
+    *,
+    actor_user_id: uuid.UUID | None,
+    language_code: str | None = None,
+) -> list[uuid.UUID]:
+    selected_language = normalize_language(language_code or _reservation_language(reservation))
+    context = _base_reservation_context(reservation)
+    context["payment_status"] = "paid"
+    context["amount_received"] = f"{money(payment_request.amount):,.2f}"
+    context["deposit_amount"] = context["amount_received"]
+    context["payment_amount"] = context["amount_received"]
+    context["document_number"] = document.document_number
+    context["document_type"] = document.document_type.title()
+    delivery = _queue_guest_email_delivery(
+        template_key="payment_success",
+        event_type="cashier.receipt_email",
+        reservation=reservation,
+        payment_request=payment_request,
+        language_code=selected_language,
+        context=context,
+        fallback_subject=f"Receipt {document.document_number} for {reservation.reservation_code}",
+        fallback_body=(
+            f"{context['hotel_name']}\n{context['guest_name']}\n"
+            f"We received THB {context['amount_received']} for reservation {reservation.reservation_code}.\n"
+            f"Receipt number {document.document_number}"
+        ),
+        dedupe_key=_make_key("notification", "cashier_receipt", payment_request.id),
+        actor_user_id=actor_user_id,
+        metadata={
+            "document_id": str(document.id),
+            "document_number": document.document_number,
+            "document_type": document.document_type,
+        },
     )
     return [delivery.id]
 

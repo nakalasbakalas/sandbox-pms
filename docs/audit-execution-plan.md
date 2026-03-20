@@ -3,6 +3,17 @@
 > **Audit date:** 2026-03-18  
 > **Test baseline:** 480 passed, 7 skipped — zero failures  
 > **Scope:** Full repository scan — routes, models, services, templates, static assets, tests, migrations, config, CI, deployment
+>
+> **Reconciliation note (2026-03-20):**
+> Treat the historical sections below as background, not the sole current status. Fresh verification in this repo now shows:
+> - targeted validation baseline across the current execution sequence: `135 passed, 4 skipped`
+> - `python -m pytest sandbox_pms_mvp/tests --collect-only -q`: `494 tests collected`
+> - `pms/app.py`: `6,239` lines
+> - verified route extraction state:
+>   - wrapper-style service splits are live for `staff_reservations_service.py`, `communication_service.py`, and `front_desk_service.py`
+>   - provider routes are now registered from `pms/routes/provider.py`
+>   - `public_bp`, `admin_bp`, and `front_desk_bp` exist on disk but are not yet the live `create_app()` registration surface
+> - remaining verified repo-wide legacy `.query` hits under `sandbox_pms_mvp/pms/**/*.py`: `303`
 
 ---
 
@@ -102,7 +113,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Hosted payments (Stripe, test-hosted provider, webhook handling) | `payment_integration_service.py`, `test_phase9_hosted_payments.py` |
 | Pre-check-in portal (token, form, document upload, document verification, OCR hook) | `pre_checkin_service.py`, `storage.py`, `test_phase17_pre_checkin.py` |
 | iCal calendar sync (export feeds, inbound source sync, conflict detection) | `ical_service.py`, `test_phase14_provider_portal_ical.py` |
-| Provider / OTA portal (booking view, payment requests, cancel) | `provider_portal_service.py`, app.py /provider routes |
+| Provider / OTA portal (booking view, payment requests, cancel) | `provider_portal_service.py`, `routes/provider.py`, `test_phase14_provider_portal_ical.py` |
 | Staff messaging hub (conversations, compose, thread management, delivery) | `messaging_service.py`, `test_phase18_messaging.py` |
 | Admin panel (property settings, rates, inventory overrides, blackouts, users, notification templates, operations, audit) | `admin_service.py`, `test_phase10_admin_panel.py` |
 | Reporting / dashboards (occupancy, revenue, cancellations, attribution, cashier activity) | `reporting_service.py`, `test_phase12_reporting.py`, `test_phase19_dashboards.py` |
@@ -243,10 +254,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Architecture
 
-- [ ] Extract Flask Blueprints from `app.py` — split into at minimum: `auth_bp`, `public_bp`, `staff_bp`, `provider_bp`, `housekeeping_bp`, `cashier_bp`, `admin_bp`, `board_bp`
+- [ ] Extract Flask Blueprints from `app.py` — split into at minimum: `auth_bp`, `public_bp`, `staff_bp`, `provider_bp`, `housekeeping_bp`, `cashier_bp`, `admin_bp`, `board_bp` *(progress: provider routes are now registered from `pms/routes/provider.py`; the existing `public_bp`, `admin_bp`, and `front_desk_bp` modules still need live registration into `create_app()` before this item is complete)*
 - [ ] Move shared route helpers (CSRF, URL builders, form parsers, date parsers) out of `app.py` into dedicated `helpers/` or `utils/` module
 - [x] Remove or fully enable `FEATURE_BOARD_V2` flag — confirm what it gates or delete it *(documented: gates board v2 action endpoints)*
-- [ ] Standardise ORM query style — migrate all 278 legacy `.query.` usages to `db.session.execute(sa.select(...))`
+- [ ] Standardise ORM query style — migrate all remaining legacy `.query.` usages to `db.session.execute(sa.select(...))` *(latest verified baseline: `303` remaining hits under `sandbox_pms_mvp/pms/**/*.py`)*
 - [x] Introduce a proper background task infrastructure (Render Cron Job or APScheduler/RQ) for all CLI automation tasks *(6 Render cron jobs added)*
 - [x] Add `boto3` to `requirements.txt` (or document S3 as an optional extra clearly) *(verified present)*
 - [x] Consolidate the 4 root-level test files into `sandbox_pms_mvp/tests/` or delete them *(deleted with root cleanup)*
@@ -313,7 +324,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [x] Fix potential Stripe webhook idempotency — ✅ Verified: 3-layer protection (provider_event_id unique index + posting_key unique on FolioCharge + SELECT FOR UPDATE). Concurrent threading tests exist.
 - [ ] Add proforma invoice generation (pre-stay billing preview)
-- [ ] Add receipt print/email after manual payment posting
+- [x] Add receipt print/email after manual payment posting *(print view already existed; cashier payment form can now queue a guest receipt email and issue/reuse a receipt document)*
 - [ ] Add partial refund support (currently refunds are against specific folio lines, but partial amounts on a single charge need validation)
 - [ ] Link folio balance warnings to the front desk board (show overdue balance badge on reservation card)
 
@@ -481,8 +492,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 **Why this phase:** The core flows exist; now they need to be the right UX.
 
 **To-dos:**
-- Begin Flask Blueprint extraction from `app.py` (start with `auth_bp`, `provider_bp`, `housekeeping_bp`)
-- Migrate legacy `.query.` ORM patterns to modern style (batch by module)
+- Keep the newly split `staff_reservations_service.py` and `communication_service.py` stable behind their wrappers and take the next hotspot from `front_desk_service.py`
+- Keep the newly split `front_desk_service.py` stable behind its wrapper and continue with the next service hotspot after verifying each batch
+- Continue route extraction from `app.py` — provider routes are now registered from `pms/routes/provider.py`; next best targets remain `auth` and `housekeeping`
+- Migrate legacy `.query.` ORM patterns to modern style (batch by module) — latest verified baseline after the front-desk, payment-integration, and public-booking batches: `303` remaining hits
 - Add mobile-optimised housekeeping attendant view
 - Add keyboard shortcuts for check-in, check-out, room assignment
 - Add guest visit history view

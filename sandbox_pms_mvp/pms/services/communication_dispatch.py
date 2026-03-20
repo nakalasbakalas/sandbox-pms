@@ -1,7 +1,19 @@
 from __future__ import annotations
 
+import sys
+
 from .communication_base import *  # noqa: F401,F403
 from .communication_queue import queue_failed_payment_reminder, queue_pre_arrival_reminder
+from . import communication_base as _base
+
+_string_setting = _base._string_setting
+_bool_setting = _base._bool_setting
+_int_setting = _base._int_setting
+_staff_notification_type = _base._staff_notification_type
+
+
+def _service_module():
+    return sys.modules.get("pms.services.communication_service")
 
 def _mark_delivery_failed(delivery: NotificationDelivery, *, category: str, reason: str) -> None:
     delivery.status = "failed"
@@ -31,7 +43,8 @@ def _deliver_email_outbox_entry(email_outbox_id: uuid.UUID, *, commit: bool = Tr
     message.set_content(entry.body_text)
 
     try:
-        with smtplib.SMTP(smtp_host, current_app.config["SMTP_PORT"], timeout=15) as client:
+        smtp_lib = getattr(_service_module(), "smtplib", smtplib)
+        with smtp_lib.SMTP(smtp_host, current_app.config["SMTP_PORT"], timeout=15) as client:
             if current_app.config["SMTP_USE_TLS"]:
                 client.starttls(context=ssl.create_default_context())
             if current_app.config["SMTP_USERNAME"]:
@@ -172,12 +185,12 @@ def dispatch_notification_deliveries(
     *,
     limit: int = 100,
 ) -> dict[str, int]:
-    query = NotificationDelivery.query.order_by(NotificationDelivery.created_at.asc())
+    query = sa.select(NotificationDelivery.id).order_by(NotificationDelivery.created_at.asc())
     if delivery_ids:
-        query = query.filter(NotificationDelivery.id.in_(delivery_ids))
+        query = query.where(NotificationDelivery.id.in_(delivery_ids))
     else:
-        query = query.filter(NotificationDelivery.status.in_(["pending", "queued", "failed"]))
-    ids = [item.id for item in query.limit(limit).all()]
+        query = query.where(NotificationDelivery.status.in_(["pending", "queued", "failed"]))
+    ids = db.session.execute(query.limit(limit)).scalars().all()
     results = {"processed": 0, "sent": 0, "failed": 0, "skipped": 0}
     for delivery_id in ids:
         try:
@@ -224,23 +237,28 @@ def query_notification_history(
     status: str | None = None,
     limit: int = 100,
 ) -> list[NotificationDelivery]:
-    query = NotificationDelivery.query.options(
+    query = sa.select(NotificationDelivery).options(
         joinedload(NotificationDelivery.reservation),
         joinedload(NotificationDelivery.payment_request),
         joinedload(NotificationDelivery.email_outbox),
         joinedload(NotificationDelivery.staff_notification),
     )
     if reservation_id:
-        query = query.filter(NotificationDelivery.reservation_id == reservation_id)
+        query = query.where(NotificationDelivery.reservation_id == reservation_id)
     if payment_request_id:
-        query = query.filter(NotificationDelivery.payment_request_id == payment_request_id)
+        query = query.where(NotificationDelivery.payment_request_id == payment_request_id)
     if audience_type:
-        query = query.filter(NotificationDelivery.audience_type == audience_type)
+        query = query.where(NotificationDelivery.audience_type == audience_type)
     if channel:
-        query = query.filter(NotificationDelivery.channel == channel)
+        query = query.where(NotificationDelivery.channel == channel)
     if status:
-        query = query.filter(NotificationDelivery.status == status)
-    return query.order_by(NotificationDelivery.created_at.desc()).limit(limit).all()
+        query = query.where(NotificationDelivery.status == status)
+    return (
+        db.session.execute(query.order_by(NotificationDelivery.created_at.desc()).limit(limit))
+        .unique()
+        .scalars()
+        .all()
+    )
 
 
 def send_due_pre_arrival_reminders(*, actor_user_id: uuid.UUID | None = None) -> dict[str, int]:
@@ -249,11 +267,15 @@ def send_due_pre_arrival_reminders(*, actor_user_id: uuid.UUID | None = None) ->
     days_before = _int_setting("notifications.pre_arrival_days_before", 1)
     target_date = date.today() + timedelta(days=days_before)
     reservations = (
-        Reservation.query.filter(
-            Reservation.check_in_date == target_date,
-            Reservation.current_status.in_(["tentative", "confirmed"]),
+        db.session.execute(
+            sa.select(Reservation)
+            .where(
+                Reservation.check_in_date == target_date,
+                Reservation.current_status.in_(["tentative", "confirmed"]),
+            )
+            .order_by(Reservation.check_in_date.asc())
         )
-        .order_by(Reservation.check_in_date.asc())
+        .scalars()
         .all()
     )
     delivery_ids: list[uuid.UUID] = []
@@ -271,11 +293,15 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
     threshold = utc_now() - timedelta(hours=_int_setting("notifications.failed_payment_reminder_delay_hours", 6))
     request_ids = [
         item.id
-        for item in PaymentRequest.query.filter(
-            PaymentRequest.status.in_(["failed", "expired"]),
-            sa.or_(PaymentRequest.failed_at <= threshold, PaymentRequest.expired_at <= threshold),
+        for item in db.session.execute(
+            sa.select(PaymentRequest)
+            .where(
+                PaymentRequest.status.in_(["failed", "expired"]),
+                sa.or_(PaymentRequest.failed_at <= threshold, PaymentRequest.expired_at <= threshold),
+            )
+            .order_by(PaymentRequest.created_at.asc())
         )
-        .order_by(PaymentRequest.created_at.asc())
+        .scalars()
         .all()
     ]
     totals = {"queued": 0, "sent": 0, "failed": 0, "skipped": 0}
@@ -313,7 +339,8 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
                 "Failed to generate failed-payment reminder checkout for %s.",
                 payment_request.request_code,
             )
-            write_activity_log(
+            activity_logger = getattr(_service_module(), "write_activity_log", write_activity_log)
+            activity_logger(
                 actor_user_id=actor_user_id,
                 event_type="notification.failed_payment_reminder_failed",
                 entity_table="payment_requests",
@@ -335,6 +362,16 @@ def send_due_failed_payment_reminders(*, actor_user_id: uuid.UUID | None = None)
 
 
 def communication_settings_context() -> dict[str, object]:
+    pending_count = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(NotificationDelivery)
+        .where(NotificationDelivery.status.in_(["pending", "queued"]))
+    ).scalar_one()
+    failed_count = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(NotificationDelivery)
+        .where(NotificationDelivery.status == "failed")
+    ).scalar_one()
     return {
         "sender_name": _string_setting("notifications.sender_name", "Sandbox Hotel"),
         "pre_arrival_enabled": _bool_setting("notifications.pre_arrival_enabled", True),
@@ -347,6 +384,6 @@ def communication_settings_context() -> dict[str, object]:
         "whatsapp_staff_alert_enabled": _bool_setting("notifications.whatsapp_staff_alert_enabled", False),
         "line_staff_alert_configured": bool(current_app.config.get("LINE_STAFF_ALERT_WEBHOOK_URL")),
         "whatsapp_staff_alert_configured": bool(current_app.config.get("WHATSAPP_STAFF_ALERT_WEBHOOK_URL")),
-        "pending_count": NotificationDelivery.query.filter(NotificationDelivery.status.in_(["pending", "queued"])).count(),
-        "failed_count": NotificationDelivery.query.filter_by(status="failed").count(),
+        "pending_count": pending_count,
+        "failed_count": failed_count,
     }

@@ -129,18 +129,19 @@
         </div>
         <button class="button" type="submit">Record payment</button>
       </div>
-      <div class="grid three">
-        <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
-        <label><span>Payment method</span><select name="payment_method"><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option><option value="front_desk">Front desk</option></select></label>
-        <label class="toggle-row"><span>Deposit receipt</span><input type="checkbox" name="is_deposit"></label>
-      </div>
-      <div class="grid two">
-        <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
-        <label><span>Note</span><input type="text" name="note" maxlength="255" placeholder="Deposit at check-in / balance collected"></label>
-      </div>
-      <label><span>Receipt / transaction reference</span><input type="text" name="transaction_reference" maxlength="255" placeholder="Cash drawer slip, bank ref, card auth code"></label>
-    </form>
-    {% endif %}
+        <div class="grid three">
+          <label><span>Amount (THB)</span><input type="number" name="amount" min="0.01" step="0.01" required></label>
+          <label><span>Payment method</span><select name="payment_method"><option value="cash">Cash</option><option value="qr">QR</option><option value="card">Card</option><option value="bank">Bank transfer</option><option value="front_desk">Front desk</option></select></label>
+          <label class="toggle-row"><span>Deposit receipt</span><input type="checkbox" name="is_deposit"></label>
+        </div>
+        <div class="grid two">
+          <label><span>Service date</span><input type="date" name="service_date" value="{{ detail.reservation.check_in_date.isoformat() }}"></label>
+          <label><span>Note</span><input type="text" name="note" maxlength="255" placeholder="Deposit at check-in / balance collected"></label>
+        </div>
+        <label><span>Receipt / transaction reference</span><input type="text" name="transaction_reference" maxlength="255" placeholder="Cash drawer slip, bank ref, card auth code"></label>
+        <label class="toggle-row"><span>Email receipt to guest</span><input type="checkbox" name="email_receipt" {% if detail.reservation.primary_guest and detail.reservation.primary_guest.email %}checked{% endif %}></label>
+      </form>
+      {% endif %}
 
     {% if can_refund %}
     <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_refund', reservation_id=detail.reservation.id) }}">

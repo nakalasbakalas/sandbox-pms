@@ -13,7 +13,7 @@ from werkzeug.security import generate_password_hash
 
 from pms.app import create_app
 from pms.extensions import db
-from pms.models import CashierActivityLog, CashierDocument, FolioCharge, PaymentEvent, Reservation, Role, RoomType, User
+from pms.models import CashierActivityLog, CashierDocument, EmailOutbox, FolioCharge, NotificationDelivery, PaymentEvent, Reservation, Role, RoomType, User
 from pms.seeds import seed_all
 from pms.services.cashier_service import (
     DocumentIssuePayload,
@@ -463,6 +463,7 @@ def test_cashier_manual_payment_and_refund_store_transaction_references(app_fact
             "payment_method": "bank",
             "transaction_reference": "BANK-REF-400",
             "note": "Bank transfer received",
+            "email_receipt": "on",
             "back_url": f"/staff/cashier/{reservation.id}",
         },
     )
@@ -487,11 +488,23 @@ def test_cashier_manual_payment_and_refund_store_transaction_references(app_fact
         refund_line = FolioCharge.query.filter_by(reservation_id=reservation.id, charge_type="refund").one()
         payment_event = PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="payment_collected").one()
         refund_event = PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="refund_processed").one()
+        receipt = CashierDocument.query.filter_by(reservation_id=reservation.id, document_type="receipt").one()
+        receipt_delivery = NotificationDelivery.query.filter_by(
+            reservation_id=reservation.id,
+            event_type="cashier.receipt_email",
+        ).one()
+        outbox = EmailOutbox.query.filter_by(
+            reservation_id=reservation.id,
+            email_type="payment_success",
+        ).one()
 
         assert payment_line.metadata_json["provider_reference"] == "BANK-REF-400"
         assert refund_line.metadata_json["transaction_reference"] == "BANK-RFD-150"
         assert payment_event.raw_payload["provider_reference"] == "BANK-REF-400"
         assert refund_event.raw_payload["transaction_reference"] == "BANK-RFD-150"
+        assert receipt.document_number.startswith("RCT-")
+        assert receipt_delivery.metadata_json["document_number"] == receipt.document_number
+        assert outbox.reservation_id == reservation.id
 
 
 def test_pos_charge_posting_is_duplicate_safe_and_maps_outlet_codes(app_factory):

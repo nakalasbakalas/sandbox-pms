@@ -170,7 +170,13 @@ def _staff_notification_type(event_type: str) -> str:
 
 
 def _existing_delivery(dedupe_key: str) -> NotificationDelivery | None:
-    return NotificationDelivery.query.filter_by(dedupe_key=dedupe_key).first()
+    return (
+        db.session.execute(
+            sa.select(NotificationDelivery).where(NotificationDelivery.dedupe_key == dedupe_key)
+        )
+        .scalars()
+        .first()
+    )
 
 
 def _create_delivery(
