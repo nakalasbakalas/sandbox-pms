@@ -594,18 +594,15 @@
     document.getElementById('resetBtn').addEventListener('click', reset);
     document.getElementById('printBtn').addEventListener('click', () => window.print());
 
-    document.addEventListener('DOMContentLoaded', () => {
+    function initPage() {
       setValues(load());
       render();
-    });
+    }
 
-    // If DOM is already ready
     if (document.readyState === 'loading') {
-      // DOM still loading, listener above will handle it
+      document.addEventListener('DOMContentLoaded', initPage);
     } else {
-      // DOM already loaded
-      setValues(load());
-      render();
+      initPage();
     }
   </script>
 </body>

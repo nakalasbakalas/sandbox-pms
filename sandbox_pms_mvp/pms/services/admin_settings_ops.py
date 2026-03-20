@@ -517,3 +517,49 @@ def _ensure_room_inventory(room: Room, *, actor_user_id: uuid.UUID) -> None:
         _restore_inventory_row_to_room_default(row, actor_user_id=actor_user_id)
 
 
+# ---------------------------------------------------------------------------
+# Admin settings context helpers (used by admin panel templates)
+# ---------------------------------------------------------------------------
+
+def property_settings_context() -> dict[str, object]:
+    """Return branding / property settings for the admin panel template."""
+    return branding_settings_context()
+
+
+def payment_settings_context() -> dict[str, object]:
+    """Return payment configuration context for the admin panel template."""
+    from flask import current_app
+
+    return {
+        "active_provider": str(get_setting_value("payment.active_provider", "env") or "env"),
+        "deposit_enabled": _bool(get_setting_value("payment.deposit_enabled", True)),
+        "link_expiry_minutes": str(
+            get_setting_value(
+                "payment.link_expiry_minutes",
+                current_app.config["PAYMENT_LINK_TTL_MINUTES"],
+            )
+        ),
+        "link_resend_cooldown_seconds": str(
+            get_setting_value(
+                "payment.link_resend_cooldown_seconds",
+                current_app.config["PAYMENT_LINK_RESEND_COOLDOWN_SECONDS"],
+            )
+        ),
+        "provider_runtime": current_app.config.get("PAYMENT_PROVIDER", "disabled"),
+        "stripe_secret_configured": bool(current_app.config.get("STRIPE_SECRET_KEY")),
+        "stripe_webhook_configured": bool(current_app.config.get("STRIPE_WEBHOOK_SECRET")),
+    }
+
+
+def housekeeping_defaults_context() -> dict[str, object]:
+    """Return housekeeping default settings for the admin panel template."""
+    return {
+        "require_inspected_for_ready": _bool(
+            get_setting_value("housekeeping.require_inspected_for_ready", False)
+        ),
+        "checkout_dirty_status": str(
+            get_setting_value("housekeeping.checkout_dirty_status", "dirty")
+        ),
+    }
+
+
