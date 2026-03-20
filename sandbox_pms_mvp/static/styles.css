@@ -4478,3 +4478,300 @@ body:not(.public-site) .hk-counts {
   color: #c62828;
   font-size: 13px;
 }
+
+/* ── Board Snapshot Panel ── */
+.board-snapshot-panel {
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.015);
+}
+.board-snapshot-toggle {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.board-snapshot-toggle::-webkit-details-marker { display: none; }
+.board-snapshot-toggle::marker { display: none; }
+.board-snapshot-toggle::after {
+  content: "▲";
+  font-size: 0.55rem;
+  opacity: 0.5;
+}
+.board-snapshot-panel:not([open]) .board-snapshot-toggle::after { content: "▼"; }
+.board-snapshot-date { color: var(--muted); font-weight: 400; }
+.board-snapshot-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 8px;
+}
+.board-snapshot-card {
+  display: grid;
+  gap: 1px;
+  min-width: 80px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  text-align: center;
+}
+.board-snapshot-card.tone-danger { background: rgba(207,95,109,0.12); border-color: rgba(207,95,109,0.2); }
+.board-snapshot-card.tone-warning { background: rgba(240,173,78,0.1); border-color: rgba(240,173,78,0.2); }
+.board-snapshot-card.tone-success { background: rgba(47,182,117,0.1); border-color: rgba(47,182,117,0.15); }
+.board-snapshot-card.tone-accent { background: rgba(var(--accent-rgb),0.1); border-color: rgba(var(--accent-rgb),0.18); }
+.bsc-label {
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.bsc-value {
+  font-size: 1.35rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+.board-snapshot-card.tone-danger .bsc-value { color: #ffb0b5; }
+.board-snapshot-card.tone-warning .bsc-value { color: #ffd391; }
+.board-snapshot-card.tone-success .bsc-value { color: #9ff1c3; }
+.board-snapshot-card.tone-accent .bsc-value { color: var(--accent-soft); }
+.bsc-sub {
+  font-size: 0.54rem;
+  color: var(--muted);
+}
+
+/* ── Arrival Readiness Checklist ── */
+.arrival-readiness-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.arc-item {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.arc-ok {
+  background: rgba(47,182,117,0.14);
+  color: #9ff1c3;
+}
+.arc-warn {
+  background: rgba(207,95,109,0.14);
+  color: #ffb0b5;
+}
+.arc-info {
+  background: rgba(77,157,255,0.12);
+  color: #8ec4ff;
+}
+
+/* ── Quick Filter Chips ── */
+.board-quick-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: none;
+}
+.bqf-label {
+  font-size: 0.62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  flex: none;
+}
+.bqf-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.04);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  width: auto;
+}
+.bqf-chip:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+.bqf-chip.active,
+.bqf-chip[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--accent-soft);
+  color: var(--accent-soft);
+}
+.bqf-chip:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+
+/* ── Occupancy Heatmap Day Headers ── */
+.planning-board-day[data-occupancy-pct] {
+  position: relative;
+}
+.planning-board-day[data-occupancy-pct]::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 999px 999px 0 0;
+}
+.planning-board-day[data-occupancy-pct="0"]::before,
+.planning-board-day:not([data-occupancy-pct])::before { display: none; }
+.planning-board-day[data-occupancy-pct]::before {
+  background: rgba(77,157,255,0.4);
+}
+.planning-board-day.occ-high::before { background: rgba(207,95,109,0.7); height: 4px; }
+.planning-board-day.occ-medium::before { background: rgba(240,173,78,0.5); height: 3px; }
+.planning-board-day.occ-low::before { background: rgba(77,157,255,0.3); height: 2px; }
+
+/* ── Today Floating Indicator ── */
+.board-today-indicator {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  background: rgba(var(--accent-rgb), 0.9);
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  transition: opacity 0.2s;
+}
+.board-today-indicator.hidden { display: none; }
+.board-today-indicator:hover { background: var(--accent); }
+.board-today-indicator:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; }
+
+/* ── Availability Mini Bar Chart ── */
+.pbs-avail-bar {
+  display: block;
+  height: 3px;
+  width: 36px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.pbs-avail-bar-fill {
+  display: block;
+  height: 100%;
+  background: rgba(47,182,117,0.7);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+/* ── Board Stats Panel content ── */
+.board-stats-section {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.board-stats-section:last-child { border-bottom: none; }
+.board-stats-section h3 {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent-soft);
+  margin: 0 0 4px;
+}
+.board-stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+  gap: 8px;
+}
+.board-stats-row .bsr-label { color: var(--muted); }
+.board-stats-row .bsr-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.board-stats-row.bsr-danger .bsr-label,
+.board-stats-row.bsr-danger .bsr-value { color: #ffb0b5; }
+.board-stats-row.bsr-warning .bsr-label,
+.board-stats-row.bsr-warning .bsr-value { color: #ffd391; }
+.board-stats-row.bsr-info .bsr-label,
+.board-stats-row.bsr-info .bsr-value { color: #8ec4ff; }
+.board-stats-trend {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+.bst-bar {
+  flex: 1;
+  background: rgba(77,157,255,0.25);
+  border-radius: 3px 3px 0 0;
+  min-height: 4px;
+  max-height: 40px;
+  position: relative;
+  transition: background 0.2s;
+}
+.bst-bar.high { background: rgba(207,95,109,0.5); }
+.bst-bar.medium { background: rgba(240,173,78,0.45); }
+.bst-bar.low { background: rgba(47,182,117,0.4); }
+.bst-bar-label {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.44rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* ── Print Layout ── */
+@media print {
+  @page { size: landscape; margin: 12mm; }
+  body { background: #fff !important; color: #000 !important; }
+  .board-side-panel,
+  .board-context-menu,
+  .planning-board-row2,
+  .board-legend,
+  .planning-board-overflow,
+  .planning-board-density-toggle,
+  .board-today-indicator,
+  .board-quick-filters,
+  nav,
+  .planning-board-nav-actions,
+  .planning-board-primary-cta,
+  .board-nav-btn,
+  .board-days-tabs,
+  .planning-board-view-tabs { display: none !important; }
+  .planning-board-shell { box-shadow: none !important; border: none !important; padding: 0 !important; }
+  .planning-board-row1 { padding: 0 0 8px !important; border-bottom: 1px solid #ccc !important; }
+  .planning-board-desktop { overflow: visible !important; }
+  .planning-board-grid { width: 100% !important; border: 1px solid #ddd !important; }
+  .planning-board-block > summary { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .planning-board-day { font-size: 8px !important; }
+  .planning-board-room strong { font-size: 9px !important; }
+  .planning-board-block-copy strong { font-size: 7px !important; }
+  .board-snapshot-panel,
+  .planning-board-status-strip,
+  .planning-board-avail-strip,
+  .planning-board-alerts { display: block !important; }
+  .planning-board-mobile { display: none !important; }
+}
