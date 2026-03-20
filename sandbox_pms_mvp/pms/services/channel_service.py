@@ -21,6 +21,9 @@ Adding a new provider
 
 from __future__ import annotations
 
+import json
+import urllib.error
+import urllib.request
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -29,6 +32,7 @@ from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
+from flask import current_app
 
 from ..audit import write_audit_log
 from ..extensions import db
@@ -237,6 +241,73 @@ class ICalChannelProvider(ChannelProvider):
         return True
 
 
+class WebhookChannelProvider(ChannelProvider):
+    """Generic webhook-backed outbound adapter for OTA/channel bridges."""
+
+    @property
+    def provider_key(self) -> str:
+        return "webhook"
+
+    def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
+        return []
+
+    def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
+        webhook_url = str(current_app.config.get("CHANNEL_PUSH_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=["CHANNEL_PUSH_WEBHOOK_URL is not configured."],
+            )
+
+        payload = {
+            "provider": self.provider_key,
+            "updates": [
+                {
+                    "room_type_code": update.room_type_code,
+                    "date_from": update.date_from.isoformat(),
+                    "date_to": update.date_to.isoformat(),
+                    "available_count": update.available_count,
+                    "rate_amount": str(update.rate_amount) if update.rate_amount is not None else None,
+                    "currency": update.currency,
+                    "closed_to_arrival": update.closed_to_arrival,
+                    "closed_to_departure": update.closed_to_departure,
+                    "min_stay": update.min_stay,
+                }
+                for update in updates
+            ],
+        }
+        request_obj = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request_obj, timeout=15) as response:  # noqa: S310
+                success = 200 <= getattr(response, "status", 200) < 300
+                body = response.read().decode("utf-8", errors="ignore")
+                return SyncResult(
+                    provider=self.provider_key,
+                    direction="outbound",
+                    success=success,
+                    records_processed=len(updates) if success else 0,
+                    errors=[] if success else [body[:200] or f"Webhook returned {getattr(response, 'status', 'unknown')}"],
+                    details={"response": body[:200]},
+                )
+        except urllib.error.URLError as exc:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[str(exc)],
+            )
+
+    def test_connection(self) -> bool:
+        return bool(str(current_app.config.get("CHANNEL_PUSH_WEBHOOK_URL", "") or "").strip())
+
+
 # ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
@@ -244,6 +315,7 @@ class ICalChannelProvider(ChannelProvider):
 PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
+    "webhook": WebhookChannelProvider,
 }
 
 

@@ -6,7 +6,10 @@ dispatch, template rendering, and automation hook infrastructure.
 from __future__ import annotations
 
 import abc
+import json
 import logging
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -225,10 +228,155 @@ class OtaMessageAdapter(ChannelAdapter):
         }
 
 
+def _send_via_webhook(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request_obj = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers=request_headers,
+    )
+    try:
+        with urllib.request.urlopen(request_obj, timeout=15) as response:  # noqa: S310
+            response_body = response.read().decode("utf-8", errors="ignore")
+            provider_message_id = (
+                response.headers.get("X-Line-Request-Id")
+                or response.headers.get("X-Request-Id")
+                or response_body[:120]
+                or f"webhook-{getattr(response, 'status', 200)}"
+            )
+            return {
+                "success": 200 <= getattr(response, "status", 200) < 300,
+                "provider_message_id": provider_message_id,
+                "error": None,
+            }
+    except urllib.error.URLError as exc:
+        return {"success": False, "provider_message_id": None, "error": str(exc)[:500]}
+
+
+class WebhookSmsAdapter(ChannelAdapter):
+    """SMS delivery via outbound webhook or sandbox mock."""
+
+    def channel_name(self) -> str:
+        return "sms"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        webhook_url = str(current_app.config.get("SMS_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            logger.info("WebhookSmsAdapter: sandbox mock - no SMS webhook configured")
+            return {
+                "success": True,
+                "provider_message_id": f"mock-sms-{uuid.uuid4().hex[:12]}",
+                "error": None,
+                "mock": True,
+            }
+        if not message.recipient_address:
+            return {"success": False, "provider_message_id": None, "error": "SMS recipient is required."}
+        return _send_via_webhook(
+            webhook_url,
+            {
+                "channel": "sms",
+                "to": message.recipient_address,
+                "body_text": message.body_text,
+                "subject": message.subject,
+                "thread_id": str(thread.id),
+                "message_id": str(message.id),
+            },
+        )
+
+
+class LineAdapter(ChannelAdapter):
+    """Guest-facing LINE delivery via push API or configured webhook."""
+
+    def channel_name(self) -> str:
+        return "line"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        recipient = (message.recipient_address or "").strip()
+        if not recipient:
+            return {"success": False, "provider_message_id": None, "error": "LINE recipient is required."}
+
+        channel_access_token = str(current_app.config.get("LINE_CHANNEL_ACCESS_TOKEN", "") or "").strip()
+        if channel_access_token:
+            base_url = str(current_app.config.get("LINE_API_BASE", "https://api.line.me") or "https://api.line.me").rstrip("/")
+            return _send_via_webhook(
+                f"{base_url}/v2/bot/message/push",
+                {
+                    "to": recipient,
+                    "messages": [
+                        {
+                            "type": "text",
+                            "text": message.body_text,
+                        }
+                    ],
+                },
+                headers={"Authorization": f"Bearer {channel_access_token}"},
+            )
+
+        webhook_url = str(current_app.config.get("LINE_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if webhook_url:
+            return _send_via_webhook(
+                webhook_url,
+                {
+                    "channel": "line",
+                    "to": recipient,
+                    "body_text": message.body_text,
+                    "subject": message.subject,
+                    "thread_id": str(thread.id),
+                    "message_id": str(message.id),
+                },
+            )
+
+        logger.info("LineAdapter: sandbox mock - no LINE delivery integration configured")
+        return {
+            "success": True,
+            "provider_message_id": f"mock-line-{uuid.uuid4().hex[:12]}",
+            "error": None,
+            "mock": True,
+        }
+
+
+class WebhookWhatsAppAdapter(ChannelAdapter):
+    """WhatsApp delivery via outbound webhook or sandbox mock."""
+
+    def channel_name(self) -> str:
+        return "whatsapp"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        webhook_url = str(current_app.config.get("WHATSAPP_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            logger.info("WebhookWhatsAppAdapter: sandbox mock - no guest WhatsApp webhook configured")
+            return {
+                "success": True,
+                "provider_message_id": f"mock-wa-{uuid.uuid4().hex[:12]}",
+                "error": None,
+                "mock": True,
+            }
+        if not message.recipient_address:
+            return {"success": False, "provider_message_id": None, "error": "WhatsApp recipient is required."}
+        return _send_via_webhook(
+            webhook_url,
+            {
+                "channel": "whatsapp",
+                "to": message.recipient_address,
+                "body_text": message.body_text,
+                "subject": message.subject,
+                "thread_id": str(thread.id),
+                "message_id": str(message.id),
+            },
+        )
+
+
 _ADAPTERS: dict[str, ChannelAdapter] = {
     "email": EmailAdapter(),
-    "sms": SmsAdapter(),
-    "whatsapp": WhatsAppAdapter(),
+    "sms": WebhookSmsAdapter(),
+    "line": LineAdapter(),
+    "whatsapp": WebhookWhatsAppAdapter(),
     "internal_note": InternalNoteAdapter(),
     "manual_call_log": ManualCallLogAdapter(),
     "ota_message": OtaMessageAdapter(),
@@ -851,10 +999,79 @@ def list_automation_rules(*, event_type: str | None = None) -> list[AutomationRu
     if event_type:
         query = query.where(AutomationRule.event_type == event_type)
     return (
-        db.session.execute(query.order_by(AutomationRule.event_type))
+        db.session.execute(query.order_by(AutomationRule.event_type.asc(), AutomationRule.channel.asc(), AutomationRule.created_at.asc()))
         .scalars()
         .all()
     )
+
+
+def upsert_automation_rule(
+    *,
+    event_type: str,
+    channel: str,
+    delay_minutes: int,
+    actor_user_id: str,
+    rule_id: str | None = None,
+    template_id: str | None = None,
+    is_active: bool = False,
+    commit: bool = True,
+) -> AutomationRule:
+    event_type = (event_type or "").strip()
+    if not event_type:
+        raise ValueError("Automation event type is required.")
+    if len(event_type) > 60:
+        raise ValueError("Automation event type must be 60 characters or fewer.")
+    if channel not in {"email", "sms", "line", "whatsapp", "internal_note", "manual_call_log", "ota_message"}:
+        raise ValueError("Automation channel is invalid.")
+    if delay_minutes < 0:
+        raise ValueError("Automation delay must be zero or greater.")
+
+    actor_uuid = uuid.UUID(actor_user_id)
+    now = utc_now()
+    template_uuid = uuid.UUID(template_id) if template_id else None
+    template = db.session.get(MessageTemplate, template_uuid) if template_uuid else None
+    if template and template.channel != channel:
+        raise ValueError("Automation template channel must match the automation rule channel.")
+
+    rule = db.session.get(AutomationRule, uuid.UUID(rule_id)) if rule_id else None
+    if rule and rule.deleted_at is not None:
+        rule = None
+
+    if rule is None:
+        rule = AutomationRule(
+            event_type=event_type,
+            channel=channel,
+            created_at=now,
+            updated_at=now,
+            created_by_user_id=actor_uuid,
+        )
+        db.session.add(rule)
+
+    rule.event_type = event_type
+    rule.channel = channel
+    rule.template_id = template.id if template else None
+    rule.is_active = bool(is_active)
+    rule.delay_minutes = int(delay_minutes)
+    rule.updated_at = now
+    rule.updated_by_user_id = actor_uuid
+    db.session.flush()
+
+    write_audit_log(
+        actor_user_id=actor_uuid,
+        entity_table="automation_rules",
+        entity_id=str(rule.id),
+        action="automation_rule.upsert",
+        after_data={
+            "event_type": rule.event_type,
+            "channel": rule.channel,
+            "template_id": str(rule.template_id) if rule.template_id else None,
+            "is_active": rule.is_active,
+            "delay_minutes": rule.delay_minutes,
+        },
+    )
+    if commit:
+        db.session.commit()
+    return rule
 
 
 def fire_automation_event(

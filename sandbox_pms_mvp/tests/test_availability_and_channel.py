@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -296,6 +297,12 @@ class TestChannelService:
             provider = get_provider("ical")
             assert provider.provider_key == "ical"
 
+    def test_get_provider_webhook(self, app_factory):
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("webhook")
+            assert provider.provider_key == "webhook"
+
     def test_get_provider_unknown_raises(self, app_factory):
         """get_provider with unknown key raises ValueError."""
         app = app_factory(seed=True)
@@ -347,3 +354,45 @@ class TestChannelService:
         with app.app_context():
             provider = get_provider("ical")
             assert provider.test_connection() is True
+
+    def test_webhook_provider_push_inventory_posts_payload(self, app_factory, monkeypatch):
+        class DummyResponse:
+            status = 200
+
+            def read(self):
+                return b'{"ok": true}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        captured = {}
+
+        def fake_urlopen(request_obj, timeout=15):
+            captured["url"] = request_obj.full_url
+            captured["body"] = json.loads(request_obj.data.decode("utf-8"))
+            return DummyResponse()
+
+        monkeypatch.setattr("pms.services.channel_service.urllib.request.urlopen", fake_urlopen)
+
+        app = app_factory(seed=True, config={"CHANNEL_PUSH_WEBHOOK_URL": "https://channel.example.invalid/push"})
+        with app.app_context():
+            provider = get_provider("webhook")
+            result = provider.push_inventory(
+                [
+                    OutboundInventoryUpdate(
+                        room_type_code="STD",
+                        date_from=date.today(),
+                        date_to=date.today() + timedelta(days=1),
+                        available_count=3,
+                        rate_amount=Decimal("1800.00"),
+                    )
+                ]
+            )
+            assert result.success is True
+            assert result.records_processed == 1
+            assert captured["url"] == "https://channel.example.invalid/push"
+            assert captured["body"]["provider"] == "webhook"
+            assert captured["body"]["updates"][0]["room_type_code"] == "STD"

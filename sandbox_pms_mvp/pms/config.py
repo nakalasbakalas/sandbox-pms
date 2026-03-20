@@ -88,6 +88,12 @@ class Config:
     # (service validates ≤ 10 MB; this allows a small extra margin for form overhead)
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", "12582912"))
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "")
+    STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").strip().lower()
+    S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+    S3_REGION = os.getenv("S3_REGION", "us-east-1").strip()
+    S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").strip()
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "").strip()
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "").strip()
     MAX_FORM_MEMORY_SIZE = int(os.getenv("MAX_FORM_MEMORY_SIZE", "262144"))
     MAX_FORM_PARTS = int(os.getenv("MAX_FORM_PARTS", "200"))
     PAYMENT_BASE_URL = os.getenv("PAYMENT_BASE_URL", "")
@@ -150,8 +156,14 @@ class Config:
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") == "1"
     MAIL_FROM = os.getenv("MAIL_FROM", "")
     STAFF_ALERT_EMAILS = [item.strip() for item in os.getenv("STAFF_ALERT_EMAILS", "").split(",") if item.strip()]
+    SMS_OUTBOUND_WEBHOOK_URL = os.getenv("SMS_OUTBOUND_WEBHOOK_URL", "").strip()
+    WHATSAPP_OUTBOUND_WEBHOOK_URL = os.getenv("WHATSAPP_OUTBOUND_WEBHOOK_URL", "").strip()
+    LINE_OUTBOUND_WEBHOOK_URL = os.getenv("LINE_OUTBOUND_WEBHOOK_URL", "").strip()
+    LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    LINE_API_BASE = os.getenv("LINE_API_BASE", "https://api.line.me").strip()
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")
+    CHANNEL_PUSH_WEBHOOK_URL = os.getenv("CHANNEL_PUSH_WEBHOOK_URL", "").strip()
     SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
     SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", APP_ENV).strip() or APP_ENV
     SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", "").strip()

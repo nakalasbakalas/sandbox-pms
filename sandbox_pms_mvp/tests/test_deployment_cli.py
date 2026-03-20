@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 from datetime import timedelta
+from pathlib import Path
 
 from pms.extensions import db
 from pms.models import AuditLog, Permission, Role, RoomType, User, utc_now
@@ -115,3 +117,41 @@ def test_health_endpoint_reports_db_liveness_and_sla_metadata(app_factory):
     assert payload["sla_ms"] == 5000
     assert isinstance(payload["response_ms"], float)
     assert payload["response_ms"] >= 0
+
+
+def test_config_reads_storage_backend_environment(monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("S3_BUCKET", "sandbox-docs")
+    monkeypatch.setenv("S3_REGION", "ap-southeast-1")
+    monkeypatch.setenv("S3_ENDPOINT_URL", "https://r2.example.invalid")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test-access-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test-secret-key")
+
+    import pms.config as config_module
+
+    reloaded = importlib.reload(config_module)
+    try:
+        assert reloaded.Config.STORAGE_BACKEND == "s3"
+        assert reloaded.Config.S3_BUCKET == "sandbox-docs"
+        assert reloaded.Config.S3_REGION == "ap-southeast-1"
+        assert reloaded.Config.S3_ENDPOINT_URL == "https://r2.example.invalid"
+        assert reloaded.Config.AWS_ACCESS_KEY_ID == "test-access-key"
+        assert reloaded.Config.AWS_SECRET_ACCESS_KEY == "test-secret-key"
+    finally:
+        importlib.reload(config_module)
+
+
+def test_render_blueprint_enables_persistent_uploads_and_background_crons():
+    render_blueprint = Path(__file__).resolve().parents[2] / "render.yaml"
+    text = render_blueprint.read_text(encoding="utf-8")
+
+    assert "key: STORAGE_BACKEND" in text
+    assert "value: local" in text
+    assert "key: UPLOAD_DIR" in text
+    assert "value: /var/data/uploads/documents" in text
+    assert "disk:" in text
+    assert "name: pms-document-storage" in text
+    assert "name: pms-cleanup-audit-logs" in text
+    assert "startCommand: flask --app app cleanup-audit-logs" in text
+    assert "name: pms-auto-cancel-no-shows" in text
+    assert "startCommand: flask --app app auto-cancel-no-shows" in text
