@@ -848,6 +848,93 @@ def test_check_in_route_updates_guest_identity_fields(app_factory):
         assert refreshed.identity_verified_at is not None
 
 
+def test_check_in_route_rejects_deposit_override_for_front_desk_role(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Override",
+            last_name="Blocked",
+            phone="+66800000119",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        reservation.deposit_required_amount = Decimal("500.00")
+        db.session.commit()
+        user = make_staff_user("front_desk", "fd-override-blocked@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Override",
+            "last_name": "Blocked",
+            "phone": "+66800000119",
+            "email": "override-blocked@example.com",
+            "identity_verified": "on",
+            "collect_payment_amount": "0.00",
+            "override_payment": "on",
+            "apply_early_fee": "on",
+            "back_url": "/staff/front-desk",
+            "business_date": date.today().isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Deposit is still outstanding." in body
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert refreshed.current_status == "confirmed"
+        assert refreshed.checked_in_at is None
+
+
+def test_check_in_route_allows_manager_deposit_override(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Override",
+            last_name="Manager",
+            phone="+66800000120",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        reservation.deposit_required_amount = Decimal("500.00")
+        db.session.commit()
+        user = make_staff_user("manager", "manager-override@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Override",
+            "last_name": "Manager",
+            "phone": "+66800000120",
+            "email": "override-manager@example.com",
+            "identity_verified": "on",
+            "collect_payment_amount": "0.00",
+            "override_payment": "on",
+            "apply_early_fee": "on",
+            "back_url": "/staff/front-desk",
+            "business_date": date.today().isoformat(),
+        },
+        follow_redirects=True,
+    )
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert response.status_code == 200
+        assert refreshed.current_status == "checked_in"
+        assert refreshed.checked_in_at is not None
+
+
 def test_check_in_route_blocks_missing_identity_verification_outside_testing(app_factory, monkeypatch):
     app = app_factory(seed=True)
     client = app.test_client()

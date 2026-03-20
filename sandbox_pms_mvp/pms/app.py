@@ -91,7 +91,7 @@ from .models import (
 from .normalization import normalize_phone
 from .pricing import get_setting_value, quote_reservation
 from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
-from .security import configure_app_security, current_request_id, public_error_message, request_client_ip
+from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
@@ -118,6 +118,7 @@ from .helpers import (
     parse_booking_extra_ids,
     parse_decimal,
     parse_optional_date,
+    permission_groups,
     parse_optional_datetime,
     parse_optional_decimal,
     parse_optional_int,
@@ -705,6 +706,7 @@ def register_template_helpers(app: Flask) -> None:
             "language_alternate_urls": language_alternate_urls,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
             "make_lang_url": _make_lang_url,
+            "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",

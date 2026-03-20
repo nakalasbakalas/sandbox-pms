@@ -967,6 +967,17 @@ def policy_text(code: str, language: str, fallback: str) -> str:
     )
 
 
+def policy_documents_context() -> dict[str, PolicyDocument | None]:
+    """Return active policy documents keyed by code."""
+    docs = db.session.execute(
+        sa.select(PolicyDocument).where(
+            PolicyDocument.is_active.is_(True),
+            PolicyDocument.deleted_at.is_(None),
+        )
+    ).scalars().all()
+    return {doc.code: doc for doc in docs}
+
+
 @dataclass
 class NotificationTemplatePayload:
     template_key: str

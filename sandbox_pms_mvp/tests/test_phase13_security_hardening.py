@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -257,6 +258,48 @@ def test_security_headers_and_session_cookie_flags_are_present(app_factory):
     assert "Secure" in session_cookie
     assert "HttpOnly" in session_cookie
     assert "SameSite=Lax" in session_cookie
+
+    csp_header = response.headers["Content-Security-Policy"]
+    nonce_match = re.search(r"'nonce-([^']+)'", csp_header)
+    assert nonce_match is not None
+    nonce = nonce_match.group(1)
+    assert f'nonce="{nonce}"'.encode() in response.data
+    assert "script-src 'self'" in csp_header
+
+
+def test_csp_hardened_templates_avoid_inline_dom_handlers():
+    template_dir = PROJECT_ROOT / "templates"
+    audited_templates = [
+        "housekeeping_board.html",
+        "reservation_detail.html",
+        "staff_messaging_thread.html",
+        "staff_reservations.html",
+        "_res_list_drawer.html",
+    ]
+
+    for template_name in audited_templates:
+        body = (template_dir / template_name).read_text(encoding="utf-8", errors="ignore")
+        assert "onclick=" not in body, template_name
+        assert "onchange=" not in body, template_name
+        assert "onsubmit=" not in body, template_name
+
+
+def test_csp_hardened_templates_nonce_inline_scripts():
+    template_dir = PROJECT_ROOT / "templates"
+    inline_script_templates = [
+        "base.html",
+        "front_desk_detail.html",
+        "reservation_detail.html",
+        "reservation_form.html",
+        "staff_messaging_compose.html",
+        "staff_messaging_thread.html",
+        "staff_reservations.html",
+    ]
+
+    for template_name in inline_script_templates:
+        body = (template_dir / template_name).read_text(encoding="utf-8", errors="ignore")
+        assert "<script" in body, template_name
+        assert 'nonce="{{ csp_nonce }}"' in body, template_name
 
 
 def test_access_logging_uses_request_id_and_omits_query_string(app_factory, monkeypatch):

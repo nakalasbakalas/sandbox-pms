@@ -1,8 +1,8 @@
 ﻿# PMS Repo Audit and Execution Plan
 
 > **Audit date:** 2026-03-18  
-> **Last updated:** 2026-03-19  
-> **Test baseline:** 492 passed, 7 skipped - zero failures  
+> **Last updated:** 2026-03-20  
+> **Test baseline:** 511 passed, 7 skipped - zero failures  
 > **Scope:** Full repository scan ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â routes, models, services, templates, static assets, tests, migrations, config, CI, deployment
 
 ---
@@ -23,7 +23,7 @@ All critical and high-priority fixes from the audit implemented and tested:
 | **F-10** OCR returns None silently | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Now returns status dict: `{"status": "unavailable", ...}` |
 | **QW-1 to QW-11** | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | All quick wins completed (aria-labels, guards, config) |
 
-**Results:** `app.py` reduced from 5,923 -> 1,354 lines (-4,569 lines, all 10 Blueprints extracted + service layer delegation). All blueprint route groups now extracted: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations, admin, front_desk (incl. board), public. Remaining in `app.py`: `create_app()` factory wiring, shared helpers, CLI registration. Current full-suite baseline: 492 passed, 7 skipped (2026-03-19).
+**Results:** `app.py` reduced from 5,923 -> 1,356 lines (-4,567 lines, all 10 Blueprints extracted + service layer delegation). All blueprint route groups now extracted: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations, admin, front_desk (incl. board), public. Remaining in `app.py`: `create_app()` factory wiring, shared helpers, CLI registration. Current full-suite baseline: 511 passed, 7 skipped (2026-03-20).
 
 **Branch:** `copilot/create-execution-plan-for-pms` (commit `cf750d8`)
 
@@ -252,7 +252,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [x] Extract remaining Flask Blueprints from `app.py` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â all 10 blueprint route files now extracted: `admin_bp`, `front_desk_bp` (incl. board routes), `public_bp` alongside the earlier auth, provider, housekeeping, messaging, cashier, reports, staff_reservations extractions *(app.py reduced to 1,354 lines; `create_app()` wiring + CLI registration remain)*
 - [x] Move shared route helpers (CSRF, URL builders, form parsers, date parsers) out of `app.py` into dedicated `helpers/` or `utils/` module *(~60 functions extracted to `helpers.py`)*
 - [x] Remove or fully enable `FEATURE_BOARD_V2` flag ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â confirm what it gates or delete it *(documented: gates board v2 action endpoints)*
-- [x] Standardise ORM query style - migrated all 278 legacy `.query.` usages to `db.session.execute(sa.select(...))` / `db.session.get()` across services, routes, helpers, `app.py`, and `seeds.py` *(0 remaining in `pms/`; full suite green on 2026-03-19: 492 passed, 7 skipped)*
+- [x] Standardise ORM query style - migrated all 278 legacy `.query.` usages to `db.session.execute(sa.select(...))` / `db.session.get()` across services, routes, helpers, `app.py`, and `seeds.py` *(0 remaining in `pms/`; full suite green on 2026-03-20: 511 passed, 7 skipped)*
 - [x] Introduce a proper background task infrastructure (Render Cron Job or APScheduler/RQ) for all CLI automation tasks *(6 Render cron jobs added)*
 - [x] Add `boto3` to `requirements.txt` (or document S3 as an optional extra clearly) *(verified present)*
 - [x] Consolidate the 4 root-level test files into `sandbox_pms_mvp/tests/` or delete them *(deleted with root cleanup)*
@@ -326,10 +326,10 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 ### Check-in / Check-out
 
 - [x] Add explicit "ready for check-in" status flag visible to front desk without navigating into the reservation *(readyForCheckIn flag on board blocks + "Ready" badge)*
-- [x] Add early check-in / late check-out fee automation *(implemented in front-desk check-in/out flows; test_phase6_front_desk_workspace.py green ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â 25 passed, 1 skipped)*
+- [x] Add early check-in / late check-out fee automation *(implemented in front-desk check-in/out flows; test_phase6_front_desk_workspace.py green ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â 27 passed, 1 skipped on 2026-03-20)*
 | Front-desk / public route contract reconciliation | ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Done | Fixed board filter drift, check-in form contract drift, public endpoint-name drift, pre-check-in CSRF exemptions, and sitemap/cache-control endpoint aliases. Full suite green on 2026-03-19. |
 | ORM migration completion | Done | `front_desk_board_service.py`, `front_desk_service.py`, `housekeeping_service.py`, `cashier_service.py`, `admin_service.py`, `staff_reservations_service.py`, `public_booking_service.py`, `availability_service.py`, `ical_service.py`, `auth_service.py`, `reporting_service.py`, `messaging_service.py`, `room_readiness_service.py`, `communication_service.py`, `payment_integration_service.py`, `provider_portal_service.py`, `reservation_service.py`, `extras_service.py`, `channel_service.py`, `routes/auth.py`, `routes/provider.py`, `routes/housekeeping.py`, `routes/public.py`, `routes/messaging.py`, `routes/reports.py`, `helpers.py`, `pricing.py`, `routes/staff_reservations.py`, `routes/front_desk.py`, `app.py`, `routes/admin.py`, and `seeds.py` migrated from legacy `.query.` patterns. Remaining `.query.` count in `pms/`: 0. Full suite green on 2026-03-19 (492 passed, 7 skipped). |
-- [x] Add guest self-service digital check-out (folio review + balance payment via hosted payment link) *(implemented via `/booking/checkout/<reservation_code>` with token-gated folio review, hosted balance payment handoff, and guarded self-checkout completion; verified in `test_phase4_public_booking.py` (48 passed, 1 skipped), `test_phase6_front_desk_workspace.py` (25 passed, 1 skipped), and `test_phase9_hosted_payments.py` (16 passed, 2 skipped) on 2026-03-19)*
+- [x] Add guest self-service digital check-out (folio review + balance payment via hosted payment link) *(implemented via `/booking/checkout/<reservation_code>` with token-gated folio review, hosted balance payment handoff, and guarded self-checkout completion; verified in `test_phase4_public_booking.py` (48 passed, 1 skipped), `test_phase6_front_desk_workspace.py` (27 passed, 1 skipped), and `test_phase9_hosted_payments.py` (16 passed, 2 skipped) on 2026-03-20)*
 - [x] Validate the `identity_verified` flag is required for check-in completion in production mode *(service-level enforcement now blocks unverified detail, board, and walk-in check-in paths outside testing; verified by test_phase6_front_desk_workspace.py, test_phase13_security_hardening.py, and test_phase15_front_desk_board.py on 2026-03-19)*
 
 ### Housekeeping
@@ -358,11 +358,11 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Security
 
-- [ ] Confirm `AUTH_ENCRYPTION_KEY` setup is documented in the Render deployment runbook ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â it is required for MFA and iCal token encryption and is currently empty in `.env.production.example`
-- [ ] Add `Content-Security-Policy` nonce for inline scripts where `unsafe-inline` is currently allowed
+- [x] Confirm `AUTH_ENCRYPTION_KEY` setup is documented in the Render deployment runbook *(documented in `docs/DEPLOYMENT-RUNBOOK.md`, `docs/RENDER_DEPLOY_CHECKLIST.md`, and `.env.production.example`; includes Fernet generation guidance and rotation risk note as of 2026-03-20)*
+- [x] Add `Content-Security-Policy` nonce for inline scripts where `unsafe-inline` is currently allowed *(per-request CSP nonce added in `pms/security.py`, nonce exposed via template context, inline script surfaces updated, inline DOM handlers removed from audited staff templates, and verified in `test_phase13_security_hardening.py`, `test_phase5_staff_reservations_workspace.py`, `test_phase6_front_desk_workspace.py`, `test_phase7_housekeeping.py`, and `test_phase18_messaging.py` on 2026-03-20)*
 - [ ] Add audit log retention/archiving policy and database-level partition or cleanup job to prevent unbounded growth
 - [x] Add IP-based rate limit for the SSE endpoint to prevent a single IP from holding multiple workers *(SSE endpoint removed; no longer applicable)*
-- [ ] Review the `allow_override` permission path on check-in ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ensure it is restricted to manager roles only
+- [x] Review the `allow_override` permission path on check-in *(route-side checkbox exposure is limited to `admin`/`manager`, service-side `_can_override()` only permits `admin`/`manager`, and coverage now includes non-manager denial plus manager-allowed override in `test_phase6_front_desk_workspace.py` on 2026-03-20)*
 
 ### Performance
 
@@ -511,24 +511,24 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Flask Blueprint extraction ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `public_bp` | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | 14 routes extracted (`/`, `/book/*`, `/checkin/*`, `/contact`) |
 | Front desk board density persistence | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | `UserPreference` persistence confirmed; test_phase15_front_desk_board.py (63 passed, 2026-03-19) |
 | Keyboard shortcuts ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â check-in / room assignment | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | Verified passing in test_phase15_front_desk_board.py (63 passed, 2026-03-19) |
-| Early check-in / late check-out fee automation | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | Implemented in front-desk check-in/out flows; test_phase6_front_desk_workspace.py green (25 passed, 1 skipped, 2026-03-19) |
-| Identity verification required for production check-in | Done | Service-level enforcement now blocks unverified detail, board, and walk-in check-in paths outside testing; verified by `test_phase6_front_desk_workspace.py` (25 passed, 1 skipped), `test_phase13_security_hardening.py` (25 passed), and `test_phase15_front_desk_board.py` (63 passed) on 2026-03-19. |
+| Early check-in / late check-out fee automation | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | Implemented in front-desk check-in/out flows; test_phase6_front_desk_workspace.py green (27 passed, 1 skipped, 2026-03-20) |
+| Identity verification required for production check-in | Done | Service-level enforcement now blocks unverified detail, board, and walk-in check-in paths outside testing; verified by `test_phase6_front_desk_workspace.py` (27 passed, 1 skipped), `test_phase13_security_hardening.py` (30 passed), and `test_phase15_front_desk_board.py` (63 passed) on 2026-03-20. |
 | Mobile-optimised housekeeping attendant view | Done | Added dedicated `?view=mobile` housekeeping cards, preserved date/filter/view toggles, and touch-friendly room-status quick actions; verified in `test_phase7_housekeeping.py` (13 passed, 1 skipped) on 2026-03-19. |
 | Group booking / room block feature | Done | Shared-code multi-room block creation and release now runs from the front-desk board using inventory overrides; verified in `test_phase15_front_desk_board.py` (63 passed) on 2026-03-19. |
-| Guest self-service digital check-out | Done | Added token-gated public folio review, hosted balance-payment handoff, and self-service checkout completion for fully settled stays; verified in `test_phase4_public_booking.py` (48 passed, 1 skipped), `test_phase6_front_desk_workspace.py` (25 passed, 1 skipped), and `test_phase9_hosted_payments.py` (16 passed, 2 skipped) on 2026-03-19. |
-| Front-desk / public route contract reconciliation | ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Done | Fixed board filter drift, check-in form contract drift, public endpoint-name drift, pre-check-in CSRF exemptions, and sitemap/cache-control endpoint aliases. Full suite green on 2026-03-19. |
-| ORM migration completion | Done | `front_desk_board_service.py`, `front_desk_service.py`, `housekeeping_service.py`, `cashier_service.py`, `admin_service.py`, `staff_reservations_service.py`, `public_booking_service.py`, `availability_service.py`, `ical_service.py`, `auth_service.py`, `reporting_service.py`, `messaging_service.py`, `room_readiness_service.py`, `communication_service.py`, `payment_integration_service.py`, `provider_portal_service.py`, `reservation_service.py`, `extras_service.py`, `channel_service.py`, `routes/auth.py`, `routes/provider.py`, `routes/housekeeping.py`, `routes/public.py`, `routes/messaging.py`, `routes/reports.py`, `helpers.py`, `pricing.py`, `routes/staff_reservations.py`, `routes/front_desk.py`, `app.py`, `routes/admin.py`, and `seeds.py` migrated from legacy `.query.` patterns. Remaining `.query.` count in `pms/`: 0. Full suite green on 2026-03-19 (492 passed, 7 skipped). |
+| Guest self-service digital check-out | Done | Added token-gated public folio review, hosted balance-payment handoff, and self-service checkout completion for fully settled stays; verified in `test_phase4_public_booking.py` (48 passed, 1 skipped), `test_phase6_front_desk_workspace.py` (27 passed, 1 skipped), and `test_phase9_hosted_payments.py` (16 passed, 2 skipped) on 2026-03-20. |
+| Front-desk / public route contract reconciliation | ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Done | Fixed board filter drift, check-in form contract drift, public endpoint-name drift, pre-check-in CSRF exemptions, and sitemap/cache-control endpoint aliases. Full suite green on 2026-03-20 (511 passed, 7 skipped). |
+| ORM migration completion | Done | `front_desk_board_service.py`, `front_desk_service.py`, `housekeeping_service.py`, `cashier_service.py`, `admin_service.py`, `staff_reservations_service.py`, `public_booking_service.py`, `availability_service.py`, `ical_service.py`, `auth_service.py`, `reporting_service.py`, `messaging_service.py`, `room_readiness_service.py`, `communication_service.py`, `payment_integration_service.py`, `provider_portal_service.py`, `reservation_service.py`, `extras_service.py`, `channel_service.py`, `routes/auth.py`, `routes/provider.py`, `routes/housekeeping.py`, `routes/public.py`, `routes/messaging.py`, `routes/reports.py`, `helpers.py`, `pricing.py`, `routes/staff_reservations.py`, `routes/front_desk.py`, `app.py`, `routes/admin.py`, and `seeds.py` migrated from legacy `.query.` patterns. Remaining `.query.` count in `pms/`: 0. Full suite green on 2026-03-20 (511 passed, 7 skipped). |
 | Messaging automation queue processing | Done | `process_pending_automations()` and the `process-automation-events` CLI now have direct delayed-event coverage plus processed-row retention cleanup in `test_phase18_messaging.py` (60 passed on 2026-03-19). |
 | Departure turnover task auto-wiring | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | Verified wired to `complete_checkout`; confirmed in Phase 1 review |
 | Staff skip-navigation link | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Done | Confirmed in `templates/base.html`; guardrail tests pass |
 
-**Results:** `app.py` reduced from 5,923 -> 1,354 lines (-4,569 lines, all 10 Blueprints extracted + service layer delegation). All blueprint route groups now extracted: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations, admin, front_desk (incl. board), public. Remaining in `app.py`: `create_app()` factory wiring, shared helpers, CLI registration. Current full-suite baseline: 492 passed, 7 skipped (2026-03-19).
+**Results:** `app.py` reduced from 5,923 -> 1,356 lines (-4,567 lines, all 10 Blueprints extracted + service layer delegation). All blueprint route groups now extracted: auth, provider, housekeeping, messaging, cashier, reports, staff_reservations, admin, front_desk (incl. board), public. Remaining in `app.py`: `create_app()` factory wiring, shared helpers, CLI registration. Current full-suite baseline: 511 passed, 7 skipped (2026-03-20).
 
 **Reconciled update (2026-03-19):**
 - `front_desk_bp`, `admin_bp`, and `public_bp` are already extracted and registered in `create_app()`; the earlier blueprint-extraction backlog entry is stale.
 - Front-desk board density persistence and keyboard shortcuts are verified by `test_phase15_front_desk_board.py` (`63 passed` on 2026-03-19).
 - Staff skip-link / accessibility baseline remains in place via `templates/base.html`, and the existing guardrail coverage still passes.
-- Early / late fee handling is implemented in front-desk check-in/out flows; `test_phase6_front_desk_workspace.py` is green (`25 passed, 1 skipped` on 2026-03-19).
+- Early / late fee handling is implemented in front-desk check-in/out flows; `test_phase6_front_desk_workspace.py` is green (`27 passed, 1 skipped` on 2026-03-20).
 - Production check-in identity verification now requires either an existing verified identity record or a fresh verification flag at the service layer; targeted front-desk and security validation is green (`test_phase6_front_desk_workspace.py`, `test_phase13_security_hardening.py`, `test_phase15_front_desk_board.py` on 2026-03-19).
 - Housekeeping now has a dedicated `?view=mobile` attendant surface with card-based room summaries, touch-sized status actions, and view-preserving navigation; `test_phase7_housekeeping.py` is green (`13 passed, 1 skipped` on 2026-03-19).
 - Group room blocks can now be created and released from the front-desk board under a shared code, using inventory overrides instead of fake reservations; `test_phase15_front_desk_board.py` is green (`63 passed` on 2026-03-19).
@@ -563,7 +563,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - Add OTA channel push adapter (inventory/rate updates via CM API)
 - Add revenue management dashboard (ADR, RevPAR, occupancy forecast)
 - Add Sentry error tracking *(initial DSN/config wiring, request-id tagging, and local tests are in place; live DSN provisioning and runtime capture verification still pending)*
-- Add CSP nonce to replace `unsafe-inline` for scripts
+- CSP nonce hardening complete *(per-request nonce in `pms/security.py`, inline script nonce coverage across staff/public templates, shared `app-actions.js` replacing audited inline handlers, and targeted verification green on 2026-03-20: `test_phase13_security_hardening.py` 30 passed, `test_phase5_staff_reservations_workspace.py` 17 passed/1 skipped, `test_phase6_front_desk_workspace.py` 27 passed/1 skipped, `test_phase7_housekeeping.py` 13 passed/1 skipped, `test_phase18_messaging.py` 60 passed)*
 - Add audit log archival/cleanup job
 
 **Dependencies:** Phase 3 stable.

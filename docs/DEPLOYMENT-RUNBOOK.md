@@ -40,6 +40,15 @@ Set at minimum:
 Render-managed Postgres URLs may be provided as `postgres://` or `postgresql://`.
 The app normalizes those values to the SQLAlchemy `postgresql+psycopg://` driver automatically.
 
+`AUTH_ENCRYPTION_KEY` must be a Fernet key (base64-encoded 32-byte secret), not a generic password string.
+Generate it locally with:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Treat it as a long-lived secret. Rotating or clearing it without a coordinated migration will invalidate stored MFA secrets and existing encrypted iCal/feed tokens.
+
 ## Payment Provider Registration
 
 Register guest-facing payment URLs against the booking origin:

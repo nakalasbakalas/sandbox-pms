@@ -250,12 +250,13 @@ def complete_check_in(
     actor_user_id: uuid.UUID,
 ) -> Reservation:
     action_at = payload.action_at or utc_now()
+    action_business_date = _action_business_date(action_at)
     reservation = _load_reservation_for_update(reservation_id)
     if not reservation:
         raise ValueError("Reservation not found.")
     if reservation.current_status not in {"tentative", "confirmed"}:
         raise ValueError("Only tentative or confirmed reservations can be checked in.")
-    if action_at.date() >= reservation.check_out_date:
+    if action_business_date >= reservation.check_out_date:
         raise ValueError("This reservation can no longer be checked in because the departure date has passed.")
     _ensure_identity_verification_for_check_in(
         identity_verified=payload.identity_verified,
@@ -263,8 +264,13 @@ def complete_check_in(
     )
 
     actor = db.session.get(User, actor_user_id)
-    room = _resolve_check_in_room(reservation, payload.room_id, actor_user_id=actor_user_id, business_date=action_at.date())
-    readiness = _locked_room_readiness(reservation, room, action_at.date())
+    room = _resolve_check_in_room(
+        reservation,
+        payload.room_id,
+        actor_user_id=actor_user_id,
+        business_date=action_business_date,
+    )
+    readiness = _locked_room_readiness(reservation, room, action_business_date)
     if not readiness["is_ready"]:
         raise ValueError(readiness["reason"])
 
@@ -311,7 +317,7 @@ def complete_check_in(
         reservation.identity_verified_at = action_at
         reservation.identity_verified_by_user_id = actor_user_id
 
-    room_rows = _reservation_inventory_rows(reservation.id, start_date=action_at.date())
+    room_rows = _reservation_inventory_rows(reservation.id, start_date=action_business_date)
     for row in room_rows:
         row.availability_status = "occupied"
         row.updated_by_user_id = actor_user_id
@@ -1207,6 +1213,12 @@ def _setting_time(key: str, default: str) -> time:
 
 def _combine_local(day: date, wall_clock: time) -> datetime:
     return datetime.combine(day, wall_clock, tzinfo=calendar_timezone())
+
+
+def _action_business_date(action_at: datetime) -> date:
+    if action_at.tzinfo is None:
+        return action_at.date()
+    return action_at.astimezone(calendar_timezone()).date()
 
 
 def _current_time() -> time:

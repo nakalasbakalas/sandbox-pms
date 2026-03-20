@@ -70,7 +70,7 @@
         <h4>Assigned to</h4>
         <form method="post" action="{{ url_for('messaging.staff_messaging_assign_thread', thread_id=thread.id) }}">
           {{ csrf_input() }}
-          <select name="user_id" onchange="this.form.submit()">
+          <select name="user_id" data-auto-submit>
             <option value="">Unassigned</option>
             {% for user in staff_users if staff_users is defined %}
             <option value="{{ user.id }}" {% if thread.assigned_user_id == user.id %}selected{% endif %}>{{ user.full_name }}</option>
@@ -212,7 +212,7 @@
 </section>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
   var btns = document.querySelectorAll('.compose-tab-btn');
   var tabs = document.querySelectorAll('.compose-tab');

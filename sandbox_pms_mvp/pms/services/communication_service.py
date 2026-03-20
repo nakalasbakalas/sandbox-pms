@@ -1297,3 +1297,29 @@ def communication_settings_context() -> dict[str, object]:
             .where(NotificationDelivery.status == "failed")
         ).scalar_one(),
     }
+
+
+def property_settings_context() -> dict[str, str]:
+    """Return property-level settings for the admin property page."""
+    return branding_settings_context()
+
+
+def payment_settings_context() -> dict[str, object]:
+    """Return payment configuration for the admin payments page."""
+    return {
+        "active_provider": _string_setting("payments.active_provider", "none"),
+        "deposit_enabled": _bool_setting("payments.deposit_enabled", False),
+        "link_expiry_minutes": _int_setting("payments.link_expiry_minutes", 30),
+        "link_resend_cooldown_seconds": _int_setting("payments.link_resend_cooldown_seconds", 60),
+        "provider_runtime": _string_setting("payments.provider_runtime", "none"),
+        "stripe_secret_configured": bool(current_app.config.get("STRIPE_SECRET_KEY")),
+        "stripe_webhook_configured": bool(current_app.config.get("STRIPE_WEBHOOK_SECRET")),
+    }
+
+
+def housekeeping_defaults_context() -> dict[str, object]:
+    """Return housekeeping default settings for the admin operations page."""
+    return {
+        "require_inspected_for_ready": _bool_setting("housekeeping.require_inspected_for_ready", False),
+        "checkout_dirty_status": _string_setting("housekeeping.checkout_dirty_status", "dirty"),
+    }

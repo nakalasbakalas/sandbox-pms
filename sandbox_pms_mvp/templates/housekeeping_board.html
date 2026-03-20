@@ -92,7 +92,7 @@
     <a class="hk-view-btn {% if filters.mobile %}active{% endif %}" href="{{ mobile_view_url }}">Mobile</a>
   </div>
   <input type="date" name="nav_date" value="{{ board.business_date.isoformat() }}" style="height:28px; padding:0 6px; font-size:12px;"
-         onchange="const nextUrl = new URL(window.location.href); nextUrl.searchParams.set('date', this.value); window.location.href = nextUrl.toString();" aria-label="Go to date">
+         data-url-param-nav="date" aria-label="Go to date">
   <span class="hk-date-label">
     Last: {{ board.refreshed_at.strftime('%H:%M') if board.refreshed_at is defined and board.refreshed_at else '—' }}
   </span>
@@ -100,7 +100,7 @@
   <a class="button secondary tiny" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
   <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', date=board.business_date.isoformat()) }}">Front desk</a>
   {% endif %}
-  <button class="hk-print-btn" onclick="window.print()">⌨️ Print</button>
+  <button class="hk-print-btn" type="button" data-window-print>Print</button>
 </div>
 
 {# ── DARK FILTER BLOCK (always visible) ──────── #}

@@ -29,7 +29,7 @@
   <meta name="twitter:title" content="{% block twitter_title %}{{ hotel_name }}{% endblock %}">
   <meta name="twitter:description" content="{{ hotel_name }} {{ t('meta_description') }}">
   <meta name="twitter:image" content="{{ share_image_url }}">
-  <script type="application/ld+json">{{ hotel_structured_data | tojson }}</script>
+  <script type="application/ld+json" nonce="{{ csp_nonce }}">{{ hotel_structured_data | tojson }}</script>
   {% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   <style>
@@ -335,6 +335,7 @@
   </footer>
   <script src="{{ url_for('static', filename='public-site.js') }}" defer></script>
   {% endif %}
+  <script src="{{ url_for('static', filename='app-actions.js') }}" defer></script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

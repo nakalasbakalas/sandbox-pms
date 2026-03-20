@@ -20,7 +20,7 @@ from .branding import (
 )
 from .extensions import db
 from .i18n import normalize_language
-from .models import AppSetting, User
+from .models import AppSetting, Permission, User
 from .permissions import default_dashboard_endpoint_for_user
 
 
@@ -84,6 +84,17 @@ def is_admin_user(user: User | None = None) -> bool:
     if not subject:
         return False
     return any(role.code == "admin" for role in subject.roles)
+
+
+def permission_groups() -> dict[str, list[Permission]]:
+    """Return all permissions grouped by module."""
+    perms = db.session.execute(
+        sa.select(Permission).order_by(Permission.module.asc(), Permission.code.asc())
+    ).scalars().all()
+    groups: dict[str, list[Permission]] = {}
+    for p in perms:
+        groups.setdefault(p.module, []).append(p)
+    return groups
 
 
 def require_admin_role(user: User | None = None) -> User:

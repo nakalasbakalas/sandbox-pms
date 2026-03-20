@@ -206,11 +206,11 @@
         <span class="small muted">{{ mr.requested_at.strftime('%Y-%m-%d %H:%M') }}</span>
         {% if mr.status in ('submitted', 'reviewed') and can('reservation.edit') %}
         <div style="display:flex;gap:0.3rem;margin-top:0.3rem">
-          <form method="POST" action="{{ url_for('staff_reservations.staff_modification_approve', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_modification_approve', reservation_id=detail.reservation.id, mod_id=mr.id) }}" data-confirm-message="Approve and apply changes? The reservation will be repriced.">
             {{ csrf_input() }}
             <input type="hidden" name="back_url" value="{{ back_url }}">
             <input type="text" name="internal_note" placeholder="Note (optional)" style="width:120px;font-size:0.75rem">
-            <button type="submit" class="button small" onclick="return confirm('Approve and apply changes? The reservation will be repriced.')">Approve</button>
+            <button type="submit" class="button small">Approve</button>
           </form>
           <form method="POST" action="{{ url_for('staff_reservations.staff_modification_decline', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
             {{ csrf_input() }}
@@ -372,7 +372,7 @@
       <button class="button" type="submit">Save Note</button>
     </form>
   </details>
-  <script>
+  <script nonce="{{ csp_nonce }}">
   (function(){
     var btns=document.querySelectorAll('.qr-tab-btn');
     var tabs=document.querySelectorAll('.qr-tab');
