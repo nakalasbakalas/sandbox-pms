@@ -5135,6 +5135,11 @@ self.addEventListener("fetch", (event) => {
         entries = query.order_by(ReservationReviewQueue.created_at.desc()).all()
         return render_template("staff_review_queue.html", entries=entries)
 
+    @app.route("/staff/coupon-studio")
+    def staff_coupon_studio() -> str:
+        user = require_permission("reports.view")
+        return render_template("staff_coupon_studio.html")
+
 
 def current_language() -> str:
     return normalize_language(getattr(g, "public_language", None) or request.args.get("lang") or request.form.get("language") or "th")
