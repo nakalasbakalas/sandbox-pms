@@ -108,7 +108,7 @@
           {% if can('provider.calendar.view') %}<a class="header-primary-link{% if request.endpoint in ['provider.provider_calendar'] %} active{% endif %}" href="{{ url_for('provider.provider_calendar') }}" {% if request.endpoint in ['provider.provider_calendar'] %}aria-current="page"{% endif %}>Calendars</a>{% endif %}
           {% if admin_sections %}<a class="header-primary-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('admin.staff_admin_dashboard') }}" {% if request.endpoint and request.endpoint.startswith('staff_admin') %}aria-current="page"{% endif %}>Admin</a>{% endif %}
           {% if can('reports.view') %}<a class="header-primary-link{% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %} active{% endif %}" href="{{ url_for('reports.staff_reports') }}" {% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %}aria-current="page"{% endif %}>Reports</a>{% endif %}
-          {% if can('reports.view') %}<span class="header-primary-link" style="opacity:.55;cursor:default" title="Coupon Studio — coming soon" aria-disabled="true">Coupons</span>{% endif %}
+          {% if can('reports.view') %}<a class="header-primary-link{% if request.endpoint == 'coupon_studio.staff_coupon_studio' %} active{% endif %}" href="{{ url_for('coupon_studio.staff_coupon_studio') }}" {% if request.endpoint == 'coupon_studio.staff_coupon_studio' %}aria-current="page"{% endif %}>Coupons</a>{% endif %}
         {% endif %}
       </nav>
       <div class="header-utilities">
@@ -222,7 +222,7 @@
               {% if can('provider.calendar.view') %}<a class="nav-drawer-link{% if request.endpoint in ['provider.provider_calendar'] %} active{% endif %}" href="{{ url_for('provider.provider_calendar') }}">Calendars</a>{% endif %}
               {% if admin_sections %}<a class="nav-drawer-link{% if request.endpoint and request.endpoint.startswith('staff_admin') %} active{% endif %}" href="{{ url_for('admin.staff_admin_dashboard') }}">Admin</a>{% endif %}
               {% if can('reports.view') %}<a class="nav-drawer-link{% if request.endpoint in ['reports.staff_reports'] or (request.endpoint and request.endpoint.startswith('reports.staff_daily_report')) %} active{% endif %}" href="{{ url_for('reports.staff_reports') }}">Reports</a>{% endif %}
-              {% if can('reports.view') %}<span class="nav-drawer-link" style="opacity:.55;cursor:default" aria-disabled="true">Coupons <small style="font-size:10px">(coming soon)</small></span>{% endif %}
+              {% if can('reports.view') %}<a class="nav-drawer-link{% if request.endpoint == 'coupon_studio.staff_coupon_studio' %} active{% endif %}" href="{{ url_for('coupon_studio.staff_coupon_studio') }}">Coupons</a>{% endif %}
               <a class="nav-drawer-link{% if request.endpoint == 'auth.staff_security' %} active{% endif %}" href="{{ url_for('auth.staff_security') }}">Security</a>
               {% if can('reservation.view') %}<a class="nav-drawer-link{% if request.endpoint == 'staff_reservations.staff_review_queue' %} active{% endif %}" href="{{ url_for('staff_reservations.staff_review_queue') }}">{{ t('review_queue') }}</a>{% endif %}
             {% endif %}

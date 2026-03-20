@@ -454,6 +454,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     from .routes.front_desk import front_desk_bp
     from .routes.admin import admin_bp
     from .routes.public import public_bp
+    from .routes.coupon_studio import coupon_studio_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(provider_bp)
     app.register_blueprint(housekeeping_bp)
@@ -464,6 +465,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(front_desk_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(coupon_studio_bp)
 
     register_routes(app)
 

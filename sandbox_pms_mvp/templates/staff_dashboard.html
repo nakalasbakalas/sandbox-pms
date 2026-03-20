@@ -228,10 +228,9 @@
       </a>
       {% endif %}
       {% if can('reports.view') %}
-      <div class="list-row no-link" style="opacity:.65">
+      <a class="list-row" href="{{ url_for('coupon_studio.staff_coupon_studio') }}">
         <div><strong>Coupon Studio</strong><p>Create, edit, and print branded voucher coupon stripes.</p></div>
-        <span class="status pending" style="font-size:10px;letter-spacing:.06em">Coming soon</span>
-      </div>
+      </a>
       {% endif %}
     </div>
   </article>
