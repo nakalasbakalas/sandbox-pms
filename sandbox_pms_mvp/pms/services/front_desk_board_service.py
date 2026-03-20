@@ -34,6 +34,7 @@ class FrontDeskBoardFilters:
     room_type_id: str = ""
     show_unallocated: bool = True
     show_closed: bool = False
+    group_by: str = "type"  # "type" or "floor"
 
 
 def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
@@ -391,10 +392,54 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         if rows:
             groups.append(group | {"rows": rows})
 
+    # If floor grouping is requested, re-key groups by floor number
+    if filters.group_by == "floor":
+        floor_group_map: dict[int | str, dict[str, Any]] = {}
+        floor_order: list[int | str] = []
+        for group in groups:
+            for row in group["rows"]:
+                floor = row.get("floor_number") or 0
+                if floor not in floor_group_map:
+                    floor_order.append(floor)
+                    floor_group_map[floor] = {
+                        "room_type_id": f"floor-{floor}",
+                        "roomTypeId": f"floor-{floor}",
+                        "room_type_code": f"Floor {floor}",
+                        "roomTypeCode": f"Floor {floor}",
+                        "room_type_name": "",
+                        "roomTypeName": "",
+                        "room_options": [],
+                        "rows": [],
+                    }
+                floor_group_map[floor]["rows"].append(row)
+                floor_group_map[floor]["room_options"].extend(
+                    o for o in group.get("room_options", [])
+                    if o.get("floorNumber") == floor and o not in floor_group_map[floor]["room_options"]
+                )
+        groups = [floor_group_map[f] for f in sorted(floor_order, key=lambda x: (x is None, x))]
+
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
     headers = _build_headers(window_start, filters.days, today=today)
     weekend_columns = [h["column"] for h in headers if h["is_weekend"]]
     room_rows = list(room_map.values())
+
+    # Per-day occupancy for heatmap headers (no extra DB queries)
+    per_day_occupancy: list[int] = []
+    total_room_count = len(room_ids)
+    for offset in range(filters.days):
+        day = window_start + timedelta(days=offset)
+        occupied = set()
+        for res in reservations:
+            if (
+                res.current_status in {"checked_in", "confirmed", "tentative", "house_use"}
+                and res.check_in_date <= day < res.check_out_date
+                and res.assigned_room_id is not None
+                and res.assigned_room_id in room_id_set
+            ):
+                occupied.add(res.assigned_room_id)
+        pct = round(len(occupied) / total_room_count * 100) if total_room_count else 0
+        per_day_occupancy.append(pct)
+
     return {
         "start_date": window_start,
         "startDate": window_start.isoformat(),
@@ -440,6 +485,7 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         "prev_start_date": window_start - timedelta(days=filters.days),
         "next_start_date": window_start + timedelta(days=filters.days),
         "today": today,
+        "per_day_occupancy": per_day_occupancy,
     }
 
 
@@ -682,6 +728,7 @@ def _reservation_block(
             "checkInAt": reservation.check_in_date.isoformat(),
             "checkOutAt": reservation.check_out_date.isoformat(),
             "balanceDue": balance_due,
+            "hasSpecialRequests": bool(reservation.special_requests),
         },
     )
 
@@ -1193,6 +1240,23 @@ def _compute_extended_counts(
         if is_available:
             avail_by_type[code] += 1
     counts["available_by_type"] = avail_by_type
+
+    # Total rooms per type (for bar charts)
+    total_by_type: dict[str, int] = {}
+    for row in room_rows:
+        if row.get("is_unallocated"):
+            continue
+        code = row.get("room_type_code", "")
+        if code:
+            total_by_type[code] = total_by_type.get(code, 0) + 1
+    counts["total_by_type"] = total_by_type
+
+    # Turnaround rooms needing attention
+    counts["turnaround_dirty"] = sum(
+        1 for row in room_rows
+        if row.get("has_departure_today") and row.get("has_arrival_today")
+        and row.get("housekeeping_status") in ("dirty", "occupied_dirty")
+    )
 
     unpaid_q = Reservation.query.filter(
         Reservation.check_in_date == today,

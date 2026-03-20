@@ -1,0 +1,90 @@
+{% set occ_pct = ((board.counts.occupied / board.counts.total_rooms * 100) | round | int) if board.counts.total_rooms else 0 %}
+<div class="board-stats-section">
+  <h3>Today — {{ board.today.strftime('%A, %d %b %Y') }}</h3>
+  <div class="board-stats-row">
+    <span class="bsr-label">Occupancy</span>
+    <strong class="bsr-value">{{ occ_pct }}%</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Arrivals today</span>
+    <strong class="bsr-value">{{ board.counts.arrivals_today }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Departures today</span>
+    <strong class="bsr-value">{{ board.counts.departures_today }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">In-house</span>
+    <strong class="bsr-value">{{ board.counts.occupied }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Stayovers</span>
+    <strong class="bsr-value">{{ board.counts.stayovers }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Ready rooms</span>
+    <strong class="bsr-value">{{ board.counts.ready_rooms }}</strong>
+  </div>
+  {% if board.counts.turnaround_dirty > 0 %}
+  <div class="board-stats-row">
+    <span class="bsr-label" style="color:#ffb0b5;">Turnaround dirty</span>
+    <strong class="bsr-value" style="color:#ffb0b5;">{{ board.counts.turnaround_dirty }}</strong>
+  </div>
+  {% endif %}
+  {% if board.counts.unpaid_arrivals > 0 %}
+  <div class="board-stats-row">
+    <span class="bsr-label" style="color:#ffb0b5;">Unpaid arrivals</span>
+    <strong class="bsr-value" style="color:#ffb0b5;">{{ board.counts.unpaid_arrivals }}</strong>
+  </div>
+  {% endif %}
+  {% if board.counts.unassigned_arrivals_today > 0 %}
+  <div class="board-stats-row">
+    <span class="bsr-label" style="color:#ffd391;">Unallocated arrivals</span>
+    <strong class="bsr-value" style="color:#ffd391;">{{ board.counts.unassigned_arrivals_today }}</strong>
+  </div>
+  {% endif %}
+</div>
+
+{% if board.alerts %}
+<div class="board-stats-section">
+  <h3>Alerts</h3>
+  {% for alert in board.alerts %}
+  <div class="board-stats-row">
+    <span class="bsr-label" style="color:{% if alert.tone == 'danger' %}#ffb0b5{% elif alert.tone == 'warning' %}#ffd391{% else %}#8ec4ff{% endif %};">{{ alert.message }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if board.per_day_occupancy %}
+<div class="board-stats-section">
+  <h3>{{ board.days }}-Day Occupancy Trend</h3>
+  <div class="board-stats-trend" role="img" aria-label="Occupancy trend chart">
+    {% for pct in board.per_day_occupancy %}
+    {% set bar_h = [[pct, 4] | max, 40] | min %}
+    {% set bar_class = 'high' if pct >= 90 else ('medium' if pct >= 60 else 'low') %}
+    <div class="bst-bar {{ bar_class }}" style="height:{{ bar_h }}px;" title="{{ pct }}%">
+      {% if loop.first or loop.last or loop.index == (board.days // 2 + 1) %}
+      <span class="bst-bar-label">{{ loop.index }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="board-stats-section">
+  <h3>Housekeeping</h3>
+  <div class="board-stats-row">
+    <span class="bsr-label">Dirty</span>
+    <strong class="bsr-value">{{ board.counts.hk_dirty }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Clean</span>
+    <strong class="bsr-value">{{ board.counts.hk_clean }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Inspected</span>
+    <strong class="bsr-value">{{ board.counts.hk_inspected }}</strong>
+  </div>
+</div>
