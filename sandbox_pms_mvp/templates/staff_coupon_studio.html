@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sandbox Hotel Coupon Strips — A4 x 5</title>
+  <meta name="description" content="Simple A4 hotel coupon strip generator with five printable banner coupons per page.">
   <style>
     :root{
       --bg:#0b0c0f;
@@ -177,11 +178,10 @@
 
     .left{
       color:#fff;
-      padding:10px 12px;
+      padding:11px 14px;
       display:grid;
-      grid-template-rows:auto 1fr auto;
-      align-content:start;
-      gap:6px;
+      align-content:space-between;
+      gap:8px;
       background:
         radial-gradient(circle at top right, rgba(214,149,90,.26), transparent 42%),
         linear-gradient(180deg, #14161a 0%, #0f1115 100%);
@@ -193,19 +193,18 @@
       gap:8px;
     }
     .logoImg{
-      width:32px;
-      height:32px;
-      border-radius:6px;
-      background:rgba(255,255,255,.1);
+      width:28px;
+      height:28px;
+      border-radius:5px;
       overflow:hidden;
       flex-shrink:0;
     }
     .logoImg img{width:100%;height:100%;object-fit:contain}
 
     .hotelName{
-      font-size:14px;
+      font-size:17px;
       font-weight:900;
-      line-height:1.1;
+      line-height:1.05;
       letter-spacing:.02em;
       text-transform:uppercase;
     }
@@ -215,39 +214,38 @@
       align-items:center;
       width:max-content;
       max-width:100%;
-      font-size:9px;
+      font-size:9.5px;
       line-height:1;
       font-weight:900;
       text-transform:uppercase;
       letter-spacing:.14em;
       border:1px solid rgba(255,255,255,.18);
       color:#fff;
-      padding:5px 7px;
+      padding:6px 8px;
       border-radius:999px;
       background:rgba(255,255,255,.06);
     }
 
     .contactList{
       display:grid;
-      gap:3px;
-      font-size:9.5px;
+      gap:4px;
+      font-size:10.5px;
       line-height:1.2;
-      color:rgba(255,255,255,.85);
-      margin-top:auto;
+      color:rgba(255,255,255,.88);
     }
 
     .middle{
-      padding:9px 12px;
+      padding:10px 14px;
       display:grid;
       align-content:center;
-      gap:4px;
+      gap:5px;
       border-left:1px dashed #cabfae;
       border-right:1px dashed #cabfae;
       background:linear-gradient(180deg, #fffdfa 0%, #f7f3ee 100%);
     }
 
     .headline{
-      font-size:20px;
+      font-size:22px;
       line-height:1.02;
       font-weight:950;
       letter-spacing:-.03em;
@@ -256,7 +254,7 @@
     }
 
     .subline{
-      font-size:10.5px;
+      font-size:11px;
       line-height:1.25;
       color:#574f46;
       font-weight:700;
@@ -265,17 +263,17 @@
     .meta{
       display:flex;
       flex-wrap:wrap;
-      gap:5px;
-      margin-top:1px;
+      gap:6px;
+      margin-top:2px;
     }
 
     .metaItem{
       display:inline-flex;
       align-items:center;
-      min-height:20px;
-      padding:3px 7px;
+      min-height:22px;
+      padding:4px 8px;
       border-radius:999px;
-      font-size:8.5px;
+      font-size:9px;
       line-height:1;
       font-weight:900;
       text-transform:uppercase;
@@ -286,24 +284,24 @@
     }
 
     .terms{
-      font-size:8px;
+      font-size:8.7px;
       line-height:1.2;
       color:#6c645a;
     }
 
     .right{
-      width:48mm;
-      padding:9px 9px 9px 10px;
+      width:50mm;
+      padding:10px 10px 10px 11px;
       display:grid;
       align-content:center;
       justify-items:center;
-      gap:5px;
+      gap:6px;
       background:
         linear-gradient(180deg, #fffaf2 0%, #f3e6d7 100%);
     }
 
     .codeLabel{
-      font-size:7.5px;
+      font-size:8px;
       line-height:1;
       text-transform:uppercase;
       letter-spacing:.18em;
@@ -314,13 +312,13 @@
     .code{
       width:100%;
       text-align:center;
-      font-size:15px;
+      font-size:16px;
       line-height:1;
       font-weight:950;
       letter-spacing:.08em;
       border:1px dashed #bd9b7f;
       border-radius:10px;
-      padding:9px 6px;
+      padding:10px 8px;
       color:#8d4e20;
       background:#fff;
       text-transform:uppercase;
@@ -329,20 +327,20 @@
     .cta{
       width:100%;
       text-align:center;
-      font-size:9.5px;
+      font-size:10px;
       line-height:1.15;
       font-weight:900;
       text-transform:uppercase;
       letter-spacing:.08em;
       color:#fff;
       border-radius:10px;
-      padding:8px 6px;
+      padding:9px 8px;
       background:linear-gradient(135deg, var(--accent), var(--accent-2));
     }
 
     .url{
       text-align:center;
-      font-size:7px;
+      font-size:7.6px;
       line-height:1.15;
       color:#6f655b;
       word-break:break-word;
@@ -475,11 +473,13 @@
   <template id="couponTemplate">
     <article class="coupon">
       <div class="left">
-        <div class="logoRow">
-          <div class="logoImg">
-            <img src="/static/branding/sandbox-hotel-logo-96.webp" alt="Sandbox Hotel">
+        <div>
+          <div class="logoRow">
+            <div class="logoImg">
+              <img src="/static/branding/sandbox-hotel-logo-96.webp" alt="Logo">
+            </div>
+            <div class="hotelName js-hotel"></div>
           </div>
-          <div class="hotelName js-hotel"></div>
         </div>
         <div class="badge js-badge"></div>
         <div class="contactList">
@@ -545,7 +545,7 @@
         const node = template.content.firstElementChild.cloneNode(true);
         node.querySelector('.js-badge').textContent = v.badge || 'Direct Booking Offer';
         node.querySelector('.js-hotel').textContent = v.hotelName || 'Sandbox Hotel';
-        node.querySelector('.js-phone').textContent = 'Call: ' + (v.phone || '\u2014');
+        node.querySelector('.js-phone').textContent = `Call: ${v.phone || '—'}`;
         node.querySelector('.js-line').textContent = v.line || 'LINE / WhatsApp';
         node.querySelector('.js-headline').textContent = v.headline || 'Hotel Offer';
         node.querySelector('.js-subline').textContent = v.subline || '';
