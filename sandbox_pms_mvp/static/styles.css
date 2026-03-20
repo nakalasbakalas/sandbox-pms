@@ -4709,6 +4709,12 @@ body:not(.public-site) .hk-counts {
 }
 .board-stats-row .bsr-label { color: var(--muted); }
 .board-stats-row .bsr-value { font-weight: 700; font-variant-numeric: tabular-nums; }
+.board-stats-row.bsr-danger .bsr-label,
+.board-stats-row.bsr-danger .bsr-value { color: #ffb0b5; }
+.board-stats-row.bsr-warning .bsr-label,
+.board-stats-row.bsr-warning .bsr-value { color: #ffd391; }
+.board-stats-row.bsr-info .bsr-label,
+.board-stats-row.bsr-info .bsr-value { color: #8ec4ff; }
 .board-stats-trend {
   display: flex;
   gap: 3px;

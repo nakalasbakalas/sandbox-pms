@@ -412,12 +412,13 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                         "rows": [],
                     }
                 floor_group_map[floor]["rows"].append(row)
-                floor_group_map[floor]["room_options"].extend(
-                    o for o in group.get("room_options", [])
-                    if o.get("floorNumber") == floor and o not in floor_group_map[floor]["room_options"]
-                )
+                seen_ids: set[str] = {o["id"] for o in floor_group_map[floor]["room_options"]}
+                for o in group.get("room_options", []):
+                    if o.get("floorNumber") == floor and o["id"] not in seen_ids:
+                        floor_group_map[floor]["room_options"].append(o)
+                        seen_ids.add(o["id"])
         groups = [floor_group_map[f] for f in sorted(floor_order, key=lambda x: (x is None, x))]
-        # sort key (is None, x): False < True so None values sort last; numeric floors sort ascending
+        # sort key: None sorts last; numeric floors sort ascending
 
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
     headers = _build_headers(window_start, filters.days, today=today)
@@ -1258,6 +1259,10 @@ def _compute_extended_counts(
         if row.get("has_departure_today") and row.get("has_arrival_today")
         and row.get("housekeeping_status") in ("dirty", "occupied_dirty")
     )
+
+    # Occupancy percentage (pre-computed to avoid duplicate template calculation)
+    total = counts.get("total_rooms", 0)
+    counts["occupancy_pct"] = round(counts.get("occupied", 0) / total * 100) if total else 0
 
     unpaid_q = Reservation.query.filter(
         Reservation.check_in_date == today,

@@ -1,4 +1,4 @@
-{% set occ_pct = ((board.counts.occupied / board.counts.total_rooms * 100) | round | int) if board.counts.total_rooms else 0 %}
+{% set occ_pct = board.counts.occupancy_pct %}
 <div class="board-stats-section">
   <h3>Today — {{ board.today.strftime('%A, %d %b %Y') }}</h3>
   <div class="board-stats-row">
@@ -26,21 +26,21 @@
     <strong class="bsr-value">{{ board.counts.ready_rooms }}</strong>
   </div>
   {% if board.counts.turnaround_dirty > 0 %}
-  <div class="board-stats-row">
-    <span class="bsr-label" style="color:#ffb0b5;">Turnaround dirty</span>
-    <strong class="bsr-value" style="color:#ffb0b5;">{{ board.counts.turnaround_dirty }}</strong>
+  <div class="board-stats-row bsr-danger">
+    <span class="bsr-label">Turnaround dirty</span>
+    <strong class="bsr-value">{{ board.counts.turnaround_dirty }}</strong>
   </div>
   {% endif %}
   {% if board.counts.unpaid_arrivals > 0 %}
-  <div class="board-stats-row">
-    <span class="bsr-label" style="color:#ffb0b5;">Unpaid arrivals</span>
-    <strong class="bsr-value" style="color:#ffb0b5;">{{ board.counts.unpaid_arrivals }}</strong>
+  <div class="board-stats-row bsr-danger">
+    <span class="bsr-label">Unpaid arrivals</span>
+    <strong class="bsr-value">{{ board.counts.unpaid_arrivals }}</strong>
   </div>
   {% endif %}
   {% if board.counts.unassigned_arrivals_today > 0 %}
-  <div class="board-stats-row">
-    <span class="bsr-label" style="color:#ffd391;">Unallocated arrivals</span>
-    <strong class="bsr-value" style="color:#ffd391;">{{ board.counts.unassigned_arrivals_today }}</strong>
+  <div class="board-stats-row bsr-warning">
+    <span class="bsr-label">Unallocated arrivals</span>
+    <strong class="bsr-value">{{ board.counts.unassigned_arrivals_today }}</strong>
   </div>
   {% endif %}
 </div>
@@ -49,8 +49,8 @@
 <div class="board-stats-section">
   <h3>Alerts</h3>
   {% for alert in board.alerts %}
-  <div class="board-stats-row">
-    <span class="bsr-label" style="color:{% if alert.tone == 'danger' %}#ffb0b5{% elif alert.tone == 'warning' %}#ffd391{% else %}#8ec4ff{% endif %};">{{ alert.message }}</span>
+  <div class="board-stats-row bsr-{{ alert.tone }}">
+    <span class="bsr-label">{{ alert.message }}</span>
   </div>
   {% endfor %}
 </div>

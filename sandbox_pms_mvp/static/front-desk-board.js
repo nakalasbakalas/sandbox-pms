@@ -895,7 +895,7 @@
       const hk = track.dataset.hkStatus || "";
       switch (filterName) {
         case "dirty": return hk.includes("dirty");
-        case "vacant": return track.dataset.isOccupied === "false" && track.dataset.isMaintenance === "false" && track.dataset.laneKind === "room";
+        case "vacant": return track.dataset.isVacant === "true";
         case "arrival": return track.dataset.hasArrivalToday === "true";
         case "departure": return track.dataset.hasDepartureToday === "true";
         case "maintenance": return track.dataset.isMaintenance === "true";
@@ -971,8 +971,8 @@
   }
 
   // ── Occupancy heatmap classes on day headers ──
-  const OCC_HIGH_THRESHOLD = 80;
-  const OCC_MEDIUM_THRESHOLD = 50;
+  const OCC_HIGH_THRESHOLD = 90;
+  const OCC_MEDIUM_THRESHOLD = 70;
   surface.querySelectorAll(".planning-board-day[data-occupancy-pct]").forEach((dayEl) => {
     const pct = parseInt(dayEl.dataset.occupancyPct || "0", 10);
     if (pct >= OCC_HIGH_THRESHOLD) dayEl.classList.add("occ-high");
