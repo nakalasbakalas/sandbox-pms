@@ -92,6 +92,10 @@ def report_metric_definitions() -> dict[str, str]:
             "Posted folio activity by service date in the selected reporting range. This is posted room and operational charge "
             "revenue, not booked revenue or cash collected."
         ),
+        "revenue_management": (
+            "Revenue management combines authoritative occupancy inventory with posted room revenue to summarize ADR, RevPAR, "
+            "and day-level pacing for the selected reporting range. Forecasts are not modeled yet."
+        ),
         "room_type_performance": (
             "Reservation count is based on confirmed or stayed reservations overlapping the selected reporting range. "
             "Sold nights come from consuming inventory ledger rows for confirmed or in-house stays, and room revenue "
@@ -157,6 +161,7 @@ def build_manager_dashboard(
     if include_financials:
         dashboard["folio_balances"] = folio_balances_outstanding_report(date_from, date_to)
         dashboard["revenue_summary"] = revenue_summary_report(date_from, date_to)
+        dashboard["revenue_management"] = revenue_management_report(date_from, date_to)
     if include_payments:
         dashboard["deposit_pipeline"] = deposit_requested_vs_paid_report(date_from, date_to)
     if include_audit:
@@ -302,6 +307,8 @@ def build_daily_report(
         report["data"] = occupancy_by_date_range_report(date_from, date_to)
         report["data"]["today"] = occupancy_today_report(business_date)
         report["data"]["year_over_year"] = occupancy_year_over_year_report(date_from, date_to)
+    elif report_type == "revenue_management":
+        report["data"] = revenue_management_report(date_from, date_to, limit=50)
     elif report_type == "booking_source":
         report["data"] = booking_attribution_report(date_from, date_to, limit=50)
     elif report_type == "channel_performance":
@@ -1040,6 +1047,153 @@ def revenue_summary_report(date_from: date, date_to: date) -> dict:
     }
 
 
+def revenue_management_report(date_from: date, date_to: date, *, limit: int = 14) -> dict:
+    occupancy = occupancy_by_date_range_report(date_from, date_to)
+    revenue = revenue_summary_report(date_from, date_to)
+    channel = channel_performance_report(date_from, date_to, limit=5)
+    room_type_performance = room_type_performance_report(date_from, date_to)
+
+    sold_nights_by_date = {
+        business_date: int(count or 0)
+        for business_date, count in db.session.execute(
+            sa.select(
+                InventoryDay.business_date,
+                sa.func.count(InventoryDay.id),
+            )
+            .join(Reservation, Reservation.id == InventoryDay.reservation_id)
+            .join(Room, Room.id == InventoryDay.room_id)
+            .where(
+                InventoryDay.business_date >= date_from,
+                InventoryDay.business_date <= date_to,
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+                InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
+                Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
+            )
+            .group_by(InventoryDay.business_date)
+        ).all()
+    }
+    room_revenue_by_date = {
+        service_date: money(amount or Decimal("0.00"))
+        for service_date, amount in db.session.execute(
+            sa.select(
+                FolioCharge.service_date,
+                sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
+            )
+            .where(
+                FolioCharge.voided_at.is_(None),
+                FolioCharge.charge_type == "room",
+                FolioCharge.service_date >= date_from,
+                FolioCharge.service_date <= date_to,
+            )
+            .group_by(FolioCharge.service_date)
+        ).all()
+    }
+
+    daily_rows: list[dict] = []
+    available_room_nights = 0
+    occupied_room_nights = 0
+    sold_room_nights = 0
+    for item in occupancy["items"]:
+        saleable_rooms = int(item["saleable_rooms"])
+        occupied_rooms = int(item["occupied_rooms"])
+        sold_nights = int(sold_nights_by_date.get(item["date"], 0))
+        room_revenue_total = money(room_revenue_by_date.get(item["date"], Decimal("0.00")))
+        adr = (
+            (room_revenue_total / Decimal(sold_nights)).quantize(Decimal("0.01"))
+            if sold_nights
+            else Decimal("0.00")
+        )
+        revpar = (
+            (room_revenue_total / Decimal(saleable_rooms)).quantize(Decimal("0.01"))
+            if saleable_rooms
+            else Decimal("0.00")
+        )
+        daily_rows.append(
+            {
+                "date": item["date"],
+                "saleable_rooms": saleable_rooms,
+                "occupied_rooms": occupied_rooms,
+                "sold_nights": sold_nights,
+                "occupancy_percentage": item["occupancy_percentage"],
+                "room_revenue_total": room_revenue_total,
+                "adr": adr,
+                "revpar": revpar,
+            }
+        )
+        available_room_nights += saleable_rooms
+        occupied_room_nights += occupied_rooms
+        sold_room_nights += sold_nights
+
+    room_type_rows: list[dict] = []
+    for item in room_type_performance["items"]:
+        sold_nights = int(item["sold_nights"])
+        room_revenue_total = money(item["room_revenue_total"])
+        adr = (
+            (room_revenue_total / Decimal(sold_nights)).quantize(Decimal("0.01"))
+            if sold_nights
+            else Decimal("0.00")
+        )
+        room_type_rows.append({**item, "adr": adr})
+    room_type_rows.sort(
+        key=lambda item: (
+            -item["room_revenue_total"],
+            -item["sold_nights"],
+            item["room_type_code"],
+        )
+    )
+
+    room_revenue_total = money(revenue["room_revenue_total"])
+    available_room_nights_decimal = Decimal(available_room_nights)
+    sold_room_nights_decimal = Decimal(sold_room_nights)
+    occupancy_percentage = (
+        (Decimal(occupied_room_nights) / available_room_nights_decimal * Decimal("100.00")).quantize(Decimal("0.01"))
+        if available_room_nights
+        else Decimal("0.00")
+    )
+    adr = (
+        (room_revenue_total / sold_room_nights_decimal).quantize(Decimal("0.01"))
+        if sold_room_nights
+        else Decimal("0.00")
+    )
+    revpar = (
+        (room_revenue_total / available_room_nights_decimal).quantize(Decimal("0.01"))
+        if available_room_nights
+        else Decimal("0.00")
+    )
+    best_day = max(
+        daily_rows,
+        key=lambda item: (item["revpar"], item["occupancy_percentage"], item["room_revenue_total"], item["date"]),
+        default=None,
+    )
+    softest_day = min(
+        daily_rows,
+        key=lambda item: (item["occupancy_percentage"], item["revpar"], item["date"]),
+        default=None,
+    )
+
+    return {
+        "days_count": len(daily_rows),
+        "available_room_nights": available_room_nights,
+        "occupied_room_nights": occupied_room_nights,
+        "sold_room_nights": sold_room_nights,
+        "occupancy_percentage": occupancy_percentage,
+        "adr": adr,
+        "revpar": revpar,
+        "room_revenue_total": room_revenue_total,
+        "net_revenue_total": revenue["net_revenue_total"],
+        "non_room_revenue_total": (revenue["net_revenue_total"] - revenue["room_revenue_total"]).quantize(Decimal("0.01")),
+        "top_channel": channel["items"][0] if channel["items"] else None,
+        "best_day": best_day,
+        "softest_day": softest_day,
+        "forecast_supported": False,
+        "forecast_note": "Forecasting and pricing automation are still backlog items; this view is a posted-revenue pacing snapshot.",
+        "channel_items": channel["items"],
+        "room_type_items": room_type_rows[:5],
+        "items": daily_rows[:limit],
+    }
+
+
 def room_type_performance_report(date_from: date, date_to: date) -> dict:
     room_types = (
         db.session.execute(
@@ -1518,6 +1672,16 @@ CSV_COLUMN_MAPS: dict[str, list[tuple[str, str]]] = {
         ("occupied_rooms", "Occupied Rooms"),
         ("occupancy_percentage", "Occupancy %"),
     ],
+    "revenue_management": [
+        ("date", "Date"),
+        ("saleable_rooms", "Saleable Rooms"),
+        ("occupied_rooms", "Occupied Rooms"),
+        ("sold_nights", "Sold Nights"),
+        ("occupancy_percentage", "Occupancy %"),
+        ("room_revenue_total", "Room Revenue"),
+        ("adr", "ADR"),
+        ("revpar", "RevPAR"),
+    ],
     "channel_performance": [
         ("source_channel", "Channel"),
         ("source_label", "Label"),
@@ -1572,6 +1736,8 @@ def build_csv_rows(report_type: str, business_date: date, date_from: date, date_
         data = housekeeping_performance_report(date_from, date_to, limit=5000)
     elif report_type == "occupancy":
         data = occupancy_by_date_range_report(date_from, date_to)
+    elif report_type == "revenue_management":
+        data = revenue_management_report(date_from, date_to, limit=5000)
     elif report_type == "channel_performance":
         data = channel_performance_report(date_from, date_to, limit=5000)
     elif report_type == "booking_source":

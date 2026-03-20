@@ -559,6 +559,12 @@ def test_deposit_pipeline_and_revenue_summary_use_authoritative_financial_data(a
         assert dashboard["revenue_summary"]["manual_charge_total"] == Decimal("150.00")
         assert dashboard["revenue_summary"]["discount_total"] == Decimal("50.00")
         assert dashboard["revenue_summary"]["net_revenue_total"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["room_revenue_total"] == dashboard["revenue_summary"]["room_revenue_total"]
+        assert dashboard["revenue_management"]["adr"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["revpar"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["forecast_supported"] is False
+        assert dashboard["revenue_management"]["best_day"] is not None
+        assert dashboard["revenue_management"]["items"]
 
 
 def test_room_type_performance_and_exception_summaries_are_correct(app_factory):
@@ -612,6 +618,7 @@ def test_reports_route_renders_for_manager_and_blocks_unauthorized_user(app_fact
     assert dataset["arrival_today"].reservation_code.encode("utf-8") in response.data
     assert b"Housekeeping performance" in response.data
     assert b"Occupancy" in response.data
+    assert b"Revenue management" in response.data
     assert b"Channel performance" in response.data
     assert b"Year-over-year comparison" in response.data
 

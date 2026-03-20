@@ -362,6 +362,121 @@
     <section class="card inset"><p class="empty-state">No prior-year inventory snapshot exists for this occupancy window yet.</p></section>
   {% endif %}
 
+{% elif report_type == 'revenue_management' %}
+  {% set data = report.data %}
+  <section class="grid four metric-grid">
+    <article class="metric-card report-metric accent"><small>Occupancy</small><strong>{{ '%.2f'|format(data.occupancy_percentage) }}%</strong></article>
+    <article class="metric-card report-metric"><small>ADR</small><strong>{{ data.adr | money }}</strong></article>
+    <article class="metric-card report-metric"><small>RevPAR</small><strong>{{ data.revpar | money }}</strong></article>
+    <article class="metric-card report-metric"><small>Room revenue</small><strong>{{ data.room_revenue_total | money }}</strong></article>
+  </section>
+  <section class="grid four metric-grid">
+    <article class="metric-card report-metric"><small>Sold nights</small><strong>{{ data.sold_room_nights }}</strong></article>
+    <article class="metric-card report-metric"><small>Available room nights</small><strong>{{ data.available_room_nights }}</strong></article>
+    <article class="metric-card report-metric"><small>Net posted revenue</small><strong>{{ data.net_revenue_total | money }}</strong></article>
+    <article class="metric-card report-metric"><small>Non-room revenue</small><strong>{{ data.non_room_revenue_total | money }}</strong></article>
+  </section>
+  <section class="card inset">
+    <p class="small muted">{{ data.forecast_note }}</p>
+  </section>
+  {% if data["items"] %}
+    <section class="card inset">
+      <div class="card-head"><h2>Daily pacing</h2></div>
+      <div class="table-wrap">
+        <table class="compact-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Saleable</th>
+              <th>Occupied</th>
+              <th>Sold nights</th>
+              <th>Occupancy %</th>
+              <th>Room revenue</th>
+              <th>ADR</th>
+              <th>RevPAR</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in data["items"] %}
+              <tr{% if item.date == report.business_date %} class="highlight-row"{% endif %}>
+                <td>{{ item.date.strftime('%a %d %b %Y') }}</td>
+                <td>{{ item.saleable_rooms }}</td>
+                <td>{{ item.occupied_rooms }}</td>
+                <td>{{ item.sold_nights }}</td>
+                <td>{{ '%.2f'|format(item.occupancy_percentage) }}%</td>
+                <td>{{ item.room_revenue_total | money }}</td>
+                <td>{{ item.adr | money }}</td>
+                <td>{{ item.revpar | money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+  <section class="grid two gap-lg">
+    <article class="card inset">
+      <div class="card-head"><h2>Room type mix</h2></div>
+      {% if data.room_type_items %}
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Room type</th>
+                <th>Sold nights</th>
+                <th>ADR</th>
+                <th>Room revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in data.room_type_items %}
+                <tr>
+                  <td>{{ item.room_type_code }} · {{ item.room_type_name }}</td>
+                  <td>{{ item.sold_nights }}</td>
+                  <td>{{ item.adr | money }}</td>
+                  <td>{{ item.room_revenue_total | money }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">No room-type revenue mix in selected range.</p>
+      {% endif %}
+    </article>
+    <article class="card inset">
+      <div class="card-head"><h2>Channel pacing</h2></div>
+      {% if data.channel_items %}
+        <div class="table-wrap">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Reservations</th>
+                <th>Sold nights</th>
+                <th>ADR</th>
+                <th>Room revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in data.channel_items %}
+                <tr>
+                  <td>{{ item.source_label }}<div class="small muted">{{ item.source_channel }}</div></td>
+                  <td>{{ item.reservation_count }}</td>
+                  <td>{{ item.sold_nights }}</td>
+                  <td>{{ item.adr | money }}</td>
+                  <td>{{ item.room_revenue_total | money }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="empty-state">No channel pacing data in selected range.</p>
+      {% endif %}
+    </article>
+  </section>
+
 {% elif report_type == 'channel_performance' %}
   {% set data = report.data %}
   <section class="grid four metric-grid">

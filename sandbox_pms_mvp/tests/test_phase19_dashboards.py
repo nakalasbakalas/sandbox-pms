@@ -356,6 +356,24 @@ def test_daily_report_channel_performance_returns_channel_metrics(app_factory):
         assert report["data"]["items"]
 
 
+def test_daily_report_revenue_management_returns_revpar_and_daily_pacing(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        dataset = build_dashboard_dataset()
+        report = build_daily_report(
+            report_type="revenue_management",
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"] + timedelta(days=1),
+        )
+
+        assert report["report_type"] == "revenue_management"
+        assert report["data"]["room_revenue_total"] > Decimal("0.00")
+        assert report["data"]["adr"] > Decimal("0.00")
+        assert report["data"]["revpar"] > Decimal("0.00")
+        assert report["data"]["items"]
+
+
 def test_daily_report_housekeeping_performance_returns_attendant_metrics(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     with app.app_context():
@@ -503,7 +521,7 @@ def test_daily_report_routes_render_for_authorized_users(app_factory):
     login_as(client, dataset["manager"])
 
     # Test each report type
-    for report_type in ["arrivals", "departures", "room_status", "payment_due", "housekeeping_performance", "occupancy", "channel_performance", "booking_source", "no_show_cancellation"]:
+    for report_type in ["arrivals", "departures", "room_status", "payment_due", "housekeeping_performance", "occupancy", "revenue_management", "channel_performance", "booking_source", "no_show_cancellation"]:
         response = client.get(f"/staff/daily-reports/{report_type}")
         assert response.status_code == 200, f"Report {report_type} failed with {response.status_code}"
         assert b"Daily Report" in response.data

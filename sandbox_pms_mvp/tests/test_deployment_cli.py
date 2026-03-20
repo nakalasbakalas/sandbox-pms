@@ -144,6 +144,17 @@ def test_config_reads_storage_backend_environment(monkeypatch):
 def test_render_blueprint_enables_persistent_uploads_and_background_crons():
     render_blueprint = Path(__file__).resolve().parents[2] / "render.yaml"
     text = render_blueprint.read_text(encoding="utf-8")
+    expected_crons = [
+        "pms-process-notifications",
+        "pms-process-automation-events",
+        "pms-sync-ical-sources",
+        "pms-send-pre-arrival-reminders",
+        "pms-send-failed-payment-reminders",
+        "pms-fire-pre-checkin-reminders",
+        "pms-process-waitlist",
+        "pms-cleanup-audit-logs",
+        "pms-auto-cancel-no-shows",
+    ]
 
     assert "key: STORAGE_BACKEND" in text
     assert "value: local" in text
@@ -151,7 +162,8 @@ def test_render_blueprint_enables_persistent_uploads_and_background_crons():
     assert "value: /var/data/uploads/documents" in text
     assert "disk:" in text
     assert "name: pms-document-storage" in text
-    assert "name: pms-cleanup-audit-logs" in text
+    assert text.count("- type: cron") == len(expected_crons)
+    for cron_name in expected_crons:
+        assert text.count(f"name: {cron_name}") == 1
     assert "startCommand: flask --app app cleanup-audit-logs" in text
-    assert "name: pms-auto-cancel-no-shows" in text
     assert "startCommand: flask --app app auto-cancel-no-shows" in text
