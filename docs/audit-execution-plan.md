@@ -19,7 +19,7 @@ All critical and high-priority fixes from the audit implemented and tested:
 | **F-02** Render storage config | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | `Config` now loads local/S3 storage env vars and `render.yaml` enables a persistent Render disk at `/var/data/uploads/documents` |
 | **F-03** Background tasks unwired | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | 9 Render cron jobs wired, including notifications, automation, iCal sync, waitlist, audit cleanup, and no-show auto-cancel |
 | **F-07** Root cleanup | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | 28 artifacts deleted, 4 docs moved to `docs/`, 4 root tests removed |
-| **F-09** FEATURE_BOARD_V2 unclear | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Flag documented; gates board v2 action endpoints |
+| **F-09** FEATURE_BOARD_V2 unclear | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Dead config and startup gate removed; board action surface stays always on via compatibility helper |
 | **F-10** OCR returns None silently | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Now returns status dict: `{"status": "unavailable", ...}` |
 | **QW-1 to QW-11** | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | All quick wins completed (aria-labels, guards, config) |
 
@@ -38,7 +38,7 @@ All critical and high-priority fixes from the audit implemented and tested:
 | Departure turnover auto-wiring | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified | Already wired in `complete_checkout` |
 | OCR unavailability status | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Returns `{"status": "unavailable", ...}` (done in Phase 0) |
 | Root cleanup | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Fixed | Done in Phase 0 |
-| `FEATURE_BOARD_V2` flag | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Documented | Gates board v2 action endpoints (done in Phase 0) |
+| `FEATURE_BOARD_V2` flag | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Removed | Legacy env/config removed; board action surface is always on |
 | DB liveness `/health` | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified | Already implemented with `SELECT 1` |
 | Inventory bootstrap on new room creation | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified | `upsert_room` calls `_ensure_room_inventory()` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â creates 730 days of InventoryDay rows. No bug for new rooms. Minor gap: no cron to extend horizon for existing unedited rooms (~2yr runway). |
 | Stripe webhook idempotency | ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified | 3-layer protection: (1) `provider_event_id` unique index, (2) `posting_key` unique on FolioCharge, (3) `SELECT FOR UPDATE` on PaymentRequest. Concurrent threading tests exist. |
@@ -101,7 +101,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | RBAC (roles, permissions, user management) | `models.py` Role/Permission, `permissions.py`, `test_phase10_admin_panel.py` |
 | Public booking flow (availability, hold, confirm, cancel/modify requests) | `public_booking_service.py`, `test_phase4_public_booking.py` |
 | Staff reservations workspace (list, create, edit, notes, pre-check-in, cancel) | `staff_reservations_service.py`, `test_phase5_staff_reservations_workspace.py` |
-| Front desk board (drag-and-drop room assignment, date resize, walk-in, SSE) | `front_desk_board_service.py`, `front-desk-board.js`, `test_phase15_front_desk_board.py` |
+| Front desk board (drag-and-drop room assignment, date resize, walk-in, polling refresh) | `front_desk_board_service.py`, `front-desk-board.js`, `test_phase15_front_desk_board.py` |
 | Front desk check-in / check-out / no-show | `front_desk_service.py`, `test_phase6_front_desk_workspace.py` |
 | Housekeeping board (room status, tasks, bulk operations) | `housekeeping_service.py`, `room_readiness_service.py`, `test_phase7_housekeeping.py` |
 | Cashier / folio (room charges, manual adjustments, payments, refunds, voids, print) | `cashier_service.py`, `test_phase8_cashier.py` |
@@ -131,7 +131,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 | Line guest messaging | `LineAdapter` supports LINE push API via `LINE_CHANNEL_ACCESS_TOKEN` and a fallback outbound webhook | Guest records do not yet store a dedicated LINE user ID field, so staff must provide the recipient explicitly |
 | OTA guest messaging | `OtaMessageAdapter` class | Explicit stub ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â "not connected to any OTA messaging API" |
 | OCR / ID extraction | `suggest_ocr_extraction()` hook returns explicit unavailability status | OCR provider integration itself is still not connected |
-| Board v2 feature flag | `FEATURE_BOARD_V2` env var + `check_board_v2_feature_gate()` | Purpose unclear ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â flag appears in context but no distinct v2 board implementation found |
+| Board v2 feature flag | Legacy compatibility helper only (`front_desk_board_v2_enabled()`) | Env/config flag and startup gate removed; helper remains for template/log compatibility while always returning `True` |
 | Scheduled/cron task wiring | Render blueprint now defines 9 cron jobs for notifications, reminders, iCal sync, automation, waitlist, audit cleanup, and no-show handling | Property-specific secrets and retention values still need production provisioning |
 | File storage in production | `LocalStorageBackend` (default) + `S3StorageBackend` (optional), `boto3` installed, storage env vars loaded, Render disk wired by default | If the property prefers S3/R2 over the Render disk, credentials still need to be provisioned |
 | Waitlist | `waitlist` reservation status constant exists | No automation to process, promote, or expire waitlist entries |
@@ -144,7 +144,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 | Area | Uncertainty |
 |---|---|
-| `FEATURE_BOARD_V2` | Flag is checked in 4+ places. Not clear what behaviour it gates beyond minor UX differences. May be dead code or a partial sprint artifact. |
+| `FEATURE_BOARD_V2` | Resolved on 2026-03-20: config and startup gate removed. Remaining helper is compatibility-only and always returns `True`. |
 | `PendingAutomationEvent` model | Queueing, CLI processing, and delayed-event dispatch are now covered in `test_phase18_messaging.py`; remaining gaps are queue management UX and external-provider delivery depth, not core event consumption. |
 | Staff notification / in-app alert delivery | `StaffNotification` model and `_dispatch_internal_notification` exist but the in-app notification UX appears limited to a badge count. |
 | `debug_test.py`, `test_demo_seeding.py`, `test_init_and_seed.py`, `test_template_compile.py` at repo root | Not collected by pytest (wrong location). Unknown if maintained or abandoned. |
@@ -229,11 +229,11 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ---
 
-### F-09 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `FEATURE_BOARD_V2` flag: unclear purpose, possible dead code
+### F-09 ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â `FEATURE_BOARD_V2` flag: stale rollout artifact
 **Severity: Low**  
-**Evidence:** `config.py` `FEATURE_BOARD_V2 = os.getenv("FEATURE_BOARD_V2", "0") == "1"`. Referenced in `front_desk_board_runtime.py`, passed into board context in several routes, tested with SSE skips in `test_phase15_front_desk_board.py`. No distinct v2 board template or route branch found that changes behaviour meaningfully.  
+**Evidence:** The planning board no longer has a separate v2 rollout path. The old env/config flag and startup gate were removed on 2026-03-20; `front_desk_board_v2_enabled()` remains only as a compatibility helper for templates and metrics and always returns `True`.  
 **Why it matters:** Feature flags that are never enabled and gate no meaningful difference are dead code. They add conditional branches to test and maintain.  
-**Fix:** Audit what `board_v2_enabled=True` actually changes. If nothing material, remove the flag, its config entry, and all conditionals. If it gates real upcoming work, document what it controls.
+**Fix:** Keep the board action surface always on, remove dead config/wiring, and retain only the minimal compatibility helper until downstream template/log references no longer need it.
 
 ---
 
@@ -251,9 +251,9 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 - [x] Extract remaining Flask Blueprints from `app.py` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â all 10 blueprint route files now extracted: `admin_bp`, `front_desk_bp` (incl. board routes), `public_bp` alongside the earlier auth, provider, housekeeping, messaging, cashier, reports, staff_reservations extractions *(app.py reduced to 1,354 lines; `create_app()` wiring + CLI registration remain)*
 - [x] Move shared route helpers (CSRF, URL builders, form parsers, date parsers) out of `app.py` into dedicated `helpers/` or `utils/` module *(~60 functions extracted to `helpers.py`)*
-- [x] Remove or fully enable `FEATURE_BOARD_V2` flag ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â confirm what it gates or delete it *(documented: gates board v2 action endpoints)*
+- [x] Remove or fully enable `FEATURE_BOARD_V2` flag ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â confirm what it gates or delete it *(completed on 2026-03-20: dead env/config flag and startup gate removed; compatibility helper remains always-on for template/log continuity)*
 - [x] Standardise ORM query style - migrated all 278 legacy `.query.` usages to `db.session.execute(sa.select(...))` / `db.session.get()` across services, routes, helpers, `app.py`, and `seeds.py` *(0 remaining in `pms/`; full suite green on 2026-03-20: 511 passed, 7 skipped)*
-- [x] Introduce a proper background task infrastructure (Render Cron Job or APScheduler/RQ) for all CLI automation tasks *(6 Render cron jobs added)*
+- [x] Introduce a proper background task infrastructure (Render Cron Job or APScheduler/RQ) for all CLI automation tasks *(9 Render cron jobs added)*
 - [x] Add `boto3` to `requirements.txt` (or document S3 as an optional extra clearly) *(verified present)*
 - [x] Consolidate the 4 root-level test files into `sandbox_pms_mvp/tests/` or delete them *(deleted with root cleanup)*
 
@@ -270,7 +270,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 
 ### Backend
 
-- [x] Wire all CLI automation tasks to Render Cron Jobs in `render.yaml` *(6 cron jobs added)*
+- [x] Wire all CLI automation tasks to Render Cron Jobs in `render.yaml` *(9 cron jobs added, including waitlist, audit cleanup, and no-show auto-cancel)*
 - [x] Fix ephemeral storage: configure `UPLOAD_DIR` (Render disk) or `STORAGE_BACKEND=s3` with proper credentials *(render.yaml + .env.production.example updated)*
 - [x] Move `send_due_pre_arrival_reminders` and `send_due_failed_payment_reminders` out of the admin-triggered path and ensure they run on schedule *(Render cron jobs added)*
 - [x] Add `try/except` guard around each `dispatch_notification_deliveries()` call to ensure one failed delivery does not abort the batch *(10 call sites wrapped)*
@@ -444,7 +444,7 @@ The Sandbox Hotel PMS is a **functionally substantial Flask monolith** that is f
 - [x] Fix Stripe webhook idempotency ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Verified: 3-layer protection (provider_event_id unique + posting_key unique + SELECT FOR UPDATE). Concurrent threading tests exist.
 - [x] Add clear "OCR not available" status response from `suggest_ocr_extraction` (remove silent null return) *(returns `{"status": "unavailable", ...}`)*
 - [x] Clean up root directory: move permanent docs to `docs/`, investigate root test files, delete or archive the 30 stale planning markdown files *(28 deleted, 4 moved)*
-- [x] Investigate and resolve `FEATURE_BOARD_V2` flag ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â document or remove *(documented: gates board v2 action endpoints)*
+- [x] Investigate and resolve `FEATURE_BOARD_V2` flag ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â document or remove *(completed on 2026-03-20: dead env/config flag and startup gate removed; board action surface remains always on)*
 - [x] Add DB liveness check to `/health` endpoint *(verified: already implemented)*
 
 **Dependencies:** Phase 0 must be stable first.
@@ -680,7 +680,7 @@ All `downgrade()` functions are empty or have `pass`. If a bad migration is depl
 
 | # | Question / Assumption |
 |---|---|
-| Q-01 | **FEATURE_BOARD_V2**: What does this flag actually gate? No distinct v2 board route, template, or behaviour was found that differs materially when `board_v2_enabled=True`. This may be a leftover from a sprint that was merged but the flag never cleaned up. Needs owner confirmation. |
+| Q-01 | **FEATURE_BOARD_V2**: Resolved on 2026-03-20. The dead env/config flag and startup gate were removed; only a compatibility helper remains, always returning `True` for existing template/log consumers. |
 | Q-02 | **Single-tenant assumption**: The data model has no `property_id` or tenant discriminator on any operational entity. The entire schema is single-property. Is multi-property support in scope? If so, this requires an architectural change before the data model grows further. |
 | Q-03 | **Render disk vs. S3**: The deployment blueprint does not include a persistent disk. Render free/starter plans do not include persistent disks. Is a Render disk available on the chosen plan, or is S3 the intended path for document storage? |
 | Q-04 | **Stripe live credentials**: The `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are `sync: false` in `render.yaml`. Has a live Stripe account been connected, or is the property still using `PAYMENT_PROVIDER=disabled`? This determines urgency of the Stripe idempotency fix (F-04). |

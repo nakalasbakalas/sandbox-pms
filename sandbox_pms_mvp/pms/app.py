@@ -49,8 +49,6 @@ from .constants import (
 )
 from .extensions import db, migrate
 from .front_desk_board_runtime import (
-    check_board_v2_feature_gate,
-    front_desk_board_v2_enabled,
     log_front_desk_board_metric,
 )
 from .i18n import LANGUAGE_LABELS, normalize_language, t
@@ -443,7 +441,6 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     register_template_helpers(app)
     register_url_topology_hooks(app)
-    register_board_v2_feature_gates(app)
     register_auth_hooks(app)
     register_cli(app)
 
@@ -554,13 +551,6 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
-
-
-def register_board_v2_feature_gates(app: Flask) -> None:
-    """Register feature gate checks for v2 board endpoints."""
-    @app.before_request
-    def check_v2_board_access():
-        check_board_v2_feature_gate()
 
 
 def register_template_helpers(app: Flask) -> None:

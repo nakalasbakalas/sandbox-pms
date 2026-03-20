@@ -95,6 +95,11 @@ from ..services.extras_service import (
     list_booking_extras,
     upsert_booking_extra,
 )
+from ..services.messaging_service import (
+    list_automation_rules,
+    list_message_templates as list_messaging_templates,
+    upsert_automation_rule,
+)
 from ..services.pre_checkin_service import fire_pre_checkin_not_completed_events
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 
@@ -696,6 +701,18 @@ def staff_admin_communications():
             elif action == "run_pre_checkin_reminders":
                 result = fire_pre_checkin_not_completed_events(hours_before=48)
                 flash(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}.", "success")
+            elif action == "save_automation_rule":
+                delay_minutes = parse_optional_int(request.form.get("delay_minutes")) or 0
+                upsert_automation_rule(
+                    rule_id=request.form.get("rule_id") or None,
+                    event_type=request.form.get("event_type") or "",
+                    channel=request.form.get("channel") or "email",
+                    template_id=request.form.get("template_id") or None,
+                    is_active=truthy_setting(request.form.get("is_active")),
+                    delay_minutes=delay_minutes,
+                    actor_user_id=str(actor.id),
+                )
+                flash("Automation rule saved.", "success")
             else:
                 abort(400)
         except Exception as exc:  # noqa: BLE001
@@ -717,6 +734,8 @@ def staff_admin_communications():
         "admin_communications.html",
         active_section="communications",
         communication_settings=communication_settings_context(),
+        automation_rules=list_automation_rules(),
+        message_templates=list_messaging_templates(),
         deliveries=deliveries,
         filters=filters,
         delivery_statuses=["pending", "queued", "delivered", "failed", "skipped", "cancelled"],

@@ -37,6 +37,14 @@ Set at minimum:
 - `SECRET_KEY`
 - `AUTH_ENCRYPTION_KEY`
 - `AUDIT_LOG_RETENTION_DAYS` only after the property approves a retention window. Leave at `0` to retain all audit history.
+- `STORAGE_BACKEND=local` plus `UPLOAD_DIR=/var/data/uploads/documents` when using the Render disk defined in `render.yaml`
+- or `STORAGE_BACKEND=s3` plus `S3_BUCKET`, `S3_REGION`, and credentials or role-based access when using object storage instead of the Render disk
+- optional outbound guest-messaging adapters:
+  - `SMS_OUTBOUND_WEBHOOK_URL`
+  - `WHATSAPP_OUTBOUND_WEBHOOK_URL`
+  - `LINE_OUTBOUND_WEBHOOK_URL`
+  - `LINE_CHANNEL_ACCESS_TOKEN` (`LINE_API_BASE` defaults to `https://api.line.me`)
+- optional outbound channel-manager bridge: `CHANNEL_PUSH_WEBHOOK_URL`
 
 Render-managed Postgres URLs may be provided as `postgres://` or `postgresql://`.
 The app normalizes those values to the SQLAlchemy `postgresql+psycopg://` driver automatically.
@@ -57,6 +65,20 @@ Audit-log cleanup is available through `flask --app app cleanup-audit-logs` and 
 - `AUDIT_LOG_RETENTION_DAYS=0` keeps cleanup disabled.
 - Set it to a positive integer only after the property has approved the retention window.
 - The scheduled cleanup deletes audit-log rows older than the configured cutoff; it is intentionally a no-op until the retention window is set.
+
+## Scheduled Background Tasks
+
+The Render Blueprint wires the recurring CLI jobs that should not depend on a human running `flask` commands manually:
+
+- `pms-process-notifications`
+- `pms-process-automation-events`
+- `pms-sync-ical-sources`
+- `pms-send-pre-arrival-reminders`
+- `pms-send-failed-payment-reminders`
+- `pms-fire-pre-checkin-reminders`
+- `pms-process-waitlist`
+- `pms-cleanup-audit-logs`
+- `pms-auto-cancel-no-shows`
 
 ## Payment Provider Registration
 

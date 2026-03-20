@@ -261,6 +261,7 @@ DOCUMENT_VERIFICATION_STATUSES = [
 CONVERSATION_CHANNEL_TYPES = [
     "email",
     "sms",
+    "line",
     "whatsapp",
     "internal_note",
     "manual_call_log",

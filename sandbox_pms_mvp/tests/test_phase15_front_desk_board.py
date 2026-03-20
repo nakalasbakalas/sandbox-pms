@@ -344,8 +344,8 @@ def test_front_desk_board_route_requires_reservation_view_permission(app_factory
     assert unauthorized.status_code == 403
 
 
-def test_front_desk_board_route_exposes_board_v2_flag_from_settings(app_factory):
-    app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+def test_front_desk_board_route_exposes_always_on_board_actions_flag(app_factory):
+    app = app_factory(seed=True)
     client = app.test_client()
     with app.app_context():
         front_desk_user = make_staff_user("front_desk", "board-flag@example.com")
@@ -353,22 +353,7 @@ def test_front_desk_board_route_exposes_board_v2_flag_from_settings(app_factory)
     login_as(client, front_desk_user)
     initial = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
     assert initial.status_code == 200
-    assert 'data-board-v2-enabled="false"' in initial.get_data(as_text=True)
-
-    with app.app_context():
-        db.session.add(
-            AppSetting(
-                key="feature.front_desk_board_v2",
-                value_json={"value": True},
-                value_type="boolean",
-                description="Enable front desk planning board v2 scaffolding",
-            )
-        )
-        db.session.commit()
-
-    enabled = client.get(f"/staff/front-desk/board?start_date={date.today().isoformat()}")
-    assert enabled.status_code == 200
-    assert 'data-board-v2-enabled="true"' in enabled.get_data(as_text=True)
+    assert 'data-board-v2-enabled="true"' in initial.get_data(as_text=True)
 
 
 def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
@@ -432,7 +417,7 @@ def test_front_desk_board_data_route_logs_metric_payload(app_factory, monkeypatc
     assert metric["group_count"] >= 1
     assert metric["row_count"] >= 1
     assert metric["visible_block_count"] >= 1
-    assert metric["board_v2_enabled"] is False
+    assert metric["board_v2_enabled"] is True
 
 
 def test_board_room_reassignment_updates_inventory_and_redirects_back_to_anchor(app_factory):
@@ -1188,16 +1173,16 @@ class TestBoardV2FeatureFlag:
     """Test feature flag framework and v2 endpoint guards."""
 
     def test_v2_feature_disabled_by_default(self, app_factory):
-        """V2 feature should be off by default in config."""
-        app = app_factory(config={"FEATURE_BOARD_V2": False})
+        """Board action surface is now always enabled."""
+        app = app_factory()
         with app.app_context():
             from pms.front_desk_board_runtime import front_desk_board_v2_enabled
 
-            assert front_desk_board_v2_enabled() is False
+            assert front_desk_board_v2_enabled() is True
 
     def test_v2_feature_enabled_when_configured(self, app_factory):
-        """V2 feature should be on if configured."""
-        app = app_factory(config={"FEATURE_BOARD_V2": True})
+        """The compatibility helper always reports the unified board surface."""
+        app = app_factory()
         with app.app_context():
             from pms.front_desk_board_runtime import front_desk_board_v2_enabled
 
@@ -1205,7 +1190,7 @@ class TestBoardV2FeatureFlag:
 
     def test_v1_endpoints_work_when_v2_disabled(self, app_factory):
         """V1 board endpoints should work when v2 is disabled."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+        app = app_factory(seed=True)
         client = app.test_client()
         with app.app_context():
             user = make_staff_user("front_desk", "test-v1@example.com")
@@ -1245,20 +1230,13 @@ class TestBoardV2FeatureFlag:
         assert is_v2_endpoint(None) is False
         assert is_v2_endpoint("nonexistent_endpoint") is False
 
-    def test_check_board_v2_feature_gate_returns_404_when_disabled(self, app_factory):
-        """V2 endpoints should return 404 when feature is disabled.
-
-        Note: This test will skip if no v2 endpoints are registered yet,
-        as they'll be added in Sprint 3 and beyond.
-        """
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
-        client = app.test_client()
+    def test_check_board_v2_feature_gate_is_now_a_noop(self, app_factory):
+        """Legacy gate no longer disables board action endpoints."""
+        app = app_factory(seed=True)
         with app.app_context():
-            user = make_staff_user("front_desk", "test-gate@example.com")
             from pms.front_desk_board_runtime import front_desk_board_v2_enabled
 
-            # Verify the feature flag is actually False.
-            assert front_desk_board_v2_enabled() is False
+            assert front_desk_board_v2_enabled() is True
 
 
 class TestBoardMetricsInfrastructure:
@@ -1266,7 +1244,7 @@ class TestBoardMetricsInfrastructure:
 
     def test_log_metrics_includes_v2_flag(self, app_factory, monkeypatch):
         """Board metrics should include v2_enabled flag in logs."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": False})
+        app = app_factory(seed=True)
 
         with app.app_context():
             from pms.front_desk_board_runtime import log_front_desk_board_metric
@@ -1296,7 +1274,7 @@ class TestBoardMetricsInfrastructure:
             last_log = logged_messages[-1]
             assert "test.board.render" in last_log
             assert "board_v2_enabled" in last_log
-            assert "false" in last_log or "False" in last_log.lower()
+            assert "true" in last_log or "True" in last_log.lower()
 
     def test_log_metrics_with_board_summary(self, app_factory, monkeypatch):
         """Metrics should include board summary stats when provided."""
@@ -1939,7 +1917,7 @@ class TestBoardPollingAutoRefresh:
 
     def test_polling_javascript_infrastructure_present(self, app_factory):
         """JavaScript should include polling start/stop infrastructure."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        app = app_factory(seed=True)
         client = app.test_client()
 
         response = client.get("/static/front-desk-board.js")
@@ -1954,7 +1932,7 @@ class TestBoardPollingAutoRefresh:
 
     def test_board_events_endpoint_no_longer_exists(self, app_factory):
         """SSE /board/events endpoint was removed; should return 404."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        app = app_factory(seed=True)
         client = app.test_client()
         with app.app_context():
             user = make_staff_user("front_desk", "sse-gone@example.com")
@@ -1965,7 +1943,7 @@ class TestBoardPollingAutoRefresh:
 
     def test_activity_log_filter_covers_board_and_reservation_events(self, app_factory):
         """Activity log query should filter front_desk.board and reservation events."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        app = app_factory(seed=True)
         with app.app_context():
             user = make_staff_user("front_desk", "poll-filter@example.com")
 
@@ -2009,7 +1987,7 @@ class TestBoardPollingAutoRefresh:
 
     def test_move_operation_writes_activity_log(self, app_factory):
         """Move operation should write an activity log entry (picked up by polling)."""
-        app = app_factory(seed=True, config={"FEATURE_BOARD_V2": True})
+        app = app_factory(seed=True)
         client = app.test_client()
         with app.app_context():
             user = make_staff_user("front_desk", "move@example.com")

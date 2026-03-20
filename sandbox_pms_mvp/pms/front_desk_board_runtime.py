@@ -5,23 +5,15 @@ from time import perf_counter
 from typing import Any
 
 from flask import current_app
-
-from .pricing import get_setting_value
 from .security import sanitize_log_data
 
-
-FRONT_DESK_BOARD_V2_SETTING_KEY = "feature.front_desk_board_v2"
-
-
 def front_desk_board_v2_enabled() -> bool:
-    configured_default = bool(current_app.config.get("FEATURE_BOARD_V2", False))
-    try:
-        stored_value = get_setting_value(FRONT_DESK_BOARD_V2_SETTING_KEY, configured_default)
-    except Exception:  # noqa: BLE001
-        return configured_default
-    if isinstance(stored_value, dict):
-        stored_value = stored_value.get("enabled", configured_default)
-    return _truthy_flag(stored_value)
+    """Legacy compatibility helper for the board action surface.
+
+    The separate v2 rollout has been fully absorbed into the current planning
+    board implementation, so the action endpoints now stay enabled.
+    """
+    return True
 
 
 def log_front_desk_board_metric(
@@ -51,13 +43,6 @@ def _board_summary(board: dict[str, Any]) -> dict[str, int]:
         "visible_block_count": sum(len(row.get("visible_blocks", [])) for row in rows),
     }
 
-
-def _truthy_flag(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "on", "yes"}
-
-
 def is_v2_endpoint(endpoint: str | None) -> bool:
     """Check if a Flask endpoint is a v2-only endpoint.
 
@@ -80,12 +65,5 @@ def is_v2_endpoint(endpoint: str | None) -> bool:
 
 
 def check_board_v2_feature_gate() -> None:
-    """Raise 404 if v2 endpoint is accessed but feature is disabled.
-
-    This should be registered as a before_request hook.
-    """
-    from flask import request, abort
-
-    if request.endpoint and is_v2_endpoint(request.endpoint):
-        if not front_desk_board_v2_enabled():
-            abort(404)
+    """Legacy no-op retained so create_app() wiring does not need to branch."""
+    return None
