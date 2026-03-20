@@ -193,7 +193,7 @@
               <span class="arc-item{% if block.allocationState == 'allocated' %} arc-ok{% else %} arc-warn{% endif %}" title="Room assignment">{% if block.allocationState == 'allocated' %}✓{% else %}✗{% endif %} Room assigned</span>
               <span class="arc-item{% if block.readyForCheckIn %} arc-ok{% else %} arc-warn{% endif %}" title="Room ready for check-in">{% if block.readyForCheckIn %}✓{% else %}✗{% endif %} Room ready</span>
               <span class="arc-item{% if not block.balanceDue or block.balanceDue == 0 %} arc-ok{% else %} arc-warn{% endif %}" title="Deposit/balance status">{% if not block.balanceDue or block.balanceDue == 0 %}✓{% else %}✗{% endif %} Balance clear</span>
-              {% if block.hasSpecialRequests %}<span class="arc-item arc-info" title="Special requests noted">⚑ Special requests</span>{% endif %}
+              {% if block.hasSpecialRequests %}<span class="arc-item arc-info" title="Special requests noted" aria-label="Special requests noted">⚑ Special requests</span>{% endif %}
             </div>
             {% endif %}
             <div class="actions">

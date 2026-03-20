@@ -417,6 +417,7 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                     if o.get("floorNumber") == floor and o not in floor_group_map[floor]["room_options"]
                 )
         groups = [floor_group_map[f] for f in sorted(floor_order, key=lambda x: (x is None, x))]
+        # sort key (is None, x): False < True so None values sort last; numeric floors sort ascending
 
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
     headers = _build_headers(window_start, filters.days, today=today)

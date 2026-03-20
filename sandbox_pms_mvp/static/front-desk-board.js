@@ -971,10 +971,12 @@
   }
 
   // ── Occupancy heatmap classes on day headers ──
+  const OCC_HIGH_THRESHOLD = 80;
+  const OCC_MEDIUM_THRESHOLD = 50;
   surface.querySelectorAll(".planning-board-day[data-occupancy-pct]").forEach((dayEl) => {
     const pct = parseInt(dayEl.dataset.occupancyPct || "0", 10);
-    if (pct >= 80) dayEl.classList.add("occ-high");
-    else if (pct >= 50) dayEl.classList.add("occ-medium");
+    if (pct >= OCC_HIGH_THRESHOLD) dayEl.classList.add("occ-high");
+    else if (pct >= OCC_MEDIUM_THRESHOLD) dayEl.classList.add("occ-medium");
     else if (pct > 0) dayEl.classList.add("occ-low");
   });
 
