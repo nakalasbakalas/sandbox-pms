@@ -269,7 +269,15 @@
     border: 1px solid var(--local-badge-border, rgba(21,25,36,.10));
   }
   #cs .coupon-preview[data-badge]:not([data-badge=""])::after { content: attr(data-badge); }
-
+  #cs .coupon-logo {
+    position: absolute; top: 8px; left: 8px; width: 32px; height: 32px;
+    border-radius: 6px; background: rgba(255,255,255,.8); padding: 4px;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 10;
+  }
+  #cs .coupon-logo img {
+    width: 100%; height: 100%; object-fit: contain;
+  }
   #cs .coupon-img {
     width: 100%; height: 104px; border-radius: 14px;
     border: 1px solid var(--cs-line); background: var(--cs-sur-3); overflow: hidden; position: relative;
@@ -576,10 +584,8 @@
               <h3 style="margin-bottom:10px;font-size:13px">Image / artwork</h3>
               <div class="image-tools">
                 <div class="image-quick">
+                  <button class="btn sm secondary img-preset" type="button" data-image="{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}">Hotel logo</button>
                   <button class="btn sm secondary img-preset" type="button" data-image="">Placeholder only</button>
-                  <button class="btn sm secondary img-preset" type="button" data-image="/static/img/hotel-hero.jpg">Exterior — day</button>
-                  <button class="btn sm secondary img-preset" type="button" data-image="/static/img/hotel-flower.jpg">Exterior — dusk</button>
-                  <button class="btn sm secondary img-preset" type="button" data-image="/static/img/hotel-lobby.jpg">Lobby</button>
                 </div>
                 <div class="mini-grid">
                   <label class="btn sm ghost" for="uploadImageInput" style="cursor:pointer">Upload custom image</label>
@@ -609,16 +615,16 @@
   const PAGE_SIZE   = 5;
 
   const defaultCoupons = [
-    {title:"Direct Booking Welcome",    badge:"Top Seller",          desc:"Save 10% on your stay when you book directly with the hotel.",                       terms:"Direct bookings only \u2022 Subject to availability \u2022 Not combinable with other promotions", code:"DIRECT10",    cta:"Book Direct",     style:"copper",    image:"/static/img/hotel-hero.jpg",   selected:true},
-    {title:"Stay 2 Nights, Save More",  badge:"High Conversion",     desc:"Get 12% off when you stay for 2 nights or more.",                                    terms:"Minimum 2 nights \u2022 Best for weekend and short business stays \u2022 Direct booking only",   code:"STAY2SAVE",   cta:"Check Dates",     style:"champagne", image:"/static/img/hotel-lobby.jpg",  selected:true},
+    {title:"Direct Booking Welcome",    badge:"Top Seller",          desc:"Save 10% on your stay when you book directly with the hotel.",                       terms:"Direct bookings only \u2022 Subject to availability \u2022 Not combinable with other promotions", code:"DIRECT10",    cta:"Book Direct",     style:"copper",    image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}",   selected:true},
+    {title:"Stay 2 Nights, Save More",  badge:"High Conversion",     desc:"Get 12% off when you stay for 2 nights or more.",                                    terms:"Minimum 2 nights \u2022 Best for weekend and short business stays \u2022 Direct booking only",   code:"STAY2SAVE",   cta:"Check Dates",     style:"champagne", image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}",  selected:true},
     {title:"Weekday Smart Rate",         badge:"Mon\u2013Thu",       desc:"Enjoy a weekday special rate from Monday to Thursday.",                               terms:"Valid on selected weekdays \u2022 Ideal for business travel \u2022 Limited rooms per day",          code:"WEEKDAY",     cta:"Book Weekday",    style:"ember",     image:"",                             selected:true},
-    {title:"Long Stay Advantage",        badge:"7+ Nights",          desc:"Stay 7 nights or more and unlock a stronger long-stay rate.",                        terms:"Best for project stays and extended visits \u2022 Subject to room availability and season",         code:"LONGSTAY7",   cta:"Ask for Rate",    style:"copper",    image:"/static/img/hotel-hero.jpg",   selected:true},
+    {title:"Long Stay Advantage",        badge:"7+ Nights",          desc:"Stay 7 nights or more and unlock a stronger long-stay rate.",                        terms:"Best for project stays and extended visits \u2022 Subject to room availability and season",         code:"LONGSTAY7",   cta:"Ask for Rate",    style:"copper",    image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}",   selected:true},
     {title:"Early Bird Saver",           badge:"Advance Booking",    desc:"Book early and receive 10% off eligible future stays.",                              terms:"Advance purchase offer \u2022 Good for planned travel \u2022 Non-peak blackout dates may apply",    code:"EARLY10",     cta:"Reserve Early",   style:"champagne", image:"",                             selected:true},
-    {title:"LINE Exclusive Deal",        badge:"Direct Message",     desc:"Message the hotel on LINE and receive a special direct-booking offer.",               terms:"For LINE enquiries only \u2022 Good for fast confirmation flow",                                    code:"LINEBEST",    cta:"Message on LINE", style:"ember",     image:"/static/img/hotel-lobby.jpg",  selected:false},
+    {title:"LINE Exclusive Deal",        badge:"Direct Message",     desc:"Message the hotel on LINE and receive a special direct-booking offer.",               terms:"For LINE enquiries only \u2022 Good for fast confirmation flow",                                    code:"LINEBEST",    cta:"Message on LINE", style:"ember",     image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}",  selected:false},
     {title:"Call & Confirm Special",     badge:"Fastest Route",      desc:"Call directly and receive a same-day booking benefit when available.",              terms:"Best for urgent stays \u2022 Rate and perk depend on live availability",                            code:"CALLFAST",    cta:"Call to Book",    style:"copper",    image:"",                             selected:false},
-    {title:"Free Late Check-Out",        badge:"Value Add",          desc:"Book direct and enjoy free late check-out subject to availability.",                 terms:"Availability-based benefit \u2022 Great for leisure guests \u2022 Not valid with every rate plan", code:"LATEOUT",     cta:"Claim Perk",      style:"champagne", image:"/static/img/hotel-flower.jpg", selected:false},
+    {title:"Free Late Check-Out",        badge:"Value Add",          desc:"Book direct and enjoy free late check-out subject to availability.",                 terms:"Availability-based benefit \u2022 Great for leisure guests \u2022 Not valid with every rate plan", code:"LATEOUT",     cta:"Claim Perk",      style:"champagne", image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}", selected:false},
     {title:"Free Room Upgrade Request",  badge:"Subject to Availability", desc:"Book direct and request a complimentary room upgrade when possible.",          terms:"Upgrade not guaranteed \u2022 Strong perceived value without always discounting rate",              code:"UPGRADEME",   cta:"Request Upgrade", style:"ember",     image:"",                             selected:false},
-    {title:"Direct Booking Best Value",  badge:"Signature Offer",    desc:"Best-value direct package: rate support plus priority confirmation for direct guests.",terms:"Strong evergreen website banner offer \u2022 Easy to rotate by channel or season",              code:"BESTDIRECT",  cta:"Unlock Offer",    style:"copper",    image:"/static/img/hotel-hero.jpg",   selected:false}
+    {title:"Direct Booking Best Value",  badge:"Signature Offer",    desc:"Best-value direct package: rate support plus priority confirmation for direct guests.",terms:"Strong evergreen website banner offer \u2022 Easy to rotate by channel or season",              code:"BESTDIRECT",  cta:"Unlock Offer",    style:"copper",    image:"{{ url_for('static', filename='branding/sandbox-hotel-logo-512.webp') }}",   selected:false}
   ];
 
   const THEMES = {
@@ -683,6 +689,7 @@
     const t = theme(coupon);
     if(mode==='screen') return `
       <article class="coupon-preview" data-badge="${esc(coupon.badge||'')}" style="--local-bg:${t.bg};--local-bar:${t.bar};--local-badge-bg:${t.badgeBg};--local-badge-border:${t.badgeBorder}">
+        <div class="coupon-logo"><img src="{{ url_for('static', filename='branding/sandbox-hotel-logo-256.webp') }}" alt="logo"></div>
         <div class="coupon-img">${imgMarkup(coupon,'screen')}</div>
         <div class="coupon-main">
           <h3 class="coupon-title">${esc(coupon.title)}</h3>
