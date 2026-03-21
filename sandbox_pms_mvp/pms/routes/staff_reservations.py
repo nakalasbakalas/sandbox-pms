@@ -150,6 +150,7 @@ def staff_reservations():
         booking_sources=BOOKING_SOURCE_CHANNELS,
         review_statuses=REVIEW_QUEUE_STATUSES,
         today=date.today(),
+        tomorrow=date.today() + timedelta(days=1),
         can_folio=can("folio.view"),
     )
 

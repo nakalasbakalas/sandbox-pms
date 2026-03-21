@@ -25,6 +25,7 @@ from ..pricing import money
 from .cashier_service import folio_summary
 from .front_desk_service import FrontDeskFilters, list_front_desk_arrivals, list_front_desk_departures, list_front_desk_in_house
 from .housekeeping_service import HousekeepingBoardFilters, list_housekeeping_board
+from .reporting_reports import revenue_management_report
 from .staff_reservations_service import build_reservation_summary, reservation_attribution_summary
 
 
@@ -161,11 +162,7 @@ def build_manager_dashboard(
     if include_financials:
         dashboard["folio_balances"] = folio_balances_outstanding_report(date_from, date_to)
         dashboard["revenue_summary"] = revenue_summary_report(date_from, date_to)
-        dashboard["revenue_management"] = revenue_management_dashboard_report(
-            business_date=business_date,
-            date_from=date_from,
-            date_to=date_to,
-        )
+        dashboard["revenue_management"] = revenue_management_report(date_from, date_to)
     if include_payments:
         dashboard["deposit_pipeline"] = deposit_requested_vs_paid_report(date_from, date_to)
     if include_audit:
