@@ -29,14 +29,14 @@
     <div class="board-days-tabs" role="group" aria-label="Day range">
       {% for opt in board.day_options %}
       <a class="board-days-tab{% if filters.days == opt %} active{% endif %}"
-         href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.start_date.isoformat(), days=opt, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}"
+         href="{{ url_for('staff_front_desk_board', start_date=board.start_date.isoformat(), days=opt, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, group_by='floor' if filters.group_by == 'floor' else None) }}"
          aria-current="{{ 'page' if filters.days == opt else 'false' }}">{{ opt }}d</a>
       {% endfor %}
     </div>
     <div class="planning-board-nav-actions">
-      <a class="board-nav-btn" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Previous period" aria-label="Previous period">&lsaquo;</a>
-      <a class="board-nav-btn today" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Today</a>
-      <a class="board-nav-btn" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
+      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.prev_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, group_by='floor' if filters.group_by == 'floor' else None) }}" title="Previous period" aria-label="Previous period">&lsaquo;</a>
+      <a class="board-nav-btn today" href="{{ url_for('staff_front_desk_board', start_date=board.today.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, group_by='floor' if filters.group_by == 'floor' else None) }}">Today</a>
+      <a class="board-nav-btn" href="{{ url_for('staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, group_by='floor' if filters.group_by == 'floor' else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
     </div>
     {% if can_create %}
     <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservations.staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
@@ -65,6 +65,7 @@
       <select name="room_type_id" aria-label="Room type" title="Room type"><option value="">All types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }}</option>{% endfor %}</select>
       <select name="show_unallocated" aria-label="Unallocated lane" title="Unallocated"><option value="1" {% if filters.show_unallocated %}selected{% endif %}>Unalloc ✓</option><option value="0" {% if not filters.show_unallocated %}selected{% endif %}>Unalloc ✗</option></select>
       <select name="show_closed" aria-label="Operational bars" title="Closures"><option value="0" {% if not filters.show_closed %}selected{% endif %}>Closures ✗</option><option value="1" {% if filters.show_closed %}selected{% endif %}>Closures ✓</option></select>
+      <select name="group_by" aria-label="Group by" title="Group rooms by"><option value="type" {% if filters.group_by == 'type' %}selected{% endif %}>By type</option><option value="floor" {% if filters.group_by == 'floor' %}selected{% endif %}>By floor</option></select>
       <button class="board-apply-btn" type="submit">Apply</button>
     </form>
 
@@ -76,6 +77,15 @@
       <input type="hidden" name="show_closed" value="{{ '1' if filters.show_closed else '0' }}">
       <input type="text" name="q" value="{{ filters.q }}" placeholder="Search guest, code, room…" aria-label="Search">
     </form>
+
+    <div class="board-quick-filters" role="group" aria-label="Quick room filters" data-quick-filters>
+      <span class="bqf-label">Filter:</span>
+      <button type="button" class="bqf-chip" data-filter="dirty" aria-pressed="false">Dirty</button>
+      <button type="button" class="bqf-chip" data-filter="vacant" aria-pressed="false">Vacant</button>
+      <button type="button" class="bqf-chip" data-filter="arrival" aria-pressed="false">Arrivals</button>
+      <button type="button" class="bqf-chip" data-filter="departure" aria-pressed="false">Departures</button>
+      <button type="button" class="bqf-chip" data-filter="maintenance" aria-pressed="false">Maint.</button>
+    </div>
 
     <fieldset class="planning-board-density-toggle" data-density-toggle>
       <legend class="sr-only">Layout density</legend>
@@ -174,7 +184,10 @@
               {% endif %}
             </form>
           </details>
-          <a class="board-overflow-item" href="{{ url_for('front_desk.staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
+          <button class="board-overflow-item" type="button" data-action="open-stats-panel">Board stats</button>
+          <button class="board-overflow-item" type="button" onclick="window.print()">Print view</button>
+          <hr style="border-color:var(--border);margin:4px 0;">
+          <a class="board-overflow-item" href="{{ url_for('staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
         </div>
       </details>
     </div>
@@ -186,6 +199,15 @@
 <div id="front-desk-board-surface" aria-busy="false">
   {% include '_front_desk_board_surface.html' %}
 </div>
+
+<button
+  id="board-today-indicator"
+  class="board-today-indicator hidden"
+  type="button"
+  aria-label="Jump to today's column"
+  title="Jump to today"
+  hidden
+>Today ↓</button>
 
 <div id="board-side-panel" class="board-side-panel hidden" role="dialog" aria-modal="true" aria-labelledby="board-panel-title" aria-hidden="true">
   <div class="panel-header">

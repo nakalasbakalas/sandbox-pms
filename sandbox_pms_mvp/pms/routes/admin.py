@@ -40,7 +40,6 @@ from ..pricing import get_setting_value
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from ..services.admin_service import (
     BlackoutPayload,
-    BookingExtraPayload,
     InventoryOverridePayload,
     NotificationTemplatePayload,
     PolicyPayload,
@@ -48,13 +47,11 @@ from ..services.admin_service import (
     RoomPayload,
     RoomTypePayload,
     create_inventory_override,
-    policy_documents_context,
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
     update_role_permissions,
     upsert_blackout_period,
-    upsert_booking_extra,
     upsert_notification_template,
     upsert_policy_document,
     upsert_rate_rule,
@@ -63,24 +60,29 @@ from ..services.admin_service import (
     upsert_setting,
     upsert_settings_bundle,
 )
+from ..services.admin_content_ops import policy_documents_context
 from ..services.auth_service import (
     admin_disable_mfa,
     admin_issue_password_reset,
     create_staff_user,
     update_staff_user,
 )
-from ..services.communication_service import (
+from ..services.communication_dispatch import (
     communication_settings_context,
     dispatch_notification_deliveries,
-    housekeeping_defaults_context,
-    payment_settings_context,
-    property_settings_context,
     query_notification_history,
     send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
+from ..services.admin_settings_ops import (
+    housekeeping_defaults_context,
+    payment_settings_context,
+    property_settings_context,
+)
 from ..services.extras_service import (
+    BookingExtraPayload,
     list_booking_extras,
+    upsert_booking_extra,
 )
 from ..services.pre_checkin_service import (
     fire_pre_checkin_not_completed_events,
