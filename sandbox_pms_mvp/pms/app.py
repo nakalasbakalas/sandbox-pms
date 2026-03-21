@@ -2,6 +2,7 @@
 
 import hmac
 import json
+import logging
 import secrets
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -9,6 +10,8 @@ from time import perf_counter
 from urllib.parse import urlparse
 from urllib.parse import urlencode
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 import sqlalchemy as sa
 import click
@@ -4800,31 +4803,6 @@ def rotate_csrf_token() -> str:
     token = secrets.token_urlsafe(32)
     session["_csrf_token"] = token
     return token
-
-
-def validate_csrf_request() -> None:
-    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-        return
-    if request.endpoint in {
-        None,
-        "static",
-        "payment_webhook",
-        "pre_checkin_save",
-        "pre_checkin_upload",
-        "staff_messaging_inbound_webhook",
-        "integration_scanner_capture",
-        "integration_pos_charge",
-        # Blueprint-prefixed equivalents
-        "public.payment_webhook",
-        "public.pre_checkin_save",
-        "public.pre_checkin_upload",
-        "messaging.staff_messaging_inbound_webhook",
-    }:
-        return
-    expected = session.get("_csrf_token")
-    provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
-    if not expected or not provided or not hmac.compare_digest(expected, provided):
-        abort(400, description="CSRF validation failed.")
 
 
 def integration_shared_token(name: str) -> str:

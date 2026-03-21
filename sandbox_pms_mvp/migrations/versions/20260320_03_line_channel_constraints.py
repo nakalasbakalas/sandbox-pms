@@ -16,48 +16,23 @@ depends_on = None
 OLD_CHANNELS = "'email','sms','whatsapp','internal_note','manual_call_log','ota_message'"
 NEW_CHANNELS = "'email','sms','line','whatsapp','internal_note','manual_call_log','ota_message'"
 
+_TABLES = ("conversation_threads", "messages", "message_templates")
+
+
+def _swap_constraints(channel_list):
+    for table in _TABLES:
+        constraint = f"ck_{table}_channel"
+        with op.batch_alter_table(table, recreate="auto") as batch_op:
+            batch_op.drop_constraint(constraint, type_="check")
+            batch_op.create_check_constraint(
+                constraint,
+                f"channel IN ({channel_list})",
+            )
+
 
 def upgrade():
-    with op.batch_alter_table("conversation_threads", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_conversation_threads_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_conversation_threads_channel",
-            f"channel IN ({NEW_CHANNELS})",
-        )
-
-    with op.batch_alter_table("messages", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_messages_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_messages_channel",
-            f"channel IN ({NEW_CHANNELS})",
-        )
-
-    with op.batch_alter_table("message_templates", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_message_templates_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_message_templates_channel",
-            f"channel IN ({NEW_CHANNELS})",
-        )
+    _swap_constraints(NEW_CHANNELS)
 
 
 def downgrade():
-    with op.batch_alter_table("message_templates", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_message_templates_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_message_templates_channel",
-            f"channel IN ({OLD_CHANNELS})",
-        )
-
-    with op.batch_alter_table("messages", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_messages_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_messages_channel",
-            f"channel IN ({OLD_CHANNELS})",
-        )
-
-    with op.batch_alter_table("conversation_threads", recreate="always") as batch_op:
-        batch_op.drop_constraint("ck_conversation_threads_channel", type_="check")
-        batch_op.create_check_constraint(
-            "ck_conversation_threads_channel",
-            f"channel IN ({OLD_CHANNELS})",
-        )
+    _swap_constraints(OLD_CHANNELS)
