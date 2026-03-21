@@ -429,6 +429,10 @@ class ExpediaChannelProvider(ConfiguredPushChannelProvider):
     provider_key_name = "expedia"
 
 
+class AgodaChannelProvider(ConfiguredPushChannelProvider):
+    provider_key_name = "agoda"
+
+
 # ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
@@ -436,8 +440,10 @@ class ExpediaChannelProvider(ConfiguredPushChannelProvider):
 PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
+    "webhook": WebhookChannelProvider,
     "booking_com": BookingComChannelProvider,
     "expedia": ExpediaChannelProvider,
+    "agoda": AgodaChannelProvider,
 }
 
 

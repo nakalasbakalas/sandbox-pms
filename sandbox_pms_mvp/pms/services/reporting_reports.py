@@ -930,6 +930,7 @@ def revenue_management_report(date_from: date, date_to: date, *, limit: int = 14
         "channel_items": channel["items"],
         "room_type_items": room_type_rows[:5],
         "items": daily_rows[:limit],
+        "rows": daily_rows,
     }
 
 
