@@ -612,6 +612,149 @@
       </div>
     </article>
   </section>
+
+  <section class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Revenue management</h2>
+        <p>{{ dashboard.definitions.revenue_management }}</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='revenue_management', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open revenue report</a>
+    </div>
+    <div class="metric-strip">
+      <div><small>Occupancy</small><strong>{{ '%.2f'|format(dashboard.revenue_management.occupancy_percentage) }}%</strong></div>
+      <div><small>ADR</small><strong>{{ dashboard.revenue_management.adr | money }}</strong></div>
+      <div><small>RevPAR</small><strong>{{ dashboard.revenue_management.revpar | money }}</strong></div>
+      <div><small>Room revenue</small><strong>{{ dashboard.revenue_management.room_revenue_total | money }}</strong></div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Sold nights</small><strong>{{ dashboard.revenue_management.sold_room_nights }}</strong></div>
+      <div><small>Available room nights</small><strong>{{ dashboard.revenue_management.available_room_nights }}</strong></div>
+      <div><small>Best pacing day</small><strong>{% if dashboard.revenue_management.best_day %}{{ dashboard.revenue_management.best_day.date.strftime('%d %b') }}{% else %}n/a{% endif %}</strong></div>
+      <div><small>Softest day</small><strong>{% if dashboard.revenue_management.softest_day %}{{ dashboard.revenue_management.softest_day.date.strftime('%d %b') }}{% else %}n/a{% endif %}</strong></div>
+    </div>
+    <p class="small muted">{{ dashboard.revenue_management.forecast_note }}</p>
+    <div class="grid two report-subgrid">
+      <div>
+        <h3>Daily pacing</h3>
+        {% if dashboard.revenue_management["items"] %}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Occ %</th>
+                  <th>Sold nights</th>
+                  <th>Room revenue</th>
+                  <th>ADR</th>
+                  <th>RevPAR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.revenue_management["items"] %}
+                  <tr>
+                    <td>{{ item.date.strftime('%d %b %Y') }}</td>
+                    <td>{{ '%.2f'|format(item.occupancy_percentage) }}%</td>
+                    <td>{{ item.sold_nights }}</td>
+                    <td>{{ item.room_revenue_total | money }}</td>
+                    <td>{{ item.adr | money }}</td>
+                    <td>{{ item.revpar | money }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="empty-state">No posted revenue pacing data inside the selected range.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h3>Room type mix</h3>
+        {% if dashboard.revenue_management.room_type_items %}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Room type</th>
+                  <th>Sold nights</th>
+                  <th>ADR</th>
+                  <th>Room revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.revenue_management.room_type_items %}
+                  <tr>
+                    <td>{{ item.room_type_code }} · {{ item.room_type_name }}</td>
+                    <td>{{ item.sold_nights }}</td>
+                    <td>{{ item.adr | money }}</td>
+                    <td>{{ item.room_revenue_total | money }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="empty-state">No room-type revenue mix is available in the selected range.</p>
+        {% endif %}
+        {% if dashboard.revenue_management.top_channel %}
+          <div class="report-summary-list">
+            <div><span>Top channel</span><strong>{{ dashboard.revenue_management.top_channel.source_label }}</strong></div>
+            <div><span>Channel ADR</span><strong>{{ dashboard.revenue_management.top_channel.adr | money }}</strong></div>
+            <div><span>Channel room revenue</span><strong>{{ dashboard.revenue_management.top_channel.room_revenue_total | money }}</strong></div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+{% endif %}
+
+{% if can_folio and dashboard.revenue_management %}
+  <section class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Revenue management</h2>
+        <p>{{ dashboard.definitions.revenue_management }}</p>
+      </div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Projected room revenue</small><strong>{{ dashboard.revenue_management.total_projected_room_revenue | money }}</strong></div>
+      <div><small>Actual room revenue</small><strong>{{ dashboard.revenue_management.total_actual_room_revenue | money }}</strong></div>
+      <div><small>Forecast remainder</small><strong>{{ dashboard.revenue_management.forecast_room_revenue | money }}</strong></div>
+      <div><small>Avg ADR</small><strong>{{ dashboard.revenue_management.average_adr | money }}</strong></div>
+      <div><small>Avg RevPAR</small><strong>{{ dashboard.revenue_management.average_revpar | money }}</strong></div>
+      <div><small>Occupied nights</small><strong>{{ dashboard.revenue_management.occupied_room_nights }}</strong></div>
+    </div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Pace</th>
+            <th>Occ %</th>
+            <th>Projected revenue</th>
+            <th>ADR</th>
+            <th>RevPAR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.revenue_management.rows %}
+            <tr>
+              <td>{{ item.date.strftime('%d %b %Y') }}</td>
+              <td><span class="status {{ 'confirmed' if item.pace_label == 'actual' else 'pending' }}">{{ item.pace_label }}</span></td>
+              <td>{{ item.occupancy_percentage }}%</td>
+              <td>{{ item.projected_room_revenue | money }}</td>
+              <td>{{ item.adr | money }}</td>
+              <td>{{ item.revpar | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="metric-strip" style="margin-top:1rem;">
+      <div><small>Peak ADR</small><strong>{% if dashboard.revenue_management.peak_adr %}{{ dashboard.revenue_management.peak_adr.adr | money }} on {{ dashboard.revenue_management.peak_adr.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
+      <div><small>Peak RevPAR</small><strong>{% if dashboard.revenue_management.peak_revpar %}{{ dashboard.revenue_management.peak_revpar.revpar | money }} on {{ dashboard.revenue_management.peak_revpar.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
+    </div>
+  </section>
 {% endif %}
 
 {% if can_payments %}

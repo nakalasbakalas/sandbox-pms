@@ -284,7 +284,6 @@ See `.env.example` for the full list.  Key reservation-related settings:
 | `INVENTORY_BOOTSTRAP_DAYS` | Days of inventory to pre-create (default: 730) |
 | `ICAL_SYNC_HTTP_TIMEOUT_SECONDS` | Timeout for OTA feed fetch (default: 15) |
 | `PAYMENT_PROVIDER` | Payment provider (`stripe`, `disabled`) |
-| `FEATURE_BOARD_V2` | Enable enhanced planning board |
 
 ### AppSetting Keys (Database)
 

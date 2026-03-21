@@ -22,12 +22,12 @@ Adding a new provider
 from __future__ import annotations
 
 import json
+import uuid
 import urllib.error
 import urllib.request
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -37,15 +37,16 @@ from flask import current_app
 from ..audit import write_audit_log
 from ..extensions import db
 from ..models import (
-    AppSetting,
     ExternalCalendarBlock,
     ExternalCalendarSource,
     ExternalCalendarSyncRun,
-    OtaChannel,
+    InventoryDay,
     Reservation,
+    Room,
     RoomType,
     utc_now,
 )
+from ..pricing import get_setting_value, money, quote_reservation
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +298,18 @@ class WebhookChannelProvider(ChannelProvider):
                     errors=[] if success else [body[:200] or f"Webhook returned {getattr(response, 'status', 'unknown')}"],
                     details={"response": body[:200]},
                 )
+        except urllib.error.HTTPError as exc:
+            try:
+                error_body = exc.read(512).decode("utf-8", errors="ignore")
+            except Exception:
+                error_body = ""
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"HTTP {exc.code}: {error_body[:200] or str(exc)}"],
+                details={"status": exc.code, "response": error_body[:200]},
+            )
         except urllib.error.URLError as exc:
             return SyncResult(
                 provider=self.provider_key,
@@ -310,89 +323,110 @@ class WebhookChannelProvider(ChannelProvider):
 
 
 # ---------------------------------------------------------------------------
-# API-key-backed OTA providers
+# Configurable API push providers
 # ---------------------------------------------------------------------------
 
 
-class _OtaApiProvider(ChannelProvider):
-    """Base for OTA providers backed by a persisted ``OtaChannel`` record.
+class ConfiguredPushChannelProvider(ChannelProvider):
+    """Outbound-only provider that posts normalized inventory payloads to a configured endpoint.
 
-    Concrete subclasses set ``provider_key_name``.  The provider is
-    *read-only* at provider level: credentials come from the database row
-    so that the admin panel is the single source of truth for API keys.
-
-    At this stage the provider:
-    - Reports its key / active status honestly.
-    - Returns ``success=False`` with a clear message when the API key is not
-      yet configured, instead of silently no-oping.
-    - Implements ``test_connection()`` which can be expanded once live API
-      access is available.
-
-    Pull reservations and push inventory are stubs that will be replaced
-    once the real OTA API client libraries are wired.
+    This intentionally does not hard-code a third-party OTA schema. Each provider
+    posts a stable JSON envelope to a hotel-configured integration endpoint so we
+    fail clearly until a real Booking.com / Expedia connector is wired.
     """
 
-    provider_key_name: str = ""
+    provider_key_name = ""
 
     @property
     def provider_key(self) -> str:
         return self.provider_key_name
 
-    def _channel_record(self) -> OtaChannel | None:
-        return db.session.execute(
-            sa.select(OtaChannel).where(
-                OtaChannel.provider_key == self.provider_key_name,
-                OtaChannel.deleted_at.is_(None),
-            )
-        ).scalar_one_or_none()
-
-    def _is_configured(self) -> bool:
-        record = self._channel_record()
-        return bool(record and record.api_key_encrypted)
-
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
-        if not self._is_configured():
-            return []
-        # Stub: real pull logic will be added once API keys are live.
         return []
 
     def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
-        if not self._is_configured():
+        endpoint = _channel_provider_setting(self.provider_key, "endpoint", "")
+        token = _channel_provider_setting(self.provider_key, "api_token", "")
+        account_id = _channel_provider_setting(self.provider_key, "account_id", "")
+        if not endpoint:
             return SyncResult(
                 provider=self.provider_key,
                 direction="outbound",
                 success=False,
-                errors=[f"{self.provider_key}: API key not configured. Add credentials in Admin → Channels."],
+                errors=[f"{self.provider_key} endpoint is not configured."],
             )
-        # Stub: real push logic will be added once API keys are live.
-        return SyncResult(
-            provider=self.provider_key,
-            direction="outbound",
-            success=True,
-            records_processed=len(updates),
-            details={"note": "Stub — live API push not yet implemented."},
+
+        payload = {
+            "provider": self.provider_key,
+            "generated_at": utc_now().isoformat(),
+            "account_id": account_id or None,
+            "updates": [
+                {
+                    "room_type_code": item.room_type_code,
+                    "date_from": item.date_from.isoformat(),
+                    "date_to": item.date_to.isoformat(),
+                    "available_count": item.available_count,
+                    "rate_amount": str(item.rate_amount) if item.rate_amount is not None else None,
+                    "currency": item.currency,
+                    "closed_to_arrival": item.closed_to_arrival,
+                    "closed_to_departure": item.closed_to_departure,
+                    "min_stay": item.min_stay,
+                }
+                for item in updates
+            ],
+        }
+        headers = {"Content-Type": "application/json", "User-Agent": "SandboxHotelPMS/1.0"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
         )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - endpoint is operator configured
+                body = response.read().decode("utf-8", errors="ignore")
+                details = {"http_status": response.status}
+                if body.strip():
+                    try:
+                        details["response"] = json.loads(body)
+                    except json.JSONDecodeError:
+                        details["response_text"] = body[:500]
+                return SyncResult(
+                    provider=self.provider_key,
+                    direction="outbound",
+                    success=200 <= response.status < 300,
+                    records_processed=len(updates),
+                    details=details,
+                )
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="ignore")
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"HTTP {exc.code}: {body[:240] or exc.reason}"],
+                details={"http_status": exc.code},
+            )
+        except urllib.error.URLError as exc:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[str(exc.reason or exc)],
+            )
 
     def test_connection(self) -> bool:
-        return self._is_configured()
+        return bool(_channel_provider_setting(self.provider_key, "endpoint", ""))
 
 
-class BookingComChannelProvider(_OtaApiProvider):
-    """Booking.com connectivity channel provider."""
-
+class BookingComChannelProvider(ConfiguredPushChannelProvider):
     provider_key_name = "booking_com"
 
 
-class ExpediaChannelProvider(_OtaApiProvider):
-    """Expedia connectivity channel provider."""
-
+class ExpediaChannelProvider(ConfiguredPushChannelProvider):
     provider_key_name = "expedia"
-
-
-class AgodaChannelProvider(_OtaApiProvider):
-    """Agoda connectivity channel provider."""
-
-    provider_key_name = "agoda"
 
 
 # ---------------------------------------------------------------------------
@@ -402,10 +436,8 @@ class AgodaChannelProvider(_OtaApiProvider):
 PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
-    "webhook": WebhookChannelProvider,
     "booking_com": BookingComChannelProvider,
     "expedia": ExpediaChannelProvider,
-    "agoda": AgodaChannelProvider,
 }
 
 
@@ -418,6 +450,78 @@ def get_provider(provider_key: str) -> ChannelProvider:
     if not cls:
         raise ValueError(f"Unknown channel provider: {provider_key!r}")
     return cls()
+
+
+def build_outbound_inventory_updates(
+    *,
+    date_from: date,
+    date_to: date,
+    room_type_id: uuid.UUID | None = None,
+) -> list[OutboundInventoryUpdate]:
+    room_type_query = RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc())
+    if room_type_id:
+        room_type_query = room_type_query.filter(RoomType.id == room_type_id)
+    room_types = room_type_query.all()
+    if not room_types:
+        return []
+
+    availability_query = (
+        db.session.query(
+            InventoryDay.business_date,
+            InventoryDay.room_type_id,
+            sa.func.count(InventoryDay.id),
+        )
+        .join(Room, Room.id == InventoryDay.room_id)
+        .filter(
+            InventoryDay.business_date >= date_from,
+            InventoryDay.business_date <= date_to,
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+            InventoryDay.is_blocked.is_(False),
+            InventoryDay.availability_status == "available",
+        )
+    )
+    if room_type_id:
+        availability_query = availability_query.filter(InventoryDay.room_type_id == room_type_id)
+    availability_counts = {
+        (business_date, inventory_room_type_id): int(available_count or 0)
+        for business_date, inventory_room_type_id, available_count in availability_query.group_by(
+            InventoryDay.business_date,
+            InventoryDay.room_type_id,
+        ).all()
+    }
+
+    updates: list[OutboundInventoryUpdate] = []
+    currency_code = str(get_setting_value("hotel.currency", "THB") or "THB")
+    for room_type in room_types:
+        current = date_from
+        while current <= date_to:
+            updates.append(
+                OutboundInventoryUpdate(
+                    room_type_code=room_type.code,
+                    date_from=current,
+                    date_to=current + timedelta(days=1),
+                    available_count=availability_counts.get((current, room_type.id), 0),
+                    rate_amount=_default_rate_for_room_type(room_type, current),
+                    currency=currency_code,
+                    closed_to_arrival=False,
+                    closed_to_departure=False,
+                )
+            )
+            current += timedelta(days=1)
+    return updates
+
+
+def provider_push_context() -> dict[str, dict[str, Any]]:
+    return {
+        provider_key: {
+            "configured": bool(_channel_provider_setting(provider_key, "endpoint", "")),
+            "endpoint": _channel_provider_setting(provider_key, "endpoint", ""),
+            "has_api_token": bool(_channel_provider_setting(provider_key, "api_token", "")),
+            "account_id": _channel_provider_setting(provider_key, "account_id", ""),
+        }
+        for provider_key in ("booking_com", "expedia")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -539,107 +643,16 @@ class ChannelSyncService:
         return self.provider.test_connection()
 
 
-# ---------------------------------------------------------------------------
-# OTA channel credential management
-# ---------------------------------------------------------------------------
-
-
-def upsert_ota_channel(
-    *,
-    provider_key: str,
-    display_name: str,
-    is_active: bool,
-    hotel_id: str | None = None,
-    endpoint_url: str | None = None,
-    api_key: str | None = None,
-    api_secret: str | None = None,
-    actor_user_id: uuid.UUID | None = None,
-) -> OtaChannel:
-    """Create or update an OtaChannel record.
-
-    Credentials are encrypted before storage.  Passing ``None`` for
-    ``api_key`` / ``api_secret`` leaves any previously stored encrypted value
-    unchanged so that a form submit that omits the key field does not clear
-    existing credentials.
-
-    Returns the persisted OtaChannel instance (not yet committed).
-    """
-    from .auth_service import encrypt_secret
-
-    record = get_ota_channel(provider_key)
-    is_create = record is None
-    if is_create:
-        record = OtaChannel(
-            provider_key=provider_key,
-            display_name=display_name,
-        )
-        db.session.add(record)
-    else:
-        record.display_name = display_name
-
-    record.is_active = is_active
-    record.hotel_id = hotel_id or None
-    record.endpoint_url = endpoint_url or None
-    record.updated_by_user_id = actor_user_id
-
-    if api_key:
-        record.api_key_encrypted = encrypt_secret(api_key)
-        record.api_key_hint = api_key[-4:] if len(api_key) >= 4 else api_key
-
-    if api_secret:
-        record.api_secret_encrypted = encrypt_secret(api_secret)
-        record.api_secret_hint = api_secret[-4:] if len(api_secret) >= 4 else api_secret
-
-    record.updated_at = utc_now()
-    write_audit_log(
-        actor_user_id=actor_user_id,
-        entity_table="ota_channels",
-        entity_id=provider_key,
-        action="create" if is_create else "update",
-        after_data={
-            "provider_key": provider_key,
-            "is_active": is_active,
-            "hotel_id": hotel_id,
-            "api_key_updated": bool(api_key),
-            "api_secret_updated": bool(api_secret),
-        },
+def _default_rate_for_room_type(room_type: RoomType, business_date: date) -> Decimal:
+    quote = quote_reservation(
+        room_type=room_type,
+        check_in_date=business_date,
+        check_out_date=business_date + timedelta(days=1),
+        adults=room_type.standard_occupancy,
+        children=0,
     )
-    return record
+    return money(quote.grand_total)
 
 
-def test_ota_channel_connection(
-    provider_key: str,
-    *,
-    actor_user_id: uuid.UUID | None = None,
-) -> dict[str, Any]:
-    """Test the connection for an OTA provider and persist the result.
-
-    Returns a dict with ``success`` (bool) and ``error`` (str or None).
-    """
-    record = get_ota_channel(provider_key)
-    if record is None:
-        return {"success": False, "error": "Channel not configured."}
-
-    try:
-        provider = get_provider(provider_key)
-        ok = provider.test_connection()
-        error: str | None = None
-    except Exception as exc:  # noqa: BLE001
-        ok = False
-        error = str(exc)
-
-    record.last_tested_at = utc_now()
-    record.last_test_ok = ok
-    record.last_test_error = error
-    record.updated_by_user_id = actor_user_id
-
-    write_audit_log(
-        actor_user_id=actor_user_id,
-        entity_table="ota_channels",
-        entity_id=str(record.id),
-        action="test",
-        after_data={"provider_key": provider_key, "success": ok, "error": error},
-    )
-    db.session.commit()
-    return {"success": ok, "error": error}
-
+def _channel_provider_setting(provider_key: str, field_name: str, default: str) -> str:
+    return str(get_setting_value(f"channel_push.{provider_key}.{field_name}", default) or default).strip()

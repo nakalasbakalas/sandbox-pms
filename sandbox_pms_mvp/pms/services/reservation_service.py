@@ -487,51 +487,58 @@ def promote_eligible_waitlist() -> dict:
             continue
 
         before_data = reservation_snapshot(reservation)
-        room_type = db.session.get(RoomType, reservation.room_type_id)
-        quote = quote_reservation(
-            room_type=room_type,
-            check_in_date=reservation.check_in_date,
-            check_out_date=reservation.check_out_date,
-            adults=reservation.adults + (reservation.extra_guests or 0),
-            children=reservation.children,
-        )
-
-        reservation.assigned_room_id = room.id
-        reservation.current_status = "confirmed"
-        reservation.updated_by_user_id = None
-        allocate_inventory(
-            reservation=reservation,
-            room=room,
-            nightly_rates=quote.nightly_rates,
-            actor_user_id=None,
-        )
-        db.session.add(
-            ReservationStatusHistory(
-                reservation_id=reservation.id,
-                old_status="waitlist",
-                new_status="confirmed",
-                reason="waitlist_auto_promotion",
-                note=f"Auto-promoted: room {room.room_number} became available",
-                changed_by_user_id=None,
+        try:
+            room_type = db.session.get(RoomType, reservation.room_type_id)
+            quote = quote_reservation(
+                room_type=room_type,
+                check_in_date=reservation.check_in_date,
+                check_out_date=reservation.check_out_date,
+                adults=reservation.adults + (reservation.extra_guests or 0),
+                children=reservation.children,
             )
-        )
-        write_audit_log(
-            actor_user_id=None,
-            entity_table="reservations",
-            entity_id=str(reservation.id),
-            action="update",
-            before_data=before_data,
-            after_data=reservation_snapshot(reservation),
-        )
+
+            reservation.assigned_room_id = room.id
+            reservation.current_status = "confirmed"
+            reservation.updated_by_user_id = None
+            allocate_inventory(
+                reservation=reservation,
+                room=room,
+                nightly_rates=quote.nightly_rates,
+                actor_user_id=None,
+            )
+            db.session.add(
+                ReservationStatusHistory(
+                    reservation_id=reservation.id,
+                    old_status="waitlist",
+                    new_status="confirmed",
+                    reason="waitlist_auto_promotion",
+                    note=f"Auto-promoted: room {room.room_number} became available",
+                    changed_by_user_id=None,
+                )
+            )
+            write_audit_log(
+                actor_user_id=None,
+                entity_table="reservations",
+                entity_id=str(reservation.id),
+                action="update",
+                before_data=before_data,
+                after_data=reservation_snapshot(reservation),
+            )
+            db.session.commit()
+        except Exception:
+            _log.exception(
+                "Failed to promote waitlisted reservation %s",
+                reservation.reservation_code,
+            )
+            db.session.rollback()
+            skipped += 1
+            continue
         promoted += 1
         _log.info(
             "Waitlist promoted: %s → confirmed (room %s)",
             reservation.reservation_code,
             room.room_number,
         )
-
-    if promoted:
-        db.session.commit()
 
     return {"promoted": promoted, "skipped": skipped}
 

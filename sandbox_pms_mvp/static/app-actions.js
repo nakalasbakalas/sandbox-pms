@@ -9,7 +9,11 @@ document.addEventListener("click", function (event) {
 document.addEventListener("change", function (event) {
   var autoSubmitField = event.target.closest("[data-auto-submit]");
   if (autoSubmitField && autoSubmitField.form) {
-    autoSubmitField.form.requestSubmit();
+    if (typeof autoSubmitField.form.requestSubmit === "function") {
+      autoSubmitField.form.requestSubmit();
+    } else {
+      autoSubmitField.form.submit();
+    }
     return;
   }
 

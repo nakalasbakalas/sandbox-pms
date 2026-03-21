@@ -37,7 +37,7 @@ from pms.services.housekeeping_service import (
     update_housekeeping_status,
 )
 from pms.services.payment_integration_service import create_or_reuse_deposit_request
-from pms.services.reporting_service import build_daily_report, build_front_desk_dashboard
+from pms.services.reporting_service import build_daily_report, build_front_desk_dashboard, build_manager_dashboard
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
 from pms.services.staff_reservations_service import cancel_reservation_workspace
 
@@ -356,6 +356,24 @@ def test_daily_report_channel_performance_returns_channel_metrics(app_factory):
         assert report["data"]["items"]
 
 
+def test_daily_report_revenue_management_returns_revpar_and_daily_pacing(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    with app.app_context():
+        dataset = build_dashboard_dataset()
+        report = build_daily_report(
+            report_type="revenue_management",
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"] + timedelta(days=1),
+        )
+
+        assert report["report_type"] == "revenue_management"
+        assert report["data"]["room_revenue_total"] > Decimal("0.00")
+        assert report["data"]["adr"] > Decimal("0.00")
+        assert report["data"]["revpar"] > Decimal("0.00")
+        assert report["data"]["items"]
+
+
 def test_daily_report_housekeeping_performance_returns_attendant_metrics(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     with app.app_context():
@@ -494,6 +512,52 @@ def test_staff_dashboard_renders_for_manager_with_all_sections(app_factory):
     assert b"Outstanding balances" in response.data
 
 
+def test_manager_dashboard_includes_revenue_management_trends(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        dataset = build_dashboard_dataset()
+        ensure_room_charges_posted(
+            dataset["in_house"].id,
+            through_date=dataset["today"],
+            actor_user_id=dataset["manager"].id,
+        )
+        future_reservation = mark_confirmed(
+            create_staff_reservation(
+                first_name="Forecast",
+                last_name="Guest",
+                phone="+66830019999",
+                room_type_code="DBL",
+                check_in_date=dataset["today"] + timedelta(days=1),
+                check_out_date=dataset["today"] + timedelta(days=3),
+                source_channel="booking_engine",
+            )
+        )
+        dashboard = build_manager_dashboard(
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"] + timedelta(days=2),
+            include_housekeeping=False,
+            include_payments=False,
+            include_audit=False,
+        )
+
+        revenue = dashboard["revenue_management"]
+        assert len(revenue["rows"]) == 3
+        assert revenue["total_actual_room_revenue"] > Decimal("0.00")
+        assert revenue["total_projected_room_revenue"] >= revenue["total_actual_room_revenue"]
+        assert revenue["average_adr"] >= Decimal("0.00")
+        assert revenue["average_revpar"] >= Decimal("0.00")
+        assert any(row["pace_label"] in {"posted", "forecast"} for row in revenue["rows"])
+        assert any(row["date"] == future_reservation.check_in_date for row in revenue["rows"])
+
+    login_as(client, dataset["manager"])
+    response = client.get("/staff/reports?preset=next_7_days")
+    assert response.status_code == 200
+    assert b"Revenue management" in response.data
+    assert b"RevPAR" in response.data
+
+
 def test_daily_report_routes_render_for_authorized_users(app_factory):
     app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
     client = app.test_client()
@@ -503,7 +567,7 @@ def test_daily_report_routes_render_for_authorized_users(app_factory):
     login_as(client, dataset["manager"])
 
     # Test each report type
-    for report_type in ["arrivals", "departures", "room_status", "payment_due", "housekeeping_performance", "occupancy", "channel_performance", "booking_source", "no_show_cancellation"]:
+    for report_type in ["arrivals", "departures", "room_status", "payment_due", "housekeeping_performance", "occupancy", "revenue_management", "channel_performance", "booking_source", "no_show_cancellation"]:
         response = client.get(f"/staff/daily-reports/{report_type}")
         assert response.status_code == 200, f"Report {report_type} failed with {response.status_code}"
         assert b"Daily Report" in response.data

@@ -948,6 +948,121 @@
     surface.addEventListener("pointerdown", onSurfacePointerDown);
   }
 
+  // ── Quick filter chips ──
+  const quickFiltersEl = document.querySelector("[data-quick-filters]");
+  if (quickFiltersEl) {
+    const activeFilters = new Set();
+
+    function matchFilter(filterName, track) {
+      const hk = track.dataset.hkStatus || "";
+      switch (filterName) {
+        case "dirty": return hk.includes("dirty");
+        case "vacant": return track.dataset.isVacant === "true";
+        case "arrival": return track.dataset.hasArrivalToday === "true";
+        case "departure": return track.dataset.hasDepartureToday === "true";
+        case "maintenance": return track.dataset.isMaintenance === "true";
+        default: return true;
+      }
+    }
+
+    function applyQuickFilters() {
+      const tracks = surface.querySelectorAll("[data-board-track]");
+      tracks.forEach((track) => {
+        if (track.dataset.laneKind === "unallocated") return;
+        const matches = activeFilters.size === 0 || [...activeFilters].some((f) => matchFilter(f, track));
+        track.hidden = !matches;
+        const prev = track.previousElementSibling;
+        if (prev && prev.classList.contains("planning-board-room") && !prev.classList.contains("heading")) {
+          prev.hidden = !matches;
+        }
+      });
+    }
+
+    quickFiltersEl.addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-filter]");
+      if (!chip) return;
+      const filter = chip.dataset.filter;
+      if (activeFilters.has(filter)) {
+        activeFilters.delete(filter);
+        chip.setAttribute("aria-pressed", "false");
+        chip.classList.remove("active");
+      } else {
+        activeFilters.add(filter);
+        chip.setAttribute("aria-pressed", "true");
+        chip.classList.add("active");
+      }
+      applyQuickFilters();
+    });
+  }
+
+  // ── Sticky today indicator ──
+  const todayIndicator = document.getElementById("board-today-indicator");
+  if (todayIndicator) {
+    const todayHeader = surface.querySelector(".planning-board-day.today");
+    if (todayHeader) {
+      const todayObserver = new IntersectionObserver(
+        (entries) => {
+          const visible = entries[0].isIntersecting;
+          todayIndicator.hidden = visible;
+          todayIndicator.classList.toggle("hidden", visible);
+        },
+        { threshold: 0.1 }
+      );
+      todayObserver.observe(todayHeader);
+      todayIndicator.addEventListener("click", () => {
+        const desktop = document.querySelector(".planning-board-desktop");
+        if (!desktop) return;
+        const gridEl = desktop.querySelector(".planning-board-grid");
+        if (!gridEl) return;
+        const todayCol = gridEl.querySelector(".planning-board-day.today");
+        if (!todayCol) return;
+        const containerRect = desktop.getBoundingClientRect();
+        const colRect = todayCol.getBoundingClientRect();
+        desktop.scrollTo({
+          left: desktop.scrollLeft + colRect.left - containerRect.left - 60,
+          behavior: "smooth",
+        });
+      });
+      todayIndicator.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          todayIndicator.click();
+        }
+      });
+    }
+  }
+
+  // ── Occupancy heatmap classes on day headers ──
+  const OCC_HIGH_THRESHOLD = 90;
+  const OCC_MEDIUM_THRESHOLD = 70;
+  surface.querySelectorAll(".planning-board-day[data-occupancy-pct]").forEach((dayEl) => {
+    const pct = parseInt(dayEl.dataset.occupancyPct || "0", 10);
+    if (pct >= OCC_HIGH_THRESHOLD) dayEl.classList.add("occ-high");
+    else if (pct >= OCC_MEDIUM_THRESHOLD) dayEl.classList.add("occ-medium");
+    else if (pct > 0) dayEl.classList.add("occ-low");
+  });
+
+  // ── Stats panel trigger ──
+  const statsBtn = document.querySelector("[data-action='open-stats-panel']");
+  if (statsBtn) {
+    statsBtn.addEventListener("click", () => {
+      panelTitle.textContent = "Board Stats";
+      setBusyState(true);
+      const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
+      target.search = window.location.search;
+      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+        .then((r) => r.ok ? r.text() : Promise.reject())
+        .then((html) => {
+          panelContent.innerHTML = html;
+          panelEl.classList.remove("hidden");
+          panelEl.setAttribute("aria-hidden", "false");
+          panelCloseBtn.focus();
+        })
+        .catch(() => setFeedback("Stats unavailable.", "error"))
+        .finally(() => setBusyState(false));
+    });
+  }
+
   // Side panel for reservation details
   const panelEl = document.getElementById("board-side-panel");
   const panelTitle = document.querySelector("[data-panel-title]");
@@ -1156,12 +1271,20 @@
           performCheckOut();
         }
         break;
+      case "i":
+      case "I":
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          statsBtn && statsBtn.click();
+        }
+        break;
       default:
         break;
     }
   });
 
   function openSearchPanel() {
+    const searchInput = root.querySelector(".planning-board-search-inline input[name='q']");
     if (searchInput) {
       searchInput.focus();
       searchInput.select();
@@ -1183,6 +1306,7 @@
         <li><kbd>A</kbd> : Assign unallocated</li>
         <li><kbd>C</kbd> : Check-in selected</li>
         <li><kbd>O</kbd> : Check-out selected</li>
+        <li><kbd>Ctrl+I</kbd> : Board stats drawer</li>
       </ul>
     `;
     setFeedback(helpContent, "neutral", { allowHtml: true });

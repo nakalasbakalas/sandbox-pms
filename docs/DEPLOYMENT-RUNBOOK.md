@@ -80,6 +80,27 @@ The Render Blueprint wires the recurring CLI jobs that should not depend on a hu
 - `pms-cleanup-audit-logs`
 - `pms-auto-cancel-no-shows`
 
+## Live Render Verification
+
+The repo now defines the storage mount, `/health` check, and all recurring cron jobs. Before calling the deployment production-ready, verify these on the live Render project:
+
+1. Open the Render dashboard and confirm the web service has the persistent disk mounted at `/var/data/uploads/documents`.
+2. Visit `/health` on the deployed service and confirm it returns `db: "ok"` with `within_sla: true`.
+3. Upload a test reservation document, restart the web service, and confirm the document still downloads afterward.
+4. Check each cron service (`pms-process-*`, reminder jobs, waitlist, audit cleanup, and no-show handling) for a successful recent run in Render logs/metrics.
+5. Open the front-desk planning board in two staff sessions and confirm the 10-second polling refresh stays comfortably under 1 second per `board/fragment` refresh under normal load.
+6. If polling starts to overlap with heavy mutation traffic, slow the poll interval or add a lighter-weight delta transport before increasing concurrency.
+7. Provision `SENTRY_DSN`, trigger a controlled test exception, and confirm one event lands in Sentry with request context before marking monitoring complete.
+
+## Beta Defaults
+
+Treat these as the default launch posture unless stakeholders explicitly require more before beta:
+
+- report exports: HTML plus CSV
+- outbound guest messaging: webhook-backed adapters plus the existing `sms` / `line` / `whatsapp` / `webhook` registry
+- storage: Render disk by default, or S3/R2 only when credentials and bucket policy are fully provisioned
+- revenue reporting: current posted-revenue pacing, ADR, RevPAR, and occupancy views; not a forecasting engine
+
 ## Payment Provider Registration
 
 Register guest-facing payment URLs against the booking origin:

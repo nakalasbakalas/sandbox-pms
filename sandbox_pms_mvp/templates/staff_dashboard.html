@@ -227,6 +227,11 @@
         {% if messaging_unread_count %}<span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}
       </a>
       {% endif %}
+      {% if can('reports.view') %}
+      <a class="list-row" href="{{ url_for('staff_coupon_studio') }}">
+        <div><strong>Coupon Studio</strong><p>Create, edit, and print branded voucher coupon stripes.</p></div>
+      </a>
+      {% endif %}
     </div>
   </article>
 

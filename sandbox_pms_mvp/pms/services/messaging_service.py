@@ -308,12 +308,7 @@ class LineAdapter(ChannelAdapter):
                 f"{base_url}/v2/bot/message/push",
                 {
                     "to": recipient,
-                    "messages": [
-                        {
-                            "type": "text",
-                            "text": message.body_text,
-                        }
-                    ],
+                    "messages": [{"type": "text", "text": message.body_text}],
                 },
                 headers={"Authorization": f"Bearer {channel_access_token}"},
             )

@@ -22,6 +22,8 @@ Render is now configured through the root [render.yaml](render.yaml) Blueprint. 
 
 - a Python web service rooted at [sandbox_pms_mvp](sandbox_pms_mvp)
 - a managed PostgreSQL database
+- a persistent disk for uploaded documents mounted via `UPLOAD_DIR`
+- 9 cron services for notifications, reminders, iCal sync, automation, waitlist, audit cleanup, and no-show handling
 - predeploy schema migration only
 - a `/health` health check
 
@@ -46,12 +48,20 @@ For the first production bootstrap on an empty database, run `flask --app app se
 `flask --app app bootstrap-inventory` manually from a Render shell or one-off job after the service is up.
 Run `flask --app app sync-role-permissions` only when you intentionally want the seeded permission map reapplied to existing system roles.
 
-For a step-by-step dashboard checklist, use [RENDER_DEPLOY_CHECKLIST.md](RENDER_DEPLOY_CHECKLIST.md).
+For a step-by-step dashboard checklist, use [docs/RENDER_DEPLOY_CHECKLIST.md](docs/RENDER_DEPLOY_CHECKLIST.md).
 
 See [sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md](sandbox_pms_mvp/DEPLOYMENT-TOPOLOGY.md) for the URL model, canonical-host behavior, and deployment runbook.
-For platform cutover steps, see [DEPLOYMENT-RUNBOOK.md](DEPLOYMENT-RUNBOOK.md).
-For hosted-payment provider setup on the live `book` origin, see [PAYMENT-CUTOVER-RUNBOOK.md](PAYMENT-CUTOVER-RUNBOOK.md).
+For platform cutover steps, see [docs/DEPLOYMENT-RUNBOOK.md](docs/DEPLOYMENT-RUNBOOK.md).
+For hosted-payment provider setup on the live `book` origin, see [docs/PAYMENT-CUTOVER-RUNBOOK.md](docs/PAYMENT-CUTOVER-RUNBOOK.md).
 Production-oriented environment defaults for the live domain split are in [sandbox_pms_mvp/.env.production.example](sandbox_pms_mvp/.env.production.example).
+
+Repo-implemented deployment hardening still needs live verification before any beta-ready claim:
+
+- confirm the Render disk is mounted and writable on the running service
+- confirm an uploaded document survives a restart
+- confirm `/health` returns DB-green on the deployed service
+- confirm each cron service has a recent successful run
+- confirm one real Sentry event is captured after `SENTRY_DSN` is provisioned
 
 Repo layout:
 
