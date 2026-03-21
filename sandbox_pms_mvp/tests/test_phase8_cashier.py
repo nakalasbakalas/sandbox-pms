@@ -19,6 +19,7 @@ from pms.services.cashier_service import (
     DocumentIssuePayload,
     ManualAdjustmentPayload,
     PaymentPostingPayload,
+    PosChargePayload,
     RefundPostingPayload,
     VoidChargePayload,
     cashier_print_context,
@@ -26,6 +27,7 @@ from pms.services.cashier_service import (
     folio_summary,
     issue_cashier_document,
     post_manual_adjustment,
+    post_pos_charge,
     record_payment,
     record_refund,
     void_folio_charge,
@@ -491,6 +493,121 @@ def test_cashier_manual_payment_and_refund_store_transaction_references(app_fact
         assert refund_line.metadata_json["transaction_reference"] == "BANK-RFD-150"
         assert payment_event.raw_payload["provider_reference"] == "BANK-REF-400"
         assert refund_event.raw_payload["transaction_reference"] == "BANK-RFD-150"
+
+
+def test_pos_charge_posting_is_duplicate_safe_and_maps_outlet_codes(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Mini",
+            last_name="Bar",
+            phone="+66810000081",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        actor = make_staff_user("front_desk", "cashier-pos@example.com")
+
+        first = post_pos_charge(
+            reservation.id,
+            PosChargePayload(
+                amount=Decimal("325.00"),
+                outlet_name="Mini Bar",
+                outlet_type="minibar",
+                external_check_id="MB-1001",
+                system_name="simphony",
+                item_summary="Cabernet and sparkling water",
+                note="Room service import",
+            ),
+            actor_user_id=actor.id,
+        )
+        second = post_pos_charge(
+            reservation.id,
+            PosChargePayload(
+                amount=Decimal("325.00"),
+                outlet_name="Mini Bar",
+                outlet_type="minibar",
+                external_check_id="MB-1001",
+                system_name="simphony",
+                item_summary="Cabernet and sparkling water",
+            ),
+            actor_user_id=actor.id,
+        )
+
+        assert first.id == second.id
+        assert first.charge_code == "SNK"
+        assert first.description == "Cabernet and sparkling water"
+        assert FolioCharge.query.filter_by(posting_key=first.posting_key).count() == 1
+        assert first.metadata_json["source"] == "pos_integration"
+        assert first.metadata_json["external_check_id"] == "MB-1001"
+
+
+def test_pos_integration_api_requires_token_and_is_idempotent(app_factory):
+    app = app_factory(seed=True, config={"POS_SHARED_TOKEN": "pos-secret"})
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Outlet",
+            last_name="Charge",
+            phone="+66810000082",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=2),
+        )
+        reservation_code = reservation.reservation_code
+
+    forbidden = client.post(
+        "/api/integrations/pos/charges",
+        json={
+            "reservation_code": reservation_code,
+            "amount": "480.00",
+            "outlet_name": "Pool Bar",
+            "outlet_type": "fnb",
+            "external_check_id": "BAR-77",
+        },
+    )
+    assert forbidden.status_code == 403
+
+    headers = {"X-Integration-Token": "pos-secret"}
+    first = client.post(
+        "/api/integrations/pos/charges",
+        json={
+            "reservation_code": reservation_code,
+            "amount": "480.00",
+            "outlet_name": "Pool Bar",
+            "outlet_type": "fnb",
+            "external_check_id": "BAR-77",
+            "system_name": "micros",
+            "item_summary": "Lunch set and juice",
+            "service_date": date.today().isoformat(),
+        },
+        headers=headers,
+    )
+    second = client.post(
+        "/api/integrations/pos/charges",
+        json={
+            "reservation_code": reservation_code,
+            "amount": "480.00",
+            "outlet_name": "Pool Bar",
+            "outlet_type": "fnb",
+            "external_check_id": "BAR-77",
+            "system_name": "micros",
+            "item_summary": "Lunch set and juice",
+            "service_date": date.today().isoformat(),
+        },
+        headers=headers,
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_payload = first.get_json()
+    second_payload = second.get_json()
+    assert first_payload["ok"] is True
+    assert second_payload["ok"] is True
+    assert first_payload["folio_charge_id"] == second_payload["folio_charge_id"]
+    assert first_payload["posting_key"] == second_payload["posting_key"]
+
+    with app.app_context():
+        assert FolioCharge.query.filter_by(posting_key=first_payload["posting_key"]).count() == 1
 
 
 def test_unauthorized_user_cannot_void_restricted_folio_lines(app_factory):

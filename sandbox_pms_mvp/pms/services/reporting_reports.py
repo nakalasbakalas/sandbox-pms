@@ -1,282 +1,17 @@
+"""Reporting metrics, detail reports, and CSV exports."""
+
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from .reporting_base import *  # noqa: F401,F403
+from . import reporting_base as _base
 
-import sqlalchemy as sa
-from sqlalchemy.orm import aliased, joinedload
-
-from ..extensions import db
-from ..models import (
-    AuditLog,
-    CashierActivityLog,
-    FolioCharge,
-    HousekeepingTask,
-    InventoryDay,
-    PaymentRequest,
-    Reservation,
-    ReservationStatusHistory,
-    Room,
-    RoomType,
-    User,
-    utc_now,
-)
-from ..pricing import money
-from .cashier_service import folio_summary
-from .front_desk_service import FrontDeskFilters, list_front_desk_arrivals, list_front_desk_departures, list_front_desk_in_house
-from .housekeeping_service import HousekeepingBoardFilters, list_housekeeping_board
-from .staff_reservations_service import build_reservation_summary, reservation_attribution_summary
-
-
-CONSUMING_INVENTORY_STATUSES = {"reserved", "occupied", "house_use"}
-CLOSED_INVENTORY_STATUSES = {"out_of_service", "out_of_order"}
-ACTIVE_REPORTABLE_RESERVATION_STATUSES = {"tentative", "confirmed", "checked_in", "checked_out"}
-SOLD_RESERVATION_STATUSES = {"confirmed", "checked_in", "checked_out"}
-ACTIVE_HOUSEKEEPING_TASK_STATUSES = {"open", "assigned", "in_progress"}
-COMPLETED_HOUSEKEEPING_TASK_STATUSES = {"completed", "inspected"}
-HOUSEKEEPING_REPORT_TASK_TYPES = (
-    "checkout_clean",
-    "daily_service",
-    "rush_clean",
-    "deep_clean",
-    "inspection",
-    "turndown",
-)
-ADMIN_AUDIT_ENTITIES = {
-    "app_settings",
-    "blackout_periods",
-    "inventory_overrides",
-    "notification_templates",
-    "payment_requests",
-    "policy_documents",
-    "rate_rules",
-    "roles",
-    "room_types",
-    "rooms",
-    "users",
-}
-RESERVATION_AUDIT_ENTITIES = {"reservations", "reservation_status_history", "reservation_review_queue", "guests"}
-CASHIER_AUDIT_ENTITIES = {"folio_charges", "cashier_documents", "payment_requests", "payment_events"}
-
-
-def report_metric_definitions() -> dict[str, str]:
-    return {
-        "occupancy_today": (
-            "Confirmed or in-house occupied room-nights for the business date divided by total saleable room inventory for that date. "
-            "The denominator excludes default non-sellable rooms, blocked rooms, out-of-order rooms, and out-of-service rooms."
-        ),
-        "occupancy_range": (
-            "Daily occupancy uses the same definition as Occupancy Today for every date in the selected range."
-        ),
-        "occupancy_year_over_year": (
-            "Compares the selected occupancy window with the same calendar dates one year earlier, using authoritative "
-            "inventory-day occupancy where historical inventory exists."
-        ),
-        "pending_reservations": (
-            "Reservations currently in tentative status with arrival dates inside the selected reporting range."
-        ),
-        "confirmed_reservations": (
-            "Reservations currently in confirmed status with arrival dates inside the selected reporting range."
-        ),
-        "checked_in_guests": (
-            "Reservations currently in checked_in status whose stay is active on the selected business date."
-        ),
-        "folio_balances_outstanding": (
-            "Reservations overlapping the selected reporting range whose authoritative folio balance due is greater than zero."
-        ),
-        "deposit_requested_vs_paid": (
-            "Reservations arriving in the selected reporting range with a deposit requirement, using the latest deposit request "
-            "status and authoritative deposit received totals from folio/payment posting."
-        ),
-        "revenue_summary": (
-            "Posted folio activity by service date in the selected reporting range. This is posted room and operational charge "
-            "revenue, not booked revenue or cash collected."
-        ),
-        "revenue_management": (
-            "Revenue management trends combine posted room revenue with on-books room-night forecasts from the inventory ledger. "
-            "ADR and RevPAR use gross room revenue for the selected dates."
-        ),
-        "room_type_performance": (
-            "Reservation count is based on confirmed or stayed reservations overlapping the selected reporting range. "
-            "Sold nights come from consuming inventory ledger rows for confirmed or in-house stays, and room revenue "
-            "comes from posted room charges in the same range."
-        ),
-        "housekeeping_performance": (
-            "Housekeeping performance groups tasks by assigned attendant and task business date, with raw start and "
-            "completion timestamps preserved because the schema does not yet store explicit roster shift codes."
-        ),
-        "cancellations": (
-            "Cancellation count is based on reservation status history entries changed to cancelled inside the selected reporting range."
-        ),
-        "no_shows": (
-            "No-show count is based on reservation status history entries changed to no_show inside the selected reporting range."
-        ),
-        "audit_activity": (
-            "Audit activity summarizes authoritative audit log entries inside the selected reporting range, grouped for operational review."
-        ),
-        "booking_attribution": (
-            "Booking attribution summarizes first-touch source metadata captured during the public booking flow. "
-            "Counts use reservations booked inside the selected reporting range."
-        ),
-        "channel_performance": (
-            "Channel performance groups reservations by source channel using arrivals inside the selected reporting range. "
-            "Cancellation rate uses the same arrival cohort, while ADR uses posted room revenue divided by sold nights "
-            "inside the range."
-        ),
-    }
-
-
-def build_manager_dashboard(
-    *,
-    business_date: date,
-    date_from: date,
-    date_to: date,
-    include_housekeeping: bool = True,
-    include_financials: bool = True,
-    include_payments: bool = True,
-    include_audit: bool = True,
-) -> dict:
-    dashboard = {
-        "business_date": business_date,
-        "date_from": date_from,
-        "date_to": date_to,
-        "definitions": report_metric_definitions(),
-        "arrivals": arrivals_today_report(business_date),
-        "departures": departures_today_report(business_date),
-        "occupancy_today": occupancy_today_report(business_date),
-        "occupancy_range": occupancy_by_date_range_report(date_from, date_to),
-        "occupancy_year_over_year": occupancy_year_over_year_report(date_from, date_to),
-        "pending_reservations": pending_reservations_report(date_from, date_to),
-        "confirmed_reservations": confirmed_reservations_report(date_from, date_to),
-        "checked_in_guests": checked_in_guests_report(business_date),
-        "channel_performance": channel_performance_report(date_from, date_to),
-        "room_type_performance": room_type_performance_report(date_from, date_to),
-        "cancellation_summary": cancellation_summary_report(date_from, date_to),
-        "no_show_summary": no_show_summary_report(date_from, date_to),
-        "booking_attribution": booking_attribution_report(date_from, date_to),
-        "housekeeping_performance": housekeeping_performance_report(date_from, date_to, limit=8),
-    }
-    if include_housekeeping:
-        dashboard["housekeeping"] = housekeeping_room_status_summary_report(business_date)
-    if include_financials:
-        dashboard["folio_balances"] = folio_balances_outstanding_report(date_from, date_to)
-        dashboard["revenue_summary"] = revenue_summary_report(date_from, date_to)
-        dashboard["revenue_management"] = revenue_management_dashboard_report(
-            business_date=business_date,
-            date_from=date_from,
-            date_to=date_to,
-        )
-    if include_payments:
-        dashboard["deposit_pipeline"] = deposit_requested_vs_paid_report(date_from, date_to)
-    if include_audit:
-        dashboard["audit_activity"] = audit_activity_summary_report(date_from, date_to)
-    dashboard["headline"] = _headline_metrics(dashboard)
-    return dashboard
-
-
-def build_front_desk_dashboard(
-    *,
-    business_date: date,
-    include_housekeeping: bool = True,
-    include_financials: bool = True,
-) -> dict:
-    """Compact operational dashboard for front-desk daily planning.
-
-    Reuses the same authoritative metric functions as the manager dashboard
-    but selects only the data a front-desk agent needs for shift preparation.
-    """
-    arrivals = arrivals_today_report(business_date)
-    departures = departures_today_report(business_date)
-    in_house = checked_in_guests_report(business_date)
-    occupancy = occupancy_today_report(business_date)
-
-    dashboard: dict = {
-        "business_date": business_date,
-        "arrivals": arrivals,
-        "departures": departures,
-        "in_house": in_house,
-        "occupancy_today": occupancy,
-    }
-
-    if include_housekeeping:
-        hk = housekeeping_room_status_summary_report(business_date)
-        dashboard["housekeeping"] = hk
-        dashboard["urgent_tasks"] = _urgent_tasks_summary(business_date)
-
-    if include_financials:
-        balances = folio_balances_outstanding_report(
-            business_date, business_date, limit=10,
-        )
-        dashboard["balances_due"] = balances
-
-    dashboard["headline"] = _front_desk_headline(dashboard)
-    return dashboard
-
-
-def _urgent_tasks_summary(business_date: date) -> dict:
-    """Open or in-progress housekeeping tasks with urgent or high priority."""
-    query = (
-        sa.select(HousekeepingTask)
-        .where(
-            HousekeepingTask.status.in_(["open", "assigned", "in_progress"]),
-            HousekeepingTask.priority.in_(["urgent", "high"]),
-            HousekeepingTask.business_date == business_date,
-        )
-        .order_by(
-            sa.case({"urgent": 0, "high": 1}, value=HousekeepingTask.priority, else_=2),
-            HousekeepingTask.due_at.asc().nullslast(),
-        )
-    )
-    tasks = db.session.execute(query).scalars().all()
-    items = []
-    for task in tasks[:10]:
-        room = db.session.get(Room, task.room_id) if task.room_id else None
-        items.append({
-            "id": task.id,
-            "room_number": room.room_number if room else "-",
-            "room_id": task.room_id,
-            "task_type": task.task_type,
-            "priority": task.priority,
-            "status": task.status,
-            "due_at": task.due_at,
-        })
-    return {
-        "count": len(tasks),
-        "items": items,
-    }
-
-
-def _front_desk_headline(dashboard: dict) -> list[dict]:
-    cards = [
-        {"label": "Arrivals", "value": dashboard["arrivals"]["count"], "tone": "default"},
-        {"label": "Departures", "value": dashboard["departures"]["count"], "tone": "default"},
-        {"label": "In-house", "value": dashboard["in_house"]["count"], "tone": "default"},
-        {
-            "label": "Occupancy",
-            "value": f"{dashboard['occupancy_today']['occupancy_percentage']:.0f}%",
-            "tone": "accent",
-        },
-    ]
-    if "housekeeping" in dashboard:
-        counts = dashboard["housekeeping"]["counts"]
-        ready = counts.get("sellable_ready", 0)
-        dirty = counts.get("dirty", 0)
-        cards.append({"label": "Rooms ready", "value": ready, "tone": "default"})
-        cards.append({"label": "Rooms dirty", "value": dirty, "tone": "warning" if dirty else "default"})
-    if "balances_due" in dashboard:
-        cards.append({
-            "label": "Balance due",
-            "value": f"{dashboard['balances_due']['total_balance_due']:,.0f}",
-            "tone": "danger" if dashboard["balances_due"]["count"] else "default",
-        })
-    if "urgent_tasks" in dashboard:
-        cards.append({
-            "label": "Urgent tasks",
-            "value": dashboard["urgent_tasks"]["count"],
-            "tone": "danger" if dashboard["urgent_tasks"]["count"] else "default",
-        })
-    return cards
-
+_as_aware = _base._as_aware
+_folio_lines_in_range = _base._folio_lines_in_range
+_occupancy_rows = _base._occupancy_rows
+_reservation_listing_query = _base._reservation_listing_query
+_reservation_overlaps_range = _base._reservation_overlaps_range
+_shift_year_safe = _base._shift_year_safe
+_status_history_summary_report = _base._status_history_summary_report
 
 def build_daily_report(
     *,
@@ -1051,100 +786,150 @@ def revenue_summary_report(date_from: date, date_to: date) -> dict:
     }
 
 
-def revenue_management_dashboard_report(
-    *,
-    business_date: date,
-    date_from: date,
-    date_to: date,
-) -> dict:
-    occupancy_rows = _occupancy_rows(date_from, date_to)
-    actual_room_revenue = {
-        service_date: money(amount or Decimal("0.00"))
-        for service_date, amount in db.session.query(
-            FolioCharge.service_date,
-            sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
-        )
-        .filter(
-            FolioCharge.voided_at.is_(None),
-            FolioCharge.charge_type == "room",
-            FolioCharge.service_date >= date_from,
-            FolioCharge.service_date <= date_to,
-        )
-        .group_by(FolioCharge.service_date)
-        .all()
+def revenue_management_report(date_from: date, date_to: date, *, limit: int = 14) -> dict:
+    occupancy = occupancy_by_date_range_report(date_from, date_to)
+    revenue = revenue_summary_report(date_from, date_to)
+    channel = channel_performance_report(date_from, date_to, limit=5)
+    room_type_performance = room_type_performance_report(date_from, date_to)
+
+    sold_nights_by_date = {
+        business_date: int(count or 0)
+        for business_date, count in db.session.execute(
+            sa.select(
+                InventoryDay.business_date,
+                sa.func.count(InventoryDay.id),
+            )
+            .join(Reservation, Reservation.id == InventoryDay.reservation_id)
+            .join(Room, Room.id == InventoryDay.room_id)
+            .where(
+                InventoryDay.business_date >= date_from,
+                InventoryDay.business_date <= date_to,
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+                InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
+                Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
+            )
+            .group_by(InventoryDay.business_date)
+        ).all()
     }
-    forecast_room_revenue = {
+    room_revenue_by_date = {
         service_date: money(amount or Decimal("0.00"))
-        for service_date, amount in db.session.query(
-            InventoryDay.business_date,
-            sa.func.coalesce(sa.func.sum(InventoryDay.nightly_rate), 0),
-        )
-        .join(Room, Room.id == InventoryDay.room_id)
-        .join(Reservation, Reservation.id == InventoryDay.reservation_id)
-        .filter(
-            InventoryDay.business_date >= date_from,
-            InventoryDay.business_date <= date_to,
-            InventoryDay.nightly_rate.is_not(None),
-            Room.is_active.is_(True),
-            Room.is_sellable.is_(True),
-            Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
-            InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
-        )
-        .group_by(InventoryDay.business_date)
-        .all()
+        for service_date, amount in db.session.execute(
+            sa.select(
+                FolioCharge.service_date,
+                sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
+            )
+            .where(
+                FolioCharge.voided_at.is_(None),
+                FolioCharge.charge_type == "room",
+                FolioCharge.service_date >= date_from,
+                FolioCharge.service_date <= date_to,
+            )
+            .group_by(FolioCharge.service_date)
+        ).all()
     }
 
-    rows: list[dict] = []
-    total_saleable = 0
-    total_occupied = 0
-    total_actual = Decimal("0.00")
-    total_projected = Decimal("0.00")
-    for row in occupancy_rows:
-        service_date = row["date"]
-        actual = actual_room_revenue.get(service_date, Decimal("0.00"))
-        forecast = forecast_room_revenue.get(service_date, Decimal("0.00"))
-        if service_date < business_date:
-            projected = actual
-        elif actual > Decimal("0.00"):
-            projected = actual
-        else:
-            projected = forecast
-        occupied_rooms = int(row["occupied_rooms"] or 0)
-        saleable_rooms = int(row["saleable_rooms"] or 0)
-        adr = money(projected / Decimal(occupied_rooms)) if occupied_rooms else Decimal("0.00")
-        revpar = money(projected / Decimal(saleable_rooms)) if saleable_rooms else Decimal("0.00")
-        rows.append(
+    daily_rows: list[dict] = []
+    available_room_nights = 0
+    occupied_room_nights = 0
+    sold_room_nights = 0
+    for item in occupancy["items"]:
+        saleable_rooms = int(item["saleable_rooms"])
+        occupied_rooms = int(item["occupied_rooms"])
+        sold_nights = int(sold_nights_by_date.get(item["date"], 0))
+        room_revenue_total = money(room_revenue_by_date.get(item["date"], Decimal("0.00")))
+        adr = (
+            (room_revenue_total / Decimal(sold_nights)).quantize(Decimal("0.01"))
+            if sold_nights
+            else Decimal("0.00")
+        )
+        revpar = (
+            (room_revenue_total / Decimal(saleable_rooms)).quantize(Decimal("0.01"))
+            if saleable_rooms
+            else Decimal("0.00")
+        )
+        daily_rows.append(
             {
-                "date": service_date,
+                "date": item["date"],
                 "saleable_rooms": saleable_rooms,
                 "occupied_rooms": occupied_rooms,
-                "occupancy_percentage": row["occupancy_percentage"],
-                "actual_room_revenue": actual,
-                "forecast_room_revenue": forecast if service_date >= business_date else Decimal("0.00"),
-                "projected_room_revenue": projected,
+                "sold_nights": sold_nights,
+                "occupancy_percentage": item["occupancy_percentage"],
+                "room_revenue_total": room_revenue_total,
                 "adr": adr,
                 "revpar": revpar,
-                "pace_label": "actual" if service_date < business_date else ("forecast" if actual == Decimal("0.00") else "posted"),
             }
         )
-        total_saleable += saleable_rooms
-        total_occupied += occupied_rooms
-        total_actual += actual
-        total_projected += projected
+        available_room_nights += saleable_rooms
+        occupied_room_nights += occupied_rooms
+        sold_room_nights += sold_nights
 
-    peak_adr = max(rows, key=lambda item: item["adr"], default=None)
-    peak_revpar = max(rows, key=lambda item: item["revpar"], default=None)
+    room_type_rows: list[dict] = []
+    for item in room_type_performance["items"]:
+        sold_nights = int(item["sold_nights"])
+        room_revenue_total = money(item["room_revenue_total"])
+        adr = (
+            (room_revenue_total / Decimal(sold_nights)).quantize(Decimal("0.01"))
+            if sold_nights
+            else Decimal("0.00")
+        )
+        room_type_rows.append({**item, "adr": adr})
+    room_type_rows.sort(
+        key=lambda item: (
+            -item["room_revenue_total"],
+            -item["sold_nights"],
+            item["room_type_code"],
+        )
+    )
+
+    room_revenue_total = money(revenue["room_revenue_total"])
+    available_room_nights_decimal = Decimal(available_room_nights)
+    sold_room_nights_decimal = Decimal(sold_room_nights)
+    occupancy_percentage = (
+        (Decimal(occupied_room_nights) / available_room_nights_decimal * Decimal("100.00")).quantize(Decimal("0.01"))
+        if available_room_nights
+        else Decimal("0.00")
+    )
+    adr = (
+        (room_revenue_total / sold_room_nights_decimal).quantize(Decimal("0.01"))
+        if sold_room_nights
+        else Decimal("0.00")
+    )
+    revpar = (
+        (room_revenue_total / available_room_nights_decimal).quantize(Decimal("0.01"))
+        if available_room_nights
+        else Decimal("0.00")
+    )
+    best_day = max(
+        daily_rows,
+        key=lambda item: (item["revpar"], item["occupancy_percentage"], item["room_revenue_total"], item["date"]),
+        default=None,
+    )
+    softest_day = min(
+        daily_rows,
+        key=lambda item: (item["occupancy_percentage"], item["revpar"], item["date"]),
+        default=None,
+    )
+
     return {
-        "rows": rows,
-        "total_actual_room_revenue": money(total_actual),
-        "total_projected_room_revenue": money(total_projected),
-        "forecast_room_revenue": money(total_projected - total_actual),
-        "average_adr": money(total_projected / Decimal(total_occupied)) if total_occupied else Decimal("0.00"),
-        "average_revpar": money(total_projected / Decimal(total_saleable)) if total_saleable else Decimal("0.00"),
-        "occupied_room_nights": total_occupied,
-        "saleable_room_nights": total_saleable,
-        "peak_adr": peak_adr,
-        "peak_revpar": peak_revpar,
+        "days_count": len(daily_rows),
+        "available_room_nights": available_room_nights,
+        "occupied_room_nights": occupied_room_nights,
+        "sold_room_nights": sold_room_nights,
+        "occupancy_percentage": occupancy_percentage,
+        "adr": adr,
+        "revpar": revpar,
+        "room_revenue_total": room_revenue_total,
+        "net_revenue_total": revenue["net_revenue_total"],
+        "non_room_revenue_total": (revenue["net_revenue_total"] - revenue["room_revenue_total"]).quantize(Decimal("0.01")),
+        "top_channel": channel["items"][0] if channel["items"] else None,
+        "best_day": best_day,
+        "softest_day": softest_day,
+        "forecast_supported": False,
+        "forecast_note": "Forecasting and pricing automation are still backlog items; this view is a posted-revenue pacing snapshot.",
+        "channel_items": channel["items"],
+        "room_type_items": room_type_rows[:5],
+        "items": daily_rows[:limit],
     }
 
 
@@ -1331,232 +1116,6 @@ def audit_activity_summary_report(date_from: date, date_to: date, *, limit: int 
     }
 
 
-def _headline_metrics(dashboard: dict) -> list[dict]:
-    cards = [
-        {"label": "Arrivals Today", "value": dashboard["arrivals"]["count"], "tone": "default"},
-        {"label": "Departures Today", "value": dashboard["departures"]["count"], "tone": "default"},
-        {
-            "label": "Occupancy Today",
-            "value": f"{dashboard['occupancy_today']['occupancy_percentage']:.2f}%",
-            "tone": "accent",
-            "detail": f"{dashboard['occupancy_today']['occupied_rooms']} / {dashboard['occupancy_today']['saleable_rooms']} saleable rooms",
-        },
-        {"label": "Pending Reservations", "value": dashboard["pending_reservations"]["count"], "tone": "warning"},
-        {"label": "Confirmed Reservations", "value": dashboard["confirmed_reservations"]["count"], "tone": "default"},
-        {"label": "Checked-in Guests", "value": dashboard["checked_in_guests"]["count"], "tone": "default"},
-    ]
-    if "housekeeping" in dashboard:
-        cards.append(
-            {
-                "label": "Arrival Rooms at Risk",
-                "value": dashboard["housekeeping"]["counts"]["arrival_risk"],
-                "tone": "warning",
-            }
-        )
-    if "folio_balances" in dashboard:
-        cards.append(
-            {
-                "label": "Outstanding Balance",
-                "value": f"{dashboard['folio_balances']['total_balance_due']:,.2f}",
-                "tone": "danger" if dashboard["folio_balances"]["count"] else "default",
-                "detail": f"{dashboard['folio_balances']['count']} folio(s)",
-            }
-        )
-    if "deposit_pipeline" in dashboard:
-        cards.append(
-            {
-                "label": "Deposits Paid",
-                "value": f"{dashboard['deposit_pipeline']['total_paid_amount']:,.2f}",
-                "tone": "default",
-                "detail": f"of {dashboard['deposit_pipeline']['total_requested_amount']:,.2f} requested",
-            }
-        )
-    if "revenue_summary" in dashboard:
-        cards.append(
-            {
-                "label": "Net Posted Revenue",
-                "value": f"{dashboard['revenue_summary']['net_revenue_total']:,.2f}",
-                "tone": "accent",
-            }
-        )
-    if "audit_activity" in dashboard:
-        cards.append(
-            {
-                "label": "Audit Actions",
-                "value": dashboard["audit_activity"]["count"],
-                "tone": "default",
-            }
-        )
-    return cards
-
-
-def _folio_lines_in_range(date_from: date, date_to: date) -> list[FolioCharge]:
-    return (
-        db.session.execute(
-            sa.select(FolioCharge)
-            .where(
-                FolioCharge.voided_at.is_(None),
-                FolioCharge.service_date >= date_from,
-                FolioCharge.service_date <= date_to,
-                FolioCharge.charge_type.in_(["room", "manual_charge", "manual_discount", "fee", "refund", "correction"]),
-            )
-            .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc())
-        )
-        .scalars()
-        .all()
-    )
-
-
-def _occupancy_rows(date_from: date, date_to: date) -> list[dict]:
-    sold_reservation = aliased(Reservation)
-    raw_rows = {
-        business_date: {
-            "saleable_rooms": int(saleable_rooms or 0),
-            "occupied_rooms": int(occupied_rooms or 0),
-        }
-        for business_date, saleable_rooms, occupied_rooms in db.session.execute(
-            sa.select(
-                InventoryDay.business_date,
-                sa.func.count(InventoryDay.id),
-                sa.func.sum(
-                    sa.case(
-                        (
-                            sa.and_(
-                                InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
-                                sa.or_(
-                                    InventoryDay.availability_status == "house_use",
-                                    sold_reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
-                                ),
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-            )
-            .join(Room, Room.id == InventoryDay.room_id)
-            .outerjoin(sold_reservation, sold_reservation.id == InventoryDay.reservation_id)
-            .where(
-                InventoryDay.business_date >= date_from,
-                InventoryDay.business_date <= date_to,
-                Room.is_active.is_(True),
-                Room.is_sellable.is_(True),
-                InventoryDay.is_blocked.is_(False),
-                InventoryDay.availability_status.notin_(tuple(CLOSED_INVENTORY_STATUSES)),
-            )
-            .group_by(InventoryDay.business_date)
-            .order_by(InventoryDay.business_date.asc())
-        ).all()
-    }
-    rows = []
-    current = date_from
-    while current <= date_to:
-        metrics = raw_rows.get(current, {"saleable_rooms": 0, "occupied_rooms": 0})
-        saleable_rooms = metrics["saleable_rooms"]
-        occupied_rooms = metrics["occupied_rooms"]
-        occupancy_percentage = Decimal("0.00")
-        if saleable_rooms:
-            occupancy_percentage = (
-                (Decimal(occupied_rooms) / Decimal(saleable_rooms)) * Decimal("100.00")
-            ).quantize(Decimal("0.01"))
-        rows.append(
-            {
-                "date": current,
-                "saleable_rooms": saleable_rooms,
-                "occupied_rooms": occupied_rooms,
-                "occupancy_percentage": occupancy_percentage,
-            }
-        )
-        current += timedelta(days=1)
-    return rows
-
-
-def _reservation_listing_query():
-    return sa.select(Reservation).options(
-        joinedload(Reservation.primary_guest),
-        joinedload(Reservation.room_type),
-        joinedload(Reservation.assigned_room),
-    )
-
-
-def _reservation_overlaps_range(date_from: date, date_to: date):
-    return sa.and_(
-        Reservation.check_in_date < date_to + timedelta(days=1),
-        Reservation.check_out_date > date_from,
-    )
-
-
-def _status_history_summary_report(status_code: str, date_from: date, date_to: date, *, limit: int) -> dict:
-    start_dt = datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc)
-    end_dt = datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
-    query = (
-        sa.select(ReservationStatusHistory).options(
-            joinedload(ReservationStatusHistory.reservation).joinedload(Reservation.primary_guest),
-            joinedload(ReservationStatusHistory.reservation).joinedload(Reservation.room_type),
-        )
-        .where(
-            ReservationStatusHistory.new_status == status_code,
-            ReservationStatusHistory.changed_at >= start_dt,
-            ReservationStatusHistory.changed_at < end_dt,
-        )
-    )
-    histories = (
-        db.session.execute(query.order_by(ReservationStatusHistory.changed_at.desc()))
-        .unique()
-        .scalars()
-        .all()
-    )
-    total = len(histories)
-    rows = []
-    source_counts: dict[str, int] = {}
-    room_type_counts: dict[str, int] = {}
-    for item in histories:
-        reservation = item.reservation
-        source_counts[reservation.source_channel] = source_counts.get(reservation.source_channel, 0) + 1
-        room_type_code = reservation.room_type.code if reservation.room_type else ""
-        room_type_counts[room_type_code] = room_type_counts.get(room_type_code, 0) + 1
-        if len(rows) >= limit:
-            continue
-        rows.append(
-            {
-                "reservation_id": reservation.id,
-                "reservation_code": reservation.reservation_code,
-                "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "Unknown guest",
-                "arrival_date": reservation.check_in_date,
-                "departure_date": reservation.check_out_date,
-                "source_channel": reservation.source_channel,
-                "room_type_code": room_type_code,
-                "changed_at": item.changed_at,
-                "reason": item.reason,
-                "note": item.note,
-                "deposit_received_amount": money(reservation.deposit_received_amount),
-            }
-        )
-    return {
-        "count": total,
-        "source_counts": source_counts,
-        "room_type_counts": room_type_counts,
-        "items": rows,
-    }
-
-
-def _as_aware(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _shift_year_safe(day: date, *, years: int) -> date:
-    try:
-        return day.replace(year=day.year + years)
-    except ValueError:
-        # Feb 29 falls back to Feb 28 in non-leap years.
-        return day.replace(month=2, day=28, year=day.year + years)
-
-
-# ---------------------------------------------------------------------------
-# CSV export helpers
-# ---------------------------------------------------------------------------
 
 CSV_COLUMN_MAPS: dict[str, list[tuple[str, str]]] = {
     "arrivals": [

@@ -1,15 +1,27 @@
-"""Admin blueprint — admin dashboard, staff access, property, rates/inventory, operations, communications, payments."""
-
 from __future__ import annotations
 
 import logging
 from datetime import date
 from uuid import UUID
 
-import sqlalchemy as sa
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from markupsafe import escape
 
-from ..branding import branding_settings_context, clean_branding_form
+from ..models import (
+    ActivityLog,
+    AppSetting,
+    BlackoutPeriod,
+    InventoryOverride,
+    NotificationTemplate,
+    PaymentRequest,
+    PolicyDocument,
+    RateRule,
+    Role,
+    Room,
+    RoomType,
+    User,
+)
+from ..extensions import db
 from ..constants import (
     BLACKOUT_TYPES,
     BOOKING_EXTRA_PRICING_MODES,
@@ -22,39 +34,10 @@ from ..constants import (
     ROOM_OPERATIONAL_STATUSES,
     USER_ACCOUNT_STATES,
 )
-from ..extensions import db
-from ..helpers import (
-    is_admin_user,
-    parse_decimal,
-    parse_optional_date,
-    parse_optional_datetime,
-    parse_optional_decimal,
-    parse_optional_int,
-    parse_optional_uuid,
-    require_admin_role,
-    require_admin_workspace_access,
-    require_any_permission,
-    require_permission,
-    truthy_setting,
-)
 from ..i18n import normalize_language
-from ..models import (
-    ActivityLog,
-    AppSetting,
-    BlackoutPeriod,
-    InventoryOverride,
-    NotificationTemplate,
-    PaymentRequest,
-    Permission,
-    PolicyDocument,
-    RateRule,
-    Role,
-    Room,
-    RoomType,
-    User,
-)
-from ..pricing import get_setting_value
 from ..security import public_error_message
+from ..pricing import get_setting_value
+from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from ..services.admin_service import (
     BlackoutPayload,
     InventoryOverridePayload,
@@ -77,123 +60,74 @@ from ..services.admin_service import (
     upsert_setting,
     upsert_settings_bundle,
 )
+from ..services.admin_content_ops import policy_documents_context
 from ..services.auth_service import (
     admin_disable_mfa,
     admin_issue_password_reset,
     create_staff_user,
     update_staff_user,
 )
-from ..services.communication_service import (
+from ..services.communication_dispatch import (
     communication_settings_context,
     dispatch_notification_deliveries,
     query_notification_history,
     send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
+from ..services.admin_settings_ops import (
+    housekeeping_defaults_context,
+    payment_settings_context,
+    property_settings_context,
+)
 from ..services.extras_service import (
     BookingExtraPayload,
     list_booking_extras,
     upsert_booking_extra,
 )
-from ..services.messaging_service import (
-    list_automation_rules,
-    list_message_templates as list_messaging_templates,
-    upsert_automation_rule,
+from ..services.pre_checkin_service import (
+    fire_pre_checkin_not_completed_events,
 )
-from ..services.pre_checkin_service import fire_pre_checkin_not_completed_events
-from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 
 logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint("admin", __name__)
 
 
-# ── Context helpers ───────────────────────────────────────────────────
-
-def _permission_groups() -> dict[str, list[Permission]]:
-    grouped: dict[str, list[Permission]] = {}
-    permissions = (
-        db.session.execute(
-            sa.select(Permission).order_by(Permission.module.asc(), Permission.code.asc())
-        )
-        .scalars()
-        .all()
-    )
-    for permission in permissions:
-        grouped.setdefault(permission.module, []).append(permission)
-    return grouped
-
-
-def _property_settings_context() -> dict[str, str]:
-    return branding_settings_context()
-
-
-def _payment_settings_context() -> dict[str, object]:
-    from flask import current_app
-    app = current_app._get_current_object()
+def _get_app_helpers():
+    """Lazy import of helpers from app.py to avoid circular dependencies."""
+    from .. import app as app_module
     return {
-        "active_provider": str(get_setting_value("payment.active_provider", "env") or "env"),
-        "deposit_enabled": truthy_setting(get_setting_value("payment.deposit_enabled", True)),
-        "link_expiry_minutes": str(
-            get_setting_value("payment.link_expiry_minutes", app.config["PAYMENT_LINK_TTL_MINUTES"])
-        ),
-        "link_resend_cooldown_seconds": str(
-            get_setting_value(
-                "payment.link_resend_cooldown_seconds",
-                app.config["PAYMENT_LINK_RESEND_COOLDOWN_SECONDS"],
-            )
-        ),
-        "provider_runtime": app.config.get("PAYMENT_PROVIDER", "disabled"),
-        "stripe_secret_configured": bool(app.config.get("STRIPE_SECRET_KEY")),
-        "stripe_webhook_configured": bool(app.config.get("STRIPE_WEBHOOK_SECRET")),
+        "require_admin_workspace_access": app_module.require_admin_workspace_access,
+        "require_permission": app_module.require_permission,
+        "require_any_permission": app_module.require_any_permission,
+        "require_admin_role": app_module.require_admin_role,
+        "require_user": app_module.require_user,
+        "permission_groups": app_module.permission_groups,
+        "is_admin_user": app_module.is_admin_user,
+        "parse_optional_uuid": app_module.parse_optional_uuid,
+        "parse_optional_date": app_module.parse_optional_date,
+        "parse_optional_datetime": app_module.parse_optional_datetime,
+        "parse_optional_int": app_module.parse_optional_int,
+        "parse_optional_decimal": app_module.parse_optional_decimal,
+        "parse_decimal": app_module.parse_decimal,
+        "truthy_setting": app_module.truthy_setting,
     }
 
-
-def _housekeeping_defaults_context() -> dict[str, object]:
-    return {
-        "require_inspected_for_ready": truthy_setting(
-            get_setting_value("housekeeping.require_inspected_for_ready", False)
-        ),
-        "checkout_dirty_status": str(get_setting_value("housekeeping.checkout_dirty_status", "dirty")),
-    }
-
-
-def _policy_documents_context() -> dict[str, PolicyDocument | None]:
-    documents = (
-        db.session.execute(
-            sa.select(PolicyDocument).where(PolicyDocument.deleted_at.is_(None))
-        )
-        .scalars()
-        .all()
-    )
-    return {item.code: item for item in documents}
-
-
-# ── Routes ────────────────────────────────────────────────────────────
 
 @admin_bp.route("/staff/admin")
 def staff_admin_dashboard():
-    require_admin_workspace_access()
+    helpers = _get_app_helpers()
+    helpers["require_admin_workspace_access"]()
     return render_template(
         "admin.html",
         active_section="dashboard",
-        room_type_count=db.session.execute(sa.select(sa.func.count()).select_from(RoomType)).scalar_one(),
-        room_count=db.session.execute(sa.select(sa.func.count()).select_from(Room)).scalar_one(),
-        active_override_count=db.session.execute(
-            sa.select(sa.func.count()).select_from(InventoryOverride).where(InventoryOverride.is_active.is_(True))
-        ).scalar_one(),
-        active_blackout_count=db.session.execute(
-            sa.select(sa.func.count()).select_from(BlackoutPeriod).where(BlackoutPeriod.is_active.is_(True))
-        ).scalar_one(),
-        policy_count=db.session.execute(
-            sa.select(sa.func.count()).select_from(PolicyDocument).where(PolicyDocument.deleted_at.is_(None))
-        ).scalar_one(),
-        template_count=db.session.execute(
-            sa.select(sa.func.count()).select_from(NotificationTemplate).where(NotificationTemplate.deleted_at.is_(None))
-        ).scalar_one(),
-        user_count=db.session.execute(
-            sa.select(sa.func.count()).select_from(User).where(User.deleted_at.is_(None))
-        ).scalar_one(),
+        room_type_count=RoomType.query.count(),
+        room_count=Room.query.count(),
+        active_override_count=InventoryOverride.query.filter_by(is_active=True).count(),
+        active_blackout_count=BlackoutPeriod.query.filter_by(is_active=True).count(),
+        policy_count=PolicyDocument.query.filter(PolicyDocument.deleted_at.is_(None)).count(),
+        template_count=NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None)).count(),
+        user_count=User.query.filter(User.deleted_at.is_(None)).count(),
         recent_audit=query_audit_entries(limit=12),
     )
 
@@ -201,12 +135,13 @@ def staff_admin_dashboard():
 @admin_bp.route("/staff/admin/staff-access", methods=["GET", "POST"], endpoint="staff_admin_staff_access")
 @admin_bp.route("/staff/users", methods=["GET", "POST"])
 def staff_users():
-    actor = require_permission("user.view")
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("user.view")
     if request.method == "POST":
         action = request.form.get("action")
         try:
             if action == "create":
-                require_permission("user.create")
+                helpers["require_permission"]("user.create")
                 create_staff_user(
                     email=request.form.get("email", ""),
                     full_name=request.form.get("full_name", ""),
@@ -215,7 +150,7 @@ def staff_users():
                 )
                 flash("Staff account created. Password setup email queued.", "success")
             elif action == "update":
-                require_permission("user.edit")
+                helpers["require_permission"]("user.edit")
                 update_staff_user(
                     UUID(request.form["user_id"]),
                     full_name=request.form.get("full_name", ""),
@@ -226,16 +161,16 @@ def staff_users():
                 )
                 flash("Staff account updated.", "success")
             elif action == "reset_password":
-                require_permission("auth.reset_password_admin")
+                helpers["require_permission"]("auth.reset_password_admin")
                 admin_issue_password_reset(UUID(request.form["user_id"]), actor_user_id=actor.id)
                 flash("Password reset issued.", "success")
             elif action == "disable_mfa":
-                require_permission("auth.manage_mfa")
+                helpers["require_permission"]("auth.manage_mfa")
                 admin_disable_mfa(UUID(request.form["user_id"]), actor_user_id=actor.id)
                 flash("User MFA disabled and active sessions revoked.", "success")
             elif action == "role_permissions":
-                require_permission("user.edit")
-                require_admin_role(actor)
+                helpers["require_permission"]("user.edit")
+                helpers["require_admin_role"](actor)
                 update_role_permissions(
                     UUID(request.form["role_id"]),
                     request.form.getlist("permission_codes"),
@@ -248,33 +183,9 @@ def staff_users():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_users"))
 
-    users = (
-        db.session.execute(
-            sa.select(User)
-            .where(User.deleted_at.is_(None))
-            .order_by(User.full_name.asc())
-        )
-        .unique()
-        .scalars()
-        .all()
-    )
-    roles = (
-        db.session.execute(
-            sa.select(Role).order_by(Role.sort_order.asc())
-        )
-        .unique()
-        .scalars()
-        .all()
-    )
-    recent_activity = (
-        db.session.execute(
-            sa.select(ActivityLog)
-            .order_by(ActivityLog.created_at.desc())
-            .limit(20)
-        )
-        .scalars()
-        .all()
-    )
+    users = User.query.filter(User.deleted_at.is_(None)).order_by(User.full_name.asc()).all()
+    roles = Role.query.order_by(Role.sort_order.asc()).all()
+    recent_activity = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(20).all()
     return render_template(
         "admin_staff_access.html",
         active_section="staff_access",
@@ -282,27 +193,23 @@ def staff_users():
         roles=roles,
         recent_activity=recent_activity,
         account_states=USER_ACCOUNT_STATES,
-        permission_groups=_permission_groups(),
-        is_super_admin=is_admin_user(actor),
+        permission_groups=helpers["permission_groups"](),
+        is_super_admin=helpers["is_admin_user"](actor),
     )
 
 
 @admin_bp.route("/staff/admin/property", methods=["GET", "POST"], endpoint="staff_admin_property")
 @admin_bp.route("/staff/settings", methods=["GET", "POST"])
 def staff_settings():
-    require_permission("settings.view")
+    helpers = _get_app_helpers()
+    helpers["require_permission"]("settings.view")
     if request.method == "POST":
         try:
             action = request.form.get("action") or "legacy_setting"
             if action == "legacy_setting":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 key = request.form.get("key", "")
-                setting = db.session.execute(
-                    sa.select(AppSetting).where(
-                        AppSetting.key == key,
-                        AppSetting.deleted_at.is_(None),
-                    )
-                ).scalar_one_or_none()
+                setting = AppSetting.query.filter_by(key=key, deleted_at=None).first()
                 if not setting:
                     abort(404)
                 upsert_setting(
@@ -316,7 +223,8 @@ def staff_settings():
                 )
                 flash("Setting updated.", "success")
             elif action == "save_branding":
-                actor = require_permission("settings.edit")
+                from ..branding import clean_branding_form
+                actor = helpers["require_permission"]("settings.edit")
                 branding = clean_branding_form(request.form)
                 upsert_settings_bundle(
                     [
@@ -341,9 +249,9 @@ def staff_settings():
                 )
                 flash("Property identity updated.", "success")
             elif action == "room_type":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_room_type(
-                    parse_optional_uuid(request.form.get("room_type_id")),
+                    helpers["parse_optional_uuid"](request.form.get("room_type_id")),
                     RoomTypePayload(
                         code=request.form.get("code", ""),
                         name=request.form.get("name", ""),
@@ -355,22 +263,22 @@ def staff_settings():
                         policy_callouts=request.form.get("policy_callouts"),
                         standard_occupancy=int(request.form.get("standard_occupancy", 1)),
                         max_occupancy=int(request.form.get("max_occupancy", 1)),
-                        extra_bed_allowed=truthy_setting(request.form.get("extra_bed_allowed")),
-                        is_active=truthy_setting(request.form.get("is_active")),
+                        extra_bed_allowed=helpers["truthy_setting"](request.form.get("extra_bed_allowed")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
                     ),
                     actor_user_id=actor.id,
                 )
                 flash("Room type saved.", "success")
             elif action == "room":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_room(
-                    parse_optional_uuid(request.form.get("room_id")),
+                    helpers["parse_optional_uuid"](request.form.get("room_id")),
                     RoomPayload(
                         room_number=request.form.get("room_number", ""),
                         room_type_id=UUID(request.form["room_type_id"]),
                         floor_number=int(request.form.get("floor_number", 0)),
-                        is_active=truthy_setting(request.form.get("is_active")),
-                        is_sellable=truthy_setting(request.form.get("is_sellable")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
+                        is_sellable=helpers["truthy_setting"](request.form.get("is_sellable")),
                         default_operational_status=request.form.get("default_operational_status", "available"),
                         notes=request.form.get("notes"),
                     ),
@@ -378,17 +286,17 @@ def staff_settings():
                 )
                 flash("Room saved.", "success")
             elif action == "booking_extra":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_booking_extra(
-                    parse_optional_uuid(request.form.get("booking_extra_id")),
+                    helpers["parse_optional_uuid"](request.form.get("booking_extra_id")),
                     BookingExtraPayload(
                         code=request.form.get("code", ""),
                         name=request.form.get("name", ""),
                         description=request.form.get("description"),
                         pricing_mode=request.form.get("pricing_mode", "per_stay"),
-                        unit_price=parse_decimal(request.form.get("unit_price"), default="0.00"),
-                        is_active=truthy_setting(request.form.get("is_active")),
-                        is_public=truthy_setting(request.form.get("is_public")),
+                        unit_price=helpers["parse_decimal"](request.form.get("unit_price"), default="0.00"),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
+                        is_public=helpers["truthy_setting"](request.form.get("is_public")),
                         sort_order=int(request.form.get("sort_order", 100)),
                     ),
                     actor_user_id=actor.id,
@@ -400,20 +308,12 @@ def staff_settings():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_settings"))
 
-    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
-    rooms = (
-        db.session.execute(
-            sa.select(Room)
-            .join(RoomType)
-            .order_by(Room.floor_number.asc(), Room.room_number.asc())
-        )
-        .scalars()
-        .all()
-    )
+    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    rooms = Room.query.join(RoomType).order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
     return render_template(
         "admin_property.html",
         active_section="property",
-        property_settings=_property_settings_context(),
+        property_settings=property_settings_context(),
         room_types=room_types,
         rooms=rooms,
         room_statuses=ROOM_OPERATIONAL_STATUSES,
@@ -425,75 +325,76 @@ def staff_settings():
 @admin_bp.route("/staff/admin/rates-inventory", methods=["GET", "POST"], endpoint="staff_admin_rates_inventory")
 @admin_bp.route("/staff/rates", methods=["GET", "POST"])
 def staff_rates():
-    require_any_permission("rate_rule.view", "settings.view")
+    helpers = _get_app_helpers()
+    helpers["require_any_permission"]("rate_rule.view", "settings.view")
     if request.method == "POST":
         try:
             action = request.form.get("action")
             if action == "rate_rule":
-                actor = require_permission("rate_rule.edit")
+                actor = helpers["require_permission"]("rate_rule.edit")
                 upsert_rate_rule(
-                    parse_optional_uuid(request.form.get("rate_rule_id")),
+                    helpers["parse_optional_uuid"](request.form.get("rate_rule_id")),
                     RateRulePayload(
                         name=request.form.get("name", ""),
-                        room_type_id=parse_optional_uuid(request.form.get("room_type_id")),
+                        room_type_id=helpers["parse_optional_uuid"](request.form.get("room_type_id")),
                         priority=int(request.form.get("priority", 100)),
-                        is_active=truthy_setting(request.form.get("is_active")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
                         rule_type=request.form.get("rule_type", ""),
                         adjustment_type=request.form.get("adjustment_type", ""),
-                        adjustment_value=parse_decimal(request.form.get("adjustment_value"), default="0.00"),
-                        start_date=parse_optional_date(request.form.get("start_date")),
-                        end_date=parse_optional_date(request.form.get("end_date")),
+                        adjustment_value=helpers["parse_decimal"](request.form.get("adjustment_value"), default="0.00"),
+                        start_date=helpers["parse_optional_date"](request.form.get("start_date")),
+                        end_date=helpers["parse_optional_date"](request.form.get("end_date")),
                         days_of_week=request.form.get("days_of_week"),
-                        min_nights=parse_optional_int(request.form.get("min_nights")),
-                        max_nights=parse_optional_int(request.form.get("max_nights")),
-                        extra_guest_fee_override=parse_optional_decimal(request.form.get("extra_guest_fee_override")),
-                        child_fee_override=parse_optional_decimal(request.form.get("child_fee_override")),
+                        min_nights=helpers["parse_optional_int"](request.form.get("min_nights")),
+                        max_nights=helpers["parse_optional_int"](request.form.get("max_nights")),
+                        extra_guest_fee_override=helpers["parse_optional_decimal"](request.form.get("extra_guest_fee_override")),
+                        child_fee_override=helpers["parse_optional_decimal"](request.form.get("child_fee_override")),
                     ),
                     actor_user_id=actor.id,
                 )
                 flash("Rate rule saved.", "success")
             elif action == "inventory_override":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 create_inventory_override(
                     InventoryOverridePayload(
                         name=request.form.get("name", ""),
                         scope_type=request.form.get("scope_type", ""),
                         override_action=request.form.get("override_action", ""),
-                        room_id=parse_optional_uuid(request.form.get("room_id")),
-                        room_type_id=parse_optional_uuid(request.form.get("override_room_type_id")),
+                        room_id=helpers["parse_optional_uuid"](request.form.get("room_id")),
+                        room_type_id=helpers["parse_optional_uuid"](request.form.get("override_room_type_id")),
                         start_date=date.fromisoformat(request.form["start_date"]),
                         end_date=date.fromisoformat(request.form["end_date"]),
                         reason=request.form.get("reason", ""),
-                        expires_at=parse_optional_datetime(request.form.get("expires_at")),
+                        expires_at=helpers["parse_optional_datetime"](request.form.get("expires_at")),
                     ),
                     actor_user_id=actor.id,
                 )
                 flash("Inventory override created.", "success")
             elif action == "release_override":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 release_inventory_override(UUID(request.form["override_id"]), actor_user_id=actor.id)
                 flash("Inventory override released.", "success")
             elif action == "blackout":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_blackout_period(
-                    parse_optional_uuid(request.form.get("blackout_id")),
+                    helpers["parse_optional_uuid"](request.form.get("blackout_id")),
                     BlackoutPayload(
                         name=request.form.get("name", ""),
                         blackout_type=request.form.get("blackout_type", ""),
                         start_date=date.fromisoformat(request.form["start_date"]),
                         end_date=date.fromisoformat(request.form["end_date"]),
                         reason=request.form.get("reason", ""),
-                        is_active=truthy_setting(request.form.get("is_active")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
                     ),
                     actor_user_id=actor.id,
                 )
                 flash("Blackout period saved.", "success")
             elif action == "deposit_settings":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_settings_bundle(
                     [
                         {"key": "reservation.deposit_percentage", "value": request.form.get("deposit_percentage"), "value_type": "decimal", "description": "Default reservation deposit percentage", "is_public": False, "sort_order": 40},
-                        {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable hosted reservation payment requests", "is_public": False, "sort_order": 41},
+                        {"key": "payment.deposit_enabled", "value": helpers["truthy_setting"](request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable hosted reservation payment requests", "is_public": False, "sort_order": 41},
                     ],
                     actor_user_id=actor.id,
                 )
@@ -504,41 +405,21 @@ def staff_rates():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_rates"))
 
-    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
-    rooms = (
-        db.session.execute(
-            sa.select(Room).order_by(Room.floor_number.asc(), Room.room_number.asc())
-        )
-        .scalars()
-        .all()
-    )
+    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    rooms = Room.query.order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
     rate_rules = (
-        db.session.execute(
-            sa.select(RateRule)
-            .where(RateRule.deleted_at.is_(None))
-            .order_by(RateRule.priority.asc(), RateRule.name.asc())
-        )
-        .scalars()
+        RateRule.query.filter(RateRule.deleted_at.is_(None))
+        .order_by(RateRule.priority.asc(), RateRule.name.asc())
         .all()
     )
     overrides = (
-        db.session.execute(
-            sa.select(InventoryOverride).order_by(
-                InventoryOverride.is_active.desc(),
-                InventoryOverride.start_date.asc(),
-                InventoryOverride.created_at.desc(),
-            )
-        )
-        .scalars()
-        .all()
+        InventoryOverride.query.order_by(
+            InventoryOverride.is_active.desc(),
+            InventoryOverride.start_date.asc(),
+            InventoryOverride.created_at.desc(),
+        ).all()
     )
-    blackouts = (
-        db.session.execute(
-            sa.select(BlackoutPeriod).order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc())
-        )
-        .scalars()
-        .all()
-    )
+    blackouts = BlackoutPeriod.query.order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc()).all()
     return render_template(
         "admin_rates_inventory.html",
         active_section="rates_inventory",
@@ -553,13 +434,14 @@ def staff_rates():
         rule_types=RATE_RULE_TYPES,
         adjustment_types=RATE_ADJUSTMENT_TYPES,
         deposit_percentage=str(get_setting_value("reservation.deposit_percentage", "50.00")),
-        deposit_enabled=truthy_setting(get_setting_value("payment.deposit_enabled", True)),
+        deposit_enabled=helpers["truthy_setting"](get_setting_value("payment.deposit_enabled", True)),
     )
 
 
 @admin_bp.route("/staff/admin/operations", methods=["GET", "POST"])
 def staff_admin_operations():
-    require_permission("settings.view")
+    helpers = _get_app_helpers()
+    helpers["require_permission"]("settings.view")
     template_preview = None
     preview_key = request.args.get("template_key", "guest_confirmation")
     preview_channel = request.args.get("channel", "email")
@@ -568,7 +450,7 @@ def staff_admin_operations():
         action = request.form.get("action")
         try:
             if action == "policy":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_policy_document(
                     PolicyPayload(
                         code=request.form.get("code", ""),
@@ -579,16 +461,16 @@ def staff_admin_operations():
                             "en": request.form.get("content_en", ""),
                             "zh-Hans": request.form.get("content_zh_hans", ""),
                         },
-                        is_active=truthy_setting(request.form.get("is_active")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
                     ),
                     actor_user_id=actor.id,
                 )
                 flash("Policy updated.", "success")
                 return redirect(url_for("admin.staff_admin_operations"))
             if action == "notification_template":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_notification_template(
-                    parse_optional_uuid(request.form.get("template_id")),
+                    helpers["parse_optional_uuid"](request.form.get("template_id")),
                     NotificationTemplatePayload(
                         template_key=request.form.get("template_key", ""),
                         channel=request.form.get("channel", "email"),
@@ -596,7 +478,7 @@ def staff_admin_operations():
                         description=request.form.get("description"),
                         subject_template=request.form.get("subject_template", ""),
                         body_template=request.form.get("body_template", ""),
-                        is_active=truthy_setting(request.form.get("is_active")),
+                        is_active=helpers["truthy_setting"](request.form.get("is_active")),
                     ),
                     actor_user_id=actor.id,
                 )
@@ -616,10 +498,10 @@ def staff_admin_operations():
                 template_preview = preview_notification_template(preview_key, preview_language, channel=preview_channel)
                 flash("Template preview refreshed.", "info")
             elif action == "housekeeping_defaults":
-                actor = require_permission("settings.edit")
+                actor = helpers["require_permission"]("settings.edit")
                 upsert_settings_bundle(
                     [
-                        {"key": "housekeeping.require_inspected_for_ready", "value": truthy_setting(request.form.get("require_inspected_for_ready")), "value_type": "boolean", "description": "Require inspected status before room readiness", "is_public": False, "sort_order": 80},
+                        {"key": "housekeeping.require_inspected_for_ready", "value": helpers["truthy_setting"](request.form.get("require_inspected_for_ready")), "value_type": "boolean", "description": "Require inspected status before room readiness", "is_public": False, "sort_order": 80},
                         {"key": "housekeeping.checkout_dirty_status", "value": request.form.get("checkout_dirty_status"), "value_type": "string", "description": "Default housekeeping status applied after checkout", "is_public": False, "sort_order": 81},
                     ],
                     actor_user_id=actor.id,
@@ -631,18 +513,10 @@ def staff_admin_operations():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
 
-    documents_by_code = _policy_documents_context()
+    documents_by_code = policy_documents_context()
     templates = (
-        db.session.execute(
-            sa.select(NotificationTemplate)
-            .where(NotificationTemplate.deleted_at.is_(None))
-            .order_by(
-                NotificationTemplate.template_key.asc(),
-                NotificationTemplate.channel.asc(),
-                NotificationTemplate.language_code.asc(),
-            )
-        )
-        .scalars()
+        NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None))
+        .order_by(NotificationTemplate.template_key.asc(), NotificationTemplate.channel.asc(), NotificationTemplate.language_code.asc())
         .all()
     )
     if template_preview is None:
@@ -659,29 +533,30 @@ def staff_admin_operations():
         preview_key=preview_key,
         preview_channel=preview_channel,
         preview_language=preview_language,
-        housekeeping_defaults=_housekeeping_defaults_context(),
+        housekeeping_defaults=housekeeping_defaults_context(),
     )
 
 
 @admin_bp.route("/staff/admin/communications", methods=["GET", "POST"], endpoint="staff_admin_communications")
 def staff_admin_communications():
-    require_permission("settings.view")
+    helpers = _get_app_helpers()
+    helpers["require_permission"]("settings.view")
     if request.method == "POST":
         action = request.form.get("action")
         try:
-            actor = require_permission("settings.edit")
+            actor = helpers["require_permission"]("settings.edit")
             if action == "save_settings":
                 upsert_settings_bundle(
                     [
                         {"key": "notifications.sender_name", "value": request.form.get("sender_name"), "value_type": "string", "description": "Friendly sender name for hotel communications", "is_public": False, "sort_order": 120},
-                        {"key": "notifications.pre_arrival_enabled", "value": truthy_setting(request.form.get("pre_arrival_enabled")), "value_type": "boolean", "description": "Enable automatic pre-arrival reminders", "is_public": False, "sort_order": 121},
+                        {"key": "notifications.pre_arrival_enabled", "value": helpers["truthy_setting"](request.form.get("pre_arrival_enabled")), "value_type": "boolean", "description": "Enable automatic pre-arrival reminders", "is_public": False, "sort_order": 121},
                         {"key": "notifications.pre_arrival_days_before", "value": request.form.get("pre_arrival_days_before"), "value_type": "integer", "description": "Days before arrival to send reminder", "is_public": False, "sort_order": 122},
-                        {"key": "notifications.failed_payment_reminder_enabled", "value": truthy_setting(request.form.get("failed_payment_reminder_enabled")), "value_type": "boolean", "description": "Enable failed payment reminders", "is_public": False, "sort_order": 123},
+                        {"key": "notifications.failed_payment_reminder_enabled", "value": helpers["truthy_setting"](request.form.get("failed_payment_reminder_enabled")), "value_type": "boolean", "description": "Enable failed payment reminders", "is_public": False, "sort_order": 123},
                         {"key": "notifications.failed_payment_reminder_delay_hours", "value": request.form.get("failed_payment_reminder_delay_hours"), "value_type": "integer", "description": "Delay before failed payment reminders", "is_public": False, "sort_order": 124},
-                        {"key": "notifications.staff_email_alerts_enabled", "value": truthy_setting(request.form.get("staff_email_alerts_enabled")), "value_type": "boolean", "description": "Enable staff alert emails", "is_public": False, "sort_order": 125},
+                        {"key": "notifications.staff_email_alerts_enabled", "value": helpers["truthy_setting"](request.form.get("staff_email_alerts_enabled")), "value_type": "boolean", "description": "Enable staff alert emails", "is_public": False, "sort_order": 125},
                         {"key": "notifications.staff_alert_recipients", "value": request.form.get("staff_alert_recipients"), "value_type": "string", "description": "Staff alert recipient emails", "is_public": False, "sort_order": 126},
-                        {"key": "notifications.line_staff_alert_enabled", "value": truthy_setting(request.form.get("line_staff_alert_enabled")), "value_type": "boolean", "description": "Enable LINE staff alerts", "is_public": False, "sort_order": 127},
-                        {"key": "notifications.whatsapp_staff_alert_enabled", "value": truthy_setting(request.form.get("whatsapp_staff_alert_enabled")), "value_type": "boolean", "description": "Enable WhatsApp staff alerts", "is_public": False, "sort_order": 128},
+                        {"key": "notifications.line_staff_alert_enabled", "value": helpers["truthy_setting"](request.form.get("line_staff_alert_enabled")), "value_type": "boolean", "description": "Enable LINE staff alerts", "is_public": False, "sort_order": 127},
+                        {"key": "notifications.whatsapp_staff_alert_enabled", "value": helpers["truthy_setting"](request.form.get("whatsapp_staff_alert_enabled")), "value_type": "boolean", "description": "Enable WhatsApp staff alerts", "is_public": False, "sort_order": 128},
                     ],
                     actor_user_id=actor.id,
                 )
@@ -746,17 +621,18 @@ def staff_admin_communications():
 
 @admin_bp.route("/staff/admin/payments", methods=["GET", "POST"])
 def staff_admin_payments():
-    viewer = require_permission("settings.view")
+    helpers = _get_app_helpers()
+    viewer = helpers["require_permission"]("settings.view")
     if request.method == "POST":
         try:
-            actor = require_permission("settings.edit")
+            actor = helpers["require_permission"]("settings.edit")
             selected_provider = (request.form.get("active_provider") or "env").strip().lower()
             if selected_provider != str(get_setting_value("payment.active_provider", "env")).strip().lower():
-                require_admin_role(actor)
+                helpers["require_admin_role"](actor)
             upsert_settings_bundle(
                 [
                     {"key": "payment.active_provider", "value": selected_provider, "value_type": "string", "description": "Active hosted payment provider selector", "is_public": False, "sort_order": 90},
-                    {"key": "payment.deposit_enabled", "value": truthy_setting(request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable reservation payment collection via hosted payments", "is_public": False, "sort_order": 91},
+                    {"key": "payment.deposit_enabled", "value": helpers["truthy_setting"](request.form.get("deposit_enabled")), "value_type": "boolean", "description": "Enable reservation payment collection via hosted payments", "is_public": False, "sort_order": 91},
                     {"key": "payment.link_expiry_minutes", "value": request.form.get("link_expiry_minutes"), "value_type": "integer", "description": "Hosted payment link expiry in minutes", "is_public": False, "sort_order": 92},
                     {"key": "payment.link_resend_cooldown_seconds", "value": request.form.get("link_resend_cooldown_seconds"), "value_type": "integer", "description": "Minimum cooldown between payment link resends", "is_public": False, "sort_order": 93},
                 ],
@@ -767,19 +643,11 @@ def staff_admin_payments():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_admin_payments"))
 
-    recent_requests = (
-        db.session.execute(
-            sa.select(PaymentRequest)
-            .order_by(PaymentRequest.created_at.desc())
-            .limit(20)
-        )
-        .scalars()
-        .all()
-    )
+    recent_requests = PaymentRequest.query.order_by(PaymentRequest.created_at.desc()).limit(20).all()
     return render_template(
         "admin_payments.html",
         active_section="payments",
-        payment_settings=_payment_settings_context(),
+        payment_settings=payment_settings_context(),
         recent_requests=recent_requests,
-        is_super_admin=is_admin_user(viewer),
+        is_super_admin=helpers["is_admin_user"](viewer),
     )

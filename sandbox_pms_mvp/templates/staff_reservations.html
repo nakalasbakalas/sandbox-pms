@@ -34,6 +34,68 @@
   </div>
 </div>
 
+<section class="card" style="margin:1rem 0;">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Group Room Blocks</p>
+      <h2 style="margin:0;">Hold inventory for tours, weddings, and rooming lists</h2>
+    </div>
+  </div>
+  <div class="grid two gap-lg">
+    <div>
+      {% if can('reservation.edit') %}
+      <form class="stack-form" method="post" action="{{ url_for('staff_group_block_create') }}">
+        {{ csrf_input() }}
+        <div class="grid two">
+          <label><span>Group name</span><input type="text" name="group_name" placeholder="Chiang Mai wedding party" required></label>
+          <label><span>Room type</span><select name="room_type_id" required>{% for room_type in room_types %}<option value="{{ room_type.id }}">{{ room_type.code }} · {{ room_type.name }}</option>{% endfor %}</select></label>
+        </div>
+        <div class="grid four">
+          <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ today.isoformat() }}" required></label>
+          <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ tomorrow.isoformat() }}" required></label>
+          <label><span>Rooms</span><input type="number" name="room_count" min="1" value="5" required></label>
+          <label><span>Adults / room</span><input type="number" name="adults" min="1" value="2" required></label>
+        </div>
+        <div class="grid four">
+          <label><span>Children / room</span><input type="number" name="children" min="0" value="0"></label>
+          <label><span>Extra guests / room</span><input type="number" name="extra_guests" min="0" value="0"></label>
+          <label><span>Contact name</span><input type="text" name="contact_name" placeholder="Organizer or agency"></label>
+          <label><span>Contact email</span><input type="email" name="contact_email" placeholder="groups@example.com"></label>
+        </div>
+        <label><span>Notes</span><textarea name="notes" rows="2" placeholder="Arrival window, rooming list pending, or release terms"></textarea></label>
+        <button class="button" type="submit">Create group block</button>
+      </form>
+      {% else %}
+      <p class="empty-state">You have view access, but reservation edit permission is required to create or release group blocks.</p>
+      {% endif %}
+    </div>
+    <div>
+      <div class="list-stack compact">
+        {% for block in group_blocks %}
+        <div class="list-row no-link">
+          <div>
+            <strong><a href="{{ url_for('staff_group_block_detail', group_block_code=block.group_block_code, back=request.full_path.rstrip('?')) }}">{{ block.group_name }}</a></strong>
+            <p>{{ block.group_block_code }} · {{ block.room_type_code or 'Room type pending' }} · {{ block.check_in_date }} to {{ block.check_out_date }}</p>
+            <p class="small muted">{{ block.active_count }} active hold{{ '' if block.active_count == 1 else 's' }} · {{ block.total_grand_total|money }} projected gross</p>
+          </div>
+          <div class="right-stack">
+            <span class="status {{ block.status }}">{{ block.status.replace('_', ' ') }}</span>
+            {% if can('reservation.edit') and block.active_count %}
+            <form method="post" action="{{ url_for('staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
+              {{ csrf_input() }}
+              <button class="button tiny secondary" type="submit">Release</button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <p class="empty-state">No active group room blocks yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
 {# ── Results toolbar ── #}
 <div class="res-results-bar">
   <span class="res-results-count">

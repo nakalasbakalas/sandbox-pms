@@ -1,5 +1,3 @@
-"""Public blueprint — booking engine, payments, cancel/modify requests, calendar feeds, pre-check-in guest form."""
-
 from __future__ import annotations
 
 import logging
@@ -7,33 +5,35 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-import sqlalchemy as sa
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
+from markupsafe import escape
 
+from ..activity import write_activity_log
+from ..models import PaymentRequest, ReservationHold, RoomType
 from ..extensions import db
-from ..helpers import (
-    current_language,
-    current_settings,
-    parse_booking_extra_ids,
-)
-from ..i18n import normalize_language, t
-from ..models import (
-    PaymentRequest,
-    ReservationHold,
-    RoomType,
-)
+from ..i18n import normalize_language
 from ..security import public_error_message, request_client_ip
-from ..services.extras_service import reservation_extra_summary
-from ..services.ical_service import export_feed_ical
-from ..services.messaging_service import fire_automation_event
+from ..services.public_booking_service import (
+    HoldRequestPayload,
+    PublicBookingPayload,
+    PublicSearchPayload,
+    VerificationRequestPayload,
+    confirm_public_booking,
+    create_reservation_hold,
+    load_public_confirmation,
+    search_public_availability,
+    submit_cancellation_request,
+    submit_modification_request,
+)
 from ..services.payment_integration_service import (
     DEPOSIT_HOSTED_REQUEST_TYPES,
-    create_or_reuse_payment_request,
+    create_or_reuse_deposit_request,
     handle_public_payment_start,
     load_public_payment_return,
     payments_enabled,
     process_payment_webhook,
 )
+from ..services.ical_service import export_feed_ical
 from ..services.pre_checkin_service import (
     PreCheckInSavePayload,
     get_pre_checkin_context,
@@ -43,50 +43,29 @@ from ..services.pre_checkin_service import (
     upload_document,
     validate_token_access,
 )
-from ..services.public_booking_service import (
-    HoldRequestPayload,
-    PublicBookingPayload,
-    PublicSearchPayload,
-    VerificationRequestPayload,
-    complete_public_digital_checkout,
-    confirm_public_booking,
-    create_reservation_hold,
-    load_public_confirmation,
-    public_digital_checkout_context,
-    submit_cancellation_request,
-    submit_modification_request,
-)
-from ..activity import write_activity_log
+from ..services.messaging_service import fire_automation_event
 
 logger = logging.getLogger(__name__)
 
 public_bp = Blueprint("public", __name__)
 
 
-# ── Helper imports from app.py module scope ──────────────────────────
-# These functions are defined at module scope in app.py and used by
-# the public booking routes. We import them lazily to avoid circular
-# imports during the blueprint extraction.
-
 def _get_app_helpers():
-    """Lazy import of helpers defined in app.py module scope."""
-    from ..app import (
-        build_public_booking_entry_context,
-        public_booking_form_context,
-        public_request_form_defaults,
-        resolve_booking_source_channel,
-        source_metadata_from_request,
-    )
+    """Lazy import of helpers from app.py to avoid circular dependencies."""
+    from .. import app as app_module
     return {
-        "build_public_booking_entry_context": build_public_booking_entry_context,
-        "public_booking_form_context": public_booking_form_context,
-        "public_request_form_defaults": public_request_form_defaults,
-        "resolve_booking_source_channel": resolve_booking_source_channel,
-        "source_metadata_from_request": source_metadata_from_request,
+        "build_public_booking_entry_context": app_module.build_public_booking_entry_context,
+        "public_booking_form_context": app_module.public_booking_form_context,
+        "public_request_form_defaults": app_module.public_request_form_defaults,
+        "resolve_booking_source_channel": app_module.resolve_booking_source_channel,
+        "source_metadata_from_request": app_module.source_metadata_from_request,
+        "current_language": app_module.current_language,
+        "current_settings": app_module.current_settings,
+        "current_booking_attribution": app_module.current_booking_attribution,
+        "reservation_extra_summary": app_module.reservation_extra_summary,
+        "parse_booking_extra_ids": app_module.parse_booking_extra_ids,
     }
 
-
-# ── Routes ────────────────────────────────────────────────────────────
 
 @public_bp.route("/book")
 def booking_entry():
@@ -157,14 +136,12 @@ def booking_hold():
 def booking_confirm():
     helpers = _get_app_helpers()
     language = normalize_language(request.form.get("language"))
-    settings = current_settings()
+    settings = helpers["current_settings"]()
     published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
     selected_extra_ids: tuple[UUID, ...] = ()
-    hold = db.session.execute(
-        sa.select(ReservationHold).where(ReservationHold.hold_code == request.form.get("hold_code"))
-    ).scalar_one_or_none()
+    hold = ReservationHold.query.filter_by(hold_code=request.form.get("hold_code")).first()
     try:
-        selected_extra_ids = parse_booking_extra_ids(request.form.getlist("extra_ids"))
+        selected_extra_ids = helpers["parse_booking_extra_ids"](request.form.getlist("extra_ids"))
         attribution = helpers["source_metadata_from_request"](
             language,
             fallback=hold.source_metadata_json if hold and isinstance(hold.source_metadata_json, dict) else None,
@@ -188,7 +165,7 @@ def booking_confirm():
         )
         if payments_enabled() and Decimal(str(reservation.deposit_required_amount or "0.00")) > Decimal("0.00"):
             try:
-                create_or_reuse_payment_request(
+                create_or_reuse_deposit_request(
                     reservation.id,
                     actor_user_id=None,
                     send_email=True,
@@ -245,136 +222,31 @@ def booking_confirm():
 
 @public_bp.route("/booking/confirmation/<reservation_code>")
 def booking_confirmation(reservation_code):
+    helpers = _get_app_helpers()
     reservation = load_public_confirmation(reservation_code, request.args.get("token", ""))
     if not reservation:
         abort(404)
     g.public_language = reservation.booking_language
     payment_request = (
-        db.session.execute(
-            sa.select(PaymentRequest)
-            .where(
-                PaymentRequest.reservation_id == reservation.id,
-                PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
-            )
-            .order_by(PaymentRequest.created_at.desc())
-        ).scalars().first()
+        PaymentRequest.query.filter(
+            PaymentRequest.reservation_id == reservation.id,
+            PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
+        )
+        .order_by(PaymentRequest.created_at.desc())
+        .first()
     )
     return render_template(
         "public_confirmation.html",
         reservation=reservation,
         guest=reservation.primary_guest,
         payment_request=payment_request,
-        extras_summary=reservation_extra_summary(reservation),
-        digital_checkout_url=(
-            url_for(
-                "public.public_digital_checkout",
-                reservation_code=reservation.reservation_code,
-                token=reservation.public_confirmation_token,
-                lang=current_language(),
-            )
-            if reservation.current_status == "checked_in"
-            else None
-        ),
-    )
-
-
-@public_bp.route("/booking/checkout/<reservation_code>")
-def public_digital_checkout(reservation_code):
-    context = public_digital_checkout_context(reservation_code, request.args.get("token", ""))
-    if not context:
-        abort(404)
-    reservation = context["reservation"]
-    g.public_language = reservation.booking_language
-    return render_template("public_digital_checkout.html", **context)
-
-
-@public_bp.route("/booking/checkout/<reservation_code>/pay-balance", methods=["POST"])
-def public_digital_checkout_pay_balance(reservation_code):
-    token = (request.form.get("token") or "").strip()
-    context = public_digital_checkout_context(reservation_code, token)
-    if not context:
-        abort(404)
-    reservation = context["reservation"]
-    g.public_language = reservation.booking_language
-    if not context["can_create_balance_payment"]:
-        flash(public_error_message(ValueError("Balance payment link is not available for this stay.")), "error")
-        return redirect(
-            url_for(
-                "public.public_digital_checkout",
-                reservation_code=reservation.reservation_code,
-                token=reservation.public_confirmation_token,
-                lang=current_language(),
-            )
-        )
-    try:
-        payment_request = create_or_reuse_payment_request(
-            reservation.id,
-            actor_user_id=None,
-            request_kind="balance",
-            send_email=False,
-            language=reservation.booking_language,
-            source="public_digital_checkout",
-        )
-    except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-        return redirect(
-            url_for(
-                "public.public_digital_checkout",
-                reservation_code=reservation.reservation_code,
-                token=reservation.public_confirmation_token,
-                lang=current_language(),
-            )
-        )
-    return redirect(
-        url_for(
-            "public.public_payment_start",
-            request_code=payment_request.request_code,
-            reservation_code=reservation.reservation_code,
-            token=reservation.public_confirmation_token,
-            lang=current_language(),
-        )
-    )
-
-
-@public_bp.route("/booking/checkout/<reservation_code>/complete", methods=["POST"])
-def public_digital_checkout_complete(reservation_code):
-    token = (request.form.get("token") or "").strip()
-    checkout_context = public_digital_checkout_context(reservation_code, token)
-    if not checkout_context:
-        abort(404)
-    reservation = checkout_context["reservation"]
-    g.public_language = reservation.booking_language
-    try:
-        reservation = complete_public_digital_checkout(reservation_code, token)
-        try:
-            fire_automation_event(
-                "checkout_completed",
-                reservation_id=str(reservation.id),
-                guest_id=str(reservation.primary_guest_id) if reservation.primary_guest_id else None,
-                context={
-                    "reservation_code": reservation.reservation_code,
-                    "guest_name": reservation.primary_guest.full_name if reservation.primary_guest else "",
-                    "check_in_date": str(reservation.check_in_date),
-                    "check_out_date": str(reservation.check_out_date),
-                    "hotel_name": current_app.config.get("HOTEL_NAME", ""),
-                },
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception("Automation hook failed for checkout_completed (public)")
-    except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(
-        url_for(
-            "public.public_digital_checkout",
-            reservation_code=reservation.reservation_code,
-            token=reservation.public_confirmation_token,
-            lang=current_language(),
-        )
+        extras_summary=helpers["reservation_extra_summary"](reservation),
     )
 
 
 @public_bp.route("/payments/request/<request_code>")
 def public_payment_start(request_code):
+    helpers = _get_app_helpers()
     try:
         payment_request = handle_public_payment_start(
             request_code,
@@ -385,12 +257,13 @@ def public_payment_start(request_code):
         abort(404)
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-        return redirect(url_for("index", lang=current_language()))
+        return redirect(url_for("public.index", lang=helpers["current_language"]()))
     return redirect(payment_request.payment_url)
 
 
 @public_bp.route("/payments/return/<request_code>")
 def public_payment_return(request_code):
+    helpers = _get_app_helpers()
     try:
         context = load_public_payment_return(
             request_code,
@@ -400,37 +273,6 @@ def public_payment_return(request_code):
     except LookupError:
         abort(404)
     g.public_language = context["reservation"].booking_language
-    reservation = context["reservation"]
-    payment_request = context["payment_request"]
-    if reservation.current_status == "checked_in" and "deposit" not in (payment_request.request_type or ""):
-        context["return_url"] = url_for(
-            "public.public_digital_checkout",
-            reservation_code=reservation.reservation_code,
-            token=reservation.public_confirmation_token,
-            lang=current_language(),
-        )
-        context["return_label"] = t(current_language(), "digital_checkout_title")
-    elif reservation.created_from_public_booking_flow:
-        context["return_url"] = url_for(
-            "public.booking_confirmation",
-            reservation_code=reservation.reservation_code,
-            token=reservation.public_confirmation_token,
-            lang=current_language(),
-        )
-        context["return_label"] = t(current_language(), "confirmation_title")
-    else:
-        context["return_url"] = url_for(
-            "public.public_digital_checkout",
-            reservation_code=reservation.reservation_code,
-            token=reservation.public_confirmation_token,
-            lang=current_language(),
-        )
-        context["return_label"] = t(current_language(), "digital_checkout_title")
-    context["payment_action_label"] = (
-        t(current_language(), "payment_pay_deposit")
-        if "deposit" in (payment_request.request_type or "")
-        else t(current_language(), "digital_checkout_pay_balance")
-    )
     return render_template("public_payment_return.html", **context)
 
 
@@ -456,10 +298,11 @@ def booking_cancel_request():
     request_row = None
     form_defaults = helpers["public_request_form_defaults"]("booking_reference", "contact_value", "reason")
     if request.method == "POST":
+        from ..i18n import t
         payload = VerificationRequestPayload(
             booking_reference=request.form["booking_reference"].strip(),
             contact_value=request.form["contact_value"].strip(),
-            language=current_language(),
+            language=helpers["current_language"](),
             reason=request.form.get("reason"),
             request_ip=request_client_ip(),
             user_agent=request.user_agent.string,
@@ -469,11 +312,10 @@ def booking_cancel_request():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         else:
-            from ..i18n import t
             if request_row:
-                flash(t(current_language(), "cancellation_received"), "success")
+                flash(t(helpers["current_language"](), "cancellation_received"), "success")
             else:
-                flash(t(current_language(), "booking_lookup_not_found"), "error")
+                flash(t(helpers["current_language"](), "booking_lookup_not_found"), "error")
     return render_template("public_cancel_request.html", request_row=request_row, form_defaults=form_defaults)
 
 
@@ -492,10 +334,11 @@ def booking_modify_request():
         "special_requests",
     )
     if request.method == "POST":
+        from ..i18n import t
         payload = VerificationRequestPayload(
             booking_reference=request.form["booking_reference"].strip(),
             contact_value=request.form["contact_value"].strip(),
-            language=current_language(),
+            language=helpers["current_language"](),
             requested_changes={
                 "requested_check_in": request.form.get("requested_check_in"),
                 "requested_check_out": request.form.get("requested_check_out"),
@@ -512,11 +355,10 @@ def booking_modify_request():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
         else:
-            from ..i18n import t
             if request_row:
-                flash(t(current_language(), "modification_received"), "success")
+                flash(t(helpers["current_language"](), "modification_received"), "success")
             else:
-                flash(t(current_language(), "booking_lookup_not_found"), "error")
+                flash(t(helpers["current_language"](), "booking_lookup_not_found"), "error")
     return render_template("public_modify_request.html", request_row=request_row, form_defaults=form_defaults)
 
 
@@ -535,7 +377,8 @@ def calendar_feed_export(token):
     return response
 
 
-# ── Pre-Check-In: Guest-facing routes ────────────────────────────────
+# ── Pre-Check-In: Guest-facing routes ───────────────────────────────
+
 
 @public_bp.route("/pre-checkin/<token>", methods=["GET"])
 def pre_checkin_form(token):
@@ -568,6 +411,7 @@ def pre_checkin_save(token):
         acknowledgment_accepted=request.form.get("acknowledgment_accepted") == "on",
         acknowledgment_name=request.form.get("acknowledgment_name"),
     )
+    # Parse occupant details from form
     occupants = []
     for i in range(20):
         name = request.form.get(f"occupant_name_{i}", "").strip()
