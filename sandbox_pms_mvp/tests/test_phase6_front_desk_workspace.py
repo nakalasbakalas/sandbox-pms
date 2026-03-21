@@ -13,6 +13,9 @@ from flask_migrate import upgrade
 from werkzeug.security import generate_password_hash
 
 import pms.app as pms_app
+import pms.routes.front_desk as front_desk_routes
+import pms.services.front_desk_service as front_desk_service
+import pms.services.front_desk_mutations as front_desk_mutations
 from pms.app import create_app
 from pms.extensions import db
 from pms.models import (
@@ -283,6 +286,79 @@ def test_check_in_succeeds_and_updates_reservation_inventory_and_identity(app_fa
         assert ActivityLog.query.filter_by(event_type="front_desk.checked_in").count() == 1
 
 
+def test_check_in_requires_identity_verification_outside_testing(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    with app.app_context():
+        business_date = date.today() + timedelta(days=1)
+        reservation = create_staff_reservation(
+            first_name="Verify",
+            last_name="Required",
+            phone="+66800000195",
+            room_type_code="TWN",
+            check_in_date=business_date,
+            check_out_date=business_date + timedelta(days=1),
+        )
+        actor = make_staff_user("front_desk", "fd-identity-required@example.com")
+        monkeypatch.setattr(front_desk_mutations, "current_app_testing", lambda: False)
+
+        with pytest.raises(ValueError, match="Identity verification must be completed before check-in."):
+            complete_check_in(
+                reservation.id,
+                CheckInPayload(
+                    room_id=reservation.assigned_room_id,
+                    first_name="Verify",
+                    last_name="Required",
+                    phone="+66800000195",
+                    email="verify-required@example.com",
+                    action_at=utc_dt(business_date, 15),
+                ),
+                actor_user_id=actor.id,
+            )
+
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert refreshed.current_status == reservation.current_status
+        assert refreshed.current_status != "checked_in"
+        assert refreshed.checked_in_at is None
+        assert refreshed.identity_verified_at is None
+
+
+def test_check_in_accepts_existing_verified_identity_outside_testing(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    with app.app_context():
+        business_date = date.today() + timedelta(days=1)
+        reservation = create_staff_reservation(
+            first_name="Pre",
+            last_name="Verified",
+            phone="+66800000196",
+            room_type_code="TWN",
+            check_in_date=business_date,
+            check_out_date=business_date + timedelta(days=1),
+        )
+        actor = make_staff_user("front_desk", "fd-identity-existing@example.com")
+        verified_at = utc_dt(business_date, 11)
+        reservation.identity_verified_at = verified_at
+        reservation.identity_verified_by_user_id = actor.id
+        db.session.commit()
+        monkeypatch.setattr(front_desk_mutations, "current_app_testing", lambda: False)
+
+        checked_in = complete_check_in(
+            reservation.id,
+            CheckInPayload(
+                room_id=reservation.assigned_room_id,
+                first_name="Pre",
+                last_name="Verified",
+                phone="+66800000196",
+                email="preverified@example.com",
+                collect_payment_amount=Decimal(str(reservation.deposit_required_amount)),
+                action_at=utc_dt(business_date, 15),
+            ),
+            actor_user_id=actor.id,
+        )
+
+        assert checked_in.current_status == "checked_in"
+        assert checked_in.identity_verified_at == verified_at
+
+
 def test_unauthorized_role_cannot_complete_check_in_or_checkout(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -410,6 +486,45 @@ def test_walk_in_create_and_check_in_uses_authoritative_service_path(app_factory
         assert reservation.public_confirmation_token is None
         assert PaymentRequest.query.filter_by(reservation_id=reservation.id, status="paid").count() == 1
         assert InventoryDay.query.filter_by(reservation_id=reservation.id, availability_status="occupied").count() == 1
+
+
+def test_walk_in_route_requires_identity_verification_outside_testing(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-walkin-identity@example.com")
+        twin = RoomType.query.filter_by(code="TWN").one()
+        walk_in_count_before = Reservation.query.filter_by(source_channel="walk_in").count()
+    monkeypatch.setattr(front_desk_mutations, "current_app_testing", lambda: False)
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        "/staff/front-desk/walk-in",
+        data={
+            "first_name": "Walk",
+            "last_name": "Blocked",
+            "phone": "+66800000197",
+            "email": "walk-blocked@example.com",
+            "room_type_id": str(twin.id),
+            "check_in_date": date.today().isoformat(),
+            "check_out_date": (date.today() + timedelta(days=1)).isoformat(),
+            "adults": "2",
+            "children": "0",
+            "extra_guests": "0",
+            "collect_payment_amount": "0.00",
+            "payment_method": "front_desk",
+            "back_mode": "arrivals",
+            "back_date": date.today().isoformat(),
+        },
+        follow_redirects=True,
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Identity verification must be completed before check-in." in body
+    with app.app_context():
+        assert Reservation.query.filter_by(source_channel="walk_in").count() == walk_in_count_before
 
 
 def test_checked_in_room_move_cannot_double_book_target_room(app_factory):
@@ -734,6 +849,135 @@ def test_check_in_route_updates_guest_identity_fields(app_factory):
         assert refreshed.identity_verified_at is not None
 
 
+def test_check_in_route_rejects_deposit_override_for_front_desk_role(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Override",
+            last_name="Blocked",
+            phone="+66800000119",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        reservation.deposit_required_amount = Decimal("500.00")
+        db.session.commit()
+        user = make_staff_user("front_desk", "fd-override-blocked@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Override",
+            "last_name": "Blocked",
+            "phone": "+66800000119",
+            "email": "override-blocked@example.com",
+            "identity_verified": "on",
+            "collect_payment_amount": "0.00",
+            "override_payment": "on",
+            "apply_early_fee": "on",
+            "back_url": "/staff/front-desk",
+            "business_date": date.today().isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Deposit is still outstanding." in body
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert refreshed.current_status == "confirmed"
+        assert refreshed.checked_in_at is None
+
+
+def test_check_in_route_allows_manager_deposit_override(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Override",
+            last_name="Manager",
+            phone="+66800000120",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        reservation.deposit_required_amount = Decimal("500.00")
+        db.session.commit()
+        user = make_staff_user("manager", "manager-override@example.com")
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Override",
+            "last_name": "Manager",
+            "phone": "+66800000120",
+            "email": "override-manager@example.com",
+            "identity_verified": "on",
+            "collect_payment_amount": "0.00",
+            "override_payment": "on",
+            "apply_early_fee": "on",
+            "back_url": "/staff/front-desk",
+            "business_date": date.today().isoformat(),
+        },
+        follow_redirects=True,
+    )
+
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert response.status_code == 200
+        assert refreshed.current_status == "checked_in"
+        assert refreshed.checked_in_at is not None
+
+
+def test_check_in_route_blocks_missing_identity_verification_outside_testing(app_factory, monkeypatch):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Route",
+            last_name="Blocked",
+            phone="+66800000198",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+        user = make_staff_user("front_desk", "fd-route-identity-required@example.com")
+    monkeypatch.setattr(front_desk_mutations, "current_app_testing", lambda: False)
+    login_as(client, user)
+
+    response = post_form(
+        client,
+        f"/staff/front-desk/{reservation.id}/check-in",
+        data={
+            "room_id": str(reservation.assigned_room_id),
+            "first_name": "Route",
+            "last_name": "Blocked",
+            "phone": "+66800000198",
+            "email": "route-blocked@example.com",
+            "collect_payment_amount": str(reservation.deposit_required_amount),
+            "apply_early_fee": "on",
+            "back_url": "/staff/front-desk",
+            "business_date": date.today().isoformat(),
+        },
+    )
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 400
+    assert "Identity verification must be completed before check-in." in body
+    assert 'href="#check-in-identity-section"' in body
+    with app.app_context():
+        refreshed = db.session.get(Reservation, reservation.id)
+        assert refreshed.current_status == "confirmed"
+        assert refreshed.checked_in_at is None
+
+
 def test_front_desk_detail_shows_check_in_blockers_before_submit(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()
@@ -799,6 +1043,10 @@ def test_check_in_route_returns_structured_field_errors_for_validation_issues(ap
     assert "Deposit is still outstanding." in body
     assert 'href="#check-in-first-name"' in body
     assert 'id="check-in-first-name"' in body
+    assert 'aria-describedby="check-in-first-name-error"' in body
+    assert 'id="check-in-first-name-error"' in body
+    assert 'aria-describedby="check-in-phone-error"' in body
+    assert 'id="check-in-phone-error"' in body
     assert 'aria-invalid="true"' in body
     assert 'value="Validation"' in body
 
@@ -837,6 +1085,8 @@ def test_check_in_route_rejects_invalid_payment_amount_with_field_message(app_fa
 
     assert response.status_code == 400
     assert "Payment collected now must be a valid amount in THB." in body
+    assert 'aria-describedby="check-in-collect-payment-amount-error"' in body
+    assert 'id="check-in-collect-payment-amount-error"' in body
     assert "Something went wrong. Please try again or contact the hotel." not in body
 
 
@@ -857,7 +1107,7 @@ def test_check_in_route_uses_unexpected_failure_fallback_with_reference(app_fact
     def boom(*args, **kwargs):
         raise RuntimeError("secret token should never leak")
 
-    monkeypatch.setattr(pms_app, "complete_check_in", boom)
+    monkeypatch.setattr(front_desk_routes, "complete_check_in", boom)
     login_as(client, user)
 
     response = post_form(

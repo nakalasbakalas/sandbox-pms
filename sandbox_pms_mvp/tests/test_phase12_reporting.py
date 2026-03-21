@@ -12,7 +12,15 @@ from pms.models import HousekeepingStatus, Reservation, Role, Room, RoomType, Us
 from pms.seeds import bootstrap_inventory_horizon, seed_reference_data
 from pms.services.cashier_service import ManualAdjustmentPayload, ensure_room_charges_posted, post_manual_adjustment
 from pms.services.front_desk_service import NoShowPayload, process_no_show
-from pms.services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
+from pms.services.housekeeping_service import (
+    CreateTaskPayload,
+    RoomStatusUpdatePayload,
+    complete_housekeeping_task,
+    create_housekeeping_task,
+    inspect_housekeeping_task,
+    start_housekeeping_task,
+    update_housekeeping_status,
+)
 from pms.services.payment_integration_service import (
     create_or_reuse_deposit_request,
     process_payment_webhook,
@@ -180,7 +188,7 @@ def build_reporting_dataset() -> dict:
         check_out_date=today + timedelta(days=4),
         source_channel="facebook",
     )
-    pending_future.booked_at = datetime.now(timezone.utc) - timedelta(days=3)
+    pending_future.booked_at = utc_dt(today - timedelta(days=3), 12)
     db.session.commit()
 
     confirmed_paid = set_deposit_required(
@@ -266,7 +274,11 @@ def build_reporting_dataset() -> dict:
             source_channel="whatsapp",
         )
     )
-    process_no_show(no_show_target.id, NoShowPayload(reason="cutoff passed"), actor_user_id=manager.id)
+    process_no_show(
+        no_show_target.id,
+        NoShowPayload(action_at=utc_dt(no_show_target.check_in_date, 12), reason="cutoff passed"),
+        actor_user_id=manager.id,
+    )
 
     reserved_room_ids = {
         arrival_today.assigned_room_id,
@@ -371,7 +383,7 @@ def test_booking_attribution_report_summarizes_public_booking_sources(app_factor
             source_channel="direct_web",
         )
         first.created_from_public_booking_flow = True
-        first.booked_at = datetime.now(timezone.utc)
+        first.booked_at = utc_dt(today, 12)
         first.source_metadata_json = {
             "source_label": "google_ads",
             "utm_source": "google",
@@ -381,7 +393,7 @@ def test_booking_attribution_report_summarizes_public_booking_sources(app_factor
             "entry_cta_source": "home_search",
         }
         second.created_from_public_booking_flow = True
-        second.booked_at = datetime.now(timezone.utc)
+        second.booked_at = utc_dt(today, 13)
         second.source_metadata_json = {
             "source_label": "direct",
             "entry_page": "/availability",
@@ -427,6 +439,87 @@ def test_occupancy_reports_are_authoritative_and_exclude_tentative_sold_nights(a
         by_date = {item["date"]: item for item in dashboard["occupancy_range"]["items"]}
         assert by_date[dataset["today"] + timedelta(days=2)]["occupied_rooms"] == 0
         assert by_date[dataset["today"] + timedelta(days=3)]["occupied_rooms"] == 1
+        assert dashboard["occupancy_year_over_year"]["previous_date_from"] == dataset["today"].replace(year=dataset["today"].year - 1)
+        assert dashboard["occupancy_year_over_year"]["has_previous_data"] is False
+        assert dashboard["occupancy_year_over_year"]["average_delta_percentage_points"] is None
+
+
+def test_channel_performance_report_summarizes_reservations_and_cancellations(app_factory):
+    app = make_reporting_app(app_factory)
+    with app.app_context():
+        dataset = build_reporting_dataset()
+        dashboard = build_manager_dashboard(
+            business_date=dataset["today"],
+            date_from=dataset["today"] - timedelta(days=1),
+            date_to=dataset["today"] + timedelta(days=6),
+        )
+
+        by_channel = {item["source_channel"]: item for item in dashboard["channel_performance"]["items"]}
+        assert dashboard["channel_performance"]["reservation_count"] >= 6
+        assert "admin_manual" in by_channel
+        assert by_channel["admin_manual"]["sold_nights"] >= 1
+        assert by_channel["admin_manual"]["room_revenue_total"] > Decimal("0.00")
+        assert "line" in by_channel
+        assert by_channel["line"]["cancelled_count"] == 1
+        assert by_channel["line"]["cancellation_rate_percentage"] == Decimal("100.00")
+
+
+def test_housekeeping_performance_report_summarizes_attendant_output(app_factory):
+    app = make_reporting_app(app_factory)
+    with app.app_context():
+        dataset = build_reporting_dataset()
+        second_housekeeper = make_staff_user("housekeeping", "housekeeper-payroll@example.com")
+        reserved_room_ids = {reservation.assigned_room_id for reservation in Reservation.query.all() if reservation.assigned_room_id}
+        free_rooms = (
+            Room.query.filter(Room.is_active.is_(True), Room.is_sellable.is_(True), Room.id.notin_(reserved_room_ids))
+            .order_by(Room.room_number.asc())
+            .limit(2)
+            .all()
+        )
+        assert len(free_rooms) == 2
+
+        checkout_task = create_housekeeping_task(
+            CreateTaskPayload(
+                room_id=free_rooms[0].id,
+                business_date=dataset["today"],
+                task_type="checkout_clean",
+                priority="high",
+                assigned_to_user_id=dataset["housekeeper"].id,
+            ),
+            actor_user_id=dataset["manager"].id,
+        )
+        start_housekeeping_task(checkout_task.id, actor_user_id=dataset["housekeeper"].id)
+        complete_housekeeping_task(checkout_task.id, actor_user_id=dataset["housekeeper"].id)
+        inspect_housekeeping_task(checkout_task.id, actor_user_id=dataset["manager"].id)
+
+        rush_task = create_housekeeping_task(
+            CreateTaskPayload(
+                room_id=free_rooms[1].id,
+                business_date=dataset["today"],
+                task_type="rush_clean",
+                priority="urgent",
+                assigned_to_user_id=second_housekeeper.id,
+            ),
+            actor_user_id=dataset["manager"].id,
+        )
+        start_housekeeping_task(rush_task.id, actor_user_id=second_housekeeper.id)
+        complete_housekeeping_task(rush_task.id, actor_user_id=second_housekeeper.id)
+
+        dashboard = build_manager_dashboard(
+            business_date=dataset["today"],
+            date_from=dataset["today"],
+            date_to=dataset["today"],
+        )
+
+        rows = {item["attendant_name"]: item for item in dashboard["housekeeping_performance"]["items"]}
+        assert dashboard["housekeeping_performance"]["task_count"] == 2
+        assert dashboard["housekeeping_performance"]["completed_count"] == 2
+        assert dashboard["housekeeping_performance"]["inspected_count"] == 1
+        assert dashboard["housekeeping_performance"]["attendant_count"] == 2
+        assert dashboard["housekeeping_performance"]["has_explicit_shifts"] is False
+        assert rows[dataset["housekeeper"].full_name]["checkout_clean_count"] == 1
+        assert rows[dataset["housekeeper"].full_name]["inspected_count"] == 1
+        assert rows[second_housekeeper.full_name]["rush_clean_count"] == 1
 
 
 def test_housekeeping_and_folio_reports_reflect_operational_truth(app_factory):
@@ -466,6 +559,12 @@ def test_deposit_pipeline_and_revenue_summary_use_authoritative_financial_data(a
         assert dashboard["revenue_summary"]["manual_charge_total"] == Decimal("150.00")
         assert dashboard["revenue_summary"]["discount_total"] == Decimal("50.00")
         assert dashboard["revenue_summary"]["net_revenue_total"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["room_revenue_total"] == dashboard["revenue_summary"]["room_revenue_total"]
+        assert dashboard["revenue_management"]["adr"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["revpar"] > Decimal("0.00")
+        assert dashboard["revenue_management"]["forecast_supported"] is False
+        assert dashboard["revenue_management"]["best_day"] is not None
+        assert dashboard["revenue_management"]["items"]
 
 
 def test_room_type_performance_and_exception_summaries_are_correct(app_factory):
@@ -474,15 +573,15 @@ def test_room_type_performance_and_exception_summaries_are_correct(app_factory):
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
             business_date=dataset["today"],
-            date_from=dataset["today"],
+            date_from=dataset["today"] - timedelta(days=1),
             date_to=dataset["today"] + timedelta(days=6),
         )
 
         by_type = {item["room_type_code"]: item for item in dashboard["room_type_performance"]["items"]}
         assert by_type["TWN"]["reservation_count"] == 2
-        assert by_type["DBL"]["reservation_count"] == 1
+        assert by_type["DBL"]["reservation_count"] == 2
         assert by_type["TWN"]["sold_nights"] == 3
-        assert by_type["DBL"]["sold_nights"] == 2
+        assert by_type["DBL"]["sold_nights"] == 3
         assert dashboard["cancellation_summary"]["count"] == 1
         assert dashboard["cancellation_summary"]["items"][0]["reservation_code"] == dataset["cancel_target"].reservation_code
         assert dashboard["no_show_summary"]["count"] == 1
@@ -495,7 +594,7 @@ def test_audit_activity_summary_includes_recent_operational_changes(app_factory)
         dataset = build_reporting_dataset()
         dashboard = build_manager_dashboard(
             business_date=dataset["today"],
-            date_from=dataset["today"],
+            date_from=dataset["today"] - timedelta(days=1),
             date_to=dataset["today"] + timedelta(days=6),
         )
 
@@ -517,7 +616,11 @@ def test_reports_route_renders_for_manager_and_blocks_unauthorized_user(app_fact
     assert response.status_code == 200
     assert b"Operational reporting" in response.data
     assert dataset["arrival_today"].reservation_code.encode("utf-8") in response.data
+    assert b"Housekeeping performance" in response.data
     assert b"Occupancy" in response.data
+    assert b"Revenue management" in response.data
+    assert b"Channel performance" in response.data
+    assert b"Year-over-year comparison" in response.data
 
     login_as(client, dataset["housekeeper"])
     forbidden = client.get("/staff/reports")

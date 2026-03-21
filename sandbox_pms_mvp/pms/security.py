@@ -21,6 +21,7 @@ DEFAULT_INSECURE_SECRET_VALUES = {
     "sandbox-hotel-pms-dev-key",
     "sandbox-test-hosted-secret",
 }
+HTTPS_REDIRECT_EXEMPT_PATHS = {"/health"}
 GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again or contact the hotel."
 SENSITIVE_FIELD_FRAGMENTS = {
     "authorization",
@@ -73,6 +74,10 @@ def sanitize_log_data(value: Any, *, key_hint: str | None = None) -> Any:
 
 def current_request_id() -> str | None:
     return getattr(g, "request_id", None) if has_request_context() else None
+
+
+def current_csp_nonce() -> str | None:
+    return getattr(g, "csp_nonce", None) if has_request_context() else None
 
 
 def request_client_ip() -> str | None:
@@ -207,6 +212,7 @@ def _register_request_security_hooks(app: Flask) -> None:
         g.request_started_at = time.perf_counter()
         incoming_request_id = str(request.headers.get("X-Request-Id") or "").strip()
         g.request_id = incoming_request_id[:120] or secrets.token_hex(16)
+        g.csp_nonce = secrets.token_urlsafe(16)
         _validate_host_header()
         if _should_redirect_to_https():
             return _redirect_to_https()
@@ -301,20 +307,41 @@ def _apply_security_headers(response) -> None:
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-    response.headers.setdefault(
-        "Content-Security-Policy",
-        current_app.config.get(
-            "CONTENT_SECURITY_POLICY",
-            "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "
-            "script-src 'self'; font-src 'self' data: https:; object-src 'none'; "
-            "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-        ),
-    )
+    response.headers.setdefault("Content-Security-Policy", _build_content_security_policy())
     if _hsts_enabled():
         response.headers.setdefault(
             "Strict-Transport-Security",
             f"max-age={int(current_app.config.get('HSTS_MAX_AGE_SECONDS', 31536000))}; includeSubDomains",
         )
+
+
+def _build_content_security_policy() -> str:
+    base_policy = current_app.config.get(
+        "CONTENT_SECURITY_POLICY",
+        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self'; font-src 'self' data: https:; object-src 'none'; "
+        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    )
+    nonce = current_csp_nonce()
+    if not nonce:
+        return str(base_policy)
+
+    nonce_source = f"'nonce-{nonce}'"
+    directives = [directive.strip() for directive in str(base_policy).split(";") if directive.strip()]
+    updated_directives: list[str] = []
+    script_src_found = False
+
+    for directive in directives:
+        if directive.startswith("script-src"):
+            script_src_found = True
+            if nonce_source not in directive:
+                directive = f"{directive} {nonce_source}"
+        updated_directives.append(directive)
+
+    if not script_src_found:
+        updated_directives.append(f"script-src 'self' {nonce_source}")
+
+    return "; ".join(updated_directives)
 
 
 def _validate_host_header() -> None:
@@ -329,6 +356,8 @@ def _validate_host_header() -> None:
 
 def _should_redirect_to_https() -> bool:
     if current_app.testing or request.method == "OPTIONS":
+        return False
+    if request.path in HTTPS_REDIRECT_EXEMPT_PATHS:
         return False
     return bool(current_app.config.get("FORCE_HTTPS")) and not request.is_secure
 

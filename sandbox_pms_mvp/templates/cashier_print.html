@@ -11,13 +11,13 @@
         <header class="print-header">
           <div>
             <p class="eyebrow">{{ hotel_name }}</p>
-            <h1>{{ document_type.replace('_', ' ').title() }}</h1>
+            <h1>{{ 'Proforma Invoice' if is_proforma_invoice else document_type.replace('_', ' ').title() }}</h1>
             <p>{{ document.document_number if document else 'Draft / preview' }}</p>
           </div>
           <div class="print-meta">
             <strong>{{ detail.reservation.reservation_code }}</strong>
             <span>Printed {{ printed_at.strftime('%Y-%m-%d %H:%M') }}</span>
-            <span>Status {{ detail.summary.settlement_state.replace('_', ' ') }}</span>
+            <span>Status {{ print_summary.settlement_state.replace('_', ' ') }}</span>
           </div>
         </header>
 
@@ -48,7 +48,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for line in detail.lines %}
+              {% for line in print_lines %}
                 {% if not line.voided_at %}
               <tr>
                 <td>{{ line.service_date }}</td>
@@ -58,7 +58,7 @@
               </tr>
                 {% endif %}
               {% else %}
-              <tr><td colspan="4">No folio lines posted.</td></tr>
+              <tr><td colspan="4">{% if is_proforma_invoice %}No quoted charges are available for this proforma preview.{% else %}No folio lines posted.{% endif %}</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -66,12 +66,12 @@
 
         <section class="print-section">
           <div class="print-totals">
-            <div><span>Charges subtotal</span><strong>{{ currency }} {{ detail.summary.charges_subtotal|money }}</strong></div>
-            <div><span>Discounts</span><strong>{{ currency }} {{ detail.summary.discounts_subtotal|money }}</strong></div>
-            <div><span>Tax</span><strong>{{ currency }} {{ detail.summary.tax_subtotal|money }}</strong></div>
-            <div><span>Credits</span><strong>{{ currency }} {{ detail.summary.credits_total|money }}</strong></div>
-            <div><span>Balance due</span><strong>{{ currency }} {{ detail.summary.balance_due|money }}</strong></div>
-            <div><span>Refund due</span><strong>{{ currency }} {{ detail.summary.refund_due|money }}</strong></div>
+            <div><span>Charges subtotal</span><strong>{{ currency }} {{ print_summary.charges_subtotal|money }}</strong></div>
+            <div><span>Discounts</span><strong>{{ currency }} {{ print_summary.discounts_subtotal|money }}</strong></div>
+            <div><span>Tax</span><strong>{{ currency }} {{ print_summary.tax_subtotal|money }}</strong></div>
+            <div><span>Credits</span><strong>{{ currency }} {{ print_summary.credits_total|money }}</strong></div>
+            <div><span>Balance due</span><strong>{{ currency }} {{ print_summary.balance_due|money }}</strong></div>
+            <div><span>Refund due</span><strong>{{ currency }} {{ print_summary.refund_due|money }}</strong></div>
           </div>
         </section>
       </section>

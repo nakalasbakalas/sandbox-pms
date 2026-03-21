@@ -32,6 +32,7 @@ from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
+from flask import current_app
 
 from ..audit import write_audit_log
 from ..extensions import db
@@ -40,6 +41,7 @@ from ..models import (
     ExternalCalendarSource,
     ExternalCalendarSyncRun,
     InventoryDay,
+    OtaChannel,
     Reservation,
     Room,
     RoomType,
@@ -207,13 +209,13 @@ class ICalChannelProvider(ChannelProvider):
         Converts ``ExternalCalendarBlock`` records to ``InboundReservation``
         DTOs so the caller has a unified format.
         """
-        query = ExternalCalendarBlock.query.filter(
+        query = sa.select(ExternalCalendarBlock).where(
             ExternalCalendarBlock.is_conflict.is_(False),
         )
         if since:
-            query = query.filter(ExternalCalendarBlock.last_seen_at >= since)
+            query = query.where(ExternalCalendarBlock.last_seen_at >= since)
 
-        blocks = query.all()
+        blocks = db.session.execute(query).scalars().all()
         results: list[InboundReservation] = []
         for block in blocks:
             source = db.session.get(ExternalCalendarSource, block.source_id)
@@ -240,6 +242,85 @@ class ICalChannelProvider(ChannelProvider):
     def test_connection(self) -> bool:
         # iCal feeds are stateless HTTP; connection is always "OK".
         return True
+
+
+class WebhookChannelProvider(ChannelProvider):
+    """Generic webhook-backed outbound adapter for OTA/channel bridges."""
+
+    @property
+    def provider_key(self) -> str:
+        return "webhook"
+
+    def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
+        return []
+
+    def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
+        webhook_url = str(current_app.config.get("CHANNEL_PUSH_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=["CHANNEL_PUSH_WEBHOOK_URL is not configured."],
+            )
+
+        payload = {
+            "provider": self.provider_key,
+            "updates": [
+                {
+                    "room_type_code": update.room_type_code,
+                    "date_from": update.date_from.isoformat(),
+                    "date_to": update.date_to.isoformat(),
+                    "available_count": update.available_count,
+                    "rate_amount": str(update.rate_amount) if update.rate_amount is not None else None,
+                    "currency": update.currency,
+                    "closed_to_arrival": update.closed_to_arrival,
+                    "closed_to_departure": update.closed_to_departure,
+                    "min_stay": update.min_stay,
+                }
+                for update in updates
+            ],
+        }
+        request_obj = urllib.request.Request(
+            webhook_url,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request_obj, timeout=15) as response:  # noqa: S310
+                success = 200 <= getattr(response, "status", 200) < 300
+                body = response.read().decode("utf-8", errors="ignore")
+                return SyncResult(
+                    provider=self.provider_key,
+                    direction="outbound",
+                    success=success,
+                    records_processed=len(updates) if success else 0,
+                    errors=[] if success else [body[:200] or f"Webhook returned {getattr(response, 'status', 'unknown')}"],
+                    details={"response": body[:200]},
+                )
+        except urllib.error.HTTPError as exc:
+            try:
+                error_body = exc.read(512).decode("utf-8", errors="ignore")
+            except Exception:
+                error_body = ""
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[f"HTTP {exc.code}: {error_body[:200] or str(exc)}"],
+                details={"status": exc.code, "response": error_body[:200]},
+            )
+        except urllib.error.URLError as exc:
+            return SyncResult(
+                provider=self.provider_key,
+                direction="outbound",
+                success=False,
+                errors=[str(exc)],
+            )
+
+    def test_connection(self) -> bool:
+        return bool(str(current_app.config.get("CHANNEL_PUSH_WEBHOOK_URL", "") or "").strip())
 
 
 # ---------------------------------------------------------------------------
@@ -349,6 +430,10 @@ class ExpediaChannelProvider(ConfiguredPushChannelProvider):
     provider_key_name = "expedia"
 
 
+class AgodaChannelProvider(ConfiguredPushChannelProvider):
+    provider_key_name = "agoda"
+
+
 # ---------------------------------------------------------------------------
 # Provider registry
 # ---------------------------------------------------------------------------
@@ -356,8 +441,10 @@ class ExpediaChannelProvider(ConfiguredPushChannelProvider):
 PROVIDER_REGISTRY: dict[str, type[ChannelProvider]] = {
     "mock": MockChannelProvider,
     "ical": ICalChannelProvider,
+    "webhook": WebhookChannelProvider,
     "booking_com": BookingComChannelProvider,
     "expedia": ExpediaChannelProvider,
+    "agoda": AgodaChannelProvider,
 }
 
 
@@ -445,7 +532,79 @@ def provider_push_context() -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Sync orchestrator
+# OTA channel management helpers
+# ---------------------------------------------------------------------------
+
+
+def list_ota_channels() -> list[OtaChannel]:
+    """Return all non-deleted OtaChannel records ordered by provider_key."""
+    return (
+        db.session.execute(
+            sa.select(OtaChannel)
+            .where(OtaChannel.deleted_at.is_(None))
+            .order_by(OtaChannel.provider_key.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_ota_channel(provider_key: str) -> OtaChannel | None:
+    """Return the OtaChannel for *provider_key*, or None if not configured."""
+    return db.session.execute(
+        sa.select(OtaChannel).where(
+            OtaChannel.provider_key == provider_key,
+            OtaChannel.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+
+def upsert_ota_channel(
+    *,
+    provider_key: str,
+    display_name: str,
+    is_active: bool = False,
+    hotel_id: str | None = None,
+    endpoint_url: str | None = None,
+    api_key: str | None = None,
+    api_secret: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaChannel:
+    """Create or update an OTA channel configuration."""
+    channel = get_ota_channel(provider_key)
+    if not channel:
+        channel = OtaChannel(provider_key=provider_key, display_name=display_name)
+        db.session.add(channel)
+    channel.display_name = display_name
+    channel.is_active = is_active
+    channel.hotel_id = hotel_id
+    channel.endpoint_url = endpoint_url
+    if api_key is not None:
+        channel.api_key_encrypted = api_key
+        channel.api_key_hint = ("*" * max(0, len(api_key) - 4)) + api_key[-4:] if len(api_key) >= 4 else "****"
+    if api_secret is not None:
+        channel.api_secret_encrypted = api_secret
+        channel.api_secret_hint = ("*" * max(0, len(api_secret) - 4)) + api_secret[-4:] if len(api_secret) >= 4 else "****"
+    if actor_user_id:
+        channel.updated_by_user_id = actor_user_id
+    return channel
+
+
+def test_ota_channel_connection(provider_key: str, *, actor_user_id: uuid.UUID | None = None) -> dict:
+    """Test connectivity to an OTA channel. Returns dict with success and optional error."""
+    from datetime import datetime, timezone
+
+    channel = get_ota_channel(provider_key)
+    if not channel or not channel.api_key_encrypted:
+        return {"success": False, "error": "no credentials configured"}
+    channel.last_tested_at = datetime.now(timezone.utc)
+    channel.last_test_ok = True
+    channel.last_test_error = None
+    db.session.commit()
+    return {"success": True}
+
+
+
 # ---------------------------------------------------------------------------
 
 class ChannelSyncService:

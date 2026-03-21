@@ -51,14 +51,14 @@
   {% endif %}
 
   <div class="res-drawer-actions">
-    <a class="button secondary" href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=back_url) }}">Full detail →</a>
+    <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=back_url) }}">Full detail →</a>
     {% if can_folio %}
-    <a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=back_url) }}">Cashier →</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=back_url) }}">Cashier →</a>
     {% endif %}
     {% if can_cancel %}
     <form method="post"
-          action="{{ url_for('staff_reservation_cancel', reservation_id=item.id) }}"
-          onsubmit="return confirm('Cancel reservation {{ item.reservation_code }}?')">
+          action="{{ url_for('staff_reservations.staff_reservation_cancel', reservation_id=item.id) }}"
+          data-confirm-message="Cancel reservation {{ item.reservation_code }}?">
       {{ csrf_input() }}
       <button type="submit" class="button" style="background:#ffebee;color:#c62828;border-color:#ffcdd2;">Cancel reservation</button>
     </form>

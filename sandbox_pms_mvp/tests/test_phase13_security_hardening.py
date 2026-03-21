@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, timedelta
@@ -11,12 +12,13 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
+import pms.app as app_module
 import pms.config as config_module
 import pms.security as security_module
-from pms.audit import write_audit_log
+from pms.audit import cleanup_audit_logs, write_audit_log
 from pms.extensions import db
 from pms.models import AuditLog, Role, Room, User, UserSession
-from pms.models import Reservation, RoomType
+from pms.models import Reservation, RoomType, utc_now
 from pms.services.auth_service import hash_password
 from pms.services.public_booking_service import (
     HoldRequestPayload,
@@ -153,6 +155,26 @@ def test_admin_bootstrap_credentials_are_loaded_from_environment(monkeypatch):
     importlib.reload(config_module)
 
 
+def test_sentry_config_is_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("SENTRY_DSN", "https://public@example.ingest.sentry.io/1")
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", "staging")
+    monkeypatch.setenv("SENTRY_RELEASE", "release-2026-03-19")
+    monkeypatch.setenv("SENTRY_TRACES_SAMPLE_RATE", "0.25")
+
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.SENTRY_DSN == "https://public@example.ingest.sentry.io/1"
+    assert reloaded.Config.SENTRY_ENVIRONMENT == "staging"
+    assert reloaded.Config.SENTRY_RELEASE == "release-2026-03-19"
+    assert reloaded.Config.SENTRY_TRACES_SAMPLE_RATE == 0.25
+
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+    monkeypatch.delenv("SENTRY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.delenv("SENTRY_TRACES_SAMPLE_RATE", raising=False)
+    importlib.reload(config_module)
+
+
 def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
     monkeypatch.setenv("TRUSTED_HOSTS", "book.example.com,staff.example.com")
     monkeypatch.setenv("APP_BASE_URL", "https://book.example.com")
@@ -176,6 +198,46 @@ def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
     importlib.reload(config_module)
 
 
+def test_create_app_initializes_sentry_when_dsn_configured(app_factory, monkeypatch):
+    captured: dict = {}
+
+    class FakeSentrySdk:
+        def init(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        app_module,
+        "_load_sentry_sdk",
+        lambda: (FakeSentrySdk(), ["flask-integration", "sqlalchemy-integration"]),
+    )
+
+    app_factory(
+        config={
+            "SENTRY_DSN": "https://public@example.ingest.sentry.io/1",
+            "SENTRY_ENVIRONMENT": "staging",
+            "SENTRY_RELEASE": "release-2026-03-19",
+            "SENTRY_TRACES_SAMPLE_RATE": 0.25,
+        }
+    )
+
+    assert captured["dsn"] == "https://public@example.ingest.sentry.io/1"
+    assert captured["environment"] == "staging"
+    assert captured["release"] == "release-2026-03-19"
+    assert captured["traces_sample_rate"] == 0.25
+    assert captured["send_default_pii"] is False
+    assert captured["integrations"] == ["flask-integration", "sqlalchemy-integration"]
+    assert captured["before_send"] is app_module._sentry_before_send
+
+
+def test_create_app_skips_sentry_loader_when_dsn_is_missing(app_factory, monkeypatch):
+    def fail_loader():
+        raise AssertionError("Sentry loader should not run without a DSN.")
+
+    monkeypatch.setattr(app_module, "_load_sentry_sdk", fail_loader)
+
+    app_factory(config={"AUTH_COOKIE_SECURE": False})
+
+
 def test_security_headers_and_session_cookie_flags_are_present(app_factory):
     app = app_factory(
         config={
@@ -196,6 +258,48 @@ def test_security_headers_and_session_cookie_flags_are_present(app_factory):
     assert "Secure" in session_cookie
     assert "HttpOnly" in session_cookie
     assert "SameSite=Lax" in session_cookie
+
+    csp_header = response.headers["Content-Security-Policy"]
+    nonce_match = re.search(r"'nonce-([^']+)'", csp_header)
+    assert nonce_match is not None
+    nonce = nonce_match.group(1)
+    assert f'nonce="{nonce}"'.encode() in response.data
+    assert "script-src 'self'" in csp_header
+
+
+def test_csp_hardened_templates_avoid_inline_dom_handlers():
+    template_dir = PROJECT_ROOT / "templates"
+    audited_templates = [
+        "housekeeping_board.html",
+        "reservation_detail.html",
+        "staff_messaging_thread.html",
+        "staff_reservations.html",
+        "_res_list_drawer.html",
+    ]
+
+    for template_name in audited_templates:
+        body = (template_dir / template_name).read_text(encoding="utf-8", errors="ignore")
+        assert "onclick=" not in body, template_name
+        assert "onchange=" not in body, template_name
+        assert "onsubmit=" not in body, template_name
+
+
+def test_csp_hardened_templates_nonce_inline_scripts():
+    template_dir = PROJECT_ROOT / "templates"
+    inline_script_templates = [
+        "base.html",
+        "front_desk_detail.html",
+        "reservation_detail.html",
+        "reservation_form.html",
+        "staff_messaging_compose.html",
+        "staff_messaging_thread.html",
+        "staff_reservations.html",
+    ]
+
+    for template_name in inline_script_templates:
+        body = (template_dir / template_name).read_text(encoding="utf-8", errors="ignore")
+        assert "<script" in body, template_name
+        assert 'nonce="{{ csp_nonce }}"' in body, template_name
 
 
 def test_access_logging_uses_request_id_and_omits_query_string(app_factory, monkeypatch):
@@ -252,6 +356,42 @@ def test_audit_log_redacts_sensitive_fields(app_factory):
         assert row.before_data["nested"]["api_token"] == "[redacted]"
         assert row.after_data["smtp_password"] == "[redacted]"
         assert row.after_data["notes"] == "kept"
+
+
+def test_cleanup_audit_logs_respects_configured_retention_window(app_factory):
+    app = app_factory(config={"AUDIT_LOG_RETENTION_DAYS": 30})
+    with app.app_context():
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="old-row",
+                action="audit_old",
+                before_data=None,
+                after_data={"status": "old"},
+                created_at=utc_now() - timedelta(days=45),
+            )
+        )
+        db.session.add(
+            AuditLog(
+                actor_user_id=None,
+                entity_table="users",
+                entity_id="fresh-row",
+                action="audit_fresh",
+                before_data=None,
+                after_data={"status": "fresh"},
+                created_at=utc_now() - timedelta(days=5),
+            )
+        )
+        db.session.commit()
+
+        result = cleanup_audit_logs()
+
+        assert result["enabled"] is True
+        assert result["deleted"] == 1
+        remaining_ids = AuditLog.query.with_entities(AuditLog.entity_id).all()
+        remaining_ids = [entity_id for (entity_id,) in remaining_ids]
+        assert remaining_ids == ["fresh-row"]
 
 
 def test_append_only_audit_log_blocks_update_and_delete(app_factory):

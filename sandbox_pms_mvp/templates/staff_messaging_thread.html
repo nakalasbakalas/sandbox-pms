@@ -9,7 +9,7 @@
   <div class="card-head">
     <div>
       <p class="eyebrow">
-        <a href="{{ url_for('staff_messaging_inbox') }}">← Back to Inbox</a>
+        <a href="{{ url_for('messaging.staff_messaging_inbox') }}">← Back to Inbox</a>
       </p>
       <h1>
         {% if guest %}{{ guest.full_name }}{% else %}{{ thread.guest_contact_value or 'Unknown guest' }}{% endif %}
@@ -21,17 +21,17 @@
     </div>
     <div class="actions">
       {% if thread.status != 'closed' %}
-      <form method="post" action="{{ url_for('staff_messaging_close_thread', thread_id=thread.id) }}" style="display:inline">
+      <form method="post" action="{{ url_for('messaging.staff_messaging_close_thread', thread_id=thread.id) }}" style="display:inline">
         {{ csrf_input() }}
         <button class="button small secondary" type="submit">Close</button>
       </form>
       {% else %}
-      <form method="post" action="{{ url_for('staff_messaging_reopen_thread', thread_id=thread.id) }}" style="display:inline">
+      <form method="post" action="{{ url_for('messaging.staff_messaging_reopen_thread', thread_id=thread.id) }}" style="display:inline">
         {{ csrf_input() }}
         <button class="button small secondary" type="submit">Reopen</button>
       </form>
       {% endif %}
-      <form method="post" action="{{ url_for('staff_messaging_toggle_followup', thread_id=thread.id) }}" style="display:inline">
+      <form method="post" action="{{ url_for('messaging.staff_messaging_toggle_followup', thread_id=thread.id) }}" style="display:inline">
         {{ csrf_input() }}
         <button class="button small secondary" type="submit">{{ 'Clear follow-up' if thread.is_needs_followup else 'Mark follow-up' }}</button>
       </form>
@@ -63,14 +63,14 @@
         {% if reservation.assigned_room %}
         <p>Room: {{ reservation.assigned_room.room_number }}</p>
         {% endif %}
-        <a class="button small" href="{{ url_for('staff_reservation_detail', reservation_id=reservation.id) }}">View reservation</a>
+        <a class="button small" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">View reservation</a>
       </div>
       {% endif %}
       <div class="context-block">
         <h4>Assigned to</h4>
-        <form method="post" action="{{ url_for('staff_messaging_assign_thread', thread_id=thread.id) }}">
+        <form method="post" action="{{ url_for('messaging.staff_messaging_assign_thread', thread_id=thread.id) }}">
           {{ csrf_input() }}
-          <select name="user_id" onchange="this.form.submit()">
+          <select name="user_id" data-auto-submit>
             <option value="">Unassigned</option>
             {% for user in staff_users if staff_users is defined %}
             <option value="{{ user.id }}" {% if thread.assigned_user_id == user.id %}selected{% endif %}>{{ user.full_name }}</option>
@@ -139,7 +139,7 @@
     </div>
 
     {# Reply form #}
-    <form id="tab-reply" class="compose-tab" method="post" action="{{ url_for('staff_messaging_send') }}">
+    <form id="tab-reply" class="compose-tab" method="post" action="{{ url_for('messaging.staff_messaging_send') }}">
       {{ csrf_input() }}
       <input type="hidden" name="thread_id" value="{{ thread.id }}">
       <input type="hidden" name="channel" value="{{ thread.channel }}">
@@ -180,7 +180,7 @@
     </form>
 
     {# Internal note form #}
-    <form id="tab-note" class="compose-tab" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none">
+    <form id="tab-note" class="compose-tab" method="post" action="{{ url_for('messaging.staff_messaging_add_note') }}" style="display:none">
       {{ csrf_input() }}
       <input type="hidden" name="thread_id" value="{{ thread.id }}">
       {% if guest %}<input type="hidden" name="guest_id" value="{{ guest.id }}">{% endif %}
@@ -195,7 +195,7 @@
     </form>
 
     {# Call log form #}
-    <form id="tab-call" class="compose-tab" method="post" action="{{ url_for('staff_messaging_call_log') }}" style="display:none">
+    <form id="tab-call" class="compose-tab" method="post" action="{{ url_for('messaging.staff_messaging_call_log') }}" style="display:none">
       {{ csrf_input() }}
       <input type="hidden" name="thread_id" value="{{ thread.id }}">
       {% if guest %}<input type="hidden" name="guest_id" value="{{ guest.id }}">{% endif %}
@@ -212,7 +212,7 @@
 </section>
 {% endif %}
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
   var btns = document.querySelectorAll('.compose-tab-btn');
   var tabs = document.querySelectorAll('.compose-tab');

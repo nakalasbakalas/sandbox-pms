@@ -59,12 +59,14 @@ from ..models import (
 )
 from ..normalization import normalize_phone
 from ..security import public_error_message
-from ..services.admin_service import (
+from ..services.admin_inventory_ops import (
     GroupRoomBlockPayload,
-    InventoryOverridePayload,
     create_group_room_block,
-    create_inventory_override,
     release_group_room_block,
+)
+from ..services.admin_service import (
+    InventoryOverridePayload,
+    create_inventory_override,
     release_inventory_override,
     update_inventory_override,
 )

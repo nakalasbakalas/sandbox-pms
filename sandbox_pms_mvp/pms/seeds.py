@@ -6,6 +6,7 @@ import uuid
 from datetime import date, timedelta
 from decimal import Decimal
 
+import sqlalchemy as sa
 from flask import current_app
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,9 @@ def seed_reference_data(*, sync_existing_roles: bool = False) -> None:
 
 def seed_roles_permissions(*, sync_existing_roles: bool = True) -> None:
     for code, name, description, module in PERMISSION_SEEDS:
-        permission = Permission.query.filter_by(code=code).first()
+        permission = db.session.execute(
+            sa.select(Permission).where(Permission.code == code)
+        ).scalar_one_or_none()
         if not permission:
             db.session.add(
                 Permission(
@@ -80,9 +83,17 @@ def seed_roles_permissions(*, sync_existing_roles: bool = True) -> None:
                 )
             )
     db.session.flush()
-    permissions = {permission.code: permission for permission in Permission.query.all()}
+    permissions = {
+        permission.code: permission
+        for permission in db.session.execute(sa.select(Permission)).scalars().all()
+    }
     for code, name, description, is_system_role, sort_order in ROLE_SEEDS:
-        role = Role.query.filter_by(code=code).first()
+        role = (
+            db.session.execute(sa.select(Role).where(Role.code == code))
+            .unique()
+            .scalars()
+            .first()
+        )
         role_created = False
         if not role:
             role = Role(
@@ -114,7 +125,9 @@ def seed_housekeeping_statuses() -> None:
         "cleaning_in_progress": ("Cleaning In Progress", "Housekeeper is cleaning the room", False, 11),
     }
     for code in HOUSEKEEPING_STATUS_CODES:
-        if HousekeepingStatus.query.filter_by(code=code).first():
+        if db.session.execute(
+            sa.select(HousekeepingStatus).where(HousekeepingStatus.code == code)
+        ).scalar_one_or_none():
             continue
         name, description, is_sellable_state, sort_order = status_details[code]
         db.session.add(
@@ -135,7 +148,9 @@ def seed_room_types() -> dict[str, RoomType]:
     }
     room_types: dict[str, RoomType] = {}
     for code, payload in room_type_definitions.items():
-        room_type = RoomType.query.filter_by(code=code).first()
+        room_type = db.session.execute(
+            sa.select(RoomType).where(RoomType.code == code)
+        ).scalar_one_or_none()
         if not room_type:
             room_type = RoomType(
                 code=code,
@@ -169,7 +184,9 @@ def seed_rooms(room_types: dict[str, RoomType]) -> None:
 
 
 def create_room_if_missing(room_number: str, room_type_id, floor_number: int, is_active: bool, is_sellable: bool, status: str, notes: str | None) -> None:
-    if Room.query.filter_by(room_number=room_number).first():
+    if db.session.execute(
+        sa.select(Room).where(Room.room_number == room_number)
+    ).scalar_one_or_none():
         return
     db.session.add(
         Room(
@@ -199,7 +216,9 @@ def seed_rate_rules(room_types: dict[str, RoomType]) -> None:
         ("Long stay 14-29 nights", None, 52, "long_stay_discount", "percent_delta", "-15.00", None),
     ]
     for name, room_type_id, priority, rule_type, adjustment_type, adjustment_value, days_of_week in rules:
-        if RateRule.query.filter_by(name=name).first():
+        if db.session.execute(
+            sa.select(RateRule).where(RateRule.name == name)
+        ).scalar_one_or_none():
             continue
         db.session.add(
             RateRule(
@@ -219,7 +238,9 @@ def seed_rate_rules(room_types: dict[str, RoomType]) -> None:
 
 def seed_app_settings() -> None:
     for key, value_json, value_type, description, is_public, sort_order in APP_SETTINGS_SEED:
-        setting = AppSetting.query.filter_by(key=key).first()
+        setting = db.session.execute(
+            sa.select(AppSetting).where(AppSetting.key == key)
+        ).scalar_one_or_none()
         if setting:
             continue
         db.session.add(
@@ -237,19 +258,43 @@ def seed_app_settings() -> None:
 def seed_initial_admin() -> None:
     admin_email = str(current_app.config.get("ADMIN_EMAIL") or os.getenv("ADMIN_EMAIL") or "").strip()
     admin_password = str(current_app.config.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or "")
-    admin_role = Role.query.filter_by(code="admin").first()
+    admin_role = (
+        db.session.execute(sa.select(Role).where(Role.code == "admin"))
+        .unique()
+        .scalars()
+        .first()
+    )
     existing_admin_user = None
     if admin_role:
-        existing_admin_user = User.query.join(User.roles).filter(Role.id == admin_role.id).first()
+        existing_admin_user = (
+            db.session.execute(
+                sa.select(User)
+                .join(User.roles)
+                .where(Role.id == admin_role.id)
+            )
+            .unique()
+            .scalars()
+            .first()
+        )
     if existing_admin_user:
         if not admin_email:
             return
-        existing_user = User.query.filter_by(email=admin_email).first()
+        existing_user = (
+            db.session.execute(sa.select(User).where(User.email == admin_email))
+            .unique()
+            .scalars()
+            .first()
+        )
         if existing_user:
             return
     if not admin_email or not admin_password.strip():
         raise RuntimeError("ADMIN_EMAIL and ADMIN_PASSWORD are required to bootstrap the initial admin account.")
-    user = User.query.filter_by(email=admin_email).first()
+    user = (
+        db.session.execute(sa.select(User).where(User.email == admin_email))
+        .unique()
+        .scalars()
+        .first()
+    )
     if user:
         return
     user = User(
@@ -281,12 +326,19 @@ def seed_employee_accounts() -> None:
     Rotate passwords after deployment to a live environment.
     """
     existing = {
-        u.username
-        for u in User.query.filter(
-            User.username.in_([a[0] for a in _EMPLOYEE_ACCOUNTS])
-        ).all()
+        username
+        for username in db.session.execute(
+            sa.select(User.username).where(
+                User.username.in_([account[0] for account in _EMPLOYEE_ACCOUNTS])
+            )
+        )
+        .scalars()
+        .all()
     }
-    roles: dict[str, Role] = {r.code: r for r in Role.query.all()}
+    roles: dict[str, Role] = {
+        role.code: role
+        for role in db.session.execute(sa.select(Role)).unique().scalars().all()
+    }
     for username, password, full_name, role_code in _EMPLOYEE_ACCOUNTS:
         if username in existing:
             continue
@@ -308,7 +360,9 @@ def seed_employee_accounts() -> None:
 
 def seed_policy_documents() -> None:
     for code, payload in POLICY_DOCUMENTS_SEED.items():
-        document = PolicyDocument.query.filter_by(code=code).first()
+        document = db.session.execute(
+            sa.select(PolicyDocument).where(PolicyDocument.code == code)
+        ).scalar_one_or_none()
         if document:
             continue
         db.session.add(
@@ -324,11 +378,13 @@ def seed_policy_documents() -> None:
 
 def seed_notification_templates() -> None:
     for template_key, channel, language_code, description, subject_template, body_template in NOTIFICATION_TEMPLATES_SEED:
-        template = NotificationTemplate.query.filter_by(
-            template_key=template_key,
-            channel=channel,
-            language_code=language_code,
-        ).first()
+        template = db.session.execute(
+            sa.select(NotificationTemplate).where(
+                NotificationTemplate.template_key == template_key,
+                NotificationTemplate.channel == channel,
+                NotificationTemplate.language_code == language_code,
+            )
+        ).scalar_one_or_none()
         if template:
             continue
         db.session.add(
@@ -347,11 +403,13 @@ def seed_notification_templates() -> None:
 def seed_message_templates() -> None:
     """Seed Phase 18 messaging hub templates and automation rules."""
     for template_key, template_type, channel, language_code, name, subject_template, body_template in MESSAGE_TEMPLATES_SEED:
-        existing = MessageTemplate.query.filter_by(
-            template_key=template_key,
-            channel=channel,
-            language_code=language_code,
-        ).first()
+        existing = db.session.execute(
+            sa.select(MessageTemplate).where(
+                MessageTemplate.template_key == template_key,
+                MessageTemplate.channel == channel,
+                MessageTemplate.language_code == language_code,
+            )
+        ).scalar_one_or_none()
         if existing:
             continue
         db.session.add(
@@ -369,16 +427,21 @@ def seed_message_templates() -> None:
     db.session.flush()
 
     for event_type, template_key, channel, is_active, delay_minutes in AUTOMATION_RULES_SEED:
-        existing = AutomationRule.query.filter_by(
-            event_type=event_type,
-            channel=channel,
-        ).filter(AutomationRule.deleted_at.is_(None)).first()
+        existing = db.session.execute(
+            sa.select(AutomationRule).where(
+                AutomationRule.event_type == event_type,
+                AutomationRule.channel == channel,
+                AutomationRule.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
         if existing:
             continue
-        template = MessageTemplate.query.filter_by(
-            template_key=template_key,
-            channel=channel,
-        ).first()
+        template = db.session.execute(
+            sa.select(MessageTemplate).where(
+                MessageTemplate.template_key == template_key,
+                MessageTemplate.channel == channel,
+            )
+        ).scalar_one_or_none()
         db.session.add(
             AutomationRule(
                 event_type=event_type,
@@ -391,15 +454,23 @@ def seed_message_templates() -> None:
 
 
 def bootstrap_inventory_horizon(start_date: date, days: int) -> None:
-    clean_status = HousekeepingStatus.query.filter_by(code="clean").first()
-    oos_status = HousekeepingStatus.query.filter_by(code="out_of_service").first()
-    rooms = Room.query.order_by(Room.room_number.asc()).all()
+    clean_status = db.session.execute(
+        sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean")
+    ).scalar_one_or_none()
+    oos_status = db.session.execute(
+        sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "out_of_service")
+    ).scalar_one_or_none()
+    rooms = db.session.execute(
+        sa.select(Room).order_by(Room.room_number.asc())
+    ).scalars().all()
     end_date = start_date + timedelta(days=days - 1)
     existing = {
-        (str(item.room_id), item.business_date)
-        for item in InventoryDay.query.filter(
-            InventoryDay.business_date >= start_date,
-            InventoryDay.business_date <= end_date,
+        (str(room_id), business_date)
+        for room_id, business_date in db.session.execute(
+            sa.select(InventoryDay.room_id, InventoryDay.business_date).where(
+                InventoryDay.business_date >= start_date,
+                InventoryDay.business_date <= end_date,
+            )
         ).all()
     }
     for room in rooms:
@@ -423,7 +494,9 @@ def bootstrap_inventory_horizon(start_date: date, days: int) -> None:
 
 def _is_demo_data_already_seeded() -> bool:
     """Check if demo data has already been seeded by looking for DEMO- phone prefix."""
-    demo_guest_count = Guest.query.filter(Guest.phone.like("DEMO-%")).count()
+    demo_guest_count = db.session.execute(
+        sa.select(sa.func.count()).select_from(Guest).where(Guest.phone.like("DEMO-%"))
+    ).scalar_one()
     return demo_guest_count > 0
 
 
@@ -477,18 +550,32 @@ def seed_demo_guests_and_reservations(
     ]
 
     # Create guests
-    admin_user = User.query.join(User.roles).filter(Role.code == "admin").first()
+    admin_user = (
+        db.session.execute(
+            sa.select(User)
+            .join(User.roles)
+            .where(Role.code == "admin")
+        )
+        .unique()
+        .scalars()
+        .first()
+    )
     admin_id = admin_user.id if admin_user else None
 
     created_guests = _create_demo_guests(guest_data[:num_guests], admin_id)
 
     # Get room types efficiently (1 query instead of 2)
-    room_types = {rt.code: rt for rt in RoomType.query.all()}
+    room_types = {
+        room_type.code: room_type
+        for room_type in db.session.execute(sa.select(RoomType)).scalars().all()
+    }
     twin_room_type = room_types["TWN"]
     double_room_type = room_types["DBL"]
 
     # Pre-compute rooms by type to avoid repeated filtering
-    sellable_rooms = Room.query.filter_by(is_sellable=True).all()
+    sellable_rooms = db.session.execute(
+        sa.select(Room).where(Room.is_sellable.is_(True))
+    ).scalars().all()
     rooms_by_type = {
         twin_room_type.id: [r for r in sellable_rooms if r.room_type_id == twin_room_type.id],
         double_room_type.id: [r for r in sellable_rooms if r.room_type_id == double_room_type.id],

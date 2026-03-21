@@ -54,7 +54,7 @@
         <p>{{ dashboard.arrivals.count }} arrival{{ '' if dashboard.arrivals.count == 1 else 's' }} due on {{ dashboard.business_date.strftime('%d %b %Y') }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals workspace</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals workspace</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -79,7 +79,7 @@
           <tbody>
             {% for item in dashboard.arrivals["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or 'Unassigned' }} · {{ item.room_type_code }}</td>
                 <td><span class="status {{ item.room_readiness_label }}">{{ item.room_readiness_label|replace('_', ' ') }}</span></td>
@@ -102,7 +102,7 @@
         <p>{{ dashboard.departures.count }} departure{{ '' if dashboard.departures.count == 1 else 's' }} due on {{ dashboard.business_date.strftime('%d %b %Y') }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures workspace</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures workspace</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -124,7 +124,7 @@
           <tbody>
             {% for item in dashboard.departures["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or '-' }}</td>
                 <td>{{ item.payment_summary.balance_due | money }}</td>
@@ -155,6 +155,15 @@
       <div><small>Average in range</small><strong>{{ '%.2f'|format(dashboard.occupancy_range.average_occupancy_percentage) }}%</strong></div>
       <div><small>Peak in range</small><strong>{{ '%.2f'|format(dashboard.occupancy_range.peak_occupancy_percentage) }}%</strong></div>
     </div>
+    <div class="metric-strip">
+      <div><small>Previous year avg</small><strong>{% if dashboard.occupancy_year_over_year.has_previous_data %}{{ '%.2f'|format(dashboard.occupancy_year_over_year.previous_average_occupancy_percentage) }}%{% else %}n/a{% endif %}</strong></div>
+      <div><small>YoY delta</small><strong>{% if dashboard.occupancy_year_over_year.average_delta_percentage_points is not none %}{{ '%+.2f'|format(dashboard.occupancy_year_over_year.average_delta_percentage_points) }} pts{% else %}n/a{% endif %}</strong></div>
+      <div><small>Previous peak</small><strong>{% if dashboard.occupancy_year_over_year.previous_peak_occupancy_percentage is not none %}{{ '%.2f'|format(dashboard.occupancy_year_over_year.previous_peak_occupancy_percentage) }}%{% else %}n/a{% endif %}</strong></div>
+      <div><small>Previous window</small><strong>{{ dashboard.occupancy_year_over_year.previous_date_from.strftime('%d %b %Y') }} - {{ dashboard.occupancy_year_over_year.previous_date_to.strftime('%d %b %Y') }}</strong></div>
+    </div>
+    {% if not dashboard.occupancy_year_over_year.has_previous_data %}
+      <p class="small muted">Year-over-year comparison appears once historical inventory exists for the same dates last year.</p>
+    {% endif %}
     <div class="table-wrap">
       <table class="compact-table">
         <thead>
@@ -186,7 +195,7 @@
         <p>{{ dashboard.checked_in_guests.count }} guest{{ '' if dashboard.checked_in_guests.count == 1 else 's' }} currently checked in.</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_front_desk', mode='in_house', date=dashboard.business_date.isoformat()) }}">Open in-house list</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='in_house', date=dashboard.business_date.isoformat()) }}">Open in-house list</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -209,7 +218,7 @@
           <tbody>
             {% for item in dashboard.checked_in_guests["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or '-' }}</td>
                 <td>{{ item.departure_date.strftime('%d %b %Y') }}</td>
@@ -232,7 +241,7 @@
         <h2>Housekeeping status summary</h2>
         <p>{{ dashboard.housekeeping.counts.sellable_ready }} arrival-ready sellable room{{ '' if dashboard.housekeeping.counts.sellable_ready == 1 else 's' }} right now.</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open housekeeping board</a>
+      <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open housekeeping board</a>
     </div>
     <div class="grid four report-mini-grid">
       <article class="status-card"><span>Dirty</span><strong>{{ dashboard.housekeeping.counts.dirty }}</strong></article>
@@ -258,7 +267,7 @@
           <tbody>
             {% for item in dashboard.housekeeping.priority_rooms %}
               <tr>
-                <td><a href="{{ url_for('staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
+                <td><a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=item.room_id, date=dashboard.business_date.isoformat(), back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.room_number }}</a> · {{ item.room_type_code }}</td>
                 <td><span class="status {{ item.housekeeping_status_code }}">{{ item.housekeeping_status_code|replace('_', ' ') }}</span></td>
                 <td><span class="status {{ item.priority }}">{{ item.priority_label }}</span></td>
                 <td>{{ item.priority_reason }}</td>
@@ -271,6 +280,61 @@
   </section>
 {% endif %}
 
+<section class="card inset">
+  <div class="card-head">
+    <div>
+      <h2>Housekeeping performance</h2>
+      <p>{{ dashboard.definitions.housekeeping_performance }}</p>
+    </div>
+    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='housekeeping_performance', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open housekeeping report</a>
+  </div>
+  <div class="metric-strip">
+    <div><small>Tasks</small><strong>{{ dashboard.housekeeping_performance.task_count }}</strong></div>
+    <div><small>Completed</small><strong>{{ dashboard.housekeeping_performance.completed_count }}</strong></div>
+    <div><small>Inspected</small><strong>{{ dashboard.housekeeping_performance.inspected_count }}</strong></div>
+    <div><small>Avg completion</small><strong>{% if dashboard.housekeeping_performance.average_completion_minutes is not none %}{{ '%.1f'|format(dashboard.housekeeping_performance.average_completion_minutes) }} min{% else %}n/a{% endif %}</strong></div>
+  </div>
+  {% if not dashboard.housekeeping_performance.has_explicit_shifts %}
+    <p class="small muted">Roster shift codes are not stored yet, so rows are grouped by business date and assigned attendant with raw timestamps preserved for reconciliation.</p>
+  {% endif %}
+  {% if dashboard.housekeeping_performance["items"] %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Attendant</th>
+            <th>Tasks</th>
+            <th>Completed</th>
+            <th>Inspected</th>
+            <th>Active</th>
+            <th>Rooms</th>
+            <th>Avg min</th>
+            <th>Last completion</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.housekeeping_performance["items"] %}
+            <tr>
+              <td>{{ item.business_date.strftime('%d %b %Y') }}</td>
+              <td>{{ item.attendant_name }}{% if item.attendant_email %}<div class="small muted">{{ item.attendant_email }}</div>{% endif %}</td>
+              <td>{{ item.task_count }}</td>
+              <td>{{ item.completed_count }}</td>
+              <td>{{ item.inspected_count }}</td>
+              <td>{{ item.active_count }}</td>
+              <td>{{ item.room_count }}</td>
+              <td>{% if item.average_completion_minutes is not none %}{{ '%.1f'|format(item.average_completion_minutes) }}{% else %}-{% endif %}</td>
+              <td>{{ item.last_completed_at.strftime('%d %b %H:%M') if item.last_completed_at else '-' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No housekeeping task performance data inside the selected range.</p>
+  {% endif %}
+</section>
+
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
@@ -279,7 +343,7 @@
         <p>{{ dashboard.definitions.pending_reservations }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_reservations', status='tentative') }}">Open reservations</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', status='tentative') }}">Open reservations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -301,7 +365,7 @@
           <tbody>
             {% for item in dashboard.pending_reservations["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.source_channel }}</td>
@@ -323,7 +387,7 @@
         <p>{{ dashboard.definitions.confirmed_reservations }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_reservations', status='confirmed') }}">Open reservations</a>
+        <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', status='confirmed') }}">Open reservations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -346,7 +410,7 @@
           <tbody>
             {% for item in dashboard.confirmed_reservations["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.source_channel }}</td>
@@ -360,6 +424,61 @@
       <p class="empty-state">No confirmed reservations inside the selected range.</p>
     {% endif %}
   </article>
+</section>
+
+<section class="card inset">
+  <div class="card-head">
+    <div>
+      <h2>Channel performance</h2>
+      <p>{{ dashboard.definitions.channel_performance }}</p>
+    </div>
+    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='channel_performance', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open channel report</a>
+  </div>
+  <div class="metric-strip">
+    <div><small>Channels</small><strong>{{ dashboard.channel_performance.channel_count }}</strong></div>
+    <div><small>Reservations</small><strong>{{ dashboard.channel_performance.reservation_count }}</strong></div>
+    <div><small>Room revenue</small><strong>{{ dashboard.channel_performance.room_revenue_total | money }}</strong></div>
+    <div><small>Overall ADR</small><strong>{{ dashboard.channel_performance.overall_adr | money }}</strong></div>
+  </div>
+  {% if dashboard.channel_performance["items"] %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th>Reservations</th>
+            <th>Cancelled</th>
+            <th>Cancel rate</th>
+            <th>Sold nights</th>
+            <th>ADR</th>
+            <th>Room revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in dashboard.channel_performance["items"] %}
+            <tr>
+              <td>
+                {% if can_reservation %}
+                  <a href="{{ url_for('staff_reservations.staff_reservations', booking_source=item.source_channel) }}">{{ item.source_label }}</a>
+                {% else %}
+                  {{ item.source_label }}
+                {% endif %}
+                <div class="small muted">{{ item.source_channel }}</div>
+              </td>
+              <td>{{ item.reservation_count }}</td>
+              <td>{{ item.cancelled_count }}</td>
+              <td>{{ '%.2f'|format(item.cancellation_rate_percentage) }}%</td>
+              <td>{{ item.sold_nights }}</td>
+              <td>{{ item.adr | money }}</td>
+              <td>{{ item.room_revenue_total | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty-state">No channel performance data inside the selected range.</p>
+  {% endif %}
 </section>
 
 {% if can_reservation %}
@@ -415,7 +534,7 @@
               <tbody>
                 {% for item in dashboard.booking_attribution["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.source_label }}<div class="small muted">{{ item.source_channel }}</div></td>
                     <td>{{ item.utm_campaign or 'untagged' }}<div class="small muted">{{ item.utm_medium or 'n/a' }}</div></td>
                     <td>{{ item.entry_page or '/' }}<div class="small muted">{{ item.entry_cta_source or 'n/a' }}</div></td>
@@ -461,7 +580,7 @@
             <tbody>
               {% for item in dashboard.folio_balances["items"] %}
                 <tr>
-                  <td><a href="{{ url_for('staff_cashier_detail', reservation_id=item.id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                  <td><a href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                   <td>{{ item.guest_name }}</td>
                   <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
                   <td>{{ item.departure_date.strftime('%d %b %Y') }}</td>
@@ -492,6 +611,100 @@
         <div class="strong"><span>Net posted revenue</span><strong>{{ dashboard.revenue_summary.net_revenue_total | money }}</strong></div>
       </div>
     </article>
+  </section>
+
+  <section class="card inset">
+    <div class="card-head">
+      <div>
+        <h2>Revenue management</h2>
+        <p>{{ dashboard.definitions.revenue_management }}</p>
+      </div>
+      <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='revenue_management', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to) }}">Open revenue report</a>
+    </div>
+    <div class="metric-strip">
+      <div><small>Occupancy</small><strong>{{ '%.2f'|format(dashboard.revenue_management.occupancy_percentage) }}%</strong></div>
+      <div><small>ADR</small><strong>{{ dashboard.revenue_management.adr | money }}</strong></div>
+      <div><small>RevPAR</small><strong>{{ dashboard.revenue_management.revpar | money }}</strong></div>
+      <div><small>Room revenue</small><strong>{{ dashboard.revenue_management.room_revenue_total | money }}</strong></div>
+    </div>
+    <div class="metric-strip">
+      <div><small>Sold nights</small><strong>{{ dashboard.revenue_management.sold_room_nights }}</strong></div>
+      <div><small>Available room nights</small><strong>{{ dashboard.revenue_management.available_room_nights }}</strong></div>
+      <div><small>Best pacing day</small><strong>{% if dashboard.revenue_management.best_day %}{{ dashboard.revenue_management.best_day.date.strftime('%d %b') }}{% else %}n/a{% endif %}</strong></div>
+      <div><small>Softest day</small><strong>{% if dashboard.revenue_management.softest_day %}{{ dashboard.revenue_management.softest_day.date.strftime('%d %b') }}{% else %}n/a{% endif %}</strong></div>
+    </div>
+    <p class="small muted">{{ dashboard.revenue_management.forecast_note }}</p>
+    <div class="grid two report-subgrid">
+      <div>
+        <h3>Daily pacing</h3>
+        {% if dashboard.revenue_management["items"] %}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Occ %</th>
+                  <th>Sold nights</th>
+                  <th>Room revenue</th>
+                  <th>ADR</th>
+                  <th>RevPAR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.revenue_management["items"] %}
+                  <tr>
+                    <td>{{ item.date.strftime('%d %b %Y') }}</td>
+                    <td>{{ '%.2f'|format(item.occupancy_percentage) }}%</td>
+                    <td>{{ item.sold_nights }}</td>
+                    <td>{{ item.room_revenue_total | money }}</td>
+                    <td>{{ item.adr | money }}</td>
+                    <td>{{ item.revpar | money }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="empty-state">No posted revenue pacing data inside the selected range.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h3>Room type mix</h3>
+        {% if dashboard.revenue_management.room_type_items %}
+          <div class="table-wrap">
+            <table class="compact-table">
+              <thead>
+                <tr>
+                  <th>Room type</th>
+                  <th>Sold nights</th>
+                  <th>ADR</th>
+                  <th>Room revenue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in dashboard.revenue_management.room_type_items %}
+                  <tr>
+                    <td>{{ item.room_type_code }} · {{ item.room_type_name }}</td>
+                    <td>{{ item.sold_nights }}</td>
+                    <td>{{ item.adr | money }}</td>
+                    <td>{{ item.room_revenue_total | money }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="empty-state">No room-type revenue mix is available in the selected range.</p>
+        {% endif %}
+        {% if dashboard.revenue_management.top_channel %}
+          <div class="report-summary-list">
+            <div><span>Top channel</span><strong>{{ dashboard.revenue_management.top_channel.source_label }}</strong></div>
+            <div><span>Channel ADR</span><strong>{{ dashboard.revenue_management.top_channel.adr | money }}</strong></div>
+            <div><span>Channel room revenue</span><strong>{{ dashboard.revenue_management.top_channel.room_revenue_total | money }}</strong></div>
+          </div>
+        {% endif %}
+      </div>
+    </div>
   </section>
 {% endif %}
 
@@ -552,7 +765,7 @@
         <p>{{ dashboard.definitions.deposit_requested_vs_paid }}</p>
       </div>
       {% if can_reservation %}
-        <a class="button secondary tiny" href="{{ url_for('staff_admin_payments') }}">Open payment operations</a>
+        <a class="button secondary tiny" href="{{ url_for('admin.staff_admin_payments') }}">Open payment operations</a>
       {% endif %}
     </div>
     <div class="metric-strip">
@@ -577,7 +790,7 @@
           <tbody>
             {% for item in dashboard.deposit_pipeline["items"] %}
               <tr>
-                <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                 <td>{{ item.deposit_required_amount | money }}</td>
@@ -653,7 +866,7 @@
               <tbody>
                 {% for item in dashboard.cancellation_summary["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                     <td>{{ item.source_channel }}</td>
                   </tr>
@@ -680,7 +893,7 @@
               <tbody>
                 {% for item in dashboard.no_show_summary["items"] %}
                   <tr>
-                    <td><a href="{{ url_for('staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
+                    <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.reservation_id, back=url_for('reports.staff_reports', preset=filters.preset, date_from=filters.date_from, date_to=filters.date_to)) }}">{{ item.reservation_code }}</a></td>
                     <td>{{ item.arrival_date.strftime('%d %b %Y') }}</td>
                     <td>{{ item.deposit_received_amount | money }}</td>
                   </tr>
@@ -703,7 +916,7 @@
         <h2>Audit activity summary</h2>
         <p>{{ dashboard.definitions.audit_activity }}</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('staff_audit', date_from=filters.date_from, date_to=filters.date_to) }}">Open full audit log</a>
+      <a class="button secondary tiny" href="{{ url_for('reports.staff_audit', date_from=filters.date_from, date_to=filters.date_to) }}">Open full audit log</a>
     </div>
     <div class="metric-strip">
       <div><small>Total audit entries</small><strong>{{ dashboard.audit_activity.count }}</strong></div>

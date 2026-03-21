@@ -53,6 +53,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE_RE = re.compile(r"^[0-9+()./\-\s]{6,30}$")
 _TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3,10}$")
+_GROUP_BLOCK_CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,31}$")
 
 
 def clean_multiline_list(
@@ -157,7 +158,16 @@ def upsert_setting(
     sort_order: int | None = None,
     commit: bool = True,
 ) -> AppSetting:
-    setting = AppSetting.query.filter_by(key=key, deleted_at=None).first()
+    setting = (
+        db.session.execute(
+            sa.select(AppSetting).where(
+                AppSetting.key == key,
+                AppSetting.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
     before_data = None
     if setting:
         before_data = {"value": setting.value_json.get("value"), "value_type": setting.value_type}
@@ -247,7 +257,11 @@ def upsert_room_type(room_type_id: uuid.UUID | None, payload: RoomTypePayload, *
     code = payload.code.strip().upper()
     if not code:
         raise ValueError("Room type code is required.")
-    existing = RoomType.query.filter(sa.func.upper(RoomType.code) == code).first()
+    existing = (
+        db.session.execute(sa.select(RoomType).where(sa.func.upper(RoomType.code) == code))
+        .scalars()
+        .first()
+    )
     if existing and existing.id != room_type_id:
         raise ValueError("Room type code must be unique.")
     room_type = db.session.get(RoomType, room_type_id) if room_type_id else None
@@ -258,11 +272,19 @@ def upsert_room_type(room_type_id: uuid.UUID | None, payload: RoomTypePayload, *
 
     if room_type:
         before = _room_type_snapshot(room_type)
-        active_room_count = Room.query.filter_by(room_type_id=room_type.id, is_active=True).count()
-        active_reservations = Reservation.query.filter(
-            Reservation.room_type_id == room_type.id,
-            Reservation.current_status.in_(ACTIVE_RESERVATION_STATUSES),
-        ).count()
+        active_room_count = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(Room)
+            .where(Room.room_type_id == room_type.id, Room.is_active.is_(True))
+        ).scalar()
+        active_reservations = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(Reservation)
+            .where(
+                Reservation.room_type_id == room_type.id,
+                Reservation.current_status.in_(ACTIVE_RESERVATION_STATUSES),
+            )
+        ).scalar()
         if room_type.code != code and (active_room_count or active_reservations):
             raise ValueError("Room type code cannot be changed while rooms or reservations depend on it.")
         if not payload.is_active and (active_room_count or active_reservations):
@@ -324,7 +346,11 @@ def upsert_room(room_id: uuid.UUID | None, payload: RoomPayload, *, actor_user_i
     room_number = payload.room_number.strip()
     if not room_number:
         raise ValueError("Room number is required.")
-    existing = Room.query.filter_by(room_number=room_number).first()
+    existing = (
+        db.session.execute(sa.select(Room).where(Room.room_number == room_number))
+        .scalars()
+        .first()
+    )
     if existing and existing.id != room_id:
         raise ValueError("Room number must be unique.")
     if payload.default_operational_status not in ROOM_OPERATIONAL_STATUSES:
@@ -335,11 +361,20 @@ def upsert_room(room_id: uuid.UUID | None, payload: RoomPayload, *, actor_user_i
         raise ValueError("Room not found.")
     if room:
         before = _room_snapshot(room)
-        active_reservations = Reservation.query.filter(
-            Reservation.assigned_room_id == room.id,
-            Reservation.current_status.in_(ACTIVE_RESERVATION_STATUSES),
-        ).count()
-        if room.room_number != room_number and Reservation.query.filter_by(assigned_room_id=room.id).count():
+        active_reservations = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(Reservation)
+            .where(
+                Reservation.assigned_room_id == room.id,
+                Reservation.current_status.in_(ACTIVE_RESERVATION_STATUSES),
+            )
+        ).scalar()
+        reservation_history_count = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(Reservation)
+            .where(Reservation.assigned_room_id == room.id)
+        ).scalar()
+        if room.room_number != room_number and reservation_history_count:
             raise ValueError("Room number cannot be changed once reservations exist for this room.")
         if active_reservations and (
             room.room_type_id != payload.room_type_id or not payload.is_active or (room.is_sellable and not payload.is_sellable)
@@ -471,9 +506,164 @@ class InventoryOverridePayload:
     expires_at: datetime | None = None
 
 
+@dataclass
+class GroupRoomBlockPayload:
+    group_code: str
+    room_type_id: uuid.UUID
+    room_count: int
+    start_date: date
+    end_date: date
+    reason: str | None = None
+
+
+def create_group_room_block(
+    payload: GroupRoomBlockPayload,
+    *,
+    actor_user_id: uuid.UUID,
+) -> list[InventoryOverride]:
+    if payload.room_count < 1:
+        raise ValueError("At least one room must be blocked for a group room block.")
+    if payload.start_date > payload.end_date:
+        raise ValueError("Group room block start date must be before the end date.")
+    room_type = db.session.get(RoomType, payload.room_type_id)
+    if not room_type or not room_type.is_active:
+        raise ValueError("Selected room type is not available.")
+
+    group_code = _normalize_group_block_code(payload.group_code)
+    group_name = _group_room_block_name(group_code)
+    reason = clean_optional(payload.reason, limit=255) or f"Group room block {group_code}"
+    candidate_rooms = _available_rooms_for_group_block(
+        room_type_id=payload.room_type_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+    )
+    if len(candidate_rooms) < payload.room_count:
+        raise ValueError(
+            f"Only {len(candidate_rooms)} rooms are available for this room block. Reduce the room count or change the stay dates."
+        )
+
+    selected_rooms = candidate_rooms[: payload.room_count]
+    overrides: list[InventoryOverride] = []
+    try:
+        for room in selected_rooms:
+            override = InventoryOverride(
+                name=group_name,
+                scope_type="room",
+                override_action="close",
+                room_id=room.id,
+                room_type_id=None,
+                start_date=payload.start_date,
+                end_date=payload.end_date,
+                reason=reason,
+                is_active=True,
+                created_by_user_id=actor_user_id,
+                updated_by_user_id=actor_user_id,
+            )
+            db.session.add(override)
+            db.session.flush()
+            _apply_inventory_override(override, actor_user_id=actor_user_id)
+            write_audit_log(
+                actor_user_id=actor_user_id,
+                entity_table="inventory_overrides",
+                entity_id=str(override.id),
+                action="inventory_override_created",
+                after_data={**(_inventory_override_snapshot(override) or {}), "group_code": group_code},
+            )
+            write_activity_log(
+                actor_user_id=actor_user_id,
+                event_type="admin.inventory_override_created",
+                entity_table="inventory_overrides",
+                entity_id=str(override.id),
+                metadata={"scope_type": override.scope_type, "action": override.override_action, "group_code": group_code},
+            )
+            overrides.append(override)
+
+        write_activity_log(
+            actor_user_id=actor_user_id,
+            event_type="admin.group_room_block_created",
+            entity_table="inventory_overrides",
+            entity_id=group_name,
+            metadata={
+                "group_code": group_code,
+                "room_type_code": room_type.code,
+                "room_count": len(overrides),
+                "room_numbers": [room.room_number for room in selected_rooms],
+                "start_date": payload.start_date.isoformat(),
+                "end_date": payload.end_date.isoformat(),
+            },
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return overrides
+
+
+def release_group_room_block(group_code: str, *, actor_user_id: uuid.UUID) -> list[InventoryOverride]:
+    normalized_code = _normalize_group_block_code(group_code)
+    group_name = _group_room_block_name(normalized_code)
+    overrides = (
+        db.session.execute(
+            sa.select(InventoryOverride)
+            .where(
+                InventoryOverride.is_active.is_(True),
+                InventoryOverride.scope_type == "room",
+                InventoryOverride.name == group_name,
+            )
+            .order_by(InventoryOverride.start_date.asc(), InventoryOverride.room_id.asc())
+            .with_for_update()
+        )
+        .scalars()
+        .all()
+    )
+    if not overrides:
+        raise ValueError("Active group room block not found.")
+
+    try:
+        for override in overrides:
+            for row in _inventory_rows_for_override(override, lock=True):
+                if row.reservation_id or row.hold_id:
+                    raise ValueError("The room block cannot be released because one or more affected dates are now allocated.")
+                _restore_inventory_row_to_room_default(row, actor_user_id=actor_user_id)
+
+            before = _inventory_override_snapshot(override)
+            override.is_active = False
+            override.released_at = utc_now()
+            override.released_by_user_id = actor_user_id
+            override.updated_by_user_id = actor_user_id
+            write_audit_log(
+                actor_user_id=actor_user_id,
+                entity_table="inventory_overrides",
+                entity_id=str(override.id),
+                action="inventory_override_released",
+                before_data=before,
+                after_data={**(_inventory_override_snapshot(override) or {}), "group_code": normalized_code},
+            )
+            write_activity_log(
+                actor_user_id=actor_user_id,
+                event_type="admin.inventory_override_released",
+                entity_table="inventory_overrides",
+                entity_id=str(override.id),
+                metadata={"scope_type": override.scope_type, "group_code": normalized_code},
+            )
+
+        write_activity_log(
+            actor_user_id=actor_user_id,
+            event_type="admin.group_room_block_released",
+            entity_table="inventory_overrides",
+            entity_id=group_name,
+            metadata={"group_code": normalized_code, "room_count": len(overrides)},
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return overrides
+
+
 def create_inventory_override(payload: InventoryOverridePayload, *, actor_user_id: uuid.UUID) -> InventoryOverride:
     _validate_inventory_override_payload(payload)
-    if _inventory_override_overlap_query(payload).first():
+    if db.session.execute(_inventory_override_overlap_query(payload)).scalars().first():
         raise ValueError("An active inventory override already covers that room scope and date range.")
 
     override = InventoryOverride(
@@ -530,7 +720,7 @@ def update_inventory_override(
         raise ValueError("Inventory override not found.")
     if not override.is_active:
         raise ValueError("Only active inventory overrides can be edited.")
-    if _inventory_override_overlap_query(payload, exclude_override_id=override.id).first():
+    if db.session.execute(_inventory_override_overlap_query(payload, exclude_override_id=override.id)).scalars().first():
         raise ValueError("An active inventory override already covers that room scope and date range.")
 
     before = _inventory_override_snapshot(override)
@@ -630,15 +820,15 @@ def upsert_blackout_period(blackout_id: uuid.UUID | None, payload: BlackoutPaylo
     if payload.start_date > payload.end_date:
         raise ValueError("Blackout start date must be before the end date.")
 
-    query = BlackoutPeriod.query.filter(
+    query = sa.select(BlackoutPeriod).where(
         BlackoutPeriod.is_active.is_(True),
         BlackoutPeriod.blackout_type == payload.blackout_type,
         BlackoutPeriod.start_date <= payload.end_date,
         BlackoutPeriod.end_date >= payload.start_date,
     )
     if blackout_id:
-        query = query.filter(BlackoutPeriod.id != blackout_id)
-    if query.first():
+        query = query.where(BlackoutPeriod.id != blackout_id)
+    if db.session.execute(query).scalars().first():
         raise ValueError("An active blackout already overlaps that date range for the selected type.")
 
     blackout = db.session.get(BlackoutPeriod, blackout_id) if blackout_id else None
@@ -678,11 +868,17 @@ def upsert_blackout_period(blackout_id: uuid.UUID | None, payload: BlackoutPaylo
 
 
 def assert_blackout_allows_booking(check_in_date: date, check_out_date: date) -> None:
-    overlapping = BlackoutPeriod.query.filter(
-        BlackoutPeriod.is_active.is_(True),
-        BlackoutPeriod.start_date <= check_out_date,
-        BlackoutPeriod.end_date >= check_in_date,
-    ).all()
+    overlapping = (
+        db.session.execute(
+            sa.select(BlackoutPeriod).where(
+                BlackoutPeriod.is_active.is_(True),
+                BlackoutPeriod.start_date <= check_out_date,
+                BlackoutPeriod.end_date >= check_in_date,
+            )
+        )
+        .scalars()
+        .all()
+    )
     for item in overlapping:
         if item.blackout_type in {"property_closed", "closed_to_booking"}:
             raise ValueError(item.reason or f"Bookings are closed for '{item.name}'.")
@@ -711,7 +907,11 @@ def upsert_policy_document(payload: PolicyPayload, *, actor_user_id: uuid.UUID) 
             raise ValueError(f"Policy content is required for {language_code}.")
         normalized_content[language_code] = text
 
-    document = PolicyDocument.query.filter_by(code=payload.code).first()
+    document = (
+        db.session.execute(sa.select(PolicyDocument).where(PolicyDocument.code == payload.code))
+        .scalars()
+        .first()
+    )
     before = _policy_snapshot(document) if document else None
     if not document:
         document = PolicyDocument(code=payload.code, created_by_user_id=actor_user_id)
@@ -743,7 +943,17 @@ def upsert_policy_document(payload: PolicyPayload, *, actor_user_id: uuid.UUID) 
 
 
 def policy_text(code: str, language: str, fallback: str) -> str:
-    document = PolicyDocument.query.filter_by(code=code, is_active=True, deleted_at=None).first()
+    document = (
+        db.session.execute(
+            sa.select(PolicyDocument).where(
+                PolicyDocument.code == code,
+                PolicyDocument.is_active.is_(True),
+                PolicyDocument.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not document:
         default_document = POLICY_DOCUMENTS_SEED.get(code)
         if default_document:
@@ -755,6 +965,17 @@ def policy_text(code: str, language: str, fallback: str) -> str:
         or next(iter(document.content_json.values()))
         or fallback
     )
+
+
+def policy_documents_context() -> dict[str, PolicyDocument | None]:
+    """Return active policy documents keyed by code."""
+    docs = db.session.execute(
+        sa.select(PolicyDocument).where(
+            PolicyDocument.is_active.is_(True),
+            PolicyDocument.deleted_at.is_(None),
+        )
+    ).scalars().all()
+    return {doc.code: doc for doc in docs}
 
 
 @dataclass
@@ -784,12 +1005,18 @@ def upsert_notification_template(
     _validate_template_tokens(payload.subject_template, allowed_tokens)
     _validate_template_tokens(payload.body_template, allowed_tokens)
 
-    existing = NotificationTemplate.query.filter_by(
-        template_key=payload.template_key,
-        channel=payload.channel,
-        language_code=payload.language_code,
-        deleted_at=None,
-    ).first()
+    existing = (
+        db.session.execute(
+            sa.select(NotificationTemplate).where(
+                NotificationTemplate.template_key == payload.template_key,
+                NotificationTemplate.channel == payload.channel,
+                NotificationTemplate.language_code == payload.language_code,
+                NotificationTemplate.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if existing and existing.id != template_id:
         raise ValueError("A template already exists for that key, channel, and language.")
 
@@ -845,14 +1072,17 @@ def get_notification_template_variant(
     for candidate_channel in fallback_channels:
         for candidate_language in fallback_languages:
             template = (
-                NotificationTemplate.query.filter_by(
-                    template_key=template_key,
-                    channel=candidate_channel,
-                    language_code=candidate_language,
-                    is_active=True,
-                    deleted_at=None,
+                db.session.execute(
+                    sa.select(NotificationTemplate).where(
+                        NotificationTemplate.template_key == template_key,
+                        NotificationTemplate.channel == candidate_channel,
+                        NotificationTemplate.language_code == candidate_language,
+                        NotificationTemplate.is_active.is_(True),
+                        NotificationTemplate.deleted_at.is_(None),
+                    )
+                    .order_by(NotificationTemplate.updated_at.desc())
                 )
-                .order_by(NotificationTemplate.updated_at.desc())
+                .scalars()
                 .first()
             )
             if template:
@@ -910,7 +1140,11 @@ def update_role_permissions(role_id: uuid.UUID, permission_codes: list[str], *, 
     role = db.session.get(Role, role_id)
     if not role:
         raise ValueError("Role not found.")
-    selected_permissions = Permission.query.filter(Permission.code.in_(permission_codes)).all()
+    selected_permissions = (
+        db.session.execute(sa.select(Permission).where(Permission.code.in_(permission_codes)))
+        .scalars()
+        .all()
+    )
     if len(selected_permissions) != len(set(permission_codes)):
         raise ValueError("One or more selected permissions are invalid.")
     before = {"permissions": [item.code for item in role.permissions]}
@@ -945,18 +1179,18 @@ def query_audit_entries(
     date_to: date | None = None,
     limit: int = 200,
 ) -> list[AuditLog]:
-    query = AuditLog.query
+    query = sa.select(AuditLog)
     if actor_user_id:
-        query = query.filter(AuditLog.actor_user_id == actor_user_id)
+        query = query.where(AuditLog.actor_user_id == actor_user_id)
     if entity_table:
-        query = query.filter(AuditLog.entity_table == entity_table)
+        query = query.where(AuditLog.entity_table == entity_table)
     if action:
-        query = query.filter(AuditLog.action == action)
+        query = query.where(AuditLog.action == action)
     if date_from:
-        query = query.filter(AuditLog.created_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
+        query = query.where(AuditLog.created_at >= datetime.combine(date_from, datetime.min.time(), tzinfo=timezone.utc))
     if date_to:
-        query = query.filter(AuditLog.created_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
-    return query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+        query = query.where(AuditLog.created_at < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc))
+    return db.session.execute(query.order_by(AuditLog.created_at.desc()).limit(limit)).scalars().all()
 
 
 def summarize_audit_entry(entry: AuditLog) -> str:
@@ -1141,19 +1375,19 @@ def _find_conflicting_rate_rule(
     payload: RateRulePayload,
     normalized_days: str | None,
 ) -> RateRule | None:
-    query = RateRule.query.filter(
+    query = sa.select(RateRule).where(
         RateRule.deleted_at.is_(None),
         RateRule.is_active.is_(True),
         RateRule.rule_type == payload.rule_type,
         RateRule.priority == payload.priority,
     )
     if rate_rule_id:
-        query = query.filter(RateRule.id != rate_rule_id)
+        query = query.where(RateRule.id != rate_rule_id)
     if payload.room_type_id:
-        query = query.filter(RateRule.room_type_id == payload.room_type_id)
+        query = query.where(RateRule.room_type_id == payload.room_type_id)
     else:
-        query = query.filter(RateRule.room_type_id.is_(None))
-    for rule in query.all():
+        query = query.where(RateRule.room_type_id.is_(None))
+    for rule in db.session.execute(query).scalars().all():
         if not _date_overlap(rule.start_date, rule.end_date, payload.start_date, payload.end_date):
             continue
         if normalized_days and rule.days_of_week and not set(normalized_days.split(",")).intersection(set(rule.days_of_week.split(","))):
@@ -1165,17 +1399,29 @@ def _find_conflicting_rate_rule(
 
 
 def _ensure_room_inventory(room: Room, *, actor_user_id: uuid.UUID) -> None:
-    clean_status = HousekeepingStatus.query.filter_by(code="clean").first()
-    out_status = HousekeepingStatus.query.filter_by(code="out_of_service").first()
+    clean_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean"))
+        .scalars()
+        .first()
+    )
+    out_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "out_of_service"))
+        .scalars()
+        .first()
+    )
     start_date = date.today()
     days = int(current_app.config.get("INVENTORY_BOOTSTRAP_DAYS", 30))
     existing_dates = {
         row.business_date
-        for row in InventoryDay.query.filter(
-            InventoryDay.room_id == room.id,
-            InventoryDay.business_date >= start_date,
-            InventoryDay.business_date < start_date + timedelta(days=days),
-        ).all()
+        for row in db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == room.id,
+                InventoryDay.business_date >= start_date,
+                InventoryDay.business_date < start_date + timedelta(days=days),
+            )
+        )
+        .scalars()
+        .all()
     }
     for offset in range(days):
         business_date = start_date + timedelta(days=offset)
@@ -1246,27 +1492,76 @@ def _inventory_override_overlap_query(
     *,
     exclude_override_id: uuid.UUID | None = None,
 ):
-    query = InventoryOverride.query.filter(
+    query = sa.select(InventoryOverride).where(
         InventoryOverride.is_active.is_(True),
         InventoryOverride.start_date <= payload.end_date,
         InventoryOverride.end_date >= payload.start_date,
         InventoryOverride.scope_type == payload.scope_type,
     )
     if exclude_override_id:
-        query = query.filter(InventoryOverride.id != exclude_override_id)
+        query = query.where(InventoryOverride.id != exclude_override_id)
     if payload.room_id:
-        query = query.filter(InventoryOverride.room_id == payload.room_id)
+        query = query.where(InventoryOverride.room_id == payload.room_id)
     if payload.room_type_id:
-        query = query.filter(InventoryOverride.room_type_id == payload.room_type_id)
+        query = query.where(InventoryOverride.room_type_id == payload.room_type_id)
     return query
+
+
+def _normalize_group_block_code(value: str) -> str:
+    candidate = re.sub(r"[^A-Z0-9-]+", "-", str(value or "").strip().upper()).strip("-")
+    if not _GROUP_BLOCK_CODE_RE.fullmatch(candidate):
+        raise ValueError("Group code must be 2 to 32 characters using letters, numbers, or dashes.")
+    return candidate
+
+
+def _group_room_block_name(group_code: str) -> str:
+    return f"Group {group_code}"
+
+
+def _available_rooms_for_group_block(
+    *,
+    room_type_id: uuid.UUID,
+    start_date: date,
+    end_date: date,
+) -> list[Room]:
+    requested_days = (end_date - start_date).days + 1
+    stmt = (
+        sa.select(Room)
+        .join(InventoryDay, InventoryDay.room_id == Room.id)
+        .where(
+            Room.room_type_id == room_type_id,
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+            InventoryDay.business_date >= start_date,
+            InventoryDay.business_date <= end_date,
+            InventoryDay.availability_status == "available",
+            InventoryDay.reservation_id.is_(None),
+            InventoryDay.hold_id.is_(None),
+            InventoryDay.is_blocked.is_(False),
+            InventoryDay.maintenance_flag.is_(False),
+        )
+        .group_by(Room.id)
+        .having(sa.func.count(InventoryDay.id) == requested_days)
+        .order_by(Room.room_number.asc())
+        .with_for_update()
+    )
+    return db.session.execute(stmt).scalars().all()
 
 
 def _apply_inventory_override(override: InventoryOverride, *, actor_user_id: uuid.UUID) -> None:
     rows = _inventory_rows_for_override(override, lock=True)
     if not rows:
         raise ValueError("No inventory rows exist for the selected override date range.")
-    clean_status = HousekeepingStatus.query.filter_by(code="clean").first()
-    closure_status = HousekeepingStatus.query.filter_by(code="out_of_service").first()
+    clean_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean"))
+        .scalars()
+        .first()
+    )
+    closure_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "out_of_service"))
+        .scalars()
+        .first()
+    )
     for row in rows:
         if row.reservation_id or row.hold_id or row.availability_status in {"reserved", "occupied", "held", "house_use"}:
             raise ValueError("One or more affected dates are already allocated and cannot be overridden.")
@@ -1286,8 +1581,16 @@ def _apply_inventory_override(override: InventoryOverride, *, actor_user_id: uui
 
 def _restore_inventory_row_to_room_default(row: InventoryDay, *, actor_user_id: uuid.UUID) -> None:
     room = db.session.get(Room, row.room_id)
-    clean_status = HousekeepingStatus.query.filter_by(code="clean").first()
-    closure_status = HousekeepingStatus.query.filter_by(code="out_of_service").first()
+    clean_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean"))
+        .scalars()
+        .first()
+    )
+    closure_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "out_of_service"))
+        .scalars()
+        .first()
+    )
     default_sellable = bool(room and room.is_active and room.is_sellable and room.default_operational_status == "available")
     row.room_type_id = room.room_type_id if room else row.room_type_id
     row.availability_status = "available" if default_sellable else (room.default_operational_status if room else "out_of_service")

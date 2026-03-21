@@ -29,7 +29,7 @@
     <button class="res-filter-submit" type="submit">Search</button>
   </form>
   <div class="res-filter-row2">
-    <a class="hk-date-btn" href="{{ url_for('provider_dashboard') }}">← Back to dashboard</a>
+    <a class="hk-date-btn" href="{{ url_for('provider.provider_dashboard') }}">← Back to dashboard</a>
     <span style="font-size:11px;color:rgba(255,255,255,0.5);margin-left:8px;">{{ result["total"] }} booking{{ '' if result["total"] == 1 else 's' }}</span>
   </div>
 </div>
@@ -56,7 +56,7 @@
     <tbody>
       {% for item in result["items"] %}
         <tr>
-          <td><a class="cell-code" href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=request.full_path) }}">{{ item.reservation_code }}</a></td>
+          <td><a class="cell-code" href="{{ url_for('provider.provider_booking_detail', reservation_id=item.id, back=request.full_path) }}">{{ item.reservation_code }}</a></td>
           <td>
             <strong>{{ item.guest_name }}</strong>
             {% if item.guest_phone %}<span class="cell-muted">{{ item.guest_phone }}</span>{% endif %}
@@ -92,10 +92,10 @@
   <span>Page {{ result["page"] }} of {{ result["pages"] }}</span>
   <div class="actions">
     {% if result["page"] > 1 %}
-      <a class="button secondary tiny" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] - 1) }}">← Prev</a>
+      <a class="button secondary tiny" href="{{ url_for('provider.provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] - 1) }}">← Prev</a>
     {% endif %}
     {% if result["page"] < result["pages"] %}
-      <a class="button secondary tiny" href="{{ url_for('provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] + 1) }}">Next →</a>
+      <a class="button secondary tiny" href="{{ url_for('provider.provider_bookings', q=filters.search, status=filters.status, deposit_state=filters.deposit_state, date_from=filters.date_from, date_to=filters.date_to, page=result["page"] + 1) }}">Next →</a>
     {% endif %}
   </div>
 </div>

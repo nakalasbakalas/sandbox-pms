@@ -6,7 +6,10 @@ dispatch, template rendering, and automation hook infrastructure.
 from __future__ import annotations
 
 import abc
+import json
 import logging
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -225,10 +228,150 @@ class OtaMessageAdapter(ChannelAdapter):
         }
 
 
+def _send_via_webhook(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request_obj = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers=request_headers,
+    )
+    try:
+        with urllib.request.urlopen(request_obj, timeout=15) as response:  # noqa: S310
+            response_body = response.read().decode("utf-8", errors="ignore")
+            provider_message_id = (
+                response.headers.get("X-Line-Request-Id")
+                or response.headers.get("X-Request-Id")
+                or response_body[:120]
+                or f"webhook-{getattr(response, 'status', 200)}"
+            )
+            return {
+                "success": 200 <= getattr(response, "status", 200) < 300,
+                "provider_message_id": provider_message_id,
+                "error": None,
+            }
+    except urllib.error.URLError as exc:
+        return {"success": False, "provider_message_id": None, "error": str(exc)[:500]}
+
+
+class WebhookSmsAdapter(ChannelAdapter):
+    """SMS delivery via outbound webhook or sandbox mock."""
+
+    def channel_name(self) -> str:
+        return "sms"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        webhook_url = str(current_app.config.get("SMS_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            logger.info("WebhookSmsAdapter: sandbox mock - no SMS webhook configured")
+            return {
+                "success": True,
+                "provider_message_id": f"mock-sms-{uuid.uuid4().hex[:12]}",
+                "error": None,
+                "mock": True,
+            }
+        if not message.recipient_address:
+            return {"success": False, "provider_message_id": None, "error": "SMS recipient is required."}
+        return _send_via_webhook(
+            webhook_url,
+            {
+                "channel": "sms",
+                "to": message.recipient_address,
+                "body_text": message.body_text,
+                "subject": message.subject,
+                "thread_id": str(thread.id),
+                "message_id": str(message.id),
+            },
+        )
+
+
+class LineAdapter(ChannelAdapter):
+    """Guest-facing LINE delivery via push API or configured webhook."""
+
+    def channel_name(self) -> str:
+        return "line"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        recipient = (message.recipient_address or "").strip()
+        if not recipient:
+            return {"success": False, "provider_message_id": None, "error": "LINE recipient is required."}
+
+        channel_access_token = str(current_app.config.get("LINE_CHANNEL_ACCESS_TOKEN", "") or "").strip()
+        if channel_access_token:
+            base_url = str(current_app.config.get("LINE_API_BASE", "https://api.line.me") or "https://api.line.me").rstrip("/")
+            return _send_via_webhook(
+                f"{base_url}/v2/bot/message/push",
+                {
+                    "to": recipient,
+                    "messages": [{"type": "text", "text": message.body_text}],
+                },
+                headers={"Authorization": f"Bearer {channel_access_token}"},
+            )
+
+        webhook_url = str(current_app.config.get("LINE_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if webhook_url:
+            return _send_via_webhook(
+                webhook_url,
+                {
+                    "channel": "line",
+                    "to": recipient,
+                    "body_text": message.body_text,
+                    "subject": message.subject,
+                    "thread_id": str(thread.id),
+                    "message_id": str(message.id),
+                },
+            )
+
+        logger.info("LineAdapter: sandbox mock - no LINE delivery integration configured")
+        return {
+            "success": True,
+            "provider_message_id": f"mock-line-{uuid.uuid4().hex[:12]}",
+            "error": None,
+            "mock": True,
+        }
+
+
+class WebhookWhatsAppAdapter(ChannelAdapter):
+    """WhatsApp delivery via outbound webhook or sandbox mock."""
+
+    def channel_name(self) -> str:
+        return "whatsapp"
+
+    def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
+        webhook_url = str(current_app.config.get("WHATSAPP_OUTBOUND_WEBHOOK_URL", "") or "").strip()
+        if not webhook_url:
+            logger.info("WebhookWhatsAppAdapter: sandbox mock - no guest WhatsApp webhook configured")
+            return {
+                "success": True,
+                "provider_message_id": f"mock-wa-{uuid.uuid4().hex[:12]}",
+                "error": None,
+                "mock": True,
+            }
+        if not message.recipient_address:
+            return {"success": False, "provider_message_id": None, "error": "WhatsApp recipient is required."}
+        return _send_via_webhook(
+            webhook_url,
+            {
+                "channel": "whatsapp",
+                "to": message.recipient_address,
+                "body_text": message.body_text,
+                "subject": message.subject,
+                "thread_id": str(thread.id),
+                "message_id": str(message.id),
+            },
+        )
+
+
 _ADAPTERS: dict[str, ChannelAdapter] = {
     "email": EmailAdapter(),
-    "sms": SmsAdapter(),
-    "whatsapp": WhatsAppAdapter(),
+    "sms": WebhookSmsAdapter(),
+    "line": LineAdapter(),
+    "whatsapp": WebhookWhatsAppAdapter(),
     "internal_note": InternalNoteAdapter(),
     "manual_call_log": ManualCallLogAdapter(),
     "ota_message": OtaMessageAdapter(),
@@ -250,25 +393,25 @@ def get_adapter(channel: str) -> ChannelAdapter:
 def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
     """Return paginated inbox entries with total count."""
     query = (
-        ConversationThread.query
+        sa.select(ConversationThread)
         .options(
             joinedload(ConversationThread.guest),
             joinedload(ConversationThread.reservation),
             joinedload(ConversationThread.assigned_user),
         )
-        .filter(ConversationThread.status != "archived")
+        .where(ConversationThread.status != "archived")
     )
 
     if filters.channel:
-        query = query.filter(ConversationThread.channel == filters.channel)
+        query = query.where(ConversationThread.channel == filters.channel)
     if filters.status:
-        query = query.filter(ConversationThread.status == filters.status)
+        query = query.where(ConversationThread.status == filters.status)
     if filters.unread_only:
-        query = query.filter(ConversationThread.unread_count > 0)
+        query = query.where(ConversationThread.unread_count > 0)
     if filters.needs_followup:
-        query = query.filter(ConversationThread.is_needs_followup.is_(True))
+        query = query.where(ConversationThread.is_needs_followup.is_(True))
     if filters.assigned_user_id:
-        query = query.filter(
+        query = query.where(
             ConversationThread.assigned_user_id == uuid.UUID(filters.assigned_user_id)
         )
 
@@ -282,20 +425,20 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
         if rs == "arrivals_today":
             from datetime import date
             today = date.today()
-            query = query.filter(Reservation.check_in_date == today)
-            query = query.filter(Reservation.current_status.in_(["confirmed", "tentative"]))
+            query = query.where(Reservation.check_in_date == today)
+            query = query.where(Reservation.current_status.in_(["confirmed", "tentative"]))
         elif rs == "in_house":
-            query = query.filter(Reservation.current_status == "checked_in")
+            query = query.where(Reservation.current_status == "checked_in")
         elif rs == "post_stay":
-            query = query.filter(Reservation.current_status == "checked_out")
+            query = query.where(Reservation.current_status == "checked_out")
         elif rs == "no_reservation":
-            query = query.filter(ConversationThread.reservation_id.is_(None))
+            query = query.where(ConversationThread.reservation_id.is_(None))
         else:
-            query = query.filter(Reservation.current_status == rs)
+            query = query.where(Reservation.current_status == rs)
 
     if filters.search:
         search_term = f"%{filters.search}%"
-        query = query.filter(
+        query = query.where(
             sa.or_(
                 ConversationThread.subject.ilike(search_term),
                 ConversationThread.guest_contact_value.ilike(search_term),
@@ -309,12 +452,18 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
             )
         )
 
-    total = query.count()
+    total = db.session.execute(
+        sa.select(sa.func.count()).select_from(query.order_by(None).subquery())
+    ).scalar_one()
     threads = (
-        query
-        .order_by(ConversationThread.last_message_at.desc().nullslast())
-        .offset((filters.page - 1) * filters.per_page)
-        .limit(filters.per_page)
+        db.session.execute(
+            query
+            .order_by(ConversationThread.last_message_at.desc().nullslast())
+            .offset((filters.page - 1) * filters.per_page)
+            .limit(filters.per_page)
+        )
+        .unique()
+        .scalars()
         .all()
     )
 
@@ -350,22 +499,29 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
 
 def get_thread_detail(thread_id: str) -> ThreadDetail | None:
     thread = (
-        ConversationThread.query
-        .options(
+        db.session.execute(
+            sa.select(ConversationThread)
+            .options(
             joinedload(ConversationThread.guest),
             joinedload(ConversationThread.reservation),
             joinedload(ConversationThread.assigned_user),
         )
-        .filter_by(id=uuid.UUID(thread_id))
+            .where(ConversationThread.id == uuid.UUID(thread_id))
+        )
+        .unique()
+        .scalars()
         .first()
     )
     if not thread:
         return None
 
     messages = (
-        Message.query
-        .filter_by(thread_id=thread.id)
-        .order_by(Message.created_at.asc())
+        db.session.execute(
+            sa.select(Message)
+            .where(Message.thread_id == thread.id)
+            .order_by(Message.created_at.asc())
+        )
+        .scalars()
         .all()
     )
 
@@ -392,17 +548,21 @@ def get_or_create_thread(
     guest_contact_value: str | None = None,
 ) -> ConversationThread:
     """Find existing open thread or create a new one."""
-    query = ConversationThread.query.filter(
+    query = sa.select(ConversationThread).where(
         ConversationThread.status.in_(["open", "waiting"])
     )
     if reservation_id:
-        query = query.filter_by(reservation_id=uuid.UUID(reservation_id))
+        query = query.where(ConversationThread.reservation_id == uuid.UUID(reservation_id))
     if guest_id:
-        query = query.filter_by(guest_id=uuid.UUID(guest_id))
+        query = query.where(ConversationThread.guest_id == uuid.UUID(guest_id))
     if channel:
-        query = query.filter_by(channel=channel)
+        query = query.where(ConversationThread.channel == channel)
 
-    existing = query.order_by(ConversationThread.last_message_at.desc().nullslast()).first()
+    existing = (
+        db.session.execute(query.order_by(ConversationThread.last_message_at.desc().nullslast()))
+        .scalars()
+        .first()
+    )
     if existing:
         return existing
 
@@ -551,21 +711,32 @@ def record_inbound_message(
     now = utc_now()
 
     if not guest_id and sender_address:
-        guest = Guest.query.filter(
-            sa.or_(
-                Guest.email == sender_address,
-                Guest.phone == sender_address,
+        guest = (
+            db.session.execute(
+                sa.select(Guest).where(
+                    sa.or_(
+                        Guest.email == sender_address,
+                        Guest.phone == sender_address,
+                    )
+                )
             )
-        ).first()
+            .scalars()
+            .first()
+        )
         if guest:
             guest_id = str(guest.id)
 
     if not reservation_id and guest_id:
         reservation = (
-            Reservation.query
-            .filter_by(primary_guest_id=uuid.UUID(guest_id))
-            .filter(Reservation.current_status.in_(["confirmed", "tentative", "checked_in"]))
-            .order_by(Reservation.check_in_date.desc())
+            db.session.execute(
+                sa.select(Reservation)
+                .where(
+                    Reservation.primary_guest_id == uuid.UUID(guest_id),
+                    Reservation.current_status.in_(["confirmed", "tentative", "checked_in"]),
+                )
+                .order_by(Reservation.check_in_date.desc())
+            )
+            .scalars()
             .first()
         )
         if reservation:
@@ -617,12 +788,19 @@ def mark_thread_read(thread_id: str, *, actor_user_id: str | None = None, commit
     thread = db.session.get(ConversationThread, uuid.UUID(thread_id))
     if not thread:
         return
+    now = utc_now()
     thread.unread_count = 0
-    thread.updated_at = utc_now()
+    thread.updated_at = now
 
-    Message.query.filter_by(thread_id=thread.id, direction="inbound").filter(
-        Message.read_at.is_(None)
-    ).update({"read_at": utc_now()}, synchronize_session=False)
+    db.session.execute(
+        sa.update(Message)
+        .where(
+            Message.thread_id == thread.id,
+            Message.direction == "inbound",
+            Message.read_at.is_(None),
+        )
+        .values(read_at=now)
+    )
 
     if commit:
         db.session.commit()
@@ -684,16 +862,25 @@ def assign_thread(thread_id: str, user_id: str | None, *, actor_user_id: str | N
 
 def reservation_messages(reservation_id: str) -> list[Message]:
     """Return all messages linked to a reservation, newest first."""
-    threads = ConversationThread.query.filter_by(
-        reservation_id=uuid.UUID(reservation_id)
-    ).all()
+    threads = (
+        db.session.execute(
+            sa.select(ConversationThread).where(
+                ConversationThread.reservation_id == uuid.UUID(reservation_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not threads:
         return []
     thread_ids = [t.id for t in threads]
     return (
-        Message.query
-        .filter(Message.thread_id.in_(thread_ids))
-        .order_by(Message.created_at.desc())
+        db.session.execute(
+            sa.select(Message)
+            .where(Message.thread_id.in_(thread_ids))
+            .order_by(Message.created_at.desc())
+        )
+        .scalars()
         .all()
     )
 
@@ -704,12 +891,19 @@ def reservation_messages(reservation_id: str) -> list[Message]:
 
 
 def list_message_templates(*, channel: str | None = None, language: str | None = None) -> list[MessageTemplate]:
-    query = MessageTemplate.query.filter(MessageTemplate.deleted_at.is_(None), MessageTemplate.is_active.is_(True))
+    query = sa.select(MessageTemplate).where(
+        MessageTemplate.deleted_at.is_(None),
+        MessageTemplate.is_active.is_(True),
+    )
     if channel:
-        query = query.filter_by(channel=channel)
+        query = query.where(MessageTemplate.channel == channel)
     if language:
-        query = query.filter_by(language_code=language)
-    return query.order_by(MessageTemplate.template_key).all()
+        query = query.where(MessageTemplate.language_code == language)
+    return (
+        db.session.execute(query.order_by(MessageTemplate.template_key))
+        .scalars()
+        .all()
+    )
 
 
 def get_message_template(template_id: str) -> MessageTemplate | None:
@@ -747,9 +941,19 @@ def upsert_message_template(
     """Create or update a message template."""
     now = utc_now()
     actor_uuid = uuid.UUID(actor_user_id) if actor_user_id else None
-    existing = MessageTemplate.query.filter_by(
-        template_key=template_key, channel=channel, language_code=language_code
-    ).filter(MessageTemplate.deleted_at.is_(None)).first()
+    existing = (
+        db.session.execute(
+            sa.select(MessageTemplate)
+            .where(
+                MessageTemplate.template_key == template_key,
+                MessageTemplate.channel == channel,
+                MessageTemplate.language_code == language_code,
+                MessageTemplate.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
 
     if existing:
         existing.name = name
@@ -786,10 +990,83 @@ def upsert_message_template(
 
 
 def list_automation_rules(*, event_type: str | None = None) -> list[AutomationRule]:
-    query = AutomationRule.query.filter(AutomationRule.deleted_at.is_(None))
+    query = sa.select(AutomationRule).where(AutomationRule.deleted_at.is_(None))
     if event_type:
-        query = query.filter_by(event_type=event_type)
-    return query.order_by(AutomationRule.event_type).all()
+        query = query.where(AutomationRule.event_type == event_type)
+    return (
+        db.session.execute(query.order_by(AutomationRule.event_type.asc(), AutomationRule.channel.asc(), AutomationRule.created_at.asc()))
+        .scalars()
+        .all()
+    )
+
+
+def upsert_automation_rule(
+    *,
+    event_type: str,
+    channel: str,
+    delay_minutes: int,
+    actor_user_id: str,
+    rule_id: str | None = None,
+    template_id: str | None = None,
+    is_active: bool = False,
+    commit: bool = True,
+) -> AutomationRule:
+    event_type = (event_type or "").strip()
+    if not event_type:
+        raise ValueError("Automation event type is required.")
+    if len(event_type) > 60:
+        raise ValueError("Automation event type must be 60 characters or fewer.")
+    if channel not in {"email", "sms", "line", "whatsapp", "internal_note", "manual_call_log", "ota_message"}:
+        raise ValueError("Automation channel is invalid.")
+    if delay_minutes < 0:
+        raise ValueError("Automation delay must be zero or greater.")
+
+    actor_uuid = uuid.UUID(actor_user_id)
+    now = utc_now()
+    template_uuid = uuid.UUID(template_id) if template_id else None
+    template = db.session.get(MessageTemplate, template_uuid) if template_uuid else None
+    if template and template.channel != channel:
+        raise ValueError("Automation template channel must match the automation rule channel.")
+
+    rule = db.session.get(AutomationRule, uuid.UUID(rule_id)) if rule_id else None
+    if rule and rule.deleted_at is not None:
+        rule = None
+
+    if rule is None:
+        rule = AutomationRule(
+            event_type=event_type,
+            channel=channel,
+            created_at=now,
+            updated_at=now,
+            created_by_user_id=actor_uuid,
+        )
+        db.session.add(rule)
+
+    rule.event_type = event_type
+    rule.channel = channel
+    rule.template_id = template.id if template else None
+    rule.is_active = bool(is_active)
+    rule.delay_minutes = int(delay_minutes)
+    rule.updated_at = now
+    rule.updated_by_user_id = actor_uuid
+    db.session.flush()
+
+    write_audit_log(
+        actor_user_id=actor_uuid,
+        entity_table="automation_rules",
+        entity_id=str(rule.id),
+        action="automation_rule.upsert",
+        after_data={
+            "event_type": rule.event_type,
+            "channel": rule.channel,
+            "template_id": str(rule.template_id) if rule.template_id else None,
+            "is_active": rule.is_active,
+            "delay_minutes": rule.delay_minutes,
+        },
+    )
+    if commit:
+        db.session.commit()
+    return rule
 
 
 def fire_automation_event(
@@ -805,9 +1082,18 @@ def fire_automation_event(
     positive delay are queued in ``pending_automation_events`` and dispatched
     later by the ``process-automation-events`` CLI command.
     """
-    rules = AutomationRule.query.filter_by(
-        event_type=event_type, is_active=True
-    ).filter(AutomationRule.deleted_at.is_(None)).all()
+    rules = (
+        db.session.execute(
+            sa.select(AutomationRule)
+            .where(
+                AutomationRule.event_type == event_type,
+                AutomationRule.is_active.is_(True),
+                AutomationRule.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     sent_messages: list[Message] = []
     queued = 0
@@ -853,6 +1139,34 @@ def fire_automation_event(
     return sent_messages
 
 
+def cleanup_processed_automation_events(
+    *, retention_days: int | None = None, commit: bool = True
+) -> int:
+    """Delete processed automation events older than the retention window."""
+    keep_days = retention_days
+    if keep_days is None:
+        keep_days = int(current_app.config.get("PENDING_AUTOMATION_RETENTION_DAYS", 30))
+    if keep_days <= 0:
+        return 0
+
+    cutoff = utc_now() - timedelta(days=keep_days)
+    stale_events = (
+        db.session.execute(
+            sa.select(PendingAutomationEvent).where(
+                PendingAutomationEvent.processed_at.is_not(None),
+                PendingAutomationEvent.processed_at < cutoff,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for event in stale_events:
+        db.session.delete(event)
+    if stale_events and commit:
+        db.session.commit()
+    return len(stale_events)
+
+
 def process_pending_automations() -> dict[str, int]:
     """Process all due pending automation events.
 
@@ -861,17 +1175,22 @@ def process_pending_automations() -> dict[str, int]:
     """
     now = utc_now()
     due: list[PendingAutomationEvent] = (
-        PendingAutomationEvent.query.filter(
-            PendingAutomationEvent.fire_at <= now,
-            PendingAutomationEvent.processed_at.is_(None),
+        db.session.execute(
+            sa.select(PendingAutomationEvent)
+            .where(
+                PendingAutomationEvent.fire_at <= now,
+                PendingAutomationEvent.processed_at.is_(None),
+            )
+            .order_by(PendingAutomationEvent.fire_at.asc())
         )
-        .order_by(PendingAutomationEvent.fire_at.asc())
+        .scalars()
         .all()
     )
 
     processed = 0
     skipped = 0
     errors = 0
+    cleaned_up = 0
 
     for event in due:
         rule = db.session.get(AutomationRule, event.rule_id)
@@ -916,8 +1235,19 @@ def process_pending_automations() -> dict[str, int]:
     except Exception:
         logger.exception("Failed to commit pending automation batch")
         db.session.rollback()
+    else:
+        try:
+            cleaned_up = cleanup_processed_automation_events(commit=True)
+        except Exception:
+            logger.exception("Failed to clean up processed automation events")
+            db.session.rollback()
 
-    return {"processed": processed, "skipped": skipped, "errors": errors}
+    return {
+        "processed": processed,
+        "skipped": skipped,
+        "errors": errors,
+        "cleaned_up": cleaned_up,
+    }
 
 
 # ---------------------------------------------------------------------------

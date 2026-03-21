@@ -110,7 +110,11 @@ def post_fee_charge(
     commit: bool = True,
 ) -> FolioCharge:
     if posting_key:
-        existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             return existing
     reservation = _load_reservation_for_update(reservation_id)
@@ -235,7 +239,11 @@ def ensure_room_charges_posted(
         if business_date > target_date:
             continue
         posting_key = f"room:{reservation.id}:{business_date.isoformat()}"
-        existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             continue
         created.append(
@@ -335,13 +343,24 @@ def folio_summary(reservation: Reservation | uuid.UUID) -> dict:
     deposit_applied_total = min(deposit_received_total, max(debit_total - payment_received_total, Decimal("0.00")))
     unused_deposit_total = max(deposit_received_total - deposit_applied_total, Decimal("0.00"))
     latest_payment_request = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     pending_refund_exists = (
-        PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="refund_pending")
-        .order_by(PaymentEvent.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentEvent)
+            .where(
+                PaymentEvent.reservation_id == reservation.id,
+                PaymentEvent.event_type == "refund_pending",
+            )
+            .order_by(PaymentEvent.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     if balance_due == Decimal("0.00") and refund_due == Decimal("0.00"):
@@ -406,28 +425,46 @@ def get_cashier_detail(
         "summary": payment_summary(reservation),
         "lines": _folio_lines(reservation.id),
         "activity": (
-            CashierActivityLog.query.options(joinedload(CashierActivityLog.actor_user))
-            .filter_by(reservation_id=reservation.id)
-            .order_by(CashierActivityLog.created_at.desc())
+            db.session.execute(
+                sa.select(CashierActivityLog)
+                .options(joinedload(CashierActivityLog.actor_user))
+                .where(CashierActivityLog.reservation_id == reservation.id)
+                .order_by(CashierActivityLog.created_at.desc())
+            )
+            .unique()
+            .scalars()
             .all()
         ),
         "documents": (
-            CashierDocument.query.options(
-                joinedload(CashierDocument.issued_by_user),
-                joinedload(CashierDocument.voided_by_user),
+            db.session.execute(
+                sa.select(CashierDocument)
+                .options(
+                    joinedload(CashierDocument.issued_by_user),
+                    joinedload(CashierDocument.voided_by_user),
+                )
+                .where(CashierDocument.reservation_id == reservation.id)
+                .order_by(CashierDocument.issued_at.desc())
             )
-            .filter_by(reservation_id=reservation.id)
-            .order_by(CashierDocument.issued_at.desc())
+            .unique()
+            .scalars()
             .all()
         ),
         "payment_requests": (
-            PaymentRequest.query.filter_by(reservation_id=reservation.id)
-            .order_by(PaymentRequest.created_at.desc())
+            db.session.execute(
+                sa.select(PaymentRequest)
+                .where(PaymentRequest.reservation_id == reservation.id)
+                .order_by(PaymentRequest.created_at.desc())
+            )
+            .scalars()
             .all()
         ),
         "payment_events": (
-            PaymentEvent.query.filter_by(reservation_id=reservation.id)
-            .order_by(PaymentEvent.created_at.desc())
+            db.session.execute(
+                sa.select(PaymentEvent)
+                .where(PaymentEvent.reservation_id == reservation.id)
+                .order_by(PaymentEvent.created_at.desc())
+            )
+            .scalars()
             .all()
         ),
         "notification_history": query_notification_history(reservation_id=reservation.id, limit=30),
@@ -513,7 +550,11 @@ def record_payment(
     )
     service_date = payload.service_date or date.today()
     if payload.posting_key:
-        existing = FolioCharge.query.filter_by(posting_key=payload.posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == payload.posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             return existing
     payment_request = None
@@ -612,6 +653,26 @@ def record_refund(
     summary = folio_summary(reservation)
     if payload.processed and amount > summary["refund_due"]:
         raise ValueError("Refund exceeds the current refund due.")
+    if payload.reference_charge_id:
+        reference = db.session.get(FolioCharge, payload.reference_charge_id)
+        if not reference or reference.reservation_id != reservation.id:
+            raise ValueError("Refund reference must belong to the same folio.")
+        if reference.voided_at is not None:
+            raise ValueError("Refund reference line has already been voided.")
+        refunded_total = (
+            db.session.execute(
+                sa.select(sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0))
+                .where(
+                    FolioCharge.reversed_charge_id == reference.id,
+                    FolioCharge.charge_type == "refund",
+                    FolioCharge.voided_at.is_(None),
+                )
+            )
+            .scalar_one()
+        )
+        remaining_reference_amount = abs(money(reference.total_amount)) - money(refunded_total)
+        if amount > remaining_reference_amount:
+            raise ValueError("Refund exceeds the remaining refundable amount for the referenced folio line.")
     event_type = "refund_processed" if payload.processed else "refund_pending"
     if not payload.processed:
         db.session.add(
@@ -765,8 +826,15 @@ def issue_cashier_document(
     if not reservation:
         raise ValueError("Reservation not found.")
     existing = (
-        CashierDocument.query.filter_by(reservation_id=reservation.id, document_type=payload.document_type, status="issued")
-        .order_by(CashierDocument.issued_at.asc())
+        db.session.execute(
+            sa.select(CashierDocument).where(
+                CashierDocument.reservation_id == reservation.id,
+                CashierDocument.document_type == payload.document_type,
+                CashierDocument.status == "issued",
+            )
+            .order_by(CashierDocument.issued_at.asc())
+        )
+        .scalars()
         .first()
     )
     if existing:
@@ -777,6 +845,8 @@ def issue_cashier_document(
     amount = summary["charges_subtotal"] + summary["tax_subtotal"]
     if payload.document_type == "receipt":
         amount = summary["credits_total"]
+    elif payload.document_type == "invoice" and _should_use_proforma_invoice(reservation, summary):
+        amount = money(reservation.quoted_grand_total)
     document = CashierDocument(
         reservation_id=reservation.id,
         document_type=payload.document_type,
@@ -787,7 +857,11 @@ def issue_cashier_document(
         issued_at=utc_now(),
         issued_by_user_id=actor_user_id,
         printed_at=utc_now(),
-        metadata_json={"note": payload.note, "settlement_state": summary["settlement_state"]},
+        metadata_json={
+            "note": payload.note,
+            "settlement_state": summary["settlement_state"],
+            "is_proforma": payload.document_type == "invoice" and _should_use_proforma_invoice(reservation, summary),
+        },
     )
     db.session.add(document)
     db.session.flush()
@@ -823,6 +897,13 @@ def cashier_print_context(
         auto_post_room_charges=True,
         auto_post_through=auto_post_through,
     )
+    print_summary = detail["summary"]
+    print_lines = detail["lines"]
+    is_proforma_invoice = document_type == "invoice" and _should_use_proforma_invoice(reservation, detail["summary"])
+    if is_proforma_invoice:
+        preview = _proforma_invoice_preview(reservation, detail["summary"])
+        print_summary = preview["summary"]
+        print_lines = preview["lines"]
     document = None
     if issue_document:
         if actor_user_id is None:
@@ -834,21 +915,41 @@ def cashier_print_context(
         )
     else:
         document = (
-            CashierDocument.query.filter_by(reservation_id=reservation_id, document_type=document_type, status="issued")
-            .order_by(CashierDocument.issued_at.asc())
+            db.session.execute(
+                sa.select(CashierDocument).where(
+                    CashierDocument.reservation_id == reservation_id,
+                    CashierDocument.document_type == document_type,
+                    CashierDocument.status == "issued",
+                )
+                .order_by(CashierDocument.issued_at.asc())
+            )
+            .scalars()
             .first()
         )
-    return {"detail": detail, "document": document, "printed_at": utc_now(), "document_type": document_type}
+    return {
+        "detail": detail,
+        "document": document,
+        "printed_at": utc_now(),
+        "document_type": document_type,
+        "print_summary": print_summary,
+        "print_lines": print_lines,
+        "is_proforma_invoice": is_proforma_invoice,
+    }
 
 
 def _load_reservation(reservation_id: uuid.UUID) -> Reservation | None:
     return (
-        Reservation.query.options(
-            joinedload(Reservation.primary_guest),
-            joinedload(Reservation.room_type),
-            joinedload(Reservation.assigned_room),
+        db.session.execute(
+            sa.select(Reservation)
+            .options(
+                joinedload(Reservation.primary_guest),
+                joinedload(Reservation.room_type),
+                joinedload(Reservation.assigned_room),
+            )
+            .where(Reservation.id == reservation_id)
         )
-        .filter(Reservation.id == reservation_id)
+        .unique()
+        .scalars()
         .first()
     )
 
@@ -873,15 +974,90 @@ def _load_reservation_for_update(reservation_id: uuid.UUID) -> Reservation | Non
 
 def _folio_lines(reservation_id: uuid.UUID) -> list[FolioCharge]:
     return (
-        FolioCharge.query.options(
-            joinedload(FolioCharge.posted_by_user),
-            joinedload(FolioCharge.voided_by_user),
-            joinedload(FolioCharge.reversed_charge),
+        db.session.execute(
+            sa.select(FolioCharge)
+            .options(
+                joinedload(FolioCharge.posted_by_user),
+                joinedload(FolioCharge.voided_by_user),
+                joinedload(FolioCharge.reversed_charge),
+            )
+            .where(FolioCharge.reservation_id == reservation_id)
+            .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc(), FolioCharge.created_at.asc())
         )
-        .filter_by(reservation_id=reservation_id)
-        .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc(), FolioCharge.created_at.asc())
+        .unique()
+        .scalars()
         .all()
     )
+
+
+def _should_use_proforma_invoice(reservation: Reservation, summary: dict) -> bool:
+    return (
+        reservation.check_in_date > date.today()
+        and money(summary["charges_subtotal"]) == Decimal("0.00")
+        and money(summary["tax_subtotal"]) == Decimal("0.00")
+    )
+
+
+def _proforma_invoice_preview(reservation: Reservation, summary: dict) -> dict:
+    room_total = money(reservation.quoted_room_total)
+    extras_total = money(reservation.quoted_extras_total)
+    tax_total = money(reservation.quoted_tax_total)
+    grand_total = money(reservation.quoted_grand_total)
+    credits_total = money(summary["credits_total"])
+    balance_due = max(grand_total - credits_total, Decimal("0.00")).quantize(Decimal("0.01"))
+    refund_due = max(credits_total - grand_total, Decimal("0.00")).quantize(Decimal("0.01"))
+    if balance_due == Decimal("0.00") and refund_due == Decimal("0.00"):
+        settlement_state = "settled"
+    elif refund_due > Decimal("0.00"):
+        settlement_state = "overpaid"
+    elif credits_total == Decimal("0.00"):
+        settlement_state = "unpaid"
+    else:
+        settlement_state = "partially_paid"
+    line_items = []
+    if room_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "RM",
+                "description": "Quoted room total",
+                "total_amount": room_total,
+                "voided_at": None,
+            }
+        )
+    if extras_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "XTR",
+                "description": "Quoted extras total",
+                "total_amount": extras_total,
+                "voided_at": None,
+            }
+        )
+    if tax_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "VAT",
+                "description": "Quoted tax total",
+                "total_amount": tax_total,
+                "voided_at": None,
+            }
+        )
+    return {
+        "summary": {
+            **summary,
+            "charges_subtotal": (room_total + extras_total).quantize(Decimal("0.01")),
+            "discounts_subtotal": Decimal("0.00"),
+            "tax_subtotal": tax_total.quantize(Decimal("0.01")),
+            "balance_due": balance_due,
+            "refund_due": refund_due,
+            "settlement_state": settlement_state,
+            "payment_state": settlement_state,
+        },
+        "lines": line_items,
+    }
 
 
 def _quoted_room_postings(reservation: Reservation) -> list[tuple[date, Decimal]]:

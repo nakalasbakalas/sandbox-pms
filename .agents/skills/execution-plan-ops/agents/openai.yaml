@@ -1,0 +1,8 @@
+interface:
+  display_name: "Execution Plan Ops"
+  short_description: "Track, update, and reconcile the PMS audit execution plan."
+  brand_color: "#4F46E5"
+  default_prompt: "Read the execution plan, identify the current phase status and next priority items, and report any discrepancies with the actual codebase state."
+
+policy:
+  allow_implicit_invocation: true

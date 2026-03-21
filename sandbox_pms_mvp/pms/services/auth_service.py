@@ -92,18 +92,34 @@ def user_has_active_mfa(user: User) -> bool:
 
 def active_mfa_factor(user: User) -> MfaFactor | None:
     return (
-        MfaFactor.query.filter_by(user_id=user.id, factor_type="totp")
-        .filter(MfaFactor.disabled_at.is_(None), MfaFactor.verified_at.is_not(None))
-        .order_by(MfaFactor.enrolled_at.desc())
+        db.session.execute(
+            sa.select(MfaFactor)
+            .where(
+                MfaFactor.user_id == user.id,
+                MfaFactor.factor_type == "totp",
+                MfaFactor.disabled_at.is_(None),
+                MfaFactor.verified_at.is_not(None),
+            )
+            .order_by(MfaFactor.enrolled_at.desc())
+        )
+        .scalars()
         .first()
     )
 
 
 def pending_mfa_factor(user: User) -> MfaFactor | None:
     return (
-        MfaFactor.query.filter_by(user_id=user.id, factor_type="totp")
-        .filter(MfaFactor.disabled_at.is_(None), MfaFactor.verified_at.is_(None))
-        .order_by(MfaFactor.enrolled_at.desc())
+        db.session.execute(
+            sa.select(MfaFactor)
+            .where(
+                MfaFactor.user_id == user.id,
+                MfaFactor.factor_type == "totp",
+                MfaFactor.disabled_at.is_(None),
+                MfaFactor.verified_at.is_(None),
+            )
+            .order_by(MfaFactor.enrolled_at.desc())
+        )
+        .scalars()
         .first()
     )
 
@@ -139,10 +155,16 @@ def login_with_password(identifier: str, password: str, *, ip_address: str | Non
         db.session.commit()
         return LoginResult(success=False, error=generic_error)
 
-    user = User.query.filter(
-        User.deleted_at.is_(None),
-        sa.or_(sa.func.lower(User.email) == normalized, sa.func.lower(User.username) == normalized),
-    ).first()
+    user = (
+        db.session.execute(
+            sa.select(User).where(
+                User.deleted_at.is_(None),
+                sa.or_(sa.func.lower(User.email) == normalized, sa.func.lower(User.username) == normalized),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not user:
         record_auth_attempt(normalized, None, ip_address, user_agent, success=False, failure_reason="invalid_credentials")
         write_activity_log(
@@ -210,7 +232,11 @@ def load_session_from_cookie(cookie_value: str | None) -> tuple[UserSession | No
     if not cookie_value or "." not in cookie_value:
         return None, None
     selector, token = cookie_value.split(".", 1)
-    auth_session = UserSession.query.filter_by(selector=selector).first()
+    auth_session = (
+        db.session.execute(sa.select(UserSession).where(UserSession.selector == selector))
+        .scalars()
+        .first()
+    )
     if not auth_session or auth_session.revoked_at is not None:
         return None, None
     if not hmac.compare_digest(auth_session.token_hash, _token_hash(token)):
@@ -269,7 +295,16 @@ def revoke_session(auth_session: UserSession) -> None:
 
 
 def revoke_all_user_sessions(user_id, *, except_session_id=None) -> None:
-    sessions = UserSession.query.filter_by(user_id=user_id).filter(UserSession.revoked_at.is_(None)).all()
+    sessions = (
+        db.session.execute(
+            sa.select(UserSession).where(
+                UserSession.user_id == user_id,
+                UserSession.revoked_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
     for auth_session in sessions:
         if except_session_id and auth_session.id == except_session_id:
             continue
@@ -294,18 +329,29 @@ def request_password_reset(identifier: str, *, ip_address: str | None) -> Passwo
     generic = PasswordResetRequestResult(issued=False, token=None, user=None)
     if not normalized:
         return generic
-    user = User.query.filter(
-        User.deleted_at.is_(None),
-        sa.or_(sa.func.lower(User.email) == normalized, sa.func.lower(User.username) == normalized),
-    ).first()
+    user = (
+        db.session.execute(
+            sa.select(User).where(
+                User.deleted_at.is_(None),
+                sa.or_(sa.func.lower(User.email) == normalized, sa.func.lower(User.username) == normalized),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not user:
         return generic
     window_start = utc_now() - timedelta(minutes=current_app.config["PASSWORD_RESET_REQUEST_WINDOW_MINUTES"])
     recent_count = (
-        PasswordResetToken.query.filter(
-            PasswordResetToken.user_id == user.id,
-            PasswordResetToken.created_at >= window_start,
-        ).count()
+        db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.created_at >= window_start,
+            )
+        )
+        .scalar_one()
     )
     if recent_count >= current_app.config["PASSWORD_RESET_REQUEST_LIMIT"]:
         record_auth_attempt(normalized, user, ip_address, None, success=False, failure_reason="reset_rate_limited")
@@ -342,7 +388,13 @@ def request_password_reset(identifier: str, *, ip_address: str | None) -> Passwo
 
 def reset_password_with_token(token: str, new_password: str) -> User:
     validate_new_password(new_password)
-    token_row = PasswordResetToken.query.filter_by(token_hash=_token_hash(token)).first()
+    token_row = (
+        db.session.execute(
+            sa.select(PasswordResetToken).where(PasswordResetToken.token_hash == _token_hash(token))
+        )
+        .scalars()
+        .first()
+    )
     if not token_row or token_row.used_at is not None or _coerce_utc(token_row.expires_at) <= utc_now():
         raise ValueError("Reset link is invalid or expired.")
     user = db.session.get(User, token_row.user_id)
@@ -387,7 +439,17 @@ def update_user_password(user: User, new_password: str, *, actor_user_id, allow_
 
 
 def ensure_password_not_reused(user: User, new_password: str) -> None:
-    hashes = [user.password_hash] + [item.password_hash for item in UserPasswordHistory.query.filter_by(user_id=user.id).order_by(UserPasswordHistory.created_at.desc()).limit(5).all()]
+    hashes = [user.password_hash] + [
+        item.password_hash
+        for item in db.session.execute(
+            sa.select(UserPasswordHistory)
+            .where(UserPasswordHistory.user_id == user.id)
+            .order_by(UserPasswordHistory.created_at.desc())
+            .limit(5)
+        )
+        .scalars()
+        .all()
+    ]
     for stored_hash in hashes:
         ok, _ = verify_password_hash(stored_hash, new_password)
         if ok:
@@ -445,11 +507,18 @@ def ip_is_rate_limited(ip_address: str | None) -> bool:
     if not ip_address:
         return False
     window_start = utc_now() - timedelta(minutes=current_app.config["LOGIN_LOCK_WINDOW_MINUTES"])
-    failure_count = AuthAttempt.query.filter(
-        AuthAttempt.ip_address == ip_address,
-        AuthAttempt.success.is_(False),
-        AuthAttempt.attempted_at >= window_start,
-    ).count()
+    failure_count = (
+        db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(AuthAttempt)
+            .where(
+                AuthAttempt.ip_address == ip_address,
+                AuthAttempt.success.is_(False),
+                AuthAttempt.attempted_at >= window_start,
+            )
+        )
+        .scalar_one()
+    )
     return failure_count >= current_app.config["LOGIN_LOCK_THRESHOLD"] * 3
 
 
@@ -502,7 +571,12 @@ def confirm_totp_enrollment(user: User, factor_id, code: str) -> list[str]:
 
 
 def regenerate_recovery_codes(factor: MfaFactor) -> list[str]:
-    MfaRecoveryCode.query.filter_by(mfa_factor_id=factor.id, used_at=None).delete()
+    db.session.execute(
+        sa.delete(MfaRecoveryCode).where(
+            MfaRecoveryCode.mfa_factor_id == factor.id,
+            MfaRecoveryCode.used_at.is_(None),
+        )
+    )
     plaintext_codes: list[str] = []
     for _ in range(8):
         code = secrets.token_hex(4).upper()
@@ -570,7 +644,17 @@ def verify_mfa_for_session(auth_session: UserSession, code: str) -> tuple[UserSe
         )
         return rotate_session_after_mfa(auth_session)
 
-    recovery_row = MfaRecoveryCode.query.filter_by(mfa_factor_id=factor.id, code_hash=_token_hash(code.strip().upper()), used_at=None).first()
+    recovery_row = (
+        db.session.execute(
+            sa.select(MfaRecoveryCode).where(
+                MfaRecoveryCode.mfa_factor_id == factor.id,
+                MfaRecoveryCode.code_hash == _token_hash(code.strip().upper()),
+                MfaRecoveryCode.used_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if recovery_row:
         recovery_row.used_at = utc_now()
         record_auth_attempt(user.email, user, auth_session.ip_address, auth_session.user_agent, success=True, failure_reason=None)
@@ -604,11 +688,20 @@ def create_staff_user(
     normalized_email = normalize_identifier(email)
     if not normalized_email or "@" not in normalized_email:
         raise ValueError("A valid email is required.")
-    if User.query.filter(sa.func.lower(User.email) == normalized_email).first():
+    if (
+        db.session.execute(sa.select(User).where(sa.func.lower(User.email) == normalized_email))
+        .scalars()
+        .first()
+    ):
         raise ValueError("A user with that email already exists.")
     from ..models import Role
 
-    selected_roles = Role.query.filter(Role.code.in_(role_codes)).all()
+    selected_roles = (
+        db.session.execute(sa.select(Role).where(Role.code.in_(role_codes)))
+        .unique()
+        .scalars()
+        .all()
+    )
     if len(selected_roles) != len(role_codes):
         raise ValueError("One or more selected roles are invalid.")
     temporary_password = secrets.token_urlsafe(18)
@@ -659,7 +752,12 @@ def update_staff_user(
     user = db.session.get(User, user_id)
     if not user or user.deleted_at is not None:
         raise ValueError("User not found.")
-    selected_roles = Role.query.filter(Role.code.in_(role_codes)).all()
+    selected_roles = (
+        db.session.execute(sa.select(Role).where(Role.code.in_(role_codes)))
+        .unique()
+        .scalars()
+        .all()
+    )
     if len(selected_roles) != len(role_codes):
         raise ValueError("One or more selected roles are invalid.")
     before_data = {
@@ -827,12 +925,19 @@ def _token_hash(value: str) -> str:
 
 def mfa_is_rate_limited(user: User) -> bool:
     window_start = utc_now() - timedelta(minutes=current_app.config["LOGIN_LOCK_WINDOW_MINUTES"])
-    failure_count = AuthAttempt.query.filter(
-        AuthAttempt.user_id == user.id,
-        AuthAttempt.success.is_(False),
-        AuthAttempt.failure_reason == "mfa_failed",
-        AuthAttempt.attempted_at >= window_start,
-    ).count()
+    failure_count = (
+        db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(AuthAttempt)
+            .where(
+                AuthAttempt.user_id == user.id,
+                AuthAttempt.success.is_(False),
+                AuthAttempt.failure_reason == "mfa_failed",
+                AuthAttempt.attempted_at >= window_start,
+            )
+        )
+        .scalar_one()
+    )
     return failure_count >= current_app.config["LOGIN_LOCK_THRESHOLD"]
 
 

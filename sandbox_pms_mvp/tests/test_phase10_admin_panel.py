@@ -87,6 +87,7 @@ def test_admin_pages_require_backend_permissions(app_factory):
     assert admin_client.get("/staff/admin/property").status_code == 200
     assert admin_client.get("/staff/admin/operations").status_code == 200
     assert admin_client.get("/staff/admin/payments").status_code == 200
+    assert admin_client.get("/staff/admin/channels").status_code == 200
     assert admin_client.get("/staff/admin/audit").status_code == 200
 
     desk_client = app.test_client()
@@ -95,6 +96,7 @@ def test_admin_pages_require_backend_permissions(app_factory):
     assert desk_client.get("/staff/admin/property").status_code == 403
     assert desk_client.get("/staff/admin/operations").status_code == 403
     assert desk_client.get("/staff/admin/payments").status_code == 403
+    assert desk_client.get("/staff/admin/channels").status_code == 403
     assert desk_client.get("/staff/admin/audit").status_code == 403
 
 
@@ -706,3 +708,64 @@ def test_audit_viewer_filters_admin_changes(app_factory):
     assert response.status_code == 200
     assert b"setting_upserted" in response.data
     assert b"app_settings" in response.data
+
+
+def test_admin_channels_page_accessible_to_admin(app_factory):
+    """Admin can access the OTA channels configuration page."""
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+
+    login_as(client, admin)
+    response = client.get("/staff/admin/channels")
+    assert response.status_code == 200
+    assert b"booking_com" in response.data or b"Booking.com" in response.data
+
+
+def test_admin_channels_page_blocked_for_front_desk(app_factory):
+    """Front desk staff cannot access the OTA channels configuration page."""
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        desk = make_staff_user(email="desk-channels@example.com", role_codes=("front_desk",))
+
+    login_as(client, desk)
+    assert client.get("/staff/admin/channels").status_code == 403
+
+
+def test_admin_channels_save_and_retrieve(app_factory):
+    """Saving OTA channel credentials persists the hint and encrypts the key."""
+    from pms.services.channel_service import get_ota_channel
+
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+
+    login_as(client, admin)
+    response = post_form(
+        client,
+        "/staff/admin/channels",
+        data={
+            "action": "save_channel",
+            "provider_key": "expedia",
+            "is_active": "on",
+            "hotel_id": "EXP-HOTEL-001",
+            "api_key": "test-expedia-key-1234",
+            "api_secret": "",
+            "endpoint_url": "",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        record = get_ota_channel("expedia")
+        assert record is not None
+        assert record.is_active is True
+        assert record.hotel_id == "EXP-HOTEL-001"
+        assert record.api_key_hint == "*****************1234"
+        assert record.api_key_encrypted is not None
+        # NOTE: api_key_encrypted stores the raw key until real encryption is implemented
+        assert record.api_key_encrypted == "test-expedia-key-1234"

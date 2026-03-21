@@ -10,7 +10,8 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ back_url }}">Back to list</a>
-      {% if can_folio %}<a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
+      {% if can('reservation.create') %}<a class="button secondary" href="{{ url_for('staff_reservations.staff_reservation_duplicate', reservation_id=detail.reservation.id, back=back_url) }}">Duplicate reservation</a>{% endif %}
+      {% if can_folio %}<a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
       <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ') }}</span>
       <span class="status {{ 'paid' if detail.deposit_state == 'paid' else 'pending' }}">{{ detail.deposit_state.replace('_', ' ') }}</span>
     </div>
@@ -35,13 +36,13 @@
     {% if detail.pending_modification_requests %}<span class="pill subtle">Modification request pending</span>{% endif %}
     {% set _pc = detail.reservation.pre_checkin|first if detail.reservation.pre_checkin else None %}
     {% if _pc %}
-    <a href="{{ url_for('staff_pre_checkin_detail', reservation_id=detail.reservation.id) }}" class="pill subtle" style="text-decoration:none;
+    <a href="{{ url_for('staff_reservations.staff_pre_checkin_detail', reservation_id=detail.reservation.id) }}" class="pill subtle" style="text-decoration:none;
       {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}background:#d4edda;color:#155724;
       {% elif _pc.readiness == 'docs_missing' or _pc.readiness == 'signature_missing' %}background:#fff3cd;color:#856404;
       {% elif _pc.readiness == 'payment_pending' %}background:#f8d7da;color:#721c24;
       {% else %}background:#e8f4fd;color:#004085;{% endif %}">Pre-check-in: {{ _pc.readiness|replace('_',' ')|title }}</a>
     {% elif detail.reservation.current_status in ('confirmed', 'tentative') %}
-    <form method="POST" action="{{ url_for('staff_pre_checkin_generate', reservation_id=detail.reservation.id) }}" style="display:inline;">
+    <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_generate', reservation_id=detail.reservation.id) }}" style="display:inline;">
       {{ csrf_input() }}
       <button type="submit" class="pill subtle" style="background:#e8f4fd;color:#004085;border:none;cursor:pointer;">+ Send Pre-Check-In</button>
     </form>
@@ -69,7 +70,7 @@
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head"><h2>Guest details</h2></div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_reservation_update_guest', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_update_guest', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="grid two">
@@ -95,7 +96,7 @@
 
   <article class="card">
     <div class="card-head"><h2>Stay and pricing</h2></div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_reservation_change_dates', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_change_dates', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="grid two">
@@ -139,7 +140,7 @@
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head"><h2>Room assignment</h2></div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_reservation_assign_room', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_assign_room', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <label><span>Eligible rooms</span>
@@ -166,7 +167,7 @@
     {% else %}
     <p class="muted">Payment and deposit summary is restricted for your role.</p>
     {% endif %}
-    <form class="inline-form" method="post" action="{{ url_for('staff_reservation_resend_confirmation', reservation_id=detail.reservation.id) }}">
+    <form class="inline-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_resend_confirmation', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <label class="grow"><span>Language</span><select name="language"><option value="">Use booking language</option><option value="th">Thai</option><option value="en">English</option><option value="zh-Hans">Simplified Chinese</option></select></label>
@@ -174,8 +175,8 @@
     </form>
     {% if can_folio %}
     <div class="actions">
-      <a class="button secondary" href="{{ url_for('staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Cashier workspace</a>
-      <a class="button secondary" href="{{ url_for('staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Cashier workspace</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
     </div>
     {% endif %}
   </article>
@@ -206,13 +207,13 @@
         <span class="small muted">{{ mr.requested_at.strftime('%Y-%m-%d %H:%M') }}</span>
         {% if mr.status in ('submitted', 'reviewed') and can('reservation.edit') %}
         <div style="display:flex;gap:0.3rem;margin-top:0.3rem">
-          <form method="POST" action="{{ url_for('staff_modification_approve', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_modification_approve', reservation_id=detail.reservation.id, mod_id=mr.id) }}" data-confirm-message="Approve and apply changes? The reservation will be repriced.">
             {{ csrf_input() }}
             <input type="hidden" name="back_url" value="{{ back_url }}">
             <input type="text" name="internal_note" placeholder="Note (optional)" style="width:120px;font-size:0.75rem">
-            <button type="submit" class="button small" onclick="return confirm('Approve and apply changes? The reservation will be repriced.')">Approve</button>
+            <button type="submit" class="button small">Approve</button>
           </form>
-          <form method="POST" action="{{ url_for('staff_modification_decline', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_modification_decline', reservation_id=detail.reservation.id, mod_id=mr.id) }}">
             {{ csrf_input() }}
             <input type="hidden" name="back_url" value="{{ back_url }}">
             <input type="hidden" name="internal_note" value="">
@@ -228,7 +229,7 @@
 {% endif %}
 
 <section class="grid two gap-lg">
-    <form class="stack-form" method="post" action="{{ url_for('staff_reservation_add_note', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_add_note', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <label><span>Note</span><textarea name="note_text" rows="4" required></textarea></label>
@@ -305,7 +306,7 @@
     <div><h2>Guest Messages</h2></div>
     <div class="actions">
       {% if can('messaging.send') %}
-      <a class="button small" href="{{ url_for('staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
+      <a class="button small" href="{{ url_for('messaging.staff_messaging_compose', reservation_id=detail.reservation.id) }}">New Message</a>
       {% endif %}
     </div>
   </div>
@@ -324,7 +325,7 @@
         </div>
         <div class="right-stack">
           <span class="small muted">{{ msg.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
-          {% if msg.thread_id %}<a class="small" href="{{ url_for('staff_messaging_thread', thread_id=msg.thread_id) }}">View thread</a>{% endif %}
+          {% if msg.thread_id %}<a class="small" href="{{ url_for('messaging.staff_messaging_thread', thread_id=msg.thread_id) }}">View thread</a>{% endif %}
         </div>
       </div>
     {% else %}
@@ -339,10 +340,10 @@
       <button type="button" class="button small qr-tab-btn active" data-qrtab="qr-send">Send</button>
       <button type="button" class="button small secondary qr-tab-btn" data-qrtab="qr-note">Note</button>
     </div>
-    <form id="qr-send" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_send') }}" style="margin-top:0.5rem">
+    <form id="qr-send" class="qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_send') }}" style="margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
-      <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">
+      <input type="hidden" name="back_url" value="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=detail.reservation.id) }}">
       {% if detail.reservation.primary_guest %}<input type="hidden" name="guest_id" value="{{ detail.reservation.primary_guest.id }}">{% endif %}
       {% if comm_messages and comm_messages[0].thread_id %}<input type="hidden" name="thread_id" value="{{ comm_messages[0].thread_id }}">{% endif %}
       <label><span>Channel</span>
@@ -360,10 +361,10 @@
       </label>
       <button class="button" type="submit">Send</button>
     </form>
-    <form id="qr-note" class="qr-tab inline-form" method="post" action="{{ url_for('staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
+    <form id="qr-note" class="qr-tab inline-form" method="post" action="{{ url_for('messaging.staff_messaging_add_note') }}" style="display:none;margin-top:0.5rem">
       {{ csrf_input() }}
       <input type="hidden" name="reservation_id" value="{{ detail.reservation.id }}">
-      <input type="hidden" name="back_url" value="{{ url_for('staff_reservation_detail', reservation_id=detail.reservation.id) }}">
+      <input type="hidden" name="back_url" value="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=detail.reservation.id) }}">
       {% if detail.reservation.primary_guest %}<input type="hidden" name="guest_id" value="{{ detail.reservation.primary_guest.id }}">{% endif %}
       {% if comm_messages and comm_messages[0].thread_id %}<input type="hidden" name="thread_id" value="{{ comm_messages[0].thread_id }}">{% endif %}
       <label class="grow"><span>Internal note (not sent to guest)</span>
@@ -372,7 +373,7 @@
       <button class="button" type="submit">Save Note</button>
     </form>
   </details>
-  <script>
+  <script nonce="{{ csp_nonce }}">
   (function(){
     var btns=document.querySelectorAll('.qr-tab-btn');
     var tabs=document.querySelectorAll('.qr-tab');
@@ -391,7 +392,7 @@
 {% if can('reservation.cancel') and detail.status in ['tentative', 'confirmed'] %}
 <section class="card">
   <div class="card-head"><h2>Cancel reservation</h2></div>
-  <form class="inline-form" method="post" action="{{ url_for('staff_reservation_cancel', reservation_id=detail.reservation.id) }}">
+  <form class="inline-form" method="post" action="{{ url_for('staff_reservations.staff_reservation_cancel', reservation_id=detail.reservation.id) }}">
     {{ csrf_input() }}
     <label class="grow"><span>Reason</span><input type="text" name="reason" placeholder="Guest cancelled / deposit not received" required></label>
     <button class="button secondary" type="submit">Cancel reservation</button>

@@ -16,6 +16,23 @@ _lock_inventory_rows = _base._lock_inventory_rows
 _load_reservation_for_update = _base._load_reservation_for_update
 _reservation_inventory_rows = _base._reservation_inventory_rows
 
+IDENTITY_VERIFICATION_REQUIRED_MESSAGE = "Identity verification must be completed before check-in."
+
+
+from ..helpers import current_app_testing
+
+
+def _ensure_identity_verification_for_check_in(
+    *,
+    identity_verified: bool,
+    existing_verified_at: datetime | None = None,
+) -> None:
+    if current_app_testing():
+        return
+    if identity_verified or existing_verified_at is not None:
+        return
+    raise ValueError(IDENTITY_VERIFICATION_REQUIRED_MESSAGE)
+
 
 def complete_check_in(
     reservation_id: uuid.UUID,
@@ -31,6 +48,10 @@ def complete_check_in(
         raise ValueError("Only tentative or confirmed reservations can be checked in.")
     if action_at.date() >= reservation.check_out_date:
         raise ValueError("This reservation can no longer be checked in because the departure date has passed.")
+    _ensure_identity_verification_for_check_in(
+        identity_verified=payload.identity_verified,
+        existing_verified_at=reservation.identity_verified_at,
+    )
 
     actor = db.session.get(User, actor_user_id)
     room = _resolve_check_in_room(reservation, payload.room_id, actor_user_id=actor_user_id, business_date=action_at.date())
@@ -150,6 +171,7 @@ def create_walk_in_and_check_in(payload: WalkInCheckInPayload, *, actor_user_id:
     )
     validate_payload(reservation_payload)
     validate_occupancy(room_type, payload.adults + payload.extra_guests, payload.children)
+    _ensure_identity_verification_for_check_in(identity_verified=payload.identity_verified)
 
     guest = create_or_get_guest(reservation_payload, actor_user_id)
     quote = quote_reservation(
@@ -748,3 +770,52 @@ def _first_ready_room_id(room_type_id: uuid.UUID, check_in_date: date, check_out
         if readiness["is_ready"]:
             return room.id
     raise ValueError("No ready room is available for this walk-in stay.")
+
+
+_log = logging.getLogger(__name__)
+
+
+def auto_cancel_no_shows(
+    *,
+    business_date: date | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> dict:
+    """Auto-cancel reservations that are no-shows after the cutoff hour."""
+    target_date = business_date or date.today()
+    cutoff = _setting_time("reservation.no_show_cutoff_hour", "21:00")
+    now_local = _current_time()
+    if now_local < cutoff:
+        return {"processed": 0, "skipped": 0, "errors": 0, "reason": "before_cutoff"}
+
+    eligible = (
+        db.session.execute(
+            sa.select(Reservation).where(
+                Reservation.check_in_date == target_date,
+                Reservation.current_status.in_(["tentative", "confirmed"]),
+                Reservation.deleted_at.is_(None),
+            )
+        ).scalars().all()
+    )
+
+    processed = 0
+    skipped = 0
+    errors = 0
+    for reservation in eligible:
+        try:
+            process_no_show(
+                reservation.id,
+                NoShowPayload(
+                    action_at=datetime.now(timezone.utc),
+                    reason="auto_cancel_no_show",
+                ),
+                actor_user_id=actor_user_id or reservation.updated_by_user_id or reservation.created_by_user_id,
+            )
+            processed += 1
+        except ValueError:
+            skipped += 1
+        except Exception:
+            _log.exception("Error auto-cancelling no-show for reservation %s", reservation.id)
+            db.session.rollback()
+            errors += 1
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}

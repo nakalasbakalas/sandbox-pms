@@ -3,7 +3,7 @@
 {% block content %}
 
 {# ── Sort URL macro — preserves all filter params ── #}
-{% macro sort_url(col) %}{{ url_for('staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=col, sort_dir='desc' if filters.sort == col and filters.sort_dir == 'asc' else 'asc') }}{% endmacro %}
+{% macro sort_url(col) %}{{ url_for('staff_reservations.staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=col, sort_dir='desc' if filters.sort == col and filters.sort_dir == 'asc' else 'asc') }}{% endmacro %}
 
 {# ── Page title ── #}
 <h1 class="res-page-title">Reservations</h1>
@@ -28,9 +28,9 @@
         {% if filters.include_closed %}checked{% endif %}>
       <span>Include cancelled/closed</span>
     </label>
-    <a class="hk-date-btn" href="{{ url_for('staff_reservation_arrivals') }}" style="margin-left:4px;">Arrivals</a>
-    <a class="hk-date-btn" href="{{ url_for('staff_reservation_departures') }}">Departures</a>
-    <a class="hk-date-btn" href="{{ url_for('staff_reservation_in_house') }}">In-house</a>
+    <a class="hk-date-btn" href="{{ url_for('staff_reservations.staff_reservation_arrivals') }}" style="margin-left:4px;">Arrivals</a>
+    <a class="hk-date-btn" href="{{ url_for('staff_reservations.staff_reservation_departures') }}">Departures</a>
+    <a class="hk-date-btn" href="{{ url_for('staff_reservations.staff_reservation_in_house') }}">In-house</a>
   </div>
 </div>
 
@@ -105,10 +105,10 @@
   </span>
   <div class="res-results-actions">
     {% if can('reservation.create') %}
-    <a class="button tiny" href="{{ url_for('staff_reservation_create', back=request.full_path.rstrip('?'), source_channel='admin_manual', status='confirmed') }}">+ New reservation</a>
+    <a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_create', back=request.full_path.rstrip('?'), source_channel='admin_manual', status='confirmed') }}">+ New reservation</a>
     {% endif %}
-    <a class="button tiny secondary" href="{{ url_for('staff_reservation_arrivals') }}">Arrivals</a>
-    <a class="button tiny secondary" href="{{ url_for('staff_reservation_departures') }}">Departures</a>
+    <a class="button tiny secondary" href="{{ url_for('staff_reservations.staff_reservation_arrivals') }}">Arrivals</a>
+    <a class="button tiny secondary" href="{{ url_for('staff_reservations.staff_reservation_departures') }}">Departures</a>
   </div>
 </div>
 
@@ -132,8 +132,8 @@
     <tbody>
       {% for item in result['items'] %}
       <tr class="res-table-row"
-          data-panel-url="{{ url_for('staff_reservation_panel', reservation_id=item.id, back=request.full_path.rstrip('?')) }}"
-          data-detail-url="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">
+          data-panel-url="{{ url_for('staff_reservations.staff_reservation_panel', reservation_id=item.id, back=request.full_path.rstrip('?')) }}"
+          data-detail-url="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">
         <td>
           <span class="cell-code">{{ item.reservation_code }}</span>
           {% if item.duplicate_suspected %}<span class="cell-muted">⚑ Duplicate</span>{% endif %}
@@ -154,7 +154,7 @@
           {% if item.review_status %}<span class="cell-muted">{{ item.review_status.replace('_', ' ') }}</span>{% endif %}
           {% set _pc = item.pre_checkin %}
           {% if _pc %}
-          <br><a href="{{ url_for('staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing','signature_missing','payment_pending') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;display:inline-block;margin-top:2px;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI: {{ _pc.readiness|replace('_',' ')|truncate(14, True, '…') }}</a>
+          <br><a href="{{ url_for('staff_reservations.staff_pre_checkin_detail', reservation_id=item.id) }}" class="status {% if _pc.readiness == 'ready_for_arrival' or _pc.readiness == 'checked_at_desk' %}confirmed{% elif _pc.readiness in ('docs_missing','signature_missing','payment_pending') %}pending{% else %}house_use{% endif %}" style="text-decoration:none;font-size:0.75rem;display:inline-block;margin-top:2px;" title="Pre-check-in: {{ _pc.readiness|replace('_',' ') }}">PCI: {{ _pc.readiness|replace('_',' ')|truncate(14, True, '…') }}</a>
           {% endif %}
         </td>
         <td>
@@ -167,13 +167,13 @@
         </td>
         <td class="cell-nowrap">{{ item.source_channel.replace('_', ' ') }}</td>
         <td class="cell-nowrap res-row-actions">
-          <a class="button tiny secondary" href="{{ url_for('staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a>
+          <a class="button tiny secondary" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a>
           {% if can('reservation.cancel') and item.status in ('tentative', 'confirmed') %}
           <form class="res-quick-cancel-form" method="post"
-                action="{{ url_for('staff_reservation_cancel', reservation_id=item.id) }}">
+                action="{{ url_for('staff_reservations.staff_reservation_cancel', reservation_id=item.id) }}"
+                data-confirm-message="Cancel reservation {{ item.reservation_code }}?">
             {{ csrf_input() }}
-            <button type="submit" class="res-quick-cancel" title="Cancel reservation"
-                    onclick="return confirm('Cancel reservation {{ item.reservation_code }}?')">✕</button>
+            <button type="submit" class="res-quick-cancel" title="Cancel reservation">&times;</button>
           </form>
           {% endif %}
         </td>
@@ -190,8 +190,8 @@
 <div class="res-pagination">
   <span>Page {{ result['page'] }} of {{ result['pages'] }}</span>
   <div class="actions">
-    {% if result['page'] > 1 %}<a class="button secondary tiny" href="{{ url_for('staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=filters.sort, sort_dir=filters.sort_dir, page=result['page']-1) }}">← Prev</a>{% endif %}
-    {% if result['page'] < result['pages'] %}<a class="button secondary tiny" href="{{ url_for('staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=filters.sort, sort_dir=filters.sort_dir, page=result['page']+1) }}">Next →</a>{% endif %}
+    {% if result['page'] > 1 %}<a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=filters.sort, sort_dir=filters.sort_dir, page=result['page']-1) }}">← Prev</a>{% endif %}
+    {% if result['page'] < result['pages'] %}<a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations', q=filters.q, status=filters.status, room_type_id=filters.room_type_id, arrival_date=filters.arrival_date, departure_date=filters.departure_date, payment_state=filters.payment_state, booking_source=filters.booking_source, review_status=filters.review_status, assigned=filters.assigned, include_closed='1' if filters.include_closed else '', sort=filters.sort, sort_dir=filters.sort_dir, page=result['page']+1) }}">Next →</a>{% endif %}
   </div>
 </div>
 {% endif %}
@@ -202,7 +202,7 @@
   <div id="res-drawer-content"></div>
 </aside>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   var overlay = document.getElementById('res-drawer-overlay');
   var drawer  = document.getElementById('res-drawer');

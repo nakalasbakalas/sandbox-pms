@@ -858,6 +858,7 @@ def revenue_management_report(date_from: date, date_to: date, *, limit: int = 14
                 "room_revenue_total": room_revenue_total,
                 "adr": adr,
                 "revpar": revpar,
+                "pace_label": "posted",
             }
         )
         available_room_nights += saleable_rooms
@@ -930,6 +931,12 @@ def revenue_management_report(date_from: date, date_to: date, *, limit: int = 14
         "channel_items": channel["items"],
         "room_type_items": room_type_rows[:5],
         "items": daily_rows[:limit],
+        "rows": daily_rows,
+        # Aliases used by dashboard and report templates
+        "total_actual_room_revenue": room_revenue_total,
+        "total_projected_room_revenue": room_revenue_total,
+        "average_adr": adr,
+        "average_revpar": revpar,
     }
 
 

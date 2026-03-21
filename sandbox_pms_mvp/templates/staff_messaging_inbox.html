@@ -9,7 +9,7 @@
       <p>View and manage all guest conversations — email, phone logs, internal notes, and more — from one place.</p>
     </div>
     <div class="actions">
-      <a class="button" href="{{ url_for('staff_messaging_compose') }}">New Message</a>
+      <a class="button" href="{{ url_for('messaging.staff_messaging_compose') }}">New Message</a>
     </div>
   </div>
 
@@ -121,7 +121,7 @@
             {% endif %}
           </td>
           <td>
-            <a class="button small" href="{{ url_for('staff_messaging_thread', thread_id=entry.thread_id) }}">Open</a>
+            <a class="button small" href="{{ url_for('messaging.staff_messaging_thread', thread_id=entry.thread_id) }}">Open</a>
           </td>
         </tr>
         {% else %}
@@ -134,7 +134,7 @@
   <div class="pagination">
     {% for p in range(1, total_pages + 1) %}
     <a class="button small {% if p == filters.page %}secondary{% endif %}"
-       href="{{ url_for('staff_messaging_inbox', page=p, q=filters.search, channel=filters.channel, status=filters.status, res_status=filters.reservation_status, unread='1' if filters.unread_only else '', followup='1' if filters.needs_followup else '', assigned=filters.assigned_user_id) }}">{{ p }}</a>
+       href="{{ url_for('messaging.staff_messaging_inbox', page=p, q=filters.search, channel=filters.channel, status=filters.status, res_status=filters.reservation_status, unread='1' if filters.unread_only else '', followup='1' if filters.needs_followup else '', assigned=filters.assigned_user_id) }}">{{ p }}</a>
     {% endfor %}
   </div>
   {% endif %}

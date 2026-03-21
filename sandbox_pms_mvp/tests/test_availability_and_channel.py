@@ -12,6 +12,7 @@ from pms.extensions import db
 from pms.models import (
     AppSetting,
     InventoryDay,
+    OtaChannel,
     Reservation,
     Room,
     RoomType,
@@ -25,7 +26,10 @@ from pms.services.availability_service import (
     query_room_type_availability,
 )
 from pms.services.channel_service import (
+    AgodaChannelProvider,
+    BookingComChannelProvider,
     ChannelSyncService,
+    ExpediaChannelProvider,
     InboundReservation,
     MockChannelProvider,
     OutboundInventoryUpdate,
@@ -68,6 +72,21 @@ class TestAvailabilityService:
             count = count_available_rooms(rt.id, today, today + timedelta(days=1))
             assert isinstance(count, int)
             assert count >= 0
+
+    def test_availability_queries_handle_200_plus_inventory_days(self, app_factory):
+        """Long-horizon availability queries should stay correct on bootstrapped inventory."""
+        app = app_factory(seed=True, config={"INVENTORY_BOOTSTRAP_DAYS": 240})
+        with app.app_context():
+            rt = RoomType.query.first()
+            check_in = date.today()
+            check_out = check_in + timedelta(days=210)
+
+            result = query_room_type_availability(check_in, check_out, rt.id)
+
+            assert len(result) == 1
+            assert len(result[0].dates) == 210
+            assert result[0].available_rooms == min(day.available_count for day in result[0].dates)
+            assert count_available_rooms(rt.id, check_in, check_out) == result[0].available_rooms
 
     def test_availability_decreases_after_booking(self, app_factory):
         """Creating a reservation should reduce available rooms."""
@@ -284,6 +303,12 @@ class TestChannelService:
         with app.app_context():
             provider = get_provider("ical")
             assert provider.provider_key == "ical"
+
+    def test_get_provider_webhook(self, app_factory):
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = get_provider("webhook")
+            assert provider.provider_key == "webhook"
 
     def test_get_provider_unknown_raises(self, app_factory):
         """get_provider with unknown key raises ValueError."""

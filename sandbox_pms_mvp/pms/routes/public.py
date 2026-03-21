@@ -18,9 +18,11 @@ from ..services.public_booking_service import (
     PublicBookingPayload,
     PublicSearchPayload,
     VerificationRequestPayload,
+    complete_public_digital_checkout,
     confirm_public_booking,
     create_reservation_hold,
     load_public_confirmation,
+    public_digital_checkout_context,
     search_public_availability,
     submit_cancellation_request,
     submit_modification_request,
@@ -28,6 +30,7 @@ from ..services.public_booking_service import (
 from ..services.payment_integration_service import (
     DEPOSIT_HOSTED_REQUEST_TYPES,
     create_or_reuse_deposit_request,
+    create_or_reuse_payment_request,
     handle_public_payment_start,
     load_public_payment_return,
     payments_enabled,
@@ -257,7 +260,7 @@ def public_payment_start(request_code):
         abort(404)
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-        return redirect(url_for("public.index", lang=helpers["current_language"]()))
+        return redirect(url_for("index", lang=helpers["current_language"]()))
     return redirect(payment_request.payment_url)
 
 
@@ -273,6 +276,22 @@ def public_payment_return(request_code):
     except LookupError:
         abort(404)
     g.public_language = context["reservation"].booking_language
+    reservation = context["reservation"]
+    # Add context-dependent return link
+    if reservation.current_status in ("checked_in",):
+        context["return_url"] = url_for(
+            "public.public_digital_checkout",
+            reservation_code=reservation.reservation_code,
+            token=request.args.get("token", ""),
+        )
+        context["return_label"] = "Return to checkout"
+    else:
+        context["return_url"] = url_for(
+            "public.booking_confirmation",
+            reservation_code=reservation.reservation_code,
+            token=request.args.get("token", ""),
+        )
+        context["return_label"] = "Return to booking"
     return render_template("public_payment_return.html", **context)
 
 
@@ -450,3 +469,59 @@ def pre_checkin_upload(token):
         return render_template("pre_checkin_form.html", error=str(exc), ctx=ctx)
     ctx = get_pre_checkin_context(pc)
     return render_template("pre_checkin_form.html", error=None, ctx=ctx, uploaded=True)
+
+
+@public_bp.route("/booking/checkout/<reservation_code>")
+def public_digital_checkout(reservation_code):
+    token = request.args.get("token", "")
+    helpers = _get_app_helpers()
+    context = public_digital_checkout_context(reservation_code, token)
+    if not context:
+        return render_template("public_booking_form.html", **helpers["build_public_booking_entry_context"]()), 404
+    settings = helpers["current_settings"]()
+    return render_template(
+        "public_digital_checkout.html",
+        **context,
+        hotel_name=settings.get("hotel.name", ""),
+        hotel_support_contact_text=settings.get("hotel.support_contact_text", ""),
+    )
+
+
+@public_bp.route("/booking/checkout/<reservation_code>/pay-balance", methods=["POST"])
+def public_digital_checkout_pay_balance(reservation_code):
+    token = request.form.get("token", "")
+    context = public_digital_checkout_context(reservation_code, token)
+    if not context:
+        abort(404)
+    reservation = context["reservation"]
+    try:
+        pr = create_or_reuse_payment_request(
+            reservation.id,
+            request_kind="balance",
+            actor_user_id=None,
+        )
+        db.session.commit()
+        return redirect(url_for(
+            "public.public_payment_start",
+            request_code=pr.request_code,
+            reservation_code=reservation.reservation_code,
+            token=reservation.public_confirmation_token,
+        ))
+    except Exception as exc:
+        db.session.rollback()
+        logger.warning("Digital checkout pay-balance failed: %s", exc)
+        flash(str(exc), "error")
+        return redirect(url_for("public.public_digital_checkout", reservation_code=reservation_code, token=token))
+
+
+@public_bp.route("/booking/checkout/<reservation_code>/complete", methods=["POST"])
+def public_digital_checkout_complete(reservation_code):
+    token = request.form.get("token", "")
+    try:
+        complete_public_digital_checkout(reservation_code, token)
+        db.session.commit()
+    except (LookupError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("public.public_digital_checkout", reservation_code=reservation_code, token=token))
+    return redirect(url_for("public.public_digital_checkout", reservation_code=reservation_code, token=token))

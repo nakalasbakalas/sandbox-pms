@@ -28,6 +28,8 @@ from ..constants import (
     INVENTORY_OVERRIDE_ACTIONS,
     INVENTORY_OVERRIDE_SCOPE_TYPES,
     NOTIFICATION_TEMPLATE_KEYS,
+    OTA_PROVIDER_KEYS,
+    OTA_PROVIDER_LABELS,
     POLICY_DOCUMENT_CODES,
     RATE_ADJUSTMENT_TYPES,
     RATE_RULE_TYPES,
@@ -40,7 +42,6 @@ from ..pricing import get_setting_value
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from ..services.admin_service import (
     BlackoutPayload,
-    BookingExtraPayload,
     InventoryOverridePayload,
     NotificationTemplatePayload,
     PolicyPayload,
@@ -48,13 +49,11 @@ from ..services.admin_service import (
     RoomPayload,
     RoomTypePayload,
     create_inventory_override,
-    policy_documents_context,
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
     update_role_permissions,
     upsert_blackout_period,
-    upsert_booking_extra,
     upsert_notification_template,
     upsert_policy_document,
     upsert_rate_rule,
@@ -63,24 +62,34 @@ from ..services.admin_service import (
     upsert_setting,
     upsert_settings_bundle,
 )
+from ..services.admin_content_ops import policy_documents_context
 from ..services.auth_service import (
     admin_disable_mfa,
     admin_issue_password_reset,
     create_staff_user,
     update_staff_user,
 )
-from ..services.communication_service import (
+from ..services.communication_dispatch import (
     communication_settings_context,
     dispatch_notification_deliveries,
-    housekeeping_defaults_context,
-    payment_settings_context,
-    property_settings_context,
     query_notification_history,
     send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
+from ..services.messaging_service import (
+    list_automation_rules,
+    list_message_templates,
+    upsert_automation_rule,
+)
+from ..services.admin_settings_ops import (
+    housekeeping_defaults_context,
+    payment_settings_context,
+    property_settings_context,
+)
 from ..services.extras_service import (
+    BookingExtraPayload,
     list_booking_extras,
+    upsert_booking_extra,
 )
 from ..services.pre_checkin_service import (
     fire_pre_checkin_not_completed_events,
@@ -574,6 +583,18 @@ def staff_admin_communications():
             elif action == "run_pre_checkin_reminders":
                 result = fire_pre_checkin_not_completed_events(hours_before=48)
                 flash(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}.", "success")
+            elif action == "save_automation_rule":
+                delay_minutes = helpers["parse_optional_int"](request.form.get("delay_minutes")) or 0
+                upsert_automation_rule(
+                    rule_id=request.form.get("rule_id") or None,
+                    event_type=request.form.get("event_type") or "",
+                    channel=request.form.get("channel") or "email",
+                    template_id=request.form.get("template_id") or None,
+                    is_active=helpers["truthy_setting"](request.form.get("is_active")),
+                    delay_minutes=delay_minutes,
+                    actor_user_id=str(actor.id),
+                )
+                flash("Automation rule saved.", "success")
             else:
                 abort(400)
         except Exception as exc:  # noqa: BLE001
@@ -595,6 +616,8 @@ def staff_admin_communications():
         "admin_communications.html",
         active_section="communications",
         communication_settings=communication_settings_context(),
+        automation_rules=list_automation_rules(),
+        message_templates=list_message_templates(),
         deliveries=deliveries,
         filters=filters,
         delivery_statuses=["pending", "queued", "delivered", "failed", "skipped", "cancelled"],
@@ -634,4 +657,92 @@ def staff_admin_payments():
         payment_settings=payment_settings_context(),
         recent_requests=recent_requests,
         is_super_admin=helpers["is_admin_user"](viewer),
+    )
+
+
+@admin_bp.route("/staff/admin/channels", methods=["GET", "POST"], endpoint="staff_admin_channels")
+def staff_admin_channels():
+    """OTA channel manager configuration panel.
+
+    Lists all known OTA providers (Booking.com, Expedia, Agoda), shows their
+    current API credential status, and allows admins to save credentials or
+    test the connection for each provider.
+    """
+    from ..services.channel_service import (
+        list_ota_channels,
+        test_ota_channel_connection,
+        upsert_ota_channel,
+    )
+
+    helpers = _get_app_helpers()
+    require_permission = helpers["require_permission"]
+    truthy_setting = helpers["truthy_setting"]
+
+    require_permission("settings.view")
+
+    if request.method == "POST":
+        action = request.form.get("action")
+        provider_key = (request.form.get("provider_key") or "").strip()
+        if provider_key not in OTA_PROVIDER_KEYS:
+            flash("Unknown OTA provider.", "error")
+            return redirect(url_for("admin.staff_admin_channels"))
+
+        try:
+            if action == "save_channel":
+                actor = require_permission("settings.edit")
+                api_key = (request.form.get("api_key") or "").strip() or None
+                api_secret = (request.form.get("api_secret") or "").strip() or None
+                upsert_ota_channel(
+                    provider_key=provider_key,
+                    display_name=OTA_PROVIDER_LABELS.get(provider_key, provider_key),
+                    is_active=truthy_setting(request.form.get("is_active")),
+                    hotel_id=(request.form.get("hotel_id") or "").strip() or None,
+                    endpoint_url=(request.form.get("endpoint_url") or "").strip() or None,
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    actor_user_id=actor.id,
+                )
+                db.session.commit()
+                flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)} configuration saved.", "success")
+
+            elif action == "test_connection":
+                actor = require_permission("settings.view")
+                result = test_ota_channel_connection(provider_key, actor_user_id=actor.id)
+                if result["success"]:
+                    flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: connection test passed.", "success")
+                else:
+                    flash(
+                        f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: connection test failed — "
+                        f"{result.get('error') or 'no credentials configured'}.",
+                        "error",
+                    )
+
+        except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            flash(public_error_message(exc), "error")
+
+        return redirect(url_for("admin.staff_admin_channels"))
+
+    # Build per-provider context so the template has a single list to iterate.
+    existing = {ch.provider_key: ch for ch in list_ota_channels()}
+    channels_context = []
+    for key in OTA_PROVIDER_KEYS:
+        record = existing.get(key)
+        channels_context.append({
+            "provider_key": key,
+            "display_name": OTA_PROVIDER_LABELS.get(key, key),
+            "is_active": record.is_active if record else False,
+            "hotel_id": record.hotel_id if record else "",
+            "endpoint_url": record.endpoint_url if record else "",
+            "api_key_hint": record.api_key_hint if record else None,
+            "api_secret_hint": record.api_secret_hint if record else None,
+            "last_tested_at": record.last_tested_at if record else None,
+            "last_test_ok": record.last_test_ok if record else None,
+            "last_test_error": record.last_test_error if record else None,
+        })
+
+    return render_template(
+        "admin_channels.html",
+        active_section="channels",
+        channels=channels_context,
     )

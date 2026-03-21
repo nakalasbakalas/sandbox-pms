@@ -290,6 +290,48 @@ def test_staff_operational_routes_render_for_authorized_user(app_factory):
     assert client.get("/staff/reservations/in-house").status_code == 200
 
 
+def test_reservation_detail_exposes_duplicate_action_and_prefills_clone_form(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Repeat",
+            last_name="Guest",
+            phone="+66800000024",
+            room_type_code="DBL",
+            check_in_date=date.today() + timedelta(days=5),
+            check_out_date=date.today() + timedelta(days=7),
+            source_channel="walk_in",
+        )
+        reservation.special_requests = "Quiet room"
+        db.session.commit()
+        user = make_staff_user("front_desk", "repeat-guest@example.com")
+
+    login_as(client, user)
+    detail_response = client.get(f"/staff/reservations/{reservation.id}?back=/staff/reservations")
+    assert detail_response.status_code == 200
+    detail_html = detail_response.get_data(as_text=True)
+    assert "Duplicate reservation" in detail_html
+    assert f"/staff/reservations/{reservation.id}/duplicate?back=/staff/reservations" in detail_html
+
+    clone_response = client.get(
+        f"/staff/reservations/{reservation.id}/duplicate?back=/staff/reservations",
+        follow_redirects=True,
+    )
+    assert clone_response.status_code == 200
+    clone_html = clone_response.get_data(as_text=True)
+    expected_check_in = reservation.check_out_date
+    expected_check_out = expected_check_in + timedelta(days=2)
+    assert 'value="Repeat"' in clone_html
+    assert 'value="Guest"' in clone_html
+    assert 'value="+66800000024"' in clone_html
+    assert 'value="walk_in" selected' in clone_html
+    assert f'value="{expected_check_in.isoformat()}"' in clone_html
+    assert f'value="{expected_check_out.isoformat()}"' in clone_html
+    assert "Quiet room" in clone_html
+    assert f"Cloned from {reservation.reservation_code}" in clone_html
+
+
 def test_search_by_guest_name_phone_and_code_work(app_factory):
     app = app_factory(seed=True)
     with app.app_context():

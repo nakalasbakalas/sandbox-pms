@@ -1,0 +1,8 @@
+interface:
+  display_name: "ORM Query Modernization"
+  short_description: "Migrate legacy Model.query patterns to modern db.session.execute style."
+  brand_color: "#D97706"
+  default_prompt: "Migrate all legacy .query. ORM calls in the specified file to modern db.session.execute(sa.select(...)) patterns, then run the related tests."
+
+policy:
+  allow_implicit_invocation: true

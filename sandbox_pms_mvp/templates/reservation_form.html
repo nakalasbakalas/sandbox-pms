@@ -89,7 +89,7 @@
 </section>
 {% endblock %}
 {% block extra_scripts %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function() {
   var form = document.getElementById('reservation-form');
   var preview = document.getElementById('rate-preview');

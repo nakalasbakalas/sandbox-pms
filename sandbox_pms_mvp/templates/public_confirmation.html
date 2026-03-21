@@ -33,7 +33,7 @@
     </div>
     {% if payment_request and payment_request.status == 'pending' %}
     <div class="actions">
-      <a class="button" href="{{ url_for('public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="pay_deposit" data-analytics-context="confirmation_payment">{{ t('payment_pay_deposit') }}</a>
+      <a class="button" href="{{ url_for('public.public_payment_start', request_code=payment_request.request_code, reservation_code=reservation.reservation_code, token=reservation.public_confirmation_token, lang=current_language) }}" data-analytics-event="cta_click" data-analytics-label="pay_deposit" data-analytics-context="confirmation_payment">{{ t('payment_pay_deposit') }}</a>
     </div>
     {% elif not payment_request and (hotel_contact_phone_link or hotel_contact_email_link) %}
     <p class="muted">{{ t('payment_link_contact_help', phone=hotel_contact_phone_link, email=hotel_contact_email_link)|safe }}</p>
@@ -73,8 +73,11 @@
       <div class="card-head"><div><p class="eyebrow">{{ t('guest_self_service') }}</p><h2>{{ hotel_name }}</h2></div></div>
       <p>{{ t('confirmation_change_help') }}</p>
       <div class="actions">
-        <a class="button secondary" href="{{ url_for('booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}" data-analytics-event="cta_click" data-analytics-label="request_modification" data-analytics-context="confirmation_self_service">{{ t('request_modification') }}</a>
-        <a class="button secondary" href="{{ url_for('booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}" data-analytics-event="cta_click" data-analytics-label="request_cancellation" data-analytics-context="confirmation_self_service">{{ t('request_cancellation') }}</a>
+        {% if digital_checkout_url %}
+        <a class="button" href="{{ digital_checkout_url }}" data-analytics-event="cta_click" data-analytics-label="digital_checkout" data-analytics-context="confirmation_self_service">{{ t('digital_checkout_title') }}</a>
+        {% endif %}
+        <a class="button secondary" href="{{ url_for('public.booking_modify_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}" data-analytics-event="cta_click" data-analytics-label="request_modification" data-analytics-context="confirmation_self_service">{{ t('request_modification') }}</a>
+        <a class="button secondary" href="{{ url_for('public.booking_cancel_request', lang=current_language, booking_reference=reservation.reservation_code, contact_value=guest.email or guest.phone or '') }}" data-analytics-event="cta_click" data-analytics-label="request_cancellation" data-analytics-context="confirmation_self_service">{{ t('request_cancellation') }}</a>
       </div>
     </article>
   </section>
