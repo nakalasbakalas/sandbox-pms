@@ -28,7 +28,7 @@ def build_repo_fixture(tmp_path: Path) -> Path:
 </head>
 <body>
   <a href="#main-content">Skip</a>
-  <a href="{{ url_for('booking_entry', lang=current_language) }}">Book</a>
+  <a href="{{ url_for('public.booking_entry', lang=current_language) }}">Book</a>
 </body>
 </html>
 """,
@@ -37,7 +37,7 @@ def build_repo_fixture(tmp_path: Path) -> Path:
         tmp_path / "sandbox_pms_mvp" / "templates" / "index.html",
         """{% extends 'base.html' %}
 {% block content %}
-<a href="{{ url_for('booking_entry', lang=current_language) }}">Book now</a>
+<a href="{{ url_for('public.booking_entry', lang=current_language) }}">Book now</a>
 {% endblock %}
 """,
     )

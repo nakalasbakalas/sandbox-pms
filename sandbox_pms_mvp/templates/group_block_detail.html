@@ -61,7 +61,7 @@
           <td>{{ currency }} {{ item.quoted_grand_total|money }}</td>
           <td>
             {% if item.converted_reservation_id %}
-            <a href="{{ url_for('staff_reservation_detail', reservation_id=item.converted_reservation_id, back=url_for('staff_group_block_detail', group_block_code=block.group_block_code)) }}">{{ item.converted_reservation_code or item.converted_reservation_id }}</a>
+            <a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.converted_reservation_id, back=url_for('staff_group_block_detail', group_block_code=block.group_block_code)) }}">{{ item.converted_reservation_code or item.converted_reservation_id }}</a>
             {% else %}
             —
             {% endif %}

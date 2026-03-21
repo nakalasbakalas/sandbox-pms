@@ -106,14 +106,14 @@
             {% else %}background:#fff3cd;color:#856404;{% endif %}">
             {{ doc.verification_status|title }}
           </span>
-          <a href="{{ url_for('staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
+          <a href="{{ url_for('staff_reservations.staff_document_view', doc_id=doc.id) }}" target="_blank" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">View</a>
           {% if doc.verification_status == 'pending' %}
-          <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
             {{ csrf_input() }}
             <input type="hidden" name="verification_status" value="verified" />
             <button type="submit" class="btn btn-primary btn-sm" style="font-size:0.8rem;">Verify</button>
           </form>
-          <form method="POST" action="{{ url_for('staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_document_verify', doc_id=doc.id) }}" style="display:inline;">
             {{ csrf_input() }}
             <input type="hidden" name="verification_status" value="rejected" />
             <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;color:#721c24;">Reject</button>

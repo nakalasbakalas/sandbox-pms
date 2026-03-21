@@ -167,7 +167,7 @@ def check_public_surface(root: Path) -> list[GuardrailIssue]:
         ("twitter-card", 'name="twitter:card"', "Public base template should expose Twitter card metadata."),
         ("hotel-schema", 'type="application/ld+json"', "Public base template should include structured data."),
         ("skip-link", 'href="#main-content"', "Public base template should include a skip link."),
-        ("booking-cta", "url_for('booking_entry'", "Public templates should keep a reachable booking CTA."),
+        ("booking-cta", "url_for('public.booking_entry'", "Public templates should keep a reachable booking CTA."),
     )
     for code, snippet, message in required_snippets:
         if snippet not in base_text:
