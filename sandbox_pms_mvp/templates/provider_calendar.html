@@ -10,7 +10,7 @@
     </div>
     <div class="actions">
       <span class="pill subtle">Timezone {{ calendar.timezone_name }}</span>
-      <a class="button secondary" href="{{ url_for('provider_dashboard') }}">Back to dashboard</a>
+      <a class="button secondary" href="{{ url_for('provider.provider_dashboard') }}">Back to dashboard</a>
     </div>
   </div>
 </section>
@@ -33,7 +33,7 @@
         <div class="right-stack">
           <a class="button secondary tiny" href="{{ calendar.property_feed.export_url }}" target="_blank" rel="noopener">Open</a>
           {% if can_manage_calendar %}
-            <form method="post" action="{{ url_for('provider_calendar_feed_rotate', feed_id=calendar.property_feed.id) }}" class="inline-form">
+            <form method="post" action="{{ url_for('provider.provider_calendar_feed_rotate', feed_id=calendar.property_feed.id) }}" class="inline-form">
               {{ csrf_input() }}
               <button class="button secondary tiny" type="submit">Rotate</button>
             </form>
@@ -45,7 +45,7 @@
         <input type="text" readonly value="{{ calendar.property_feed.export_url }}">
       </label>
     {% elif can_manage_calendar %}
-      <form method="post" action="{{ url_for('provider_calendar_feed_create') }}" class="stack-form">
+      <form method="post" action="{{ url_for('provider.provider_calendar_feed_create') }}" class="stack-form">
         {{ csrf_input() }}
         <input type="hidden" name="scope_type" value="property">
         <label><span>Feed name</span><input type="text" name="name" value="{{ hotel_name }} availability"></label>
@@ -65,7 +65,7 @@
           <div class="right-stack">
             <a class="button secondary tiny" href="{{ feed.export_url }}" target="_blank" rel="noopener">Open</a>
             {% if can_manage_calendar %}
-              <form method="post" action="{{ url_for('provider_calendar_feed_rotate', feed_id=feed.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('provider.provider_calendar_feed_rotate', feed_id=feed.id) }}" class="inline-form">
                 {{ csrf_input() }}
                 <button class="button secondary tiny" type="submit">Rotate</button>
               </form>
@@ -78,7 +78,7 @@
     </div>
 
     {% if can_manage_calendar and calendar.rooms_without_feed %}
-      <form method="post" action="{{ url_for('provider_calendar_feed_create') }}" class="stack-form top-gap">
+      <form method="post" action="{{ url_for('provider.provider_calendar_feed_create') }}" class="stack-form top-gap">
         {{ csrf_input() }}
         <input type="hidden" name="scope_type" value="room">
         <label>
@@ -104,7 +104,7 @@
     </div>
 
     {% if can_manage_calendar %}
-      <form method="post" action="{{ url_for('provider_calendar_source_create') }}" class="stack-form">
+      <form method="post" action="{{ url_for('provider.provider_calendar_source_create') }}" class="stack-form">
         {{ csrf_input() }}
         <label>
           <span>Room</span>
@@ -140,7 +140,7 @@
             </span>
             <span class="small muted">{{ source.conflict_count }} conflict{{ '' if source.conflict_count == 1 else 's' }}</span>
             {% if can_manage_calendar %}
-              <form method="post" action="{{ url_for('provider_calendar_source_sync', source_id=source.id) }}" class="inline-form">
+              <form method="post" action="{{ url_for('provider.provider_calendar_source_sync', source_id=source.id) }}" class="inline-form">
                 {{ csrf_input() }}
                 <button class="button secondary tiny" type="submit">Sync now</button>
               </form>

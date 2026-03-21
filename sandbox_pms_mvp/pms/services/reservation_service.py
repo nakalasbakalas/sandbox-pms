@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -247,7 +248,12 @@ def validate_occupancy(room_type: RoomType, adults: int, children: int) -> None:
 
 
 def create_or_get_guest(payload: ReservationCreatePayload, actor_user_id: uuid.UUID | None) -> Guest:
-    guest = Guest.query.filter_by(phone=payload.phone, deleted_at=None).first()
+    guest = db.session.execute(
+        sa.select(Guest).where(
+            Guest.phone == payload.phone,
+            Guest.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     full_name = f"{payload.first_name.strip()} {payload.last_name.strip()}".strip()
     if guest:
         guest.first_name = payload.first_name.strip()
@@ -277,16 +283,25 @@ def choose_available_room(
     check_out_date: date,
     assigned_room_id: uuid.UUID | None,
 ) -> Room:
-    candidates = Room.query.filter_by(
-        room_type_id=room_type_id, is_active=True, is_sellable=True
-    ).order_by(Room.room_number.asc())
     if assigned_room_id:
         room = db.session.get(Room, assigned_room_id)
         if not room or room.room_type_id != room_type_id:
             raise ValueError("Assigned room does not match room type.")
         candidates = [room]
     else:
-        candidates = candidates.all()
+        candidates = (
+            db.session.execute(
+                sa.select(Room)
+                .where(
+                    Room.room_type_id == room_type_id,
+                    Room.is_active.is_(True),
+                    Room.is_sellable.is_(True),
+                )
+                .order_by(Room.room_number.asc())
+            )
+            .scalars()
+            .all()
+        )
     nights = list(_stay_dates(check_in_date, check_out_date))
     for room in candidates:
         if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
@@ -360,13 +375,22 @@ def release_inventory(reservation: Reservation, actor_user_id: uuid.UUID | None)
 
 
 def next_reservation_code() -> str:
-    prefix_setting = AppSetting.query.filter_by(key="reservation.code_prefix", deleted_at=None).first()
+    prefix_setting = db.session.execute(
+        sa.select(AppSetting).where(
+            AppSetting.key == "reservation.code_prefix",
+            AppSetting.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     prefix = prefix_setting.value_json.get("value", "SBX") if prefix_setting else "SBX"
     bind = db.session.get_bind()
     if bind.dialect.name == "postgresql":
         next_value = db.session.execute(sa.text("SELECT nextval('reservation_code_seq')")).scalar_one()
     else:
-        sequence = ReservationCodeSequence.query.filter_by(sequence_name="reservation_code").with_for_update().first()
+        sequence = db.session.execute(
+            sa.select(ReservationCodeSequence)
+            .where(ReservationCodeSequence.sequence_name == "reservation_code")
+            .with_for_update()
+        ).scalar_one_or_none()
         if not sequence:
             sequence = ReservationCodeSequence(sequence_name="reservation_code", next_value=1)
             db.session.add(sequence)
@@ -414,3 +438,160 @@ def _stay_dates(check_in_date: date, check_out_date: date):
     while cursor < check_out_date:
         yield cursor
         cursor += timedelta(days=1)
+
+
+# ---------------------------------------------------------------------------
+# Waitlist promotion and expiry
+# ---------------------------------------------------------------------------
+
+_log = logging.getLogger(__name__)
+
+
+def promote_eligible_waitlist() -> dict:
+    """Promote waitlisted reservations to confirmed when rooms become available.
+
+    Processes waitlisted reservations ordered by creation date (FIFO),
+    attempting to assign a room and allocate inventory for each. Reservations
+    whose check-in date has already passed are skipped (handled by expiry).
+
+    Returns a summary dict with ``promoted`` and ``skipped`` counts.
+    """
+    today = date.today()
+    waitlisted = (
+        db.session.execute(
+            sa.select(Reservation)
+            .where(
+                Reservation.current_status == "waitlist",
+                Reservation.check_in_date >= today,
+                Reservation.deleted_at.is_(None),
+            )
+            .order_by(Reservation.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    promoted = 0
+    skipped = 0
+
+    for reservation in waitlisted:
+        try:
+            room = choose_available_room(
+                room_type_id=reservation.room_type_id,
+                check_in_date=reservation.check_in_date,
+                check_out_date=reservation.check_out_date,
+                assigned_room_id=None,
+            )
+        except ValueError:
+            skipped += 1
+            continue
+
+        before_data = reservation_snapshot(reservation)
+        room_type = db.session.get(RoomType, reservation.room_type_id)
+        quote = quote_reservation(
+            room_type=room_type,
+            check_in_date=reservation.check_in_date,
+            check_out_date=reservation.check_out_date,
+            adults=reservation.adults + (reservation.extra_guests or 0),
+            children=reservation.children,
+        )
+
+        reservation.assigned_room_id = room.id
+        reservation.current_status = "confirmed"
+        reservation.updated_by_user_id = None
+        allocate_inventory(
+            reservation=reservation,
+            room=room,
+            nightly_rates=quote.nightly_rates,
+            actor_user_id=None,
+        )
+        db.session.add(
+            ReservationStatusHistory(
+                reservation_id=reservation.id,
+                old_status="waitlist",
+                new_status="confirmed",
+                reason="waitlist_auto_promotion",
+                note=f"Auto-promoted: room {room.room_number} became available",
+                changed_by_user_id=None,
+            )
+        )
+        write_audit_log(
+            actor_user_id=None,
+            entity_table="reservations",
+            entity_id=str(reservation.id),
+            action="update",
+            before_data=before_data,
+            after_data=reservation_snapshot(reservation),
+        )
+        promoted += 1
+        _log.info(
+            "Waitlist promoted: %s → confirmed (room %s)",
+            reservation.reservation_code,
+            room.room_number,
+        )
+
+    if promoted:
+        db.session.commit()
+
+    return {"promoted": promoted, "skipped": skipped}
+
+
+def expire_stale_waitlist(*, max_age_days: int = 14) -> dict:
+    """Cancel waitlisted reservations that are past their check-in date or older
+    than ``max_age_days`` since creation.
+
+    Returns a summary dict with ``expired`` count.
+    """
+    today = date.today()
+    cutoff = utc_now() - timedelta(days=max_age_days)
+
+    stale = (
+        db.session.execute(
+            sa.select(Reservation)
+            .where(
+                Reservation.current_status == "waitlist",
+                Reservation.deleted_at.is_(None),
+                sa.or_(
+                    Reservation.check_in_date < today,
+                    Reservation.created_at < cutoff,
+                ),
+            )
+            .order_by(Reservation.created_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+    expired = 0
+    for reservation in stale:
+        before_data = reservation_snapshot(reservation)
+        reservation.current_status = "cancelled"
+        reservation.cancelled_at = utc_now()
+        reservation.cancellation_reason = "waitlist_expired"
+        reservation.updated_by_user_id = None
+        release_inventory(reservation, actor_user_id=None)
+        db.session.add(
+            ReservationStatusHistory(
+                reservation_id=reservation.id,
+                old_status="waitlist",
+                new_status="cancelled",
+                reason="waitlist_expired",
+                note=f"Auto-expired: waitlist older than {max_age_days} days or past check-in",
+                changed_by_user_id=None,
+            )
+        )
+        write_audit_log(
+            actor_user_id=None,
+            entity_table="reservations",
+            entity_id=str(reservation.id),
+            action="update",
+            before_data=before_data,
+            after_data=reservation_snapshot(reservation),
+        )
+        expired += 1
+        _log.info("Waitlist expired: %s → cancelled", reservation.reservation_code)
+
+    if expired:
+        db.session.commit()
+
+    return {"expired": expired}

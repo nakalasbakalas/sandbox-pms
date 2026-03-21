@@ -8,7 +8,8 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
-from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, Reservation, ReservationHold, Room, utc_now
+from ..extensions import db
+from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -83,6 +84,23 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
         for rid, net in _balance_rows:
             _balance_map[rid] = max(float(net or 0), 0.0)
 
+    # Batch-fetch pending modification request counts (single query)
+    _pending_mod_map: dict[uuid.UUID, int] = {}
+    if _res_ids:
+        _mod_rows = _db.session.execute(
+            sa.select(
+                ModificationRequest.reservation_id,
+                sa.func.count(),
+            )
+            .where(
+                ModificationRequest.reservation_id.in_(_res_ids),
+                ModificationRequest.status.in_(("submitted", "reviewed")),
+            )
+            .group_by(ModificationRequest.reservation_id)
+        ).all()
+        for rid, cnt in _mod_rows:
+            _pending_mod_map[rid] = cnt
+
     holds = _hold_query(
         room_type_id=filters.room_type_id,
         window_start=window_start,
@@ -94,35 +112,47 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
     external_blocks: list[ExternalCalendarBlock] = []
     if room_ids:
         inventory_rows = (
-            InventoryDay.query.filter(
-                InventoryDay.room_id.in_(room_ids),
-                InventoryDay.business_date >= window_start,
-                InventoryDay.business_date < window_end,
+            db.session.execute(
+                sa.select(InventoryDay)
+                .where(
+                    InventoryDay.room_id.in_(room_ids),
+                    InventoryDay.business_date >= window_start,
+                    InventoryDay.business_date < window_end,
+                )
+                .order_by(InventoryDay.room_id.asc(), InventoryDay.business_date.asc())
             )
-            .order_by(InventoryDay.room_id.asc(), InventoryDay.business_date.asc())
+            .scalars()
             .all()
         )
         overrides = (
-            InventoryOverride.query.filter(
-                InventoryOverride.is_active.is_(True),
-                InventoryOverride.start_date < window_end,
-                InventoryOverride.end_date >= window_start,
-                sa.or_(
-                    InventoryOverride.room_id.in_(room_ids),
-                    InventoryOverride.room_type_id.in_(room_type_ids),
-                ),
+            db.session.execute(
+                sa.select(InventoryOverride)
+                .where(
+                    InventoryOverride.is_active.is_(True),
+                    InventoryOverride.start_date < window_end,
+                    InventoryOverride.end_date >= window_start,
+                    sa.or_(
+                        InventoryOverride.room_id.in_(room_ids),
+                        InventoryOverride.room_type_id.in_(room_type_ids),
+                    ),
+                )
+                .order_by(InventoryOverride.start_date.asc(), InventoryOverride.created_at.asc())
             )
-            .order_by(InventoryOverride.start_date.asc(), InventoryOverride.created_at.asc())
+            .scalars()
             .all()
         )
         external_blocks = (
-            ExternalCalendarBlock.query.options(joinedload(ExternalCalendarBlock.conflict_reservation))
-            .filter(
-                ExternalCalendarBlock.room_id.in_(room_ids),
-                ExternalCalendarBlock.starts_on < window_end,
-                ExternalCalendarBlock.ends_on > window_start,
+            db.session.execute(
+                sa.select(ExternalCalendarBlock)
+                .options(joinedload(ExternalCalendarBlock.conflict_reservation))
+                .where(
+                    ExternalCalendarBlock.room_id.in_(room_ids),
+                    ExternalCalendarBlock.starts_on < window_end,
+                    ExternalCalendarBlock.ends_on > window_start,
+                )
+                .order_by(ExternalCalendarBlock.room_id.asc(), ExternalCalendarBlock.starts_on.asc())
             )
-            .order_by(ExternalCalendarBlock.room_id.asc(), ExternalCalendarBlock.starts_on.asc())
+            .scalars()
             .all()
         )
 
@@ -133,7 +163,9 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
     _today = date.today()
     _today_inv: dict[uuid.UUID, InventoryDay] = {
         row.room_id: row
-        for row in InventoryDay.query.filter_by(business_date=_today).all()
+        for row in db.session.execute(
+            sa.select(InventoryDay).where(InventoryDay.business_date == _today)
+        ).scalars().all()
     }
     _hk_status_cache: dict[uuid.UUID, str] = {}
 
@@ -142,7 +174,6 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             return None
         if status_id in _hk_status_cache:
             return _hk_status_cache[status_id]
-        from ..extensions import db
         s = db.session.get(HousekeepingStatus, status_id)
         code = s.code if s else None
         _hk_status_cache[status_id] = code
@@ -269,6 +300,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             and target_row is not None
             and target_row.get("is_room_ready", False)
         )
+        # Flag reservation with pending modification request(s)
+        block["pendingModification"] = _pending_mod_map.get(reservation.id, 0) > 0
         if allocation_state == "unallocated" or target_row is None or reservation.assigned_room_id not in room_id_set:
             _ensure_unallocated_row(target_group)["blocks"].append(block)
             continue
@@ -532,37 +565,43 @@ def serialize_front_desk_board(board: dict[str, Any]) -> dict[str, Any]:
 
 
 def _room_query(room_type_id: str) -> list[Room]:
-    query = Room.query.options(joinedload(Room.room_type)).filter(Room.is_active.is_(True))
+    stmt = sa.select(Room).options(joinedload(Room.room_type)).where(Room.is_active.is_(True))
     if room_type_id:
-        query = query.filter(Room.room_type_id == uuid.UUID(room_type_id))
-    return query.order_by(Room.room_type_id.asc(), Room.room_number.asc()).all()
+        stmt = stmt.where(Room.room_type_id == uuid.UUID(room_type_id))
+    return db.session.execute(
+        stmt.order_by(Room.room_type_id.asc(), Room.room_number.asc())
+    ).scalars().all()
 
 
 def _reservation_query(*, room_type_id: str, window_start: date, window_end: date) -> list[Reservation]:
-    query = Reservation.query.options(
+    stmt = sa.select(Reservation).options(
         joinedload(Reservation.primary_guest),
         joinedload(Reservation.room_type),
         joinedload(Reservation.assigned_room),
-    ).filter(
+    ).where(
         Reservation.current_status.in_(tuple(ACTIVE_BOARD_RESERVATION_STATUSES)),
         Reservation.check_in_date < window_end,
         Reservation.check_out_date > window_start,
     )
     if room_type_id:
-        query = query.filter(Reservation.room_type_id == uuid.UUID(room_type_id))
-    return query.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc()).all()
+        stmt = stmt.where(Reservation.room_type_id == uuid.UUID(room_type_id))
+    return db.session.execute(
+        stmt.order_by(Reservation.check_in_date.asc(), Reservation.booked_at.asc())
+    ).scalars().all()
 
 
 def _hold_query(*, room_type_id: str, window_start: date, window_end: date) -> list[ReservationHold]:
-    query = ReservationHold.query.filter(
+    stmt = sa.select(ReservationHold).where(
         ReservationHold.status.in_(tuple(ACTIVE_BOARD_HOLD_STATUSES)),
         ReservationHold.check_in_date < window_end,
         ReservationHold.check_out_date > window_start,
         ReservationHold.expires_at > utc_now(),
     )
     if room_type_id:
-        query = query.filter(ReservationHold.room_type_id == uuid.UUID(room_type_id))
-    return query.order_by(ReservationHold.check_in_date.asc(), ReservationHold.created_at.asc()).all()
+        stmt = stmt.where(ReservationHold.room_type_id == uuid.UUID(room_type_id))
+    return db.session.execute(
+        stmt.order_by(ReservationHold.check_in_date.asc(), ReservationHold.created_at.asc())
+    ).scalars().all()
 
 
 def _build_weekend_track_bg(weekend_columns: list[int], days: int) -> str:
@@ -1269,19 +1308,29 @@ def _compute_extended_counts(
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.deposit_required_amount > 0,
         Reservation.deposit_received_amount < Reservation.deposit_required_amount,
-    )
+    ]
     if room_type_id_filter:
-        unpaid_q = unpaid_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
-    counts["unpaid_arrivals"] = unpaid_q.count()
+        unpaid_conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    counts["unpaid_arrivals"] = int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*unpaid_conditions)
+        ).scalar_one()
+        or 0
+    )
 
-    unassigned_q = Reservation.query.filter(
+    unassigned_conditions = [
         Reservation.check_in_date == today,
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.assigned_room_id.is_(None),
-    )
+    ]
     if room_type_id_filter:
-        unassigned_q = unassigned_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
-    counts["unassigned_arrivals_today"] = unassigned_q.count()
+        unassigned_conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    counts["unassigned_arrivals_today"] = int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*unassigned_conditions)
+        ).scalar_one()
+        or 0
+    )
 
     return counts
 
@@ -1295,26 +1344,36 @@ def _compute_operational_alerts(
     """Compute actionable alert messages for the board surface."""
     alerts: list[dict[str, str]] = []
 
-    unpaid_q = Reservation.query.filter(
+    unpaid_conditions = [
         Reservation.check_in_date == today,
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.deposit_required_amount > 0,
         Reservation.deposit_received_amount < Reservation.deposit_required_amount,
-    )
+    ]
     if room_type_id_filter:
-        unpaid_q = unpaid_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
-    n = unpaid_q.count()
+        unpaid_conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*unpaid_conditions)
+        ).scalar_one()
+        or 0
+    )
     if n > 0:
         alerts.append({"message": f"{n} arrival{'s' if n != 1 else ''} with unpaid deposit", "tone": "danger"})
 
-    unassigned_q = Reservation.query.filter(
+    unassigned_conditions = [
         Reservation.check_in_date == today,
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.assigned_room_id.is_(None),
-    )
+    ]
     if room_type_id_filter:
-        unassigned_q = unassigned_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
-    n = unassigned_q.count()
+        unassigned_conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*unassigned_conditions)
+        ).scalar_one()
+        or 0
+    )
     if n > 0:
         alerts.append({"message": f"{n} today's arrival{'s' if n != 1 else ''} unassigned", "tone": "warning"})
 
@@ -1326,15 +1385,20 @@ def _compute_operational_alerts(
     if turnaround_dirty > 0:
         alerts.append({"message": f"{turnaround_dirty} turnaround room{'s' if turnaround_dirty != 1 else ''} still dirty", "tone": "danger"})
 
-    specials_q = Reservation.query.filter(
+    specials_conditions = [
         Reservation.check_in_date == today,
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.special_requests.isnot(None),
         Reservation.special_requests != "",
-    )
+    ]
     if room_type_id_filter:
-        specials_q = specials_q.filter(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
-    n = specials_q.count()
+        specials_conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id_filter))
+    n = int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*specials_conditions)
+        ).scalar_one()
+        or 0
+    )
     if n > 0:
         alerts.append({"message": f"{n} arrival{'s' if n != 1 else ''} with special requests", "tone": "info"})
 
@@ -1342,20 +1406,30 @@ def _compute_operational_alerts(
 
 
 def _count_arrivals(target_date: date, room_type_id: str) -> int:
-    query = Reservation.query.filter(
+    conditions = [
         Reservation.check_in_date == target_date,
         Reservation.current_status.in_(["tentative", "confirmed"]),
-    )
+    ]
     if room_type_id:
-        query = query.filter(Reservation.room_type_id == uuid.UUID(room_type_id))
-    return query.count()
+        conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id))
+    return int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*conditions)
+        ).scalar_one()
+        or 0
+    )
 
 
 def _count_departures(target_date: date, room_type_id: str) -> int:
-    query = Reservation.query.filter(
+    conditions = [
         Reservation.check_out_date == target_date,
         Reservation.current_status.in_(["checked_in", "checked_out"]),
-    )
+    ]
     if room_type_id:
-        query = query.filter(Reservation.room_type_id == uuid.UUID(room_type_id))
-    return query.count()
+        conditions.append(Reservation.room_type_id == uuid.UUID(room_type_id))
+    return int(
+        db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(*conditions)
+        ).scalar_one()
+        or 0
+    )

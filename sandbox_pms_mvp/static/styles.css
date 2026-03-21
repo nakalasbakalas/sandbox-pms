@@ -1553,6 +1553,13 @@ tbody tr:last-child td { border-bottom: 0; }
   font-weight: 600;
   color: #d4ffd4;
 }
+.planning-board-block-badges .badge-mod {
+  background: rgba(255,200,50,0.3);
+  padding: 0 3px;
+  border-radius: 2px;
+  font-weight: 600;
+  color: #ffe8a0;
+}
 .planning-board-resize-handle {
   position: relative;
   width: 14px;
@@ -3952,6 +3959,29 @@ body:not(.public-site) .hk-page-title {
 }
 
 .hk-header-bar .button { margin: 0; }
+.hk-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--pms-border-medium);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.hk-view-btn {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pms-text-secondary);
+  background: #fff;
+  border-right: 1px solid var(--pms-border-thin);
+  text-decoration: none;
+}
+.hk-view-btn:last-child { border-right: none; }
+.hk-view-btn:hover { background: var(--pms-bg-hover); color: var(--pms-text-primary); }
+.hk-view-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
 
 /* Dark filter block (always visible) */
 .hk-filter-block {
@@ -4170,6 +4200,135 @@ body:not(.public-site) .hk-counts {
   line-height: 1.2;
 }
 
+.hk-mobile-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.hk-mobile-summary-card,
+.hk-mobile-empty {
+  border: 1px solid var(--pms-border-thin);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+.hk-mobile-summary-card small,
+.hk-mobile-meta small {
+  display: block;
+  color: var(--pms-text-muted);
+  margin-bottom: 4px;
+}
+.hk-mobile-summary-card strong,
+.hk-mobile-meta strong {
+  display: block;
+  color: var(--pms-text-primary);
+  font-size: 1rem;
+}
+.hk-mobile-summary-card span {
+  color: var(--pms-text-secondary);
+  font-size: 12px;
+}
+.hk-mobile-following-day {
+  margin-top: 10px;
+}
+.hk-mobile-following-day > summary {
+  cursor: pointer;
+}
+.hk-mobile-section {
+  margin-bottom: 12px;
+}
+.hk-mobile-section-head {
+  align-items: flex-start;
+}
+.hk-mobile-section-head h2 {
+  margin: 0;
+}
+.hk-mobile-section-head p {
+  margin: 4px 0 0;
+  color: var(--pms-text-secondary);
+  font-size: 12px;
+}
+.hk-mobile-section-stats {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  color: var(--pms-text-muted);
+  font-size: 11px;
+}
+.hk-mobile-list {
+  display: grid;
+  gap: 10px;
+}
+.hk-mobile-card {
+  border: 1px solid var(--pms-border-thin);
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+  display: grid;
+  gap: 10px;
+}
+.hk-mobile-card.attention {
+  border-color: rgba(243, 156, 18, 0.35);
+  box-shadow: inset 3px 0 0 rgba(243, 156, 18, 0.7);
+}
+.hk-mobile-card.blocked {
+  border-color: rgba(192, 57, 43, 0.35);
+}
+.hk-mobile-card.maintenance {
+  border-color: rgba(230, 126, 34, 0.35);
+}
+.hk-mobile-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.hk-mobile-room {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--pms-text-primary);
+  text-decoration: none;
+}
+.hk-mobile-ref {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--pms-text-secondary);
+  font-size: 12px;
+}
+.hk-mobile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hk-mobile-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.hk-mobile-reason,
+.hk-mobile-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--pms-text-secondary);
+}
+.hk-mobile-actions {
+  display: grid;
+  gap: 8px;
+}
+.hk-mobile-quick-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.hk-mobile-quick-form .button,
+.hk-mobile-actions > .button {
+  width: 100%;
+  justify-content: center;
+}
+
 /* Mobile responsive: stack below 768px */
 @media (max-width: 768px) {
   .hk-filter-form {
@@ -4184,6 +4343,33 @@ body:not(.public-site) .hk-counts {
   .hk-row-actions { flex-direction: column; gap: 1px; }
   .hk-row-actions .button { padding: 2px 4px; font-size: 9px; }
   .hk-inline-form { flex-direction: column; }
+  .hk-header-bar {
+    align-items: stretch;
+  }
+  .hk-view-toggle,
+  .hk-date-toggle {
+    width: 100%;
+  }
+  .hk-view-btn,
+  .hk-date-btn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+  .hk-mobile-summary {
+    grid-template-columns: 1fr;
+  }
+  .hk-mobile-section-head {
+    flex-direction: column;
+  }
+  .hk-mobile-section-stats {
+    text-align: left;
+  }
+  .hk-mobile-card-head {
+    flex-direction: column;
+  }
+  .hk-mobile-quick-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ─── Reservations page PMS layout ─── */

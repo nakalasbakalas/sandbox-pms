@@ -76,6 +76,14 @@ services:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: SENTRY_DSN
+        sync: false
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      - key: SENTRY_RELEASE
+        sync: false
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.0"
       - key: MAX_CONTENT_LENGTH
         value: "12582912"
       # Document storage — choose one:
@@ -222,6 +230,44 @@ services:
     schedule: "0 8 * * *"
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: flask --app app fire-pre-checkin-reminders
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+
+  - type: cron
+    name: pms-process-waitlist
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app process-waitlist
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+
+  - type: cron
+    name: pms-auto-cancel-no-shows
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "0 21 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app auto-cancel-no-shows
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11

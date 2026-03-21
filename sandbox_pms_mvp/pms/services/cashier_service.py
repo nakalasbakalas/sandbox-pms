@@ -110,7 +110,11 @@ def post_fee_charge(
     commit: bool = True,
 ) -> FolioCharge:
     if posting_key:
-        existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             return existing
     reservation = _load_reservation_for_update(reservation_id)
@@ -235,7 +239,11 @@ def ensure_room_charges_posted(
         if business_date > target_date:
             continue
         posting_key = f"room:{reservation.id}:{business_date.isoformat()}"
-        existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             continue
         created.append(
@@ -335,13 +343,24 @@ def folio_summary(reservation: Reservation | uuid.UUID) -> dict:
     deposit_applied_total = min(deposit_received_total, max(debit_total - payment_received_total, Decimal("0.00")))
     unused_deposit_total = max(deposit_received_total - deposit_applied_total, Decimal("0.00"))
     latest_payment_request = (
-        PaymentRequest.query.filter_by(reservation_id=reservation.id)
-        .order_by(PaymentRequest.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentRequest)
+            .where(PaymentRequest.reservation_id == reservation.id)
+            .order_by(PaymentRequest.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     pending_refund_exists = (
-        PaymentEvent.query.filter_by(reservation_id=reservation.id, event_type="refund_pending")
-        .order_by(PaymentEvent.created_at.desc())
+        db.session.execute(
+            sa.select(PaymentEvent)
+            .where(
+                PaymentEvent.reservation_id == reservation.id,
+                PaymentEvent.event_type == "refund_pending",
+            )
+            .order_by(PaymentEvent.created_at.desc())
+        )
+        .scalars()
         .first()
     )
     if balance_due == Decimal("0.00") and refund_due == Decimal("0.00"):
@@ -406,28 +425,46 @@ def get_cashier_detail(
         "summary": payment_summary(reservation),
         "lines": _folio_lines(reservation.id),
         "activity": (
-            CashierActivityLog.query.options(joinedload(CashierActivityLog.actor_user))
-            .filter_by(reservation_id=reservation.id)
-            .order_by(CashierActivityLog.created_at.desc())
+            db.session.execute(
+                sa.select(CashierActivityLog)
+                .options(joinedload(CashierActivityLog.actor_user))
+                .where(CashierActivityLog.reservation_id == reservation.id)
+                .order_by(CashierActivityLog.created_at.desc())
+            )
+            .unique()
+            .scalars()
             .all()
         ),
         "documents": (
-            CashierDocument.query.options(
-                joinedload(CashierDocument.issued_by_user),
-                joinedload(CashierDocument.voided_by_user),
+            db.session.execute(
+                sa.select(CashierDocument)
+                .options(
+                    joinedload(CashierDocument.issued_by_user),
+                    joinedload(CashierDocument.voided_by_user),
+                )
+                .where(CashierDocument.reservation_id == reservation.id)
+                .order_by(CashierDocument.issued_at.desc())
             )
-            .filter_by(reservation_id=reservation.id)
-            .order_by(CashierDocument.issued_at.desc())
+            .unique()
+            .scalars()
             .all()
         ),
         "payment_requests": (
-            PaymentRequest.query.filter_by(reservation_id=reservation.id)
-            .order_by(PaymentRequest.created_at.desc())
+            db.session.execute(
+                sa.select(PaymentRequest)
+                .where(PaymentRequest.reservation_id == reservation.id)
+                .order_by(PaymentRequest.created_at.desc())
+            )
+            .scalars()
             .all()
         ),
         "payment_events": (
-            PaymentEvent.query.filter_by(reservation_id=reservation.id)
-            .order_by(PaymentEvent.created_at.desc())
+            db.session.execute(
+                sa.select(PaymentEvent)
+                .where(PaymentEvent.reservation_id == reservation.id)
+                .order_by(PaymentEvent.created_at.desc())
+            )
+            .scalars()
             .all()
         ),
         "notification_history": query_notification_history(reservation_id=reservation.id, limit=30),
@@ -513,7 +550,11 @@ def record_payment(
     )
     service_date = payload.service_date or date.today()
     if payload.posting_key:
-        existing = FolioCharge.query.filter_by(posting_key=payload.posting_key).first()
+        existing = (
+            db.session.execute(sa.select(FolioCharge).where(FolioCharge.posting_key == payload.posting_key))
+            .scalars()
+            .first()
+        )
         if existing:
             return existing
     payment_request = None
@@ -765,8 +806,15 @@ def issue_cashier_document(
     if not reservation:
         raise ValueError("Reservation not found.")
     existing = (
-        CashierDocument.query.filter_by(reservation_id=reservation.id, document_type=payload.document_type, status="issued")
-        .order_by(CashierDocument.issued_at.asc())
+        db.session.execute(
+            sa.select(CashierDocument).where(
+                CashierDocument.reservation_id == reservation.id,
+                CashierDocument.document_type == payload.document_type,
+                CashierDocument.status == "issued",
+            )
+            .order_by(CashierDocument.issued_at.asc())
+        )
+        .scalars()
         .first()
     )
     if existing:
@@ -834,8 +882,15 @@ def cashier_print_context(
         )
     else:
         document = (
-            CashierDocument.query.filter_by(reservation_id=reservation_id, document_type=document_type, status="issued")
-            .order_by(CashierDocument.issued_at.asc())
+            db.session.execute(
+                sa.select(CashierDocument).where(
+                    CashierDocument.reservation_id == reservation_id,
+                    CashierDocument.document_type == document_type,
+                    CashierDocument.status == "issued",
+                )
+                .order_by(CashierDocument.issued_at.asc())
+            )
+            .scalars()
             .first()
         )
     return {"detail": detail, "document": document, "printed_at": utc_now(), "document_type": document_type}
@@ -843,12 +898,17 @@ def cashier_print_context(
 
 def _load_reservation(reservation_id: uuid.UUID) -> Reservation | None:
     return (
-        Reservation.query.options(
-            joinedload(Reservation.primary_guest),
-            joinedload(Reservation.room_type),
-            joinedload(Reservation.assigned_room),
+        db.session.execute(
+            sa.select(Reservation)
+            .options(
+                joinedload(Reservation.primary_guest),
+                joinedload(Reservation.room_type),
+                joinedload(Reservation.assigned_room),
+            )
+            .where(Reservation.id == reservation_id)
         )
-        .filter(Reservation.id == reservation_id)
+        .unique()
+        .scalars()
         .first()
     )
 
@@ -873,13 +933,18 @@ def _load_reservation_for_update(reservation_id: uuid.UUID) -> Reservation | Non
 
 def _folio_lines(reservation_id: uuid.UUID) -> list[FolioCharge]:
     return (
-        FolioCharge.query.options(
-            joinedload(FolioCharge.posted_by_user),
-            joinedload(FolioCharge.voided_by_user),
-            joinedload(FolioCharge.reversed_charge),
+        db.session.execute(
+            sa.select(FolioCharge)
+            .options(
+                joinedload(FolioCharge.posted_by_user),
+                joinedload(FolioCharge.voided_by_user),
+                joinedload(FolioCharge.reversed_charge),
+            )
+            .where(FolioCharge.reservation_id == reservation_id)
+            .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc(), FolioCharge.created_at.asc())
         )
-        .filter_by(reservation_id=reservation_id)
-        .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc(), FolioCharge.created_at.asc())
+        .unique()
+        .scalars()
         .all()
     )
 

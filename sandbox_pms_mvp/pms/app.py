@@ -95,6 +95,51 @@ from .security import configure_app_security, current_request_id, public_error_m
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
+from .helpers import (
+    absolute_public_url,
+    action_datetime_for_form_date,
+    add_anchor_to_path,
+    available_admin_sections,
+    can,
+    can_access_admin_workspace,
+    _contact_link,
+    current_app_testing,
+    current_language,
+    current_settings,
+    current_user,
+    default_dashboard_endpoint,
+    default_dashboard_url,
+    email_href,
+    ensure_csrf_token,
+    format_report_date_range,
+    is_admin_user,
+    is_staff_or_provider_endpoint,
+    make_language_url,
+    parse_booking_extra_ids,
+    parse_decimal,
+    parse_optional_date,
+    parse_optional_datetime,
+    parse_optional_decimal,
+    parse_optional_int,
+    parse_optional_uuid,
+    parse_request_date_arg,
+    parse_request_form_date,
+    parse_request_int_arg,
+    parse_request_uuid_arg,
+    phone_href,
+    public_base_url,
+    report_date_presets,
+    require_admin_role,
+    require_admin_workspace_access,
+    require_any_permission,
+    require_permission,
+    require_user,
+    resolve_report_date_range,
+    rotate_csrf_token,
+    safe_back_path,
+    truthy_setting,
+    validate_csrf_request,
+)
 from .services.admin_service import (
     BlackoutPayload,
     InventoryOverridePayload,
@@ -184,6 +229,7 @@ from .services.front_desk_service import (
     FrontDeskFilters,
     NoShowPayload,
     WalkInCheckInPayload,
+    auto_cancel_no_shows,
     complete_check_in,
     complete_checkout,
     create_walk_in_and_check_in,
@@ -305,7 +351,7 @@ from .services.pre_checkin_service import (
     verify_document,
 )
 from .services.reporting_service import build_csv_rows, build_daily_report, build_front_desk_dashboard, build_manager_dashboard
-from .services.reservation_service import ReservationCreatePayload, create_reservation
+from .services.reservation_service import ReservationCreatePayload, create_reservation, expire_stale_waitlist, promote_eligible_waitlist
 from .services.messaging_service import (
     ComposePayload as MessagingComposePayload,
     InboxFilters as MessagingInboxFilters,
@@ -344,6 +390,8 @@ from .services.staff_reservations_service import (
     list_reservations,
     quote_modification_request,
     resend_confirmation,
+    search_guests,
+    get_guest_detail,
     update_guest_details,
 )
 
@@ -360,7 +408,70 @@ BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
     "landing_path",
     "entry_cta_source",
 }
-BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {"index", "availability", "booking_entry", "booking_hold", "booking_confirm"}
+BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {
+    "index",
+    "availability",
+    "booking_entry",
+    "booking_hold",
+    "booking_confirm",
+    "public.availability",
+    "public.booking_entry",
+    "public.booking_hold",
+    "public.booking_confirm",
+}
+PUBLIC_BOOKING_LANDING_ENDPOINTS = {"index", "availability", "booking_entry", "public.availability", "public.booking_entry"}
+PUBLIC_NON_CACHEABLE_ENDPOINTS = {
+    "booking_confirmation",
+    "booking_cancel_request",
+    "booking_modify_request",
+    "public_payment_return",
+    "public_payment_start",
+    "public.booking_confirmation",
+    "public.booking_cancel_request",
+    "public.public_digital_checkout",
+    "public.public_digital_checkout_complete",
+    "public.public_digital_checkout_pay_balance",
+    "public.booking_modify_request",
+    "public.public_payment_return",
+    "public.public_payment_start",
+}
+PUBLIC_WEBHOOK_ENDPOINTS = {"payment_webhook", "public.payment_webhook"}
+
+
+def _load_sentry_sdk():
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+    except ImportError:
+        return None, []
+    return sentry_sdk, [FlaskIntegration(), SqlalchemyIntegration()]
+
+
+def _sentry_before_send(event, hint):  # noqa: ARG001
+    request_id = current_request_id()
+    if request_id:
+        event.setdefault("tags", {})["request_id"] = request_id
+    return event
+
+
+def configure_error_monitoring(app: Flask) -> None:
+    dsn = str(app.config.get("SENTRY_DSN") or "").strip()
+    if not dsn:
+        return
+    sentry_sdk, integrations = _load_sentry_sdk()
+    if sentry_sdk is None:
+        app.logger.warning("SENTRY_DSN is set but sentry-sdk is not installed; skipping Sentry initialization.")
+        return
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=str(app.config.get("SENTRY_ENVIRONMENT") or app.config.get("APP_ENV") or "development"),
+        release=str(app.config.get("SENTRY_RELEASE") or "") or None,
+        traces_sample_rate=float(app.config.get("SENTRY_TRACES_SAMPLE_RATE") or 0.0),
+        integrations=integrations,
+        send_default_pii=False,
+        before_send=_sentry_before_send,
+    )
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -372,12 +483,35 @@ def create_app(test_config: dict | None = None) -> Flask:
     configure_app_security(app)
     db.init_app(app)
     migrate.init_app(app, db)
+    configure_error_monitoring(app)
 
     register_template_helpers(app)
     register_url_topology_hooks(app)
     register_board_v2_feature_gates(app)
     register_auth_hooks(app)
     register_cli(app)
+
+    from .routes.auth import auth_bp
+    from .routes.provider import provider_bp
+    from .routes.housekeeping import housekeeping_bp
+    from .routes.messaging import messaging_bp
+    from .routes.reports import reports_bp
+    from .routes.cashier import cashier_bp
+    from .routes.staff_reservations import staff_reservations_bp
+    from .routes.front_desk import front_desk_bp
+    from .routes.admin import admin_bp
+    from .routes.public import public_bp
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(provider_bp)
+    app.register_blueprint(housekeeping_bp)
+    app.register_blueprint(messaging_bp)
+    app.register_blueprint(reports_bp)
+    app.register_blueprint(cashier_bp)
+    app.register_blueprint(staff_reservations_bp)
+    app.register_blueprint(front_desk_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(public_bp)
+
     register_routes(app)
 
     with app.app_context():
@@ -414,25 +548,25 @@ def register_auth_hooks(app: Flask) -> None:
 
         if g.pending_mfa_user:
             allowed_endpoints = {
-                "staff_mfa_verify",
-                "staff_logout",
+                "auth.staff_mfa_verify",
+                "auth.staff_logout",
                 "static",
             }
             if request.endpoint not in allowed_endpoints:
-                return redirect(url_for("staff_mfa_verify"))
+                return redirect(url_for("auth.staff_mfa_verify"))
 
         if g.current_staff_user and (g.current_staff_user.force_password_reset or g.current_staff_user.account_state == "password_reset_required"):
             allowed_endpoints = {
-                "staff_security",
-                "staff_logout",
-                "staff_mfa_verify",
+                "auth.staff_security",
+                "auth.staff_logout",
+                "auth.staff_mfa_verify",
                 "static",
             }
             if request.endpoint not in allowed_endpoints:
                 flash("Password reset is required before continuing.", "warning")
-                return redirect(url_for("staff_security"))
+                return redirect(url_for("auth.staff_security"))
 
-        if g.current_staff_user and request.endpoint in {"staff_login", "staff_forgot_password", "staff_reset_password"}:
+        if g.current_staff_user and request.endpoint in {"auth.staff_login", "auth.staff_forgot_password", "auth.staff_reset_password"}:
             return redirect(default_dashboard_url(g.current_staff_user))
 
     @app.after_request
@@ -451,13 +585,7 @@ def register_auth_hooks(app: Flask) -> None:
 
         if getattr(g, "current_auth_session", None):
             db.session.commit()
-        if request.endpoint in {
-            "booking_confirmation",
-            "booking_cancel_request",
-            "booking_modify_request",
-            "public_payment_return",
-            "public_payment_start",
-        }:
+        if request.endpoint in PUBLIC_NON_CACHEABLE_ENDPOINTS:
             response.headers["Cache-Control"] = "no-store, private, max-age=0"
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
         return response
@@ -556,16 +684,14 @@ def register_template_helpers(app: Flask) -> None:
             candidate = str(path or "").strip()
             if not candidate:
                 return ""
-            if request.endpoint and (
-                request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
-            ):
+            if is_staff_or_provider_endpoint(request.endpoint):
                 normalized_path = candidate if candidate.startswith("/") else f"/{candidate.lstrip('/')}"
                 return f"{staff_app_base_url()}{normalized_path}"
             return absolute_public_url(candidate)
 
         canonical_url = _absolute_route_url(_language_url(language, preserve_query=False))
         language_alternate_urls = {}
-        if request.endpoint and not request.endpoint.startswith("staff_") and not request.endpoint.startswith("provider_"):
+        if request.endpoint and not is_staff_or_provider_endpoint(request.endpoint):
             language_alternate_urls = {
                 code: _absolute_route_url(_language_url(code, preserve_query=False))
                 for code in LANGUAGE_LABELS
@@ -573,8 +699,7 @@ def register_template_helpers(app: Flask) -> None:
         is_public_site = bool(
             request.endpoint
             and request.endpoint != "static"
-            and not request.endpoint.startswith("staff_")
-            and not request.endpoint.startswith("provider_")
+            and not is_staff_or_provider_endpoint(request.endpoint)
         )
         current_staff = current_user()
         marketing_site_url = marketing_site_base_url(required=False)
@@ -635,9 +760,7 @@ def register_template_helpers(app: Flask) -> None:
             ),
             "messaging_unread_count": total_unread_count() if (
                 current_staff and current_staff.has_permission("messaging.view")
-                and request.endpoint and (
-                    request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_")
-                )
+                and request.endpoint and is_staff_or_provider_endpoint(request.endpoint)
             ) else 0,
             "CONVERSATION_CHANNEL_TYPES": CONVERSATION_CHANNEL_TYPES,
             "CONVERSATION_STATUSES": CONVERSATION_STATUSES,
@@ -708,262 +831,44 @@ def register_cli(app: Flask) -> None:
         result = process_pending_automations()
         print(
             f"Automation events processed: {result['processed']} sent, "
+            f"{result['skipped']} skipped, {result['errors']} errors, "
+            f"{result.get('cleaned_up', 0)} cleaned up."
+        )
+
+    @app.cli.command("process-waitlist")
+    @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
+    def process_waitlist_command(max_age_days: int) -> None:
+        """Promote eligible waitlisted reservations and expire stale ones."""
+        promo = promote_eligible_waitlist()
+        expiry = expire_stale_waitlist(max_age_days=max_age_days)
+        print(
+            f"Waitlist: {promo['promoted']} promoted, {promo['skipped']} skipped, "
+            f"{expiry['expired']} expired."
+        )
+
+    @app.cli.command("auto-cancel-no-shows")
+    @click.option("--date", "target_date", default=None, type=click.DateTime(formats=["%Y-%m-%d"]), help="Business date (default: today).")
+    def auto_cancel_no_shows_command(target_date: datetime | None) -> None:
+        """Auto-cancel same-day no-shows after cutoff hour."""
+        biz_date = target_date.date() if target_date else None
+        result = auto_cancel_no_shows(business_date=biz_date)
+        print(
+            f"No-show auto-cancel: {result['processed']} processed, "
             f"{result['skipped']} skipped, {result['errors']} errors."
+            + (f" ({result.get('reason', '')})" if result.get("reason") else "")
         )
 
 
-CHECK_IN_FIELD_TARGETS = {
-    "first_name": "check-in-first-name",
-    "last_name": "check-in-last-name",
-    "phone": "check-in-phone",
-    "email": "check-in-email",
-    "room_id": "check-in-room-id",
-    "payment_method": "check-in-payment-method",
-    "collect_payment_amount": "check-in-collect-payment-amount",
-    "waiver_reason": "check-in-waiver-reason",
-    "override_payment": "check-in-override-payment",
-}
-CHECK_IN_SECTION_TARGETS = {
-    "identity": "check-in-identity-section",
-    "room": "check-in-room-section",
-    "payment": "check-in-payment-section",
-    "fees": "check-in-fee-section",
-}
-CHECK_IN_UNEXPECTED_FALLBACK = (
-    "Check-in could not be completed due to an unexpected system error. "
-    "No data was lost. Please retry. If the issue continues, contact support and provide reference: {reference}"
-)
-
-
-def _check_in_issue(message: str, *, field: str | None = None, section: str | None = None) -> dict[str, str]:
-    target_id = CHECK_IN_FIELD_TARGETS.get(field or "") or CHECK_IN_SECTION_TARGETS.get(section or "") or "check-in-errors"
-    issue = {"message": message, "target_id": target_id, "href": f"#{target_id}"}
-    if field:
-        issue["field"] = field
-    if section:
-        issue["section"] = section
-    return issue
-
-
-def _format_money_amount(value: Decimal) -> str:
-    return f"{value.quantize(Decimal('0.01')):,.2f}"
-
-
-def _as_decimal_amount(value: object) -> Decimal:
-    try:
-        return Decimal(str(value or "0.00"))
-    except (InvalidOperation, TypeError, ValueError):
-        return Decimal("0.00")
-
-
-def _format_number_input_amount(value: Decimal) -> str:
-    return f"{value.quantize(Decimal('0.01'))}"
-
-
-def _check_in_form_defaults(detail: dict) -> dict[str, str]:
-    reservation = detail["reservation"]
-    guest = reservation.primary_guest
-    payment_summary = detail["payment_summary"]
-    # Pre-check-in submitted data takes precedence for contact/nationality fields
-    pc_list = reservation.pre_checkin
-    pc = pc_list[0] if pc_list else None
-    phone = (pc.primary_contact_phone if pc and pc.primary_contact_phone else None) or guest.phone or ""
-    email = (pc.primary_contact_email if pc and pc.primary_contact_email else None) or guest.email or ""
-    nationality = (pc.nationality if pc and pc.nationality else None) or guest.nationality or ""
-    # Pre-fill arrival note from pre-check-in notes_for_staff if provided
-    arrival_note = (pc.notes_for_staff or "") if pc else ""
-    deposit_shortfall = max(
-        Decimal("0.00"),
-        _as_decimal_amount(payment_summary["deposit_required_amount"])
-        - _as_decimal_amount(payment_summary["deposit_received_amount"]),
-    )
-    return {
-        "first_name": guest.first_name or "",
-        "last_name": guest.last_name or "",
-        "phone": phone,
-        "email": email,
-        "nationality": nationality,
-        "preferred_language": guest.preferred_language or reservation.booking_language or "",
-        "id_document_type": guest.id_document_type or "",
-        "id_document_number": guest.id_document_number or "",
-        "room_id": str(reservation.assigned_room_id or ""),
-        "payment_method": "front_desk",
-        "collect_payment_amount": _format_number_input_amount(deposit_shortfall),
-        "arrival_note": arrival_note,
-        "notes_summary": guest.notes_summary or "",
-        "identity_verified": "on" if reservation.identity_verified_at else "",
-        "apply_early_fee": "",
-        "waive_early_fee": "",
-        "waiver_reason": "",
-        "override_payment": "",
-    }
-
-
-def _checkout_form_defaults(checkout_prep: dict) -> dict[str, str]:
-    payment_summary = checkout_prep["checkout_payment_summary"]
-    balance_due = max(Decimal("0.00"), _as_decimal_amount(payment_summary["balance_due"]))
-    return {
-        "collect_payment_amount": _format_number_input_amount(balance_due),
-        "payment_method": "front_desk",
-        "departure_note": "",
-        "apply_late_fee": "",
-        "waive_late_fee": "",
-        "waiver_reason": "",
-        "override_balance": "",
-        "process_refund": "",
-        "refund_note": "",
-    }
-
-
-def _build_checkout_form_state(checkout_prep: dict, *, values: dict[str, str] | None = None) -> dict[str, object]:
-    return {"values": values or _checkout_form_defaults(checkout_prep)}
-
-
-def _parse_check_in_form_values(form_data) -> tuple[dict[str, str], dict[str, object], list[dict[str, str]]]:
-    values = {
-        "first_name": (form_data.get("first_name") or ""),
-        "last_name": (form_data.get("last_name") or ""),
-        "phone": (form_data.get("phone") or ""),
-        "email": (form_data.get("email") or ""),
-        "nationality": (form_data.get("nationality") or ""),
-        "preferred_language": (form_data.get("preferred_language") or ""),
-        "id_document_type": (form_data.get("id_document_type") or ""),
-        "id_document_number": (form_data.get("id_document_number") or ""),
-        "room_id": (form_data.get("room_id") or "").strip(),
-        "payment_method": (form_data.get("payment_method") or "front_desk"),
-        "collect_payment_amount": (form_data.get("collect_payment_amount") or "0.00").strip() or "0.00",
-        "arrival_note": (form_data.get("arrival_note") or ""),
-        "notes_summary": (form_data.get("notes_summary") or ""),
-        "waiver_reason": (form_data.get("waiver_reason") or ""),
-        "identity_verified": "on" if form_data.get("identity_verified") == "on" else "",
-        "apply_early_fee": "on" if form_data.get("apply_early_fee") == "on" else "",
-        "waive_early_fee": "on" if form_data.get("waive_early_fee") == "on" else "",
-        "override_payment": "on" if form_data.get("override_payment") == "on" else "",
-    }
-    parsed: dict[str, object] = {
-        "room_uuid": None,
-        "collect_payment_amount": Decimal("0.00"),
-        "identity_verified": values["identity_verified"] == "on",
-        "apply_early_fee": values["apply_early_fee"] == "on",
-        "waive_early_fee": values["waive_early_fee"] == "on",
-        "override_payment": values["override_payment"] == "on",
-    }
-    issues: list[dict[str, str]] = []
-    if values["room_id"]:
-        try:
-            parsed["room_uuid"] = UUID(values["room_id"])
-        except ValueError:
-            issues.append(_check_in_issue("Room assignment is invalid. Re-select the room to continue.", field="room_id", section="room"))
-    try:
-        parsed["collect_payment_amount"] = Decimal(values["collect_payment_amount"])
-    except InvalidOperation:
-        issues.append(
-            _check_in_issue(
-                "Payment collected now must be a valid amount in THB.",
-                field="collect_payment_amount",
-                section="payment",
-            )
-        )
-    return values, parsed, issues
-
-
-def _check_in_blockers(detail: dict, values: dict[str, str], *, allow_override: bool) -> list[dict[str, str]]:
-    payment_summary = detail["payment_summary"]
-    blockers: list[dict[str, str]] = []
-    if not values["first_name"].strip():
-        blockers.append(_check_in_issue("Primary guest first name is required before check-in can be completed.", field="first_name", section="identity"))
-    if not values["last_name"].strip():
-        blockers.append(_check_in_issue("Primary guest last name is required before check-in can be completed.", field="last_name", section="identity"))
-    if not normalize_phone(values["phone"]):
-        blockers.append(_check_in_issue("Primary guest phone number is required before check-in can be completed.", field="phone", section="identity"))
-    if not values["room_id"].strip():
-        blockers.append(_check_in_issue("Room assignment is missing. Assign a room to continue.", field="room_id", section="room"))
-    if not detail["front_desk"]["room_ready"]:
-        blockers.append(_check_in_issue(detail["front_desk"]["room_readiness_reason"], field="room_id", section="room"))
-    try:
-        collect_payment_amount = Decimal(values["collect_payment_amount"] or "0.00")
-    except InvalidOperation:
-        collect_payment_amount = Decimal("0.00")
-    deposit_shortfall = max(
-        Decimal("0.00"),
-        Decimal(str(payment_summary["deposit_required_amount"])) - Decimal(str(payment_summary["deposit_received_amount"])) - collect_payment_amount,
-    )
-    if deposit_shortfall > Decimal("0.00") and values["override_payment"] != "on":
-        blockers.append(
-            _check_in_issue(
-                f"Deposit is still outstanding. Collect at least THB {_format_money_amount(deposit_shortfall)} or request a manager override.",
-                field="collect_payment_amount",
-                section="payment",
-            )
-        )
-    if deposit_shortfall > Decimal("0.00") and values["override_payment"] == "on" and not allow_override:
-        blockers.append(
-            _check_in_issue(
-                "Only a manager or admin can override a missing deposit. Collect payment or ask an authorized user to approve.",
-                field="override_payment",
-                section="payment",
-            )
-        )
-    if detail["front_desk"]["early_fee"]["applies"] and values["apply_early_fee"] != "on" and values["waive_early_fee"] != "on":
-        blockers.append(
-            _check_in_issue(
-                "Early check-in fee requires a decision. Apply the fee or record an approved waiver before continuing.",
-                section="fees",
-            )
-        )
-    return blockers
-
-
-def _build_check_in_form_state(
-    detail: dict,
-    *,
-    values: dict[str, str] | None = None,
-    errors: list[dict[str, str]] | None = None,
-    allow_override: bool = False,
-    unexpected_message: str | None = None,
-) -> dict[str, object]:
-    resolved_values = values or _check_in_form_defaults(detail)
-    summary_errors = list(errors or [])
-    field_errors = {issue["field"]: issue["message"] for issue in summary_errors if issue.get("field")}
-    blockers = _check_in_blockers(detail, resolved_values, allow_override=allow_override) if not summary_errors and not unexpected_message else []
-    return {
-        "values": resolved_values,
-        "summary_errors": summary_errors,
-        "field_errors": field_errors,
-        "blockers": blockers,
-        "unexpected_message": unexpected_message,
-    }
-
-
-def _unexpected_check_in_reference() -> str:
-    token = str(current_request_id() or secrets.token_hex(4)).upper()
-    raw = "".join(ch for ch in token if ch.isalnum()) or token
-    return f"CHKIN-{raw[:12]}"
-
-
-def _map_check_in_error(message: str) -> dict[str, str]:
-    lowered = message.lower()
-    if "first name" in lowered:
-        return _check_in_issue(message, field="first_name", section="identity")
-    if "last name" in lowered:
-        return _check_in_issue(message, field="last_name", section="identity")
-    if "phone number" in lowered or "phone" in lowered:
-        return _check_in_issue(message, field="phone", section="identity")
-    if "room assignment" in lowered or "assigned room" in lowered or "room is marked" in lowered:
-        return _check_in_issue(message, field="room_id", section="room")
-    if "deposit" in lowered:
-        return _check_in_issue(message, field="collect_payment_amount", section="payment")
-    if "waive this fee" in lowered:
-        return _check_in_issue(message, field="waiver_reason", section="fees")
-    if "fee" in lowered:
-        return _check_in_issue(message, section="fees")
-    return _check_in_issue(message)
+    # Check-in form helpers moved to front_desk_bp
 
 
 def register_routes(app: Flask) -> None:
     @app.route("/")
     def index():
-        return render_template("index.html", room_types=RoomType.query.order_by(RoomType.code.asc()).all())
+        return render_template(
+            "index.html",
+            room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
+        )
 
     @app.route("/health")
     def health():
@@ -2181,122 +2086,60 @@ self.addEventListener("fetch", (event) => {
         "no_show_cancellation": ("reports.view", "No-show & Cancellation Report"),
     }
 
-    @app.route("/staff/daily-reports/<report_type>")
-    def staff_daily_report(report_type):
-        if report_type not in DAILY_REPORT_TYPES:
-            abort(404)
-        permission_code, report_title = DAILY_REPORT_TYPES[report_type]
-        user = require_permission(permission_code)
-        target_date = parse_request_date_arg("date", default=date.today())
-        preset, date_from, date_to = resolve_report_date_range(
-            preset=(request.args.get("preset") or "next_7_days").strip(),
-            requested_start=parse_optional_date(request.args.get("date_from")),
-            requested_end=parse_optional_date(request.args.get("date_to")),
-        )
-        report = build_daily_report(
-            report_type=report_type,
-            business_date=target_date,
-            date_from=date_from,
-            date_to=date_to,
-        )
-        return render_template(
-            "staff_daily_report.html",
-            report=report,
-            report_type=report_type,
-            report_title=report_title,
-            target_date=target_date,
-            filters={
-                "preset": preset,
-                "date_from": date_from.isoformat(),
-                "date_to": date_to.isoformat(),
-            },
-            report_presets=report_date_presets(),
-            report_range_label=format_report_date_range(date_from, date_to),
-            can_reservation=user.has_permission("reservation.view"),
-            can_folio=user.has_permission("folio.view"),
-            can_housekeeping=user.has_permission("housekeeping.view"),
-        )
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        public_pages = [
+            ("index", {}),
+            ("public.booking_entry", {}),
+            ("public.booking_cancel_request", {}),
+            ("public.booking_modify_request", {}),
+        ]
+        urls: list[str] = []
+        for endpoint, values in public_pages:
+            urls.append(absolute_public_url(url_for(endpoint, **values)))
+            for language_code in LANGUAGE_LABELS:
+                urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
+        unique_urls = list(dict.fromkeys(url for url in urls if url))
+        body = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        ]
+        body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
+        body.append("</urlset>")
+        return Response("\n".join(body), mimetype="application/xml")
 
-    @app.route("/staff/daily-reports/<report_type>/csv")
-    def staff_daily_report_csv(report_type):
-        if report_type not in DAILY_REPORT_TYPES:
-            abort(404)
-        permission_code, report_title = DAILY_REPORT_TYPES[report_type]
-        require_permission(permission_code)
-        target_date = parse_request_date_arg("date", default=date.today())
-        preset, date_from, date_to = resolve_report_date_range(
-            preset=(request.args.get("preset") or "next_7_days").strip(),
-            requested_start=parse_optional_date(request.args.get("date_from")),
-            requested_end=parse_optional_date(request.args.get("date_to")),
-        )
-        headers, rows = build_csv_rows(report_type, target_date, date_from, date_to)
-        import csv
-        import io
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(headers)
-        writer.writerows(rows)
-        filename = f"{report_type}_{date_from.isoformat()}_{date_to.isoformat()}.csv"
-        return Response(
-            buf.getvalue(),
-            mimetype="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
+    # Public booking, payment, calendar, and pre-check-in routes moved to public_bp
 
-    @app.route("/staff/admin/audit", endpoint="staff_admin_audit")
-    @app.route("/staff/audit")
-    def staff_audit():
-        require_permission("audit.view")
-        actor_user_id = parse_optional_uuid(request.args.get("actor_user_id"))
-        date_from = parse_optional_date(request.args.get("date_from"))
-        date_to = parse_optional_date(request.args.get("date_to"))
-        entity_table = (request.args.get("entity_table") or "").strip() or None
-        action = (request.args.get("action") or "").strip() or None
-        entries = query_audit_entries(
-            actor_user_id=actor_user_id,
-            entity_table=entity_table,
-            action=action,
-            date_from=date_from,
-            date_to=date_to,
-            limit=200,
-        )
-        users = User.query.filter(User.deleted_at.is_(None)).order_by(User.full_name.asc()).all()
-        entity_tables = sorted(
-            item[0]
-            for item in AuditLog.query.with_entities(AuditLog.entity_table).distinct().all()
-            if item[0]
-        )
-        action_codes = sorted(
-            item[0]
-            for item in AuditLog.query.with_entities(AuditLog.action).distinct().all()
-            if item[0]
-        )
-        return render_template(
-            "admin_audit.html",
-            active_section="audit",
-            entries=entries,
-            users=users,
-            entity_tables=entity_tables,
-            action_codes=action_codes,
-            summarize_audit_entry=summarize_audit_entry,
-            filters={
-                "actor_user_id": str(actor_user_id) if actor_user_id else "",
-                "entity_table": entity_table or "",
-                "action": action or "",
-                "date_from": date_from.isoformat() if date_from else "",
-                "date_to": date_to.isoformat() if date_to else "",
-            },
-        )
+    # Admin routes moved to admin_bp
 
     @app.route("/staff")
     def staff_dashboard():
         user = require_permission("reservation.view")
         today = date.today()
         queue_entries = (
-            ReservationReviewQueue.query.order_by(ReservationReviewQueue.created_at.desc()).limit(10).all()
+            db.session.execute(
+                sa.select(ReservationReviewQueue)
+                .order_by(ReservationReviewQueue.created_at.desc())
+                .limit(10)
+            )
+            .scalars()
+            .all()
         )
-        notifications = StaffNotification.query.filter_by(status="new").order_by(StaffNotification.created_at.desc()).limit(10).all()
-        pending_emails = EmailOutbox.query.filter(EmailOutbox.status.in_(["pending", "failed"])).count()
+        notifications = (
+            db.session.execute(
+                sa.select(StaffNotification)
+                .where(StaffNotification.status == "new")
+                .order_by(StaffNotification.created_at.desc())
+                .limit(10)
+            )
+            .scalars()
+            .all()
+        )
+        pending_emails = db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(EmailOutbox)
+            .where(EmailOutbox.status.in_(["pending", "failed"]))
+        ).scalar_one()
         dashboard = build_front_desk_dashboard(
             business_date=today,
             include_housekeeping=user.has_permission("housekeeping.view"),
@@ -2327,138 +2170,12 @@ self.addEventListener("fetch", (event) => {
         db.session.commit()
         return redirect(request.form.get("back_url") or url_for("staff_dashboard"))
 
-    # ------------------------------------------------------------------
-    # Unified Guest Messaging Hub routes
-    # ------------------------------------------------------------------
+    # Front desk routes moved to front_desk_bp
 
-    @app.route("/staff/messaging")
-    def staff_messaging_inbox():
-        actor = require_permission("messaging.view")
-        filters = MessagingInboxFilters(
-            channel=request.args.get("channel", ""),
-            status=request.args.get("status", ""),
-            unread_only=request.args.get("unread") == "1",
-            needs_followup=request.args.get("followup") == "1",
-            reservation_status=request.args.get("res_status", ""),
-            search=(request.args.get("q") or "").strip(),
-            assigned_user_id=request.args.get("assigned", ""),
-            page=parse_request_int_arg("page", default=1, minimum=1),
-        )
-        entries, total = list_inbox(filters)
-        total_pages = max(1, (total + filters.per_page - 1) // filters.per_page)
-        templates = list_msg_templates()
-        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
-        return render_template(
-            "staff_messaging_inbox.html",
-            entries=entries,
-            filters=filters,
-            total=total,
-            total_pages=total_pages,
-            templates=templates,
-            staff_users=staff_users,
-        )
 
-    @app.route("/staff/messaging/thread/<uuid:thread_id>")
-    def staff_messaging_thread(thread_id):
-        require_permission("messaging.view")
-        detail = get_thread_detail(str(thread_id))
-        if not detail or not detail.thread:
-            abort(404)
-        mark_thread_read(str(thread_id))
-        templates = list_msg_templates(channel=detail.thread.channel)
-        staff_users = User.query.filter(User.deleted_at.is_(None), User.account_state == "active").order_by(User.full_name).all()
-        return render_template(
-            "staff_messaging_thread.html",
-            detail=detail,
-            templates=templates,
-            staff_users=staff_users,
-        )
 
-    @app.route("/staff/messaging/send", methods=["POST"])
-    def staff_messaging_send():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel=request.form.get("channel", "email"),
-            subject=request.form.get("subject", "").strip(),
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=request.form.get("is_internal_note") == "1",
-            template_key=request.form.get("template_key") or None,
-            recipient_address=request.form.get("recipient_address") or None,
-        )
-        if not payload.body_text:
-            flash("Message body cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        try:
-            msg = messaging_send_message(payload, actor_user_id=str(actor.id))
-            if msg.status == "sent":
-                flash("Message sent successfully.", "success")
-            elif msg.status == "failed":
-                flash(f"Message delivery failed: {msg.provider_error or 'unknown error'}", "danger")
-            else:
-                flash("Message queued.", "info")
-        except Exception as exc:
-            db.session.rollback()
-            flash(f"Error sending message: {escape(str(exc))}", "danger")
 
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
 
-    @app.route("/staff/messaging/note", methods=["POST"])
-    def staff_messaging_add_note():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel="internal_note",
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=True,
-        )
-        if not payload.body_text:
-            flash("Note text cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        messaging_send_message(payload, actor_user_id=str(actor.id))
-        flash("Internal note added.", "success")
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
-
-    @app.route("/staff/messaging/call-log", methods=["POST"])
-    def staff_messaging_call_log():
-        actor = require_permission("messaging.send")
-        payload = MessagingComposePayload(
-            thread_id=request.form.get("thread_id") or None,
-            guest_id=request.form.get("guest_id") or None,
-            reservation_id=request.form.get("reservation_id") or None,
-            channel="manual_call_log",
-            subject="Phone call",
-            body_text=request.form.get("body_text", "").strip(),
-            is_internal_note=True,
-        )
-        if not payload.body_text:
-            flash("Call log notes cannot be empty.", "danger")
-            back = request.form.get("back_url") or url_for("staff_messaging_inbox")
-            return redirect(back)
-        messaging_send_message(payload, actor_user_id=str(actor.id))
-        flash("Phone call logged.", "success")
-        back = request.form.get("back_url")
-        if back:
-            return redirect(back)
-        if payload.thread_id:
-            return redirect(url_for("staff_messaging_thread", thread_id=payload.thread_id))
-        return redirect(url_for("staff_messaging_inbox"))
 
     @app.route("/staff/messaging/thread/<uuid:thread_id>/close", methods=["POST"])
     def staff_messaging_close_thread(thread_id):
@@ -5292,14 +5009,14 @@ def resolve_reservation_identifier(
 def resolve_public_room_type_query() -> RoomType | None:
     room_type_code = (request.args.get("room_type") or "").strip()
     if room_type_code:
-        room_type = (
-            RoomType.query.filter(
+        room_type = db.session.execute(
+            sa.select(RoomType)
+            .where(
                 sa.func.lower(RoomType.code) == room_type_code.lower(),
                 RoomType.is_active.is_(True),
             )
             .order_by(RoomType.code.asc())
-            .first()
-        )
+        ).scalars().first()
         if not room_type:
             abort(400, description="Invalid room_type query parameter.")
         return room_type
@@ -5367,7 +5084,7 @@ def build_public_booking_entry_context() -> dict[str, object]:
             "language": language,
         },
         "error": error,
-        "room_types": RoomType.query.order_by(RoomType.code.asc()).all(),
+        "room_types": db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         "booking_nonce": ensure_booking_nonce(),
     }
 
@@ -5444,11 +5161,11 @@ def booking_request_starts_new_attribution() -> bool:
         for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
     ):
         return True
-    return bool(external_referrer_host() and request.endpoint in {"index", "availability", "booking_entry"})
+    return bool(external_referrer_host() and request.endpoint in PUBLIC_BOOKING_LANDING_ENDPOINTS)
 
 
 def default_booking_attribution() -> dict:
-    if request.method != "GET" or request.endpoint not in {"index", "availability", "booking_entry"}:
+    if request.method != "GET" or request.endpoint not in PUBLIC_BOOKING_LANDING_ENDPOINTS:
         return {}
     entry_page = clean_public_path(request.path)
     referrer_host = external_referrer_host()
@@ -5589,9 +5306,9 @@ def resolve_booking_source_channel(explicit_source_channel: str | None, attribut
 
 
 def _should_track_booking_attribution() -> bool:
-    if request.endpoint in {None, "static", "payment_webhook"}:
+    if request.endpoint in {None, "static", *PUBLIC_WEBHOOK_ENDPOINTS}:
         return False
-    if request.endpoint.startswith("staff_") or request.endpoint.startswith("provider_"):
+    if is_staff_or_provider_endpoint(request.endpoint):
         return False
     return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
 

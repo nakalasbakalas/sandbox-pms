@@ -921,3 +921,81 @@ class TestDelayedAutomationEvents:
         result = process_pending_automations()
         assert result["processed"] == 0
         assert result["skipped"] == 0
+
+    def test_process_pending_cleans_up_old_processed_events(
+        self, app_ctx, guest, reservation, _delayed_rule
+    ):
+        _rule, _tpl = _delayed_rule
+        app_ctx.config["PENDING_AUTOMATION_RETENTION_DAYS"] = 7
+        now = utc_now()
+
+        old_event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(days=9),
+            processed_at=now - timedelta(days=8),
+            created_at=now - timedelta(days=9),
+            updated_at=now - timedelta(days=8),
+        )
+        recent_event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(days=2),
+            processed_at=now - timedelta(days=1),
+            created_at=now - timedelta(days=2),
+            updated_at=now - timedelta(days=1),
+        )
+        due_event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(minutes=2),
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add_all([old_event, recent_event, due_event])
+        db.session.commit()
+
+        result = process_pending_automations()
+
+        assert result["processed"] == 1
+        assert result["cleaned_up"] == 1
+        assert db.session.get(PendingAutomationEvent, old_event.id) is None
+        assert db.session.get(PendingAutomationEvent, recent_event.id) is not None
+        db.session.refresh(due_event)
+        assert due_event.processed_at is not None
+
+    def test_process_automation_events_cli_command(
+        self, seeded_app, app_ctx, guest, reservation, _delayed_rule
+    ):
+        _rule, _tpl = _delayed_rule
+        now = utc_now()
+        event = PendingAutomationEvent(
+            id=uuid.uuid4(),
+            rule_id=_rule.id,
+            reservation_id=reservation.id,
+            guest_id=guest.id,
+            context_json={"guest_name": "Test Guest", "reservation_code": "SBX-TST001"},
+            fire_at=now - timedelta(minutes=1),
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        runner = seeded_app.test_cli_runner()
+        result = runner.invoke(args=["process-automation-events"])
+
+        assert result.exit_code == 0
+        assert "1 sent" in result.output
+        assert "0 cleaned up" in result.output
+        db.session.refresh(event)
+        assert event.processed_at is not None

@@ -67,7 +67,7 @@
         <h2>Update housekeeping state</h2>
       </div>
     </div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_status', room_id=detail.room.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_status', room_id=detail.room.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
       <input type="hidden" name="back_url" value="{{ back_url }}">
@@ -94,7 +94,7 @@
         <h2>Flag or clear maintenance</h2>
       </div>
     </div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_maintenance', room_id=detail.room.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_maintenance', room_id=detail.room.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
       <input type="hidden" name="back_url" value="{{ back_url }}">
@@ -115,7 +115,7 @@
         <h2>Block or unblock room</h2>
       </div>
     </div>
-    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_block', room_id=detail.room.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_block', room_id=detail.room.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
       <input type="hidden" name="back_url" value="{{ back_url }}">
@@ -139,7 +139,7 @@
       </div>
     </div>
     {% if can('housekeeping.status_change') %}
-    <form class="stack-form" method="post" action="{{ url_for('staff_housekeeping_room_note', room_id=detail.room.id) }}">
+    <form class="stack-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_room_note', room_id=detail.room.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
       <input type="hidden" name="back_url" value="{{ back_url }}">

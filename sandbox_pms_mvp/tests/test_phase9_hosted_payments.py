@@ -12,7 +12,7 @@ from flask_migrate import upgrade
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
-from pms.models import EmailOutbox, FolioCharge, PaymentEvent, PaymentRequest, Reservation, Role, RoomType, User
+from pms.models import EmailOutbox, FolioCharge, HousekeepingStatus, InventoryDay, PaymentEvent, PaymentRequest, Reservation, Role, RoomType, User
 from pms.seeds import seed_all
 from pms.services.cashier_service import PaymentPostingPayload, folio_summary, record_payment
 from pms.services.payment_integration_service import (
@@ -55,6 +55,8 @@ def login_as(client, user: User) -> None:
 
 
 def post_form(client, url: str, *, data: dict, follow_redirects: bool = False):
+    with client.session_transaction() as session:
+        session["_csrf_token"] = "test-csrf-token"
     payload = dict(data)
     payload["csrf_token"] = "test-csrf-token"
     return client.post(url, data=payload, follow_redirects=follow_redirects)
@@ -99,6 +101,16 @@ def create_staff_reservation() -> Reservation:
             source_channel="admin_manual",
         )
     )
+
+
+def mark_checked_in(reservation: Reservation) -> None:
+    reservation.current_status = "checked_in"
+    occupied_clean = HousekeepingStatus.query.filter_by(code="occupied_clean").one()
+    rows = InventoryDay.query.filter_by(reservation_id=reservation.id).all()
+    for row in rows:
+        row.availability_status = "occupied"
+        row.housekeeping_status_id = occupied_clean.id
+    db.session.commit()
 
 
 def test_provider_selection_and_deposit_request_creation(app_factory):
@@ -204,6 +216,111 @@ def test_public_payment_start_and_return_do_not_treat_redirect_as_final_truth(ap
     )
     assert return_response.status_code == 200
     assert b"Pending confirmation" in return_response.data
+
+
+def test_public_digital_checkout_page_is_private_and_can_issue_balance_request(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation()
+        mark_checked_in(reservation)
+        reservation.public_confirmation_token = "checkout-balance-token"
+        db.session.commit()
+        reservation_id = reservation.id
+        reservation_code = reservation.reservation_code
+        token = reservation.public_confirmation_token
+
+    page_response = client.get(f"/booking/checkout/{reservation_code}?token={token}")
+    body = page_response.get_data(as_text=True)
+
+    assert page_response.status_code == 200
+    assert page_response.headers["Cache-Control"] == "no-store, private, max-age=0"
+    assert page_response.headers["X-Robots-Tag"] == "noindex, nofollow, noarchive"
+    assert "Pay remaining balance" in body
+    assert "Complete digital check-out" not in body
+
+    payment_response = post_form(
+        client,
+        f"/booking/checkout/{reservation_code}/pay-balance",
+        data={"token": token},
+    )
+
+    assert payment_response.status_code == 302
+    assert "/payments/request/" in payment_response.headers["Location"]
+
+    with app.app_context():
+        request_row = (
+            PaymentRequest.query.filter_by(reservation_id=reservation_id, status="pending")
+            .order_by(PaymentRequest.created_at.desc())
+            .first()
+        )
+        assert request_row is not None
+        assert request_row.request_type == "full_payment_hosted"
+
+
+def test_public_digital_checkout_can_complete_settled_checked_in_stay(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation()
+        mark_checked_in(reservation)
+        reservation.public_confirmation_token = "checkout-complete-token"
+        reservation.booking_language = "en"
+        db.session.commit()
+        balance_due = payment_summary(reservation)["balance_due"]
+        record_payment(
+            reservation.id,
+            PaymentPostingPayload(
+                amount=balance_due,
+                payment_method="card",
+                note="Settled before digital checkout",
+            ),
+            actor_user_id=None,
+        )
+        reservation_id = reservation.id
+        reservation_code = reservation.reservation_code
+        token = reservation.public_confirmation_token
+
+    response = post_form(
+        client,
+        f"/booking/checkout/{reservation_code}/complete",
+        data={"token": token},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"Checked out" in response.data
+
+    with app.app_context():
+        reservation = db.session.get(Reservation, reservation_id)
+        assert reservation.current_status == "checked_out"
+        assert reservation.checked_out_at is not None
+
+
+def test_public_payment_return_for_checked_in_staff_stay_links_back_to_digital_checkout(app_factory):
+    app = app_factory(seed=True, config={"PAYMENT_PROVIDER": "test_hosted", "PAYMENT_BASE_URL": "https://hosted.test"})
+    client = app.test_client()
+    with app.app_context():
+        reservation = create_staff_reservation()
+        mark_checked_in(reservation)
+        request_row = create_or_reuse_payment_request(
+            reservation.id,
+            actor_user_id=None,
+            request_kind="balance",
+            send_email=False,
+            language="en",
+            source="test",
+        )
+        reservation_code = reservation.reservation_code
+        token = reservation.public_confirmation_token
+        request_code = request_row.request_code
+
+    response = client.get(f"/payments/return/{request_code}?reservation_code={reservation_code}&token={token}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert f"/booking/checkout/{reservation_code}?token={token}" in body
+    assert f"/booking/confirmation/{reservation_code}" not in body
 
 
 def test_webhook_paid_event_updates_status_and_applies_folio_deposit(app_factory):

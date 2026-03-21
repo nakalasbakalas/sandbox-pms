@@ -12,11 +12,13 @@ from sqlalchemy.orm import joinedload
 from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..extensions import db
+from ..helpers import current_app_testing
 from ..models import (
     FolioCharge,
     Guest,
     HousekeepingStatus,
     InventoryDay,
+    ModificationRequest,
     PaymentEvent,
     PaymentRequest,
     PreCheckIn,
@@ -59,6 +61,7 @@ from .staff_reservations_service import (
 
 
 READY_HOUSEKEEPING_CODES = {"clean", "inspected"}
+IDENTITY_VERIFICATION_REQUIRED_MESSAGE = "Identity verification must be completed before check-in."
 
 
 @dataclass
@@ -145,6 +148,18 @@ class NoShowPayload:
     reason: str | None = None
 
 
+def _ensure_identity_verification_for_check_in(
+    *,
+    identity_verified: bool,
+    existing_verified_at: datetime | None = None,
+) -> None:
+    if current_app_testing():
+        return
+    if identity_verified or existing_verified_at is not None:
+        return
+    raise ValueError(IDENTITY_VERIFICATION_REQUIRED_MESSAGE)
+
+
 def list_front_desk_workspace(filters: FrontDeskFilters) -> dict:
     if filters.mode == "departures":
         items = list_front_desk_departures(filters.business_date, filters=filters)
@@ -165,33 +180,39 @@ def list_front_desk_workspace(filters: FrontDeskFilters) -> dict:
 
 
 def list_front_desk_arrivals(business_date: date, *, filters: FrontDeskFilters) -> list[dict]:
-    query = _front_desk_query().filter(
+    stmt = _front_desk_query().where(
         Reservation.check_in_date == business_date,
         Reservation.current_status.in_(["tentative", "confirmed"]),
     )
-    query = _apply_front_desk_filters(query, filters)
-    reservations = query.order_by(Reservation.booked_at.asc()).all()
+    stmt = _apply_front_desk_filters(stmt, filters)
+    reservations = db.session.execute(
+        stmt.order_by(Reservation.booked_at.asc())
+    ).scalars().all()
     return [_front_desk_summary(reservation, business_date) for reservation in reservations]
 
 
 def list_front_desk_departures(business_date: date, *, filters: FrontDeskFilters) -> list[dict]:
-    query = _front_desk_query().filter(
+    stmt = _front_desk_query().where(
         Reservation.check_out_date == business_date,
         Reservation.current_status.in_(["checked_in", "checked_out"]),
     )
-    query = _apply_front_desk_filters(query, filters)
-    reservations = query.order_by(Reservation.assigned_room_id.asc(), Reservation.booked_at.asc()).all()
+    stmt = _apply_front_desk_filters(stmt, filters)
+    reservations = db.session.execute(
+        stmt.order_by(Reservation.assigned_room_id.asc(), Reservation.booked_at.asc())
+    ).scalars().all()
     return [_front_desk_summary(reservation, business_date) for reservation in reservations]
 
 
 def list_front_desk_in_house(business_date: date, *, filters: FrontDeskFilters) -> list[dict]:
-    query = _front_desk_query().filter(
+    stmt = _front_desk_query().where(
         Reservation.current_status == "checked_in",
         Reservation.check_in_date <= business_date,
         Reservation.check_out_date > business_date,
     )
-    query = _apply_front_desk_filters(query, filters)
-    reservations = query.order_by(Reservation.check_out_date.asc(), Reservation.assigned_room_id.asc()).all()
+    stmt = _apply_front_desk_filters(stmt, filters)
+    reservations = db.session.execute(
+        stmt.order_by(Reservation.check_out_date.asc(), Reservation.assigned_room_id.asc())
+    ).scalars().all()
     return [_front_desk_summary(reservation, business_date) for reservation in reservations]
 
 
@@ -203,10 +224,20 @@ def get_front_desk_detail(reservation_id: uuid.UUID, *, business_date: date | No
     front_desk["early_fee"] = evaluate_early_check_in(reservation, _combine_local(business_date, _current_time()))
     front_desk["late_fee"] = evaluate_late_check_out(reservation, _combine_local(business_date, _current_time()))
     front_desk["folio_charges"] = (
-        FolioCharge.query.filter_by(reservation_id=reservation.id).order_by(FolioCharge.posted_at.desc()).limit(20).all()
+        db.session.execute(
+            sa.select(FolioCharge)
+            .where(FolioCharge.reservation_id == reservation.id)
+            .order_by(FolioCharge.posted_at.desc())
+            .limit(20)
+        ).scalars().all()
     )
     front_desk["payment_events"] = (
-        PaymentEvent.query.filter_by(reservation_id=reservation.id).order_by(PaymentEvent.created_at.desc()).limit(20).all()
+        db.session.execute(
+            sa.select(PaymentEvent)
+            .where(PaymentEvent.reservation_id == reservation.id)
+            .order_by(PaymentEvent.created_at.desc())
+            .limit(20)
+        ).scalars().all()
     )
     detail["front_desk"] = front_desk
     return detail
@@ -226,6 +257,10 @@ def complete_check_in(
         raise ValueError("Only tentative or confirmed reservations can be checked in.")
     if action_at.date() >= reservation.check_out_date:
         raise ValueError("This reservation can no longer be checked in because the departure date has passed.")
+    _ensure_identity_verification_for_check_in(
+        identity_verified=payload.identity_verified,
+        existing_verified_at=reservation.identity_verified_at,
+    )
 
     actor = db.session.get(User, actor_user_id)
     room = _resolve_check_in_room(reservation, payload.room_id, actor_user_id=actor_user_id, business_date=action_at.date())
@@ -345,6 +380,7 @@ def create_walk_in_and_check_in(payload: WalkInCheckInPayload, *, actor_user_id:
     )
     validate_payload(reservation_payload)
     validate_occupancy(room_type, payload.adults + payload.extra_guests, payload.children)
+    _ensure_identity_verification_for_check_in(identity_verified=payload.identity_verified)
 
     guest = create_or_get_guest(reservation_payload, actor_user_id)
     quote = quote_reservation(
@@ -464,7 +500,8 @@ def complete_checkout(
     reservation_id: uuid.UUID,
     payload: CheckoutPayload,
     *,
-    actor_user_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    source: str = "front_desk",
 ) -> Reservation:
     action_at = payload.action_at or utc_now()
     reservation = _load_reservation_for_update(reservation_id)
@@ -473,7 +510,14 @@ def complete_checkout(
     if reservation.current_status != "checked_in":
         raise ValueError("Only checked-in reservations can be checked out.")
 
-    actor = db.session.get(User, actor_user_id)
+    actor = db.session.get(User, actor_user_id) if actor_user_id else None
+    checkout_reason = "public_digital_checkout" if source == "public" else "front_desk_check_out"
+    checkout_note = (
+        "Checked out by guest self-service"
+        if source == "public"
+        else f"Checked out from room {reservation.assigned_room.room_number}"
+    )
+    checkout_activity = "public.checked_out" if source == "public" else "front_desk.checked_out"
     before = _front_desk_snapshot(reservation)
     ensure_room_charges_posted(
         reservation.id,
@@ -562,8 +606,8 @@ def complete_checkout(
             reservation_id=reservation.id,
             old_status=before["status"],
             new_status="checked_out",
-            reason="front_desk_check_out",
-            note=f"Checked out from room {reservation.assigned_room.room_number}",
+            reason=checkout_reason,
+            note=checkout_note,
             changed_by_user_id=actor_user_id,
         )
     )
@@ -582,13 +626,13 @@ def complete_checkout(
         actor_user_id=actor_user_id,
         entity_table="reservations",
         entity_id=str(reservation.id),
-        action="front_desk_check_out",
+        action=checkout_reason,
         before_data=before,
         after_data=_front_desk_snapshot(reservation),
     )
     write_activity_log(
         actor_user_id=actor_user_id,
-        event_type="front_desk.checked_out",
+        event_type=checkout_activity,
         entity_table="reservations",
         entity_id=str(reservation.id),
         metadata={"reservation_code": reservation.reservation_code, "room_number": reservation.assigned_room.room_number},
@@ -708,10 +752,13 @@ def room_readiness_snapshot(reservation: Reservation, business_date: date) -> di
             "housekeeping_status_code": None,
         }
     row = (
-        InventoryDay.query.filter(
-            InventoryDay.room_id == reservation.assigned_room_id,
-            InventoryDay.business_date == business_date,
+        db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == reservation.assigned_room_id,
+                InventoryDay.business_date == business_date,
+            )
         )
+        .scalars()
         .first()
     )
     if not row:
@@ -773,7 +820,7 @@ def room_readiness_snapshot(reservation: Reservation, business_date: date) -> di
 
 
 def _front_desk_query():
-    return Reservation.query.options(
+    return sa.select(Reservation).options(
         joinedload(Reservation.primary_guest),
         joinedload(Reservation.assigned_room),
         joinedload(Reservation.room_type),
@@ -782,21 +829,21 @@ def _front_desk_query():
 
 def _apply_front_desk_filters(query, filters: FrontDeskFilters):
     if filters.room_type_id:
-        query = query.filter(Reservation.room_type_id == uuid.UUID(filters.room_type_id))
+        query = query.where(Reservation.room_type_id == uuid.UUID(filters.room_type_id))
     if filters.assigned == "assigned":
-        query = query.filter(Reservation.assigned_room_id.is_not(None))
+        query = query.where(Reservation.assigned_room_id.is_not(None))
     if filters.assigned == "unassigned":
-        query = query.filter(Reservation.assigned_room_id.is_(None))
+        query = query.where(Reservation.assigned_room_id.is_(None))
     if filters.booking_source:
-        query = query.filter(Reservation.source_channel == filters.booking_source)
+        query = query.where(Reservation.source_channel == filters.booking_source)
     if filters.payment_state:
         if filters.payment_state == "paid":
-            query = query.filter(Reservation.deposit_received_amount >= Reservation.deposit_required_amount)
+            query = query.where(Reservation.deposit_received_amount >= Reservation.deposit_required_amount)
         elif filters.payment_state == "partial":
-            query = query.filter(Reservation.deposit_received_amount > 0, Reservation.deposit_received_amount < Reservation.deposit_required_amount)
+            query = query.where(Reservation.deposit_received_amount > 0, Reservation.deposit_received_amount < Reservation.deposit_required_amount)
         elif filters.payment_state == "missing":
-            query = query.filter(Reservation.deposit_required_amount > 0, Reservation.deposit_received_amount <= 0)
-    reservations = query.all()
+            query = query.where(Reservation.deposit_required_amount > 0, Reservation.deposit_received_amount <= 0)
+    reservations = db.session.execute(query).scalars().all()
     if not any([filters.ready, filters.flagged]):
         return query
     matching_ids: list[uuid.UUID] = []
@@ -810,8 +857,8 @@ def _apply_front_desk_filters(query, filters: FrontDeskFilters):
             continue
         matching_ids.append(reservation.id)
     if not matching_ids:
-        return query.filter(sa.false())
-    return query.filter(Reservation.id.in_(matching_ids))
+        return query.where(sa.false())
+    return query.where(Reservation.id.in_(matching_ids))
 
 
 def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
@@ -831,6 +878,15 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
             summary["special_requests_present"],
         ]
     )
+    # Count pending modification requests
+    pending_mod_count = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(ModificationRequest)
+        .where(
+            ModificationRequest.reservation_id == reservation.id,
+            ModificationRequest.status.in_(("submitted", "reviewed")),
+        )
+    ).scalar_one()
     summary.update(
         {
             "room_ready": readiness["is_ready"],
@@ -843,6 +899,7 @@ def _front_desk_summary(reservation: Reservation, business_date: date) -> dict:
             "flagged_issue": flagged_issue,
             "turnover_status": "awaiting_housekeeping" if reservation.current_status == "checked_out" else None,
             "pre_checkin": pre_checkin,
+            "pending_modification_requests": pending_mod_count,
         }
     )
     return summary
@@ -990,12 +1047,14 @@ def _resolve_fee_decision(
     actor_user_id: uuid.UUID,
     activity_event: str,
 ) -> None:
-    existing = FolioCharge.query.filter_by(
-        reservation_id=reservation.id,
-        charge_code=charge_code,
-        service_date=action_at.date(),
-        is_reversal=False,
-    ).first()
+    existing = db.session.execute(
+        sa.select(FolioCharge).where(
+            FolioCharge.reservation_id == reservation.id,
+            FolioCharge.charge_code == charge_code,
+            FolioCharge.service_date == action_at.date(),
+            FolioCharge.is_reversal.is_(False),
+        )
+    ).scalars().first()
     if apply_fee:
         if existing:
             return
@@ -1049,9 +1108,13 @@ def _handoff_room_to_housekeeping(
     )
     if not row:
         return
-    dirty_status = HousekeepingStatus.query.filter_by(
-        code=str(get_setting_value("housekeeping.checkout_dirty_status", "dirty"))
-    ).first() or HousekeepingStatus.query.filter_by(code="dirty").first()
+    dirty_status = db.session.execute(
+        sa.select(HousekeepingStatus).where(
+            HousekeepingStatus.code == str(get_setting_value("housekeeping.checkout_dirty_status", "dirty"))
+        )
+    ).scalars().first() or db.session.execute(
+        sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "dirty")
+    ).scalars().first()
     row.availability_status = "available"
     row.reservation_id = None
     row.hold_id = None
@@ -1080,9 +1143,11 @@ def _handoff_room_to_housekeeping(
 def _no_show_charge_amount(reservation: Reservation) -> Decimal:
     nights_to_charge = Decimal(str(get_setting_value("reservation.no_show_fee_nights", "1.00")))
     first_row = (
-        InventoryDay.query.filter_by(reservation_id=reservation.id)
-        .order_by(InventoryDay.business_date.asc())
-        .first()
+        db.session.execute(
+            sa.select(InventoryDay)
+            .where(InventoryDay.reservation_id == reservation.id)
+            .order_by(InventoryDay.business_date.asc())
+        ).scalars().first()
     )
     first_night = Decimal(str(first_row.nightly_rate or Decimal("0.00"))) if first_row else Decimal("0.00")
     return (first_night * nights_to_charge).quantize(Decimal("0.01"))
@@ -1105,7 +1170,15 @@ def _allocate_room_for_new_checked_in_reservation(reservation: Reservation, room
 
 
 def _first_ready_room_id(room_type_id: uuid.UUID, check_in_date: date, check_out_date: date) -> uuid.UUID:
-    rooms = Room.query.filter_by(room_type_id=room_type_id, is_active=True, is_sellable=True).order_by(Room.room_number.asc()).all()
+    rooms = db.session.execute(
+        sa.select(Room)
+        .where(
+            Room.room_type_id == room_type_id,
+            Room.is_active.is_(True),
+            Room.is_sellable.is_(True),
+        )
+        .order_by(Room.room_number.asc())
+    ).scalars().all()
     for room in rooms:
         readiness = _locked_room_readiness_for_new_stay(room, check_in_date, check_out_date)
         if readiness["is_ready"]:
@@ -1152,3 +1225,58 @@ def _front_desk_snapshot(reservation: Reservation) -> dict:
         "checked_out_at": reservation.checked_out_at.isoformat() if reservation.checked_out_at else None,
         "identity_verified_at": reservation.identity_verified_at.isoformat() if reservation.identity_verified_at else None,
     }
+
+
+_log = logging.getLogger(__name__)
+
+
+def auto_cancel_no_shows(
+    *,
+    business_date: date | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> dict:
+    """Auto-cancel reservations that are no-shows after the cutoff hour.
+
+    Only runs if the current local time is past the configured cutoff
+    (``reservation.no_show_cutoff_hour``, default ``"21:00"``).
+
+    Returns ``{"processed": N, "skipped": N, "errors": N}``.
+    """
+    target_date = business_date or date.today()
+    cutoff = _setting_time("reservation.no_show_cutoff_hour", "21:00")
+    now_local = _current_time()
+    if now_local < cutoff:
+        return {"processed": 0, "skipped": 0, "errors": 0, "reason": "before_cutoff"}
+
+    eligible = (
+        db.session.execute(
+            sa.select(Reservation).where(
+                Reservation.check_in_date == target_date,
+                Reservation.current_status.in_(["tentative", "confirmed"]),
+                Reservation.deleted_at.is_(None),
+            )
+        ).scalars().all()
+    )
+
+    processed = 0
+    skipped = 0
+    errors = 0
+    for reservation in eligible:
+        try:
+            process_no_show(
+                reservation.id,
+                NoShowPayload(
+                    action_at=datetime.now(timezone.utc),
+                    reason="auto_cancel_no_show",
+                ),
+                actor_user_id=actor_user_id or reservation.updated_by_user_id or reservation.created_by_user_id,
+            )
+            processed += 1
+        except ValueError:
+            skipped += 1
+        except Exception:
+            _log.exception("Error auto-cancelling no-show for reservation %s", reservation.id)
+            db.session.rollback()
+            errors += 1
+
+    return {"processed": processed, "skipped": skipped, "errors": errors}

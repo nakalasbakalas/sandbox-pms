@@ -10,8 +10,8 @@
     </div>
     <div class="actions">
       <span class="pill subtle">Business date {{ target_date.strftime('%d %b %Y') }}</span>
-      <a class="button secondary" href="{{ url_for('provider_bookings') }}">Open bookings</a>
-      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider_calendar') }}">Open calendars</a>{% endif %}
+      <a class="button secondary" href="{{ url_for('provider.provider_bookings') }}">Open bookings</a>
+      {% if can('provider.calendar.view') %}<a class="button secondary" href="{{ url_for('provider.provider_calendar') }}">Open calendars</a>{% endif %}
     </div>
   </div>
 </section>
@@ -34,7 +34,7 @@
         <h2>Arrivals today</h2>
         <p>Live arrival list from the PMS front-desk data.</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('provider_bookings', date_from=target_date.isoformat(), date_to=target_date.isoformat()) }}">View bookings</a>
+      <a class="button secondary tiny" href="{{ url_for('provider.provider_bookings', date_from=target_date.isoformat(), date_to=target_date.isoformat()) }}">View bookings</a>
     </div>
     <div class="metric-strip">
       <div><small>No room assigned</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
@@ -55,7 +55,7 @@
         <tbody>
           {% for item in dashboard.arrivals["items"][:8] %}
             <tr>
-              <td><a href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td><a href="{{ url_for('provider.provider_booking_detail', reservation_id=item.id, back=url_for('provider.provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
               <td>{{ item.guest_name }}</td>
               <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
               <td><span class="status {{ item.room_readiness_label }}">{{ item.room_readiness_label|replace('_', ' ') }}</span></td>
@@ -75,7 +75,7 @@
         <h2>Departures today</h2>
         <p>Current departure and folio attention list.</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('provider_bookings') }}">View bookings</a>
+      <a class="button secondary tiny" href="{{ url_for('provider.provider_bookings') }}">View bookings</a>
     </div>
     <div class="metric-strip">
       <div><small>Outstanding balances</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
@@ -95,7 +95,7 @@
         <tbody>
           {% for item in dashboard.departures["items"][:8] %}
             <tr>
-              <td><a href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td><a href="{{ url_for('provider.provider_booking_detail', reservation_id=item.id, back=url_for('provider.provider_dashboard')) }}">{{ item.reservation_code }}</a></td>
               <td>{{ item.guest_name }}</td>
               <td>{{ item.assigned_room_number or '-' }}</td>
               <td>{{ currency }} {{ item.payment_summary.balance_due|money }}</td>
@@ -117,11 +117,11 @@
         <h2>Pending deposit follow-up</h2>
         <p>Bookings still missing a full deposit.</p>
       </div>
-      <a class="button secondary tiny" href="{{ url_for('provider_bookings', deposit_state='missing') }}">Open unpaid</a>
+      <a class="button secondary tiny" href="{{ url_for('provider.provider_bookings', deposit_state='missing') }}">Open unpaid</a>
     </div>
     <div class="list-stack compact">
       {% for item in dashboard.pending_deposit_bookings %}
-        <a class="list-row" href="{{ url_for('provider_booking_detail', reservation_id=item.id, back=url_for('provider_dashboard')) }}">
+        <a class="list-row" href="{{ url_for('provider.provider_booking_detail', reservation_id=item.id, back=url_for('provider.provider_dashboard')) }}">
           <div>
             <strong>{{ item.reservation_code }} · {{ item.guest_name }}</strong>
             <p>{{ item.arrival_date }} to {{ item.departure_date }} · {{ item.room_type_name }}</p>
@@ -143,7 +143,7 @@
         <h2>Calendar sync status</h2>
         <p>Private feed export plus external iCal sync health.</p>
       </div>
-      {% if can('provider.calendar.view') %}<a class="button secondary tiny" href="{{ url_for('provider_calendar') }}">Manage calendars</a>{% endif %}
+      {% if can('provider.calendar.view') %}<a class="button secondary tiny" href="{{ url_for('provider.provider_calendar') }}">Manage calendars</a>{% endif %}
     </div>
     <div class="metric-strip">
       <div><small>Private feeds</small><strong>{{ dashboard.calendar.room_feeds|length + (1 if dashboard.calendar.property_feed else 0) }}</strong></div>

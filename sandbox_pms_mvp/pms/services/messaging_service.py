@@ -250,25 +250,25 @@ def get_adapter(channel: str) -> ChannelAdapter:
 def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
     """Return paginated inbox entries with total count."""
     query = (
-        ConversationThread.query
+        sa.select(ConversationThread)
         .options(
             joinedload(ConversationThread.guest),
             joinedload(ConversationThread.reservation),
             joinedload(ConversationThread.assigned_user),
         )
-        .filter(ConversationThread.status != "archived")
+        .where(ConversationThread.status != "archived")
     )
 
     if filters.channel:
-        query = query.filter(ConversationThread.channel == filters.channel)
+        query = query.where(ConversationThread.channel == filters.channel)
     if filters.status:
-        query = query.filter(ConversationThread.status == filters.status)
+        query = query.where(ConversationThread.status == filters.status)
     if filters.unread_only:
-        query = query.filter(ConversationThread.unread_count > 0)
+        query = query.where(ConversationThread.unread_count > 0)
     if filters.needs_followup:
-        query = query.filter(ConversationThread.is_needs_followup.is_(True))
+        query = query.where(ConversationThread.is_needs_followup.is_(True))
     if filters.assigned_user_id:
-        query = query.filter(
+        query = query.where(
             ConversationThread.assigned_user_id == uuid.UUID(filters.assigned_user_id)
         )
 
@@ -282,20 +282,20 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
         if rs == "arrivals_today":
             from datetime import date
             today = date.today()
-            query = query.filter(Reservation.check_in_date == today)
-            query = query.filter(Reservation.current_status.in_(["confirmed", "tentative"]))
+            query = query.where(Reservation.check_in_date == today)
+            query = query.where(Reservation.current_status.in_(["confirmed", "tentative"]))
         elif rs == "in_house":
-            query = query.filter(Reservation.current_status == "checked_in")
+            query = query.where(Reservation.current_status == "checked_in")
         elif rs == "post_stay":
-            query = query.filter(Reservation.current_status == "checked_out")
+            query = query.where(Reservation.current_status == "checked_out")
         elif rs == "no_reservation":
-            query = query.filter(ConversationThread.reservation_id.is_(None))
+            query = query.where(ConversationThread.reservation_id.is_(None))
         else:
-            query = query.filter(Reservation.current_status == rs)
+            query = query.where(Reservation.current_status == rs)
 
     if filters.search:
         search_term = f"%{filters.search}%"
-        query = query.filter(
+        query = query.where(
             sa.or_(
                 ConversationThread.subject.ilike(search_term),
                 ConversationThread.guest_contact_value.ilike(search_term),
@@ -309,12 +309,18 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
             )
         )
 
-    total = query.count()
+    total = db.session.execute(
+        sa.select(sa.func.count()).select_from(query.order_by(None).subquery())
+    ).scalar_one()
     threads = (
-        query
-        .order_by(ConversationThread.last_message_at.desc().nullslast())
-        .offset((filters.page - 1) * filters.per_page)
-        .limit(filters.per_page)
+        db.session.execute(
+            query
+            .order_by(ConversationThread.last_message_at.desc().nullslast())
+            .offset((filters.page - 1) * filters.per_page)
+            .limit(filters.per_page)
+        )
+        .unique()
+        .scalars()
         .all()
     )
 
@@ -350,22 +356,29 @@ def list_inbox(filters: InboxFilters) -> tuple[list[InboxEntry], int]:
 
 def get_thread_detail(thread_id: str) -> ThreadDetail | None:
     thread = (
-        ConversationThread.query
-        .options(
+        db.session.execute(
+            sa.select(ConversationThread)
+            .options(
             joinedload(ConversationThread.guest),
             joinedload(ConversationThread.reservation),
             joinedload(ConversationThread.assigned_user),
         )
-        .filter_by(id=uuid.UUID(thread_id))
+            .where(ConversationThread.id == uuid.UUID(thread_id))
+        )
+        .unique()
+        .scalars()
         .first()
     )
     if not thread:
         return None
 
     messages = (
-        Message.query
-        .filter_by(thread_id=thread.id)
-        .order_by(Message.created_at.asc())
+        db.session.execute(
+            sa.select(Message)
+            .where(Message.thread_id == thread.id)
+            .order_by(Message.created_at.asc())
+        )
+        .scalars()
         .all()
     )
 
@@ -392,17 +405,21 @@ def get_or_create_thread(
     guest_contact_value: str | None = None,
 ) -> ConversationThread:
     """Find existing open thread or create a new one."""
-    query = ConversationThread.query.filter(
+    query = sa.select(ConversationThread).where(
         ConversationThread.status.in_(["open", "waiting"])
     )
     if reservation_id:
-        query = query.filter_by(reservation_id=uuid.UUID(reservation_id))
+        query = query.where(ConversationThread.reservation_id == uuid.UUID(reservation_id))
     if guest_id:
-        query = query.filter_by(guest_id=uuid.UUID(guest_id))
+        query = query.where(ConversationThread.guest_id == uuid.UUID(guest_id))
     if channel:
-        query = query.filter_by(channel=channel)
+        query = query.where(ConversationThread.channel == channel)
 
-    existing = query.order_by(ConversationThread.last_message_at.desc().nullslast()).first()
+    existing = (
+        db.session.execute(query.order_by(ConversationThread.last_message_at.desc().nullslast()))
+        .scalars()
+        .first()
+    )
     if existing:
         return existing
 
@@ -551,21 +568,32 @@ def record_inbound_message(
     now = utc_now()
 
     if not guest_id and sender_address:
-        guest = Guest.query.filter(
-            sa.or_(
-                Guest.email == sender_address,
-                Guest.phone == sender_address,
+        guest = (
+            db.session.execute(
+                sa.select(Guest).where(
+                    sa.or_(
+                        Guest.email == sender_address,
+                        Guest.phone == sender_address,
+                    )
+                )
             )
-        ).first()
+            .scalars()
+            .first()
+        )
         if guest:
             guest_id = str(guest.id)
 
     if not reservation_id and guest_id:
         reservation = (
-            Reservation.query
-            .filter_by(primary_guest_id=uuid.UUID(guest_id))
-            .filter(Reservation.current_status.in_(["confirmed", "tentative", "checked_in"]))
-            .order_by(Reservation.check_in_date.desc())
+            db.session.execute(
+                sa.select(Reservation)
+                .where(
+                    Reservation.primary_guest_id == uuid.UUID(guest_id),
+                    Reservation.current_status.in_(["confirmed", "tentative", "checked_in"]),
+                )
+                .order_by(Reservation.check_in_date.desc())
+            )
+            .scalars()
             .first()
         )
         if reservation:
@@ -617,12 +645,19 @@ def mark_thread_read(thread_id: str, *, actor_user_id: str | None = None, commit
     thread = db.session.get(ConversationThread, uuid.UUID(thread_id))
     if not thread:
         return
+    now = utc_now()
     thread.unread_count = 0
-    thread.updated_at = utc_now()
+    thread.updated_at = now
 
-    Message.query.filter_by(thread_id=thread.id, direction="inbound").filter(
-        Message.read_at.is_(None)
-    ).update({"read_at": utc_now()}, synchronize_session=False)
+    db.session.execute(
+        sa.update(Message)
+        .where(
+            Message.thread_id == thread.id,
+            Message.direction == "inbound",
+            Message.read_at.is_(None),
+        )
+        .values(read_at=now)
+    )
 
     if commit:
         db.session.commit()
@@ -684,16 +719,25 @@ def assign_thread(thread_id: str, user_id: str | None, *, actor_user_id: str | N
 
 def reservation_messages(reservation_id: str) -> list[Message]:
     """Return all messages linked to a reservation, newest first."""
-    threads = ConversationThread.query.filter_by(
-        reservation_id=uuid.UUID(reservation_id)
-    ).all()
+    threads = (
+        db.session.execute(
+            sa.select(ConversationThread).where(
+                ConversationThread.reservation_id == uuid.UUID(reservation_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not threads:
         return []
     thread_ids = [t.id for t in threads]
     return (
-        Message.query
-        .filter(Message.thread_id.in_(thread_ids))
-        .order_by(Message.created_at.desc())
+        db.session.execute(
+            sa.select(Message)
+            .where(Message.thread_id.in_(thread_ids))
+            .order_by(Message.created_at.desc())
+        )
+        .scalars()
         .all()
     )
 
@@ -704,12 +748,19 @@ def reservation_messages(reservation_id: str) -> list[Message]:
 
 
 def list_message_templates(*, channel: str | None = None, language: str | None = None) -> list[MessageTemplate]:
-    query = MessageTemplate.query.filter(MessageTemplate.deleted_at.is_(None), MessageTemplate.is_active.is_(True))
+    query = sa.select(MessageTemplate).where(
+        MessageTemplate.deleted_at.is_(None),
+        MessageTemplate.is_active.is_(True),
+    )
     if channel:
-        query = query.filter_by(channel=channel)
+        query = query.where(MessageTemplate.channel == channel)
     if language:
-        query = query.filter_by(language_code=language)
-    return query.order_by(MessageTemplate.template_key).all()
+        query = query.where(MessageTemplate.language_code == language)
+    return (
+        db.session.execute(query.order_by(MessageTemplate.template_key))
+        .scalars()
+        .all()
+    )
 
 
 def get_message_template(template_id: str) -> MessageTemplate | None:
@@ -747,9 +798,19 @@ def upsert_message_template(
     """Create or update a message template."""
     now = utc_now()
     actor_uuid = uuid.UUID(actor_user_id) if actor_user_id else None
-    existing = MessageTemplate.query.filter_by(
-        template_key=template_key, channel=channel, language_code=language_code
-    ).filter(MessageTemplate.deleted_at.is_(None)).first()
+    existing = (
+        db.session.execute(
+            sa.select(MessageTemplate)
+            .where(
+                MessageTemplate.template_key == template_key,
+                MessageTemplate.channel == channel,
+                MessageTemplate.language_code == language_code,
+                MessageTemplate.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
 
     if existing:
         existing.name = name
@@ -786,10 +847,14 @@ def upsert_message_template(
 
 
 def list_automation_rules(*, event_type: str | None = None) -> list[AutomationRule]:
-    query = AutomationRule.query.filter(AutomationRule.deleted_at.is_(None))
+    query = sa.select(AutomationRule).where(AutomationRule.deleted_at.is_(None))
     if event_type:
-        query = query.filter_by(event_type=event_type)
-    return query.order_by(AutomationRule.event_type).all()
+        query = query.where(AutomationRule.event_type == event_type)
+    return (
+        db.session.execute(query.order_by(AutomationRule.event_type))
+        .scalars()
+        .all()
+    )
 
 
 def fire_automation_event(
@@ -805,9 +870,18 @@ def fire_automation_event(
     positive delay are queued in ``pending_automation_events`` and dispatched
     later by the ``process-automation-events`` CLI command.
     """
-    rules = AutomationRule.query.filter_by(
-        event_type=event_type, is_active=True
-    ).filter(AutomationRule.deleted_at.is_(None)).all()
+    rules = (
+        db.session.execute(
+            sa.select(AutomationRule)
+            .where(
+                AutomationRule.event_type == event_type,
+                AutomationRule.is_active.is_(True),
+                AutomationRule.deleted_at.is_(None),
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     sent_messages: list[Message] = []
     queued = 0
@@ -853,6 +927,34 @@ def fire_automation_event(
     return sent_messages
 
 
+def cleanup_processed_automation_events(
+    *, retention_days: int | None = None, commit: bool = True
+) -> int:
+    """Delete processed automation events older than the retention window."""
+    keep_days = retention_days
+    if keep_days is None:
+        keep_days = int(current_app.config.get("PENDING_AUTOMATION_RETENTION_DAYS", 30))
+    if keep_days <= 0:
+        return 0
+
+    cutoff = utc_now() - timedelta(days=keep_days)
+    stale_events = (
+        db.session.execute(
+            sa.select(PendingAutomationEvent).where(
+                PendingAutomationEvent.processed_at.is_not(None),
+                PendingAutomationEvent.processed_at < cutoff,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for event in stale_events:
+        db.session.delete(event)
+    if stale_events and commit:
+        db.session.commit()
+    return len(stale_events)
+
+
 def process_pending_automations() -> dict[str, int]:
     """Process all due pending automation events.
 
@@ -861,17 +963,22 @@ def process_pending_automations() -> dict[str, int]:
     """
     now = utc_now()
     due: list[PendingAutomationEvent] = (
-        PendingAutomationEvent.query.filter(
-            PendingAutomationEvent.fire_at <= now,
-            PendingAutomationEvent.processed_at.is_(None),
+        db.session.execute(
+            sa.select(PendingAutomationEvent)
+            .where(
+                PendingAutomationEvent.fire_at <= now,
+                PendingAutomationEvent.processed_at.is_(None),
+            )
+            .order_by(PendingAutomationEvent.fire_at.asc())
         )
-        .order_by(PendingAutomationEvent.fire_at.asc())
+        .scalars()
         .all()
     )
 
     processed = 0
     skipped = 0
     errors = 0
+    cleaned_up = 0
 
     for event in due:
         rule = db.session.get(AutomationRule, event.rule_id)
@@ -916,8 +1023,19 @@ def process_pending_automations() -> dict[str, int]:
     except Exception:
         logger.exception("Failed to commit pending automation batch")
         db.session.rollback()
+    else:
+        try:
+            cleaned_up = cleanup_processed_automation_events(commit=True)
+        except Exception:
+            logger.exception("Failed to clean up processed automation events")
+            db.session.rollback()
 
-    return {"processed": processed, "skipped": skipped, "errors": errors}
+    return {
+        "processed": processed,
+        "skipped": skipped,
+        "errors": errors,
+        "cleaned_up": cleaned_up,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -100,10 +100,23 @@ class BulkHousekeepingPayload:
 
 
 def list_housekeeping_board(filters: HousekeepingBoardFilters, *, actor_user: User | None = None) -> dict:
-    rooms = Room.query.options(joinedload(Room.room_type)).order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
+    rooms = (
+        db.session.execute(
+            sa.select(Room)
+            .options(joinedload(Room.room_type))
+            .order_by(Room.floor_number.asc(), Room.room_number.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
     inventory_rows = {
         row.room_id: row
-        for row in InventoryDay.query.filter_by(business_date=filters.business_date).all()
+        for row in db.session.execute(
+            sa.select(InventoryDay).where(InventoryDay.business_date == filters.business_date)
+        )
+        .scalars()
+        .all()
     }
     allowed_scopes = allowed_note_visibility_scopes(actor_user)
     note_counts = {
@@ -155,10 +168,24 @@ def get_housekeeping_room_detail(
     business_date: date,
     actor_user: User | None = None,
 ) -> dict:
-    room = Room.query.options(joinedload(Room.room_type)).filter_by(id=room_id).first()
+    room = (
+        db.session.execute(sa.select(Room).options(joinedload(Room.room_type)).where(Room.id == room_id))
+        .unique()
+        .scalars()
+        .first()
+    )
     if not room:
         raise ValueError("Room not found.")
-    inventory_row = InventoryDay.query.filter_by(room_id=room.id, business_date=business_date).first()
+    inventory_row = (
+        db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == room.id,
+                InventoryDay.business_date == business_date,
+            )
+        )
+        .scalars()
+        .first()
+    )
     if not inventory_row:
         raise ValueError("Inventory row not found for the selected day.")
     arrival_by_room, departure_by_room, in_house_by_room, arrival_pressure = _reservation_context(business_date)
@@ -174,42 +201,64 @@ def get_housekeeping_room_detail(
         actor_user=actor_user,
     )
     notes = (
-        RoomNote.query.options(joinedload(RoomNote.created_by_user)).filter(
-            RoomNote.room_id == room.id,
-            sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == business_date),
-            RoomNote.visibility_scope.in_(allowed_note_visibility_scopes(actor_user)),
+        db.session.execute(
+            sa.select(RoomNote)
+            .options(joinedload(RoomNote.created_by_user))
+            .where(
+                RoomNote.room_id == room.id,
+                sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == business_date),
+                RoomNote.visibility_scope.in_(allowed_note_visibility_scopes(actor_user)),
+            )
+            .order_by(RoomNote.created_at.desc())
         )
-        .order_by(RoomNote.created_at.desc())
+        .unique()
+        .scalars()
         .all()
     )
     history = (
-        RoomStatusHistory.query.options(
-            joinedload(RoomStatusHistory.changed_by_user),
-            joinedload(RoomStatusHistory.previous_housekeeping_status),
-            joinedload(RoomStatusHistory.new_housekeeping_status),
+        db.session.execute(
+            sa.select(RoomStatusHistory)
+            .options(
+                joinedload(RoomStatusHistory.changed_by_user),
+                joinedload(RoomStatusHistory.previous_housekeeping_status),
+                joinedload(RoomStatusHistory.new_housekeeping_status),
+            )
+            .where(
+                RoomStatusHistory.room_id == room.id,
+                RoomStatusHistory.business_date == business_date,
+            )
+            .order_by(RoomStatusHistory.changed_at.desc())
         )
-        .filter_by(room_id=room.id, business_date=business_date)
-        .order_by(RoomStatusHistory.changed_at.desc())
+        .unique()
+        .scalars()
         .all()
     )
     activities = (
-        ActivityLog.query.filter(
-            ActivityLog.entity_table == "inventory_days",
-            ActivityLog.entity_id == str(inventory_row.id),
+        db.session.execute(
+            sa.select(ActivityLog)
+            .where(
+                ActivityLog.entity_table == "inventory_days",
+                ActivityLog.entity_id == str(inventory_row.id),
+            )
+            .order_by(ActivityLog.created_at.desc())
+            .limit(20)
         )
-        .order_by(ActivityLog.created_at.desc())
-        .limit(20)
+        .scalars()
         .all()
     )
     audits = []
     if actor_user and actor_user.has_permission("audit.view"):
         audits = (
-            AuditLog.query.filter(
-                AuditLog.entity_table == "inventory_days",
-                AuditLog.entity_id == str(inventory_row.id),
+            db.session.execute(
+                sa.select(AuditLog)
+                .where(
+                    AuditLog.entity_table == "inventory_days",
+                    AuditLog.entity_id == str(inventory_row.id),
+                )
+                .order_by(AuditLog.created_at.desc())
+                .limit(20)
             )
-            .order_by(AuditLog.created_at.desc())
-            .limit(20)
+            .scalars()
             .all()
         )
     return {
@@ -489,28 +538,43 @@ def bulk_update_housekeeping(payload: BulkHousekeepingPayload, *, actor_user_id:
 
 def _reservation_context(business_date: date) -> tuple[dict, dict, dict, dict]:
     arrivals = (
-        Reservation.query.options(joinedload(Reservation.primary_guest))
-        .filter(
-            Reservation.check_in_date == business_date,
-            Reservation.current_status.in_(["tentative", "confirmed"]),
+        db.session.execute(
+            sa.select(Reservation)
+            .options(joinedload(Reservation.primary_guest))
+            .where(
+                Reservation.check_in_date == business_date,
+                Reservation.current_status.in_(["tentative", "confirmed"]),
+            )
         )
+        .unique()
+        .scalars()
         .all()
     )
     departures = (
-        Reservation.query.options(joinedload(Reservation.primary_guest))
-        .filter(
-            Reservation.check_out_date == business_date,
-            Reservation.current_status == "checked_in",
+        db.session.execute(
+            sa.select(Reservation)
+            .options(joinedload(Reservation.primary_guest))
+            .where(
+                Reservation.check_out_date == business_date,
+                Reservation.current_status == "checked_in",
+            )
         )
+        .unique()
+        .scalars()
         .all()
     )
     in_house = (
-        Reservation.query.options(joinedload(Reservation.primary_guest))
-        .filter(
-            Reservation.current_status == "checked_in",
-            Reservation.check_in_date <= business_date,
-            Reservation.check_out_date > business_date,
+        db.session.execute(
+            sa.select(Reservation)
+            .options(joinedload(Reservation.primary_guest))
+            .where(
+                Reservation.current_status == "checked_in",
+                Reservation.check_in_date <= business_date,
+                Reservation.check_out_date > business_date,
+            )
         )
+        .unique()
+        .scalars()
         .all()
     )
     arrival_by_room = {item.assigned_room_id: item for item in arrivals if item.assigned_room_id}
@@ -573,10 +637,16 @@ def _room_board_summary(
         "reservation_code": reservation_code,
         "guest_name": guest_name,
         "last_updated_at": inventory_row.updated_at if inventory_row else None,
-        "note_count": note_count if note_count is not None else RoomNote.query.filter(
-            RoomNote.room_id == room.id,
-            sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == business_date),
-        ).count(),
+        "note_count": note_count
+        if note_count is not None
+        else db.session.execute(
+            sa.select(sa.func.count())
+            .select_from(RoomNote)
+            .where(
+                RoomNote.room_id == room.id,
+                sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == business_date),
+            )
+        ).scalar(),
         "cleaned_at": inventory_row.cleaned_at if inventory_row else None,
         "inspected_at": inventory_row.inspected_at if inventory_row else None,
     }
@@ -667,7 +737,11 @@ def _load_inventory_row_for_update(room_id: uuid.UUID, business_date: date) -> I
 
 
 def _status_by_code(code: str) -> HousekeepingStatus:
-    status = HousekeepingStatus.query.filter_by(code=code).first()
+    status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == code))
+        .scalars()
+        .first()
+    )
     if not status:
         raise ValueError("Unknown housekeeping status.")
     return status
@@ -764,7 +838,11 @@ def _housekeeping_code(status_id: uuid.UUID | None) -> str | None:
 def _status_id_from_code(code: str | None) -> uuid.UUID | None:
     if not code:
         return None
-    status = HousekeepingStatus.query.filter_by(code=code).first()
+    status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == code))
+        .scalars()
+        .first()
+    )
     return status.id if status else None
 
 
@@ -923,11 +1001,24 @@ def start_housekeeping_task(
     task.updated_by_user_id = actor_user_id
 
     # Transition room housekeeping status to cleaning_in_progress
-    cip_status = HousekeepingStatus.query.filter_by(code="cleaning_in_progress").first()
+    cip_status = (
+        db.session.execute(
+            sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "cleaning_in_progress")
+        )
+        .scalars()
+        .first()
+    )
     if cip_status:
-        inv = InventoryDay.query.filter_by(
-            room_id=task.room_id, business_date=task.business_date
-        ).first()
+        inv = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == task.room_id,
+                    InventoryDay.business_date == task.business_date,
+                )
+            )
+            .scalars()
+            .first()
+        )
         if inv and inv.availability_status not in CLOSURE_STATUS_CODES:
             inv_before = _inventory_snapshot(inv)
             inv.housekeeping_status_id = cip_status.id
@@ -984,11 +1075,22 @@ def complete_housekeeping_task(
     task.updated_by_user_id = actor_user_id
 
     # Transition room to clean
-    clean_status = HousekeepingStatus.query.filter_by(code="clean").first()
+    clean_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean"))
+        .scalars()
+        .first()
+    )
     if clean_status:
-        inv = InventoryDay.query.filter_by(
-            room_id=task.room_id, business_date=task.business_date
-        ).first()
+        inv = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == task.room_id,
+                    InventoryDay.business_date == task.business_date,
+                )
+            )
+            .scalars()
+            .first()
+        )
         if inv and inv.availability_status not in CLOSURE_STATUS_CODES and not inv.is_blocked:
             inv_before = _inventory_snapshot(inv)
             inv.housekeeping_status_id = clean_status.id
@@ -1046,11 +1148,22 @@ def inspect_housekeeping_task(
     task.updated_by_user_id = actor_user_id
 
     # Transition room to inspected
-    inspected_status = HousekeepingStatus.query.filter_by(code="inspected").first()
+    inspected_status = (
+        db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "inspected"))
+        .scalars()
+        .first()
+    )
     if inspected_status:
-        inv = InventoryDay.query.filter_by(
-            room_id=task.room_id, business_date=task.business_date
-        ).first()
+        inv = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == task.room_id,
+                    InventoryDay.business_date == task.business_date,
+                )
+            )
+            .scalars()
+            .first()
+        )
         if inv and inv.availability_status not in CLOSURE_STATUS_CODES and not inv.is_blocked:
             inv_before = _inventory_snapshot(inv)
             inv.housekeeping_status_id = inspected_status.id
@@ -1130,34 +1243,42 @@ def cancel_housekeeping_task(
 def list_housekeeping_tasks(filters: TaskListFilters) -> list[dict]:
     """Return housekeeping tasks matching the provided filters."""
     query = (
-        HousekeepingTask.query.options(
+        sa.select(HousekeepingTask)
+        .options(
             joinedload(HousekeepingTask.room),
             joinedload(HousekeepingTask.assigned_to_user),
             joinedload(HousekeepingTask.verified_by_user),
         )
-        .filter(HousekeepingTask.business_date == filters.business_date)
+        .where(HousekeepingTask.business_date == filters.business_date)
     )
     if filters.status:
-        query = query.filter(HousekeepingTask.status == filters.status)
+        query = query.where(HousekeepingTask.status == filters.status)
     if filters.room_id:
-        query = query.filter(HousekeepingTask.room_id == filters.room_id)
+        query = query.where(HousekeepingTask.room_id == filters.room_id)
     if filters.assigned_to_user_id:
-        query = query.filter(HousekeepingTask.assigned_to_user_id == filters.assigned_to_user_id)
+        query = query.where(HousekeepingTask.assigned_to_user_id == filters.assigned_to_user_id)
     if filters.task_type:
-        query = query.filter(HousekeepingTask.task_type == filters.task_type)
+        query = query.where(HousekeepingTask.task_type == filters.task_type)
     if filters.priority:
-        query = query.filter(HousekeepingTask.priority == filters.priority)
+        query = query.where(HousekeepingTask.priority == filters.priority)
 
-    tasks = query.order_by(
-        sa.case(
-            (HousekeepingTask.priority == "urgent", 0),
-            (HousekeepingTask.priority == "high", 1),
-            (HousekeepingTask.priority == "normal", 2),
-            (HousekeepingTask.priority == "low", 3),
-            else_=4,
-        ),
-        HousekeepingTask.created_at.asc(),
-    ).all()
+    tasks = (
+        db.session.execute(
+            query.order_by(
+                sa.case(
+                    (HousekeepingTask.priority == "urgent", 0),
+                    (HousekeepingTask.priority == "high", 1),
+                    (HousekeepingTask.priority == "normal", 2),
+                    (HousekeepingTask.priority == "low", 3),
+                    else_=4,
+                ),
+                HousekeepingTask.created_at.asc(),
+            )
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
 
     return [_task_to_dict(t) for t in tasks]
 
@@ -1177,21 +1298,33 @@ def create_departure_turnover_task(
     already exists for this room+date, it is returned instead of creating
     a duplicate.
     """
-    existing = HousekeepingTask.query.filter(
-        HousekeepingTask.room_id == room_id,
-        HousekeepingTask.business_date == business_date,
-        HousekeepingTask.task_type == "checkout_clean",
-        HousekeepingTask.status.in_(list(ACTIVE_TASK_STATUSES)),
-    ).first()
+    existing = (
+        db.session.execute(
+            sa.select(HousekeepingTask).where(
+                HousekeepingTask.room_id == room_id,
+                HousekeepingTask.business_date == business_date,
+                HousekeepingTask.task_type == "checkout_clean",
+                HousekeepingTask.status.in_(list(ACTIVE_TASK_STATUSES)),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if existing:
         return existing
 
     # Check if there's an incoming arrival that needs the room — bump priority
-    arrival = Reservation.query.filter(
-        Reservation.assigned_room_id == room_id,
-        Reservation.check_in_date == business_date,
-        Reservation.current_status.in_(["tentative", "confirmed"]),
-    ).first()
+    arrival = (
+        db.session.execute(
+            sa.select(Reservation).where(
+                Reservation.assigned_room_id == room_id,
+                Reservation.check_in_date == business_date,
+                Reservation.current_status.in_(["tentative", "confirmed"]),
+            )
+        )
+        .scalars()
+        .first()
+    )
     if arrival:
         priority = "urgent"
 

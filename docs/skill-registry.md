@@ -7,7 +7,7 @@ This registry captures the current high-value skill set for Sandbox Hotel PMS. E
 | Priority | Skills |
 | --- | --- |
 | **P0** | `front-desk-cashier-ops`, `housekeeping-readiness-board`, `analytics-reporting-integrity`, `hotel-booking-flow-qa`, `security-surface-check`, `deploy-env-safety`, `sandbox-ui-polish` |
-| **P1** | `guest-messaging-workflows`, `performance-seo-accessibility`, `thai-first-content-guard`, `db-schema-migration-review`, `repo-audit-cleanup` |
+| **P1** | `guest-messaging-workflows`, `performance-seo-accessibility`, `thai-first-content-guard`, `db-schema-migration-review`, `repo-audit-cleanup`, `blueprint-route-extraction`, `execution-plan-ops`, `orm-query-modernization` |
 | **P2** | None recommended right now; keep the roster lean until a repeat pattern proves otherwise. |
 
 ## `analytics-reporting-integrity`
@@ -40,6 +40,16 @@ This registry captures the current high-value skill set for Sandbox Hotel PMS. E
 - **What repeated work it replaces:** bespoke deployment safety prompts.
 - **Dependencies / related agents:** `release-safety-steward`, `repo-systems-auditor`.
 
+## `blueprint-route-extraction`
+
+- **Objective:** move routes out of the monolith safely while preserving endpoint contracts, `url_for()` stability, and app registration order.
+- **Best use cases:** `app.py` route extraction, blueprint registration, endpoint-name reconciliation, template `url_for()` migration.
+- **Standard workflow:** map source route cluster -> extract blueprint -> register in `create_app()` -> update endpoint references -> rerun targeted route tests.
+- **Expected outputs:** extracted route slice, endpoint compatibility notes, targeted validation results.
+- **Prompt compression opportunities:** avoids restating the same blueprint-extraction sequencing and endpoint-drift cautions.
+- **What repeated work it replaces:** ad hoc "move these routes out of app.py" prompts.
+- **Dependencies / related agents:** `repo-systems-auditor`, `ops-console-orchestrator`, `web-conversion-guardian`.
+
 ## `front-desk-cashier-ops`
 
 - **Objective:** protect front-desk, planning-board, cashier, and dense operational validation workflows.
@@ -49,6 +59,16 @@ This registry captures the current high-value skill set for Sandbox Hotel PMS. E
 - **Prompt compression opportunities:** bundles front-desk board density, cashier reflection, and desk validation rules into one reusable packet.
 - **What repeated work it replaces:** long custom prompts for front-desk board plus cashier plus validation changes.
 - **Dependencies / related agents:** `ops-console-orchestrator`, `booking-revenue-guard`.
+
+## `execution-plan-ops`
+
+- **Objective:** keep the audit execution plan accurate, verified, and useful as the repo's current work ledger.
+- **Best use cases:** reconciling plan status, marking completed items, identifying the next highest-priority task, documenting verified phase progress.
+- **Standard workflow:** read the plan -> verify codebase reality -> update only the confirmed items -> note discrepancies and next actions.
+- **Expected outputs:** corrected phase status, completed-item notes, remaining backlog, verified next-step recommendation.
+- **Prompt compression opportunities:** replaces repeated plan-tracking and reconciliation boilerplate.
+- **What repeated work it replaces:** one-off "what's next / mark this done / reconcile the plan" prompts.
+- **Dependencies / related agents:** `repo-systems-auditor`.
 
 ## `guest-messaging-workflows`
 
@@ -89,6 +109,16 @@ This registry captures the current high-value skill set for Sandbox Hotel PMS. E
 - **Prompt compression opportunities:** collects front-end quality heuristics into one reusable checklist.
 - **What repeated work it replaces:** generic SEO/a11y/performance prompt paragraphs.
 - **Dependencies / related agents:** `web-conversion-guardian`.
+
+## `orm-query-modernization`
+
+- **Objective:** replace legacy Flask-SQLAlchemy `.query` patterns with modern `db.session.execute(sa.select(...))` or `db.session.get(...)` usage.
+- **Best use cases:** service-layer modernization passes, query-style consistency work, incremental ORM cleanup by module.
+- **Standard workflow:** read the full target file -> map each `.query` pattern -> migrate without changing semantics -> rerun the nearest test coverage.
+- **Expected outputs:** migrated file, pattern-by-pattern transformation notes, remaining `.query` count, validation results.
+- **Prompt compression opportunities:** avoids re-explaining result-shape, `.first()` semantics, and `select()` migration rules on each module.
+- **What repeated work it replaces:** repetitive ORM modernization prompts for each service file.
+- **Dependencies / related agents:** `repo-systems-auditor`, `ops-console-orchestrator`, `booking-revenue-guard`.
 
 ## `repo-audit-cleanup`
 

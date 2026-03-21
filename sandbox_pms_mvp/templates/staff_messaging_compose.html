@@ -4,12 +4,12 @@
 <section class="card">
   <div class="card-head">
     <div>
-      <p class="eyebrow"><a href="{{ url_for('staff_messaging_inbox') }}">← Back to Inbox</a></p>
+      <p class="eyebrow"><a href="{{ url_for('messaging.staff_messaging_inbox') }}">← Back to Inbox</a></p>
       <h1>Compose New Message</h1>
     </div>
   </div>
 
-  <form method="post" action="{{ url_for('staff_messaging_send') }}">
+  <form method="post" action="{{ url_for('messaging.staff_messaging_send') }}">
     {{ csrf_input() }}
     {% if reservation %}
     <input type="hidden" name="reservation_id" value="{{ reservation.id }}">
@@ -86,7 +86,7 @@
     </div>
     <div class="actions">
       <button class="button" type="submit">Send Message</button>
-      <a class="button secondary" href="{{ url_for('staff_messaging_inbox') }}">Cancel</a>
+      <a class="button secondary" href="{{ url_for('messaging.staff_messaging_inbox') }}">Cancel</a>
     </div>
   </form>
 </section>

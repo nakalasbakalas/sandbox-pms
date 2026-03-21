@@ -1,0 +1,8 @@
+interface:
+  display_name: "Blueprint Route Extraction"
+  short_description: "Extract Flask routes from app.py into Blueprint modules and update all endpoint references."
+  brand_color: "#0891B2"
+  default_prompt: "Extract the specified route group from register_routes() in app.py into a Flask Blueprint, update all url_for() references, and validate with the test suite."
+
+policy:
+  allow_implicit_invocation: true

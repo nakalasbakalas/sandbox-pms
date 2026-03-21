@@ -6,7 +6,7 @@
     </div>
   </div>
   <div class="list-row no-link admin-nav-row">
-    <a class="pill subtle{% if active_section == 'dashboard' %} active{% endif %}" href="{{ url_for('staff_admin_dashboard') }}">Overview</a>
+    <a class="pill subtle{% if active_section == 'dashboard' %} active{% endif %}" href="{{ url_for('admin.staff_admin_dashboard') }}">Overview</a>
     {% for section in admin_sections %}
       <a class="pill subtle{% if active_section == section.key %} active{% endif %}" href="{{ url_for(section.endpoint) }}">{{ section.label }}</a>
     {% endfor %}

@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('digital_checkout_title') }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="public-page">
+  <section class="card confirmation-panel">
+    <div class="card-head split-row">
+      <div>
+        <p class="eyebrow">{{ t('guest_self_service') }}</p>
+        <h1>{{ reservation.reservation_code }}</h1>
+        <p class="lead">{{ t('digital_checkout_title') }}</p>
+      </div>
+      <span class="status {{ reservation.current_status }}">{{ t('reservation_status_' ~ reservation.current_status) }}</span>
+    </div>
+    <div class="metric-grid grid four">
+      <article class="metric-card"><small>{{ t('guest_label') }}</small><strong>{{ guest.full_name if guest else reservation.reservation_code }}</strong></article>
+      <article class="metric-card"><small>{{ t('stay_label') }}</small><strong>{{ t('date_range', start=reservation.check_in_date, end=reservation.check_out_date) }}</strong></article>
+      <article class="metric-card"><small>{{ t('room_label') }}</small><strong>{{ reservation.assigned_room.room_number if reservation.assigned_room else reservation.room_type.name }}</strong></article>
+      <article class="metric-card"><small>{{ t('status_label') }}</small><strong>{{ t('reservation_status_' ~ reservation.current_status) }}</strong></article>
+      <article class="metric-card"><small>{{ t('balance_due_label') }}</small><strong>{{ currency }} {{ checkout_payment_summary.balance_due|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('refund_due_label') }}</small><strong>{{ currency }} {{ checkout_payment_summary.refund_due|money }}</strong></article>
+      <article class="metric-card"><small>{{ t('late_fee_label') }}</small><strong>{% if checkout_fee.applies %}{{ currency }} {{ checkout_fee.amount|money }}{% else %}{{ currency }} 0.00{% endif %}</strong></article>
+      <article class="metric-card"><small>{{ t('payment_status_label') }}</small><strong>{{ checkout_payment_summary.payment_state.replace('_', ' ').title() }}</strong></article>
+    </div>
+    {% if reservation.current_status == 'checked_out' %}
+    <p>{{ t('digital_checkout_checked_out_body') }}</p>
+    {% elif reservation.current_status != 'checked_in' %}
+    <p>{{ t('digital_checkout_not_checked_in_body') }}</p>
+    {% elif can_complete_checkout %}
+    <p>{{ t('digital_checkout_ready_body') }}</p>
+    {% else %}
+    <p>{{ t('digital_checkout_review_body') }}</p>
+    {% endif %}
+    <p class="muted">{{ hotel_support_contact_text }}</p>
+    <div class="actions">
+      {% if can_create_balance_payment %}
+      <form class="inline-form slim" method="post" action="{{ url_for('public.public_digital_checkout_pay_balance', reservation_code=reservation.reservation_code) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="token" value="{{ reservation.public_confirmation_token }}">
+        <button class="button" type="submit" data-analytics-event="cta_click" data-analytics-label="pay_checkout_balance" data-analytics-context="digital_checkout">{{ t('digital_checkout_pay_balance') }}</button>
+      </form>
+      {% endif %}
+      {% if can_complete_checkout %}
+      <form class="inline-form slim" method="post" action="{{ url_for('public.public_digital_checkout_complete', reservation_code=reservation.reservation_code) }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="token" value="{{ reservation.public_confirmation_token }}">
+        <button class="button secondary" type="submit" data-analytics-event="cta_click" data-analytics-label="complete_digital_checkout" data-analytics-context="digital_checkout">{{ t('digital_checkout_complete') }}</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="grid two gap-lg">
+    <article class="card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('folio_title') }}</p><h2>{{ t('summary_title') }}</h2></div></div>
+      {% if folio_lines %}
+      <div class="list-stack compact">
+        {% for line in folio_lines %}
+        <div class="list-row no-link">
+          <div>
+            <strong>{{ line.description }}</strong>
+            <p class="small muted">{{ t('service_date_label') }} {{ line.service_date }}</p>
+          </div>
+          <strong>{{ currency }} {{ line.total_amount|money }}</strong>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">{{ t('digital_checkout_no_folio_lines') }}</p>
+      {% endif %}
+    </article>
+    <article class="card support-card">
+      <div class="card-head"><div><p class="eyebrow">{{ t('guest_self_service') }}</p><h2>{{ hotel_name }}</h2></div></div>
+      {% if checkout_blockers %}
+      <ul class="checklist compact">
+        {% for blocker in checkout_blockers %}
+        <li>{{ blocker }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p>{{ t('digital_checkout_ready_body') }}</p>
+      {% endif %}
+      <p class="muted">{{ t('confirmation_change_help') }}</p>
+    </article>
+  </section>
+</div>
+{% endblock %}

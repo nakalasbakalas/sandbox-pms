@@ -36,12 +36,15 @@ Specialized skill files live under `.agents/skills/`. Each skill defines a focus
 Load the relevant skill at task start when the task matches its trigger conditions:
 
 - `analytics-reporting-integrity` — dataLayer / GA4-ready event taxonomy, conversion tracking, attribution, dashboard KPI definition integrity
+- `blueprint-route-extraction` — extracting routes from app.py into Flask Blueprints, url_for updates, register_routes cleanup
 - `db-schema-migration-review` — schema changes, migrations, indexes, backfills
 - `deploy-env-safety` — deployments, secrets, environment config, rollback planning
+- `execution-plan-ops` — tracking, updating, and reconciling the audit execution plan against codebase state
 - `front-desk-cashier-ops` — front desk board, check-in/out, room moves, cashier handoff, dense operational validation states
 - `guest-messaging-workflows` — messaging hub, templates, automation rules, delivery tracking, guest communication workflows
 - `housekeeping-readiness-board` — room status, housekeeping tasks, readiness sync, front-desk handoff
 - `hotel-booking-flow-qa` — booking, availability, rates, guest journey, payments
+- `orm-query-modernization` — migrating legacy Model.query patterns to modern db.session.execute style
 - `performance-seo-accessibility` — page speed, SEO metadata, ARIA, Core Web Vitals
 - `repo-audit-cleanup` — dead code removal, deduplication, dependency hygiene
 - `sandbox-ui-polish` — visual hierarchy, layout, CTA clarity, mobile UX
@@ -51,6 +54,9 @@ Load the relevant skill at task start when the task matches its trigger conditio
 Prefer the narrowest domain skill first, then add only the cross-cutting skills that are truly needed:
 
 - default to one domain skill plus at most one or two cross-cutting skills
+- prefer `blueprint-route-extraction` when the task is moving routes out of app.py — do not combine with other refactoring in the same pass
+- prefer `orm-query-modernization` when migrating .query. patterns — do not combine with Blueprint extraction in the same pass
+- prefer `execution-plan-ops` when the task is about plan tracking, status updates, or identifying next work — not for implementing the work itself
 - prefer `front-desk-cashier-ops` over generic UI polish when the task changes board behavior, check-in/out, room moves, cashier actions, or staff validation messaging
 - prefer `housekeeping-readiness-board` when the change touches room status, readiness, turnover tasks, or housekeeping/front-desk reflection
 - prefer `guest-messaging-workflows` when the change touches threads, templates, automations, delivery status, or guest communication context

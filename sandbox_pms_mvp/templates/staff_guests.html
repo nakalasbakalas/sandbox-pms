@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}Guest Search | {{ hotel_name }}{% endblock %}
+{% block content %}
+
+<h1 class="res-page-title">Guest Search</h1>
+
+<div class="res-filter-block">
+  <form class="res-filter-form" method="get">
+    <label><span>Name, phone, or email</span><input type="text" name="q" value="{{ q }}" placeholder="Search guests..." autofocus></label>
+    <button class="button small" type="submit">Search</button>
+  </form>
+</div>
+
+{% if q and guests %}
+<div class="res-table-wrap">
+  <table class="res-table">
+    <thead>
+      <tr>
+        <th>Guest</th>
+        <th>Phone</th>
+        <th>Email</th>
+        <th>Nationality</th>
+        <th>Reservations</th>
+        <th>Latest booking</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for guest in guests %}
+      <tr class="res-table-row">
+        <td>
+          <a href="{{ url_for('staff_reservations.staff_guest_detail', guest_id=guest.id, back=request.full_path.rstrip('?')) }}" style="font-weight:600; color:var(--pms-text-primary); text-decoration:none;">{{ guest.full_name }}</a>
+          {% if guest.blacklist_flag %}<span class="status cancelled" style="font-size:0.7rem">Blacklisted</span>{% endif %}
+        </td>
+        <td>{{ guest.phone }}</td>
+        <td>{{ guest.email or '' }}</td>
+        <td>{{ guest.nationality or '' }}</td>
+        <td>{{ guest.reservation_count }}</td>
+        <td>
+          {% if guest.latest_reservation_code %}
+          <span class="status {{ guest.latest_reservation_status }}">{{ guest.latest_reservation_status.replace('_', ' ') }}</span>
+          <div class="small muted">{{ guest.latest_reservation_code }} &middot; {{ guest.latest_check_in }} &rarr; {{ guest.latest_check_out }}</div>
+          {% else %}
+          <span class="small muted">No reservations</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if guest.latest_reservation_id %}
+          <a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=guest.latest_reservation_id) }}">Open</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif q %}
+<section class="card center">
+  <h2>No guests found</h2>
+  <p class="muted">Try a different name, phone number, or email address.</p>
+</section>
+{% else %}
+<section class="card center">
+  <p class="muted">Enter a name, phone number, or email address to search guest profiles.</p>
+</section>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+{% block title %}{{ detail.guest.full_name }} | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% set guest = detail.guest %}
+{% set stats = detail.stats %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Guest Profile</p>
+      <h1>{{ guest.full_name }}</h1>
+      <p>{{ stats.total_reservations }} reservation{{ '' if stats.total_reservations == 1 else 's' }} · {{ stats.completed_stays }} completed stay{{ '' if stats.completed_stays == 1 else 's' }}</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ back_url }}">Back</a>
+      {% if guest.blacklist_flag %}<span class="status cancelled">Blacklisted</span>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="grid four metric-grid">
+  <article class="metric-card"><small>Total reservations</small><strong>{{ stats.total_reservations }}</strong></article>
+  <article class="metric-card"><small>Completed stays</small><strong>{{ stats.completed_stays }}</strong></article>
+  <article class="metric-card"><small>Total nights</small><strong>{{ stats.total_nights }}</strong></article>
+  <article class="metric-card"><small>Total revenue</small><strong>{{ stats.total_revenue | money }}</strong></article>
+</section>
+
+<section class="grid two gap-lg">
+  <article class="card inset">
+    <div class="card-head"><div><h2>Contact details</h2></div></div>
+    <div class="list-stack compact">
+      <div class="list-row no-link"><div><strong>Phone</strong><p>{{ guest.phone }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Email</strong><p>{{ guest.email or '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Nationality</strong><p>{{ guest.nationality or '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Date of birth</strong><p>{{ guest.date_of_birth.strftime('%d %b %Y') if guest.date_of_birth else '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Preferred language</strong><p>{{ guest.preferred_language or '—' }}</p></div></div>
+    </div>
+  </article>
+
+  <article class="card inset">
+    <div class="card-head"><div><h2>Identity document</h2></div></div>
+    <div class="list-stack compact">
+      <div class="list-row no-link"><div><strong>Document type</strong><p>{{ guest.id_document_type or '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Document number</strong><p>{{ guest.id_document_number or '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>First stay</strong><p>{{ stats.first_stay.strftime('%d %b %Y') if stats.first_stay else '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Last stay</strong><p>{{ stats.last_stay.strftime('%d %b %Y') if stats.last_stay else '—' }}</p></div></div>
+      <div class="list-row no-link"><div><strong>Cancelled</strong><p>{{ stats.cancelled }}</p></div></div>
+      <div class="list-row no-link"><div><strong>No-shows</strong><p>{{ stats.no_shows }}</p></div></div>
+    </div>
+  </article>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Reservation history</h2>
+      <p>{{ stats.total_reservations }} reservation{{ '' if stats.total_reservations == 1 else 's' }} on file.</p>
+    </div>
+  </div>
+  {% if detail.reservations %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Status</th>
+          <th>Room type</th>
+          <th>Room</th>
+          <th>Check-in</th>
+          <th>Check-out</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for res in detail.reservations %}
+        <tr>
+          <td><a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=res.id, back=request.full_path.rstrip('?')) }}">{{ res.reservation_code }}</a></td>
+          <td><span class="status {{ res.current_status }}">{{ res.current_status.replace('_', ' ') }}</span></td>
+          <td>{{ res.room_type.code if res.room_type else '—' }}</td>
+          <td>{{ res.assigned_room.room_number if res.assigned_room else '—' }}</td>
+          <td>{{ res.check_in_date.strftime('%d %b %Y') }}</td>
+          <td>{{ res.check_out_date.strftime('%d %b %Y') }}</td>
+          <td>{{ res.quoted_grand_total | money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty-state">No reservations found for this guest.</p>
+  {% endif %}
+</section>
+
+{% if detail.notes %}
+<section class="card">
+  <div class="card-head"><div><h2>Guest notes</h2></div></div>
+  <div class="list-stack compact">
+    {% for note in detail.notes %}
+    <div class="list-row no-link">
+      <div>
+        <strong>{{ note.note_type.replace('_', ' ').title() }}</strong>
+        <p>{{ note.note_text }}</p>
+      </div>
+      <div class="right-stack">
+        {% if note.is_important %}<span class="status pending">Important</span>{% endif %}
+        <span class="small muted">{{ note.created_at.strftime('%d %b %Y %H:%M') }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if detail.threads %}
+<section class="card">
+  <div class="card-head"><div><h2>Conversation threads</h2><p>Recent guest communication threads.</p></div></div>
+  <div class="list-stack compact">
+    {% for thread in detail.threads %}
+    <a class="list-row" href="{{ url_for('messaging.staff_messaging_thread', thread_id=thread.id) }}">
+      <div>
+        <strong>{{ thread.subject or thread.channel_type.replace('_', ' ').title() }}</strong>
+        <p>{{ thread.status.replace('_', ' ') }} · {{ thread.channel_type.replace('_', ' ') }}</p>
+      </div>
+      <div class="right-stack">
+        <span class="status {{ thread.status }}">{{ thread.status.replace('_', ' ') }}</span>
+        <span class="small muted">{{ thread.updated_at.strftime('%d %b %Y %H:%M') }}</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

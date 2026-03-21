@@ -26,7 +26,12 @@ def daterange(start_date: date, end_date: date):
 
 
 def get_setting_value(key: str, default):
-    setting = AppSetting.query.filter_by(key=key, deleted_at=None).first()
+    setting = db.session.execute(
+        sa.select(AppSetting).where(
+            AppSetting.key == key,
+            AppSetting.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
     if not setting:
         return default
     return setting.value_json.get("value", default)

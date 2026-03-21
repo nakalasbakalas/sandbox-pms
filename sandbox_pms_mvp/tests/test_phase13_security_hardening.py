@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
+import pms.app as app_module
 import pms.config as config_module
 import pms.security as security_module
 from pms.audit import write_audit_log
@@ -153,6 +154,26 @@ def test_admin_bootstrap_credentials_are_loaded_from_environment(monkeypatch):
     importlib.reload(config_module)
 
 
+def test_sentry_config_is_loaded_from_environment(monkeypatch):
+    monkeypatch.setenv("SENTRY_DSN", "https://public@example.ingest.sentry.io/1")
+    monkeypatch.setenv("SENTRY_ENVIRONMENT", "staging")
+    monkeypatch.setenv("SENTRY_RELEASE", "release-2026-03-19")
+    monkeypatch.setenv("SENTRY_TRACES_SAMPLE_RATE", "0.25")
+
+    reloaded = importlib.reload(config_module)
+
+    assert reloaded.Config.SENTRY_DSN == "https://public@example.ingest.sentry.io/1"
+    assert reloaded.Config.SENTRY_ENVIRONMENT == "staging"
+    assert reloaded.Config.SENTRY_RELEASE == "release-2026-03-19"
+    assert reloaded.Config.SENTRY_TRACES_SAMPLE_RATE == 0.25
+
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+    monkeypatch.delenv("SENTRY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("SENTRY_RELEASE", raising=False)
+    monkeypatch.delenv("SENTRY_TRACES_SAMPLE_RATE", raising=False)
+    importlib.reload(config_module)
+
+
 def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
     monkeypatch.setenv("TRUSTED_HOSTS", "book.example.com,staff.example.com")
     monkeypatch.setenv("APP_BASE_URL", "https://book.example.com")
@@ -174,6 +195,46 @@ def test_render_external_hostname_is_added_to_trusted_hosts(monkeypatch):
     monkeypatch.delenv("STAFF_APP_URL", raising=False)
     monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
     importlib.reload(config_module)
+
+
+def test_create_app_initializes_sentry_when_dsn_configured(app_factory, monkeypatch):
+    captured: dict = {}
+
+    class FakeSentrySdk:
+        def init(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        app_module,
+        "_load_sentry_sdk",
+        lambda: (FakeSentrySdk(), ["flask-integration", "sqlalchemy-integration"]),
+    )
+
+    app_factory(
+        config={
+            "SENTRY_DSN": "https://public@example.ingest.sentry.io/1",
+            "SENTRY_ENVIRONMENT": "staging",
+            "SENTRY_RELEASE": "release-2026-03-19",
+            "SENTRY_TRACES_SAMPLE_RATE": 0.25,
+        }
+    )
+
+    assert captured["dsn"] == "https://public@example.ingest.sentry.io/1"
+    assert captured["environment"] == "staging"
+    assert captured["release"] == "release-2026-03-19"
+    assert captured["traces_sample_rate"] == 0.25
+    assert captured["send_default_pii"] is False
+    assert captured["integrations"] == ["flask-integration", "sqlalchemy-integration"]
+    assert captured["before_send"] is app_module._sentry_before_send
+
+
+def test_create_app_skips_sentry_loader_when_dsn_is_missing(app_factory, monkeypatch):
+    def fail_loader():
+        raise AssertionError("Sentry loader should not run without a DSN.")
+
+    monkeypatch.setattr(app_module, "_load_sentry_sdk", fail_loader)
+
+    app_factory(config={"AUTH_COOKIE_SECURE": False})
 
 
 def test_security_headers_and_session_cookie_flags_are_present(app_factory):
