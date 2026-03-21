@@ -45,6 +45,7 @@ from .constants import (
     NOTIFICATION_DELIVERY_STATUSES,
     NOTIFICATION_TEMPLATE_CHANNELS,
     NOTIFICATION_TEMPLATE_KEYS,
+    OTA_PROVIDER_KEYS,
     PAYMENT_REQUEST_STATUSES,
     POLICY_DOCUMENT_CODES,
     PRE_CHECKIN_STATUSES,
@@ -1573,6 +1574,40 @@ class NotificationDelivery(AuditMixin, db.Model):
     )
 
 
+class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
+    """Stores per-OTA provider configuration including encrypted API credentials.
+
+    Each row represents one OTA integration (e.g. Booking.com, Expedia, Agoda).
+    API keys are encrypted at rest using the application Fernet key.
+    ``api_key_hint`` stores the last four characters so the UI can confirm
+    a key is saved without ever revealing the plaintext value.
+    """
+
+    __tablename__ = "ota_channels"
+
+    provider_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    display_name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    hotel_id: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    endpoint_url: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    api_key_encrypted: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    api_key_hint: Mapped[str | None] = mapped_column(sa.String(8), nullable=True)
+    api_secret_encrypted: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    api_secret_hint: Mapped[str | None] = mapped_column(sa.String(8), nullable=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_test_ok: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
+    last_test_error: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"provider_key IN ({', '.join(repr(v) for v in OTA_PROVIDER_KEYS)})",
+            name="ck_ota_channels_provider_key",
+        ),
+        UniqueConstraint("provider_key", name="uq_ota_channels_provider_key"),
+        Index("ix_ota_channels_provider_active", "provider_key", "is_active"),
+    )
+
+
 class AppSetting(AuditMixin, SoftDeleteMixin, db.Model):
     __tablename__ = "app_settings"
 
@@ -2031,6 +2066,7 @@ for model in (
     ExternalCalendarSource,
     ExternalCalendarBlock,
     ExternalCalendarSyncRun,
+    OtaChannel,
     PreCheckIn,
     ReservationDocument,
     ConversationThread,

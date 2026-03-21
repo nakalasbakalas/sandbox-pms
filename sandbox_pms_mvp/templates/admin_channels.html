@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block title %}OTA Channels | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Online Travel Agency integrations</p>
+      <h2>OTA channel API key management</h2>
+    </div>
+  </div>
+  <p class="muted">Configure API credentials for each OTA channel. API keys are encrypted at rest and never shown in plaintext. Leave the key field blank to keep an existing credential unchanged.</p>
+</section>
+
+{% for ch in channels %}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Channel provider</p>
+      <h2>{{ ch.display_name }}</h2>
+    </div>
+    <div>
+      {% if ch.last_test_ok is not none %}
+        <span class="pill {% if ch.last_test_ok %}success{% else %}error{% endif %}">
+          {{ 'Connection OK' if ch.last_test_ok else 'Connection failed' }}
+        </span>
+      {% else %}
+        <span class="pill subtle">Not tested</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid two gap-lg">
+    <article>
+      <form class="stack-form" method="post">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="save_channel">
+        <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+
+        <label class="toggle-row">
+          <input type="checkbox" name="is_active" {% if ch.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+          <span>Active — include this channel in sync operations</span>
+        </label>
+
+        <label>
+          <span>Hotel / property ID</span>
+          <input type="text" name="hotel_id" value="{{ ch.hotel_id or '' }}" placeholder="Your property code on {{ ch.display_name }}" {% if not can('settings.edit') %}disabled{% endif %}>
+        </label>
+
+        <label>
+          <span>API key{% if ch.api_key_hint %} <span class="muted">(saved: …{{ ch.api_key_hint }})</span>{% endif %}</span>
+          <input type="password" name="api_key" value="" autocomplete="new-password" placeholder="{% if ch.api_key_hint %}Leave blank to keep existing{% else %}Enter API key{% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
+        </label>
+
+        <label>
+          <span>API secret{% if ch.api_secret_hint %} <span class="muted">(saved: …{{ ch.api_secret_hint }})</span>{% endif %}</span>
+          <input type="password" name="api_secret" value="" autocomplete="new-password" placeholder="{% if ch.api_secret_hint %}Leave blank to keep existing{% else %}Enter API secret (if required){% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
+        </label>
+
+        <label>
+          <span>Custom endpoint URL <span class="muted">(optional — leave blank for default)</span></span>
+          <input type="url" name="endpoint_url" value="{{ ch.endpoint_url or '' }}" placeholder="https://api.example.com/v1/" {% if not can('settings.edit') %}disabled{% endif %}>
+        </label>
+
+        {% if can('settings.edit') %}
+          <button class="button" type="submit">Save {{ ch.display_name }} configuration</button>
+        {% endif %}
+      </form>
+    </article>
+
+    <article>
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Credential status</p>
+          <h3>{{ ch.display_name }} connection health</h3>
+        </div>
+      </div>
+      <div class="list-stack compact">
+        <div class="list-row no-link">
+          <strong>API key</strong>
+          <span class="status">{{ ('…' ~ ch.api_key_hint) if ch.api_key_hint else 'Not configured' }}</span>
+        </div>
+        <div class="list-row no-link">
+          <strong>API secret</strong>
+          <span class="status">{{ ('…' ~ ch.api_secret_hint) if ch.api_secret_hint else 'Not configured' }}</span>
+        </div>
+        <div class="list-row no-link">
+          <strong>Status</strong>
+          <span class="status">{{ 'Active' if ch.is_active else 'Inactive' }}</span>
+        </div>
+        {% if ch.last_tested_at %}
+          <div class="list-row no-link">
+            <strong>Last tested</strong>
+            <span class="status">{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+          </div>
+          {% if ch.last_test_error %}
+            <div class="list-row no-link">
+              <strong>Last error</strong>
+              <span class="status error">{{ ch.last_test_error }}</span>
+            </div>
+          {% endif %}
+        {% endif %}
+      </div>
+      <p class="muted">API credentials are encrypted at rest and never displayed in plaintext.</p>
+
+      <form method="post" style="margin-top: 1rem;">
+        {{ csrf_input() }}
+        <input type="hidden" name="action" value="test_connection">
+        <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+        <button class="button subtle" type="submit">Test connection</button>
+      </form>
+    </article>
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

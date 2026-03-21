@@ -12,6 +12,7 @@ from pms.extensions import db
 from pms.models import (
     AppSetting,
     InventoryDay,
+    OtaChannel,
     Reservation,
     Room,
     RoomType,
@@ -25,7 +26,10 @@ from pms.services.availability_service import (
     query_room_type_availability,
 )
 from pms.services.channel_service import (
+    AgodaChannelProvider,
+    BookingComChannelProvider,
     ChannelSyncService,
+    ExpediaChannelProvider,
     InboundReservation,
     MockChannelProvider,
     OutboundInventoryUpdate,

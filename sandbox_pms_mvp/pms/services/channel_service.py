@@ -525,7 +525,34 @@ def provider_push_context() -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Sync orchestrator
+# OTA channel management helpers
+# ---------------------------------------------------------------------------
+
+
+def list_ota_channels() -> list[OtaChannel]:
+    """Return all non-deleted OtaChannel records ordered by provider_key."""
+    return (
+        db.session.execute(
+            sa.select(OtaChannel)
+            .where(OtaChannel.deleted_at.is_(None))
+            .order_by(OtaChannel.provider_key.asc())
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_ota_channel(provider_key: str) -> OtaChannel | None:
+    """Return the OtaChannel for *provider_key*, or None if not configured."""
+    return db.session.execute(
+        sa.select(OtaChannel).where(
+            OtaChannel.provider_key == provider_key,
+            OtaChannel.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+
+
 # ---------------------------------------------------------------------------
 
 class ChannelSyncService:
