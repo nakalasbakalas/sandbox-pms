@@ -119,6 +119,34 @@ def test_health_endpoint_reports_db_liveness_and_sla_metadata(app_factory):
     assert payload["response_ms"] >= 0
 
 
+def test_health_endpoint_skips_https_redirects_for_render_checks(app_factory):
+    app = app_factory(
+        seed=False,
+        config={
+            "APP_ENV": "production",
+            "APP_BASE_URL": "https://book.example.com",
+            "BOOKING_ENGINE_URL": "https://book.example.com",
+            "STAFF_APP_URL": "https://staff.example.com",
+            "FORCE_HTTPS": True,
+            "AUTH_COOKIE_SECURE": True,
+            "SESSION_COOKIE_SECURE": True,
+            "AUTH_ENCRYPTION_KEY": "g0pj3nQ_SQ3P7ABmS5s3CeuNJnHNLiqOLTD7ATngcDk=",
+            "SECRET_KEY": "production-secret-key-1234567890abcdef",
+            "ADMIN_EMAIL": "admin@hotel.example",
+            "ADMIN_PASSWORD": "password-manager-generated-secret",
+            "TRUSTED_HOSTS": ["book.example.com", "staff.example.com"],
+        },
+    )
+    client = app.test_client()
+
+    response = client.get("/health", base_url="http://book.example.com")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["db"] == "ok"
+
+
 def test_config_reads_storage_backend_environment(monkeypatch):
     monkeypatch.setenv("STORAGE_BACKEND", "s3")
     monkeypatch.setenv("S3_BUCKET", "sandbox-docs")

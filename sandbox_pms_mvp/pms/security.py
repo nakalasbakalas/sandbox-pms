@@ -21,6 +21,7 @@ DEFAULT_INSECURE_SECRET_VALUES = {
     "sandbox-hotel-pms-dev-key",
     "sandbox-test-hosted-secret",
 }
+HTTPS_REDIRECT_EXEMPT_PATHS = {"/health"}
 GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again or contact the hotel."
 SENSITIVE_FIELD_FRAGMENTS = {
     "authorization",
@@ -355,6 +356,8 @@ def _validate_host_header() -> None:
 
 def _should_redirect_to_https() -> bool:
     if current_app.testing or request.method == "OPTIONS":
+        return False
+    if request.path in HTTPS_REDIRECT_EXEMPT_PATHS:
         return False
     return bool(current_app.config.get("FORCE_HTTPS")) and not request.is_secure
 
