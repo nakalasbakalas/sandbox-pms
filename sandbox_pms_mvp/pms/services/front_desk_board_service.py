@@ -1303,7 +1303,7 @@ def _compute_extended_counts(
     total = counts.get("total_rooms", 0)
     counts["occupancy_pct"] = round(counts.get("occupied", 0) / total * 100) if total else 0
 
-    unpaid_q = Reservation.query.filter(
+    unpaid_conditions = [
         Reservation.check_in_date == today,
         Reservation.current_status.in_(["tentative", "confirmed"]),
         Reservation.deposit_required_amount > 0,

@@ -1001,28 +1001,6 @@ self.addEventListener("fetch", (event) => {
 """.strip()
         return Response(script, mimetype="application/javascript")
 
-    @app.route("/sitemap.xml")
-    def sitemap_xml():
-        public_pages = [
-            ("index", {}),
-            ("booking_entry", {}),
-            ("booking_cancel_request", {}),
-            ("booking_modify_request", {}),
-        ]
-        urls: list[str] = []
-        for endpoint, values in public_pages:
-            urls.append(absolute_public_url(url_for(endpoint, **values)))
-            for language_code in LANGUAGE_LABELS:
-                urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
-        unique_urls = list(dict.fromkeys(url for url in urls if url))
-        body = [
-            '<?xml version="1.0" encoding="UTF-8"?>',
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
-        ]
-        body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
-        body.append("</urlset>")
-        return Response("\n".join(body), mimetype="application/xml")
-
     @app.route("/book")
     def booking_entry():
         return render_template("availability.html", **build_public_booking_entry_context())
@@ -5989,6 +5967,6 @@ def available_admin_sections() -> list[dict[str, str]]:
         )
     if can("audit.view"):
         sections.append(
-            {"key": "audit", "label": "Audit", "endpoint": "staff_admin_audit", "description": "Configuration and system history"}
+            {"key": "audit", "label": "Audit", "endpoint": "reports.staff_admin_audit", "description": "Configuration and system history"}
         )
     return sections
