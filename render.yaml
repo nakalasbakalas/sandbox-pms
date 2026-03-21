@@ -84,12 +84,15 @@ services:
         sync: false
       - key: SENTRY_TRACES_SAMPLE_RATE
         value: "0.0"
+      - key: AUDIT_LOG_RETENTION_DAYS
+        value: "0"
       - key: MAX_CONTENT_LENGTH
         value: "12582912"
-      # Document storage — choose one:
-      # Option A: Render persistent disk (set UPLOAD_DIR to disk mount path)
-      # - key: UPLOAD_DIR
-      #   value: /var/data/uploads/documents
+      - key: STORAGE_BACKEND
+        value: local
+      - key: UPLOAD_DIR
+        value: /var/data/uploads/documents
+      # Optional alternative: S3-compatible storage
       # Option B: S3 (set all four keys below)
       # - key: STORAGE_BACKEND
       #   value: s3
@@ -101,11 +104,10 @@ services:
       #   sync: false
       # - key: AWS_SECRET_ACCESS_KEY
       #   sync: false
-    # Uncomment if using Render persistent disk for document storage:
-    # disk:
-    #   name: pms-document-storage
-    #   mountPath: /var/data/uploads/documents
-    #   sizeGB: 1
+    disk:
+      name: pms-document-storage
+      mountPath: /var/data/uploads/documents
+      sizeGB: 1
 
   # -- Scheduled background tasks (cron jobs) --
   - type: cron
@@ -260,12 +262,33 @@ services:
         sync: false
 
   - type: cron
+    name: pms-cleanup-audit-logs
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "30 3 * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app cleanup-audit-logs
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: AUDIT_LOG_RETENTION_DAYS
+        value: "0"
+
+  - type: cron
     name: pms-auto-cancel-no-shows
     runtime: python
     rootDir: sandbox_pms_mvp
     region: oregon
     plan: starter
-    schedule: "0 21 * * *"
+    schedule: "0 * * * *"
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: flask --app app auto-cancel-no-shows
     envVars:

@@ -53,6 +53,24 @@ def test_schema_can_migrate_from_empty_database(app_factory):
         assert "audit_log" in tables
 
 
+def test_schema_has_expected_inventory_and_folio_indexes(app_factory):
+    app = app_factory(seed=False)
+    with app.app_context():
+        inspector = sa.inspect(db.engine)
+        inventory_unique_constraints = inspector.get_unique_constraints("inventory_days")
+        folio_indexes = inspector.get_indexes("folio_charges")
+
+        assert any(
+            set(constraint.get("column_names") or []) == {"room_id", "business_date"}
+            for constraint in inventory_unique_constraints
+        )
+        assert any(
+            index["name"] == "ix_folio_charges_reservation_voided"
+            and index.get("column_names") == ["reservation_id", "voided_at"]
+            for index in folio_indexes
+        )
+
+
 def test_seeds_load_successfully_and_rooms_match_phase1(app_factory):
     app = app_factory(seed=True)
     with app.app_context():
@@ -161,6 +179,29 @@ def test_backup_restore_scripts_reference_postgres_tools():
     assert "pg_restore" in restore_sh
     assert "pg_dump" in backup_ps1
     assert "pg_restore" in restore_ps1
+
+
+def test_postgresql_partial_index_parity_is_declared_in_migrations():
+    project_root = Path(__file__).resolve().parents[1]
+    baseline = (project_root / "migrations" / "versions" / "20260307_01_phase2_baseline.py").read_text()
+    partial_username = (
+        project_root / "migrations" / "versions" / "20260320_02_user_partial_username_index.py"
+    ).read_text()
+
+    assert "ix_users_active_email_live" in baseline
+    assert "ix_users_active_username_live" in partial_username
+    assert "deleted_at IS NULL" in partial_username
+
+
+def test_migrations_no_longer_leave_downgrades_as_noop_pass():
+    project_root = Path(__file__).resolve().parents[1]
+    migration_text = "\n".join(
+        path.read_text()
+        for path in sorted((project_root / "migrations" / "versions").glob("*.py"))
+        if path.name != "__init__.py"
+    )
+
+    assert "def downgrade():\n    pass" not in migration_text
 
 
 def test_audit_log_writes_on_critical_mutations(app_factory):

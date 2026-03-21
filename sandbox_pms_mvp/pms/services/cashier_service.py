@@ -653,6 +653,26 @@ def record_refund(
     summary = folio_summary(reservation)
     if payload.processed and amount > summary["refund_due"]:
         raise ValueError("Refund exceeds the current refund due.")
+    if payload.reference_charge_id:
+        reference = db.session.get(FolioCharge, payload.reference_charge_id)
+        if not reference or reference.reservation_id != reservation.id:
+            raise ValueError("Refund reference must belong to the same folio.")
+        if reference.voided_at is not None:
+            raise ValueError("Refund reference line has already been voided.")
+        refunded_total = (
+            db.session.execute(
+                sa.select(sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0))
+                .where(
+                    FolioCharge.reversed_charge_id == reference.id,
+                    FolioCharge.charge_type == "refund",
+                    FolioCharge.voided_at.is_(None),
+                )
+            )
+            .scalar_one()
+        )
+        remaining_reference_amount = abs(money(reference.total_amount)) - money(refunded_total)
+        if amount > remaining_reference_amount:
+            raise ValueError("Refund exceeds the remaining refundable amount for the referenced folio line.")
     event_type = "refund_processed" if payload.processed else "refund_pending"
     if not payload.processed:
         db.session.add(
@@ -825,6 +845,8 @@ def issue_cashier_document(
     amount = summary["charges_subtotal"] + summary["tax_subtotal"]
     if payload.document_type == "receipt":
         amount = summary["credits_total"]
+    elif payload.document_type == "invoice" and _should_use_proforma_invoice(reservation, summary):
+        amount = money(reservation.quoted_grand_total)
     document = CashierDocument(
         reservation_id=reservation.id,
         document_type=payload.document_type,
@@ -835,7 +857,11 @@ def issue_cashier_document(
         issued_at=utc_now(),
         issued_by_user_id=actor_user_id,
         printed_at=utc_now(),
-        metadata_json={"note": payload.note, "settlement_state": summary["settlement_state"]},
+        metadata_json={
+            "note": payload.note,
+            "settlement_state": summary["settlement_state"],
+            "is_proforma": payload.document_type == "invoice" and _should_use_proforma_invoice(reservation, summary),
+        },
     )
     db.session.add(document)
     db.session.flush()
@@ -871,6 +897,13 @@ def cashier_print_context(
         auto_post_room_charges=True,
         auto_post_through=auto_post_through,
     )
+    print_summary = detail["summary"]
+    print_lines = detail["lines"]
+    is_proforma_invoice = document_type == "invoice" and _should_use_proforma_invoice(reservation, detail["summary"])
+    if is_proforma_invoice:
+        preview = _proforma_invoice_preview(reservation, detail["summary"])
+        print_summary = preview["summary"]
+        print_lines = preview["lines"]
     document = None
     if issue_document:
         if actor_user_id is None:
@@ -893,7 +926,15 @@ def cashier_print_context(
             .scalars()
             .first()
         )
-    return {"detail": detail, "document": document, "printed_at": utc_now(), "document_type": document_type}
+    return {
+        "detail": detail,
+        "document": document,
+        "printed_at": utc_now(),
+        "document_type": document_type,
+        "print_summary": print_summary,
+        "print_lines": print_lines,
+        "is_proforma_invoice": is_proforma_invoice,
+    }
 
 
 def _load_reservation(reservation_id: uuid.UUID) -> Reservation | None:
@@ -947,6 +988,76 @@ def _folio_lines(reservation_id: uuid.UUID) -> list[FolioCharge]:
         .scalars()
         .all()
     )
+
+
+def _should_use_proforma_invoice(reservation: Reservation, summary: dict) -> bool:
+    return (
+        reservation.check_in_date > date.today()
+        and money(summary["charges_subtotal"]) == Decimal("0.00")
+        and money(summary["tax_subtotal"]) == Decimal("0.00")
+    )
+
+
+def _proforma_invoice_preview(reservation: Reservation, summary: dict) -> dict:
+    room_total = money(reservation.quoted_room_total)
+    extras_total = money(reservation.quoted_extras_total)
+    tax_total = money(reservation.quoted_tax_total)
+    grand_total = money(reservation.quoted_grand_total)
+    credits_total = money(summary["credits_total"])
+    balance_due = max(grand_total - credits_total, Decimal("0.00")).quantize(Decimal("0.01"))
+    refund_due = max(credits_total - grand_total, Decimal("0.00")).quantize(Decimal("0.01"))
+    if balance_due == Decimal("0.00") and refund_due == Decimal("0.00"):
+        settlement_state = "settled"
+    elif refund_due > Decimal("0.00"):
+        settlement_state = "overpaid"
+    elif credits_total == Decimal("0.00"):
+        settlement_state = "unpaid"
+    else:
+        settlement_state = "partially_paid"
+    line_items = []
+    if room_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "RM",
+                "description": "Quoted room total",
+                "total_amount": room_total,
+                "voided_at": None,
+            }
+        )
+    if extras_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "XTR",
+                "description": "Quoted extras total",
+                "total_amount": extras_total,
+                "voided_at": None,
+            }
+        )
+    if tax_total > Decimal("0.00"):
+        line_items.append(
+            {
+                "service_date": reservation.check_in_date,
+                "charge_code": "VAT",
+                "description": "Quoted tax total",
+                "total_amount": tax_total,
+                "voided_at": None,
+            }
+        )
+    return {
+        "summary": {
+            **summary,
+            "charges_subtotal": (room_total + extras_total).quantize(Decimal("0.01")),
+            "discounts_subtotal": Decimal("0.00"),
+            "tax_subtotal": tax_total.quantize(Decimal("0.01")),
+            "balance_due": balance_due,
+            "refund_due": refund_due,
+            "settlement_state": settlement_state,
+            "payment_state": settlement_state,
+        },
+        "lines": line_items,
+    }
 
 
 def _quoted_room_postings(reservation: Reservation) -> list[tuple[date, Decimal]]:

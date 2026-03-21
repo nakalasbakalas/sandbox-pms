@@ -39,6 +39,7 @@
         <select name="channel" id="compose-channel">
           <option value="email" selected>Email</option>
           <option value="sms">SMS</option>
+          <option value="line">LINE</option>
           <option value="whatsapp">WhatsApp</option>
           <option value="internal_note">Internal Note</option>
           <option value="manual_call_log">Phone Call Log</option>
@@ -91,7 +92,7 @@
   </form>
 </section>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.addEventListener('DOMContentLoaded', function() {
   var ch = document.getElementById('compose-channel');
   var rg = document.getElementById('compose-recipient-group');
@@ -100,8 +101,9 @@ document.addEventListener('DOMContentLoaded', function() {
   function update() {
     var v = ch.value;
     var isInternal = v === 'internal_note' || v === 'manual_call_log';
+    var hidesSubject = v === 'sms' || v === 'line' || v === 'whatsapp' || v === 'manual_call_log';
     rg.style.display = isInternal ? 'none' : '';
-    sg.style.display = v === 'manual_call_log' ? 'none' : '';
+    sg.style.display = hidesSubject ? 'none' : '';
     ic.checked = isInternal;
   }
   ch.addEventListener('change', update);

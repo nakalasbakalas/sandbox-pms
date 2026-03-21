@@ -9,7 +9,9 @@ import pms.services.communication_service as communication_service_module
 import pms.services.payment_integration_service as payment_integration_service_module
 from pms.extensions import db
 from pms.models import (
+    AutomationRule,
     EmailOutbox,
+    MessageTemplate,
     NotificationDelivery,
     NotificationTemplate,
     PaymentRequest,
@@ -562,6 +564,59 @@ def test_admin_communications_page_requires_permission_and_saves_settings(app_fa
         refreshed = client.get("/staff/admin/communications")
         assert refreshed.status_code == 200
         assert "Sandbox Communications" in refreshed.get_data(as_text=True)
+
+
+def test_admin_communications_page_can_create_and_update_automation_rules(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        admin = db.session.scalar(db.select(User).where(User.email == "admin@sandbox.local"))
+        template = db.session.scalar(db.select(MessageTemplate).where(MessageTemplate.channel == "email"))
+        assert admin is not None
+        assert template is not None
+
+    login_as(client, admin)
+    create_response = post_form(
+        client,
+        "/staff/admin/communications",
+        data={
+            "action": "save_automation_rule",
+            "event_type": "reservation_balance_due",
+            "channel": "email",
+            "template_id": str(template.id),
+            "delay_minutes": "90",
+            "is_active": "1",
+        },
+    )
+    assert create_response.status_code == 302
+
+    with app.app_context():
+        rule = db.session.scalar(
+            db.select(AutomationRule).where(AutomationRule.event_type == "reservation_balance_due")
+        )
+        assert rule is not None
+        assert rule.delay_minutes == 90
+        assert rule.is_active is True
+
+    update_response = post_form(
+        client,
+        "/staff/admin/communications",
+        data={
+            "action": "save_automation_rule",
+            "rule_id": str(rule.id),
+            "event_type": "reservation_balance_due",
+            "channel": "email",
+            "template_id": str(template.id),
+            "delay_minutes": "15",
+        },
+    )
+    assert update_response.status_code == 302
+
+    with app.app_context():
+        refreshed_rule = db.session.get(AutomationRule, rule.id)
+        assert refreshed_rule is not None
+        assert refreshed_rule.delay_minutes == 15
+        assert refreshed_rule.is_active is False
 
 
 def test_housekeeping_cannot_trigger_restricted_resend_actions(app_factory):

@@ -16,7 +16,7 @@ from flask import Flask, Response, abort, current_app, flash, g, jsonify, redire
 from markupsafe import Markup, escape
 
 from .activity import write_activity_log
-from .audit import write_audit_log
+from .audit import cleanup_audit_logs, write_audit_log
 from .branding import (
     absolute_public_url as branding_absolute_public_url,
     branding_settings_context,
@@ -49,8 +49,6 @@ from .constants import (
 )
 from .extensions import db, migrate
 from .front_desk_board_runtime import (
-    check_board_v2_feature_gate,
-    front_desk_board_v2_enabled,
     log_front_desk_board_metric,
 )
 from .i18n import LANGUAGE_LABELS, normalize_language, t
@@ -91,7 +89,7 @@ from .models import (
 from .normalization import normalize_phone
 from .pricing import get_setting_value, quote_reservation
 from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
-from .security import configure_app_security, current_request_id, public_error_message, request_client_ip
+from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message, request_client_ip
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
 from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
@@ -118,6 +116,7 @@ from .helpers import (
     parse_booking_extra_ids,
     parse_decimal,
     parse_optional_date,
+    permission_groups,
     parse_optional_datetime,
     parse_optional_decimal,
     parse_optional_int,
@@ -480,6 +479,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
     normalize_runtime_config(app.config, override_keys=set((test_config or {}).keys()))
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = int(app.config.get("STATIC_ASSET_MAX_AGE_SECONDS", 3600) or 0)
     configure_app_security(app)
     db.init_app(app)
     migrate.init_app(app, db)
@@ -487,7 +487,6 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     register_template_helpers(app)
     register_url_topology_hooks(app)
-    register_board_v2_feature_gates(app)
     register_auth_hooks(app)
     register_cli(app)
 
@@ -501,6 +500,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     from .routes.front_desk import front_desk_bp
     from .routes.admin import admin_bp
     from .routes.public import public_bp
+    from .routes.coupon_studio import coupon_studio_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(provider_bp)
     app.register_blueprint(housekeeping_bp)
@@ -511,6 +511,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(front_desk_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(public_bp)
+    app.register_blueprint(coupon_studio_bp)
 
     register_routes(app)
 
@@ -598,13 +599,6 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
-
-
-def register_board_v2_feature_gates(app: Flask) -> None:
-    """Register feature gate checks for v2 board endpoints."""
-    @app.before_request
-    def check_v2_board_access():
-        check_board_v2_feature_gate()
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -751,6 +745,7 @@ def register_template_helpers(app: Flask) -> None:
             "language_alternate_urls": language_alternate_urls,
             "t": lambda key, **kwargs: t(language, key, **kwargs),
             "make_lang_url": _make_lang_url,
+            "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
@@ -835,6 +830,26 @@ def register_cli(app: Flask) -> None:
             f"{result.get('cleaned_up', 0)} cleaned up."
         )
 
+    @app.cli.command("cleanup-audit-logs")
+    @click.option(
+        "--retention-days",
+        default=None,
+        type=int,
+        help="Delete audit logs older than N days. Defaults to AUDIT_LOG_RETENTION_DAYS.",
+    )
+    @click.option("--dry-run", is_flag=True, help="Report matching audit-log rows without deleting them.")
+    def cleanup_audit_logs_command(retention_days: int | None, dry_run: bool) -> None:
+        result = cleanup_audit_logs(retention_days=retention_days, dry_run=dry_run)
+        if not result["enabled"]:
+            print("Audit log cleanup skipped: AUDIT_LOG_RETENTION_DAYS is not set to a positive value.")
+            return
+        mode = "would delete" if dry_run else "deleted"
+        cutoff = result["cutoff"].isoformat() if result["cutoff"] else "n/a"
+        print(
+            f"Audit log cleanup: {result['deleted']} rows {mode}, "
+            f"retention_days={result['retention_days']}, cutoff={cutoff}"
+        )
+
     @app.cli.command("process-waitlist")
     @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
     def process_waitlist_command(max_age_days: int) -> None:
@@ -872,11 +887,32 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/health")
     def health():
+        started_at = perf_counter()
+        threshold_ms = int(app.config.get("HEALTHCHECK_SLA_MS", 1000) or 0)
         try:
             db.session.execute(sa.text("SELECT 1"))
         except Exception:  # noqa: BLE001
-            return jsonify({"status": "db_error"}), 503
-        return jsonify({"status": "ok"})
+            elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+            return jsonify(
+                {
+                    "status": "db_error",
+                    "db": "error",
+                    "response_ms": elapsed_ms,
+                    "sla_ms": threshold_ms,
+                    "within_sla": False,
+                }
+            ), 503
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        within_sla = threshold_ms <= 0 or elapsed_ms <= threshold_ms
+        return jsonify(
+            {
+                "status": "ok" if within_sla else "degraded",
+                "db": "ok",
+                "response_ms": elapsed_ms,
+                "sla_ms": threshold_ms,
+                "within_sla": within_sla,
+            }
+        )
 
     @app.route("/robots.txt")
     def robots_txt():

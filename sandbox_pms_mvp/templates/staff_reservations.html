@@ -170,10 +170,10 @@
           <a class="button tiny secondary" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a>
           {% if can('reservation.cancel') and item.status in ('tentative', 'confirmed') %}
           <form class="res-quick-cancel-form" method="post"
-                action="{{ url_for('staff_reservations.staff_reservation_cancel', reservation_id=item.id) }}">
+                action="{{ url_for('staff_reservations.staff_reservation_cancel', reservation_id=item.id) }}"
+                data-confirm-message="Cancel reservation {{ item.reservation_code }}?">
             {{ csrf_input() }}
-            <button type="submit" class="res-quick-cancel" title="Cancel reservation"
-                    onclick="return confirm('Cancel reservation {{ item.reservation_code }}?')">✕</button>
+            <button type="submit" class="res-quick-cancel" title="Cancel reservation">&times;</button>
           </form>
           {% endif %}
         </td>
@@ -202,7 +202,7 @@
   <div id="res-drawer-content"></div>
 </aside>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
   var overlay = document.getElementById('res-drawer-overlay');
   var drawer  = document.getElementById('res-drawer');

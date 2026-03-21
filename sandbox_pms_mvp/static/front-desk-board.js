@@ -8,6 +8,10 @@
   const csrfToken = root.dataset.csrfToken || "";
   const canEdit = root.dataset.canEdit === "true";
   const feedback = root.querySelector("[data-board-feedback]");
+  const searchForm = root.querySelector("[data-board-search-form]");
+  const searchInput = root.querySelector("[data-board-search-input]");
+  const surfaceContent = surface.querySelector("[data-board-surface-content]");
+  const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");
   let mutationInFlight = false;
   let selectedBlock = null;
   let moveMode = false;
@@ -15,11 +19,21 @@
   let moveTargetTrack = null;
   let resizeMode = false;
   let resizeTargetEndDate = null;
+  let boardSearchSubmitTimer = null;
+  let lastSubmittedSearchValue = searchInput ? searchInput.value.trim() : "";
 
   function setBusyState(isBusy) {
     mutationInFlight = isBusy;
     root.dataset.busy = isBusy ? "true" : "false";
-    surface.setAttribute("aria-busy", isBusy ? "true" : "false");
+    surface.setAttribute("aria-busy", isBusy || surface.classList.contains("is-loading") ? "true" : "false");
+  }
+
+  function setSurfaceLoading(isLoading) {
+    surface.classList.toggle("is-loading", isLoading);
+    if (surfaceSkeleton) {
+      surfaceSkeleton.hidden = !isLoading;
+    }
+    surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
   function setFeedback(message, tone, options) {
@@ -80,6 +94,50 @@
       selectedBlock = null;
       setFeedback("", "neutral");
     }
+  }
+
+  function clearBoardSearchTimer() {
+    if (boardSearchSubmitTimer) {
+      clearTimeout(boardSearchSubmitTimer);
+      boardSearchSubmitTimer = null;
+    }
+  }
+
+  function submitBoardSearchIfChanged() {
+    if (!searchForm || !searchInput) {
+      return;
+    }
+    clearBoardSearchTimer();
+    const normalizedQuery = searchInput.value.trim();
+    if (normalizedQuery === lastSubmittedSearchValue) {
+      return;
+    }
+    lastSubmittedSearchValue = normalizedQuery;
+    setSurfaceLoading(true);
+    if (typeof searchForm.requestSubmit === "function") {
+      searchForm.requestSubmit();
+      return;
+    }
+    searchForm.submit();
+  }
+
+  function initializeBoardSearch() {
+    if (!searchForm || !searchInput) {
+      return;
+    }
+    searchForm.addEventListener("submit", () => {
+      clearBoardSearchTimer();
+      lastSubmittedSearchValue = searchInput.value.trim();
+    });
+    searchInput.addEventListener("input", () => {
+      clearBoardSearchTimer();
+      boardSearchSubmitTimer = window.setTimeout(submitBoardSearchIfChanged, 250);
+    });
+    searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        clearBoardSearchTimer();
+      }
+    });
   }
 
   function getBlocksInTrack(track) {
@@ -295,17 +353,21 @@
   async function refreshSurface() {
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
-    surface.setAttribute("aria-busy", "true");
+    setSurfaceLoading(true);
     const response = await fetch(target.toString(), {
       headers: { Accept: "text/html" },
       credentials: "same-origin",
     });
     if (!response.ok) {
-      surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
+      setSurfaceLoading(false);
       throw new Error("Unable to refresh the planning board.");
     }
-    surface.innerHTML = await response.text();
-    surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
+    if (surfaceContent) {
+      surfaceContent.innerHTML = await response.text();
+    } else {
+      surface.innerHTML = await response.text();
+    }
+    setSurfaceLoading(false);
   }
 
   function clearTrackHighlights() {
@@ -1359,6 +1421,11 @@
   });
 
   setBusyState(false);
+  initializeBoardSearch();
+  setSurfaceLoading(true);
+  window.requestAnimationFrame(() => {
+    setSurfaceLoading(false);
+  });
 
   // ── Context menu (right-click on blocks) ──
   const ctxMenu = document.getElementById("board-context-menu");

@@ -32,6 +32,7 @@ DAILY_REPORT_TYPES = {
     "payment_due": ("folio.view", "Payment Due Report"),
     "housekeeping_performance": ("reports.view", "Housekeeping Performance Report"),
     "occupancy": ("reports.view", "Occupancy Report"),
+    "revenue_management": ("folio.view", "Revenue Management Report"),
     "channel_performance": ("reports.view", "Channel Performance Report"),
     "booking_source": ("reports.view", "Booking Source Report"),
     "no_show_cancellation": ("reports.view", "No-show & Cancellation Report"),

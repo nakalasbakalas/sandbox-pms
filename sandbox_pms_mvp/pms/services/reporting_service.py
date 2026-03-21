@@ -311,6 +311,8 @@ def build_daily_report(
         report["data"] = occupancy_by_date_range_report(date_from, date_to)
         report["data"]["today"] = occupancy_today_report(business_date)
         report["data"]["year_over_year"] = occupancy_year_over_year_report(date_from, date_to)
+    elif report_type == "revenue_management":
+        report["data"] = revenue_management_report(date_from, date_to, limit=50)
     elif report_type == "booking_source":
         report["data"] = booking_attribution_report(date_from, date_to, limit=50)
     elif report_type == "channel_performance":
@@ -1624,6 +1626,16 @@ CSV_COLUMN_MAPS: dict[str, list[tuple[str, str]]] = {
         ("occupied_rooms", "Occupied Rooms"),
         ("occupancy_percentage", "Occupancy %"),
     ],
+    "revenue_management": [
+        ("date", "Date"),
+        ("saleable_rooms", "Saleable Rooms"),
+        ("occupied_rooms", "Occupied Rooms"),
+        ("sold_nights", "Sold Nights"),
+        ("occupancy_percentage", "Occupancy %"),
+        ("room_revenue_total", "Room Revenue"),
+        ("adr", "ADR"),
+        ("revpar", "RevPAR"),
+    ],
     "channel_performance": [
         ("source_channel", "Channel"),
         ("source_label", "Label"),
@@ -1678,6 +1690,8 @@ def build_csv_rows(report_type: str, business_date: date, date_from: date, date_
         data = housekeeping_performance_report(date_from, date_to, limit=5000)
     elif report_type == "occupancy":
         data = occupancy_by_date_range_report(date_from, date_to)
+    elif report_type == "revenue_management":
+        data = revenue_management_report(date_from, date_to, limit=5000)
     elif report_type == "channel_performance":
         data = channel_performance_report(date_from, date_to, limit=5000)
     elif report_type == "booking_source":

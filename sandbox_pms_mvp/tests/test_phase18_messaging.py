@@ -11,6 +11,7 @@ Tests cover:
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -553,6 +554,90 @@ class TestChannelAdapters:
     def test_whatsapp_adapter(self, app_ctx):
         adapter = get_adapter("whatsapp")
         assert adapter.channel_name() == "whatsapp"
+
+    def test_line_adapter(self, app_ctx):
+        adapter = get_adapter("line")
+        assert adapter.channel_name() == "line"
+
+    def test_sms_adapter_posts_to_configured_webhook(self, app_ctx, guest, staff_user, monkeypatch):
+        class DummyResponse:
+            status = 202
+            headers = {"X-Request-Id": "sms-req-123"}
+
+            def read(self):
+                return b'{"accepted": true}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        captured = {}
+
+        def fake_urlopen(request_obj, timeout=15):
+            captured["url"] = request_obj.full_url
+            captured["body"] = json.loads(request_obj.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return DummyResponse()
+
+        monkeypatch.setattr("pms.services.messaging_service.urllib.request.urlopen", fake_urlopen)
+        app_ctx.config["SMS_OUTBOUND_WEBHOOK_URL"] = "https://sms.example.invalid/send"
+
+        payload = ComposePayload(
+            guest_id=str(guest.id),
+            channel="sms",
+            body_text="SMS test",
+            recipient_address="+66812345678",
+        )
+        msg = send_message(payload, actor_user_id=str(staff_user.id))
+
+        assert msg.status == "sent"
+        assert msg.provider_message_id == "sms-req-123"
+        assert captured["url"] == "https://sms.example.invalid/send"
+        assert captured["body"]["channel"] == "sms"
+        assert captured["body"]["to"] == "+66812345678"
+
+    def test_line_adapter_uses_line_push_api_when_token_configured(self, app_ctx, guest, staff_user, monkeypatch):
+        class DummyResponse:
+            status = 200
+            headers = {"X-Line-Request-Id": "line-req-456"}
+
+            def read(self):
+                return b"{}"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        captured = {}
+
+        def fake_urlopen(request_obj, timeout=15):
+            captured["url"] = request_obj.full_url
+            captured["headers"] = dict(request_obj.header_items())
+            captured["body"] = json.loads(request_obj.data.decode("utf-8"))
+            return DummyResponse()
+
+        monkeypatch.setattr("pms.services.messaging_service.urllib.request.urlopen", fake_urlopen)
+        app_ctx.config["LINE_CHANNEL_ACCESS_TOKEN"] = "line-secret-token"
+        app_ctx.config["LINE_API_BASE"] = "https://api.line.test"
+
+        payload = ComposePayload(
+            guest_id=str(guest.id),
+            channel="line",
+            body_text="LINE hello",
+            recipient_address="U1234567890",
+        )
+        msg = send_message(payload, actor_user_id=str(staff_user.id))
+
+        assert msg.status == "sent"
+        assert msg.provider_message_id == "line-req-456"
+        assert captured["url"] == "https://api.line.test/v2/bot/message/push"
+        assert captured["headers"]["Authorization"] == "Bearer line-secret-token"
+        assert captured["body"]["to"] == "U1234567890"
+        assert captured["body"]["messages"][0]["text"] == "LINE hello"
 
     def test_internal_note_adapter(self, app_ctx):
         adapter = get_adapter("internal_note")

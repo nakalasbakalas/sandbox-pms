@@ -81,6 +81,73 @@
 <section class="card">
   <div class="card-head">
     <div>
+      <p class="eyebrow">Automation rules</p>
+      <h2>Delayed-event routing</h2>
+      <p>Manage which events send guest-facing follow-up, which channel they use, and how long they wait before firing.</p>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    {% for rule in automation_rules %}
+    <form class="card inset stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="save_automation_rule">
+      <input type="hidden" name="rule_id" value="{{ rule.id }}">
+      <div class="grid four">
+        <label><span>Event type</span><input type="text" name="event_type" value="{{ rule.event_type }}" maxlength="60" required></label>
+        <label><span>Channel</span>
+          <select name="channel">
+            {% for channel in CONVERSATION_CHANNEL_TYPES %}
+            <option value="{{ channel }}" {% if rule.channel == channel %}selected{% endif %}>{{ channel.replace('_', ' ').title() }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Delay (minutes)</span><input type="number" min="0" max="10080" name="delay_minutes" value="{{ rule.delay_minutes }}" required></label>
+        <label class="toggle-row"><input type="checkbox" name="is_active" value="1" {% if rule.is_active %}checked{% endif %}> <span>Active</span></label>
+      </div>
+      <label><span>Template</span>
+        <select name="template_id">
+          <option value="">No template</option>
+          {% for template in message_templates %}
+          <option value="{{ template.id }}" {% if rule.template_id == template.id %}selected{% endif %}>{{ template.name }} ({{ template.channel }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if can('settings.edit') %}<button class="button secondary" type="submit">Save automation rule</button>{% endif %}
+    </form>
+    {% else %}
+    <p class="muted">No automation rules are configured yet.</p>
+    {% endfor %}
+    <form class="card inset stack-form" method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="save_automation_rule">
+      <div class="grid four">
+        <label><span>Event type</span><input type="text" name="event_type" maxlength="60" placeholder="reservation_created" required></label>
+        <label><span>Channel</span>
+          <select name="channel">
+            {% for channel in CONVERSATION_CHANNEL_TYPES %}
+            <option value="{{ channel }}">{{ channel.replace('_', ' ').title() }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Delay (minutes)</span><input type="number" min="0" max="10080" name="delay_minutes" value="0" required></label>
+        <label class="toggle-row"><input type="checkbox" name="is_active" value="1" checked> <span>Active</span></label>
+      </div>
+      <label><span>Template</span>
+        <select name="template_id">
+          <option value="">No template</option>
+          {% for template in message_templates %}
+          <option value="{{ template.id }}">{{ template.name }} ({{ template.channel }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if can('settings.edit') %}<button class="button" type="submit">Add automation rule</button>{% endif %}
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
       <p class="eyebrow">Delivery history</p>
       <h2>Notification log</h2>
     </div>
