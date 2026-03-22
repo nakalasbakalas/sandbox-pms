@@ -2,63 +2,101 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>{{ document.document_number if document else document_type|title }} | {{ hotel_name }}</title>
+    <title>
+      {% if is_proforma_invoice %}Proforma Invoice{% elif document_type == 'receipt' %}Receipt{% elif document_type == 'invoice' %}Invoice{% else %}Folio Statement{% endif %}
+      {{ '— ' ~ document.document_number if document else '' }} | {{ hotel_name }}
+    </title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
   </head>
   <body class="print-page">
+
+    <div class="print-toolbar no-print">
+      <button onclick="window.print()" class="button secondary">Print / Save PDF</button>
+      <button onclick="window.close()" class="button secondary">Close</button>
+    </div>
+
     <main class="print-shell">
       <section class="print-doc">
+
         <header class="print-header">
           <div>
-            <p class="eyebrow">{{ hotel_name }}</p>
-            <h1>{{ 'Proforma Invoice' if is_proforma_invoice else document_type.replace('_', ' ').title() }}</h1>
-            <p>{{ document.document_number if document else 'Draft / preview' }}</p>
+            {% if hotel_logo_url %}
+              <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }}" class="print-logo">
+            {% else %}
+              <p class="print-brand-mark">{{ hotel_brand_mark }}</p>
+            {% endif %}
+            <strong class="print-hotel-name">{{ hotel_name }}</strong>
+            {% if hotel_address %}<p>{{ hotel_address }}</p>{% endif %}
+            {% if hotel_contact_phone %}<p>{{ hotel_contact_phone }}</p>{% endif %}
+            {% if hotel_contact_email %}<p>{{ hotel_contact_email }}</p>{% endif %}
+            {% if hotel_tax_id %}<p>Tax ID: {{ hotel_tax_id }}</p>{% endif %}
           </div>
           <div class="print-meta">
-            <strong>{{ detail.reservation.reservation_code }}</strong>
-            <span>Printed {{ printed_at.strftime('%Y-%m-%d %H:%M') }}</span>
-            <span>Status {{ print_summary.settlement_state.replace('_', ' ') }}</span>
+            <h1>
+              {% if is_proforma_invoice %}Proforma Invoice
+              {% elif document_type == 'receipt' %}Receipt
+              {% elif document_type == 'invoice' %}Invoice
+              {% else %}Folio Statement
+              {% endif %}
+            </h1>
+            <strong>{{ document.document_number if document else 'Preview — not yet issued' }}</strong>
+            <span>Issued {{ (document.issued_at if document else printed_at).strftime('%d %b %Y') }}</span>
+            <span>Reservation {{ detail.reservation.reservation_code }}</span>
+            <span class="status {{ print_summary.settlement_state }}">{{ print_summary.settlement_state.replace('_', ' ') }}</span>
           </div>
         </header>
+
+        {% if is_proforma_invoice %}
+        <div class="print-notice">
+          This is a proforma invoice based on your reservation. Amounts shown are estimates and may vary.
+          Final charges will be confirmed at check-in.
+        </div>
+        {% endif %}
 
         <section class="print-grid">
           <article>
             <h2>Guest</h2>
-            <p>{{ detail.reservation.primary_guest.full_name }}</p>
-            <p>{{ detail.reservation.primary_guest.phone }}</p>
-            <p>{{ detail.reservation.primary_guest.email or '' }}</p>
+            <p><strong>{{ detail.reservation.primary_guest.full_name }}</strong></p>
+            {% if detail.reservation.primary_guest.phone %}<p>{{ detail.reservation.primary_guest.phone }}</p>{% endif %}
+            {% if detail.reservation.primary_guest.email %}<p>{{ detail.reservation.primary_guest.email }}</p>{% endif %}
           </article>
           <article>
             <h2>Stay</h2>
-            <p>Room {{ detail.reservation.assigned_room.room_number if detail.reservation.assigned_room else 'Unassigned' }}</p>
-            <p>{{ detail.reservation.check_in_date }} → {{ detail.reservation.check_out_date }}</p>
-            <p>{{ detail.reservation.room_type.code }} · {{ detail.reservation.room_type.name }}</p>
+            <p>{{ detail.reservation.check_in_date.strftime('%d %b %Y') }} — {{ detail.reservation.check_out_date.strftime('%d %b %Y') }}</p>
+            <p>{{ detail.reservation.room_type.name }}{% if detail.reservation.assigned_room %} · Room {{ detail.reservation.assigned_room.room_number }}{% endif %}</p>
+            <p>
+              {{ detail.reservation.adults }} adult{{ 's' if detail.reservation.adults != 1 }}{% if detail.reservation.children %}, {{ detail.reservation.children }} child{{ 'ren' if detail.reservation.children != 1 }}{% endif %}
+            </p>
           </article>
         </section>
 
         <section class="print-section">
-          <h2>Line items</h2>
+          <h2>{% if document_type == 'receipt' %}Charges and payments{% else %}Line items{% endif %}</h2>
           <table class="print-table">
             <thead>
               <tr>
                 <th>Date</th>
                 <th>Code</th>
                 <th>Description</th>
-                <th>Total</th>
+                <th style="text-align:right">Amount</th>
               </tr>
             </thead>
             <tbody>
               {% for line in print_lines %}
                 {% if not line.voided_at %}
               <tr>
-                <td>{{ line.service_date }}</td>
+                <td>{{ line.service_date.strftime('%d %b %Y') if line.service_date else '—' }}</td>
                 <td>{{ line.charge_code }}</td>
                 <td>{{ line.description }}</td>
-                <td>{{ currency }} {{ line.total_amount|money }}</td>
+                <td style="text-align:right">{{ currency }} {{ line.total_amount|money }}</td>
               </tr>
                 {% endif %}
               {% else %}
-              <tr><td colspan="4">{% if is_proforma_invoice %}No quoted charges are available for this proforma preview.{% else %}No folio lines posted.{% endif %}</td></tr>
+              <tr>
+                <td colspan="4" class="center muted">
+                  {% if is_proforma_invoice %}Estimated charges are shown in the totals below.{% else %}No folio lines posted.{% endif %}
+                </td>
+              </tr>
               {% endfor %}
             </tbody>
           </table>
@@ -66,14 +104,45 @@
 
         <section class="print-section">
           <div class="print-totals">
-            <div><span>Charges subtotal</span><strong>{{ currency }} {{ print_summary.charges_subtotal|money }}</strong></div>
-            <div><span>Discounts</span><strong>{{ currency }} {{ print_summary.discounts_subtotal|money }}</strong></div>
-            <div><span>Tax</span><strong>{{ currency }} {{ print_summary.tax_subtotal|money }}</strong></div>
-            <div><span>Credits</span><strong>{{ currency }} {{ print_summary.credits_total|money }}</strong></div>
-            <div><span>Balance due</span><strong>{{ currency }} {{ print_summary.balance_due|money }}</strong></div>
-            <div><span>Refund due</span><strong>{{ currency }} {{ print_summary.refund_due|money }}</strong></div>
+            {% if is_proforma_invoice %}
+              <div><span>Room and extras (estimated)</span><strong>{{ currency }} {{ print_summary.charges_subtotal|money }}</strong></div>
+              {% if print_summary.tax_subtotal %}<div><span>Tax / VAT (estimated)</span><strong>{{ currency }} {{ print_summary.tax_subtotal|money }}</strong></div>{% endif %}
+              {% if print_summary.credits_total %}<div><span>Less deposits received</span><strong>{{ currency }} {{ print_summary.credits_total|money }}</strong></div>{% endif %}
+              <div><span>Estimated balance due</span><strong>{{ currency }} {{ print_summary.balance_due|money }}</strong></div>
+              {% if print_summary.refund_due %}<div><span>Estimated refund due</span><strong>{{ currency }} {{ print_summary.refund_due|money }}</strong></div>{% endif %}
+            {% elif document_type == 'receipt' %}
+              <div><span>Charges subtotal</span><strong>{{ currency }} {{ print_summary.charges_subtotal|money }}</strong></div>
+              {% if print_summary.discounts_subtotal %}<div><span>Discounts</span><strong>{{ currency }} {{ print_summary.discounts_subtotal|money }}</strong></div>{% endif %}
+              {% if print_summary.tax_subtotal %}<div><span>Tax / VAT</span><strong>{{ currency }} {{ print_summary.tax_subtotal|money }}</strong></div>{% endif %}
+              <div><span>Total paid</span><strong>{{ currency }} {{ print_summary.credits_total|money }}</strong></div>
+              {% if print_summary.balance_due %}<div><span>Outstanding balance</span><strong>{{ currency }} {{ print_summary.balance_due|money }}</strong></div>{% endif %}
+              {% if print_summary.refund_due %}<div><span>Refund due</span><strong>{{ currency }} {{ print_summary.refund_due|money }}</strong></div>{% endif %}
+            {% else %}
+              <div><span>Charges subtotal</span><strong>{{ currency }} {{ print_summary.charges_subtotal|money }}</strong></div>
+              {% if print_summary.discounts_subtotal %}<div><span>Discounts</span><strong>{{ currency }} {{ print_summary.discounts_subtotal|money }}</strong></div>{% endif %}
+              {% if print_summary.tax_subtotal %}<div><span>Tax / VAT</span><strong>{{ currency }} {{ print_summary.tax_subtotal|money }}</strong></div>{% endif %}
+              {% if print_summary.credits_total %}<div><span>Payments received</span><strong>{{ currency }} {{ print_summary.credits_total|money }}</strong></div>{% endif %}
+              <div><span>Balance due</span><strong>{{ currency }} {{ print_summary.balance_due|money }}</strong></div>
+              {% if print_summary.refund_due %}<div><span>Refund due</span><strong>{{ currency }} {{ print_summary.refund_due|money }}</strong></div>{% endif %}
+            {% endif %}
           </div>
         </section>
+
+        <footer class="print-footer">
+          {% if document %}
+          <p>Document {{ document.document_number }} · Issued {{ document.issued_at.strftime('%d %b %Y %H:%M') }}</p>
+          {% endif %}
+          <p>{{ hotel_name }}{% if hotel_address %} · {{ hotel_address }}{% endif %}</p>
+          {% if hotel_contact_phone or hotel_contact_email %}
+          <p>
+            {% if hotel_contact_phone %}{{ hotel_contact_phone }}{% endif %}
+            {% if hotel_contact_phone and hotel_contact_email %} · {% endif %}
+            {% if hotel_contact_email %}{{ hotel_contact_email }}{% endif %}
+          </p>
+          {% endif %}
+          {% if hotel_tax_id %}<p>Tax Registration No. {{ hotel_tax_id }}</p>{% endif %}
+        </footer>
+
       </section>
     </main>
   </body>

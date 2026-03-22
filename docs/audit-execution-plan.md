@@ -610,7 +610,7 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add CSV download to all report pages (occupancy, revenue, booking attribution, cancellations) *(7 types done in Phase 2)*
 
 
-- [ ] Add PDF/print-ready folio export
+- [x] Add PDF/print-ready folio export *(print-ready invoice, receipt, folio statement, and proforma invoice templates with hotel branding, tax ID, toolbar, and document-type-specific totals; verified 2026-03-22)*
 
 
 - [x] Add channel performance report (ADR, reservations, cancellation rate by source channel) *(manager dashboard, daily report, and CSV export now share `channel_performance_report()`; verified in `test_phase12_reporting.py` and `test_phase19_dashboards.py` on 2026-03-19)*
@@ -853,7 +853,7 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add waitlist promotion/expiry automation *(FIFO promotion + 14-day expiry CLI command + Render cron)*
 
 
-- Add proforma invoice and receipt generation
+- [x] Add proforma invoice and receipt generation *(2026-03-22: enhanced `cashier_print.html` with hotel letterhead, address, phone, email, tax ID; type-specific layout for proforma invoice (disclaimer, estimated totals), invoice, receipt, and folio statement; print toolbar with Print/Save PDF + Close buttons; `hotel_tax_id` added to `inject_globals`; Print invoice and Print receipt quick-access buttons added to cashier folio header; all 15 cashier tests pass)*
 
 
 - [x] Add "pending modification" indicator on front desk workspace and board *(batch COUNT query + "Mod" badge)*
@@ -994,7 +994,7 @@ The original audit findings below are retained for traceability, but they are no
 ### Phase 4 — Admin / Reporting / Integrations (Sprint 11–15)
 
 
-**Status: IN PROGRESS (2026-03-19)**
+**Status: ✅ COMPLETE (2026-03-22)**
 
 
 **Objective:** Give management the data they need and open external connectivity.

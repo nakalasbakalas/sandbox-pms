@@ -10,6 +10,8 @@
     </div>
     <div class="actions">
       <a class="button secondary" href="{{ back_url }}">Back</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank" rel="noopener">Print invoice</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank" rel="noopener">Print receipt</a>
       <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
       <span class="status {{ detail.summary.settlement_state }}">{{ detail.summary.settlement_state.replace('_', ' ') }}</span>
       <span class="status {{ 'paid' if detail.summary.deposit_state in ['paid', 'not_required'] else 'pending' }}">{{ detail.summary.deposit_state.replace('_', ' ') }}</span>

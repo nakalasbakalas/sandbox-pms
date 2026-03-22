@@ -724,6 +724,7 @@ def register_template_helpers(app: Flask) -> None:
             "hotel_address": hotel_address,
             "hotel_check_in_time": hotel_check_in_time,
             "hotel_check_out_time": hotel_check_out_time,
+            "hotel_tax_id": branding["tax_id"],
             "hotel_accent_color": branding["accent_color"],
             "hotel_accent_color_soft": branding["accent_color_soft"],
             "hotel_accent_color_dark": branding["accent_color_dark"],
