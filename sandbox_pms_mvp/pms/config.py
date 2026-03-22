@@ -171,6 +171,8 @@ class Config:
     SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", APP_ENV).strip() or APP_ENV
     SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", "").strip()
     SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0"))
+    REDIS_URL = os.getenv("REDIS_URL", "")
+    ID_SCANNER_PROVIDER = os.getenv("ID_SCANNER_PROVIDER", "manual")
     BACKUP_RETENTION_DAYS = int(os.getenv("BACKUP_RETENTION_DAYS", "14"))
     BACKUP_ENCRYPTION_REQUIRED = os.getenv("BACKUP_ENCRYPTION_REQUIRED", "1" if APP_ENV == "production" else "0") == "1"
     RESTORE_VERIFY_COMMAND = os.getenv("RESTORE_VERIFY_COMMAND", "")

@@ -1070,6 +1070,28 @@ def _extract_from_key_value_text(text: str) -> dict[str, Any] | None:
 
 
 def _extract_from_mrz(text: str) -> dict[str, Any] | None:
+    # Try the pluggable scanner adapter first (if configured).
+    try:
+        from .id_scanner_adapter import get_scanner_adapter
+
+        adapter_result = get_scanner_adapter().parse_mrz(text)
+        if adapter_result and adapter_result.get("status") == "parsed":
+            # Map adapter output to the expected internal format.
+            return {
+                "document_type": "passport",
+                "first_name": adapter_result.get("given_names", ""),
+                "last_name": adapter_result.get("surname", ""),
+                "full_name": f"{adapter_result.get('given_names', '')} {adapter_result.get('surname', '')}".strip(),
+                "document_number": adapter_result.get("document_number", ""),
+                "nationality": adapter_result.get("nationality", ""),
+                "date_of_birth": _parse_mrz_date(adapter_result.get("date_of_birth_raw", ""), future_bias=False),
+                "expiry_date": None,
+                "source_format": "mrz",
+            }
+    except Exception:  # noqa: BLE001
+        pass  # Fall through to built-in parser
+
+    # Built-in MRZ parser (fallback).
     lines = [line.strip().replace(" ", "") for line in text.splitlines() if line.strip()]
     if len(lines) < 2:
         return None

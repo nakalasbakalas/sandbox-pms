@@ -453,11 +453,30 @@ class GuestNote(AuditMixin, SoftDeleteMixin, db.Model):
     )
 
 
+class Property(AuditMixin, db.Model):
+    __tablename__ = "properties"
+
+    name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
+    code: Mapped[str] = mapped_column(sa.String(20), unique=True, nullable=False)
+    timezone: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="Asia/Bangkok")
+    currency: Mapped[str] = mapped_column(sa.String(10), nullable=False, default="THB")
+    address: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    settings_json: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    __table_args__ = (
+        Index("ix_properties_is_active", "is_active"),
+    )
+
+
 class RoomType(AuditMixin, db.Model):
     __tablename__ = "room_types"
 
     code: Mapped[str] = mapped_column(sa.String(20), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True
+    )
     summary: Mapped[str | None] = mapped_column(sa.String(280), nullable=True)
     description: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     bed_details: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
@@ -483,6 +502,9 @@ class Room(AuditMixin, db.Model):
     room_number: Mapped[str] = mapped_column(sa.String(20), nullable=False, unique=True)
     room_type_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("room_types.id", ondelete="RESTRICT"), nullable=False
+    )
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True
     )
     floor_number: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
@@ -667,6 +689,9 @@ class Reservation(AuditMixin, db.Model):
     reservation_code: Mapped[str] = mapped_column(sa.String(20), nullable=False, unique=True)
     primary_guest_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("guests.id", ondelete="RESTRICT"), nullable=False
+    )
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True
     )
     room_type_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("room_types.id", ondelete="RESTRICT"), nullable=False

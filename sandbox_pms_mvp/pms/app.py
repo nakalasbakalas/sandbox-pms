@@ -529,6 +529,26 @@ def create_app(test_config: dict | None = None) -> Flask:
     return app
 
 
+def _resolve_current_property() -> None:
+    """Set ``g.current_property`` from request header, session, or default.
+
+    Resolution order:
+    1. ``X-Property-Code`` request header (API / multi-property clients)
+    2. ``property_code`` query parameter (convenience for dev/testing)
+    3. First active property in the database (single-property fallback)
+    """
+    from .services.property_service import get_current_property, get_property_by_code
+
+    code = request.headers.get("X-Property-Code") or request.args.get("property_code")
+    if code:
+        prop = get_property_by_code(code.strip().upper())
+        if prop and prop.is_active:
+            g.current_property = prop
+            return
+    # Fallback: let property_service pick the default lazily
+    g.current_property = get_current_property()
+
+
 def register_auth_hooks(app: Flask) -> None:
     @app.before_request
     def load_authenticated_staff_session() -> None:
@@ -539,6 +559,10 @@ def register_auth_hooks(app: Flask) -> None:
         g.auth_cookie_value = None
         g.clear_auth_cookie = False
         g.booking_attribution = {}
+        g.current_property = None
+
+        # Resolve current property from header, query param, or default.
+        _resolve_current_property()
 
         capture_public_booking_attribution()
 

@@ -501,25 +501,27 @@ def record_auth_attempt(identifier: str, user: User | None, ip_address: str | No
             failure_reason=failure_reason,
         )
     )
+    # Keep the rate limiter sliding window in sync with failures.
+    if not success:
+        from .rate_limiter import get_rate_limiter
+
+        window_seconds = current_app.config["LOGIN_LOCK_WINDOW_MINUTES"] * 60
+        if ip_address:
+            get_rate_limiter().record_event(f"auth:ip:{ip_address}", window_seconds)
+        if failure_reason == "mfa_failed" and user:
+            get_rate_limiter().record_event(f"auth:mfa:{user.id}", window_seconds)
 
 
 def ip_is_rate_limited(ip_address: str | None) -> bool:
     if not ip_address:
         return False
-    window_start = utc_now() - timedelta(minutes=current_app.config["LOGIN_LOCK_WINDOW_MINUTES"])
-    failure_count = (
-        db.session.execute(
-            sa.select(sa.func.count())
-            .select_from(AuthAttempt)
-            .where(
-                AuthAttempt.ip_address == ip_address,
-                AuthAttempt.success.is_(False),
-                AuthAttempt.attempted_at >= window_start,
-            )
-        )
-        .scalar_one()
-    )
-    return failure_count >= current_app.config["LOGIN_LOCK_THRESHOLD"] * 3
+    from .rate_limiter import get_rate_limiter
+
+    window_seconds = current_app.config["LOGIN_LOCK_WINDOW_MINUTES"] * 60
+    limit = current_app.config["LOGIN_LOCK_THRESHOLD"] * 3
+    key = f"auth:ip:{ip_address}"
+    is_limited, _remaining, _retry_after = get_rate_limiter().check_rate_limit(key, limit, window_seconds)
+    return is_limited
 
 
 def create_totp_factor(user: User) -> tuple[MfaFactor, str]:
@@ -924,21 +926,13 @@ def _token_hash(value: str) -> str:
 
 
 def mfa_is_rate_limited(user: User) -> bool:
-    window_start = utc_now() - timedelta(minutes=current_app.config["LOGIN_LOCK_WINDOW_MINUTES"])
-    failure_count = (
-        db.session.execute(
-            sa.select(sa.func.count())
-            .select_from(AuthAttempt)
-            .where(
-                AuthAttempt.user_id == user.id,
-                AuthAttempt.success.is_(False),
-                AuthAttempt.failure_reason == "mfa_failed",
-                AuthAttempt.attempted_at >= window_start,
-            )
-        )
-        .scalar_one()
-    )
-    return failure_count >= current_app.config["LOGIN_LOCK_THRESHOLD"]
+    from .rate_limiter import get_rate_limiter
+
+    window_seconds = current_app.config["LOGIN_LOCK_WINDOW_MINUTES"] * 60
+    limit = current_app.config["LOGIN_LOCK_THRESHOLD"]
+    key = f"auth:mfa:{user.id}"
+    is_limited, _remaining, _retry_after = get_rate_limiter().check_rate_limit(key, limit, window_seconds)
+    return is_limited
 
 
 def _coerce_utc(value: datetime | None) -> datetime:

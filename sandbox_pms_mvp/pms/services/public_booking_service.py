@@ -368,36 +368,15 @@ def search_public_availability(payload: PublicSearchPayload) -> list[dict]:
 def _check_public_rate_limit(request_ip: str | None, *, limit: int, mode: str = "booking") -> None:
     if not request_ip:
         return
-    window_start = utc_now() - timedelta(minutes=current_app.config["PUBLIC_BOOKING_RATE_LIMIT_WINDOW_MINUTES"])
-    if mode == "booking":
-        count = (
-            db.session.execute(
-                sa.select(sa.func.count())
-                .select_from(ReservationHold)
-                .where(ReservationHold.request_ip == request_ip, ReservationHold.created_at >= window_start)
-            )
-            .scalar_one()
-        )
-    else:
-        cancellation_count = (
-            db.session.execute(
-                sa.select(sa.func.count())
-                .select_from(CancellationRequest)
-                .where(CancellationRequest.request_ip == request_ip, CancellationRequest.requested_at >= window_start)
-            )
-            .scalar_one()
-        )
-        modification_count = (
-            db.session.execute(
-                sa.select(sa.func.count())
-                .select_from(ModificationRequest)
-                .where(ModificationRequest.request_ip == request_ip, ModificationRequest.requested_at >= window_start)
-            )
-            .scalar_one()
-        )
-        count = cancellation_count + modification_count
-    if count >= limit:
+    from .rate_limiter import get_rate_limiter
+
+    window_seconds = current_app.config["PUBLIC_BOOKING_RATE_LIMIT_WINDOW_MINUTES"] * 60
+    key = f"public:{mode}:{request_ip}"
+    is_limited, _remaining, _retry_after = get_rate_limiter().check_rate_limit(key, limit, window_seconds)
+    if is_limited:
         raise ValueError("Too many booking attempts. Please wait a moment and try again.")
+    # Record the event so the sliding window advances.
+    get_rate_limiter().record_event(key, window_seconds)
 
 
 def create_reservation_hold(payload: HoldRequestPayload) -> ReservationHold:

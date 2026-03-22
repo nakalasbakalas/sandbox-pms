@@ -7,6 +7,7 @@ from flask_migrate import upgrade
 
 from pms.app import create_app
 from pms.seeds import seed_all
+from pms.services.rate_limiter import reset_rate_limiter
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ MIGRATIONS_DIR = PROJECT_ROOT / "migrations"
 @pytest.fixture()
 def app_factory(tmp_path):
     def factory(*, seed: bool = False, config: dict | None = None):
+        reset_rate_limiter()
         db_path = tmp_path / ("seeded.db" if seed else "empty.db")
         app_config = {
             "TESTING": True,
