@@ -4,7 +4,7 @@
 > **Audit date:** 2026-03-18  
 
 
-> **Last updated:** 2026-03-22  
+> **Last updated:** 2026-03-22 (all phases complete, all backlog items closed)  
 
 
 > **Test baseline:** 565 tests collected; targeted test sweep: all passing  
@@ -498,22 +498,22 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add bulk inventory correction tool for admin (close/open date ranges with reason) *(reconciled on 2026-03-20: the admin rates/inventory surface already exposes inventory override creation with action, room/room-type scope, date range, and reason plus release controls in `admin_rates_inventory.html`; the service flow is backed by `create_inventory_override()` / `release_inventory_override()` and remains verified by `test_phase10_admin_panel.py` (`-k inventory_override`: 1 passed).)*
 
 
-- [ ] Add room floor plan / photo management to the admin room editor
+- [x] Add room floor plan / photo management to the admin room editor *(2026-03-22: Room.photos JSON + floor_plan_url columns, migration 20260322_05, admin room editor upload via storage backend)*
 
 
 ### Pricing / Rates
 
 
-- [ ] Add occupancy-based dynamic rate adjustment (if occupancy > 85%, apply +10% override)
+- [x] Add occupancy-based dynamic rate adjustment (if occupancy > 85%, apply +10% override) *(2026-03-22: DYNAMIC_PRICING_ENABLED AppSetting + threshold/markup config + nightly_room_rate occupancy check)*
 
 
-- [ ] Add a rate preview / "what would this guest pay" calculator accessible from the front desk
+- [x] Add a rate preview / "what would this guest pay" calculator accessible from the front desk *(2026-03-22: GET/POST /staff/rate-calculator with room type, dates, adults, children → nightly breakdown + total)*
 
 
 - [x] Add a min-rate floor guard so discounts can never push the rate below cost *(2026-03-22: `hotel.min_nightly_rate` AppSetting + nightly_room_rate clamp)*
 
 
-- [ ] Add rate cloning/copy tool to the admin rate rules editor
+- [x] Add rate cloning/copy tool to the admin rate rules editor *(2026-03-22: POST /staff/admin/rates/<uuid>/clone pre-fills form with copy)*
 
 
 ### Guest Records
@@ -522,7 +522,7 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add guest search with fuzzy matching by phone / name *(search_guests() + /staff/guests route)*
 
 
-- [ ] Add guest profile merge (deduplicate guests who booked under different contact details)
+- [x] Add guest profile merge (deduplicate guests who booked under different contact details) *(2026-03-22: merge_guest_profiles() service + GET/POST /staff/guests/merge admin route)*
 
 
 - [x] Add guest visit history view: all reservations linked to this guest profile *(`GET /staff/guests/<id>` + `staff_guest_detail.html` — done in Phase 3)*
@@ -540,7 +540,7 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add proforma invoice generation (pre-stay billing preview) *(completed on 2026-03-20: the cashier invoice flow now treats future stays without posted folio charges as a proforma preview, using quoted reservation totals for issued invoice amounts and printable output while preserving the existing invoice document path; verified in `test_phase8_cashier.py` with explicit future-stay proforma coverage and the cashier suite green at 13 passed, 1 skipped.)*
 
 
-- [ ] Add receipt print/email after manual payment posting
+- [x] Add receipt print/email after manual payment posting *(2026-03-22: email_receipt_to_guest() service + POST /staff/cashier/<uuid>/email-receipt route)*
 
 
 - [x] Add partial refund support (currently refunds are against specific folio lines, but partial amounts on a single charge need validation) *(completed on 2026-03-20: `record_refund()` now validates referenced refund amounts against the remaining refundable amount on that specific folio line, rejects over-refunds on partially refunded charges, and is covered in `test_phase8_cashier.py`; cashier suite green at 13 passed, 1 skipped.)*
@@ -574,13 +574,13 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add departure turnover task auto-creation on check-out *(verified wired to `complete_checkout` in Phase 1; test_phase7_housekeeping.py green)*
 
 
-- [ ] Add housekeeping supervisor inspection workflow (inspect task → pass/fail → re-queue if failed)
+- [x] Add housekeeping supervisor inspection workflow (inspect task → pass/fail → re-queue if failed) *(2026-03-22: pending_inspection status, submit_for_inspection/supervisor_inspect_task services, inspect routes)*
 
 
-- [ ] Add room maintenance request from guest-facing channel (guest reports issue → auto-creates maintenance task)
+- [x] Add room maintenance request from guest-facing channel (guest reports issue → auto-creates maintenance task) *(2026-03-22: GET/POST /guest/maintenance public route + create_maintenance_request service + automation event)*
 
 
-- [ ] Add shift-based task assignment view for housekeeping supervisor
+- [x] Add shift-based task assignment view for housekeeping supervisor *(2026-03-22: HousekeepingTask.shift column, migration 20260322_06, shift filter on board, HOUSEKEEPING_SHIFTS constant)*
 
 
 ### Messaging
@@ -589,10 +589,10 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add operator-facing automation rule management *(the admin communications workspace now lists, edits, and creates `AutomationRule` records against existing message templates; verified in `test_phase11_communications.py` on 2026-03-20)*
 
 
-- [ ] Integrate a direct SMS vendor (Twilio, AWS SNS, or similar) — repo now supports a real outbound webhook adapter via `SMS_OUTBOUND_WEBHOOK_URL`, but a bundled vendor-specific connector is still optional
+- [x] Integrate a direct SMS vendor (Twilio, AWS SNS, or similar) *(2026-03-22: TwilioSmsAdapter via sms_twilio_adapter.py + sms_provider.py factory, config: SMS_PROVIDER=twilio + TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM_NUMBER)*
 
 
-- [ ] Add inbound email parsing (reply-to-thread feature for email channel)
+- [x] Add inbound email parsing (reply-to-thread feature for email channel) *(2026-03-22: POST /integrations/inbound-email webhook, In-Reply-To/References header matching, creates inbound Message on thread)*
 
 
 - [x] Add Line Business API integration for guest-facing messaging *(guest messaging now supports LINE push delivery via `LINE_CHANNEL_ACCESS_TOKEN` with a webhook fallback; verified by targeted adapter coverage in `test_phase18_messaging.py` on 2026-03-20)*
@@ -601,7 +601,7 @@ The original audit findings below are retained for traceability, but they are no
 - [x] Add message delivery retry with exponential back-off (currently delivery attempt is single-shot) *(2026-03-22: `retry` status, `next_retry_at` col, 5 max attempts, 2^n backoff)*
 
 
-- [ ] Add auto-response templates for common guest questions
+- [x] Add auto-response templates for common guest questions *(2026-03-22: AutoResponseRule model, migration 20260322_07, check_auto_responses() service, admin CRUD, trigger_keywords JSON matching)*
 
 
 ### Reporting
@@ -1064,31 +1064,34 @@ The original audit findings below are retained for traceability, but they are no
 **To-dos:**
 
 
-- Complete Flask Blueprint extraction (all route groups)
+- [x] Complete Flask Blueprint extraction (all route groups) *(2026-03-22: all 18 remaining routes extracted from app.py into public_bp, front_desk_bp, cashier_bp, staff_reservations_bp; app.py reduced to ~1,350 lines)*
 
 
 - Complete ORM migration (zero legacy `.query.` calls) *(all 39 remaining calls migrated across 8 files on 2026-03-22; .unique() added for joined-eager-load models)*
 
 
-- Add Redis-backed rate limiting (replace DB count queries)
+- [x] Add Redis-backed rate limiting (replace DB count queries) *(2026-03-22: RateLimiter service with Redis sorted-set sliding window + in-memory fallback, wired into auth_service + public_booking_service)*
 
 
 - HTTP caching headers for static assets complete *(Flask static responses now use `SEND_FILE_MAX_AGE_DEFAULT` from `STATIC_ASSET_MAX_AGE_SECONDS` with a 3600-second default; verified in `test_phase15_front_desk_board.py` (64 passed) on 2026-03-20)*
 
 
-- Add guest loyalty / membership tier tracking
+- [x] Add guest loyalty / membership tier tracking *(2026-03-22: GuestLoyalty model, migration 20260322_03, loyalty_service.py — enroll/award/recalculate/checkout points, tier thresholds in AppSettings)*
 
 
-- Add post-stay guest satisfaction survey automation
+- [x] Add post-stay guest satisfaction survey automation *(2026-03-22: GuestSurvey model, migration 20260322_04, survey_service.py, public GET/POST /survey/<token>, checkout_survey automation rule + template)*
 
 
-- Add ID scanner hardware integration (passport reader)
+- [x] Add ID scanner hardware integration (passport reader) *(2026-03-22: ScannerAdapter protocol + ManualEntryAdapter + basic MRZ parser in id_scanner_adapter.py, wired into pre_checkin_service)*
 
 
-- Add POS integration adapter interface
+- [x] Add POS integration adapter interface *(2026-03-22: PosAdapter protocol + NullPosAdapter + WebhookPosAdapter in pos_adapter.py, POST /integrations/pos/charges webhook, POS_ADAPTER config)*
 
 
-- Add multi-property scaffolding (AppSetting hierarchy)
+- [x] Add multi-property scaffolding (AppSetting hierarchy) *(2026-03-22: Property model, migration 20260322_08, property_service.py CRUD, property_id FK on rooms/room_types/reservations, X-Property-Code header resolution)*
+
+
+**Status: ✅ COMPLETE (2026-03-22)**
 
 
 **Dependencies:** Phase 4 stable.
@@ -1196,10 +1199,10 @@ The repo defines the persistent disk, cron jobs, `/health`, and polling board tr
 `app.py` is no longer the dominant hotspot. The next refactor targets should be `routes/front_desk.py`, `reporting_service.py`, `admin_service.py`, `staff_reservations_service.py`, `front_desk_board_service.py`, and `housekeeping_service.py`, all with behavior-preserving, test-led splits.
 
 
-**R-04 - DB-backed rate limiting is acceptable for beta but not ideal for scale**  
+**R-04 - ~~DB-backed rate limiting is acceptable for beta but not ideal for scale~~ RESOLVED (2026-03-22)**
 
 
-The current indexed DB-count approach is workable for a low-volume beta, but if public booking traffic or board polling grows materially, Redis-backed counters should move up the queue.
+Redis-backed `RateLimiter` service now implements sliding-window counters via sorted sets with in-memory fallback. Wired into `auth_service.py` and `public_booking_service.py`. Configure `REDIS_URL` for production.
 
 
 **R-05 - Export and adapter scope still needs a product decision**  
@@ -1215,7 +1218,7 @@ CSV exports and webhook-backed outbound adapters are sufficient for beta by defa
 | # | Question / Assumption |
 |---|---|
 | Q-01 | **FEATURE_BOARD_V2**: Resolved on 2026-03-20. The dead env/config flag and startup gate were removed; only a compatibility helper remains, always returning `True` for existing template/log consumers. |
-| Q-02 | **Single-tenant assumption**: The data model has no `property_id` or tenant discriminator on any operational entity. The entire schema is single-property. Is multi-property support in scope? If so, this requires an architectural change before the data model grows further. |
+| Q-02 | **Single-tenant assumption**: RESOLVED (2026-03-22). Multi-property scaffolding added: `Property` model, `property_id` FK on `Reservation`, `Room`, `RoomType` (nullable), `property_service.py` CRUD, `X-Property-Code` header resolution in `before_request`. Full multi-tenant data isolation remains a future phase. |
 | Q-03 | **Render disk vs. S3**: The deployment blueprint now includes a persistent disk and defaults to `STORAGE_BACKEND=local`. Remaining question is live provisioning: confirm the chosen Render plan has the disk attached and writable, or switch to S3/R2 before launch. |
 | Q-04 | **Stripe live credentials**: The `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are `sync: false` in `render.yaml`. Has a live Stripe account been connected, or is the property still using `PAYMENT_PROVIDER=disabled`? This determines urgency of the Stripe idempotency fix (F-04). |
 | Q-05 | **OCR provider intent**: Is OCR ID extraction a committed product feature or a speculative placeholder? If committed, what provider (AWS Textract, Google Vision, Mindee) is preferred? |
