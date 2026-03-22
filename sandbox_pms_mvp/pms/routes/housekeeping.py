@@ -41,11 +41,15 @@ from ..services.housekeeping_service import (
     set_blocked_state,
     set_maintenance_flag,
     start_housekeeping_task,
+    submit_for_inspection,
+    supervisor_inspect_task,
     update_housekeeping_status,
 )
 from ..services.room_readiness_service import is_room_assignable, room_readiness_board
 
 housekeeping_bp = Blueprint("housekeeping", __name__)
+
+HOUSEKEEPING_SHIFTS = ["morning", "afternoon", "evening", "night"]
 
 
 def _housekeeping_filter_query(
@@ -111,7 +115,7 @@ def staff_housekeeping():
         mobile=filters.mobile,
     )
     tomorrow_board = list_housekeeping_board(tomorrow_filters, actor_user=user)
-    tasks = list_housekeeping_tasks(TaskListFilters(business_date=target_date))
+    tasks = list_housekeeping_tasks(TaskListFilters(business_date=target_date, shift=request.args.get("shift", "")))
     return render_template(
         "housekeeping_board.html",
         board=board,
@@ -119,6 +123,8 @@ def staff_housekeeping():
         today_date=date.today(),
         tasks=tasks,
         filters=filters,
+        shift_filter=request.args.get("shift", ""),
+        housekeeping_shifts=HOUSEKEEPING_SHIFTS,
         room_types=(
             db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc()))
             .scalars()
@@ -307,6 +313,7 @@ def staff_housekeeping_task_create():
                 assigned_to_user_id=UUID(assigned_to) if assigned_to else None,
                 reservation_id=UUID(request.form["reservation_id"]) if request.form.get("reservation_id") else None,
                 due_at=datetime.fromisoformat(due_at_raw) if due_at_raw else None,
+                shift=request.form.get("shift") or None,
             ),
             actor_user_id=user.id,
         )
@@ -356,6 +363,32 @@ def staff_housekeeping_task_inspect(task_id):
     try:
         inspect_housekeeping_task(UUID(task_id), actor_user_id=user.id, notes=request.form.get("notes"))
         flash("Inspection passed — room ready for assignment.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+
+
+@housekeeping_bp.route("/staff/housekeeping/tasks/<uuid:task_id>/submit-inspection", methods=["POST"])
+def staff_housekeeping_task_submit_inspection(task_id):
+    user = require_permission("housekeeping.task_manage")
+    try:
+        submit_for_inspection(task_id, actor_user_id=user.id)
+        flash("Task submitted for supervisor inspection.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+
+
+@housekeeping_bp.route("/staff/housekeeping/tasks/<uuid:task_id>/supervisor-inspect", methods=["POST"])
+def staff_housekeeping_task_supervisor_inspect(task_id):
+    user = require_permission("housekeeping.task_manage")
+    try:
+        result = request.form.get("result", "pass")
+        supervisor_inspect_task(task_id, result=result, notes=request.form.get("notes"), actor_user_id=user.id)
+        if result == "pass":
+            flash("Inspection passed — room ready for assignment.", "success")
+        else:
+            flash("Inspection failed — task reset to in-progress.", "warning")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
     return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))

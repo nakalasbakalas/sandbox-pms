@@ -50,6 +50,7 @@ from ..services.pre_checkin_service import (
     validate_token_access,
 )
 from ..services.messaging_service import fire_automation_event
+from ..services.housekeeping_service import create_maintenance_request
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +634,41 @@ def sitemap_xml():
     body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
     body.append("</urlset>")
     return Response("\n".join(body), mimetype="application/xml")
+
+
+# -- Guest Maintenance Request: public routes ---------------------------------
+
+
+@public_bp.route("/guest/maintenance", methods=["GET", "POST"])
+def guest_maintenance_request():
+    form_defaults = {
+        "room_number": request.form.get("room_number", ""),
+        "description": request.form.get("description", ""),
+        "guest_name": request.form.get("guest_name", ""),
+        "guest_contact": request.form.get("guest_contact", ""),
+        "reservation_code": request.form.get("reservation_code", ""),
+    }
+    submitted = False
+    if request.method == "POST":
+        try:
+            create_maintenance_request(
+                room_number=request.form.get("room_number", ""),
+                description=request.form.get("description", ""),
+                guest_name=request.form.get("guest_name", ""),
+                guest_contact=request.form.get("guest_contact", ""),
+                reservation_code=request.form.get("reservation_code") or None,
+            )
+            submitted = True
+            flash("Your maintenance request has been submitted. Our team will address it shortly.", "success")
+        except ValueError as exc:
+            flash(str(exc), "error")
+        except Exception as exc:  # noqa: BLE001
+            flash(public_error_message(exc), "error")
+    return render_template(
+        "guest_maintenance_request.html",
+        form_defaults=form_defaults,
+        submitted=submitted,
+    )
 
 
 # -- Guest Satisfaction Survey: public routes ---------------------------------

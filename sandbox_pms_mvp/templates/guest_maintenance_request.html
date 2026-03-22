@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}Report a Room Issue | {{ hotel_name }}{% endblock %}
+{% block body_class %}public-site{% endblock %}
+{% block content %}
+<div class="public-page" style="max-width:640px;margin:0 auto;padding:1.5rem 1rem;">
+
+  <div class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h1 style="font-size:1.5rem;margin-bottom:0.5rem;">Report a Room Issue</h1>
+    <p class="muted" style="margin-bottom:0;">
+      Let us know about any maintenance issues in your room and our team will address them promptly.
+    </p>
+  </div>
+
+  {% if submitted %}
+  <div class="card" style="padding:2rem;text-align:center;">
+    <div style="font-size:3rem;margin-bottom:1rem;">&#9989;</div>
+    <h2 style="font-size:1.25rem;margin-bottom:0.75rem;">Request Submitted</h2>
+    <p style="margin-bottom:1rem;color:#555;">
+      Thank you for letting us know. Our maintenance team has been notified and will address your issue as soon as possible.
+    </p>
+    <a href="{{ url_for('public.guest_maintenance_request') }}" class="btn btn-primary" style="display:inline-block;padding:0.625rem 1.5rem;">Submit Another Request</a>
+  </div>
+  {% else %}
+
+  <form method="POST" action="{{ url_for('public.guest_maintenance_request') }}">
+    {{ csrf_input() }}
+
+    <div class="card" style="padding:1.5rem;margin-bottom:1rem;">
+      <div style="margin-bottom:1rem;">
+        <label for="room_number" style="font-weight:600;display:block;margin-bottom:0.25rem;">Room Number <span style="color:#c00;">*</span></label>
+        <input type="text" id="room_number" name="room_number" value="{{ form_defaults.room_number }}"
+               required maxlength="20" placeholder="e.g. 201"
+               style="width:100%;padding:0.625rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;">
+      </div>
+
+      <div style="margin-bottom:1rem;">
+        <label for="description" style="font-weight:600;display:block;margin-bottom:0.25rem;">Issue Description <span style="color:#c00;">*</span></label>
+        <textarea id="description" name="description" rows="4" required maxlength="2000"
+                  placeholder="Please describe the issue you are experiencing..."
+                  style="width:100%;padding:0.625rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;resize:vertical;">{{ form_defaults.description }}</textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+        <div>
+          <label for="guest_name" style="font-weight:600;display:block;margin-bottom:0.25rem;">Your Name <span style="color:#c00;">*</span></label>
+          <input type="text" id="guest_name" name="guest_name" value="{{ form_defaults.guest_name }}"
+                 required maxlength="120" placeholder="Full name"
+                 style="width:100%;padding:0.625rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;">
+        </div>
+        <div>
+          <label for="guest_contact" style="font-weight:600;display:block;margin-bottom:0.25rem;">Contact <span style="color:#c00;">*</span></label>
+          <input type="text" id="guest_contact" name="guest_contact" value="{{ form_defaults.guest_contact }}"
+                 required maxlength="120" placeholder="Phone or email"
+                 style="width:100%;padding:0.625rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;">
+        </div>
+      </div>
+
+      <div>
+        <label for="reservation_code" style="font-weight:600;display:block;margin-bottom:0.25rem;">Booking Reference <span class="muted" style="font-weight:normal;">(optional)</span></label>
+        <input type="text" id="reservation_code" name="reservation_code" value="{{ form_defaults.reservation_code }}"
+               maxlength="40" placeholder="e.g. SBX-240001"
+               style="width:100%;padding:0.625rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;">
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="width:100%;padding:0.875rem;font-size:1rem;">
+      Submit Maintenance Request
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

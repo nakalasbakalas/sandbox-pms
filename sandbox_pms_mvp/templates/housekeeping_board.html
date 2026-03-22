@@ -35,6 +35,7 @@
     <label><span>Room Type</span><select name="room_type_id"><option value="">All</option>{% for rt in room_types %}<option value="{{ rt.id }}" {% if filters.room_type_id == rt.id|string %}selected{% endif %}>{{ rt.code }}</option>{% endfor %}</select></label>
     <label><span>Arrival</span><select name="arrival_today"><option value="">Any</option><option value="1" {% if filters.arrival_today == '1' %}selected{% endif %}>Yes</option></select></label>
     <label><span>Departure</span><select name="departure_today"><option value="">Any</option><option value="1" {% if filters.departure_today == '1' %}selected{% endif %}>Yes</option></select></label>
+    <label><span>Shift</span><select name="shift"><option value="">All</option>{% for sh in housekeeping_shifts %}<option value="{{ sh }}" {% if shift_filter == sh %}selected{% endif %}>{{ sh|capitalize }}</option>{% endfor %}</select></label>
     <div class="hk-filter-actions">
       <button class="button tiny" type="submit">Apply</button>
       <a class="button tiny secondary" href="{{ url_for('housekeeping.staff_housekeeping', view='mobile' if filters.mobile else None) }}">Reset</a>
@@ -141,10 +142,27 @@
     <div class="list-row no-link">
       <div>
         <strong>{{ task.task_type.replace('_', ' ') }}</strong>
-        <p>Room {{ task.room.room_number if task.room else '—' }} · {{ task.status.replace('_', ' ') }}</p>
+        <p>Room {{ task.room.room_number if task.room else '—' }} · {{ task.status.replace('_', ' ') }}{% if task.assigned_to_user %} · {{ task.assigned_to_user.full_name }}{% endif %}{% if task.shift %} · <span class="pill subtle" style="font-size:9px;">{{ task.shift }}</span>{% endif %}</p>
       </div>
-      <div class="right-stack">
+      <div class="right-stack" style="display:flex; gap:4px; align-items:center;">
         <span class="status {{ task.priority }}">{{ task.priority }}</span>
+        {% if can('housekeeping.task_manage') %}
+          {% if task.status == 'completed' %}
+          <form class="hk-inline-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_task_submit_inspection', task_id=task.id) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+            <button class="button tiny secondary" type="submit" title="Submit for supervisor inspection">Submit insp.</button>
+          </form>
+          {% endif %}
+          {% if task.status in ['completed', 'pending_inspection'] %}
+          <form class="hk-inline-form" method="post" action="{{ url_for('housekeeping.staff_housekeeping_task_supervisor_inspect', task_id=task.id) }}">
+            {{ csrf_input() }}
+            <input type="hidden" name="back_url" value="{{ request.full_path.rstrip('?') }}">
+            <button class="button tiny" type="submit" name="result" value="pass" title="Pass inspection">Pass</button>
+            <button class="button tiny secondary" type="submit" name="result" value="fail" title="Fail inspection">Fail</button>
+          </form>
+          {% endif %}
+        {% endif %}
       </div>
     </div>
     {% else %}

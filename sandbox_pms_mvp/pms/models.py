@@ -491,6 +491,8 @@ class Room(AuditMixin, db.Model):
         sa.String(40), nullable=False, default="available"
     )
     notes: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    photos: Mapped[list | None] = mapped_column(JSONType, nullable=True)
+    floor_plan_url: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
 
     room_type = relationship("RoomType", back_populates="rooms")
     room_notes = relationship(
@@ -626,6 +628,7 @@ class HousekeepingTask(AuditMixin, db.Model):
     verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     business_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    shift: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
 
     room = relationship("Room", foreign_keys=[room_id])
     reservation = relationship("Reservation", foreign_keys=[reservation_id])

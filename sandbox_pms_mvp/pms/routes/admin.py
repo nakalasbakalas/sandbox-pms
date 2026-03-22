@@ -98,6 +98,7 @@ from ..services.extras_service import (
 from ..services.pre_checkin_service import (
     fire_pre_checkin_not_completed_events,
 )
+from ..services.storage import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -900,3 +901,71 @@ def staff_admin_rate_clone(rule_id):
 
     flash(f'Rate rule "{original.name}" cloned. The copy is inactive by default.', "success")
     return redirect(url_for("admin.staff_rates"))
+
+
+# ------------------------------------------------------------------
+# Room photo management
+# ------------------------------------------------------------------
+
+ALLOWED_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+
+
+@admin_bp.route("/staff/admin/rooms/<uuid:room_id>/photos", methods=["POST"])
+def staff_admin_room_photos(room_id):
+    """Upload a photo for a room and store the path in the photos JSON array."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("settings.edit")
+    room = db.session.get(Room, room_id)
+    if not room:
+        abort(404)
+
+    action = request.form.get("action", "upload")
+
+    if action == "set_floor_plan_url":
+        floor_plan_url = request.form.get("floor_plan_url", "").strip() or None
+        room.floor_plan_url = floor_plan_url
+        room.updated_by_user_id = actor.id
+        db.session.commit()
+        flash("Floor plan URL updated.", "success")
+        return redirect(url_for("admin.staff_settings"))
+
+    if action == "remove_photo":
+        index = int(request.form.get("photo_index", -1))
+        photos = list(room.photos or [])
+        if 0 <= index < len(photos):
+            photos.pop(index)
+            room.photos = photos or None
+            room.updated_by_user_id = actor.id
+            db.session.commit()
+            flash("Photo removed.", "success")
+        else:
+            flash("Photo not found.", "error")
+        return redirect(url_for("admin.staff_settings"))
+
+    # Default: upload
+    uploaded_file = request.files.get("photo")
+    if not uploaded_file or not uploaded_file.filename:
+        flash("No file selected.", "error")
+        return redirect(url_for("admin.staff_settings"))
+
+    import os
+    ext = os.path.splitext(uploaded_file.filename)[1].lower()
+    if ext not in ALLOWED_PHOTO_EXTENSIONS:
+        flash(f"File type not allowed. Use: {', '.join(sorted(ALLOWED_PHOTO_EXTENSIONS))}", "error")
+        return redirect(url_for("admin.staff_settings"))
+
+    try:
+        backend = get_storage_backend()
+        storage_key = backend.save(uploaded_file, room.id, ext)
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+        return redirect(url_for("admin.staff_settings"))
+
+    photos = list(room.photos or [])
+    photos.append(storage_key)
+    room.photos = photos
+    room.updated_by_user_id = actor.id
+    db.session.commit()
+
+    flash("Room photo uploaded.", "success")
+    return redirect(url_for("admin.staff_settings"))

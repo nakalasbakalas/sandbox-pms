@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -856,7 +857,7 @@ def _require_override(actor: User | None) -> None:
 # ---------------------------------------------------------------------------
 
 ACTIVE_TASK_STATUSES = {"open", "assigned", "in_progress"}
-VALID_TASK_TYPES = {"checkout_clean", "daily_service", "rush_clean", "deep_clean", "inspection", "turndown"}
+VALID_TASK_TYPES = {"checkout_clean", "daily_service", "rush_clean", "deep_clean", "inspection", "turndown", "maintenance"}
 VALID_TASK_PRIORITIES = {"low", "normal", "high", "urgent"}
 
 
@@ -870,6 +871,7 @@ class CreateTaskPayload:
     assigned_to_user_id: uuid.UUID | None = None
     reservation_id: uuid.UUID | None = None
     due_at: datetime | None = None
+    shift: str | None = None
 
 
 @dataclass
@@ -880,6 +882,7 @@ class TaskListFilters:
     assigned_to_user_id: str = ""
     task_type: str = ""
     priority: str = ""
+    shift: str = ""
 
 
 def create_housekeeping_task(
@@ -910,6 +913,7 @@ def create_housekeeping_task(
         due_at=payload.due_at,
         notes=clean_optional(payload.notes, limit=2000),
         business_date=payload.business_date,
+        shift=clean_optional(payload.shift, limit=20) if payload.shift else None,
         created_by_user_id=actor_user_id,
     )
     db.session.add(task)
@@ -1240,6 +1244,180 @@ def cancel_housekeeping_task(
     return task
 
 
+def submit_for_inspection(
+    task_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    commit: bool = True,
+) -> HousekeepingTask:
+    """Move a completed task to pending_inspection for supervisor review."""
+    task = db.session.get(HousekeepingTask, task_id)
+    if not task:
+        raise ValueError("Task not found.")
+    if task.status != "completed":
+        raise ValueError("Only completed tasks can be submitted for inspection.")
+
+    before = _task_snapshot(task)
+    task.status = "pending_inspection"
+    task.updated_by_user_id = actor_user_id
+
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="housekeeping_tasks",
+        entity_id=str(task.id),
+        action="housekeeping_task_submitted_for_inspection",
+        before_data=before,
+        after_data=_task_snapshot(task),
+    )
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="housekeeping.task_submitted_for_inspection",
+        entity_table="housekeeping_tasks",
+        entity_id=str(task.id),
+        metadata={"room_id": str(task.room_id)},
+    )
+
+    if commit:
+        db.session.commit()
+    return task
+
+
+def supervisor_inspect_task(
+    task_id: uuid.UUID,
+    *,
+    result: str,
+    notes: str | None = None,
+    actor_user_id: uuid.UUID,
+    commit: bool = True,
+) -> HousekeepingTask:
+    """Supervisor inspection: pass sets status to inspected, fail resets to in_progress.
+
+    *result* must be ``"pass"`` or ``"fail"``.
+    """
+    task = db.session.get(HousekeepingTask, task_id)
+    if not task:
+        raise ValueError("Task not found.")
+    if task.status not in {"completed", "pending_inspection"}:
+        raise ValueError("Only completed or pending-inspection tasks can be inspected.")
+    if result not in {"pass", "fail"}:
+        raise ValueError("Inspection result must be 'pass' or 'fail'.")
+
+    before = _task_snapshot(task)
+
+    if result == "pass":
+        task.status = "inspected"
+        task.verified_by_user_id = actor_user_id
+        task.verified_at = utc_now()
+        if notes:
+            task.notes = (task.notes + "\n" + notes if task.notes else notes)[:2000]
+        task.updated_by_user_id = actor_user_id
+
+        # Transition room to inspected
+        inspected_status = (
+            db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "inspected"))
+            .scalars()
+            .first()
+        )
+        if inspected_status:
+            inv = (
+                db.session.execute(
+                    sa.select(InventoryDay).where(
+                        InventoryDay.room_id == task.room_id,
+                        InventoryDay.business_date == task.business_date,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if inv and inv.availability_status not in CLOSURE_STATUS_CODES and not inv.is_blocked:
+                inv_before = _inventory_snapshot(inv)
+                inv.housekeeping_status_id = inspected_status.id
+                inv.cleaned_at = inv.cleaned_at or utc_now()
+                inv.inspected_at = utc_now()
+                inv.is_sellable = _sellable_for_row(inv, "inspected")
+                _persist_room_history(
+                    row=inv,
+                    before=inv_before,
+                    actor_user_id=actor_user_id,
+                    event_type="supervisor_inspection_passed",
+                    note=f"Supervisor inspection passed (task type: {task.task_type})",
+                )
+
+        write_audit_log(
+            actor_user_id=actor_user_id,
+            entity_table="housekeeping_tasks",
+            entity_id=str(task.id),
+            action="housekeeping_task_inspection_passed",
+            before_data=before,
+            after_data=_task_snapshot(task),
+        )
+        write_activity_log(
+            actor_user_id=actor_user_id,
+            event_type="housekeeping.task_inspection_passed",
+            entity_table="housekeeping_tasks",
+            entity_id=str(task.id),
+            metadata={"room_id": str(task.room_id)},
+        )
+    else:
+        # Fail: reset to in_progress so the housekeeper can redo the work
+        task.status = "in_progress"
+        task.completed_at = None
+        fail_note = f"Inspection failed by supervisor"
+        if notes:
+            fail_note += f": {notes}"
+        task.notes = (task.notes + "\n" + fail_note if task.notes else fail_note)[:2000]
+        task.updated_by_user_id = actor_user_id
+
+        # Set room back to dirty
+        dirty_status = (
+            db.session.execute(sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "dirty"))
+            .scalars()
+            .first()
+        )
+        if dirty_status:
+            inv = (
+                db.session.execute(
+                    sa.select(InventoryDay).where(
+                        InventoryDay.room_id == task.room_id,
+                        InventoryDay.business_date == task.business_date,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if inv and inv.availability_status not in CLOSURE_STATUS_CODES:
+                inv_before = _inventory_snapshot(inv)
+                inv.housekeeping_status_id = dirty_status.id
+                inv.is_sellable = False
+                _persist_room_history(
+                    row=inv,
+                    before=inv_before,
+                    actor_user_id=actor_user_id,
+                    event_type="supervisor_inspection_failed",
+                    note=f"Supervisor inspection failed — room reset to dirty",
+                )
+
+        write_audit_log(
+            actor_user_id=actor_user_id,
+            entity_table="housekeeping_tasks",
+            entity_id=str(task.id),
+            action="housekeeping_task_inspection_failed",
+            before_data=before,
+            after_data=_task_snapshot(task),
+        )
+        write_activity_log(
+            actor_user_id=actor_user_id,
+            event_type="housekeeping.task_inspection_failed",
+            entity_table="housekeeping_tasks",
+            entity_id=str(task.id),
+            metadata={"room_id": str(task.room_id), "notes": notes or ""},
+        )
+
+    if commit:
+        db.session.commit()
+    return task
+
+
 def list_housekeeping_tasks(filters: TaskListFilters) -> list[dict]:
     """Return housekeeping tasks matching the provided filters."""
     query = (
@@ -1261,6 +1439,8 @@ def list_housekeeping_tasks(filters: TaskListFilters) -> list[dict]:
         query = query.where(HousekeepingTask.task_type == filters.task_type)
     if filters.priority:
         query = query.where(HousekeepingTask.priority == filters.priority)
+    if filters.shift:
+        query = query.where(HousekeepingTask.shift == filters.shift)
 
     tasks = (
         db.session.execute(
@@ -1355,6 +1535,7 @@ def _task_snapshot(task: HousekeepingTask) -> dict:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "verified_at": task.verified_at.isoformat() if task.verified_at else None,
+        "shift": task.shift,
     }
 
 
@@ -1377,4 +1558,109 @@ def _task_to_dict(task: HousekeepingTask) -> dict:
         "notes": task.notes,
         "business_date": task.business_date.isoformat(),
         "created_at": task.created_at.isoformat() if task.created_at else None,
+        "shift": task.shift,
     }
+
+
+_log = logging.getLogger(__name__)
+
+
+def create_maintenance_request(
+    room_number: str,
+    description: str,
+    guest_name: str,
+    guest_contact: str,
+    reservation_code: str | None = None,
+) -> HousekeepingTask:
+    """Create a maintenance request from a guest (public, no auth).
+
+    Looks up the room by number, creates a HousekeepingTask with
+    type ``maintenance``, and fires a ``maintenance_requested``
+    automation event.
+    """
+    room_number = room_number.strip()
+    description = description.strip()
+    guest_name = guest_name.strip()
+    guest_contact = guest_contact.strip()
+
+    if not room_number:
+        raise ValueError("Room number is required.")
+    if not description:
+        raise ValueError("Issue description is required.")
+    if not guest_name:
+        raise ValueError("Guest name is required.")
+    if not guest_contact:
+        raise ValueError("Contact information is required.")
+
+    room = (
+        db.session.execute(sa.select(Room).where(Room.room_number == room_number))
+        .scalars()
+        .first()
+    )
+    if not room:
+        raise ValueError("Room not found. Please check the room number.")
+
+    # Optionally link to a reservation
+    reservation_id = None
+    if reservation_code:
+        reservation = (
+            db.session.execute(
+                sa.select(Reservation).where(Reservation.reservation_code == reservation_code.strip())
+            )
+            .scalars()
+            .first()
+        )
+        if reservation:
+            reservation_id = reservation.id
+
+    notes_text = (
+        f"Guest maintenance request from {guest_name} ({guest_contact}).\n"
+        f"Issue: {description}"
+    )
+    if reservation_code:
+        notes_text += f"\nReservation: {reservation_code}"
+
+    task = HousekeepingTask(
+        room_id=room.id,
+        reservation_id=reservation_id,
+        task_type="maintenance",
+        priority="normal",
+        status="open",
+        notes=notes_text[:2000],
+        business_date=date.today(),
+    )
+    db.session.add(task)
+
+    write_activity_log(
+        actor_user_id=None,
+        event_type="housekeeping.maintenance_request_created",
+        entity_table="housekeeping_tasks",
+        entity_id=str(task.id),
+        metadata={
+            "room_number": room_number,
+            "guest_name": guest_name,
+            "guest_contact": guest_contact,
+            "description": description[:255],
+        },
+    )
+
+    db.session.commit()
+
+    # Fire automation event (non-blocking)
+    try:
+        from ..services.messaging_service import fire_automation_event
+        fire_automation_event(
+            "maintenance_requested",
+            reservation_id=str(reservation_id) if reservation_id else None,
+            guest_id=None,
+            context={
+                "room_number": room_number,
+                "guest_name": guest_name,
+                "guest_contact": guest_contact,
+                "description": description[:500],
+            },
+        )
+    except Exception:  # noqa: BLE001
+        _log.exception("Automation hook failed for maintenance_requested")
+
+    return task

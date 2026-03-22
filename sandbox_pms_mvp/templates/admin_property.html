@@ -283,6 +283,38 @@
                   </div>
                   {% if can('settings.edit') %}<button class="button secondary" type="submit">Save room</button>{% endif %}
                 </form>
+                {% if can('settings.edit') %}
+                <div class="stack-form compact" style="margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid var(--pms-border, #e0e0e0);">
+                  <p class="eyebrow" style="margin:0 0 4px;">Room photos</p>
+                  {% if room.photos %}
+                  <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;">
+                    {% for photo_key in room.photos %}
+                    <div style="position:relative; display:inline-block;">
+                      <span class="pill subtle" style="font-size:10px;" title="{{ photo_key }}">Photo {{ loop.index }}</span>
+                      <form method="post" action="{{ url_for('admin.staff_admin_room_photos', room_id=room.id) }}" style="display:inline;">
+                        {{ csrf_input() }}
+                        <input type="hidden" name="action" value="remove_photo">
+                        <input type="hidden" name="photo_index" value="{{ loop.index0 }}">
+                        <button type="submit" class="button tiny secondary" style="padding:1px 4px; font-size:9px;" title="Remove photo">x</button>
+                      </form>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  {% endif %}
+                  <form method="post" action="{{ url_for('admin.staff_admin_room_photos', room_id=room.id) }}" enctype="multipart/form-data" style="display:flex; gap:6px; align-items:end;">
+                    {{ csrf_input() }}
+                    <input type="hidden" name="action" value="upload">
+                    <label style="flex:1;"><span>Upload photo</span><input type="file" name="photo" accept=".jpg,.jpeg,.png,.webp,.gif"></label>
+                    <button class="button tiny" type="submit">Upload</button>
+                  </form>
+                  <form method="post" action="{{ url_for('admin.staff_admin_room_photos', room_id=room.id) }}" style="display:flex; gap:6px; align-items:end; margin-top:4px;">
+                    {{ csrf_input() }}
+                    <input type="hidden" name="action" value="set_floor_plan_url">
+                    <label style="flex:1;"><span>Floor plan URL</span><input type="url" name="floor_plan_url" value="{{ room.floor_plan_url or '' }}" placeholder="https://..."></label>
+                    <button class="button tiny secondary" type="submit">Set</button>
+                  </form>
+                </div>
+                {% endif %}
               </details>
             </td>
           </tr>

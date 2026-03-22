@@ -155,6 +155,7 @@ HOUSEKEEPING_TASK_STATUSES = [
     "assigned",
     "in_progress",
     "completed",
+    "pending_inspection",
     "inspected",
     "cancelled",
 ]
@@ -166,6 +167,7 @@ HOUSEKEEPING_TASK_TYPES = [
     "deep_clean",
     "inspection",
     "turndown",
+    "maintenance",
 ]
 
 HOUSEKEEPING_TASK_PRIORITIES = [
@@ -330,6 +332,7 @@ AUTOMATION_EVENT_TYPES = [
     "room_ready",
     "payment_due",
     "checkout_completed",
+    "maintenance_requested",
 ]
 
 PERMISSION_SEEDS = [
