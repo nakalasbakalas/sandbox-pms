@@ -12,7 +12,7 @@
       <a class="button secondary" href="{{ back_url }}">Back</a>
       <span class="status {{ block.status }}">{{ block.status.replace('_', ' ') }}</span>
       {% if can('reservation.edit') and block.active_count %}
-      <form method="post" action="{{ url_for('staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
+      <form method="post" action="{{ url_for('staff_reservations.staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
         {{ csrf_input() }}
         <button class="button" type="submit">Release active holds</button>
       </form>
@@ -61,7 +61,7 @@
           <td>{{ currency }} {{ item.quoted_grand_total|money }}</td>
           <td>
             {% if item.converted_reservation_id %}
-            <a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.converted_reservation_id, back=url_for('staff_group_block_detail', group_block_code=block.group_block_code)) }}">{{ item.converted_reservation_code or item.converted_reservation_id }}</a>
+            <a href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.converted_reservation_id, back=url_for('staff_reservations.staff_group_block_detail', group_block_code=block.group_block_code)) }}">{{ item.converted_reservation_code or item.converted_reservation_id }}</a>
             {% else %}
             —
             {% endif %}

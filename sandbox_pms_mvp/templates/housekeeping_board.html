@@ -18,7 +18,7 @@
     Last: {{ board.refreshed_at.strftime('%H:%M') if board.refreshed_at is defined and board.refreshed_at else '—' }}
   </span>
   {% if can('reservation.view') %}
-  <a class="button secondary tiny" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+  <a class="button secondary tiny" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
   <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', date=board.business_date.isoformat()) }}">Front desk</a>
   {% endif %}
   <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=board.business_date.isoformat(), floor=filters.floor, status=filters.status, priority=filters.priority, room_type_id=filters.room_type_id, arrival_today=filters.arrival_today, departure_today=filters.departure_today) }}">Desktop</a>
@@ -156,7 +156,7 @@
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('{{ url_for("staff_service_worker") }}').catch(function () {});
+    navigator.serviceWorker.register('{{ url_for("front_desk.staff_service_worker") }}').catch(function () {});
   });
 }
 </script>

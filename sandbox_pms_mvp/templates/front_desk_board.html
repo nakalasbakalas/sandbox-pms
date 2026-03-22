@@ -15,7 +15,7 @@
     <div class="planning-board-title-compact">
       <h1>Planning Board</h1>
       <nav class="planning-board-utility-links" aria-label="Board navigation">
-        <a href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
         <a href="{{ url_for('front_desk.staff_front_desk', date=board.start_date.isoformat()) }}">Lists</a>
         <a href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
       </nav>

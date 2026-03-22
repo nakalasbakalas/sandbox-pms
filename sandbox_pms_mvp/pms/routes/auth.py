@@ -74,7 +74,7 @@ def staff_logout():
     session.clear()
     rotate_csrf_token()
     g.clear_auth_cookie = True
-    return redirect(url_for("index"))
+    return redirect(url_for("public.index"))
 
 
 @auth_bp.route("/staff/forgot-password", methods=["GET", "POST"])

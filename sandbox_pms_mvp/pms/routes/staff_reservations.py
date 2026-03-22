@@ -22,7 +22,9 @@ from ..helpers import (
     parse_request_int_arg,
     parse_request_uuid_arg,
     require_any_permission,
+    require_integration_token,
     require_permission,
+    resolve_reservation_identifier,
     safe_back_path,
 )
 from ..models import (
@@ -42,11 +44,14 @@ from ..services.messaging_service import (
 )
 from ..services.pre_checkin_service import (
     DocumentVerifyPayload,
+    ScannerCapturePayload,
+    apply_document_ocr_to_guest,
     build_pre_checkin_link,
     generate_pre_checkin,
     get_document_serve_url,
     get_documents_for_reservation,
     get_pre_checkin_for_reservation,
+    ingest_scanner_capture,
     mark_rejected,
     mark_verified,
     read_document_bytes,
@@ -54,6 +59,12 @@ from ..services.pre_checkin_service import (
     verify_document,
 )
 from ..services.reservation_service import ReservationCreatePayload, create_reservation
+from ..services.group_booking_service import (
+    GroupBlockCreatePayload,
+    create_group_room_block,
+    get_group_block_detail,
+    release_group_room_block,
+)
 from ..services.staff_reservations_service import (
     GuestUpdatePayload,
     ReservationNotePayload,
@@ -844,3 +855,140 @@ def staff_review_queue():
         query = query.where(ReservationReviewQueue.special_requests_present.is_(True))
     entries = db.session.execute(query.order_by(ReservationReviewQueue.created_at.desc())).scalars().all()
     return render_template("staff_review_queue.html", entries=entries)
+
+
+# ── Group room blocks ──────────────────────────────────────────────────
+
+
+@staff_reservations_bp.route("/staff/group-blocks", methods=["POST"])
+def staff_group_block_create():
+    user = require_permission("reservation.edit")
+    try:
+        detail = create_group_room_block(
+            GroupBlockCreatePayload(
+                group_name=request.form.get("group_name", ""),
+                check_in_date=date.fromisoformat(request.form["check_in_date"]),
+                check_out_date=date.fromisoformat(request.form["check_out_date"]),
+                room_type_id=UUID(request.form["room_type_id"]),
+                room_count=int(request.form.get("room_count") or "0"),
+                adults=int(request.form.get("adults") or "2"),
+                children=int(request.form.get("children") or "0"),
+                extra_guests=int(request.form.get("extra_guests") or "0"),
+                contact_name=request.form.get("contact_name"),
+                contact_email=request.form.get("contact_email"),
+                notes=request.form.get("notes"),
+            ),
+            actor_user_id=user.id,
+        )
+        flash(
+            f"Group block {detail['group_block_code']} created with {detail['active_count']} held room(s).",
+            "success",
+        )
+        return redirect(url_for("staff_reservations.staff_group_block_detail", group_block_code=detail["group_block_code"]))
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("staff_reservations.staff_reservations"))
+
+
+@staff_reservations_bp.route("/staff/group-blocks/<group_block_code>")
+def staff_group_block_detail(group_block_code):
+    require_permission("reservation.view")
+    try:
+        detail = get_group_block_detail(group_block_code)
+    except Exception:
+        abort(404)
+    return render_template(
+        "group_block_detail.html",
+        block=detail,
+        back_url=safe_back_path(request.args.get("back"), url_for("staff_reservations.staff_reservations")),
+    )
+
+
+@staff_reservations_bp.route("/staff/group-blocks/<group_block_code>/release", methods=["POST"])
+def staff_group_block_release(group_block_code):
+    user = require_permission("reservation.edit")
+    try:
+        detail = release_group_room_block(group_block_code, actor_user_id=user.id)
+        flash(
+            f"Released {detail['released_count']} room block(s) from {detail['group_block_code']}.",
+            "success",
+        )
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("staff_reservations.staff_group_block_detail", group_block_code=group_block_code))
+
+
+# ── Scanner capture + OCR apply ────────────────────────────────────────
+
+
+@staff_reservations_bp.route("/staff/reservations/<uuid:reservation_id>/pre-checkin/scanner-capture", methods=["POST"])
+def staff_pre_checkin_scanner_capture(reservation_id):
+    user = require_permission("reservation.edit")
+    try:
+        document = ingest_scanner_capture(
+            reservation_id,
+            ScannerCapturePayload(
+                document_type=request.form.get("document_type", "passport"),
+                raw_text=request.form.get("raw_text"),
+                raw_payload=None,
+                filename=request.form.get("filename"),
+                content_type=request.form.get("content_type") or None,
+                scanner_name=request.form.get("scanner_name"),
+                source="staff_scanner_capture",
+            ),
+            actor_user_id=user.id,
+        )
+        extracted = document.ocr_extracted_data or {}
+        if extracted.get("status") == "parsed":
+            flash("Scanner payload saved and parsed for staff review.", "success")
+        else:
+            flash("Scanner payload saved, but no structured fields were parsed.", "warning")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("staff_reservations.staff_pre_checkin_detail", reservation_id=reservation_id))
+
+
+@staff_reservations_bp.route("/staff/documents/<uuid:doc_id>/apply-ocr", methods=["POST"])
+def staff_document_apply_ocr(doc_id):
+    user = require_permission("reservation.edit")
+    try:
+        document = apply_document_ocr_to_guest(doc_id, actor_user_id=user.id)
+        flash("Parsed document details applied to the guest profile.", "success")
+        return redirect(url_for("staff_reservations.staff_pre_checkin_detail", reservation_id=document.reservation_id))
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+        return redirect(request.referrer or url_for("staff_reservations.staff_reservations"))
+
+
+@staff_reservations_bp.route("/api/integrations/scanner/capture", methods=["POST"])
+def integration_scanner_capture():
+    require_integration_token("scanner")
+    payload = request.get_json(silent=True) or {}
+    try:
+        reservation = resolve_reservation_identifier(
+            reservation_id_value=payload.get("reservation_id"),
+            reservation_code_value=payload.get("reservation_code"),
+        )
+        document = ingest_scanner_capture(
+            reservation.id,
+            ScannerCapturePayload(
+                document_type=payload.get("document_type", "passport"),
+                raw_text=payload.get("raw_text"),
+                raw_payload=payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else None,
+                filename=payload.get("filename"),
+                content_type=payload.get("content_type"),
+                scanner_name=payload.get("scanner_name"),
+                source=payload.get("source") or "scanner_api",
+            ),
+            actor_user_id=None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": public_error_message(exc)}), 400
+    return jsonify(
+        {
+            "ok": True,
+            "document_id": str(document.id),
+            "reservation_id": str(document.reservation_id),
+            "ocr_extracted_data": document.ocr_extracted_data,
+        }
+    )

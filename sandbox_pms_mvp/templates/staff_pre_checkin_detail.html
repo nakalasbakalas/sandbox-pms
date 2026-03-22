@@ -72,7 +72,7 @@
       </span>
     </div>
     {% if can('reservation.edit') %}
-    <form method="POST" action="{{ url_for('staff_pre_checkin_scanner_capture', reservation_id=reservation.id) }}" class="stack-form">
+    <form method="POST" action="{{ url_for('staff_reservations.staff_pre_checkin_scanner_capture', reservation_id=reservation.id) }}" class="stack-form">
       {{ csrf_input() }}
       <div class="grid four">
         <label><span>Document type</span><select name="document_type"><option value="passport">Passport</option><option value="national_id">National ID</option><option value="driving_license">Driving licence</option><option value="other">Other</option></select></label>
@@ -120,7 +120,7 @@
           </form>
           {% endif %}
           {% if can('reservation.edit') and doc.ocr_extracted_data and doc.ocr_extracted_data.status == 'parsed' %}
-          <form method="POST" action="{{ url_for('staff_document_apply_ocr', doc_id=doc.id) }}" style="display:inline;">
+          <form method="POST" action="{{ url_for('staff_reservations.staff_document_apply_ocr', doc_id=doc.id) }}" style="display:inline;">
             {{ csrf_input() }}
             <button type="submit" class="btn btn-secondary btn-sm" style="font-size:0.8rem;">Apply to guest</button>
           </form>

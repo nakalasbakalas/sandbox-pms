@@ -20,7 +20,7 @@ from flask import abort, current_app, g, redirect, request, session, url_for
 from markupsafe import Markup, escape
 
 from .extensions import db
-from .models import AppSetting, Permission, User
+from .models import AppSetting, Permission, Reservation, User
 from .services.ical_service import calendar_timezone
 
 
@@ -249,6 +249,8 @@ def validate_csrf_request() -> None:
         "public.pre_checkin_save",
         "public.pre_checkin_upload",
         "messaging.staff_messaging_inbound_webhook",
+        "cashier.integration_pos_charge",
+        "staff_reservations.integration_scanner_capture",
     }:
         return
     expected = session.get("_csrf_token")
@@ -542,3 +544,46 @@ def format_report_date_range(start_date: date, end_date: date) -> str:
     if start_date == end_date:
         return start_date.strftime("%d %b %Y")
     return f"{start_date.strftime('%d %b %Y')} - {end_date.strftime('%d %b %Y')}"
+
+
+# ---------------------------------------------------------------------------
+# Integration token + reservation identifier helpers
+# ---------------------------------------------------------------------------
+
+def integration_shared_token(name: str) -> str:
+    from .pricing import get_setting_value
+
+    config_key = f"{name.upper()}_SHARED_TOKEN"
+    default = current_app.config.get(config_key, "")
+    return str(get_setting_value(f"integrations.{name}.shared_token", default) or "").strip()
+
+
+def require_integration_token(name: str) -> None:
+    expected = integration_shared_token(name)
+    if not expected:
+        abort(503, description=f"{name} integration token is not configured.")
+    provided = (
+        request.headers.get("X-Integration-Token")
+        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    )
+    if not provided or not hmac.compare_digest(expected, provided):
+        abort(403)
+
+
+def resolve_reservation_identifier(
+    *,
+    reservation_id_value: str | None = None,
+    reservation_code_value: str | None = None,
+) -> Reservation:
+    if reservation_id_value:
+        try:
+            reservation = db.session.get(Reservation, UUID(reservation_id_value))
+        except ValueError as exc:
+            raise ValueError("Invalid reservation ID.") from exc
+        if reservation:
+            return reservation
+    if reservation_code_value:
+        reservation = db.session.execute(sa.select(Reservation).filter_by(reservation_code=reservation_code_value.strip())).scalar_one_or_none()
+        if reservation:
+            return reservation
+    raise ValueError("Reservation not found.")

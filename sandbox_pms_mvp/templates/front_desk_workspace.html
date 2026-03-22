@@ -10,7 +10,7 @@
       <p>Prepare arrivals, manage in-house guests, and complete departures from one operational screen.</p>
     </div>
     <div class="actions">
-      <a class="button secondary" href="{{ url_for('staff_dashboard') }}">Dashboard</a>
+      <a class="button secondary" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
       <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
       <a class="button secondary" href="{{ url_for('front_desk.staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Planning board</a>
     </div>

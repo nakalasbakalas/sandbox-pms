@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from decimal import Decimal
+from time import perf_counter
 from uuid import UUID
 
 import sqlalchemy as sa
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
+from markupsafe import escape
 
 from ..activity import write_activity_log
+from ..branding import branding_settings_context
+from ..helpers import absolute_public_url
 from ..models import PaymentRequest, ReservationHold, RoomType
 from ..extensions import db
-from ..i18n import normalize_language, t
+from ..i18n import LANGUAGE_LABELS, normalize_language, t
 from ..security import public_error_message, request_client_ip
 from ..services.public_booking_service import (
     HoldRequestPayload,
@@ -257,7 +262,7 @@ def public_payment_start(request_code):
         abort(404)
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-        return redirect(url_for("index", lang=helpers["current_language"]()))
+        return redirect(url_for("public.index", lang=helpers["current_language"]()))
     return redirect(payment_request.payment_url)
 
 
@@ -519,3 +524,112 @@ def public_digital_checkout_complete(reservation_code):
         flash(str(exc), "error")
         return redirect(url_for("public.public_digital_checkout", reservation_code=reservation_code, token=token))
     return redirect(url_for("public.public_digital_checkout", reservation_code=reservation_code, token=token))
+
+
+# ── Public pages (index, health, robots, favicon, manifest, sitemap) ──
+
+
+@public_bp.route("/")
+def index():
+    return render_template(
+        "index.html",
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
+    )
+
+
+@public_bp.route("/health")
+def health():
+    started_at = perf_counter()
+    threshold_ms = int(current_app.config.get("HEALTHCHECK_SLA_MS", 1000) or 0)
+    try:
+        db.session.execute(sa.text("SELECT 1"))
+    except Exception:  # noqa: BLE001
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        return jsonify(
+            {
+                "status": "db_error",
+                "db": "error",
+                "response_ms": elapsed_ms,
+                "sla_ms": threshold_ms,
+                "within_sla": False,
+            }
+        ), 503
+    elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+    within_sla = threshold_ms <= 0 or elapsed_ms <= threshold_ms
+    return jsonify(
+        {
+            "status": "ok" if within_sla else "degraded",
+            "db": "ok",
+            "response_ms": elapsed_ms,
+            "sla_ms": threshold_ms,
+            "within_sla": within_sla,
+        }
+    )
+
+
+@public_bp.route("/robots.txt")
+def robots_txt():
+    body = "\n".join(
+        [
+            "User-agent: *",
+            "Disallow: /staff/",
+            "Disallow: /booking/hold",
+            f"Sitemap: {absolute_public_url(url_for('public.sitemap_xml'))}",
+        ]
+    )
+    return Response(f"{body}\n", mimetype="text/plain")
+
+
+@public_bp.route("/favicon.ico")
+def favicon_ico():
+    return redirect(url_for("static", filename="branding/sandbox-hotel-favicon.ico"), code=302)
+
+
+@public_bp.route("/manifest.json")
+def web_manifest():
+    branding = branding_settings_context()
+    hotel_name = branding["hotel_name"]
+    manifest = {
+        "name": hotel_name,
+        "short_name": branding["brand_mark"] or hotel_name[:12],
+        "icons": [
+            {
+                "src": url_for("static", filename="branding/sandbox-hotel-logo-safe-192.png"),
+                "sizes": "192x192",
+                "type": "image/png",
+            },
+            {
+                "src": url_for("static", filename="branding/sandbox-hotel-logo-safe-512.png"),
+                "sizes": "512x512",
+                "type": "image/png",
+            },
+        ],
+        "theme_color": branding["accent_color"],
+        "background_color": "#0b0d11",
+        "display": "standalone",
+        "start_url": "/",
+    }
+    return Response(json.dumps(manifest), mimetype="application/manifest+json")
+
+
+@public_bp.route("/sitemap.xml")
+def sitemap_xml():
+    public_pages = [
+        ("public.index", {}),
+        ("public.booking_entry", {}),
+        ("public.booking_cancel_request", {}),
+        ("public.booking_modify_request", {}),
+    ]
+    urls: list[str] = []
+    for endpoint, values in public_pages:
+        urls.append(absolute_public_url(url_for(endpoint, **values)))
+        for language_code in LANGUAGE_LABELS:
+            urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
+    unique_urls = list(dict.fromkeys(url for url in urls if url))
+    body = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
+    body.append("</urlset>")
+    return Response("\n".join(body), mimetype="application/xml")

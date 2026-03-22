@@ -95,7 +95,7 @@
     {% endif %}
 
     {% if can_charge %}
-    <form class="stack-form subsection" method="post" action="{{ url_for('staff_cashier_pos_charge', reservation_id=detail.reservation.id) }}">
+    <form class="stack-form subsection" method="post" action="{{ url_for('cashier.staff_cashier_pos_charge', reservation_id=detail.reservation.id) }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_url" value="{{ back_url }}">
       <div class="split-row">

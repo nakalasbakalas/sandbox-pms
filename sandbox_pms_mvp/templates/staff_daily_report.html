@@ -10,7 +10,7 @@
     </div>
     <div class="report-context">
       <span class="pill subtle">{{ target_date.strftime('%d %b %Y') }}</span>
-      <a class="button secondary tiny" href="{{ url_for('staff_dashboard') }}">← Dashboard</a>
+      <a class="button secondary tiny" href="{{ url_for('front_desk.staff_dashboard') }}">← Dashboard</a>
       {% if can('reports.view') %}
         <a class="button secondary tiny" href="{{ url_for('reports.staff_reports') }}">Manager reports</a>
       {% endif %}

@@ -50,7 +50,7 @@
           <tbody>
             {% for item in dashboard.arrivals["items"][:5] %}
               <tr>
-                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('front_desk.staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or 'Unassigned' }}</td>
                 <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
@@ -91,7 +91,7 @@
           <tbody>
             {% for item in dashboard.departures["items"][:5] %}
               <tr>
-                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+                <td><a href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=item.id, date=dashboard.business_date.isoformat(), back=url_for('front_desk.staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
                 <td>{{ item.guest_name }}</td>
                 <td>{{ item.assigned_room_number or '-' }}</td>
                 <td>{{ item.payment_summary.balance_due | money }}</td>
@@ -147,7 +147,7 @@
           <tbody>
             {% for task in dashboard.urgent_tasks["items"] %}
               <tr>
-                <td>{% if task.room_id %}<a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=task.room_id, date=dashboard.business_date.isoformat(), back=url_for('staff_dashboard')) }}">{{ task.room_number }}</a>{% else %}-{% endif %}</td>
+                <td>{% if task.room_id %}<a href="{{ url_for('housekeeping.staff_housekeeping_room_detail', room_id=task.room_id, date=dashboard.business_date.isoformat(), back=url_for('front_desk.staff_dashboard')) }}">{{ task.room_number }}</a>{% else %}-{% endif %}</td>
                 <td>{{ task.task_type|replace('_', ' ') }}</td>
                 <td><span class="status {{ task.priority }}">{{ task.priority }}</span></td>
                 <td><span class="status {{ task.status }}">{{ task.status|replace('_', ' ') }}</span></td>
@@ -181,7 +181,7 @@
         <tbody>
           {% for item in dashboard.balances_due["items"][:5] %}
             <tr>
-              <td><a href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=url_for('staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
+              <td><a href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=url_for('front_desk.staff_dashboard')) }}">{{ item.reservation_code }}</a></td>
               <td>{{ item.guest_name }}</td>
               <td><span class="status {{ item.status }}">{{ item.status|replace('_', ' ') }}</span></td>
               <td>{{ item.departure_date.strftime('%d %b') }}</td>
@@ -284,9 +284,9 @@
           </div>
           <div class="right-stack">
             <span class="small muted">{{ notification.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
-            <form class="stack-form compact-form" method="post" action="{{ url_for('staff_notification_read', notification_id=notification.id) }}">
+            <form class="stack-form compact-form" method="post" action="{{ url_for('front_desk.staff_notification_read', notification_id=notification.id) }}">
               {{ csrf_input() }}
-              <input type="hidden" name="back_url" value="{{ url_for('staff_dashboard') }}">
+              <input type="hidden" name="back_url" value="{{ url_for('front_desk.staff_dashboard') }}">
               <button class="button tiny secondary" type="submit">Mark read</button>
             </form>
           </div>

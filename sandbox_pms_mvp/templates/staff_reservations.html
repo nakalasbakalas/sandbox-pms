@@ -44,7 +44,7 @@
   <div class="grid two gap-lg">
     <div>
       {% if can('reservation.edit') %}
-      <form class="stack-form" method="post" action="{{ url_for('staff_group_block_create') }}">
+      <form class="stack-form" method="post" action="{{ url_for('staff_reservations.staff_group_block_create') }}">
         {{ csrf_input() }}
         <div class="grid two">
           <label><span>Group name</span><input type="text" name="group_name" placeholder="Chiang Mai wedding party" required></label>
@@ -74,14 +74,14 @@
         {% for block in group_blocks %}
         <div class="list-row no-link">
           <div>
-            <strong><a href="{{ url_for('staff_group_block_detail', group_block_code=block.group_block_code, back=request.full_path.rstrip('?')) }}">{{ block.group_name }}</a></strong>
+            <strong><a href="{{ url_for('staff_reservations.staff_group_block_detail', group_block_code=block.group_block_code, back=request.full_path.rstrip('?')) }}">{{ block.group_name }}</a></strong>
             <p>{{ block.group_block_code }} · {{ block.room_type_code or 'Room type pending' }} · {{ block.check_in_date }} to {{ block.check_out_date }}</p>
             <p class="small muted">{{ block.active_count }} active hold{{ '' if block.active_count == 1 else 's' }} · {{ block.total_grand_total|money }} projected gross</p>
           </div>
           <div class="right-stack">
             <span class="status {{ block.status }}">{{ block.status.replace('_', ' ') }}</span>
             {% if can('reservation.edit') and block.active_count %}
-            <form method="post" action="{{ url_for('staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
+            <form method="post" action="{{ url_for('staff_reservations.staff_group_block_release', group_block_code=block.group_block_code) }}" class="inline-form">
               {{ csrf_input() }}
               <button class="button tiny secondary" type="submit">Release</button>
             </form>

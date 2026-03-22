@@ -1067,7 +1067,7 @@ The original audit findings below are retained for traceability, but they are no
 - Complete Flask Blueprint extraction (all route groups)
 
 
-- Complete ORM migration (zero legacy `.query.` calls)
+- Complete ORM migration (zero legacy `.query.` calls) *(all 39 remaining calls migrated across 8 files on 2026-03-22; .unique() added for joined-eager-load models)*
 
 
 - Add Redis-backed rate limiting (replace DB count queries)

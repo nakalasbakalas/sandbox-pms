@@ -46,12 +46,16 @@ from ..helpers import (
     safe_back_path,
 )
 from ..models import (
+    EmailOutbox,
     ExternalCalendarBlock,
     InventoryOverride,
     Reservation,
+    ReservationReviewQueue,
     Room,
     RoomType,
+    StaffNotification,
     UserPreference,
+    utc_now,
 )
 from ..normalization import normalize_phone
 from ..security import public_error_message
@@ -93,6 +97,7 @@ from ..services.messaging_service import (
     fire_automation_event,
     reservation_messages,
 )
+from ..services.reporting_service import build_front_desk_dashboard
 from ..services.staff_reservations_service import (
     StayDateChangePayload,
     assign_room,
@@ -1698,3 +1703,123 @@ def staff_front_desk_no_show(reservation_id):
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
     return redirect(url_for("front_desk.staff_front_desk", mode="arrivals", date=request.form.get("business_date")))
+
+
+# ── Dashboard + notifications + stats panel + service worker ──────────
+
+
+@front_desk_bp.route("/staff")
+def staff_dashboard():
+    user = require_permission("reservation.view")
+    today = date.today()
+    queue_entries = (
+        db.session.execute(
+            sa.select(ReservationReviewQueue)
+            .order_by(ReservationReviewQueue.created_at.desc())
+            .limit(10)
+        )
+        .scalars()
+        .all()
+    )
+    notifications = (
+        db.session.execute(
+            sa.select(StaffNotification)
+            .where(StaffNotification.status == "new")
+            .order_by(StaffNotification.created_at.desc())
+            .limit(10)
+        )
+        .scalars()
+        .all()
+    )
+    pending_emails = db.session.execute(
+        sa.select(sa.func.count())
+        .select_from(EmailOutbox)
+        .where(EmailOutbox.status.in_(["pending", "failed"]))
+    ).scalar_one()
+    dashboard = build_front_desk_dashboard(
+        business_date=today,
+        include_housekeeping=user.has_permission("housekeeping.view"),
+        include_financials=user.has_permission("folio.view"),
+    )
+    return render_template(
+        "staff_dashboard.html",
+        dashboard=dashboard,
+        queue_entries=queue_entries,
+        notifications=notifications,
+        pending_emails=pending_emails,
+        arrivals_count=dashboard["arrivals"]["count"],
+        departures_count=dashboard["departures"]["count"],
+        in_house_count=dashboard["in_house"]["count"],
+        can_housekeeping=user.has_permission("housekeeping.view"),
+        can_folio=user.has_permission("folio.view"),
+        can_reports=user.has_permission("reports.view"),
+    )
+
+
+@front_desk_bp.route("/staff/notifications/<uuid:notification_id>/read", methods=["POST"])
+def staff_notification_read(notification_id):
+    require_permission("reservation.view")
+    notification = db.session.get(StaffNotification, notification_id)
+    if not notification:
+        abort(404)
+    notification.status = "read"
+    notification.read_at = utc_now()
+    db.session.commit()
+    return redirect(request.form.get("back_url") or url_for("front_desk.staff_dashboard"))
+
+
+@front_desk_bp.route("/staff/front-desk/board/stats-panel")
+def staff_front_desk_board_stats_panel():
+    require_permission("reservation.view")
+    try:
+        filters = front_desk_board_filters_from_request()
+        context = front_desk_board_context(filters)
+        return render_template("_front_desk_board_stats_panel.html", **context)
+    except Exception:  # noqa: BLE001
+        return "<p class='small muted'>Stats unavailable.</p>", 200
+
+
+@front_desk_bp.route("/staff/sw.js")
+def staff_service_worker():
+    script = """
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") {
+    return;
+  }
+  const url = new URL(event.request.url);
+  const cacheName = "sandbox-hk-mobile-v1";
+  if (url.pathname.startsWith("/staff/housekeeping")) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(cacheName).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+  if (url.pathname.startsWith("/static/") || url.pathname === "/manifest.json") {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) {
+          return cached;
+        }
+        return fetch(event.request).then((response) => {
+          const copy = response.clone();
+          caches.open(cacheName).then((cache) => cache.put(event.request, copy));
+          return response;
+        });
+      })
+    );
+  }
+});
+""".strip()
+    return Response(script, mimetype="application/javascript")

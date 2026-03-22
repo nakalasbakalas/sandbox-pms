@@ -6,14 +6,16 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
 from ..extensions import db
 from ..helpers import (
     can,
     parse_request_date_arg,
+    require_integration_token,
     require_permission,
     require_user,
+    resolve_reservation_identifier,
     safe_back_path,
 )
 from ..models import PaymentRequest, Reservation
@@ -22,6 +24,7 @@ from ..services.cashier_service import (
     DocumentIssuePayload,
     ManualAdjustmentPayload,
     PaymentPostingPayload,
+    PosChargePayload,
     RefundPostingPayload,
     VoidChargePayload,
     cashier_print_context,
@@ -29,6 +32,7 @@ from ..services.cashier_service import (
     get_cashier_detail,
     issue_cashier_document,
     post_manual_adjustment,
+    post_pos_charge,
     record_payment,
     record_refund,
     void_folio_charge,
@@ -287,3 +291,67 @@ def staff_cashier_issue_document(reservation_id):
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
         return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+
+# ── POS charges (staff form + integration API) ───────────────────────
+
+
+@cashier_bp.route("/staff/cashier/<uuid:reservation_id>/pos-charges", methods=["POST"])
+def staff_cashier_pos_charge(reservation_id):
+    user = require_permission("folio.charge_add")
+    try:
+        post_pos_charge(
+            reservation_id,
+            PosChargePayload(
+                amount=Decimal(request.form.get("amount") or "0.00"),
+                outlet_name=request.form.get("outlet_name", ""),
+                outlet_type=request.form.get("outlet_type", "fnb"),
+                external_check_id=request.form.get("external_check_id", ""),
+                system_name=request.form.get("system_name", "pos"),
+                item_summary=request.form.get("item_summary"),
+                note=request.form.get("note"),
+                service_date=date.fromisoformat(request.form["service_date"]) if request.form.get("service_date") else None,
+            ),
+            actor_user_id=user.id,
+        )
+        flash("POS charge posted to folio.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+
+@cashier_bp.route("/api/integrations/pos/charges", methods=["POST"])
+def integration_pos_charge():
+    require_integration_token("pos")
+    payload = request.get_json(silent=True) or {}
+    try:
+        reservation = resolve_reservation_identifier(
+            reservation_id_value=payload.get("reservation_id"),
+            reservation_code_value=payload.get("reservation_code"),
+        )
+        line = post_pos_charge(
+            reservation.id,
+            PosChargePayload(
+                amount=Decimal(str(payload.get("amount") or "0.00")),
+                outlet_name=payload.get("outlet_name", ""),
+                outlet_type=payload.get("outlet_type", "fnb"),
+                external_check_id=payload.get("external_check_id", ""),
+                system_name=payload.get("system_name", "pos"),
+                item_summary=payload.get("item_summary"),
+                note=payload.get("note"),
+                service_date=date.fromisoformat(payload["service_date"]) if payload.get("service_date") else None,
+                covers=int(payload["covers"]) if payload.get("covers") is not None else None,
+                metadata=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None,
+            ),
+            actor_user_id=None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": public_error_message(exc)}), 400
+    return jsonify(
+        {
+            "ok": True,
+            "folio_charge_id": str(line.id),
+            "posting_key": line.posting_key,
+            "reservation_id": str(line.reservation_id),
+        }
+    )
