@@ -25,6 +25,7 @@ from ..models import (
     ModificationRequest,
     PaymentRequest,
     Reservation,
+    ReservationDocument,
     ReservationNote,
     ReservationReviewQueue,
     ReservationStatusHistory,
@@ -1527,11 +1528,21 @@ def get_guest_detail(guest_id: uuid.UUID) -> dict:
         .all()
     )
 
+    # Loyalty — may not exist yet if the migration hasn't run
+    loyalty = None
+    try:
+        from .loyalty_service import get_loyalty_summary
+
+        loyalty = get_loyalty_summary(guest.id)
+    except Exception:  # noqa: BLE001
+        pass
+
     return {
         "guest": guest,
         "reservations": reservations,
         "notes": notes,
         "threads": threads,
+        "loyalty": loyalty,
         "stats": {
             "total_reservations": len(reservations),
             "completed_stays": len(completed),
@@ -1543,3 +1554,114 @@ def get_guest_detail(guest_id: uuid.UUID) -> dict:
             "last_stay": max((r.check_in_date for r in reservations), default=None),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Guest profile merge / dedup
+# ---------------------------------------------------------------------------
+
+
+def merge_guest_profiles(
+    primary_id: uuid.UUID,
+    secondary_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+) -> Guest:
+    """Merge *secondary* guest into *primary*, moving all linked records.
+
+    After the merge the secondary guest is soft-deleted and all reservations,
+    notes, conversation threads, and documents point to the primary guest.
+    """
+    if primary_id == secondary_id:
+        raise ValueError("Cannot merge a guest with itself.")
+
+    primary = db.session.get(Guest, primary_id)
+    if not primary or primary.deleted_at:
+        raise ValueError("Primary guest not found.")
+
+    secondary = db.session.get(Guest, secondary_id)
+    if not secondary or secondary.deleted_at:
+        raise ValueError("Secondary guest not found.")
+
+    # 1. Move reservations
+    db.session.execute(
+        sa.update(Reservation)
+        .where(Reservation.primary_guest_id == secondary_id)
+        .values(primary_guest_id=primary_id, updated_by_user_id=actor_user_id)
+    )
+
+    # 2. Move guest notes
+    db.session.execute(
+        sa.update(GuestNote)
+        .where(GuestNote.guest_id == secondary_id)
+        .values(guest_id=primary_id, updated_by_user_id=actor_user_id)
+    )
+
+    # 3. Move conversation threads
+    db.session.execute(
+        sa.update(ConversationThread)
+        .where(ConversationThread.guest_id == secondary_id)
+        .values(guest_id=primary_id)
+    )
+
+    # 4. Move reservation documents that reference the secondary guest
+    db.session.execute(
+        sa.update(ReservationDocument)
+        .where(ReservationDocument.guest_id == secondary_id)
+        .values(guest_id=primary_id)
+    )
+
+    # 5. Move loyalty record if it exists (only if primary does not already have one)
+    try:
+        from ..models import GuestLoyalty
+
+        secondary_loyalty = db.session.execute(
+            sa.select(GuestLoyalty).where(GuestLoyalty.guest_id == secondary_id)
+        ).scalars().first()
+        if secondary_loyalty:
+            primary_loyalty = db.session.execute(
+                sa.select(GuestLoyalty).where(GuestLoyalty.guest_id == primary_id)
+            ).scalars().first()
+            if primary_loyalty:
+                # Merge points into primary, keep higher tier
+                primary_loyalty.points += secondary_loyalty.points
+                from .loyalty_service import recalculate_tier
+
+                recalculate_tier(primary_loyalty)
+                db.session.delete(secondary_loyalty)
+            else:
+                secondary_loyalty.guest_id = primary_id
+    except Exception:  # noqa: BLE001
+        # GuestLoyalty may not exist yet (migration pending)
+        pass
+
+    # 6. Soft-delete the secondary guest
+    secondary.deleted_at = utc_now()
+    secondary.deleted_by_user_id = actor_user_id
+
+    # 7. Audit log
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="guests",
+        entity_id=str(primary_id),
+        action="guest.merged",
+        before_data={"secondary_guest_id": str(secondary_id), "secondary_name": secondary.full_name},
+        after_data={"primary_guest_id": str(primary_id), "primary_name": primary.full_name},
+    )
+
+    # 8. Activity log
+    write_activity_log(
+        actor_user_id=actor_user_id,
+        event_type="guest.merged",
+        entity_table="guests",
+        entity_id=str(primary_id),
+        metadata={
+            "primary_guest_id": str(primary_id),
+            "secondary_guest_id": str(secondary_id),
+            "primary_name": primary.full_name,
+            "secondary_name": secondary.full_name,
+        },
+    )
+
+    # 9. Commit and return
+    db.session.commit()
+    return primary

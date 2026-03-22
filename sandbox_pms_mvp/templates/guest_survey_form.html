@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block title %}Guest Survey | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="public-page" style="max-width:640px;margin:0 auto;padding:1.5rem 1rem;">
+
+  {% if error %}
+  <div class="card" style="padding:2rem;text-align:center;">
+    <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Guest Survey</h1>
+    <p class="text-danger" style="margin-bottom:1rem;">{{ error }}</p>
+    <a href="{{ url_for('public.index') }}" class="btn btn-primary">Return to Homepage</a>
+  </div>
+  {% elif survey and survey.submitted_at %}
+  <div class="card" style="padding:2rem;text-align:center;">
+    <div style="font-size:3rem;margin-bottom:1rem;">&#9989;</div>
+    <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Thank You!</h1>
+    <p style="margin-bottom:1rem;color:#555;">
+      You have already submitted your feedback for this stay. We appreciate your time!
+    </p>
+    <p class="muted" style="font-size:0.9rem;">
+      Overall rating: <strong>{{ survey.rating }}/5</strong>
+    </p>
+  </div>
+  {% elif survey %}
+  <div class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+    <h1 style="font-size:1.5rem;margin-bottom:0.5rem;">How was your stay?</h1>
+    <p class="muted" style="margin-bottom:1rem;">
+      We would love to hear about your experience. Your feedback helps us improve.
+    </p>
+    {% if survey.reservation %}
+    <div class="detail-pills" style="gap:0.5rem;display:flex;flex-wrap:wrap;margin-bottom:1rem;">
+      <span class="detail-pill">Booking: <strong>{{ survey.reservation.reservation_code }}</strong></span>
+      {% if survey.reservation.check_in_date %}
+      <span class="detail-pill">Check-in: <strong>{{ survey.reservation.check_in_date }}</strong></span>
+      {% endif %}
+      {% if survey.reservation.check_out_date %}
+      <span class="detail-pill">Check-out: <strong>{{ survey.reservation.check_out_date }}</strong></span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <form method="POST" action="{{ url_for('public.guest_survey_submit', token=survey.token) }}">
+
+    {# -- Overall Rating -- #}
+    <div class="card" style="padding:1.5rem;margin-bottom:1rem;">
+      <label style="font-weight:600;display:block;margin-bottom:0.75rem;">Overall Rating <span style="color:#c00;">*</span></label>
+      <div class="star-rating-group" style="display:flex;gap:0.25rem;font-size:2rem;flex-direction:row-reverse;justify-content:flex-end;">
+        {% for i in range(5, 0, -1) %}
+        <input type="radio" name="rating" id="star{{ i }}" value="{{ i }}" required
+               style="display:none;" {% if i == 5 %}checked{% endif %}>
+        <label for="star{{ i }}" class="star-label"
+               style="cursor:pointer;color:#ccc;transition:color 0.15s;"
+               title="{{ i }} star{{ 's' if i > 1 else '' }}">&#9733;</label>
+        {% endfor %}
+      </div>
+      <style>
+        .star-rating-group input:checked ~ label { color: #ccc !important; }
+        .star-rating-group input:checked + label,
+        .star-rating-group input:checked + label ~ label { color: #f5a623 !important; }
+        .star-rating-group label:hover,
+        .star-rating-group label:hover ~ label { color: #f5a623 !important; }
+      </style>
+    </div>
+
+    {# -- Category Ratings -- #}
+    <div class="card" style="padding:1.5rem;margin-bottom:1rem;">
+      <label style="font-weight:600;display:block;margin-bottom:0.75rem;">Rate Each Category</label>
+      <p class="muted" style="font-size:0.85rem;margin-bottom:1rem;">Optional &mdash; help us understand what we did well and where we can improve.</p>
+      {% set categories = [("cleanliness", "Cleanliness"), ("service", "Service"), ("comfort", "Comfort"), ("location", "Location"), ("value", "Value for Money")] %}
+      {% for key, label in categories %}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;padding:0.5rem 0;border-bottom:1px solid #eee;">
+        <span style="font-size:0.95rem;">{{ label }}</span>
+        <div class="cat-rating-group" style="display:flex;gap:0.15rem;font-size:1.4rem;flex-direction:row-reverse;">
+          {% for i in range(5, 0, -1) %}
+          <input type="radio" name="cat_{{ key }}" id="cat_{{ key }}_{{ i }}" value="{{ i }}"
+                 style="display:none;">
+          <label for="cat_{{ key }}_{{ i }}" class="cat-star-label"
+                 style="cursor:pointer;color:#ccc;transition:color 0.15s;"
+                 title="{{ i }}">&#9733;</label>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+      <style>
+        .cat-rating-group input:checked ~ label { color: #ccc !important; }
+        .cat-rating-group input:checked + label,
+        .cat-rating-group input:checked + label ~ label { color: #f5a623 !important; }
+        .cat-rating-group label:hover,
+        .cat-rating-group label:hover ~ label { color: #f5a623 !important; }
+      </style>
+    </div>
+
+    {# -- Written Feedback -- #}
+    <div class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+      <label for="feedback" style="font-weight:600;display:block;margin-bottom:0.5rem;">Your Feedback</label>
+      <p class="muted" style="font-size:0.85rem;margin-bottom:0.75rem;">Tell us about your experience &mdash; what you enjoyed and how we can improve.</p>
+      <textarea id="feedback" name="feedback" rows="5"
+                style="width:100%;padding:0.75rem;border:1px solid #ccc;border-radius:6px;font-size:0.95rem;resize:vertical;"
+                placeholder="Share your thoughts..."></textarea>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="width:100%;padding:0.875rem;font-size:1rem;">
+      Submit Feedback
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

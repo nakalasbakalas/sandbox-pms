@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint, event
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, backref, mapped_column, relationship
 
 from .constants import (
     ARRIVAL_READINESS_STATES,
@@ -395,6 +395,35 @@ class Guest(AuditMixin, SoftDeleteMixin, db.Model):
         Index("ix_guests_phone", "phone"),
         Index("ix_guests_email", "email"),
         Index("ix_guests_full_name", "full_name"),
+    )
+
+
+LOYALTY_TIERS = ("bronze", "silver", "gold", "platinum")
+
+
+class GuestLoyalty(AuditMixin, db.Model):
+    __tablename__ = "guest_loyalties"
+
+    guest_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("guests.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    tier: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="bronze")
+    points: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    enrolled_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    tier_updated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    guest = relationship("Guest", backref=backref("loyalty", uselist=False))
+
+    __table_args__ = (
+        CheckConstraint(
+            f"tier IN ({', '.join(repr(v) for v in LOYALTY_TIERS)})",
+            name="ck_guest_loyalties_tier",
+        ),
+        CheckConstraint("points >= 0", name="ck_guest_loyalties_points"),
+        Index("ix_guest_loyalties_guest_id", "guest_id", unique=True),
+        Index("ix_guest_loyalties_tier", "tier"),
     )
 
 
@@ -2038,6 +2067,35 @@ class PendingAutomationEvent(AuditMixin, db.Model):
     )
 
 
+class GuestSurvey(AuditMixin, db.Model):
+    """Post-stay guest satisfaction survey."""
+
+    __tablename__ = "guest_surveys"
+
+    reservation_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("reservations.id", ondelete="CASCADE"), nullable=False
+    )
+    guest_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("guests.id", ondelete="CASCADE"), nullable=False
+    )
+    token: Mapped[str] = mapped_column(sa.String(64), nullable=False, unique=True, index=True)
+    rating: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    feedback: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    category_ratings: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
+
+    reservation = relationship("Reservation", backref="surveys")
+    guest = relationship("Guest")
+
+    __table_args__ = (
+        CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_guest_surveys_rating"),
+        Index("ix_guest_surveys_reservation_id", "reservation_id"),
+        Index("ix_guest_surveys_guest_id", "guest_id"),
+        Index("ix_guest_surveys_submitted_at", "submitted_at"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -2051,6 +2109,7 @@ for model in (
     Role,
     Permission,
     Guest,
+    GuestLoyalty,
     GuestNote,
     RoomType,
     Room,
@@ -2081,6 +2140,7 @@ for model in (
     AutomationRule,
     PendingAutomationEvent,
     HousekeepingTask,
+    GuestSurvey,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
 

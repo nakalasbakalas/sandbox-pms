@@ -316,6 +316,7 @@ MESSAGE_TEMPLATE_TYPES = [
     "deposit_reminder",
     "room_ready_notification",
     "checkout_followup",
+    "checkout_survey",
     "manual_quote_response",
     "inquiry_followup",
     "general",

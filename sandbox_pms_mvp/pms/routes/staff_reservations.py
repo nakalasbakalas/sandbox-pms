@@ -83,6 +83,7 @@ from ..services.staff_reservations_service import (
     list_departures,
     list_in_house,
     list_reservations,
+    merge_guest_profiles,
     quote_modification_request,
     resend_confirmation,
     search_guests,
@@ -145,6 +146,33 @@ def staff_guest_blacklist_toggle(guest_id):
         db.session.commit()
         flash(f"Guest {guest.full_name} has been removed from the blacklist.", "success")
     return redirect(url_for("staff_reservations.staff_guest_detail", guest_id=guest_id))
+
+
+# ── Guest merge ────────────────────────────────────────────────────────
+
+@staff_reservations_bp.route("/staff/guests/merge", methods=["GET"])
+def staff_guest_merge_form():
+    require_permission("admin.settings")
+    return render_template("staff_guest_merge.html")
+
+
+@staff_reservations_bp.route("/staff/guests/merge", methods=["POST"])
+def staff_guest_merge_action():
+    user = require_permission("admin.settings")
+    primary_id = parse_optional_uuid(request.form.get("primary_guest_id"))
+    secondary_id = parse_optional_uuid(request.form.get("secondary_guest_id"))
+    if not primary_id or not secondary_id:
+        flash("Please select both a primary and a secondary guest.", "error")
+        return redirect(url_for("staff_reservations.staff_guest_merge_form"))
+    try:
+        primary = merge_guest_profiles(primary_id, secondary_id, actor_user_id=user.id)
+        flash(f"Guest profiles merged successfully. All records now belong to {primary.full_name}.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    except Exception:  # noqa: BLE001
+        logger.exception("Guest merge failed")
+        flash("An unexpected error occurred while merging guest profiles.", "error")
+    return redirect(url_for("staff_reservations.staff_guest_merge_form"))
 
 
 # ── Reservation list and operational views ─────────────────────────────

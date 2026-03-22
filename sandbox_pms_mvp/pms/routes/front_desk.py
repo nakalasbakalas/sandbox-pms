@@ -98,6 +98,7 @@ from ..services.messaging_service import (
     reservation_messages,
 )
 from ..services.reporting_service import build_front_desk_dashboard
+from ..services.loyalty_service import award_checkout_points
 from ..services.staff_reservations_service import (
     StayDateChangePayload,
     assign_room,
@@ -1342,6 +1343,10 @@ def staff_front_desk_board_check_out(reservation_id):
 
         db.session.refresh(reservation)
         try:
+            award_checkout_points(reservation)
+        except Exception:  # noqa: BLE001
+            logger.exception("Loyalty points award failed for board checkout %s", reservation_id)
+        try:
             fire_automation_event(
                 "checkout_completed",
                 reservation_id=str(reservation_id),
@@ -1669,6 +1674,10 @@ def staff_front_desk_check_out(reservation_id):
         try:
             res = db.session.get(Reservation, reservation_id)
             if res:
+                try:
+                    award_checkout_points(res)
+                except Exception:  # noqa: BLE001
+                    logger.exception("Loyalty points award failed for checkout %s", reservation_id)
                 fire_automation_event(
                     "checkout_completed",
                     reservation_id=str(reservation_id),
@@ -1741,6 +1750,12 @@ def staff_dashboard():
         include_housekeeping=user.has_permission("housekeeping.view"),
         include_financials=user.has_permission("folio.view"),
     )
+    # Survey stats for the last 30 days
+    from ..services.survey_service import get_survey_stats
+    survey_stats = get_survey_stats(
+        from_date=today - timedelta(days=30),
+        to_date=today,
+    )
     return render_template(
         "staff_dashboard.html",
         dashboard=dashboard,
@@ -1753,6 +1768,7 @@ def staff_dashboard():
         can_housekeeping=user.has_permission("housekeeping.view"),
         can_folio=user.has_permission("folio.view"),
         can_reports=user.has_permission("reports.view"),
+        survey_stats=survey_stats,
     )
 
 

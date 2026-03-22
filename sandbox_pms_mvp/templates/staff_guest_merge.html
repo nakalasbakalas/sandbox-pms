@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Merge Guest Profiles | {{ hotel_name }}{% endblock %}
+{% block content %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Admin</p>
+      <h1>Merge Guest Profiles</h1>
+      <p>Combine two guest records into one. All reservations, notes, messages, and documents from the secondary guest will be moved to the primary guest.</p>
+    </div>
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('staff_reservations.staff_guests') }}">Back to guest search</a>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="border-left:4px solid var(--warning, #e6a817); padding:var(--space-md);">
+  <p><strong>Warning:</strong> This action is irreversible. The secondary guest profile will be permanently deactivated and all linked records will be transferred to the primary guest.</p>
+</section>
+
+<section class="card">
+  <form method="post" action="{{ url_for('staff_reservations.staff_guest_merge_action') }}" class="stack-form" onsubmit="return confirm('Are you sure you want to merge these guest profiles? This action cannot be undone.');">
+    {{ csrf_input() }}
+
+    <fieldset style="border:1px solid var(--border, #ddd); border-radius:var(--radius, 8px); padding:var(--space-md); margin-bottom:var(--space-md);">
+      <legend style="font-weight:600; padding:0 var(--space-xs);">Primary guest (keep)</legend>
+      <p class="small muted" style="margin-bottom:var(--space-sm);">This guest profile will be preserved. All records from the secondary guest will be moved here.</p>
+      <label>
+        <span>Guest ID</span>
+        <input type="text" name="primary_guest_id" required placeholder="Paste the primary guest UUID" pattern="[0-9a-fA-F\-]{36}">
+      </label>
+    </fieldset>
+
+    <fieldset style="border:1px solid var(--border, #ddd); border-radius:var(--radius, 8px); padding:var(--space-md); margin-bottom:var(--space-md);">
+      <legend style="font-weight:600; padding:0 var(--space-xs);">Secondary guest (merge into primary)</legend>
+      <p class="small muted" style="margin-bottom:var(--space-sm);">This guest profile will be deactivated after the merge. All its reservations, notes, and messages will be transferred.</p>
+      <label>
+        <span>Guest ID</span>
+        <input type="text" name="secondary_guest_id" required placeholder="Paste the secondary guest UUID" pattern="[0-9a-fA-F\-]{36}">
+      </label>
+    </fieldset>
+
+    <div>
+      <button type="submit" class="button" style="--btn-bg:var(--danger, #dc3545);--btn-text:#fff">Merge profiles</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <div class="card-head"><div><h2>How to find Guest IDs</h2></div></div>
+  <div class="list-stack compact">
+    <div class="list-row no-link">
+      <div>
+        <p>1. Go to <a href="{{ url_for('staff_reservations.staff_guests') }}">Guest Search</a> and search for the guest by name, phone, or email.</p>
+        <p>2. Open the guest profile. The Guest ID is shown in the page URL.</p>
+        <p>3. Copy the UUID from the URL bar and paste it into the field above.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}

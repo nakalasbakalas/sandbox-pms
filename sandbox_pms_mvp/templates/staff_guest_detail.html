@@ -25,6 +25,27 @@
   <article class="metric-card"><small>Total revenue</small><strong>{{ stats.total_revenue | money }}</strong></article>
 </section>
 
+{% set loyalty = detail.loyalty %}
+{% if loyalty %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Loyalty programme</h2>
+      <p>Enrolled member with {{ loyalty.points }} points.</p>
+    </div>
+    <div class="actions">
+      <span class="status {% if loyalty.tier == 'platinum' %}confirmed{% elif loyalty.tier == 'gold' %}pending{% elif loyalty.tier == 'silver' %}checked_in{% else %}tentative{% endif %}" style="font-size:0.85rem; text-transform:uppercase; letter-spacing:0.05em;">{{ loyalty.tier }}</span>
+    </div>
+  </div>
+  <div class="list-stack compact">
+    <div class="list-row no-link"><div><strong>Tier</strong><p>{{ loyalty.tier | capitalize }}</p></div></div>
+    <div class="list-row no-link"><div><strong>Points</strong><p>{{ loyalty.points }}</p></div></div>
+    <div class="list-row no-link"><div><strong>Enrolled</strong><p>{{ loyalty.enrolled_at.strftime('%d %b %Y') }}</p></div></div>
+    <div class="list-row no-link"><div><strong>Tier last changed</strong><p>{{ loyalty.tier_updated_at.strftime('%d %b %Y %H:%M') if loyalty.tier_updated_at else '—' }}</p></div></div>
+  </div>
+</section>
+{% endif %}
+
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head"><div><h2>Contact details</h2></div></div>

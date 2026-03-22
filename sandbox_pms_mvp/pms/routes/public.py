@@ -633,3 +633,41 @@ def sitemap_xml():
     body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
     body.append("</urlset>")
     return Response("\n".join(body), mimetype="application/xml")
+
+
+# -- Guest Satisfaction Survey: public routes ---------------------------------
+
+from ..services.survey_service import submit_survey, validate_survey_token
+
+
+@public_bp.route("/survey/<token>", methods=["GET"])
+def guest_survey_form(token):
+    survey = validate_survey_token(token)
+    if not survey:
+        return render_template("guest_survey_form.html", error="This survey link is invalid or has expired.", survey=None), 403
+    return render_template("guest_survey_form.html", error=None, survey=survey)
+
+
+@public_bp.route("/survey/<token>/submit", methods=["POST"])
+def guest_survey_submit(token):
+    try:
+        rating = int(request.form.get("rating", 0))
+    except (TypeError, ValueError):
+        rating = 0
+    feedback = request.form.get("feedback", "").strip()
+    category_ratings = {}
+    for cat in ("cleanliness", "service", "comfort", "location", "value"):
+        val = request.form.get(f"cat_{cat}")
+        if val:
+            try:
+                category_ratings[cat] = int(val)
+            except (TypeError, ValueError):
+                pass
+    try:
+        survey = submit_survey(token, rating, feedback, category_ratings or None)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        survey = validate_survey_token(token)
+        return render_template("guest_survey_form.html", error=str(exc), survey=survey)
+    return render_template("guest_survey_thanks.html", survey=survey)

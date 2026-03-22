@@ -107,7 +107,7 @@ def upgrade():
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("deleted_by_user_id", sa.Uuid(as_uuid=True), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.CheckConstraint(
-            "template_type IN ('booking_confirmation','pre_checkin_reminder','arrival_day_reminder','deposit_reminder','room_ready_notification','checkout_followup','manual_quote_response','inquiry_followup','general')",
+            "template_type IN ('booking_confirmation','pre_checkin_reminder','arrival_day_reminder','deposit_reminder','room_ready_notification','checkout_followup','checkout_survey','manual_quote_response','inquiry_followup','general')",
             name="ck_message_templates_template_type",
         ),
         sa.CheckConstraint(

@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block title %}Thank You | {{ hotel_name }}{% endblock %}
+{% block content %}
+<div class="public-page" style="max-width:640px;margin:0 auto;padding:2rem 1rem;text-align:center;">
+  <div class="card" style="padding:2rem;">
+    <div style="font-size:3rem;margin-bottom:1rem;">&#9989;</div>
+    <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Thank You for Your Feedback!</h1>
+    <p style="margin-bottom:1.5rem;color:#555;">
+      We truly appreciate you taking the time to share your experience
+      {% if survey and survey.reservation %}
+      for reservation <strong>{{ survey.reservation.reservation_code }}</strong>.
+      {% else %}.{% endif %}
+    </p>
+    {% if survey and survey.rating %}
+    <div style="background:#f8f9fa;padding:1rem;border-radius:8px;margin-bottom:1.5rem;">
+      <p style="margin-bottom:0.5rem;font-size:1.1rem;">Your rating:</p>
+      <div style="font-size:1.8rem;color:#f5a623;">
+        {% for i in range(1, 6) %}
+          {% if i <= survey.rating %}&#9733;{% else %}<span style="color:#ccc;">&#9733;</span>{% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    <p class="muted" style="font-size:0.9rem;margin-bottom:1.5rem;">
+      Your feedback helps us improve and provide a better experience for all our guests.
+    </p>
+    <a href="{{ url_for('public.index') }}" class="btn btn-primary">Return to Homepage</a>
+  </div>
+</div>
+{% endblock %}

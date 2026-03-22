@@ -777,6 +777,22 @@ MESSAGE_TEMPLATES_SEED: list[tuple[str, str, str, str, str, str, str]] = [
         "We'd love to help you plan your visit.\n\n"
         "Best regards,\n{{hotel_name}}",
     ),
+    (
+        "checkout_survey",
+        "checkout_survey",
+        "email",
+        "en",
+        "Post-Stay Survey",
+        "How was your stay at {{hotel_name}}?",
+        "Dear {{guest_name}},\n\n"
+        "Thank you for staying at {{hotel_name}}. "
+        "We hope you had a wonderful experience.\n\n"
+        "We would love to hear your feedback. Please take a moment to "
+        "complete our short satisfaction survey:\n\n"
+        "{{survey_link}}\n\n"
+        "Your feedback helps us improve and serve you better.\n\n"
+        "Warm regards,\n{{hotel_name}}",
+    ),
 ]
 
 # Each entry: (event_type, template_key, channel, is_active, delay_minutes)
@@ -787,6 +803,7 @@ AUTOMATION_RULES_SEED: list[tuple[str, str, str, bool, int]] = [
     ("checkout_completed", "checkout_followup", "email", True, 60),
     ("payment_due", "deposit_reminder", "email", False, 0),
     ("pre_checkin_not_completed", "pre_checkin_reminder", "email", False, 0),
+    ("checkout_completed", "checkout_survey", "email", False, 120),
 ]
 
 

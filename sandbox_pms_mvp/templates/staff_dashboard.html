@@ -266,6 +266,60 @@
   </article>
 </section>
 
+{% if survey_stats and survey_stats.total_responses > 0 %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Guest Satisfaction</p>
+      <h2>Survey Results (Last 30 Days)</h2>
+    </div>
+  </div>
+  <div style="padding:1rem 1.5rem;">
+    <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1rem;">
+      <div>
+        <span class="small muted">Responses</span>
+        <p style="font-size:1.5rem;font-weight:700;">{{ survey_stats.total_responses }}</p>
+      </div>
+      <div>
+        <span class="small muted">Average Rating</span>
+        <p style="font-size:1.5rem;font-weight:700;">
+          {{ survey_stats.average_rating }}/5
+          <span style="color:#f5a623;font-size:1.2rem;">&#9733;</span>
+        </p>
+      </div>
+    </div>
+    {% if survey_stats.rating_distribution %}
+    <div style="margin-bottom:1rem;">
+      <span class="small muted">Rating Distribution</span>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+        {% for star in range(5, 0, -1) %}
+        {% set count = survey_stats.rating_distribution.get(star, 0) %}
+        {% set pct = (count / survey_stats.total_responses * 100) | round(0) | int if survey_stats.total_responses > 0 else 0 %}
+        <div style="flex:1;text-align:center;">
+          <div style="font-size:0.8rem;color:#888;">{{ star }}&#9733;</div>
+          <div style="background:#eee;border-radius:4px;height:40px;position:relative;overflow:hidden;">
+            <div style="background:#f5a623;height:100%;width:100%;position:absolute;bottom:0;transform:scaleY({{ pct / 100 }});transform-origin:bottom;border-radius:4px;"></div>
+          </div>
+          <div style="font-size:0.75rem;color:#666;margin-top:2px;">{{ count }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% if survey_stats.category_averages %}
+    <div>
+      <span class="small muted">Category Averages</span>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem;">
+        {% for cat, avg in survey_stats.category_averages.items() %}
+        <span class="detail-pill">{{ cat | capitalize }}: <strong>{{ avg }}</strong></span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card-head">
     <div>
