@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import os
+import subprocess
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -195,3 +198,75 @@ def test_render_blueprint_enables_persistent_uploads_and_background_crons():
         assert text.count(f"name: {cron_name}") == 1
     assert "startCommand: flask --app app cleanup-audit-logs" in text
     assert "startCommand: flask --app app auto-cancel-no-shows" in text
+
+
+def _production_like_render_env(database_url: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "APP_ENV": "production",
+            "SECRET_KEY": "production-secret-key-1234567890abcdef",
+            "AUTH_ENCRYPTION_KEY": "g0pj3nQ_SQ3P7ABmS5s3CeuNJnHNLiqOLTD7ATngcDk=",
+            "DATABASE_URL": database_url,
+            "BOOKING_ENGINE_URL": "https://book.example.com",
+            "STAFF_APP_URL": "https://staff.example.com",
+            "APP_BASE_URL": "https://book.example.com",
+            "MARKETING_SITE_URL": "https://www.example.com",
+            "FORCE_HTTPS": "1",
+            "AUTH_COOKIE_SECURE": "1",
+            "SESSION_COOKIE_SECURE": "1",
+            "ADMIN_EMAIL": "admin@hotel.example",
+            "ADMIN_PASSWORD": "password-manager-generated-secret",
+            "AUTO_BOOTSTRAP_SCHEMA": "0",
+            "AUTO_SEED_REFERENCE_DATA": "0",
+            "AUTH_SHOW_RESET_LINKS": "0",
+            "PAYMENT_PROVIDER": "disabled",
+        }
+    )
+    return env
+
+
+def test_entrypoint_health_smoke_boots_in_production_like_subprocess(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "deploy-entrypoint.sqlite"
+    env = _production_like_render_env(f"sqlite:///{db_path.as_posix()}")
+    code = (
+        "from app import app; "
+        "client = app.test_client(); "
+        "response = client.get('/health', base_url='https://book.example.com'); "
+        "payload = response.get_json(); "
+        "assert response.status_code == 200, response.status_code; "
+        "assert payload['status'] == 'ok'; "
+        "assert payload['db'] == 'ok'; "
+        "print('health-smoke-ok')"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "health-smoke-ok" in result.stdout
+
+
+def test_flask_db_upgrade_smoke_runs_in_production_like_subprocess(tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    db_path = tmp_path / "deploy-upgrade.sqlite"
+    env = _production_like_render_env(f"sqlite:///{db_path.as_posix()}")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "flask", "--app", "app", "db", "upgrade"],
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "Running upgrade" in result.stderr
