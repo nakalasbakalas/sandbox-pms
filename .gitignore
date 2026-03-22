@@ -5,9 +5,14 @@
 # Python cache and local tooling
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
+build/
 .pytest_cache/
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 
 # Local virtualenvs
 .venv/
@@ -20,9 +25,16 @@ sandbox_pms_mvp/instance/
 *.sqlite
 *.sqlite3
 
-# MCP config (contains API keys)
+# Logs
+*.log
+
+# Environment and secrets
+.env
 .mcp.json
+*.pem
+*.key
 
 # Editor and platform noise
 Thumbs.db
 .DS_Store
+node_modules/

@@ -33,7 +33,6 @@ from ..front_desk_board_runtime import (
     log_front_desk_board_metric,
 )
 from ..helpers import (
-    action_datetime_for_form_date,
     add_anchor_to_path,
     can,
     ensure_csrf_token,
@@ -42,7 +41,6 @@ from ..helpers import (
     parse_request_date_arg,
     parse_request_int_arg,
     parse_request_uuid_arg,
-    require_any_permission,
     require_permission,
     require_user,
     safe_back_path,
@@ -58,8 +56,11 @@ from ..models import (
 from ..normalization import normalize_phone
 from ..security import public_error_message
 from ..services.admin_service import (
+    GroupRoomBlockPayload,
     InventoryOverridePayload,
+    create_group_room_block,
     create_inventory_override,
+    release_group_room_block,
     release_inventory_override,
     update_inventory_override,
 )
@@ -401,7 +402,6 @@ def front_desk_board_context(
     *,
     ical_import_report: dict | None = None,
 ) -> dict:
-    from ..helpers import can as can_perm
     board = build_front_desk_board(filters)
     back_url = front_desk_board_url(filters)
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
@@ -421,11 +421,11 @@ def front_desk_board_context(
         "room_types": room_types,
         "user_density": user_density,
         "default_checkout_date": filters.start_date + timedelta(days=1),
-        "can_create": can_perm("reservation.create"),
-        "can_edit": can_perm("reservation.edit"),
-        "can_manage_closures": can_perm("operations.override"),
-        "can_check_in": can_perm("reservation.check_in"),
-        "can_check_out": can_perm("reservation.check_out"),
+        "can_create": can("reservation.create"),
+        "can_edit": can("reservation.edit"),
+        "can_manage_closures": can("operations.override"),
+        "can_check_in": can("reservation.check_in"),
+        "can_check_out": can("reservation.check_out"),
         "board_url": url_for("front_desk.staff_front_desk_board"),
         "board_fragment_url": url_for("front_desk.staff_front_desk_board_fragment"),
         "board_data_url": url_for("front_desk.staff_front_desk_board_data"),
@@ -1151,7 +1151,6 @@ def staff_front_desk_board_release_closure(override_id):
 
 @front_desk_bp.route("/staff/front-desk/board/group-blocks", methods=["POST"])
 def staff_front_desk_board_create_group_block():
-    from ..services.admin_service import GroupRoomBlockPayload, create_group_room_block
 
     user = require_permission("operations.override")
     back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
@@ -1175,7 +1174,6 @@ def staff_front_desk_board_create_group_block():
 
 @front_desk_bp.route("/staff/front-desk/board/group-blocks/release", methods=["POST"])
 def staff_front_desk_board_release_group_block():
-    from ..services.admin_service import release_group_room_block
 
     user = require_permission("operations.override")
     back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))

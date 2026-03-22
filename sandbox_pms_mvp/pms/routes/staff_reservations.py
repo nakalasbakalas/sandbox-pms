@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from decimal import Decimal
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from markupsafe import Markup, escape
 
 from ..activity import write_activity_log
@@ -37,7 +36,6 @@ from ..models import (
 )
 from ..pricing import quote_reservation
 from ..security import public_error_message
-from ..services.extras_service import list_booking_extras
 from ..services.messaging_service import (
     fire_automation_event,
     reservation_messages,

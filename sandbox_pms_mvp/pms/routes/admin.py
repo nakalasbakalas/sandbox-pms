@@ -4,8 +4,8 @@ import logging
 from datetime import date
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
-from markupsafe import escape
 
 from ..models import (
     ActivityLog,
@@ -14,7 +14,6 @@ from ..models import (
     InventoryOverride,
     NotificationTemplate,
     PaymentRequest,
-    PendingAutomationEvent,
     PolicyDocument,
     RateRule,
     Role,
@@ -396,7 +395,7 @@ def staff_rates():
                 flash("Inventory override released.", "success")
             elif action == "blackout":
                 actor = helpers["require_permission"]("settings.edit")
-                _blackout, conflict_count = upsert_blackout_period(
+                _, conflict_count = upsert_blackout_period(
                     helpers["parse_optional_uuid"](request.form.get("blackout_id")),
                     BlackoutPayload(
                         name=request.form.get("name", ""),
@@ -540,7 +539,6 @@ def staff_admin_operations():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
 
-    import sqlalchemy as sa
     documents_by_code = policy_documents_context()
     templates = list(
         db.session.execute(

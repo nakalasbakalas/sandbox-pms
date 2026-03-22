@@ -10,7 +10,6 @@ from flask import Blueprint, flash, jsonify, redirect, render_template, request,
 from ..constants import ROOM_NOTE_TYPES
 from ..extensions import db
 from ..helpers import (
-    can,
     parse_request_date_arg,
     parse_request_uuid_arg,
     require_any_permission,

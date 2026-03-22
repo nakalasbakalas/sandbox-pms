@@ -6,24 +6,21 @@ from decimal import Decimal
 from uuid import UUID
 
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
-from markupsafe import escape
 
 from ..activity import write_activity_log
 from ..models import PaymentRequest, ReservationHold, RoomType
 from ..extensions import db
-from ..i18n import normalize_language
+from ..i18n import normalize_language, t
 from ..security import public_error_message, request_client_ip
 from ..services.public_booking_service import (
     HoldRequestPayload,
     PublicBookingPayload,
-    PublicSearchPayload,
     VerificationRequestPayload,
     complete_public_digital_checkout,
     confirm_public_booking,
     create_reservation_hold,
     load_public_confirmation,
     public_digital_checkout_context,
-    search_public_availability,
     submit_cancellation_request,
     submit_modification_request,
 )
@@ -266,7 +263,6 @@ def public_payment_start(request_code):
 
 @public_bp.route("/payments/return/<request_code>")
 def public_payment_return(request_code):
-    helpers = _get_app_helpers()
     try:
         context = load_public_payment_return(
             request_code,
@@ -317,7 +313,6 @@ def booking_cancel_request():
     request_row = None
     form_defaults = helpers["public_request_form_defaults"]("booking_reference", "contact_value", "reason")
     if request.method == "POST":
-        from ..i18n import t
         payload = VerificationRequestPayload(
             booking_reference=request.form["booking_reference"].strip(),
             contact_value=request.form["contact_value"].strip(),
@@ -353,7 +348,6 @@ def booking_modify_request():
         "special_requests",
     )
     if request.method == "POST":
-        from ..i18n import t
         payload = VerificationRequestPayload(
             booking_reference=request.form["booking_reference"].strip(),
             contact_value=request.form["contact_value"].strip(),

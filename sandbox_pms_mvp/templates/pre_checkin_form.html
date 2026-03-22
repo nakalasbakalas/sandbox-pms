@@ -7,7 +7,7 @@
   <div class="card" style="padding:2rem;text-align:center;">
     <h1 style="font-size:1.5rem;margin-bottom:0.75rem;">Pre-Check-In</h1>
     <p class="text-danger" style="margin-bottom:1rem;">{{ error }}</p>
-    <a href="/" class="btn btn-primary">Return to Homepage</a>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Return to Homepage</a>
   </div>
   {% elif ctx %}
   {% set pc = ctx.pre_checkin %}
@@ -76,7 +76,7 @@
   </div>
 
   {# ── Guest Information Form ── #}
-  <form method="POST" action="/pre-checkin/{{ pc.token }}/save" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+  <form method="POST" action="{{ url_for('public.pre_checkin_save', token=pc.token) }}" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
     <h2 style="font-size:1.2rem;margin-bottom:1rem;">👤 Guest Information</h2>
 
     <div style="margin-bottom:1rem;">
@@ -151,7 +151,7 @@
   </form>
 
   {# ── Document Upload ── #}
-  <form method="POST" action="/pre-checkin/{{ pc.token }}/upload" enctype="multipart/form-data" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
+  <form method="POST" action="{{ url_for('public.pre_checkin_upload', token=pc.token) }}" enctype="multipart/form-data" class="card" style="padding:1.5rem;margin-bottom:1.5rem;">
     <h2 style="font-size:1.2rem;margin-bottom:1rem;">📄 Identity Document Upload</h2>
     <p class="muted" style="margin-bottom:1rem;font-size:0.9rem;">Please upload a clear photo or scan of your ID document (passport, national ID, or driving license). Accepted formats: JPG, PNG, PDF (max 10 MB).</p>
     <div style="margin-bottom:1rem;">
