@@ -14,6 +14,7 @@ from ..models import (
     InventoryOverride,
     NotificationTemplate,
     PaymentRequest,
+    PendingAutomationEvent,
     PolicyDocument,
     RateRule,
     Role,
@@ -52,6 +53,7 @@ from ..services.admin_service import (
     preview_notification_template,
     query_audit_entries,
     release_inventory_override,
+    reset_notification_templates_to_defaults,
     update_role_permissions,
     upsert_blackout_period,
     upsert_notification_template,
@@ -77,8 +79,11 @@ from ..services.communication_dispatch import (
     send_due_pre_arrival_reminders,
 )
 from ..services.messaging_service import (
+    cancel_pending_automation_event,
     list_automation_rules,
     list_message_templates,
+    list_pending_automation_events,
+    process_pending_automations,
     upsert_automation_rule,
 )
 from ..services.admin_settings_ops import (
@@ -137,6 +142,14 @@ def staff_admin_dashboard():
         user_count=User.query.filter(User.deleted_at.is_(None)).count(),
         recent_audit=query_audit_entries(limit=12),
     )
+
+
+@admin_bp.route("/staff/admin/test-error", methods=["POST"], endpoint="staff_admin_test_error")
+def staff_admin_test_error():
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("audit.view")
+    helpers["require_admin_role"](actor)
+    raise RuntimeError("Sentry verification test")
 
 
 @admin_bp.route("/staff/admin/staff-access", methods=["GET", "POST"], endpoint="staff_admin_staff_access")
@@ -383,7 +396,7 @@ def staff_rates():
                 flash("Inventory override released.", "success")
             elif action == "blackout":
                 actor = helpers["require_permission"]("settings.edit")
-                upsert_blackout_period(
+                _blackout, conflict_count = upsert_blackout_period(
                     helpers["parse_optional_uuid"](request.form.get("blackout_id")),
                     BlackoutPayload(
                         name=request.form.get("name", ""),
@@ -396,6 +409,8 @@ def staff_rates():
                     actor_user_id=actor.id,
                 )
                 flash("Blackout period saved.", "success")
+                if conflict_count:
+                    flash(f"Warning: {conflict_count} active reservation(s) overlap this blackout period.", "warning")
             elif action == "deposit_settings":
                 actor = helpers["require_permission"]("settings.edit")
                 upsert_settings_bundle(
@@ -504,6 +519,11 @@ def staff_admin_operations():
                 preview_language = normalize_language(request.form.get("language_code", preview_language))
                 template_preview = preview_notification_template(preview_key, preview_language, channel=preview_channel)
                 flash("Template preview refreshed.", "info")
+            elif action == "reset_templates_to_defaults":
+                actor = helpers["require_permission"]("settings.edit")
+                result = reset_notification_templates_to_defaults(actor_user_id=actor.id)
+                flash(f"Templates reset to defaults: {result['updated']} updated, {result['created']} created.", "success")
+                return redirect(url_for("admin.staff_admin_operations"))
             elif action == "housekeeping_defaults":
                 actor = helpers["require_permission"]("settings.edit")
                 upsert_settings_bundle(
@@ -520,11 +540,14 @@ def staff_admin_operations():
         except Exception as exc:  # noqa: BLE001
             flash(public_error_message(exc), "error")
 
+    import sqlalchemy as sa
     documents_by_code = policy_documents_context()
-    templates = (
-        NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None))
-        .order_by(NotificationTemplate.template_key.asc(), NotificationTemplate.channel.asc(), NotificationTemplate.language_code.asc())
-        .all()
+    templates = list(
+        db.session.execute(
+            sa.select(NotificationTemplate)
+            .where(NotificationTemplate.deleted_at.is_(None))
+            .order_by(NotificationTemplate.template_key.asc(), NotificationTemplate.channel.asc(), NotificationTemplate.language_code.asc())
+        ).scalars()
     )
     if template_preview is None:
         template_preview = preview_notification_template(preview_key, preview_language, channel=preview_channel)
@@ -595,6 +618,13 @@ def staff_admin_communications():
                     actor_user_id=str(actor.id),
                 )
                 flash("Automation rule saved.", "success")
+            elif action == "process_automation_queue":
+                result = process_pending_automations()
+                flash(f"Automation queue processed: {result['processed']} processed, {result['skipped']} skipped, {result['errors']} errors.", "success")
+            elif action == "cancel_automation_event":
+                event_id = request.form.get("event_id")
+                cancel_pending_automation_event(event_id, actor_user_id=actor.id)
+                flash("Automation event cancelled.", "success")
             else:
                 abort(400)
         except Exception as exc:  # noqa: BLE001
@@ -618,9 +648,10 @@ def staff_admin_communications():
         communication_settings=communication_settings_context(),
         automation_rules=list_automation_rules(),
         message_templates=list_message_templates(),
+        pending_events=list_pending_automation_events(include_processed=False, limit=50),
         deliveries=deliveries,
         filters=filters,
-        delivery_statuses=["pending", "queued", "delivered", "failed", "skipped", "cancelled"],
+        delivery_statuses=["pending", "queued", "delivered", "failed", "retry", "skipped", "cancelled"],
         delivery_channels=["email", "internal_notification", "line_staff_alert", "whatsapp_staff_alert"],
         audience_types=["guest", "staff"],
     )

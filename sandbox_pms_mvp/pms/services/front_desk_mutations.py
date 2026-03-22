@@ -17,6 +17,7 @@ _load_reservation_for_update = _base._load_reservation_for_update
 _reservation_inventory_rows = _base._reservation_inventory_rows
 
 IDENTITY_VERIFICATION_REQUIRED_MESSAGE = "Identity verification must be completed before check-in."
+GUEST_BLACKLISTED_MESSAGE = "This guest is blacklisted and cannot be checked in. A manager must remove the blacklist flag before proceeding."
 
 
 from ..helpers import current_app_testing
@@ -46,6 +47,8 @@ def complete_check_in(
         raise ValueError("Reservation not found.")
     if reservation.current_status not in {"tentative", "confirmed"}:
         raise ValueError("Only tentative or confirmed reservations can be checked in.")
+    if reservation.primary_guest and reservation.primary_guest.blacklist_flag:
+        raise ValueError(GUEST_BLACKLISTED_MESSAGE)
     if action_at.date() >= reservation.check_out_date:
         raise ValueError("This reservation can no longer be checked in because the departure date has passed.")
     _ensure_identity_verification_for_check_in(
@@ -174,6 +177,8 @@ def create_walk_in_and_check_in(payload: WalkInCheckInPayload, *, actor_user_id:
     _ensure_identity_verification_for_check_in(identity_verified=payload.identity_verified)
 
     guest = create_or_get_guest(reservation_payload, actor_user_id)
+    if guest.blacklist_flag:
+        raise ValueError(GUEST_BLACKLISTED_MESSAGE)
     quote = quote_reservation(
         room_type=room_type,
         check_in_date=payload.check_in_date,

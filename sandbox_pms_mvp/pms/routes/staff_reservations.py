@@ -27,6 +27,7 @@ from ..helpers import (
     safe_back_path,
 )
 from ..models import (
+    Guest,
     PreCheckIn,
     Reservation,
     ReservationDocument,
@@ -103,6 +104,38 @@ def staff_guest_detail(guest_id):
         abort(404)
     back_url = safe_back_path(request.args.get("back"), url_for("staff_reservations.staff_guests"))
     return render_template("staff_guest_detail.html", detail=detail, back_url=back_url)
+
+
+@staff_reservations_bp.route("/staff/guests/<uuid:guest_id>/blacklist", methods=["POST"])
+def staff_guest_blacklist_toggle(guest_id):
+    user = require_permission("reservation.edit")
+    guest = db.session.get(Guest, guest_id)
+    if not guest:
+        abort(404)
+    action = request.form.get("action", "block")
+    reason = (request.form.get("reason") or "").strip()
+    if action == "block":
+        if not reason:
+            flash("A reason is required when blacklisting a guest.", "error")
+            return redirect(url_for("staff_reservations.staff_guest_detail", guest_id=guest_id))
+        old_snapshot = {"blacklist_flag": guest.blacklist_flag, "blacklist_reason": guest.blacklist_reason}
+        guest.blacklist_flag = True
+        guest.blacklist_reason = reason
+        guest.blacklisted_at = utc_now()
+        guest.blacklisted_by_user_id = user.id
+        write_audit_log(guest, "guest_blacklisted", old_data=old_snapshot, new_data={"blacklist_flag": True, "blacklist_reason": reason}, actor_user_id=user.id)
+        db.session.commit()
+        flash(f"Guest {guest.full_name} has been blacklisted.", "warning")
+    elif action == "unblock":
+        old_snapshot = {"blacklist_flag": guest.blacklist_flag, "blacklist_reason": guest.blacklist_reason}
+        guest.blacklist_flag = False
+        guest.blacklist_reason = None
+        guest.blacklisted_at = None
+        guest.blacklisted_by_user_id = None
+        write_audit_log(guest, "guest_unblacklisted", old_data=old_snapshot, new_data={"blacklist_flag": False, "blacklist_reason": None}, actor_user_id=user.id)
+        db.session.commit()
+        flash(f"Guest {guest.full_name} has been removed from the blacklist.", "success")
+    return redirect(url_for("staff_reservations.staff_guest_detail", guest_id=guest_id))
 
 
 # ── Reservation list and operational views ─────────────────────────────

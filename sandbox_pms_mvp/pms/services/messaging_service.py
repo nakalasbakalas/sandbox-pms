@@ -1261,3 +1261,43 @@ def total_unread_count() -> int:
         .where(ConversationThread.status.in_(["open", "waiting"]))
     )
     return int(result.scalar() or 0)
+
+
+# ---------------------------------------------------------------------------
+# Pending automation events -- admin queue view
+# ---------------------------------------------------------------------------
+
+
+def list_pending_automation_events(*, include_processed: bool = False, limit: int = 100) -> list[PendingAutomationEvent]:
+    """Return pending automation events for admin queue view."""
+    stmt = (
+        sa.select(PendingAutomationEvent)
+        .options(joinedload(PendingAutomationEvent.rule))
+    )
+    if not include_processed:
+        stmt = stmt.where(PendingAutomationEvent.processed_at.is_(None))
+    stmt = stmt.order_by(PendingAutomationEvent.fire_at.asc()).limit(limit)
+    return list(db.session.execute(stmt).scalars().unique())
+
+
+def cancel_pending_automation_event(event_id: str, *, actor_user_id: uuid.UUID) -> PendingAutomationEvent:
+    """Cancel a pending automation event by marking it as processed with error."""
+    try:
+        parsed_id = uuid.UUID(str(event_id))
+    except (ValueError, AttributeError):
+        raise ValueError("Invalid event ID.")
+    event = db.session.get(PendingAutomationEvent, parsed_id)
+    if not event:
+        raise ValueError("Pending automation event not found.")
+    if event.processed_at is not None:
+        raise ValueError("Event has already been processed.")
+    event.processed_at = utc_now()
+    event.error = "Cancelled by admin"
+    write_audit_log(
+        actor_user_id=actor_user_id,
+        entity_table="pending_automation_events",
+        entity_id=str(event.id),
+        action="automation_event_cancelled",
+    )
+    db.session.commit()
+    return event

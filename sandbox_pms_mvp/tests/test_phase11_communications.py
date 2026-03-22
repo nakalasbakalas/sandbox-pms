@@ -5,6 +5,8 @@ from datetime import date, timedelta, timezone
 
 from werkzeug.security import generate_password_hash
 
+import sqlalchemy as sa
+
 import pms.services.communication_service as communication_service_module
 import pms.services.payment_integration_service as payment_integration_service_module
 from pms.extensions import db
@@ -403,7 +405,7 @@ def test_optional_staff_alert_channel_failure_isolated_from_internal_alerts(app_
         ).order_by(NotificationDelivery.created_at.desc()).first()
 
         assert internal_delivery is not None and internal_delivery.status == "delivered"
-        assert line_delivery is not None and line_delivery.status == "failed"
+        assert line_delivery is not None and line_delivery.status in ("failed", "retry")
         assert result["sent"] >= 1
         assert result["failed"] >= 1
 
@@ -633,3 +635,61 @@ def test_housekeeping_cannot_trigger_restricted_resend_actions(app_factory):
         data={"language": "en"},
     )
     assert response.status_code == 403
+
+
+def test_admin_can_view_pending_automation_events_and_cancel(app_factory):
+    """Admin communications page shows pending automation queue and supports cancel."""
+    from pms.models import PendingAutomationEvent
+    from pms.services.messaging_service import (
+        cancel_pending_automation_event,
+        list_pending_automation_events,
+    )
+    from datetime import datetime, timezone as tz
+
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = make_staff_user(email="queue-admin@example.com", role_code="admin")
+
+        # Create a pending event via an active rule with delay
+        rule = db.session.execute(
+            sa.select(AutomationRule).where(AutomationRule.is_active.is_(True))
+        ).scalars().first()
+        if not rule:
+            rule = AutomationRule(
+                event_type="test_queue_event",
+                channel="email",
+                is_active=True,
+                delay_minutes=30,
+            )
+            db.session.add(rule)
+            db.session.flush()
+
+        event = PendingAutomationEvent(
+            rule_id=rule.id,
+            fire_at=datetime.now(tz.utc),
+            context_json={"source": "test"},
+        )
+        db.session.add(event)
+        db.session.commit()
+        event_id = str(event.id)
+
+        # Verify the event appears in the list
+        events = list_pending_automation_events()
+        assert any(str(e.id) == event_id for e in events)
+
+        # Cancel the event
+        cancelled = cancel_pending_automation_event(event_id, actor_user_id=admin.id)
+        assert cancelled.processed_at is not None
+        assert cancelled.error == "Cancelled by admin"
+
+        # Verify it no longer appears in pending list
+        events_after = list_pending_automation_events()
+        assert not any(str(e.id) == event_id for e in events_after)
+
+    # Verify the admin communications page renders with the queue section
+    client = app.test_client()
+    login_as(client, admin)
+    response = client.get("/staff/admin/communications")
+    assert response.status_code == 200
+    assert b"Pending automation events" in response.data
+    assert b"Process queue now" in response.data

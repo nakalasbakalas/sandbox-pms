@@ -50,6 +50,41 @@
   </article>
 </section>
 
+{% if can('reservation.edit') %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <h2>Blacklist status</h2>
+      {% if guest.blacklist_flag %}
+      <p>This guest is currently blacklisted and will be blocked from check-in.</p>
+      {% else %}
+      <p>This guest is not blacklisted.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% if guest.blacklist_flag %}
+  <div class="list-stack compact">
+    <div class="list-row no-link"><div><strong>Reason</strong><p>{{ guest.blacklist_reason or '—' }}</p></div></div>
+    <div class="list-row no-link"><div><strong>Blacklisted on</strong><p>{{ guest.blacklisted_at.strftime('%d %b %Y %H:%M') if guest.blacklisted_at else '—' }}</p></div></div>
+  </div>
+  <form method="post" action="{{ url_for('staff_reservations.staff_guest_blacklist_toggle', guest_id=guest.id) }}" class="form-row compact-form" style="padding:var(--space-sm)">
+    {{ csrf_input() }}
+    <input type="hidden" name="action" value="unblock">
+    <button type="submit" class="button secondary small">Remove from blacklist</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('staff_reservations.staff_guest_blacklist_toggle', guest_id=guest.id) }}" class="stack-form compact-form" style="padding:var(--space-sm)">
+    {{ csrf_input() }}
+    <input type="hidden" name="action" value="block">
+    <label><span>Reason for blacklisting</span>
+      <input type="text" name="reason" required placeholder="e.g. Repeated no-shows, property damage" maxlength="500">
+    </label>
+    <button type="submit" class="button small" style="--btn-bg:var(--danger);--btn-text:#fff">Blacklist guest</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="card">
   <div class="card-head">
     <div>

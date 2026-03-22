@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import timedelta
 
 from .communication_base import *  # noqa: F401,F403
 from .communication_queue import queue_failed_payment_reminder, queue_pre_arrival_reminder
@@ -11,15 +12,24 @@ _bool_setting = _base._bool_setting
 _int_setting = _base._int_setting
 _staff_notification_type = _base._staff_notification_type
 
+MAX_DELIVERY_ATTEMPTS = 5
+BACKOFF_BASE_SECONDS = 60  # 1 min, 2 min, 4 min, 8 min, 16 min
+
 
 def _service_module():
     return sys.modules.get("pms.services.communication_service")
 
 def _mark_delivery_failed(delivery: NotificationDelivery, *, category: str, reason: str) -> None:
-    delivery.status = "failed"
     delivery.failure_category = category
     delivery.failure_reason = (reason or "")[:255]
     delivery.failed_at = utc_now()
+    if delivery.attempts >= MAX_DELIVERY_ATTEMPTS or category == "configuration":
+        delivery.status = "failed"
+        delivery.next_retry_at = None
+    else:
+        delivery.status = "retry"
+        backoff = BACKOFF_BASE_SECONDS * (2 ** (delivery.attempts - 1))
+        delivery.next_retry_at = utc_now() + timedelta(seconds=backoff)
 
 
 def _deliver_email_outbox_entry(email_outbox_id: uuid.UUID, *, commit: bool = True) -> EmailOutbox | None:
@@ -80,6 +90,7 @@ def _dispatch_email(delivery: NotificationDelivery) -> str:
         delivery.failure_reason = None
         delivery.sent_at = outbox.sent_at or utc_now()
         delivery.delivered_at = delivery.sent_at
+        delivery.next_retry_at = None
         return "sent"
     category = "transport"
     if outbox.last_error and "SMTP is not configured" in outbox.last_error:
@@ -189,7 +200,19 @@ def dispatch_notification_deliveries(
     if delivery_ids:
         query = query.where(NotificationDelivery.id.in_(delivery_ids))
     else:
-        query = query.where(NotificationDelivery.status.in_(["pending", "queued", "failed"]))
+        now = utc_now()
+        query = query.where(
+            sa.or_(
+                NotificationDelivery.status.in_(["pending", "queued"]),
+                sa.and_(
+                    NotificationDelivery.status == "retry",
+                    sa.or_(
+                        NotificationDelivery.next_retry_at.is_(None),
+                        NotificationDelivery.next_retry_at <= now,
+                    ),
+                ),
+            )
+        )
     ids = db.session.execute(query.limit(limit)).scalars().all()
     results = {"processed": 0, "sent": 0, "failed": 0, "skipped": 0}
     for delivery_id in ids:
@@ -197,7 +220,7 @@ def dispatch_notification_deliveries(
             delivery = db.session.get(NotificationDelivery, delivery_id)
             if not delivery:
                 continue
-            if delivery.status in {"sent", "delivered", "cancelled", "skipped"}:
+            if delivery.status in {"sent", "delivered", "cancelled", "skipped", "failed"}:
                 results["skipped"] += 1
                 continue
             if delivery.channel == "email":

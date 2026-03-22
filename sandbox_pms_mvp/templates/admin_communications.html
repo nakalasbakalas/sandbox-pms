@@ -148,6 +148,61 @@
 <section class="card">
   <div class="card-head">
     <div>
+      <p class="eyebrow">Automation queue</p>
+      <h2>Pending automation events</h2>
+    </div>
+    {% if can('settings.edit') %}
+    <form method="post">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="process_automation_queue">
+      <button class="button secondary" type="submit">Process queue now</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th>Fire at</th>
+          <th>Event type</th>
+          <th>Channel</th>
+          <th>Delay</th>
+          <th>Reservation</th>
+          <th>Error</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in pending_events %}
+        <tr>
+          <td>{{ event.fire_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><strong>{{ event.rule.event_type if event.rule else '-' }}</strong></td>
+          <td>{{ event.rule.channel if event.rule else '-' }}</td>
+          <td>{{ event.rule.delay_minutes if event.rule else '-' }} min</td>
+          <td>{% if event.reservation_id %}{{ event.reservation_id|string|truncate(8, True, '') }}{% else %}-{% endif %}</td>
+          <td>{{ event.error or '-' }}</td>
+          <td>
+            {% if can('settings.edit') and not event.processed_at %}
+            <form method="post" style="display:inline">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="cancel_automation_event">
+              <input type="hidden" name="event_id" value="{{ event.id }}">
+              <button class="button small danger" type="submit">Cancel</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="center muted">No pending automation events in the queue.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <div>
       <p class="eyebrow">Delivery history</p>
       <h2>Notification log</h2>
     </div>

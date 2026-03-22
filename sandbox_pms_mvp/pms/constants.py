@@ -71,6 +71,7 @@ NOTIFICATION_DELIVERY_STATUSES = [
     "sent",
     "delivered",
     "failed",
+    "retry",
     "skipped",
     "cancelled",
 ]

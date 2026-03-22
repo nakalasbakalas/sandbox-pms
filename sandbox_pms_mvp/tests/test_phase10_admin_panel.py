@@ -21,6 +21,7 @@ from pms.services.admin_service import (
     query_audit_entries,
     release_inventory_override,
     render_notification_template,
+    reset_notification_templates_to_defaults,
     upsert_blackout_period,
     upsert_rate_rule,
     upsert_setting,
@@ -769,3 +770,72 @@ def test_admin_channels_save_and_retrieve(app_factory):
         assert record.api_key_encrypted is not None
         # NOTE: api_key_encrypted stores the raw key until real encryption is implemented
         assert record.api_key_encrypted == "test-expedia-key-1234"
+
+
+def test_reset_notification_templates_to_defaults(app_factory):
+    """Bulk reset restores seed templates and creates missing ones."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = make_staff_user(email="reset-admin@example.com", role_codes=("admin",))
+
+        # Modify a template so we can verify the reset reverts it
+        template = db.session.execute(
+            sa.select(NotificationTemplate)
+            .where(
+                NotificationTemplate.template_key == "guest_confirmation",
+                NotificationTemplate.channel == "email",
+                NotificationTemplate.language_code == "en",
+                NotificationTemplate.deleted_at.is_(None),
+            )
+        ).scalars().first()
+        assert template is not None
+        original_subject = template.subject_template
+        template.subject_template = "CUSTOM SUBJECT"
+        template.is_active = False
+        db.session.commit()
+
+        result = reset_notification_templates_to_defaults(actor_user_id=admin.id)
+        assert result["updated"] > 0
+
+        # Verify the template was restored
+        db.session.refresh(template)
+        assert template.subject_template == original_subject
+        assert template.is_active is True
+
+        # Verify audit log was written
+        audit = db.session.execute(
+            sa.select(AuditLog).where(
+                AuditLog.action == "notification_template_reset_to_default",
+                AuditLog.entity_id == str(template.id),
+            )
+        ).scalars().first()
+        assert audit is not None
+
+
+def test_reset_templates_route_accessible_to_admin(app_factory):
+    """Admin can POST the reset_templates_to_defaults action via the operations page."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = make_staff_user(email="reset-route-admin@example.com", role_codes=("admin",))
+    client = app.test_client()
+    login_as(client, admin)
+    response = post_form(
+        client,
+        "/staff/admin/operations",
+        data={"action": "reset_templates_to_defaults"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"reset to defaults" in response.data.lower() or b"Templates reset" in response.data
+
+
+def test_booking_extras_admin_ui_exists(app_factory):
+    """Verify the BookingExtra admin UI is present on the property settings page."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        admin = make_staff_user(email="extras-admin@example.com", role_codes=("admin",))
+    client = app.test_client()
+    login_as(client, admin)
+    response = client.get("/staff/admin/property")
+    assert response.status_code == 200
+    assert b"booking_extra" in response.data or b"Booking extra" in response.data

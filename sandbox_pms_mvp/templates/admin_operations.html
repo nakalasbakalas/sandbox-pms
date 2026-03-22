@@ -136,7 +136,7 @@
   </div>
   {% if can('audit.view') %}
   <p class="muted">Sends a controlled <code>RuntimeError: Sentry verification test</code> to confirm end-to-end event delivery to Sentry. Check your Sentry project after submitting.</p>
-  <form method="post" action="{{ url_for('admin.staff_admin_test_error') }}"
+  <form method="post" action="/staff/admin/test-error"
         onsubmit="return confirm('This will intentionally raise an error to verify Sentry is receiving events. Proceed?')">
     {{ csrf_input() }}
     <button class="button secondary" type="submit">Trigger Sentry test error</button>

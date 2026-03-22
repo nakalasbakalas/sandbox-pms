@@ -79,7 +79,7 @@ def upgrade():
             name="ck_notification_deliveries_language",
         ),
         sa.CheckConstraint(
-            "status IN ('pending', 'queued', 'sent', 'delivered', 'failed', 'skipped', 'cancelled')",
+            "status IN ('pending', 'queued', 'sent', 'delivered', 'failed', 'retry', 'skipped', 'cancelled')",
             name="ck_notification_deliveries_status",
         ),
         sa.CheckConstraint("attempts >= 0", name="ck_notification_deliveries_attempts"),

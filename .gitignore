@@ -20,6 +20,9 @@ sandbox_pms_mvp/instance/
 *.sqlite
 *.sqlite3
 
+# MCP config (contains API keys)
+.mcp.json
+
 # Editor and platform noise
 Thumbs.db
 .DS_Store

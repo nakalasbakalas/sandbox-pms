@@ -90,6 +90,11 @@
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head"><h2>Guest and arrival details</h2></div>
+    {% if detail.reservation.primary_guest and detail.reservation.primary_guest.blacklist_flag %}
+    <div class="callout danger" role="alert">
+      <strong>Blacklisted guest</strong> — {{ detail.reservation.primary_guest.blacklist_reason or 'No reason recorded' }}. Check-in is blocked.
+    </div>
+    {% endif %}
     <div class="metric-strip">
       <div><small>Name</small><strong>{{ detail.reservation.primary_guest.full_name }}</strong></div>
       <div><small>Nationality</small><strong>{{ detail.reservation.primary_guest.nationality or 'Not recorded' }}</strong></div>

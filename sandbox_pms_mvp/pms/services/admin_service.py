@@ -44,7 +44,7 @@ from ..models import (
 )
 from ..normalization import clean_optional
 from ..pricing import get_setting_value
-from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS, POLICY_DOCUMENTS_SEED
+from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS, NOTIFICATION_TEMPLATES_SEED, POLICY_DOCUMENTS_SEED
 from ..url_topology import build_booking_url
 
 
@@ -864,7 +864,19 @@ def upsert_blackout_period(blackout_id: uuid.UUID | None, payload: BlackoutPaylo
         metadata={"blackout_type": blackout.blackout_type},
     )
     db.session.commit()
-    return blackout
+
+    conflicting_reservation_count = 0
+    if blackout.is_active and blackout.blackout_type in ("closed_to_booking", "property_closed"):
+        active_statuses = {"tentative", "confirmed", "checked_in"}
+        conflicting_reservation_count = db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(
+                Reservation.current_status.in_(active_statuses),
+                Reservation.check_in_date < blackout.end_date,
+                Reservation.check_out_date > blackout.start_date,
+            )
+        ).scalar_one()
+
+    return blackout, conflicting_reservation_count
 
 
 def assert_blackout_allows_booking(check_in_date: date, check_out_date: date) -> None:
@@ -1598,3 +1610,62 @@ def _restore_inventory_row_to_room_default(row: InventoryDay, *, actor_user_id: 
     row.housekeeping_status_id = clean_status.id if default_sellable and clean_status else closure_status.id if closure_status else row.housekeeping_status_id
     row.notes = room.notes if room else row.notes
     row.updated_by_user_id = actor_user_id
+
+
+def reset_notification_templates_to_defaults(*, actor_user_id: uuid.UUID) -> dict[str, int]:
+    """Reset all notification templates to their seed defaults.
+
+    Returns counts of updated and created templates.
+    """
+    updated = 0
+    created = 0
+    for template_key, channel, language_code, description, subject_template, body_template in NOTIFICATION_TEMPLATES_SEED:
+        existing = db.session.execute(
+            sa.select(NotificationTemplate).where(
+                NotificationTemplate.template_key == template_key,
+                NotificationTemplate.channel == channel,
+                NotificationTemplate.language_code == language_code,
+                NotificationTemplate.deleted_at.is_(None),
+            )
+        ).scalars().first()
+        if existing:
+            before = _notification_template_snapshot(existing)
+            existing.description = description
+            existing.subject_template = subject_template
+            existing.body_template = body_template
+            existing.is_active = True
+            existing.updated_by_user_id = actor_user_id
+            db.session.flush()
+            write_audit_log(
+                actor_user_id=actor_user_id,
+                entity_table="notification_templates",
+                entity_id=str(existing.id),
+                action="notification_template_reset_to_default",
+                before_data=before,
+                after_data=_notification_template_snapshot(existing),
+            )
+            updated += 1
+        else:
+            template = NotificationTemplate(
+                template_key=template_key,
+                channel=channel,
+                language_code=language_code,
+                description=description,
+                subject_template=subject_template,
+                body_template=body_template,
+                is_active=True,
+                created_by_user_id=actor_user_id,
+            )
+            db.session.add(template)
+            db.session.flush()
+            write_audit_log(
+                actor_user_id=actor_user_id,
+                entity_table="notification_templates",
+                entity_id=str(template.id),
+                action="notification_template_reset_created",
+                before_data=None,
+                after_data=_notification_template_snapshot(template),
+            )
+            created += 1
+    db.session.commit()
+    return {"updated": updated, "created": created}

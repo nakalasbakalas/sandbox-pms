@@ -114,6 +114,9 @@ def nightly_room_rate(room_type: RoomType, business_date: date, stay_length: int
         applied = fallback_base_rate
     for discount in discounts:
         applied = apply_adjustment(applied, Decimal(str(discount.adjustment_value)), discount.adjustment_type)
+    min_rate = money(get_setting_value("hotel.min_nightly_rate", "0.00"))
+    if min_rate > 0 and applied < min_rate:
+        applied = min_rate
     return applied.quantize(Decimal("0.01"))
 
 

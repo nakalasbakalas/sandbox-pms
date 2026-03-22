@@ -378,7 +378,19 @@ def upsert_blackout_period(blackout_id: uuid.UUID | None, payload: BlackoutPaylo
         metadata={"blackout_type": blackout.blackout_type},
     )
     db.session.commit()
-    return blackout
+
+    conflicting_reservation_count = 0
+    if blackout.is_active and blackout.blackout_type in ("closed_to_booking", "property_closed"):
+        active_statuses = {"tentative", "confirmed", "checked_in"}
+        conflicting_reservation_count = db.session.execute(
+            sa.select(sa.func.count()).select_from(Reservation).where(
+                Reservation.current_status.in_(active_statuses),
+                Reservation.check_in_date < blackout.end_date,
+                Reservation.check_out_date > blackout.start_date,
+            )
+        ).scalar_one()
+
+    return blackout, conflicting_reservation_count
 
 
 def assert_blackout_allows_booking(check_in_date: date, check_out_date: date) -> None:

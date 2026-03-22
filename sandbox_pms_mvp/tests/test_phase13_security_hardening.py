@@ -238,6 +238,55 @@ def test_create_app_skips_sentry_loader_when_dsn_is_missing(app_factory, monkeyp
     app_factory(config={"AUTH_COOKIE_SECURE": False})
 
 
+def test_sentry_verification_route_is_post_only_and_admin_only(app_factory):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False})
+    admin = None
+    desk = None
+    with app.app_context():
+        admin = make_staff_user(
+            email="admin.sentry@example.com",
+            password="password12345",
+            role_codes=("admin",),
+        )
+        desk = make_staff_user(
+            email="desk.sentry@example.com",
+            password="password12345",
+            role_codes=("front_desk",),
+        )
+
+    guest_client = app.test_client()
+    guest_response = guest_client.post("/staff/admin/test-error", data={"csrf_token": csrf_token_for(guest_client)})
+    assert guest_response.status_code == 401
+
+    desk_client = app.test_client()
+    with desk_client.session_transaction() as session:
+        session["staff_user_id"] = str(desk.id)
+        session["_csrf_token"] = "test-csrf-token"
+    forbidden = desk_client.post("/staff/admin/test-error", data={"csrf_token": "test-csrf-token"})
+    assert forbidden.status_code == 403
+
+    method_not_allowed = desk_client.get("/staff/admin/test-error")
+    assert method_not_allowed.status_code == 405
+
+
+def test_sentry_verification_route_raises_for_admin(app_factory):
+    app = app_factory(seed=True, config={"AUTH_COOKIE_SECURE": False, "PROPAGATE_EXCEPTIONS": False})
+    with app.app_context():
+        admin = make_staff_user(
+            email="admin.sentry.raise@example.com",
+            password="password12345",
+            role_codes=("admin",),
+        )
+
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["staff_user_id"] = str(admin.id)
+        session["_csrf_token"] = "test-csrf-token"
+
+    response = client.post("/staff/admin/test-error", data={"csrf_token": "test-csrf-token"})
+    assert response.status_code == 500
+
+
 def test_security_headers_and_session_cookie_flags_are_present(app_factory):
     app = app_factory(
         config={

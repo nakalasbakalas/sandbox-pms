@@ -384,6 +384,11 @@ class Guest(AuditMixin, SoftDeleteMixin, db.Model):
     preferred_language: Mapped[str | None] = mapped_column(sa.String(30), nullable=True)
     marketing_opt_in: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
     blacklist_flag: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    blacklist_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    blacklisted_at: Mapped[datetime | None] = mapped_column(sa.DateTime, nullable=True)
+    blacklisted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     notes_summary: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
 
     __table_args__ = (
@@ -1541,6 +1546,7 @@ class NotificationDelivery(AuditMixin, db.Model):
     delivered_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     failed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     attempts: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    next_retry_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
     reservation = relationship("Reservation", foreign_keys=[reservation_id])
     payment_request = relationship("PaymentRequest", foreign_keys=[payment_request_id])

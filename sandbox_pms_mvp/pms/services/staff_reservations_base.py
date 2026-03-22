@@ -371,6 +371,8 @@ def guest_snapshot(guest: Guest) -> dict:
         "id_document_number": guest.id_document_number,
         "preferred_language": guest.preferred_language,
         "notes_summary": guest.notes_summary,
+        "blacklist_flag": guest.blacklist_flag,
+        "blacklist_reason": guest.blacklist_reason,
     }
 
 
