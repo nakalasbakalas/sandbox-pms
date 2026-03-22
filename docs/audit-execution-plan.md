@@ -4,7 +4,7 @@
 > **Audit date:** 2026-03-18  
 
 
-> **Last updated:** 2026-03-22  
+> **Last updated:** 2026-03-22 (Phase 3)  
 
 
 > **Test baseline:** 565 tests collected; targeted test sweep: all passing  
@@ -76,6 +76,19 @@ All critical and high-priority fixes from the audit implemented and tested:
 | Guest profile fuzzy search | ✅ Done | `search_guests(q)` in `staff_reservations_service.py` — LIKE matching on name/email/phone with batch latest-reservation lookup. `/staff/guests` route + `staff_guests.html` template. Reservation search also enhanced with email matching. Nav links added. |
 | Waitlist promotion/expiry automation | ✅ Done | `promote_eligible_waitlist()` — FIFO promotion when rooms available (assigns room + allocates inventory + confirms). `expire_stale_waitlist(max_age_days=14)` — cancels past-check-in or stale entries. CLI: `flask process-waitlist`. Render cron: every 15 min. |
 | Proforma invoice and receipt generation | ⏳ Backlog | Deferred to Phase 4 (not critical path). |
+
+---
+
+## Phase 3 Execution Progress
+
+**Status: ✅ COMPLETE (2026-03-22)**
+
+| Phase 3 Item | Status | Notes |
+|--------------|--------|-------|
+| CI pipeline implementation | ✅ Done | `.github/workflows/ci.yml` added. Triggers on push and PRs to `main`. Runs: pre-commit, full pytest suite (`-q --tb=short`), and `scripts/launch_gate.py`. Uses SQLite (no external DB needed). Generates a fresh Fernet key per run via `$GITHUB_ENV`. Installs both `requirements.txt` and `requirements-dev.txt`. |
+| Architecture debt reduction — `front_desk.py` split | ✅ Partial (comments added) | `routes/front_desk.py` (1,698 lines) annotated with `# --- Section: View Routes ---`, `# --- Section: Board Routes ---`, and `# --- Section: Action Routes ---` markers and a planned-split comment block. Full module split deferred to Phase 4 to avoid import-cycle risk before beta stabilisation. |
+| Stale branch inventory documented | ✅ Done | `docs/stale-branch-cleanup.md` created. Lists known stale prefixes (`copilot/`, `claude/`, `codex/`), branches to check before deletion, and bulk cleanup commands. |
+| Proforma invoice/receipt generation | ⏳ Deferred | Remains deferred to Phase 4 (not on the beta critical path). |
 
 ---
 
