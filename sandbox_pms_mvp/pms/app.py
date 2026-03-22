@@ -2226,7 +2226,6 @@ def parse_optional_datetime(value: str | None) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        from .services.ical_service import calendar_timezone
         return parsed.replace(tzinfo=calendar_timezone())
     return parsed
 
