@@ -5,7 +5,7 @@ import json
 import logging
 import secrets
 from datetime import date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from time import perf_counter
 from urllib.parse import urlparse
 from urllib.parse import urlencode
@@ -90,12 +90,10 @@ from .models import (
     UserSession,
     utc_now,
 )
-from .normalization import normalize_phone
-from .pricing import get_setting_value, quote_reservation
-from .permissions import can_manage_operational_overrides, default_dashboard_endpoint_for_user
-from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message, request_client_ip
+from .pricing import get_setting_value
+from .permissions import default_dashboard_endpoint_for_user
+from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message
 from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
-from .settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .helpers import (
     absolute_public_url,
@@ -2223,9 +2221,12 @@ def parse_optional_datetime(value: str | None) -> datetime | None:
     candidate = (value or "").strip()
     if not candidate:
         return None
-    parsed = datetime.fromisoformat(candidate)
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
     if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        return parsed.replace(tzinfo=calendar_timezone())
     return parsed
 
 

@@ -169,7 +169,9 @@ def post_pos_charge(
         f"{_posting_key_segment(outlet_type or outlet_name)}:"
         f"{_posting_key_segment(external_check_id)}"
     )[:160]
-    existing = FolioCharge.query.filter_by(posting_key=posting_key).first()
+    existing = db.session.execute(
+        sa.select(FolioCharge).where(FolioCharge.posting_key == posting_key)
+    ).scalars().first()
     if existing:
         return existing
 

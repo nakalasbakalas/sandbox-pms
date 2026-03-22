@@ -173,7 +173,7 @@ def booking_confirm():
                     source="public_confirmation",
                 )
             except Exception:  # noqa: BLE001
-                pass
+                logger.exception("Deposit payment request failed for reservation %s", reservation.id)
         try:
             fire_automation_event(
                 "reservation_created",

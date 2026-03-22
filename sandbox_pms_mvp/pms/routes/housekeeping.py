@@ -313,7 +313,7 @@ def staff_housekeeping_task_create():
         flash("Housekeeping task created.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping", date=request.form.get("business_date", date.today().isoformat())))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping", date=request.form.get("business_date", date.today().isoformat()))))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/assign", methods=["POST"])
@@ -325,7 +325,7 @@ def staff_housekeeping_task_assign(task_id):
         flash("Task assigned.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/start", methods=["POST"])
@@ -336,7 +336,7 @@ def staff_housekeeping_task_start(task_id):
         flash("Task started — room set to cleaning in progress.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/complete", methods=["POST"])
@@ -347,7 +347,7 @@ def staff_housekeeping_task_complete(task_id):
         flash("Task completed — room marked clean.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/inspect", methods=["POST"])
@@ -358,7 +358,7 @@ def staff_housekeeping_task_inspect(task_id):
         flash("Inspection passed — room ready for assignment.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/cancel", methods=["POST"])
@@ -369,7 +369,7 @@ def staff_housekeeping_task_cancel(task_id):
         flash("Task cancelled.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 # ------------------------------------------------------------------
@@ -481,4 +481,4 @@ def staff_housekeeping_quick_action():
             flash("Unknown quick action.", "error")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping", date=business_date.isoformat()))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping", date=business_date.isoformat())))

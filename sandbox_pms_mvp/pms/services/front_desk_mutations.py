@@ -305,7 +305,7 @@ def complete_checkout(
     if reservation.current_status != "checked_in":
         raise ValueError("Only checked-in reservations can be checked out.")
 
-    actor = db.session.get(User, actor_user_id)
+    actor = db.session.get(User, actor_user_id) if actor_user_id else None
     before = _front_desk_snapshot(reservation)
     ensure_room_charges_posted(
         reservation.id,
