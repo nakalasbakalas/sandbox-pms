@@ -38,7 +38,7 @@ from ..constants import (
 )
 from ..i18n import normalize_language
 from ..security import public_error_message
-from ..pricing import get_setting_value
+from ..pricing import get_setting_value, quote_reservation
 from ..settings import NOTIFICATION_TEMPLATE_PLACEHOLDERS
 from ..services.admin_service import (
     BlackoutPayload,
@@ -774,3 +774,129 @@ def staff_admin_channels():
         active_section="channels",
         channels=channels_context,
     )
+
+
+@admin_bp.route("/staff/rate-calculator", methods=["GET"])
+def staff_rate_calculator():
+    """Rate preview calculator for staff."""
+    helpers = _get_app_helpers()
+    helpers["require_permission"]("reservation.view")
+    room_types = db.session.execute(
+        sa.select(RoomType).where(RoomType.is_active.is_(True)).order_by(RoomType.code.asc())
+    ).scalars().all()
+    return render_template("staff_rate_calculator.html", room_types=room_types, active_section="rates")
+
+
+@admin_bp.route("/staff/rate-calculator/quote", methods=["POST"])
+def staff_rate_calculator_quote():
+    """Calculate and return a rate quote."""
+    helpers = _get_app_helpers()
+    helpers["require_permission"]("reservation.view")
+
+    room_type_id = helpers["parse_optional_uuid"](request.form.get("room_type_id"))
+    check_in_str = (request.form.get("check_in_date") or "").strip()
+    check_out_str = (request.form.get("check_out_date") or "").strip()
+    adults = int(request.form.get("adults") or 1)
+    children = int(request.form.get("children") or 0)
+
+    errors: list[str] = []
+    if not room_type_id:
+        errors.append("Room type is required.")
+    if not check_in_str:
+        errors.append("Check-in date is required.")
+    if not check_out_str:
+        errors.append("Check-out date is required.")
+
+    room_type = None
+    check_in_date = None
+    check_out_date = None
+
+    if room_type_id:
+        room_type = db.session.get(RoomType, room_type_id)
+        if not room_type:
+            errors.append("Room type not found.")
+
+    try:
+        if check_in_str:
+            check_in_date = date.fromisoformat(check_in_str)
+        if check_out_str:
+            check_out_date = date.fromisoformat(check_out_str)
+    except ValueError:
+        errors.append("Invalid date format.")
+
+    if check_in_date and check_out_date and check_out_date <= check_in_date:
+        errors.append("Check-out date must be after check-in date.")
+
+    room_types = db.session.execute(
+        sa.select(RoomType).where(RoomType.is_active.is_(True)).order_by(RoomType.code.asc())
+    ).scalars().all()
+
+    if errors:
+        for msg in errors:
+            flash(msg, "error")
+        return render_template(
+            "staff_rate_calculator.html",
+            room_types=room_types,
+            active_section="rates",
+            form_room_type_id=str(room_type_id) if room_type_id else "",
+            form_check_in=check_in_str,
+            form_check_out=check_out_str,
+            form_adults=adults,
+            form_children=children,
+        )
+
+    quote = quote_reservation(
+        room_type=room_type,
+        check_in_date=check_in_date,
+        check_out_date=check_out_date,
+        adults=adults,
+        children=children,
+    )
+
+    return render_template(
+        "staff_rate_calculator.html",
+        room_types=room_types,
+        active_section="rates",
+        quote=quote,
+        form_room_type_id=str(room_type_id),
+        form_check_in=check_in_str,
+        form_check_out=check_out_str,
+        form_adults=adults,
+        form_children=children,
+        selected_room_type=room_type,
+    )
+
+
+@admin_bp.route("/staff/admin/rates/<uuid:rule_id>/clone", methods=["POST"])
+def staff_admin_rate_clone(rule_id):
+    """Clone a rate rule."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("rate_rule.edit")
+
+    original = db.session.get(RateRule, rule_id)
+    if not original or original.deleted_at is not None:
+        abort(404)
+
+    clone = RateRule(
+        name=f"{original.name} (Copy)",
+        room_type_id=original.room_type_id,
+        priority=original.priority,
+        is_active=False,
+        rule_type=original.rule_type,
+        adjustment_type=original.adjustment_type,
+        adjustment_value=original.adjustment_value,
+        start_date=original.start_date,
+        end_date=original.end_date,
+        days_of_week=original.days_of_week,
+        min_nights=original.min_nights,
+        max_nights=original.max_nights,
+        extra_guest_fee_override=original.extra_guest_fee_override,
+        child_fee_override=original.child_fee_override,
+        metadata_json=original.metadata_json,
+        created_by_user_id=actor.id,
+    )
+    db.session.add(clone)
+    db.session.commit()
+
+    flash(f'Rate rule "{original.name}" cloned. The copy is inactive by default.', "success")
+    return redirect(url_for("admin.staff_rates"))

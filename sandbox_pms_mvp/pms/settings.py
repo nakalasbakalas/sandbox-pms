@@ -65,6 +65,9 @@ APP_SETTINGS_SEED = [
     ("hotel.accent_color", {"value": "#C57C35"}, "string", "Primary booking engine accent color", True, 46),
     ("hotel.accent_color_soft", {"value": "#F0C89A"}, "string", "Secondary booking engine accent color", True, 47),
     ("hotel.public_base_url", {"value": ""}, "string", "Canonical public booking base URL override", True, 48),
+    ("dynamic_pricing_enabled", {"value": False}, "boolean", "Enable occupancy-based dynamic pricing", False, 49),
+    ("dynamic_pricing_threshold", {"value": 85}, "integer", "Occupancy threshold (%) for dynamic pricing", False, 50),
+    ("dynamic_pricing_markup_pct", {"value": 10}, "integer", "Dynamic pricing markup (%)", False, 51),
 ]
 
 

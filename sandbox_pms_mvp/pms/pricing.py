@@ -7,7 +7,7 @@ from decimal import Decimal
 import sqlalchemy as sa
 
 from .extensions import db
-from .models import AppSetting, RateRule, RoomType
+from .models import AppSetting, InventoryDay, RateRule, Room, RoomType
 
 
 @dataclass
@@ -114,6 +114,30 @@ def nightly_room_rate(room_type: RoomType, business_date: date, stay_length: int
         applied = fallback_base_rate
     for discount in discounts:
         applied = apply_adjustment(applied, Decimal(str(discount.adjustment_value)), discount.adjustment_type)
+    # ── Occupancy-based dynamic pricing markup ─────────────────────
+    if str(get_setting_value("dynamic_pricing_enabled", "false")).lower() in ("true", "1", "yes"):
+        threshold = int(get_setting_value("dynamic_pricing_threshold", "85"))
+        total_rooms = db.session.execute(
+            sa.select(sa.func.count(Room.id)).where(
+                Room.room_type_id == room_type.id,
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+                Room.deleted_at.is_(None),
+            )
+        ).scalar_one()
+        if total_rooms > 0:
+            sold_rooms = db.session.execute(
+                sa.select(sa.func.count(InventoryDay.id)).where(
+                    InventoryDay.room_type_id == room_type.id,
+                    InventoryDay.business_date == business_date,
+                    InventoryDay.reservation_id.isnot(None),
+                    InventoryDay.deleted_at.is_(None),
+                )
+            ).scalar_one()
+            occupancy_pct = (sold_rooms * 100) / total_rooms
+            if occupancy_pct > threshold:
+                markup_pct = Decimal(str(get_setting_value("dynamic_pricing_markup_pct", "10")))
+                applied = (applied * (Decimal("1.00") + markup_pct / Decimal("100.00"))).quantize(Decimal("0.01"))
     min_rate = money(get_setting_value("hotel.min_nightly_rate", "0.00"))
     if min_rate > 0 and applied < min_rate:
         applied = min_rate

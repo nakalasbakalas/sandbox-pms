@@ -1151,6 +1151,58 @@ def _sync_reservation_payment_fields(reservation: Reservation) -> None:
     reservation.deposit_received_amount = deposit_received.quantize(Decimal("0.01"))
 
 
+def email_receipt_to_guest(reservation_id: uuid.UUID, actor_user_id: uuid.UUID) -> None:
+    """Issue a receipt document and email a receipt summary to the guest via messaging hub."""
+    from .messaging_service import ComposePayload, send_message
+
+    reservation = _load_reservation(reservation_id)
+    if not reservation:
+        raise ValueError("Reservation not found.")
+    guest = reservation.primary_guest
+    if not guest or not guest.email:
+        raise ValueError("Guest email is not available for receipt delivery.")
+
+    summary = folio_summary(reservation)
+    document = issue_cashier_document(
+        reservation_id,
+        DocumentIssuePayload(document_type="receipt", note="Receipt emailed to guest"),
+        actor_user_id=actor_user_id,
+    )
+    currency = get_setting_value("hotel.currency", "THB")
+    hotel_name = get_setting_value("hotel.name", "Hotel")
+    body = (
+        f"{hotel_name}\n"
+        f"Dear {guest.full_name},\n\n"
+        f"Receipt {document.document_number} for reservation {reservation.reservation_code}\n\n"
+        f"Charges subtotal: {currency} {money(summary['charges_subtotal']):,.2f}\n"
+        f"Tax: {currency} {money(summary['tax_subtotal']):,.2f}\n"
+        f"Credits: {currency} {money(summary['credits_total']):,.2f}\n"
+        f"Balance due: {currency} {money(summary['balance_due']):,.2f}\n\n"
+        f"Thank you for your stay.\n{hotel_name}"
+    )
+    send_message(
+        ComposePayload(
+            guest_id=str(guest.id),
+            reservation_id=str(reservation.id),
+            channel="email",
+            subject=f"Receipt {document.document_number} — {reservation.reservation_code}",
+            body_text=body,
+            recipient_address=guest.email,
+        ),
+        actor_user_id=str(actor_user_id),
+        commit=False,
+    )
+    _log_cashier_event(
+        reservation_id=reservation.id,
+        actor_user_id=actor_user_id,
+        event_type="cashier.receipt_emailed",
+        note=f"Receipt {document.document_number} emailed to {guest.email}",
+        document_id=document.id,
+        metadata={"document_number": document.document_number, "recipient": guest.email},
+    )
+    db.session.commit()
+
+
 def _log_cashier_event(
     *,
     reservation_id: uuid.UUID,

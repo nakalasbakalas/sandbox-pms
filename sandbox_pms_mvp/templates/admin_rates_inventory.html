@@ -124,6 +124,7 @@
           <th>Priority</th>
           <th>Window</th>
           <th>Adjustment</th>
+          {% if can('rate_rule.edit') %}<th>Actions</th>{% endif %}
         </tr>
       </thead>
       <tbody>
@@ -135,9 +136,17 @@
             <td>{{ rule.priority }}</td>
             <td>{{ rule.start_date or '-' }} to {{ rule.end_date or '-' }}</td>
             <td>{{ rule.adjustment_type }} / {{ rule.adjustment_value|money }}</td>
+            {% if can('rate_rule.edit') %}
+              <td>
+                <form method="post" action="{{ url_for('admin.staff_admin_rate_clone', rule_id=rule.id) }}" style="display:inline">
+                  {{ csrf_input() }}
+                  <button class="button secondary" type="submit" title="Clone this rate rule">Clone</button>
+                </form>
+              </td>
+            {% endif %}
           </tr>
         {% else %}
-          <tr><td colspan="6" class="muted center">No rate rules configured.</td></tr>
+          <tr><td colspan="{{ 7 if can('rate_rule.edit') else 6 }}" class="muted center">No rate rules configured.</td></tr>
         {% endfor %}
       </tbody>
     </table>

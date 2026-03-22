@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Rate Calculator | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Staff tool</p>
+      <h2>Rate preview calculator</h2>
+    </div>
+  </div>
+
+  <form class="stack-form" method="post" action="{{ url_for('admin.staff_rate_calculator_quote') }}">
+    {{ csrf_input() }}
+    <div class="grid three">
+      <label>
+        <span>Room type</span>
+        <select name="room_type_id" required>
+          <option value="">Select room type</option>
+          {% for rt in room_types %}
+            <option value="{{ rt.id }}" {% if form_room_type_id|default('') == rt.id|string %}selected{% endif %}>{{ rt.code }} - {{ rt.name }} (max {{ rt.max_occupancy }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Check-in date</span>
+        <input type="date" name="check_in_date" value="{{ form_check_in|default('') }}" required>
+      </label>
+      <label>
+        <span>Check-out date</span>
+        <input type="date" name="check_out_date" value="{{ form_check_out|default('') }}" required>
+      </label>
+    </div>
+    <div class="grid three">
+      <label>
+        <span>Adults</span>
+        <input type="number" name="adults" min="1" max="10" value="{{ form_adults|default(1) }}" required>
+      </label>
+      <label>
+        <span>Children</span>
+        <input type="number" name="children" min="0" max="10" value="{{ form_children|default(0) }}" required>
+      </label>
+      <div style="display:flex;align-items:flex-end">
+        <button class="button" type="submit">Calculate</button>
+      </div>
+    </div>
+  </form>
+</section>
+
+{% if quote %}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Quote result</p>
+      <h2>{{ selected_room_type.code }} - {{ selected_room_type.name }}</h2>
+      <p class="muted">{{ form_check_in }} to {{ form_check_out }} &middot; {{ form_adults }} adult{{ 's' if form_adults|int > 1 else '' }}{% if form_children|int > 0 %}, {{ form_children }} child{{ 'ren' if form_children|int > 1 else '' }}{% endif %} &middot; {{ quote.nightly_rates|length }} night{{ 's' if quote.nightly_rates|length > 1 else '' }}</p>
+    </div>
+  </div>
+
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th style="text-align:right">Nightly rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for night_date, night_rate in quote.nightly_rates %}
+          <tr>
+            <td>{{ night_date.strftime('%a %d %b %Y') }}</td>
+            <td style="text-align:right">{{ currency }} {{ night_rate|money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td><strong>Room subtotal (net)</strong></td>
+          <td style="text-align:right"><strong>{{ currency }} {{ quote.room_total|money }}</strong></td>
+        </tr>
+        <tr>
+          <td>Tax (VAT)</td>
+          <td style="text-align:right">{{ currency }} {{ quote.tax_total|money }}</td>
+        </tr>
+        <tr>
+          <td><strong>Grand total</strong></td>
+          <td style="text-align:right"><strong>{{ currency }} {{ quote.grand_total|money }}</strong></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

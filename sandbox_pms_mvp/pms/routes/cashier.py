@@ -28,6 +28,7 @@ from ..services.cashier_service import (
     RefundPostingPayload,
     VoidChargePayload,
     cashier_print_context,
+    email_receipt_to_guest,
     ensure_room_charges_posted,
     get_cashier_detail,
     issue_cashier_document,
@@ -291,6 +292,17 @@ def staff_cashier_issue_document(reservation_id):
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
         return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+
+@cashier_bp.route("/staff/cashier/<uuid:reservation_id>/email-receipt", methods=["POST"])
+def staff_cashier_email_receipt(reservation_id):
+    user = require_permission("folio.view")
+    try:
+        email_receipt_to_guest(reservation_id, actor_user_id=user.id)
+        flash("Receipt emailed to guest.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
 
 
 # ── POS charges (staff form + integration API) ───────────────────────
