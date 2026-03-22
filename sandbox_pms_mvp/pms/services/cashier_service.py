@@ -214,6 +214,25 @@ def post_pos_charge(
     )
     if commit:
         db.session.commit()
+
+    # Optionally notify the external POS about the posted charge
+    try:
+        from .pos_adapter import get_pos_adapter
+        adapter = get_pos_adapter()
+        adapter.post_charge(
+            reservation_id=str(reservation_id),
+            amount=amount,
+            outlet_name=outlet_name,
+            description=description,
+            external_check_id=external_check_id,
+            metadata=payload.metadata,
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).debug(
+            "POS adapter notification failed for charge %s (non-critical)", line.id, exc_info=True,
+        )
+
     return line
 
 

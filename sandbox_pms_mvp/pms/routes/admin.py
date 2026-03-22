@@ -79,10 +79,12 @@ from ..services.communication_dispatch import (
 )
 from ..services.messaging_service import (
     cancel_pending_automation_event,
+    list_auto_response_rules,
     list_automation_rules,
     list_message_templates,
     list_pending_automation_events,
     process_pending_automations,
+    upsert_auto_response_rule,
     upsert_automation_rule,
 )
 from ..services.admin_settings_ops import (
@@ -623,6 +625,19 @@ def staff_admin_communications():
                 event_id = request.form.get("event_id")
                 cancel_pending_automation_event(event_id, actor_user_id=actor.id)
                 flash("Automation event cancelled.", "success")
+            elif action == "save_auto_response_rule":
+                keywords_raw = (request.form.get("trigger_keywords") or "").strip()
+                keywords = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
+                upsert_auto_response_rule(
+                    rule_id=request.form.get("rule_id") or None,
+                    name=request.form.get("name") or "",
+                    trigger_keywords=keywords,
+                    template_id=request.form.get("template_id") or "",
+                    channel=request.form.get("channel") or "email",
+                    is_active=helpers["truthy_setting"](request.form.get("is_active")),
+                    actor_user_id=str(actor.id),
+                )
+                flash("Auto-response rule saved.", "success")
             else:
                 abort(400)
         except Exception as exc:  # noqa: BLE001
@@ -645,6 +660,7 @@ def staff_admin_communications():
         active_section="communications",
         communication_settings=communication_settings_context(),
         automation_rules=list_automation_rules(),
+        auto_response_rules=list_auto_response_rules(),
         message_templates=list_message_templates(),
         pending_events=list_pending_automation_events(include_processed=False, limit=50),
         deliveries=deliveries,

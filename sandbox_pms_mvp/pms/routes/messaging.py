@@ -19,6 +19,8 @@ from ..services.messaging_service import (
     InboxFilters as MessagingInboxFilters,
     assign_thread,
     close_thread,
+    create_inbound_message,
+    find_thread_by_provider_message_id,
     get_thread_detail,
     list_inbox,
     list_message_templates as list_msg_templates,
@@ -269,3 +271,76 @@ def staff_messaging_inbound_webhook():
     except Exception as exc:
         db.session.rollback()
         return jsonify({"error": str(exc)}), 500
+
+
+@messaging_bp.route("/integrations/inbound-email", methods=["POST"])
+def staff_messaging_inbound_email():
+    """Inbound email webhook — matches replies to existing threads.
+
+    Parses a JSON payload with standard email fields and uses the
+    ``in_reply_to`` / ``references`` headers to find the matching
+    conversation thread via ``Message.provider_message_id``.
+    """
+    data = request.get_json(silent=True) or {}
+    sender = (data.get("from") or "").strip()
+    subject = (data.get("subject") or "").strip() or None
+    body = (data.get("body") or "").strip()
+    in_reply_to = (data.get("in_reply_to") or "").strip()
+    references = data.get("references") or []
+    message_id = (data.get("message_id") or "").strip() or None
+
+    if not body:
+        return jsonify({"error": "body is required"}), 400
+
+    # Attempt to match thread via in_reply_to or references
+    thread = None
+    if in_reply_to:
+        thread = find_thread_by_provider_message_id(in_reply_to)
+    if not thread and references:
+        ref_list = references if isinstance(references, list) else [references]
+        for ref in ref_list:
+            ref = (ref or "").strip()
+            if ref:
+                thread = find_thread_by_provider_message_id(ref)
+                if thread:
+                    break
+
+    if thread:
+        # Reply to existing thread
+        try:
+            msg = create_inbound_message(
+                thread_id=str(thread.id),
+                body=body,
+                channel="email",
+                sender_email=sender,
+                provider_message_id=message_id,
+                subject=subject,
+            )
+            return jsonify({
+                "status": "ok",
+                "message_id": str(msg.id),
+                "thread_id": str(thread.id),
+                "matched": True,
+            })
+        except Exception as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 500
+    else:
+        # No thread match — create new inbound message (auto-creates thread)
+        try:
+            msg = record_inbound_message(
+                channel="email",
+                sender_address=sender or "unknown",
+                body_text=body,
+                subject=subject,
+                provider_message_id=message_id,
+            )
+            return jsonify({
+                "status": "ok",
+                "message_id": str(msg.id),
+                "thread_id": str(msg.thread_id),
+                "matched": False,
+            })
+        except Exception as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 500

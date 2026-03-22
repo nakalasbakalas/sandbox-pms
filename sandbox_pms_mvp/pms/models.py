@@ -2070,6 +2070,26 @@ class PendingAutomationEvent(AuditMixin, db.Model):
     )
 
 
+class AutoResponseRule(AuditMixin, db.Model):
+    """Keyword-triggered auto-reply rule for inbound messages."""
+
+    __tablename__ = "auto_response_rules"
+
+    name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
+    trigger_keywords: Mapped[list] = mapped_column(JSONType, nullable=False)
+    template_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("message_templates.id", ondelete="CASCADE"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(sa.String(50), nullable=False, default="email")
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    template = relationship("MessageTemplate", foreign_keys=[template_id])
+
+    __table_args__ = (
+        Index("ix_auto_response_rules_is_active", "is_active"),
+    )
+
+
 class GuestSurvey(AuditMixin, db.Model):
     """Post-stay guest satisfaction survey."""
 

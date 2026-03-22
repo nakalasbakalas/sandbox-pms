@@ -314,7 +314,7 @@ class TestSendMessage:
         msg = send_message(payload, actor_user_id=str(staff_user.id))
         assert msg.status == "sent"
         assert msg.provider_message_id is not None
-        assert msg.provider_message_id.startswith("mock-sms-")
+        assert msg.provider_message_id.startswith("log-sms-")
 
     def test_send_whatsapp_mock(self, app_ctx, guest, staff_user):
         payload = ComposePayload(
@@ -581,8 +581,9 @@ class TestChannelAdapters:
             captured["timeout"] = timeout
             return DummyResponse()
 
-        monkeypatch.setattr("pms.services.messaging_service.urllib.request.urlopen", fake_urlopen)
+        monkeypatch.setattr("pms.services.sms_provider.urllib.request.urlopen", fake_urlopen)
         app_ctx.config["SMS_OUTBOUND_WEBHOOK_URL"] = "https://sms.example.invalid/send"
+        app_ctx.config["SMS_PROVIDER"] = "webhook"
 
         payload = ComposePayload(
             guest_id=str(guest.id),

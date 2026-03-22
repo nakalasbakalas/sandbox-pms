@@ -153,7 +153,11 @@ class Config:
     SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1") == "1"
     MAIL_FROM = os.getenv("MAIL_FROM", "")
     STAFF_ALERT_EMAILS = [item.strip() for item in os.getenv("STAFF_ALERT_EMAILS", "").split(",") if item.strip()]
+    SMS_PROVIDER = os.getenv("SMS_PROVIDER", "log").strip().lower()
     SMS_OUTBOUND_WEBHOOK_URL = os.getenv("SMS_OUTBOUND_WEBHOOK_URL", "").strip()
+    TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+    TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+    TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
     WHATSAPP_OUTBOUND_WEBHOOK_URL = os.getenv("WHATSAPP_OUTBOUND_WEBHOOK_URL", "").strip()
     LINE_OUTBOUND_WEBHOOK_URL = os.getenv("LINE_OUTBOUND_WEBHOOK_URL", "").strip()
     LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -161,6 +165,8 @@ class Config:
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")
     CHANNEL_PUSH_WEBHOOK_URL = os.getenv("CHANNEL_PUSH_WEBHOOK_URL", "").strip()
+    POS_ADAPTER = os.getenv("POS_ADAPTER", "null").strip().lower()
+    POS_WEBHOOK_URL = os.getenv("POS_WEBHOOK_URL", "").strip()
     SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
     SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", APP_ENV).strip() or APP_ENV
     SENTRY_RELEASE = os.getenv("SENTRY_RELEASE", "").strip()

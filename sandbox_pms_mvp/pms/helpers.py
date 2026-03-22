@@ -243,6 +243,7 @@ def validate_csrf_request() -> None:
         "pre_checkin_upload",
         "guest_survey_submit",
         "staff_messaging_inbound_webhook",
+        "staff_messaging_inbound_email",
         "integration_scanner_capture",
         "integration_pos_charge",
         # Blueprint-prefixed equivalents
@@ -251,6 +252,7 @@ def validate_csrf_request() -> None:
         "public.pre_checkin_upload",
         "public.guest_survey_submit",
         "messaging.staff_messaging_inbound_webhook",
+        "messaging.staff_messaging_inbound_email",
         "cashier.integration_pos_charge",
         "staff_reservations.integration_scanner_capture",
     }:

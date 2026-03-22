@@ -22,6 +22,7 @@ from sqlalchemy.orm import joinedload
 from ..audit import write_audit_log
 from ..extensions import db
 from ..models import (
+    AutoResponseRule,
     AutomationRule,
     ConversationThread,
     DeliveryAttempt,
@@ -260,34 +261,30 @@ def _send_via_webhook(
 
 
 class WebhookSmsAdapter(ChannelAdapter):
-    """SMS delivery via outbound webhook or sandbox mock."""
+    """SMS delivery via the pluggable SMS provider (twilio / webhook / log).
+
+    Delegates to :func:`sms_provider.send_sms` which reads the ``SMS_PROVIDER``
+    config key.  Falls back to the outbound webhook if the provider is not
+    configured.
+    """
 
     def channel_name(self) -> str:
         return "sms"
 
     def send(self, message: Message, thread: ConversationThread) -> dict[str, Any]:
-        webhook_url = str(current_app.config.get("SMS_OUTBOUND_WEBHOOK_URL", "") or "").strip()
-        if not webhook_url:
-            logger.info("WebhookSmsAdapter: sandbox mock - no SMS webhook configured")
-            return {
-                "success": True,
-                "provider_message_id": f"mock-sms-{uuid.uuid4().hex[:12]}",
-                "error": None,
-                "mock": True,
-            }
         if not message.recipient_address:
             return {"success": False, "provider_message_id": None, "error": "SMS recipient is required."}
-        return _send_via_webhook(
-            webhook_url,
-            {
-                "channel": "sms",
-                "to": message.recipient_address,
-                "body_text": message.body_text,
-                "subject": message.subject,
-                "thread_id": str(thread.id),
-                "message_id": str(message.id),
-            },
-        )
+
+        from .sms_provider import send_sms as provider_send_sms
+
+        result = provider_send_sms(to=message.recipient_address, body=message.body_text)
+
+        return {
+            "success": result.get("ok", False),
+            "provider_message_id": result.get("sid"),
+            "error": result.get("error"),
+            "mock": result.get("mock", False),
+        }
 
 
 class LineAdapter(ChannelAdapter):
@@ -1301,3 +1298,235 @@ def cancel_pending_automation_event(event_id: str, *, actor_user_id: uuid.UUID) 
     )
     db.session.commit()
     return event
+
+
+# ---------------------------------------------------------------------------
+# Inbound email thread-matching helper
+# ---------------------------------------------------------------------------
+
+
+def create_inbound_message(
+    *,
+    thread_id: str,
+    body: str,
+    channel: str = "email",
+    sender_email: str | None = None,
+    provider_message_id: str | None = None,
+    subject: str | None = None,
+    commit: bool = True,
+) -> Message:
+    """Create an inbound message on an existing thread.
+
+    Used by the inbound-email webhook to append a guest reply to an
+    existing conversation thread (matched via ``in_reply_to`` /
+    ``references`` headers).
+    """
+    now = utc_now()
+    thread = db.session.get(ConversationThread, uuid.UUID(thread_id))
+    if not thread:
+        raise ValueError("Conversation thread not found.")
+
+    message = Message(
+        thread_id=thread.id,
+        direction="inbound",
+        channel=channel,
+        sender_name=sender_email,
+        recipient_address=None,
+        subject=subject,
+        body_text=body,
+        status="delivered",
+        provider_message_id=provider_message_id,
+        delivered_at=now,
+        is_internal_note=False,
+        created_at=now,
+        updated_at=now,
+    )
+    db.session.add(message)
+
+    thread.last_message_at = now
+    thread.last_message_preview = body[:255]
+    thread.unread_count = (thread.unread_count or 0) + 1
+    thread.status = "open"
+    thread.updated_at = now
+
+    if commit:
+        db.session.commit()
+
+    return message
+
+
+def find_thread_by_provider_message_id(provider_message_id: str) -> ConversationThread | None:
+    """Look up the thread that contains a message with the given provider_message_id.
+
+    Used by the inbound-email webhook to match ``In-Reply-To`` /
+    ``References`` headers back to an existing conversation.
+    """
+    if not provider_message_id:
+        return None
+    msg = (
+        db.session.execute(
+            sa.select(Message).where(
+                Message.provider_message_id == provider_message_id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if msg:
+        return db.session.get(ConversationThread, msg.thread_id)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Auto-Response Rules
+# ---------------------------------------------------------------------------
+
+
+def list_auto_response_rules(*, active_only: bool = False) -> list[AutoResponseRule]:
+    """Return all auto-response rules, optionally filtered to active only."""
+    query = sa.select(AutoResponseRule)
+    if active_only:
+        query = query.where(AutoResponseRule.is_active.is_(True))
+    return (
+        db.session.execute(query.order_by(AutoResponseRule.name.asc()))
+        .scalars()
+        .all()
+    )
+
+
+def upsert_auto_response_rule(
+    *,
+    name: str,
+    trigger_keywords: list[str],
+    template_id: str,
+    channel: str = "email",
+    is_active: bool = True,
+    rule_id: str | None = None,
+    actor_user_id: str | None = None,
+    commit: bool = True,
+) -> AutoResponseRule:
+    """Create or update an auto-response rule."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Auto-response rule name is required.")
+    if not trigger_keywords:
+        raise ValueError("At least one trigger keyword is required.")
+    if not template_id:
+        raise ValueError("A message template is required.")
+
+    now = utc_now()
+    actor_uuid = uuid.UUID(actor_user_id) if actor_user_id else None
+    template_uuid = uuid.UUID(template_id)
+    template = db.session.get(MessageTemplate, template_uuid)
+    if not template:
+        raise ValueError("Message template not found.")
+
+    rule = db.session.get(AutoResponseRule, uuid.UUID(rule_id)) if rule_id else None
+
+    if rule is None:
+        rule = AutoResponseRule(
+            name=name,
+            trigger_keywords=trigger_keywords,
+            template_id=template.id,
+            channel=channel,
+            is_active=is_active,
+            created_at=now,
+            updated_at=now,
+            created_by_user_id=actor_uuid,
+        )
+        db.session.add(rule)
+    else:
+        rule.name = name
+        rule.trigger_keywords = trigger_keywords
+        rule.template_id = template.id
+        rule.channel = channel
+        rule.is_active = is_active
+        rule.updated_at = now
+        rule.updated_by_user_id = actor_uuid
+
+    db.session.flush()
+
+    write_audit_log(
+        actor_user_id=actor_uuid,
+        entity_table="auto_response_rules",
+        entity_id=str(rule.id),
+        action="auto_response_rule.upsert",
+        after_data={
+            "name": rule.name,
+            "trigger_keywords": rule.trigger_keywords,
+            "template_id": str(rule.template_id),
+            "channel": rule.channel,
+            "is_active": rule.is_active,
+        },
+    )
+
+    if commit:
+        db.session.commit()
+    return rule
+
+
+def check_auto_responses(thread_id: str, message_body: str) -> list[Message]:
+    """Scan active auto-response rules for keyword matches and send auto-replies.
+
+    For each matching rule, renders the associated template and sends a reply
+    on the same thread.  Returns the list of auto-reply messages sent.
+    """
+    if not message_body:
+        return []
+
+    body_lower = message_body.lower()
+    rules = (
+        db.session.execute(
+            sa.select(AutoResponseRule).where(AutoResponseRule.is_active.is_(True))
+        )
+        .scalars()
+        .all()
+    )
+
+    sent_messages: list[Message] = []
+    for rule in rules:
+        keywords = rule.trigger_keywords or []
+        matched = any(kw.lower() in body_lower for kw in keywords if kw)
+        if not matched:
+            continue
+
+        template = rule.template
+        if not template or not template.is_active:
+            continue
+
+        thread = db.session.get(ConversationThread, uuid.UUID(thread_id))
+        if not thread:
+            continue
+
+        # Build simple context from thread
+        context: dict[str, str] = {
+            "guest_name": "",
+            "hotel_name": current_app.config.get("HOTEL_NAME", "Hotel"),
+        }
+        if thread.guest:
+            context["guest_name"] = thread.guest.full_name or ""
+        if thread.reservation:
+            context["reservation_code"] = thread.reservation.reservation_code or ""
+
+        subject, body = render_message_template(template, context)
+
+        payload = ComposePayload(
+            thread_id=thread_id,
+            channel=rule.channel,
+            subject=subject,
+            body_text=body,
+        )
+        try:
+            msg = send_message(payload, commit=False)
+            sent_messages.append(msg)
+            logger.info(
+                "AutoResponse rule %s matched on thread %s — sent message %s",
+                rule.name, thread_id, msg.id,
+            )
+        except Exception:
+            logger.exception("AutoResponse rule %s failed on thread %s", rule.name, thread_id)
+
+    if sent_messages:
+        db.session.commit()
+
+    return sent_messages
