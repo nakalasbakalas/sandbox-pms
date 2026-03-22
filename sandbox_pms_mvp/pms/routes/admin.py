@@ -132,13 +132,13 @@ def staff_admin_dashboard():
     return render_template(
         "admin.html",
         active_section="dashboard",
-        room_type_count=RoomType.query.count(),
-        room_count=Room.query.count(),
-        active_override_count=InventoryOverride.query.filter_by(is_active=True).count(),
-        active_blackout_count=BlackoutPeriod.query.filter_by(is_active=True).count(),
-        policy_count=PolicyDocument.query.filter(PolicyDocument.deleted_at.is_(None)).count(),
-        template_count=NotificationTemplate.query.filter(NotificationTemplate.deleted_at.is_(None)).count(),
-        user_count=User.query.filter(User.deleted_at.is_(None)).count(),
+        room_type_count=db.session.execute(sa.select(sa.func.count()).select_from(RoomType)).scalar(),
+        room_count=db.session.execute(sa.select(sa.func.count()).select_from(Room)).scalar(),
+        active_override_count=db.session.execute(sa.select(sa.func.count()).select_from(InventoryOverride).filter_by(is_active=True)).scalar(),
+        active_blackout_count=db.session.execute(sa.select(sa.func.count()).select_from(BlackoutPeriod).filter_by(is_active=True)).scalar(),
+        policy_count=db.session.execute(sa.select(sa.func.count()).select_from(PolicyDocument).filter(PolicyDocument.deleted_at.is_(None))).scalar(),
+        template_count=db.session.execute(sa.select(sa.func.count()).select_from(NotificationTemplate).filter(NotificationTemplate.deleted_at.is_(None))).scalar(),
+        user_count=db.session.execute(sa.select(sa.func.count()).select_from(User).filter(User.deleted_at.is_(None))).scalar(),
         recent_audit=query_audit_entries(limit=12),
     )
 
@@ -202,9 +202,9 @@ def staff_users():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_users"))
 
-    users = User.query.filter(User.deleted_at.is_(None)).order_by(User.full_name.asc()).all()
-    roles = Role.query.order_by(Role.sort_order.asc()).all()
-    recent_activity = ActivityLog.query.order_by(ActivityLog.created_at.desc()).limit(20).all()
+    users = db.session.execute(sa.select(User).filter(User.deleted_at.is_(None)).order_by(User.full_name.asc())).unique().scalars().all()
+    roles = db.session.execute(sa.select(Role).order_by(Role.sort_order.asc())).unique().scalars().all()
+    recent_activity = db.session.execute(sa.select(ActivityLog).order_by(ActivityLog.created_at.desc()).limit(20)).scalars().all()
     return render_template(
         "admin_staff_access.html",
         active_section="staff_access",
@@ -228,7 +228,7 @@ def staff_settings():
             if action == "legacy_setting":
                 actor = helpers["require_permission"]("settings.edit")
                 key = request.form.get("key", "")
-                setting = AppSetting.query.filter_by(key=key, deleted_at=None).first()
+                setting = db.session.execute(sa.select(AppSetting).filter_by(key=key, deleted_at=None)).scalar_one_or_none()
                 if not setting:
                     abort(404)
                 upsert_setting(
@@ -327,8 +327,8 @@ def staff_settings():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_settings"))
 
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
-    rooms = Room.query.join(RoomType).order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
+    rooms = db.session.execute(sa.select(Room).join(RoomType).order_by(Room.floor_number.asc(), Room.room_number.asc())).scalars().all()
     return render_template(
         "admin_property.html",
         active_section="property",
@@ -426,21 +426,20 @@ def staff_rates():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_rates"))
 
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
-    rooms = Room.query.order_by(Room.floor_number.asc(), Room.room_number.asc()).all()
-    rate_rules = (
-        RateRule.query.filter(RateRule.deleted_at.is_(None))
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
+    rooms = db.session.execute(sa.select(Room).order_by(Room.floor_number.asc(), Room.room_number.asc())).scalars().all()
+    rate_rules = db.session.execute(
+        sa.select(RateRule).filter(RateRule.deleted_at.is_(None))
         .order_by(RateRule.priority.asc(), RateRule.name.asc())
-        .all()
-    )
-    overrides = (
-        InventoryOverride.query.order_by(
+    ).scalars().all()
+    overrides = db.session.execute(
+        sa.select(InventoryOverride).order_by(
             InventoryOverride.is_active.desc(),
             InventoryOverride.start_date.asc(),
             InventoryOverride.created_at.desc(),
-        ).all()
-    )
-    blackouts = BlackoutPeriod.query.order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc()).all()
+        )
+    ).scalars().all()
+    blackouts = db.session.execute(sa.select(BlackoutPeriod).order_by(BlackoutPeriod.start_date.asc(), BlackoutPeriod.name.asc())).scalars().all()
     return render_template(
         "admin_rates_inventory.html",
         active_section="rates_inventory",
@@ -679,7 +678,7 @@ def staff_admin_payments():
             flash(public_error_message(exc), "error")
         return redirect(url_for("admin.staff_admin_payments"))
 
-    recent_requests = PaymentRequest.query.order_by(PaymentRequest.created_at.desc()).limit(20).all()
+    recent_requests = db.session.execute(sa.select(PaymentRequest).order_by(PaymentRequest.created_at.desc()).limit(20)).scalars().all()
     return render_template(
         "admin_payments.html",
         active_section="payments",

@@ -405,7 +405,7 @@ def front_desk_board_context(
     board = build_front_desk_board(filters)
     back_url = front_desk_board_url(filters)
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
     board_v2_enabled = front_desk_board_v2_enabled()
 
     # Load user density preference
@@ -660,7 +660,7 @@ def staff_front_desk():
         "front_desk_workspace.html",
         workspace=workspace,
         filters=filters,
-        room_types=RoomType.query.order_by(RoomType.code.asc()).all(),
+        room_types=db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all(),
         booking_sources=BOOKING_SOURCE_CHANNELS,
         walk_in_checkout_default=target_date + timedelta(days=1),
         can_folio=can("folio.view"),
@@ -1231,7 +1231,7 @@ def staff_front_desk_board_preferences():
     if density not in ["comfortable", "compact", "spacious", "ultra"]:
         abort(400, "Invalid density value")
 
-    pref = UserPreference.query.filter_by(user_id=user.id).first()
+    pref = db.session.execute(sa.select(UserPreference).filter_by(user_id=user.id)).scalar_one_or_none()
     if not pref:
         pref = UserPreference(user_id=user.id, preferences={})
         db.session.add(pref)
@@ -1255,7 +1255,7 @@ def staff_front_desk_board_preferences():
 def staff_front_desk_board_check_in(reservation_id):
     """Check in a reservation via the front desk board."""
     user = require_permission("reservation.check_in")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
 
     if reservation.current_status in ("checked_in", "checked_out"):
         return jsonify(ok=False, error=f"Cannot check in a {reservation.current_status} reservation.")
@@ -1319,7 +1319,7 @@ def staff_front_desk_board_check_in(reservation_id):
 def staff_front_desk_board_check_out(reservation_id):
     """Check out a reservation via the front desk board."""
     user = require_permission("reservation.check_out")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
 
     if reservation.current_status in ("checked_out", "canceled"):
         return jsonify(ok=False, error=f"Cannot check out a {reservation.current_status} reservation.")
@@ -1367,7 +1367,7 @@ def staff_front_desk_board_check_out(reservation_id):
 def staff_front_desk_board_reservation_panel(reservation_id):
     """Load panel content for a reservation."""
     user = require_permission("reservation.view")
-    reservation = Reservation.query.get_or_404(reservation_id)
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
 
     can_reassign = user.has_permission("reservation.edit")
     can_change_dates = user.has_permission("reservation.edit")
@@ -1376,22 +1376,24 @@ def staff_front_desk_board_reservation_panel(reservation_id):
 
     available_rooms = []
     if can_reassign and reservation.room_type_id:
-        all_rooms = Room.query.filter(
-            Room.room_type_id == reservation.room_type_id,
-            Room.is_active.is_(True),
-        ).order_by(Room.room_number).all()
+        all_rooms = db.session.execute(
+            sa.select(Room).filter(
+                Room.room_type_id == reservation.room_type_id,
+                Room.is_active.is_(True),
+            ).order_by(Room.room_number)
+        ).scalars().all()
         conflict_statuses = {"tentative", "confirmed", "checked_in", "house_use"}
-        conflicting_room_ids = {
-            row.assigned_room_id
-            for row in db.session.query(Reservation.assigned_room_id).filter(
-                Reservation.id != reservation.id,
-                Reservation.assigned_room_id.isnot(None),
-                Reservation.current_status.in_(conflict_statuses),
-                Reservation.check_in_date < reservation.check_out_date,
-                Reservation.check_out_date > reservation.check_in_date,
-            ).all()
-            if row.assigned_room_id is not None
-        }
+        conflicting_room_ids = set(
+            db.session.execute(
+                sa.select(Reservation.assigned_room_id).filter(
+                    Reservation.id != reservation.id,
+                    Reservation.assigned_room_id.isnot(None),
+                    Reservation.current_status.in_(conflict_statuses),
+                    Reservation.check_in_date < reservation.check_out_date,
+                    Reservation.check_out_date > reservation.check_in_date,
+                )
+            ).scalars().all()
+        )
         for room in all_rooms:
             label = f"Room {room.room_number} — Floor {room.floor_number}"
             if room.id in conflicting_room_ids:

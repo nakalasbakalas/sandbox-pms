@@ -5,6 +5,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
 from ..activity import write_activity_log
@@ -139,7 +140,7 @@ def booking_confirm():
     settings = helpers["current_settings"]()
     published_terms_version = settings.get("booking.terms_version", {}).get("value", "2026-03")
     selected_extra_ids: tuple[UUID, ...] = ()
-    hold = ReservationHold.query.filter_by(hold_code=request.form.get("hold_code")).first()
+    hold = db.session.execute(sa.select(ReservationHold).filter_by(hold_code=request.form.get("hold_code"))).scalar_one_or_none()
     try:
         selected_extra_ids = helpers["parse_booking_extra_ids"](request.form.getlist("extra_ids"))
         attribution = helpers["source_metadata_from_request"](
@@ -227,14 +228,13 @@ def booking_confirmation(reservation_code):
     if not reservation:
         abort(404)
     g.public_language = reservation.booking_language
-    payment_request = (
-        PaymentRequest.query.filter(
+    payment_request = db.session.execute(
+        sa.select(PaymentRequest).filter(
             PaymentRequest.reservation_id == reservation.id,
             PaymentRequest.request_type.in_(DEPOSIT_HOSTED_REQUEST_TYPES),
         )
         .order_by(PaymentRequest.created_at.desc())
-        .first()
-    )
+    ).scalar_one_or_none()
     return render_template(
         "public_confirmation.html",
         reservation=reservation,

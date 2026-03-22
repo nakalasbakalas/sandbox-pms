@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
+import sqlalchemy as sa
+
 from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..extensions import db
@@ -132,12 +134,12 @@ def create_group_room_block(
 
 def list_group_room_blocks(*, include_inactive: bool = False, limit: int = 12) -> list[dict]:
     cleanup_expired_holds()
-    query = ReservationHold.query.order_by(ReservationHold.created_at.desc())
+    query = sa.select(ReservationHold).order_by(ReservationHold.created_at.desc())
     if not include_inactive:
         query = query.filter(ReservationHold.status == "active")
     holds = [
         hold
-        for hold in query.limit(250).all()
+        for hold in db.session.execute(query.limit(250)).scalars().all()
         if _group_block_code(hold)
     ]
     grouped: dict[str, list[ReservationHold]] = {}
@@ -262,15 +264,15 @@ def _serialize_group_block(group_block_code: str, holds: list[ReservationHold]) 
     converted_ids = {hold.converted_reservation_id for hold in holds if hold.converted_reservation_id}
     room_type_map = {
         room_type.id: room_type
-        for room_type in RoomType.query.filter(RoomType.id.in_(room_type_ids)).all()
+        for room_type in db.session.execute(sa.select(RoomType).filter(RoomType.id.in_(room_type_ids))).scalars().all()
     } if room_type_ids else {}
     room_map = {
         room.id: room
-        for room in Room.query.filter(Room.id.in_(room_ids)).all()
+        for room in db.session.execute(sa.select(Room).filter(Room.id.in_(room_ids))).scalars().all()
     } if room_ids else {}
     reservation_map = {
         reservation.id: reservation
-        for reservation in Reservation.query.filter(Reservation.id.in_(converted_ids)).all()
+        for reservation in db.session.execute(sa.select(Reservation).filter(Reservation.id.in_(converted_ids))).scalars().all()
     } if converted_ids else {}
     first_hold = holds[0]
     metadata = first_hold.source_metadata_json or {}

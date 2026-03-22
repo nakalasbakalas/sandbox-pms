@@ -465,10 +465,10 @@ def build_outbound_inventory_updates(
     date_to: date,
     room_type_id: uuid.UUID | None = None,
 ) -> list[OutboundInventoryUpdate]:
-    room_type_query = RoomType.query.filter_by(is_active=True).order_by(RoomType.code.asc())
+    room_type_query = sa.select(RoomType).filter_by(is_active=True).order_by(RoomType.code.asc())
     if room_type_id:
         room_type_query = room_type_query.filter(RoomType.id == room_type_id)
-    room_types = room_type_query.all()
+    room_types = db.session.execute(room_type_query).scalars().all()
     if not room_types:
         return []
 

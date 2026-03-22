@@ -15,6 +15,7 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from uuid import UUID
 
+import sqlalchemy as sa
 from flask import abort, current_app, g, redirect, request, session, url_for
 from markupsafe import Markup, escape
 
@@ -337,7 +338,7 @@ def _contact_link(href: str, label: str) -> Markup | str:
 
 def current_settings() -> dict[str, dict]:
     """Return all active AppSettings as a key→value_json mapping."""
-    return {setting.key: setting.value_json for setting in AppSetting.query.filter_by(deleted_at=None).all()}
+    return {setting.key: setting.value_json for setting in db.session.execute(sa.select(AppSetting).filter_by(deleted_at=None)).scalars().all()}
 
 
 def truthy_setting(value) -> bool:
@@ -436,7 +437,7 @@ def available_admin_sections() -> list[dict[str, str]]:
 def permission_groups() -> dict[str, list]:
     """Return all Permissions grouped by their module name."""
     grouped: dict[str, list] = {}
-    permissions = Permission.query.order_by(Permission.module.asc(), Permission.code.asc()).all()
+    permissions = db.session.execute(sa.select(Permission).order_by(Permission.module.asc(), Permission.code.asc())).scalars().all()
     for permission in permissions:
         grouped.setdefault(permission.module, []).append(permission)
     return grouped

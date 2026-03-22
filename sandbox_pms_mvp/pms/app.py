@@ -1394,7 +1394,7 @@ def resolve_reservation_identifier(
         if reservation:
             return reservation
     if reservation_code_value:
-        reservation = Reservation.query.filter_by(reservation_code=reservation_code_value.strip()).first()
+        reservation = db.session.execute(sa.select(Reservation).filter_by(reservation_code=reservation_code_value.strip())).scalar_one_or_none()
         if reservation:
             return reservation
     raise ValueError("Reservation not found.")
@@ -1827,7 +1827,7 @@ def default_dashboard_url(user: User | None) -> str:
 
 
 def current_settings() -> dict[str, dict]:
-    return {setting.key: setting.value_json for setting in AppSetting.query.filter_by(deleted_at=None).all()}
+    return {setting.key: setting.value_json for setting in db.session.execute(sa.select(AppSetting).filter_by(deleted_at=None)).scalars().all()}
 
 
 def current_app_testing() -> bool:
@@ -1905,7 +1905,7 @@ def front_desk_board_context(
     board = build_front_desk_board(filters)
     back_url = front_desk_board_url(filters)
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
-    room_types = RoomType.query.order_by(RoomType.code.asc()).all()
+    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
     board_v2_enabled = front_desk_board_v2_enabled()
 
     # Load user density preference
