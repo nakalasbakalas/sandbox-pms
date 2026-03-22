@@ -33,6 +33,7 @@ from ..front_desk_board_runtime import (
     log_front_desk_board_metric,
 )
 from ..helpers import (
+    action_datetime_for_form_date,
     add_anchor_to_path,
     can,
     ensure_csrf_token,
@@ -1589,6 +1590,7 @@ def staff_front_desk_check_in(reservation_id):
     if blockers:
         return render_check_in_error(blockers=blockers, values=values)
     try:
+        action_at = action_datetime_for_form_date("business_date", default=business_date)
         complete_check_in(
             reservation_id,
             CheckInPayload(
@@ -1610,6 +1612,7 @@ def staff_front_desk_check_in(reservation_id):
                 waive_early_fee=bool(parsed["waive_early_fee"]),
                 waiver_reason=values["waiver_reason"],
                 override_payment=bool(parsed["override_payment"]),
+                action_at=action_at,
             ),
             actor_user_id=user.id,
         )

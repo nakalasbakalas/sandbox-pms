@@ -537,16 +537,20 @@ def _resolve_current_property() -> None:
     2. ``property_code`` query parameter (convenience for dev/testing)
     3. First active property in the database (single-property fallback)
     """
-    from .services.property_service import get_current_property, get_property_by_code
+    try:
+        from .services.property_service import get_current_property, get_property_by_code
 
-    code = request.headers.get("X-Property-Code") or request.args.get("property_code")
-    if code:
-        prop = get_property_by_code(code.strip().upper())
-        if prop and prop.is_active:
-            g.current_property = prop
-            return
-    # Fallback: let property_service pick the default lazily
-    g.current_property = get_current_property()
+        code = request.headers.get("X-Property-Code") or request.args.get("property_code")
+        if code:
+            prop = get_property_by_code(code.strip().upper())
+            if prop and prop.is_active:
+                g.current_property = prop
+                return
+        # Fallback: let property_service pick the default lazily
+        g.current_property = get_current_property()
+    except Exception:
+        # Table may not exist yet (pre-migration) — silently fall back
+        g.current_property = None
 
 
 def register_auth_hooks(app: Flask) -> None:
