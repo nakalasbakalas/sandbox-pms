@@ -89,6 +89,13 @@
       <p class="eyebrow">Notification templates</p>
       <h2>Channel templates and language variants</h2>
     </div>
+    {% if can('settings.edit') %}
+    <form method="post" onsubmit="return confirm('Reset all notification templates to their factory defaults? Custom edits will be overwritten.')">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="reset_templates_to_defaults">
+      <button class="button secondary" type="submit">Reset all to defaults</button>
+    </form>
+    {% endif %}
   </div>
   <div class="list-stack">
     {% for template in templates %}
@@ -119,5 +126,23 @@
       <p class="muted">No notification templates are configured.</p>
     {% endfor %}
   </div>
+</section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div class="card-title">
+      <h2>Error monitoring diagnostics</h2>
+    </div>
+  </div>
+  {% if can('audit.view') %}
+  <p class="muted">Sends a controlled <code>RuntimeError: Sentry verification test</code> to confirm end-to-end event delivery to Sentry. Check your Sentry project after submitting.</p>
+  <form method="post" action="{{ url_for('admin.staff_admin_test_error') }}"
+        onsubmit="return confirm('This will intentionally raise an error to verify Sentry is receiving events. Proceed?')">
+    {{ csrf_input() }}
+    <button class="button secondary" type="submit">Trigger Sentry test error</button>
+  </form>
+  {% else %}
+  <p class="muted">Requires audit.view permission.</p>
+  {% endif %}
 </section>
 {% endblock %}
