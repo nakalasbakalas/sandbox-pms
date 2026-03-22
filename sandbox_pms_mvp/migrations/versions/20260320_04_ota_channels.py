@@ -33,7 +33,7 @@ def upgrade():
         sa.Column("deleted_by_user_id", UUID, sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("provider_key", sa.String(80), nullable=False),
         sa.Column("display_name", sa.String(120), nullable=False),
-        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("0")),
+        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("false")),
         sa.Column("hotel_id", sa.String(120), nullable=True),
         sa.Column("endpoint_url", sa.String(500), nullable=True),
         sa.Column("api_key_encrypted", sa.Text, nullable=True),
