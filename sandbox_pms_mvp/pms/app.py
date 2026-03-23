@@ -523,7 +523,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         if app.config["AUTO_BOOTSTRAP_SCHEMA"] and app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
             db.create_all()
             if app.config["AUTO_SEED_REFERENCE_DATA"]:
-                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+                include_demo = app.config.get("SEED_DEMO_DATA", False)
+                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=include_demo)
     return app
 
 
@@ -808,9 +809,10 @@ def register_cli(app: Flask) -> None:
         print("System role permissions synchronized.")
 
     @app.cli.command("seed-phase2")
-    def seed_phase2_command() -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        print("Phase 2 seed completed.")
+    @click.option("--demo-data", is_flag=True, default=False, help="Include demo guests and reservations")
+    def seed_phase2_command(demo_data: bool) -> None:
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=demo_data)
+        print("Phase 2 seed completed." + (" (with demo data)" if demo_data else ""))
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:

@@ -45,10 +45,10 @@ from .services.auth_service import hash_password
 from .settings import APP_SETTINGS_SEED, AUTOMATION_RULES_SEED, MESSAGE_TEMPLATES_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOCUMENTS_SEED
 
 
-def seed_all(inventory_days: int = 730) -> None:
+def seed_all(inventory_days: int = 730, *, include_demo_data: bool = False) -> None:
     seed_reference_data(sync_existing_roles=True)
     bootstrap_inventory_horizon(date.today(), inventory_days)
-    if not _is_demo_data_already_seeded():
+    if include_demo_data and not _is_demo_data_already_seeded():
         seed_demo_guests_and_reservations()
     db.session.commit()
 
