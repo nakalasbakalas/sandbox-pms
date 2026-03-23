@@ -919,6 +919,8 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert ("tel:" in body) or ("mailto:" in body)
     assert "mailto:" in body
     assert "https://hotel.example/static/hotel-share.svg" in body
+    assert '<meta property="og:image" content="https://hotel.example/static/hotel-share.svg">' in body
+    assert '<meta name="twitter:image" content="https://hotel.example/static/hotel-share.svg">' in body
 
 
 def test_public_pages_render_analytics_and_consent_hooks(app_factory):

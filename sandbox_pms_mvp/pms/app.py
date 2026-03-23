@@ -658,8 +658,7 @@ def register_template_helpers(app: Flask) -> None:
         favicon_url = absolute_public_url(url_for("static", filename="favicon.svg"))
         favicon_ico_url = absolute_public_url(url_for("static", filename="branding/sandbox-hotel-favicon.ico"))
         apple_touch_icon_url = absolute_public_url(url_for("static", filename="branding/sandbox-hotel-logo-safe-180.png"))
-        default_share_image_url = absolute_public_url(url_for("static", filename="hotel-share.svg"))
-        share_image_url = hotel_logo_url or default_share_image_url
+        share_image_url = absolute_public_url(url_for("static", filename="hotel-share.svg"))
         hotel_contact_phone_href = phone_href(hotel_contact_phone)
         hotel_contact_email_href = email_href(hotel_contact_email)
         hotel_contact_line_href = branding_line_href(hotel_contact_line_url)
