@@ -3653,7 +3653,6 @@ body.route-auth-staff-login .auth-page {
 
 body.route-auth-staff-login .auth-shell-login {
   width: min(100%, 560px);
-  max-width: 560px;
   margin: 0 auto;
   padding: clamp(28px, 5vw, 42px);
   border: 1px solid rgba(124, 103, 78, 0.14);
