@@ -163,7 +163,7 @@ def branding_settings_context() -> dict[str, str]:
     return {
         "hotel_name": hotel_name,
         "brand_mark": _string_setting("hotel.brand_mark", "SBX"),
-        "logo_url": _string_setting("hotel.logo_url", ""),
+        "logo_url": _string_setting("hotel.logo_url", "/static/branding/sandbox-hotel-logo-safe-256.png"),
         "contact_phone": _string_setting("hotel.contact_phone", "+66 2 123 4567"),
         "contact_email": _string_setting("hotel.contact_email", current_app.config.get("MAIL_FROM", "")),
         "contact_line_url": _safe_public_contact_url(_string_setting("hotel.contact_line_url", "")),

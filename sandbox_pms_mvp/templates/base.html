@@ -84,8 +84,8 @@
     <div class="container app-header{% if is_public_site %} public-app-header{% endif %}">
       <div class="header-brand-group">
         <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ header_brand_href }}">
-          {% if hotel_logo_url %}
-            <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
+          {% if hotel_logo_url or default_logo_url %}
+            <img src="{{ hotel_logo_url or default_logo_url }}" alt="{{ hotel_name }} logo" class="brand-logo">
           {% else %}
             <span class="brand-mark">{{ hotel_brand_mark }}</span>
           {% endif %}

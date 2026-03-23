@@ -20,8 +20,8 @@
 
         <header class="print-header">
           <div>
-            {% if hotel_logo_url %}
-              <img src="{{ hotel_logo_url }}" alt="{{ hotel_name }}" class="print-logo">
+            {% if hotel_logo_url or default_logo_url %}
+              <img src="{{ hotel_logo_url or default_logo_url }}" alt="{{ hotel_name }}" class="print-logo">
             {% else %}
               <p class="print-brand-mark">{{ hotel_brand_mark }}</p>
             {% endif %}
