@@ -1409,7 +1409,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-grid {
   display: grid;
-  grid-template-columns: var(--room-header-width) auto;
+  grid-template-columns: var(--room-header-width) 1fr;
   width: max-content;
   min-width: 100%;
   border: 1px solid var(--border);
@@ -1422,6 +1422,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-track {
   display: grid;
   grid-template-columns: repeat(var(--board-days), minmax(var(--day-column-min), 1fr));
+  /* Ensure both use the same grid sizing */
+  width: 100%;
 }
 .planning-board-days {
   grid-template-rows: minmax(var(--day-header-height), auto);
@@ -5438,11 +5440,19 @@ body:not(.public-site) .planning-board-shell {
   background: var(--pms-bg-surface, #fff);
   border-bottom: 1px solid var(--pms-border-thin);
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  /* Ensure shell doesn't block pointer events on the board below */
+  pointer-events: auto;
+}
+/* Allow pointer events on interactive children */
+body:not(.public-site) .planning-board-shell * {
+  pointer-events: auto;
 }
 /* Day header row + room heading: account for sticky shell offset */
 body:not(.public-site) .planning-board-room.heading,
 body:not(.public-site) .planning-board-days {
   top: var(--board-shell-h, 0px);
+  /* Ensure day headers are below shell but above tracks */
+  z-index: 45;
 }
 
 /* ── Stronger today column ── */
