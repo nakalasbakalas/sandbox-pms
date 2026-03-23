@@ -646,6 +646,16 @@ def _inventory_override_snapshot_for_audit(override_id: UUID) -> dict | None:
 
 
 # ── Routes ────────────────────────────────────────────────────────────
+#
+# Planned split target (Phase 3 architecture debt reduction):
+#   routes/front_desk.py        → Section: View Routes
+#   routes/front_desk_board.py  → Section: Board Routes
+#   routes/front_desk_actions.py → Section: Action Routes
+# Each sub-module would import front_desk_bp from a shared location or
+# register its own sub-blueprint. Full split is deferred until after
+# beta stabilisation to avoid import-cycle risk.
+
+# --- Section: View Routes ---
 
 
 @front_desk_bp.route("/staff/front-desk")
@@ -678,6 +688,9 @@ def staff_front_desk():
         can_collect_payment=can("payment.create"),
         can_charge=can("folio.charge_add"),
     )
+
+
+# --- Section: Board Routes ---
 
 
 @front_desk_bp.route("/staff/front-desk/board")
@@ -1430,6 +1443,9 @@ def staff_front_desk_board_reservation_panel(reservation_id):
     return render_template("_panel_reservation_details.html", **context)
 
 
+# --- Section: View Routes (walk-in, detail) ---
+
+
 @front_desk_bp.route("/staff/front-desk/walk-in", methods=["POST"])
 def staff_front_desk_walk_in():
     user = require_permission("reservation.create")
@@ -1497,6 +1513,9 @@ def staff_front_desk_detail(reservation_id):
         checkout_form=_build_checkout_form_state(checkout_prep) if checkout_prep else None,
         comm_messages=comm_messages,
     )
+
+
+# --- Section: Action Routes ---
 
 
 @front_desk_bp.route("/staff/front-desk/<uuid:reservation_id>/room", methods=["POST"])

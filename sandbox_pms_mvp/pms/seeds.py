@@ -256,8 +256,10 @@ def seed_app_settings() -> None:
 
 
 def seed_initial_admin() -> None:
-    admin_email = str(current_app.config.get("ADMIN_EMAIL") or os.getenv("ADMIN_EMAIL") or "").strip()
-    admin_password = str(current_app.config.get("ADMIN_PASSWORD") or os.getenv("ADMIN_PASSWORD") or "")
+    cfg_email = current_app.config.get("ADMIN_EMAIL")
+    cfg_password = current_app.config.get("ADMIN_PASSWORD")
+    admin_email = str(cfg_email if cfg_email is not None else (os.getenv("ADMIN_EMAIL") or "")).strip()
+    admin_password = str(cfg_password if cfg_password is not None else (os.getenv("ADMIN_PASSWORD") or ""))
     admin_role = (
         db.session.execute(sa.select(Role).where(Role.code == "admin"))
         .unique()

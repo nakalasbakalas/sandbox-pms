@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    env:
+      SECRET_KEY: ci-test-secret-key-minimum-32-chars-ok
+      ADMIN_EMAIL: ci@test.local
+      ADMIN_PASSWORD: CiTestPassword123!
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y libpq-dev
+
+      - name: Install dependencies
+        run: pip install -r sandbox_pms_mvp/requirements.txt -r sandbox_pms_mvp/requirements-dev.txt
+
+      - name: Generate Fernet key for CI
+        run: |
+          echo "AUTH_ENCRYPTION_KEY=$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" >> $GITHUB_ENV
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files
+
+      - name: Run pytest
+        run: python -m pytest sandbox_pms_mvp/tests/ -p no:cacheprovider -q --tb=short
+
+      - name: Run launch gate
+        run: python scripts/launch_gate.py
