@@ -42,6 +42,8 @@
     {% if can_create %}
     <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservations.staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}" title="Create new reservation (N)">+ Reservation</a>
     {% endif %}
+    <button class="board-nav-btn board-toolbar-toggle" type="button" data-action="toggle-toolbar" title="Hide filters &amp; legend" aria-pressed="false" aria-label="Toggle filter toolbar">⚙</button>
+    <button class="board-nav-btn board-help-btn" type="button" data-action="show-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
   </div>
 
   {# ── Board Legend ── #}

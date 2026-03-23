@@ -12,6 +12,10 @@
   const searchInput = root.querySelector("[data-board-search-input]");
   const surfaceContent = surface.querySelector("[data-board-surface-content]");
   const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");
+  const panelEl = document.getElementById("board-side-panel");
+  const panelTitle = document.querySelector("[data-panel-title]");
+  const panelContent = document.querySelector(".panel-content");
+  const panelCloseBtn = document.querySelector("[data-action='close-panel']");
   let mutationInFlight = false;
   let selectedBlock = null;
   let moveMode = false;
@@ -484,12 +488,22 @@
     // Select the block on click
     selectBlock(block);
 
-    if (block.dataset.suppressClick !== "true") {
+    if (block.dataset.suppressClick === "true") {
+      block.dataset.suppressClick = "false";
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
-    block.dataset.suppressClick = "false";
-    event.preventDefault();
-    event.stopPropagation();
+
+    // Single click on reservation blocks opens side panel directly
+    // for fast check-in/check-out without leaving the board
+    if (block.dataset.reservationId) {
+      event.preventDefault(); // Prevent <details> toggle
+      openPanel(block);
+      return;
+    }
+    // Non-reservation blocks (closures, external blocks, etc.) allow
+    // the default <details> popover to open for inline editing
   }
 
   function onSurfaceKeydown(event) {
@@ -998,6 +1012,7 @@
         prev.hidden = !matches;
       }
     });
+    updateNoResultsIndicator();
   }
 
   function syncFilterState() {
@@ -1172,6 +1187,158 @@
     syncHkOverlayState();
     syncRoleViewState();
     updateStickyOffset();
+    initCollapsibleGroups();
+  }
+
+  // ── Collapsible room-type group headers ──
+  const collapsedGroups = new Set();
+
+  function restoreCollapsedGroups() {
+    try {
+      const saved = localStorage.getItem("board_collapsed_groups");
+      if (saved) JSON.parse(saved).forEach((g) => collapsedGroups.add(g));
+    } catch (_) { /* ignore */ }
+  }
+
+  function persistCollapsedGroups() {
+    try { localStorage.setItem("board_collapsed_groups", JSON.stringify([...collapsedGroups])); } catch (_) { /* ignore */ }
+  }
+
+  function setGroupCollapsed(groupEl, collapsed) {
+    const groupId = groupEl.dataset.groupId || groupEl.textContent.trim();
+    groupEl.classList.toggle("collapsed", collapsed);
+    groupEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    // Hide/show all rows belonging to this group until the next group header
+    let sibling = groupEl.nextElementSibling;
+    while (sibling && !sibling.classList.contains("planning-board-group")) {
+      sibling.classList.toggle("group-hidden", collapsed);
+      sibling = sibling.nextElementSibling;
+    }
+    if (collapsed) collapsedGroups.add(groupId);
+    else collapsedGroups.delete(groupId);
+    persistCollapsedGroups();
+  }
+
+  function initCollapsibleGroups() {
+    surface.querySelectorAll(".planning-board-group").forEach((groupEl) => {
+      groupEl.setAttribute("role", "button");
+      groupEl.setAttribute("tabindex", "0");
+      groupEl.setAttribute("title", "Click to collapse/expand this room group");
+      const groupId = groupEl.dataset.groupId || groupEl.textContent.trim();
+      if (collapsedGroups.has(groupId)) {
+        setGroupCollapsed(groupEl, true);
+      } else {
+        groupEl.setAttribute("aria-expanded", "true");
+      }
+    });
+  }
+
+  surface.addEventListener("click", (e) => {
+    const groupEl = e.target.closest(".planning-board-group");
+    if (groupEl) {
+      const isCollapsed = groupEl.classList.contains("collapsed");
+      setGroupCollapsed(groupEl, !isCollapsed);
+    }
+  });
+
+  surface.addEventListener("keydown", (e) => {
+    const groupEl = e.target.closest(".planning-board-group");
+    if (groupEl && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault();
+      const isCollapsed = groupEl.classList.contains("collapsed");
+      setGroupCollapsed(groupEl, !isCollapsed);
+    }
+  });
+
+  restoreCollapsedGroups();
+
+  // ── Collapsible toolbar (legend + row2) ──
+  const legendEl = root.querySelector(".board-legend");
+  const row2El = root.querySelector(".planning-board-row2");
+  const toolbarToggle = root.querySelector("[data-action='toggle-toolbar']");
+
+  function setToolbarCollapsed(collapsed) {
+    if (legendEl) legendEl.classList.toggle("toolbar-hidden", collapsed);
+    if (row2El) row2El.classList.toggle("toolbar-hidden", collapsed);
+    if (toolbarToggle) {
+      toolbarToggle.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      toolbarToggle.title = collapsed ? "Show filters & legend" : "Hide filters & legend";
+    }
+    try { localStorage.setItem("board_toolbar_collapsed", collapsed ? "1" : "0"); } catch (_) { /* ignore */ }
+  }
+
+  function restoreToolbarState() {
+    try {
+      const saved = localStorage.getItem("board_toolbar_collapsed");
+      if (saved === "1") setToolbarCollapsed(true);
+    } catch (_) { /* ignore */ }
+  }
+
+  if (toolbarToggle) {
+    toolbarToggle.addEventListener("click", () => {
+      const isCollapsed = legendEl && legendEl.classList.contains("toolbar-hidden");
+      setToolbarCollapsed(!isCollapsed);
+    });
+  }
+
+  restoreToolbarState();
+
+  // ── Keyboard shortcuts button ──
+  const shortcutsBtn = root.querySelector("[data-action='show-shortcuts']");
+  if (shortcutsBtn) {
+    shortcutsBtn.addEventListener("click", () => showKeyboardHelp());
+  }
+
+  // ── No-results indicator for quick filters ──
+  function updateNoResultsIndicator() {
+    let indicator = surface.querySelector("[data-board-no-results]");
+    if (activeFilters.size === 0) {
+      if (indicator) indicator.hidden = true;
+      return;
+    }
+    const tracks = surface.querySelectorAll("[data-board-track]");
+    const anyVisible = Array.from(tracks).some((t) => !t.hidden);
+    if (!anyVisible) {
+      if (!indicator) {
+        indicator = document.createElement("div");
+        indicator.dataset.boardNoResults = "";
+        indicator.className = "planning-board-no-results";
+        indicator.setAttribute("role", "status");
+        const msg = document.createElement("p");
+        msg.textContent = "No rooms match the active filters.";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "button secondary tiny";
+        btn.textContent = "Clear filters";
+        btn.addEventListener("click", resetAllFilters);
+        indicator.appendChild(msg);
+        indicator.appendChild(btn);
+        const desktopSection = surface.querySelector(".planning-board-desktop");
+        if (desktopSection) desktopSection.parentNode.insertBefore(indicator, desktopSection.nextSibling);
+        else surface.appendChild(indicator);
+      }
+      indicator.hidden = false;
+    } else {
+      if (indicator) indicator.hidden = true;
+    }
+  }
+
+  // ── Scroll to today helper (shared by indicator & initial load) ──
+  const TODAY_SCROLL_OFFSET = 60;
+
+  function scrollToToday(behavior) {
+    const desktop = document.querySelector(".planning-board-desktop");
+    if (!desktop) return;
+    const gridEl = desktop.querySelector(".planning-board-grid");
+    if (!gridEl) return;
+    const todayCol = gridEl.querySelector(".planning-board-day.today");
+    if (!todayCol) return;
+    const containerRect = desktop.getBoundingClientRect();
+    const colRect = todayCol.getBoundingClientRect();
+    desktop.scrollTo({
+      left: desktop.scrollLeft + colRect.left - containerRect.left - TODAY_SCROLL_OFFSET,
+      behavior: behavior || "smooth",
+    });
   }
 
   // ── Sticky today indicator ──
@@ -1188,20 +1355,7 @@
         { threshold: 0.1 }
       );
       todayObserver.observe(todayHeader);
-      todayIndicator.addEventListener("click", () => {
-        const desktop = document.querySelector(".planning-board-desktop");
-        if (!desktop) return;
-        const gridEl = desktop.querySelector(".planning-board-grid");
-        if (!gridEl) return;
-        const todayCol = gridEl.querySelector(".planning-board-day.today");
-        if (!todayCol) return;
-        const containerRect = desktop.getBoundingClientRect();
-        const colRect = todayCol.getBoundingClientRect();
-        desktop.scrollTo({
-          left: desktop.scrollLeft + colRect.left - containerRect.left - 60,
-          behavior: "smooth",
-        });
-      });
+      todayIndicator.addEventListener("click", () => scrollToToday("smooth"));
       todayIndicator.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -1210,6 +1364,9 @@
       });
     }
   }
+
+  // ── Auto-scroll to today on page load ──
+  window.requestAnimationFrame(() => scrollToToday("instant"));
 
   // ── Occupancy heatmap classes on day headers ──
   const OCC_HIGH_THRESHOLD = 90;
@@ -1266,10 +1423,6 @@
   }
 
   // Side panel for reservation details
-  const panelEl = document.getElementById("board-side-panel");
-  const panelTitle = document.querySelector("[data-panel-title]");
-  const panelContent = document.querySelector(".panel-content");
-  const panelCloseBtn = document.querySelector("[data-action='close-panel']");
 
   function openPanel(blockEl) {
     if (!blockEl || !blockEl.dataset.reservationId) {
@@ -1436,10 +1589,6 @@
     }
   });
 
-  // Wire Enter key to open panel for selected block (from Sprint 2)
-  // Modify the global keyboard handler to call openPanel instead of a stub
-  // This will be handled in the onSurfaceKeydown handler by updating it to call openPanel
-
   // Global keyboard shortcuts for quick actions
   document.addEventListener("keydown", (event) => {
     // Ignore if user is typing in input/textarea
@@ -1508,7 +1657,10 @@
     const helpContent = `
       <strong>Keyboard Shortcuts</strong>
       <ul style="margin: 8px 0; padding-left: 20px;">
+        <li><kbd>T</kbd> : Jump to today</li>
+        <li><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> : Switch to 7 / 14 / 30 day view</li>
         <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
         <li><kbd>Enter</kbd> : Confirm action or open details</li>
