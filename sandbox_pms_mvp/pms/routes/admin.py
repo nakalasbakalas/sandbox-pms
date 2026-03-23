@@ -192,11 +192,11 @@ def staff_admin_setup():
         sa.select(RoomType).order_by(RoomType.code)
     ).scalars().all()
     rooms = db.session.execute(
-        sa.select(Room).order_by(Room.number)
+        sa.select(Room).order_by(Room.room_number)
     ).scalars().all()
     users = db.session.execute(
         sa.select(User).where(User.deleted_at.is_(None)).order_by(User.full_name)
-    ).scalars().all()
+    ).unique().scalars().all()
     return render_template(
         "admin_setup.html",
         active_section="setup",
