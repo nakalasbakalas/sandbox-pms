@@ -362,13 +362,18 @@
       setSurfaceLoading(false);
       throw new Error("Unable to refresh the planning board.");
     }
+    const html = await response.text();
     if (surfaceContent) {
-      surfaceContent.innerHTML = await response.text();
+      surfaceContent.style.visibility = "hidden";
+      surfaceContent.innerHTML = html;
     } else {
-      surface.innerHTML = await response.text();
+      surface.style.visibility = "hidden";
+      surface.innerHTML = html;
     }
     setSurfaceLoading(false);
     reapplyBoardState();
+    if (surfaceContent) surfaceContent.style.visibility = "";
+    else surface.style.visibility = "";
   }
 
   function clearTrackHighlights() {
@@ -1229,6 +1234,7 @@
         .then((html) => {
           panelContent.innerHTML = html;
           panelEl.classList.remove("hidden");
+          panelEl.removeAttribute("inert");
           panelEl.setAttribute("aria-hidden", "false");
           panelCloseBtn.focus();
         })
@@ -1250,6 +1256,7 @@
         .then((html) => {
           panelContent.innerHTML = html;
           panelEl.classList.remove("hidden");
+          panelEl.removeAttribute("inert");
           panelEl.setAttribute("aria-hidden", "false");
           panelCloseBtn.focus();
         })
@@ -1290,6 +1297,7 @@
     .then(html => {
       panelContent.innerHTML = html;
       panelEl.classList.remove("hidden");
+      panelEl.removeAttribute("inert");
       panelEl.setAttribute("aria-hidden", "false");
       setFeedback("", "neutral");
       attachPanelHandlers();
@@ -1304,6 +1312,7 @@
 
   function closePanel() {
     panelEl.classList.add("hidden");
+    panelEl.setAttribute("inert", "");
     panelEl.setAttribute("aria-hidden", "true");
     panelContent.innerHTML = "";
     if (selectedBlock) {
@@ -1584,7 +1593,43 @@
   }
 
   function assignUnallocatedReservation() {
-    setFeedback("Assign unallocated feature coming soon. Select an unallocated block and press M to move.", "neutral");
+    if (!selectedBlock) {
+      setFeedback("Select an unallocated block first.", "neutral");
+      return;
+    }
+    enterMoveMode();
+  }
+
+  async function performNoShow() {
+    if (!selectedBlock) {
+      setFeedback("No block selected.", "error");
+      return;
+    }
+    const reservationId = selectedBlock.dataset.reservationId;
+    if (!reservationId) {
+      setFeedback("This block does not have a reservation ID.", "error");
+      return;
+    }
+    if (!confirm("Mark this reservation as no-show?")) return;
+    selectedBlock.classList.add("is-pending");
+    setBusyState(true);
+    setFeedback("Marking no-show…", "pending");
+    try {
+      const response = await fetch(`/staff/front-desk/board/reservations/${reservationId}/no-show`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken },
+      });
+      const result = await readJsonResponse(response);
+      if (!response.ok || !result.ok) throw new Error(result.error || "No-show failed.");
+      setFeedback(result.message || "Marked as no-show.", "success");
+      await refreshSurface();
+    } catch (error) {
+      setFeedback(error.message || "No-show failed.", "error");
+    } finally {
+      selectedBlock && selectedBlock.classList.remove("is-pending");
+      setBusyState(false);
+    }
   }
 
   function performMarkRoomReady(blockEl) {
@@ -1724,7 +1769,8 @@
         selectBlock(blockEl);
         performCheckOut();
       } else if (action === "no-show") {
-        setFeedback("No-show marking: use the reservation detail page.", "neutral");
+        selectBlock(blockEl);
+        performNoShow();
       } else if (action === "move") {
         selectBlock(blockEl);
         enterMoveMode();

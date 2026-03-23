@@ -1389,6 +1389,40 @@ def staff_front_desk_board_check_out(reservation_id):
         return jsonify(ok=False, error=str(exc)), 409
 
 
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/no-show", methods=["POST"])
+def staff_front_desk_board_no_show(reservation_id):
+    """Mark a reservation as no-show via the front desk board (JSON)."""
+    user = require_permission("reservation.cancel")
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
+
+    if reservation.current_status not in ("tentative", "confirmed"):
+        return jsonify(ok=False, error=f"Cannot mark a {reservation.current_status} reservation as no-show.")
+
+    try:
+        process_no_show(
+            reservation_id,
+            NoShowPayload(reason="board_no_show"),
+            actor_user_id=user.id,
+        )
+        write_activity_log(
+            actor_user_id=user.id,
+            event_type="front_desk.board_no_show",
+            entity_table="reservations",
+            entity_id=str(reservation_id),
+            metadata={"via": "board_context_menu"},
+        )
+        return jsonify(ok=True, message="Marked as no-show.", status="no_show")
+    except Exception as exc:
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="reservations",
+            entity_id=str(reservation_id),
+            action="front_desk_board_no_show_failed",
+            after_data={"error": str(exc)},
+        )
+        return jsonify(ok=False, error=str(exc)), 409
+
+
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room-ready", methods=["POST"])
 def staff_front_desk_board_room_ready(reservation_id):
     """Mark the assigned room for a reservation as clean via the board context menu."""
