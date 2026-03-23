@@ -68,6 +68,22 @@ def test_staff_header_preserves_compact_nav_search_and_logout(app_factory):
     assert "brand-contact" not in html
 
 
+def test_staff_login_page_uses_auth_shell_and_hides_redundant_header_link(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = client.get("/staff/login")
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert 'class="site-header auth-entry-header"' in html
+    assert 'class="header-auth-status">Authorized staff only</span>' in html
+    assert 'class="header-utility-link" href="/staff/login"' not in html
+    assert 'class="auth-page"' in html
+    assert "Access reservations, front desk tools, and hotel operations." in html
+    assert 'class="auth-secondary-link" href="/staff/forgot-password"' in html
+
+
 def test_current_settings_returns_active_settings(app_factory, monkeypatch):
     app = app_factory(seed=False)
     with app.app_context():

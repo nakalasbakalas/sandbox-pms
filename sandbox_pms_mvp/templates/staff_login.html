@@ -1,17 +1,28 @@
 {% extends 'base.html' %}
 {% block title %}Staff sign in | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="card narrow-card">
-  <div class="card-head"><div><p class="eyebrow">Staff access</p><h1>Staff sign in</h1></div></div>
-  {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
-  <form class="stack-form" method="post">
-    {{ csrf_input() }}
-    <label><span>Email or username</span><input type="text" name="username" autocomplete="username" required></label>
-    <label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
-    <button class="button" type="submit">Sign in</button>
-  </form>
-  <div class="actions">
-    <a class="button secondary" href="{{ url_for('auth.staff_forgot_password') }}">Forgot password</a>
+<section class="auth-page" aria-labelledby="staff-sign-in-title">
+  <div class="auth-shell auth-shell-login card narrow-card">
+    <div class="auth-copy">
+      <p class="eyebrow">STAFF ACCESS</p>
+      <h1 id="staff-sign-in-title">Staff sign in</h1>
+      <p class="auth-intro">Access reservations, front desk tools, and hotel operations.</p>
+      <div class="auth-trust-cues" aria-label="Security notice">
+        <span class="auth-trust-pill">Secure access</span>
+        <span class="auth-trust-copy">Authorized staff only</span>
+      </div>
+    </div>
+    {% if error %}<p class="flash error">{{ error }}</p>{% endif %}
+    <form class="stack-form auth-form" method="post">
+      {{ csrf_input() }}
+      <label class="auth-field"><span>Email or username</span><input type="text" name="username" autocomplete="username" placeholder="name@hotel.com" required></label>
+      <label class="auth-field"><span>Password</span><input type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required></label>
+      <button class="button auth-submit" type="submit">Sign in</button>
+    </form>
+    <div class="auth-secondary-actions">
+      <a class="auth-secondary-link" href="{{ url_for('auth.staff_forgot_password') }}">Forgot password?</a>
+      <p class="auth-help">Need help accessing your account? Contact your administrator.</p>
+    </div>
   </div>
 </section>
 {% endblock %}
