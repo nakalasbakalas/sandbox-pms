@@ -9,7 +9,8 @@
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="{{ favicon_url }}">
-  <link rel="alternate icon" href="{{ favicon_url }}">
+  <link rel="alternate icon" href="{{ favicon_ico_url }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="{{ apple_touch_icon_url }}">
   <link rel="sitemap" type="application/xml" title="Sitemap" href="{{ url_for('public.sitemap_xml') }}">
   <link rel="canonical" href="{{ canonical_url }}">
   {% for code, href in language_alternate_urls.items() %}

@@ -32,7 +32,7 @@ APP_SETTINGS_SEED = [
     ("hotel.contact_line_url", {"value": ""}, "string", "Public reservation LINE URL", True, 22),
     ("hotel.contact_whatsapp_url", {"value": ""}, "string", "Public reservation WhatsApp URL", True, 23),
     ("hotel.address", {"value": "Sandbox Hotel, Thailand"}, "string", "Hotel address", True, 24),
-    ("hotel.logo_url", {"value": ""}, "string", "Hotel logo URL", True, 25),
+    ("hotel.logo_url", {"value": "/static/branding/sandbox-hotel-logo-safe-256.png"}, "string", "Hotel logo URL", True, 25),
     ("hotel.tax_id", {"value": "0100000000000"}, "string", "Tax or business display identifier", True, 26),
     ("hotel.brand_mark", {"value": "SBX"}, "string", "Short hotel brand mark", True, 27),
     ("reservation.deposit_percentage", {"value": "50.00"}, "decimal", "Deposit percentage for future reservations", False, 26),
