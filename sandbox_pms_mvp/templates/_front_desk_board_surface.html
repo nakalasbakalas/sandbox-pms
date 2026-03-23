@@ -150,7 +150,7 @@
         data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"
         data-is-stayover="{{ 'true' if row.is_occupied and not row.has_departure_today else 'false' }}"
         data-has-balance-due="{{ 'true' if ns.has_bal else 'false' }}"
-        data-is-conflict="{{ 'true' if row.has_arrival_today and row.has_departure_today and row.housekeeping_status in ('dirty', 'occupied_dirty') else 'false' }}"
+        data-is-conflict="{{ 'true' if (row.has_arrival_today and row.has_departure_today and row.housekeeping_status in ('dirty', 'occupied_dirty')) or (row.is_unallocated and row.has_arrival_today) else 'false' }}"
         aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
       >
