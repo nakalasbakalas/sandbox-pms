@@ -12,6 +12,10 @@
   const searchInput = root.querySelector("[data-board-search-input]");
   const surfaceContent = surface.querySelector("[data-board-surface-content]");
   const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");
+  const panelEl = document.getElementById("board-side-panel");
+  const panelTitle = document.querySelector("[data-panel-title]");
+  const panelContent = document.querySelector(".panel-content");
+  const panelCloseBtn = document.querySelector("[data-action='close-panel']");
   let mutationInFlight = false;
   let selectedBlock = null;
   let moveMode = false;
@@ -1400,10 +1404,6 @@
   }
 
   // Side panel for reservation details
-  const panelEl = document.getElementById("board-side-panel");
-  const panelTitle = document.querySelector("[data-panel-title]");
-  const panelContent = document.querySelector(".panel-content");
-  const panelCloseBtn = document.querySelector("[data-action='close-panel']");
 
   function openPanel(blockEl) {
     if (!blockEl || !blockEl.dataset.reservationId) {
