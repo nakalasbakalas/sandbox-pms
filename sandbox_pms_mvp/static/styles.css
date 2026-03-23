@@ -1561,6 +1561,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-track:focus-within {
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
 }
+[data-can-edit="true"] .planning-board-track[data-room-id]:not(:empty) { cursor: cell; }
+.planning-board-track[data-room-id] .planning-board-block { cursor: pointer; }
 .planning-board-track::after {
   content: "";
   position: absolute;
@@ -1871,7 +1873,7 @@ tbody tr:last-child td { border-bottom: 0; }
   position: fixed;
   right: 0;
   top: 0;
-  width: 340px;
+  width: 380px;
   height: 100vh;
   background: var(--panel);
   border-left: 1px solid var(--border);
@@ -1929,6 +1931,45 @@ tbody tr:last-child td { border-bottom: 0; }
 .panel-btn-danger:hover { background: rgba(207,95,109,0.1); }
 .panel-btn-warning { color: #e1824e; border-color: rgba(225,130,78,0.3); }
 .panel-btn-warning:hover { background: rgba(225,130,78,0.1); }
+/* ── Enhanced board panel: folio, charges, notes, HK ── */
+.panel-res-header { display: grid; gap: 4px; }
+.panel-res-header .panel-res-code { font-size: 0.9rem; }
+.panel-res-guest { display: grid; gap: 2px; }
+.panel-res-guest strong { font-size: 0.92rem; }
+.panel-res-guest small { font-size: 0.78rem; color: var(--muted); }
+.panel-header-section { padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.panel-grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+.panel-kv { display: flex; flex-direction: column; gap: 1px; }
+.panel-kv-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.panel-kv-value { font-size: 0.84rem; }
+.panel-collapsible { border: 1px solid var(--border); border-radius: 6px; }
+.panel-collapsible-head { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; list-style: none; }
+.panel-collapsible-head::-webkit-details-marker { display: none; }
+.panel-collapsible-head h3 { margin: 0; font-size: 0.82rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-soft); }
+.panel-collapsible-body { padding: 6px 10px 10px; border-top: 1px solid var(--border); }
+.panel-collapsible[open] > .panel-collapsible-head { border-bottom: none; }
+.panel-folio-summary { display: grid; gap: 3px; }
+.panel-folio-row { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 2px 0; }
+.panel-folio-row.panel-folio-charge { font-size: 0.78rem; color: var(--muted); }
+.panel-folio-row.panel-folio-total { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; }
+.panel-folio-row.panel-folio-balance { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; }
+.panel-folio-row.panel-folio-balance.unpaid strong { color: var(--danger); }
+.panel-folio-row.panel-folio-balance.partial strong { color: var(--warning); }
+.panel-folio-row.panel-folio-balance.paid strong { color: var(--success); }
+.panel-folio-actions { margin-top: 6px; display: flex; gap: 6px; }
+.panel-balance-badge { font-size: 0.78rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+.panel-balance-badge.unpaid { background: rgba(207,95,109,0.12); color: var(--danger); }
+.panel-balance-badge.partial { background: rgba(240,173,78,0.12); color: var(--warning); }
+.panel-balance-badge.paid { background: rgba(47,182,117,0.12); color: var(--success); }
+.panel-hk-status { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.panel-hk-badge { font-size: 0.78rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+.panel-hk-badge.clean, .panel-hk-badge.inspected { background: rgba(47,182,117,0.12); color: var(--success); }
+.panel-hk-badge.dirty, .panel-hk-badge.occupied_dirty { background: rgba(207,95,109,0.12); color: var(--danger); }
+.panel-hk-badge.cleaning_in_progress, .panel-hk-badge.pickup { background: rgba(240,173,78,0.12); color: var(--warning); }
+.panel-hk-badge.out_of_order, .panel-hk-badge.out_of_service { background: rgba(159,169,183,0.15); color: var(--muted); }
+.panel-hk-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.panel-checkbox { font-size: 0.82rem; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.panel-checkbox input { margin: 0; }
 /* ── Rate preview box (reservation form) ── */
 .rate-preview-box {
   padding: 10px 12px;
@@ -4161,6 +4202,32 @@ body:not(.public-site) .panel-note { border-bottom-color: var(--pms-border-thin)
 body:not(.public-site) .panel-note.important { border-left-color: var(--pms-status-warning); }
 body:not(.public-site) .panel-btn-danger { color: #c0392b; border-color: rgba(192,57,43,0.3); }
 body:not(.public-site) .panel-btn-warning { color: #d68910; border-color: rgba(214,137,16,0.3); }
+/* PMS light-mode overrides for enhanced panel */
+body:not(.public-site) .panel-res-guest small { color: var(--pms-text-secondary); }
+body:not(.public-site) .panel-kv-label { color: var(--pms-text-muted); }
+body:not(.public-site) .panel-kv-value { color: var(--pms-text-primary); }
+body:not(.public-site) .panel-header-section { border-bottom-color: var(--pms-border-thin); }
+body:not(.public-site) .panel-collapsible { border-color: var(--pms-border-thin); }
+body:not(.public-site) .panel-collapsible-head h3 { color: var(--pms-text-muted); }
+body:not(.public-site) .panel-collapsible-body { border-top-color: var(--pms-border-thin); }
+body:not(.public-site) .panel-folio-row { color: var(--pms-text-primary); }
+body:not(.public-site) .panel-folio-row.panel-folio-charge { color: var(--pms-text-secondary); }
+body:not(.public-site) .panel-folio-row.panel-folio-total { border-top-color: var(--pms-border-thin); }
+body:not(.public-site) .panel-folio-row.panel-folio-balance { border-top-color: var(--pms-border-thin); }
+body:not(.public-site) .panel-folio-row.panel-folio-balance.unpaid strong { color: #c0392b; }
+body:not(.public-site) .panel-folio-row.panel-folio-balance.partial strong { color: #d68910; }
+body:not(.public-site) .panel-folio-row.panel-folio-balance.paid strong { color: #27ae60; }
+body:not(.public-site) .panel-balance-badge.unpaid { background: #fff5f5; color: #c0392b; }
+body:not(.public-site) .panel-balance-badge.partial { background: #fffbf0; color: #d68910; }
+body:not(.public-site) .panel-balance-badge.paid { background: #f0f8f0; color: #27ae60; }
+body:not(.public-site) .panel-hk-badge.clean,
+body:not(.public-site) .panel-hk-badge.inspected { background: #e8f5e9; color: #27ae60; }
+body:not(.public-site) .panel-hk-badge.dirty,
+body:not(.public-site) .panel-hk-badge.occupied_dirty { background: #ffebee; color: #c0392b; }
+body:not(.public-site) .panel-hk-badge.cleaning_in_progress,
+body:not(.public-site) .panel-hk-badge.pickup { background: #fff8e1; color: #d68910; }
+body:not(.public-site) .panel-hk-badge.out_of_order,
+body:not(.public-site) .panel-hk-badge.out_of_service { background: #f5f5f5; color: #586069; }
 body:not(.public-site) .rate-preview-box { background: #f0f8f0; border-color: var(--pms-border-thin); }
 body:not(.public-site) .rate-preview-box h3 { color: var(--pms-text-muted); }
 body:not(.public-site) .rate-preview-box dt { color: var(--pms-text-muted); }
@@ -4228,6 +4295,14 @@ body:not(.public-site) .hk-section-date { color: var(--pms-text-muted); }
 .board-legend-swatch.past { background: #46626c; }
 .board-legend-swatch.external { background: #2d7b84; }
 .board-legend-swatch.conflict { background: #aa4952; }
+.board-legend-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--pms-text-muted, #999);
+  cursor: help;
+  opacity: .6;
+  letter-spacing: .5px;
+}
 
 /* ─── HK quick-date toggles ─── */
 .hk-date-bar {

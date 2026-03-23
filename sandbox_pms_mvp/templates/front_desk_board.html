@@ -9,6 +9,7 @@
   data-csrf-token="{{ csrf_token() }}"
   data-can-edit="{{ 'true' if can_edit else 'false' }}"
   data-board-v2-enabled="{{ 'true' if board_v2_enabled else 'false' }}"
+  data-create-url="{{ board_create_url }}"
 >
   {# ── Row 1: Compact title + tabs + date nav + CTA ── #}
   <div class="planning-board-row1">
@@ -39,7 +40,7 @@
       <a class="board-nav-btn" href="{{ url_for('front_desk.staff_front_desk_board', start_date=board.next_start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None, group_by='floor' if filters.group_by == 'floor' else None) }}" title="Next period" aria-label="Next period">&rsaquo;</a>
     </div>
     {% if can_create %}
-    <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservations.staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}">+ Reservation</a>
+    <a class="button planning-board-primary-cta" href="{{ url_for('staff_reservations.staff_reservation_create', back=board_current_url, check_in=board.start_date.isoformat(), check_out=default_checkout_date.isoformat(), room_type_id=filters.room_type_id or None, source_channel='admin_manual', status='confirmed') }}" title="Create new reservation (N)">+ Reservation</a>
     {% endif %}
   </div>
 
@@ -54,6 +55,7 @@
     <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
     <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
     <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
+    <span class="board-legend-hint" title="Press ? for keyboard shortcuts">⌨ ?</span>
   </div>
 
   {# ── Row 2: Filters + search + density + overflow ── #}
