@@ -412,6 +412,10 @@ def available_admin_sections() -> list[dict[str, str]]:
     if not user:
         return []
     sections: list[dict[str, str]] = []
+    if can("settings.edit") and is_admin_user(user):
+        sections.append(
+            {"key": "setup", "label": "Setup", "endpoint": "admin.staff_admin_setup", "description": "First-time configuration and system essentials"}
+        )
     if can("settings.view"):
         sections.append(
             {"key": "property", "label": "Property Setup", "endpoint": "admin.staff_admin_property", "description": "Rooms, room types, branding"}

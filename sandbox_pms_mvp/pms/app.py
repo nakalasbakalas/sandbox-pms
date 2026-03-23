@@ -523,7 +523,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         if app.config["AUTO_BOOTSTRAP_SCHEMA"] and app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
             db.create_all()
             if app.config["AUTO_SEED_REFERENCE_DATA"]:
-                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+                include_demo = app.config.get("SEED_DEMO_DATA", False)
+                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=include_demo)
     return app
 
 
@@ -631,6 +632,22 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
+
+
+def _admin_setup_incomplete(staff_user) -> bool:
+    """Return True if admin setup is not yet complete (for admin-only banner)."""
+    if not staff_user:
+        return False
+    if not is_admin_user(staff_user):
+        return False
+    endpoint = request.endpoint or ""
+    if not endpoint.startswith("admin."):
+        return False
+    try:
+        from .services.setup_service import setup_completeness
+        return not setup_completeness()["complete"]
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -781,6 +798,7 @@ def register_template_helpers(app: Flask) -> None:
             "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
+            "setup_incomplete": _admin_setup_incomplete(current_staff),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
             "csrf_token": ensure_csrf_token,
             "csrf_input": lambda: Markup(
@@ -808,9 +826,10 @@ def register_cli(app: Flask) -> None:
         print("System role permissions synchronized.")
 
     @app.cli.command("seed-phase2")
-    def seed_phase2_command() -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        print("Phase 2 seed completed.")
+    @click.option("--demo-data", is_flag=True, default=False, help="Include demo guests and reservations")
+    def seed_phase2_command(demo_data: bool) -> None:
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=demo_data)
+        print("Phase 2 seed completed." + (" (with demo data)" if demo_data else ""))
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:

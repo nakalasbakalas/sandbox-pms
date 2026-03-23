@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sandbox Hotel Coupon Strips — A4 x 5</title>
+  <title>{{ hotel_name }} Coupon Strips — A4 x 5</title>
   <meta name="description" content="Simple A4 hotel coupon strip generator with five printable banner coupons per page.">
   <style>
     :root{
@@ -392,7 +392,7 @@
       <div class="form">
         <div class="group">
           <label>Hotel name
-            <input id="hotelName" type="text" value="Sandbox Hotel">
+            <input id="hotelName" type="text" value="{{ hotel_name }}">
           </label>
           <label>Small badge
             <input id="badge" type="text" value="Direct Booking Offer">
@@ -404,13 +404,13 @@
             <input id="headline" type="text" value="10% Off Direct Booking">
           </label>
           <label>Subheadline
-            <textarea id="subline">Book direct with Sandbox Hotel and enjoy a better-value stay with fast confirmation and local support.</textarea>
+            <textarea id="subline">Book direct with {{ hotel_name }} and enjoy a better-value stay with fast confirmation and local support.</textarea>
           </label>
         </div>
 
         <div class="grid2">
           <label>Promo code
-            <input id="code" type="text" value="SANDBOX10">
+            <input id="code" type="text" value="DIRECT10">
           </label>
           <label>CTA
             <input id="cta" type="text" value="Book Now">
@@ -434,7 +434,7 @@
 
         <div class="grid2">
           <label>Phone
-            <input id="phone" type="text" value="066 111 7070">
+            <input id="phone" type="text" value="{{ hotel_contact_phone }}">
           </label>
           <label>LINE / WhatsApp
             <input id="line" type="text" value="LINE / WhatsApp available">
@@ -443,7 +443,7 @@
 
         <div class="group">
           <label>Booking URL or website
-            <input id="url" type="text" value="www.sandboxhotel.com">
+            <input id="url" type="text" value="{{ site_base_url }}">
           </label>
           <p class="hint">The sheet is fixed to 5 strips on one A4 page. Keep the headline short for the cleanest print result.</p>
         </div>
@@ -478,7 +478,7 @@
         </div>
         <div class="logoRow">
           <div class="logoImg">
-            <img src="{{ url_for('static', filename='branding/sandbox-hotel-logo-96.webp') }}" alt="Logo">
+            <img src="{{ hotel_logo_url or url_for('static', filename='branding/sandbox-hotel-logo-96.webp') }}" alt="Logo">
           </div>
           <div class="hotelName js-hotel"></div>
         </div>
@@ -506,20 +506,20 @@
   </template>
 
   <script>
-    const STORAGE_KEY = 'sandbox_coupon_strip_a4_v1';
+    const STORAGE_KEY = 'coupon_strip_a4_v1';
     const defaults = {
-      hotelName: 'Sandbox Hotel',
+      hotelName: '{{ hotel_name }}',
       badge: 'Direct Booking Offer',
       headline: '10% Off Direct Booking',
-      subline: 'Book direct with Sandbox Hotel and enjoy a better-value stay with fast confirmation and local support.',
-      code: 'SANDBOX10',
+      subline: 'Book direct with {{ hotel_name }} and enjoy a better-value stay with fast confirmation and local support.',
+      code: 'DIRECT10',
       cta: 'Book Now',
-      validity: 'Book by 30 Apr 2026',
-      stay: 'Stay until 31 May 2026',
+      validity: '',
+      stay: '',
       terms: 'Direct bookings only. Subject to availability. Blackout dates may apply. One coupon per stay. Not combinable with other promotions.',
-      phone: '066 111 7070',
+      phone: '{{ hotel_contact_phone }}',
       line: 'LINE / WhatsApp available',
-      url: 'www.sandboxhotel.com'
+      url: '{{ site_base_url }}'
     };
 
     const ids = Object.keys(defaults);

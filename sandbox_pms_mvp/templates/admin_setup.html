@@ -1,0 +1,251 @@
+{% extends 'base.html' %}
+{% block title %}Setup | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+{% if not completeness.complete %}
+<section class="card subsection" style="border-left:4px solid var(--accent)">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Getting started</p>
+      <h2>Complete your property setup</h2>
+    </div>
+    <span class="pill subtle">{{ completeness.pct }}% complete</span>
+  </div>
+  <p style="max-width:60ch">
+    Configure the essential settings below so the system is ready for live operations.
+    {% if completeness.missing %}
+    The following fields still need attention:
+    <strong>{{ completeness.missing | join(', ') }}</strong>.
+    {% endif %}
+    {% if not completeness.has_room_types %}
+    <br>No room types configured yet — add them in <a href="{{ url_for('admin.staff_admin_property') }}">Property Setup</a>.
+    {% endif %}
+    {% if not completeness.has_rooms %}
+    <br>No rooms configured yet — add them in <a href="{{ url_for('admin.staff_admin_property') }}">Property Setup</a>.
+    {% endif %}
+  </p>
+</section>
+{% else %}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">System status</p>
+      <h2>Setup complete</h2>
+    </div>
+    <span class="pill success">Ready</span>
+  </div>
+  <p style="max-width:60ch">All essential settings are configured. You can update any section below at any time.</p>
+</section>
+{% endif %}
+
+{# ── Property / Business Information ────────────────────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 1</p>
+      <h2>Property information</h2>
+    </div>
+  </div>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <input type="hidden" name="section" value="property">
+    <div class="grid two">
+      <label><span>Hotel name <small class="muted">(required)</small></span>
+        <input type="text" name="hotel_name" value="{{ setup.hotel_name }}" required maxlength="120">
+      </label>
+      <label><span>Short brand mark</span>
+        <input type="text" name="brand_mark" value="{{ setup.brand_mark }}" maxlength="12" placeholder="e.g. HTL">
+      </label>
+    </div>
+    <div class="grid two">
+      <label><span>Contact phone <small class="muted">(required)</small></span>
+        <input type="text" name="contact_phone" value="{{ setup.contact_phone }}" required>
+      </label>
+      <label><span>Contact email <small class="muted">(required)</small></span>
+        <input type="email" name="contact_email" value="{{ setup.contact_email }}" required>
+      </label>
+    </div>
+    <label><span>Address <small class="muted">(required)</small></span>
+      <textarea name="address" rows="2" required>{{ setup.address }}</textarea>
+    </label>
+    <div class="grid two">
+      <label><span>Check-in time</span>
+        <input type="text" name="check_in_time" value="{{ setup.check_in_time }}" required placeholder="14:00">
+      </label>
+      <label><span>Check-out time</span>
+        <input type="text" name="check_out_time" value="{{ setup.check_out_time }}" required placeholder="11:00">
+      </label>
+    </div>
+    <div class="grid two">
+      <label><span>Time zone</span>
+        <input type="text" name="timezone" value="{{ setup.timezone }}" required placeholder="Asia/Bangkok">
+      </label>
+      <label><span>Currency <small class="muted">(required)</small></span>
+        <input type="text" name="currency" value="{{ setup.currency }}" required maxlength="10" placeholder="THB">
+      </label>
+    </div>
+    <div class="grid two">
+      <label><span>Tax / business ID</span>
+        <input type="text" name="tax_id" value="{{ setup.tax_id }}">
+      </label>
+      <label><span>Public booking URL</span>
+        <input type="url" name="public_base_url" value="{{ setup.public_base_url }}" placeholder="https://book.yourhotel.com">
+      </label>
+    </div>
+    <button class="button" type="submit">Save property information</button>
+  </form>
+</section>
+
+{# ── Room Configuration (read-only overview + link) ─────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 2</p>
+      <h2>Room configuration</h2>
+    </div>
+    <a class="pill subtle" href="{{ url_for('admin.staff_admin_property') }}">Manage rooms →</a>
+  </div>
+  {% if room_types %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Occupancy</th><th>Rooms</th></tr></thead>
+      <tbody>
+        {% for rt in room_types %}
+        <tr>
+          <td><strong>{{ rt.code }}</strong></td>
+          <td>{{ rt.name }}</td>
+          <td>{{ rt.standard_occupancy }}–{{ rt.max_occupancy }}</td>
+          <td>{{ rooms | selectattr('room_type_id', 'equalto', rt.id) | list | length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No room types configured yet. <a href="{{ url_for('admin.staff_admin_property') }}">Add room types</a> to get started.</p>
+  {% endif %}
+</section>
+
+{# ── Financial / Booking Defaults ───────────────────────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 3</p>
+      <h2>Financial &amp; booking defaults</h2>
+    </div>
+  </div>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <input type="hidden" name="section" value="financial">
+    <div class="grid two">
+      <label><span>VAT rate</span>
+        <input type="text" name="vat_rate" value="{{ setup.vat_rate }}" placeholder="0.07">
+        <small class="muted">Decimal format, e.g. 0.07 for 7%</small>
+      </label>
+      <label><span>Service charge rate</span>
+        <input type="text" name="service_charge_rate" value="{{ setup.service_charge_rate }}" placeholder="0.00">
+        <small class="muted">Decimal format, e.g. 0.10 for 10%</small>
+      </label>
+    </div>
+    <div class="grid two">
+      <label><span>Deposit percentage</span>
+        <input type="text" name="deposit_percentage" value="{{ setup.deposit_percentage }}" placeholder="50.00">
+        <small class="muted">Percentage of total booking charged as deposit</small>
+      </label>
+      <label><span>Reservation code prefix</span>
+        <input type="text" name="code_prefix" value="{{ setup.code_prefix }}" maxlength="10" placeholder="RES">
+        <small class="muted">Prefix for reservation confirmation codes</small>
+      </label>
+    </div>
+    <label><span>Cancellation notice hours</span>
+      <input type="number" name="cancellation_hours" value="{{ setup.cancellation_hours }}" min="0" max="168">
+      <small class="muted">Hours before arrival for free cancellation</small>
+    </label>
+    <button class="button" type="submit">Save financial defaults</button>
+  </form>
+</section>
+
+{# ── Operational Defaults ───────────────────────────────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 4</p>
+      <h2>Operational defaults</h2>
+    </div>
+    <a class="pill subtle" href="{{ url_for('admin.staff_admin_operations') }}">Advanced settings →</a>
+  </div>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <input type="hidden" name="section" value="operational">
+    <label><span>Notification sender name</span>
+      <input type="text" name="notifications_sender_name" value="{{ setup.notifications_sender_name }}" placeholder="Your Hotel Name">
+      <small class="muted">Display name on guest notifications and emails</small>
+    </label>
+    <label><span>Guest support message</span>
+      <textarea name="support_contact_text" rows="2" maxlength="255">{{ setup.support_contact_text }}</textarea>
+      <small class="muted">Shown on the public booking engine</small>
+    </label>
+    <button class="button" type="submit">Save operational defaults</button>
+  </form>
+</section>
+
+{# ── Staff / Users (read-only overview + link) ──────────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 5</p>
+      <h2>Staff accounts</h2>
+    </div>
+    {% if can('user.view') %}
+    <a class="pill subtle" href="{{ url_for('admin.staff_admin_staff_access') }}">Manage staff →</a>
+    {% endif %}
+  </div>
+  {% if users %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Roles</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.full_name or u.username }}</td>
+          <td>{{ u.email }}</td>
+          <td><span class="pill {% if u.is_active %}success{% else %}subtle{% endif %}">{{ 'Active' if u.is_active else 'Inactive' }}</span></td>
+          <td>{{ u.roles | map(attribute='name') | join(', ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No staff accounts found.</p>
+  {% endif %}
+</section>
+
+{# ── Branding Basics ────────────────────────────────────────────── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Section 6</p>
+      <h2>Branding basics</h2>
+    </div>
+    <a class="pill subtle" href="{{ url_for('admin.staff_admin_property') }}">Full branding settings →</a>
+  </div>
+  <form class="stack-form" method="post">
+    {{ csrf_input() }}
+    <input type="hidden" name="section" value="branding">
+    <div class="grid two">
+      <label><span>Logo URL</span>
+        <input type="url" name="logo_url" value="{{ setup.logo_url }}" placeholder="https://example.com/logo.png">
+        <small class="muted">URL to your hotel logo image</small>
+      </label>
+      <label><span>Primary accent color</span>
+        <input type="color" name="accent_color" value="{{ setup.accent_color }}">
+        <small class="muted">Used across the booking engine and staff UI</small>
+      </label>
+    </div>
+    <button class="button" type="submit">Save branding</button>
+  </form>
+</section>
+
+{% endblock %}
