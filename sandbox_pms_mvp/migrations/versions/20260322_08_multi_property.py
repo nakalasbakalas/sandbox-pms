@@ -30,7 +30,7 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(10), nullable=False, server_default="THB"),
         sa.Column("address", sa.Text, nullable=True),
         sa.Column("settings_json", sa.JSON, nullable=True),
-        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("1")),
+        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("true")),
     )
     op.create_index("ix_properties_is_active", "properties", ["is_active"])
 
