@@ -1177,7 +1177,15 @@
   // ── Sticky shell: set CSS variable so day headers account for shell height ──
   function updateStickyOffset() {
     if (!root) return;
-    document.documentElement.style.setProperty("--board-shell-h", root.offsetHeight + "px");
+    const shellHeight = root.offsetHeight;
+    document.documentElement.style.setProperty("--board-shell-h", shellHeight + "px");
+    // Also update on next frame to catch any layout shifts
+    window.requestAnimationFrame(() => {
+      const newHeight = root.offsetHeight;
+      if (newHeight !== shellHeight) {
+        document.documentElement.style.setProperty("--board-shell-h", newHeight + "px");
+      }
+    });
   }
 
   // ── Post-refresh: reapply all stateful board decoration ──
@@ -1265,6 +1273,8 @@
       toolbarToggle.title = collapsed ? "Show filters & legend" : "Hide filters & legend";
     }
     try { localStorage.setItem("board_toolbar_collapsed", collapsed ? "1" : "0"); } catch (_) { /* ignore */ }
+    // Update sticky offset after toolbar height changes
+    window.requestAnimationFrame(() => updateStickyOffset());
   }
 
   function restoreToolbarState() {
@@ -1858,6 +1868,14 @@
     setSurfaceLoading(false);
     reapplyBoardState();
   });
+
+  // ── Watch for shell height changes and update sticky offset ──
+  if (window.ResizeObserver && root) {
+    const shellObserver = new ResizeObserver(() => {
+      updateStickyOffset();
+    });
+    shellObserver.observe(root);
+  }
 
   // ── Context menu (right-click on blocks) ──
   const ctxMenu = document.getElementById("board-context-menu");
