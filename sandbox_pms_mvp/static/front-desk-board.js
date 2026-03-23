@@ -1195,7 +1195,7 @@
   }
 
   function setGroupCollapsed(groupEl, collapsed) {
-    const groupId = groupEl.textContent.trim();
+    const groupId = groupEl.dataset.groupId || groupEl.textContent.trim();
     groupEl.classList.toggle("collapsed", collapsed);
     groupEl.setAttribute("aria-expanded", collapsed ? "false" : "true");
     // Hide/show all rows belonging to this group until the next group header
@@ -1214,7 +1214,7 @@
       groupEl.setAttribute("role", "button");
       groupEl.setAttribute("tabindex", "0");
       groupEl.setAttribute("title", "Click to collapse/expand this room group");
-      const groupId = groupEl.textContent.trim();
+      const groupId = groupEl.dataset.groupId || groupEl.textContent.trim();
       if (collapsedGroups.has(groupId)) {
         setGroupCollapsed(groupEl, true);
       } else {
@@ -1294,8 +1294,15 @@
         indicator.dataset.boardNoResults = "";
         indicator.className = "planning-board-no-results";
         indicator.setAttribute("role", "status");
-        indicator.innerHTML = '<p>No rooms match the active filters.</p><button type="button" class="button secondary tiny" data-action="reset-filters">Clear filters</button>';
-        indicator.querySelector("[data-action='reset-filters']").addEventListener("click", resetAllFilters);
+        const msg = document.createElement("p");
+        msg.textContent = "No rooms match the active filters.";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "button secondary tiny";
+        btn.textContent = "Clear filters";
+        btn.addEventListener("click", resetAllFilters);
+        indicator.appendChild(msg);
+        indicator.appendChild(btn);
         const desktopSection = surface.querySelector(".planning-board-desktop");
         if (desktopSection) desktopSection.parentNode.insertBefore(indicator, desktopSection.nextSibling);
         else surface.appendChild(indicator);
@@ -1307,6 +1314,8 @@
   }
 
   // ── Scroll to today helper (shared by indicator & initial load) ──
+  const TODAY_SCROLL_OFFSET = 60;
+
   function scrollToToday(behavior) {
     const desktop = document.querySelector(".planning-board-desktop");
     if (!desktop) return;
@@ -1317,7 +1326,7 @@
     const containerRect = desktop.getBoundingClientRect();
     const colRect = todayCol.getBoundingClientRect();
     desktop.scrollTo({
-      left: desktop.scrollLeft + colRect.left - containerRect.left - 60,
+      left: desktop.scrollLeft + colRect.left - containerRect.left - TODAY_SCROLL_OFFSET,
       behavior: behavior || "smooth",
     });
   }
