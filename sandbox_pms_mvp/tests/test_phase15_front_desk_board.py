@@ -378,7 +378,7 @@ def test_front_desk_board_route_renders_compact_readable_controls(app_factory):
     assert 'class="planning-board-filters-inline"' in html
     assert 'class="planning-board-nav-actions"' in html
     assert 'class="planning-board-row1"' in html
-    assert 'class="planning-board-status-strip"' in html
+    assert 'fd-cmd-strip' in html
     assert 'class="planning-board-room-badge' in html
     assert 'aria-pressed="true"' in html
     assert "+ Reservation" in html

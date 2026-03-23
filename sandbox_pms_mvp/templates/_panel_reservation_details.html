@@ -82,6 +82,13 @@
 </div>
 {% endif %}
 
+{# ── Section 6b: Turnaround conflict warning ── #}
+{% if is_conflict_room %}
+<div class="panel-alert danger">
+  <strong>⚠ Room not ready</strong> — Assigned room is dirty. Check housekeeping or mark room ready before check-in.
+</div>
+{% endif %}
+
 {# ── Section 7: Room assignment form ── #}
 {% if can_reassign %}
 <div class="panel-section">

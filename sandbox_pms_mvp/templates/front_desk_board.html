@@ -80,11 +80,18 @@
 
     <div class="board-quick-filters" role="group" aria-label="Quick room filters" data-quick-filters>
       <span class="bqf-label">Filter:</span>
-      <button type="button" class="bqf-chip" data-filter="dirty" aria-pressed="false">Dirty</button>
-      <button type="button" class="bqf-chip" data-filter="vacant" aria-pressed="false">Vacant</button>
       <button type="button" class="bqf-chip" data-filter="arrival" aria-pressed="false">Arrivals</button>
       <button type="button" class="bqf-chip" data-filter="departure" aria-pressed="false">Departures</button>
+      <button type="button" class="bqf-chip" data-filter="in-house" aria-pressed="false">In-house</button>
+      <button type="button" class="bqf-chip" data-filter="stayover" aria-pressed="false">Stay</button>
+      <button type="button" class="bqf-chip" data-filter="dirty" aria-pressed="false">Dirty</button>
+      <button type="button" class="bqf-chip" data-filter="vacant" aria-pressed="false">Vacant</button>
+      <button type="button" class="bqf-chip" data-filter="unallocated" aria-pressed="false">Unalloc</button>
+      <button type="button" class="bqf-chip" data-filter="balance-due" aria-pressed="false">Unpaid</button>
+      <button type="button" class="bqf-chip" data-filter="conflict" aria-pressed="false">Conflict</button>
       <button type="button" class="bqf-chip" data-filter="maintenance" aria-pressed="false">Maint.</button>
+      <button type="button" class="bqf-chip" data-filter="inspected" aria-pressed="false">Inspected</button>
+      <button type="button" class="bqf-chip bqf-reset" data-action="reset-filters" aria-label="Clear all filters" title="Clear all filters">✕</button>
     </div>
 
     <fieldset class="planning-board-density-toggle" data-density-toggle>
@@ -185,6 +192,7 @@
             </form>
           </details>
           <button class="board-overflow-item" type="button" data-action="open-stats-panel">Board stats</button>
+          <button class="board-overflow-item" type="button" data-action="open-handover-panel">Shift handover</button>
           <button class="board-overflow-item" type="button" data-window-print>Print view</button>
           <hr style="border-color:var(--border);margin:4px 0;">
           <a class="board-overflow-item" href="{{ url_for('front_desk.staff_front_desk_board_export_ical', start_date=board.start_date.isoformat(), days=filters.days, q=filters.q or None, room_type_id=filters.room_type_id or None, show_unallocated='1' if filters.show_unallocated else '0', show_closed='1' if filters.show_closed else None) }}">Export ICS</a>
@@ -245,6 +253,7 @@
   <button role="menuitem" data-ctx="check-in">Check in</button>
   <button role="menuitem" data-ctx="check-out">Check out</button>
   <button role="menuitem" data-ctx="no-show">Mark no-show</button>
+  <button role="menuitem" data-ctx="room-ready">Mark room ready</button>
   <hr>
   <button role="menuitem" data-ctx="move">Move room</button>
   <button role="menuitem" data-ctx="resize">Edit dates</button>

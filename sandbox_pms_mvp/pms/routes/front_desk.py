@@ -49,6 +49,8 @@ from ..helpers import (
 from ..models import (
     EmailOutbox,
     ExternalCalendarBlock,
+    HousekeepingStatus,
+    InventoryDay,
     InventoryOverride,
     Reservation,
     ReservationReviewQueue,
@@ -1387,6 +1389,33 @@ def staff_front_desk_board_check_out(reservation_id):
         return jsonify(ok=False, error=str(exc)), 409
 
 
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room-ready", methods=["POST"])
+def staff_front_desk_board_room_ready(reservation_id):
+    """Mark the assigned room for a reservation as clean via the board context menu."""
+    user = require_permission("reservation.edit")
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
+    if not reservation.assigned_room_id:
+        return jsonify(ok=False, error="No room assigned to this reservation."), 400
+    from ..services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
+    try:
+        update_housekeeping_status(
+            reservation.assigned_room_id,
+            business_date=date.today(),
+            payload=RoomStatusUpdatePayload(status_code="clean", note="Marked ready via front desk board"),
+            actor_user_id=user.id,
+        )
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="reservations",
+            entity_id=str(reservation_id),
+            action="board_mark_room_ready",
+            after_data={"room_id": str(reservation.assigned_room_id)},
+        )
+        return jsonify(ok=True, message="Room marked clean.")
+    except Exception as exc:  # noqa: BLE001
+        return jsonify(ok=False, error=str(exc)), 409
+
+
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel", methods=["GET"])
 def staff_front_desk_board_reservation_panel(reservation_id):
     """Load panel content for a reservation."""
@@ -1424,6 +1453,23 @@ def staff_front_desk_board_reservation_panel(reservation_id):
                 label += " (unavailable)"
             available_rooms.append({"id": str(room.id), "label": label, "available": room.id not in conflicting_room_ids})
 
+    # Check if arrival today and assigned room is dirty (turnaround conflict)
+    is_conflict_room = False
+    if (
+        reservation.assigned_room_id
+        and reservation.current_status in ("tentative", "confirmed")
+        and reservation.check_in_date <= date.today()
+    ):
+        hk_code = db.session.execute(
+            sa.select(HousekeepingStatus.code).join(
+                InventoryDay, InventoryDay.housekeeping_status_id == HousekeepingStatus.id
+            ).where(
+                InventoryDay.room_id == reservation.assigned_room_id,
+                InventoryDay.business_date == date.today(),
+            )
+        ).scalar_one_or_none()
+        is_conflict_room = hk_code in ("dirty", "occupied_dirty")
+
     context = {
         "reservation": reservation,
         "can_reassign": can_reassign,
@@ -1438,6 +1484,7 @@ def staff_front_desk_board_reservation_panel(reservation_id):
         "recent_notes": list(reservation.notes[:5]) if reservation.notes else [],
         "can_cancel": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"],
         "can_no_show": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today(),
+        "is_conflict_room": is_conflict_room,
     }
 
     return render_template("_panel_reservation_details.html", **context)
@@ -1815,6 +1862,17 @@ def staff_front_desk_board_stats_panel():
         return render_template("_front_desk_board_stats_panel.html", **context)
     except Exception:  # noqa: BLE001
         return "<p class='small muted'>Stats unavailable.</p>", 200
+
+
+@front_desk_bp.route("/staff/front-desk/board/handover-panel")
+def staff_front_desk_board_handover_panel():
+    require_permission("reservation.view")
+    try:
+        filters = front_desk_board_filters_from_request()
+        context = front_desk_board_context(filters)
+        return render_template("_front_desk_board_handover_panel.html", **context)
+    except Exception:  # noqa: BLE001
+        return "<p class='small muted'>Handover data unavailable.</p>", 200
 
 
 @front_desk_bp.route("/staff/sw.js")

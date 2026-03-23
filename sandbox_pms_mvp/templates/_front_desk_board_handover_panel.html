@@ -1,0 +1,87 @@
+<div class="board-stats-section">
+  <h3>Shift Handover — {{ board.today.strftime('%A, %d %b %Y') }}</h3>
+  <p class="small muted">Unresolved items requiring attention at handover</p>
+</div>
+
+<div class="board-stats-section">
+  <h3>Operational Issues</h3>
+  {% if board.counts.conflict_count > 0 %}
+  <div class="board-stats-row bsr-danger">
+    <span class="bsr-label">⚠ Turnaround conflicts</span>
+    <strong class="bsr-value">{{ board.counts.conflict_count }}</strong>
+  </div>
+  {% else %}
+  <div class="board-stats-row">
+    <span class="bsr-label">Turnaround conflicts</span>
+    <strong class="bsr-value">None</strong>
+  </div>
+  {% endif %}
+  {% if board.counts.unassigned_arrivals_today > 0 %}
+  <div class="board-stats-row bsr-warning">
+    <span class="bsr-label">Unallocated arrivals</span>
+    <strong class="bsr-value">{{ board.counts.unassigned_arrivals_today }}</strong>
+  </div>
+  {% else %}
+  <div class="board-stats-row">
+    <span class="bsr-label">Unallocated arrivals</span>
+    <strong class="bsr-value">All assigned</strong>
+  </div>
+  {% endif %}
+  {% if board.counts.unpaid_arrivals > 0 %}
+  <div class="board-stats-row bsr-danger">
+    <span class="bsr-label">Unpaid arriving guests</span>
+    <strong class="bsr-value">{{ board.counts.unpaid_arrivals }}</strong>
+  </div>
+  {% else %}
+  <div class="board-stats-row">
+    <span class="bsr-label">Unpaid arriving guests</span>
+    <strong class="bsr-value">None</strong>
+  </div>
+  {% endif %}
+  {% if board.counts.turnaround_dirty > 0 %}
+  <div class="board-stats-row bsr-warning">
+    <span class="bsr-label">Dirty turnaround rooms</span>
+    <strong class="bsr-value">{{ board.counts.turnaround_dirty }}</strong>
+  </div>
+  {% else %}
+  <div class="board-stats-row">
+    <span class="bsr-label">Dirty turnaround rooms</span>
+    <strong class="bsr-value">None</strong>
+  </div>
+  {% endif %}
+</div>
+
+<div class="board-stats-section">
+  <h3>End-of-Shift Snapshot</h3>
+  <div class="board-stats-row">
+    <span class="bsr-label">In-house guests</span>
+    <strong class="bsr-value">{{ board.counts.occupied }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Arrivals today</span>
+    <strong class="bsr-value">{{ board.counts.arrivals_today }}</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Departures today</span>
+    <strong class="bsr-value">{{ board.counts.departures_today }}</strong>
+  </div>
+  <div class="board-stats-row{% if board.counts.checkin_readiness_pct < 80 %} bsr-warning{% endif %}">
+    <span class="bsr-label">Check-in readiness</span>
+    <strong class="bsr-value">{{ board.counts.checkin_readiness_pct }}%</strong>
+  </div>
+  <div class="board-stats-row">
+    <span class="bsr-label">Occupancy</span>
+    <strong class="bsr-value">{{ board.counts.occupancy_pct }}%</strong>
+  </div>
+</div>
+
+{% if board.alerts %}
+<div class="board-stats-section">
+  <h3>Active Alerts</h3>
+  {% for alert in board.alerts %}
+  <div class="board-stats-row bsr-{{ alert.tone }}">
+    <span class="bsr-label">{{ alert.message }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
 from ..extensions import db
-from ..models import ExternalCalendarBlock, FolioCharge, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, FolioCharge, Guest, GuestLoyalty, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -291,6 +291,11 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             status="conflict" if str(reservation.id) in conflict_reservation_ids else reservation.current_status,
             allocation_state=allocation_state,
             balance_due=_balance_map.get(reservation.id, 0.0),
+            is_vip=bool(
+                reservation.primary_guest
+                and reservation.primary_guest.loyalty
+                and reservation.primary_guest.loyalty.tier in ("gold", "platinum")
+            ),
         )
         # Flag reservation as ready for check-in: confirmed, arriving today, room assigned & ready
         block["readyForCheckIn"] = (
@@ -575,7 +580,7 @@ def _room_query(room_type_id: str) -> list[Room]:
 
 def _reservation_query(*, room_type_id: str, window_start: date, window_end: date) -> list[Reservation]:
     stmt = sa.select(Reservation).options(
-        joinedload(Reservation.primary_guest),
+        joinedload(Reservation.primary_guest).joinedload(Guest.loyalty),
         joinedload(Reservation.room_type),
         joinedload(Reservation.assigned_room),
     ).where(
@@ -703,6 +708,7 @@ def _reservation_block(
     status: str,
     allocation_state: str,
     balance_due: float = 0.0,
+    is_vip: bool = False,
 ) -> dict[str, Any]:
     visible_start = max(window_start, reservation.check_in_date)
     visible_end = min(window_end, reservation.check_out_date)
@@ -770,6 +776,7 @@ def _reservation_block(
             "checkOutAt": reservation.check_out_date.isoformat(),
             "balanceDue": balance_due,
             "hasSpecialRequests": bool(reservation.special_requests),
+            "isVip": is_vip,
         },
     )
 
@@ -1330,6 +1337,18 @@ def _compute_extended_counts(
             sa.select(sa.func.count()).select_from(Reservation).where(*unassigned_conditions)
         ).scalar_one()
         or 0
+    )
+
+    # Conflict count: critical situations needing immediate staff attention
+    counts["conflict_count"] = counts["turnaround_dirty"] + counts["unassigned_arrivals_today"]
+
+    # Check-in readiness: % of today's arrivals that are actionable (assigned + not a dirty turnaround)
+    _arrivals_today = counts.get("arrivals_today", 0)
+    _blocked = counts["turnaround_dirty"] + counts["unassigned_arrivals_today"]
+    counts["checkin_readiness_pct"] = (
+        max(0, round((_arrivals_today - _blocked) / _arrivals_today * 100))
+        if _arrivals_today > 0
+        else 100
     )
 
     return counts

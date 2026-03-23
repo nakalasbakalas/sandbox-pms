@@ -368,6 +368,7 @@
       surface.innerHTML = await response.text();
     }
     setSurfaceLoading(false);
+    reapplyBoardState();
   }
 
   function clearTrackHighlights() {
@@ -948,51 +949,224 @@
     surface.addEventListener("pointerdown", onSurfacePointerDown);
   }
 
-  // ── Quick filter chips ──
-  const quickFiltersEl = document.querySelector("[data-quick-filters]");
-  if (quickFiltersEl) {
-    const activeFilters = new Set();
+  // ── Quick filter chips – module-level state so command strip & role views share it ──
+  const activeFilters = new Set();
 
-    function matchFilter(filterName, track) {
-      const hk = track.dataset.hkStatus || "";
-      switch (filterName) {
-        case "dirty": return hk.includes("dirty");
-        case "vacant": return track.dataset.isVacant === "true";
-        case "arrival": return track.dataset.hasArrivalToday === "true";
-        case "departure": return track.dataset.hasDepartureToday === "true";
-        case "maintenance": return track.dataset.isMaintenance === "true";
-        default: return true;
-      }
+  function matchFilter(filterName, track) {
+    const hk = track.dataset.hkStatus || "";
+    switch (filterName) {
+      case "dirty":       return hk.includes("dirty");
+      case "vacant":      return track.dataset.isVacant === "true";
+      case "arrival":     return track.dataset.hasArrivalToday === "true";
+      case "departure":   return track.dataset.hasDepartureToday === "true";
+      case "maintenance": return track.dataset.isMaintenance === "true";
+      case "unallocated": return track.dataset.laneKind === "unallocated";
+      case "in-house":    return track.dataset.isOccupied === "true";
+      case "stayover":    return track.dataset.isStayover === "true";
+      case "balance-due": return track.dataset.hasBalanceDue === "true";
+      case "conflict":    return track.dataset.isConflict === "true";
+      case "inspected":   return hk === "inspected";
+      default:            return true;
     }
+  }
 
-    function applyQuickFilters() {
-      const tracks = surface.querySelectorAll("[data-board-track]");
-      tracks.forEach((track) => {
-        if (track.dataset.laneKind === "unallocated") return;
-        const matches = activeFilters.size === 0 || [...activeFilters].some((f) => matchFilter(f, track));
-        track.hidden = !matches;
-        const prev = track.previousElementSibling;
-        if (prev && prev.classList.contains("planning-board-room") && !prev.classList.contains("heading")) {
-          prev.hidden = !matches;
-        }
+  function applyQuickFilters() {
+    const tracks = surface.querySelectorAll("[data-board-track]");
+    const hasUnallocated = activeFilters.has("unallocated");
+    const nonUnallocatedFilters = [...activeFilters].filter((f) => f !== "unallocated");
+    tracks.forEach((track) => {
+      const isUnallocated = track.dataset.laneKind === "unallocated";
+      let matches;
+      if (activeFilters.size === 0) {
+        matches = true;
+      } else if (isUnallocated) {
+        // Unallocated rows only visible when the "unallocated" filter is active
+        matches = hasUnallocated;
+      } else {
+        // Regular rows: show if they match any non-unallocated filter (OR semantics)
+        // When only the unallocated filter is active, hide regular rows
+        matches = nonUnallocatedFilters.length > 0 && nonUnallocatedFilters.some((f) => matchFilter(f, track));
+      }
+      track.hidden = !matches;
+      const prev = track.previousElementSibling;
+      if (prev && prev.classList.contains("planning-board-room") && !prev.classList.contains("heading")) {
+        prev.hidden = !matches;
+      }
+    });
+  }
+
+  function syncFilterState() {
+    // Sync chips in the persistent toolbar
+    const quickFiltersEl = document.querySelector("[data-quick-filters]");
+    if (quickFiltersEl) {
+      quickFiltersEl.querySelectorAll("[data-filter]").forEach((chip) => {
+        const isActive = activeFilters.has(chip.dataset.filter);
+        chip.setAttribute("aria-pressed", isActive ? "true" : "false");
+        chip.classList.toggle("active", isActive);
       });
     }
+    // Sync command strip metric buttons (inside refreshable surface)
+    surface.querySelectorAll("[data-cmd-filter]").forEach((btn) => {
+      const isActive = activeFilters.has(btn.dataset.cmdFilter);
+      btn.setAttribute("aria-pressed", isActive ? "true" : "false");
+      btn.classList.toggle("active", isActive);
+    });
+  }
 
+  function toggleQuickFilter(filter) {
+    if (!filter) return;
+    if (activeFilters.has(filter)) {
+      activeFilters.delete(filter);
+    } else {
+      activeFilters.add(filter);
+    }
+    syncFilterState();
+    applyQuickFilters();
+    persistFilterState();
+  }
+
+  function resetAllFilters() {
+    activeFilters.clear();
+    activeRoleView = "";
+    syncFilterState();
+    syncRoleViewState();
+    applyQuickFilters();
+    persistFilterState();
+    try { localStorage.setItem("board_active_view", ""); } catch (_) { /* ignore */ }
+  }
+
+  function persistFilterState() {
+    try { localStorage.setItem("board_active_filters", JSON.stringify([...activeFilters])); } catch (_) { /* ignore */ }
+  }
+
+  function restoreFilterState() {
+    try {
+      const saved = localStorage.getItem("board_active_filters");
+      if (saved) {
+        JSON.parse(saved).forEach((f) => activeFilters.add(f));
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  const quickFiltersEl = document.querySelector("[data-quick-filters]");
+  if (quickFiltersEl) {
     quickFiltersEl.addEventListener("click", (e) => {
+      if (e.target.closest("[data-action='reset-filters']")) {
+        resetAllFilters();
+        return;
+      }
       const chip = e.target.closest("[data-filter]");
       if (!chip) return;
-      const filter = chip.dataset.filter;
-      if (activeFilters.has(filter)) {
-        activeFilters.delete(filter);
-        chip.setAttribute("aria-pressed", "false");
-        chip.classList.remove("active");
-      } else {
-        activeFilters.add(filter);
-        chip.setAttribute("aria-pressed", "true");
-        chip.classList.add("active");
-      }
-      applyQuickFilters();
+      toggleQuickFilter(chip.dataset.filter);
     });
+  }
+
+  // ── Command strip: click delegation on surface (survives AJAX refresh) ──
+  surface.addEventListener("click", (e) => {
+    // Metric filter button (not inside a board block or track)
+    const metricBtn = e.target.closest("[data-cmd-filter]");
+    if (metricBtn && !metricBtn.closest("[data-board-block]") && !metricBtn.closest("[data-board-track]")) {
+      toggleQuickFilter(metricBtn.dataset.cmdFilter);
+      return;
+    }
+    // HK overlay toggle
+    if (e.target.closest("[data-action='toggle-hk-overlay']")) {
+      toggleHkOverlay();
+      return;
+    }
+    // Role preset view buttons
+    if (e.target.closest("[data-view-presets]")) {
+      const viewBtn = e.target.closest("[data-view]");
+      if (viewBtn !== null) {
+        applyRoleView(viewBtn.dataset.view);
+        return;
+      }
+    }
+  });
+
+  // ── Double-click on block: navigate to full reservation detail ──
+  surface.addEventListener("dblclick", (e) => {
+    const blockEl = e.target.closest("[data-board-block]");
+    if (!blockEl) return;
+    const detailLink = blockEl.querySelector("a[href*='/staff/reservations/']");
+    if (detailLink && detailLink.href) {
+      window.location.href = detailLink.href;
+    }
+  });
+
+  // ── HK Overlay Mode ──
+  let hkOverlayActive = false;
+
+  function syncHkOverlayState() {
+    const surfaceEl = document.getElementById("front-desk-board-surface");
+    if (surfaceEl) surfaceEl.classList.toggle("hk-overlay-active", hkOverlayActive);
+    surface.querySelectorAll("[data-action='toggle-hk-overlay']").forEach((btn) => {
+      btn.setAttribute("aria-pressed", hkOverlayActive ? "true" : "false");
+      btn.classList.toggle("active", hkOverlayActive);
+    });
+  }
+
+  function toggleHkOverlay() {
+    hkOverlayActive = !hkOverlayActive;
+    syncHkOverlayState();
+    try { localStorage.setItem("board_hk_overlay", hkOverlayActive ? "1" : "0"); } catch (_) { /* ignore */ }
+  }
+
+  function restoreHkOverlay() {
+    try { hkOverlayActive = localStorage.getItem("board_hk_overlay") === "1"; } catch (_) { /* ignore */ }
+  }
+
+  // ── Role View Presets ──
+  const ROLE_VIEWS = {
+    "front-desk":   { filters: ["arrival", "departure"], overlay: false },
+    "housekeeping": { filters: ["dirty"],                overlay: true  },
+    "allocation":   { filters: ["unallocated"],          overlay: false },
+    "night-shift":  { filters: ["in-house"],             overlay: false },
+  };
+
+  let activeRoleView = "";
+
+  function applyRoleView(viewName) {
+    activeRoleView = viewName || "";
+    activeFilters.clear();
+    if (viewName && ROLE_VIEWS[viewName]) {
+      const view = ROLE_VIEWS[viewName];
+      (view.filters || []).forEach((f) => activeFilters.add(f));
+      hkOverlayActive = Boolean(view.overlay);
+    } else {
+      hkOverlayActive = false;
+    }
+    syncFilterState();
+    syncHkOverlayState();
+    syncRoleViewState();
+    applyQuickFilters();
+    persistFilterState();
+    try { localStorage.setItem("board_active_view", activeRoleView); } catch (_) { /* ignore */ }
+  }
+
+  function syncRoleViewState() {
+    surface.querySelectorAll("[data-view]").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.view === activeRoleView);
+    });
+  }
+
+  function restoreRoleView() {
+    try { activeRoleView = localStorage.getItem("board_active_view") || ""; } catch (_) { /* ignore */ }
+  }
+
+  // ── Sticky shell: set CSS variable so day headers account for shell height ──
+  function updateStickyOffset() {
+    if (!root) return;
+    document.documentElement.style.setProperty("--board-shell-h", root.offsetHeight + "px");
+  }
+
+  // ── Post-refresh: reapply all stateful board decoration ──
+  function reapplyBoardState() {
+    syncFilterState();
+    applyQuickFilters();
+    syncHkOverlayState();
+    syncRoleViewState();
+    updateStickyOffset();
   }
 
   // ── Sticky today indicator ──
@@ -1059,6 +1233,27 @@
           panelCloseBtn.focus();
         })
         .catch(() => setFeedback("Stats unavailable.", "error"))
+        .finally(() => setBusyState(false));
+    });
+  }
+
+  // ── Shift handover panel trigger ──
+  const handoverBtn = document.querySelector("[data-action='open-handover-panel']");
+  if (handoverBtn) {
+    handoverBtn.addEventListener("click", () => {
+      panelTitle.textContent = "Shift Handover";
+      setBusyState(true);
+      const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
+      target.search = window.location.search;
+      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+        .then((r) => r.ok ? r.text() : Promise.reject())
+        .then((html) => {
+          panelContent.innerHTML = html;
+          panelEl.classList.remove("hidden");
+          panelEl.setAttribute("aria-hidden", "false");
+          panelCloseBtn.focus();
+        })
+        .catch(() => setFeedback("Handover data unavailable.", "error"))
         .finally(() => setBusyState(false));
     });
   }
@@ -1392,6 +1587,29 @@
     setFeedback("Assign unallocated feature coming soon. Select an unallocated block and press M to move.", "neutral");
   }
 
+  function performMarkRoomReady(blockEl) {
+    const reservationId = blockEl ? blockEl.dataset.reservationId : null;
+    if (!reservationId) {
+      setFeedback("Cannot determine reservation.", "error");
+      return;
+    }
+    setBusyState(true);
+    setFeedback("Marking room clean…", "pending");
+    fetch(`/staff/front-desk/board/reservations/${reservationId}/room-ready`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": csrfToken },
+    })
+      .then((r) => readJsonResponse(r))
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error || "Failed.");
+        setFeedback(result.message || "Room marked clean.", "success");
+        return refreshSurface();
+      })
+      .catch((err) => setFeedback(err.message || "Failed to mark room ready.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
   // ========== Board Auto-Refresh (Polling) ==========
 
   let pollInterval = null;
@@ -1413,8 +1631,13 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    restoreFilterState();
+    restoreHkOverlay();
+    restoreRoleView();
     startPolling();
   });
+
+  window.addEventListener("resize", updateStickyOffset);
 
   window.addEventListener("beforeunload", () => {
     stopPolling();
@@ -1422,9 +1645,11 @@
 
   setBusyState(false);
   initializeBoardSearch();
+  updateStickyOffset();
   setSurfaceLoading(true);
   window.requestAnimationFrame(() => {
     setSurfaceLoading(false);
+    reapplyBoardState();
   });
 
   // ── Context menu (right-click on blocks) ──
@@ -1443,6 +1668,7 @@
         if (action === "open") btn.disabled = !detailUrl;
         if (action === "front-desk") btn.disabled = !frontDeskUrl;
         if (action === "check-in" || action === "check-out" || action === "no-show") btn.disabled = isClosure || !canEdit;
+        if (action === "room-ready") btn.disabled = isClosure || !canEdit || allocationState !== "allocated";
         if (action === "move" || action === "resize" || action === "assign") btn.disabled = !canEdit;
       });
 
@@ -1508,6 +1734,9 @@
       } else if (action === "assign") {
         selectBlock(blockEl);
         assignUnallocatedReservation();
+      } else if (action === "room-ready") {
+        selectBlock(blockEl);
+        performMarkRoomReady(blockEl);
       } else if (action === "export-ics") {
         const icsLink = blockEl.querySelector("a[href*='export.ics']");
         if (icsLink) window.location.href = icsLink.href;

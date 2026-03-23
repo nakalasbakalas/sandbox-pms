@@ -1919,6 +1919,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .panel-actions { display: grid; gap: 6px; }
 .panel-alert { padding: 8px; border-radius: 6px; font-size: 0.82rem; border-left: 3px solid var(--border); }
 .panel-alert.warning { background: rgba(240, 173, 78, 0.1); border-left-color: var(--warning); }
+.panel-alert.danger { background: rgba(207, 95, 109, 0.12); border-left-color: var(--danger); }
 .panel-note { font-size: 0.82rem; padding: 4px 0; border-bottom: 1px solid var(--border); }
 .panel-note.important { border-left: 3px solid var(--warning); padding-left: 6px; }
 .panel-note small { display: block; margin-top: 2px; }
@@ -3911,6 +3912,11 @@ body:not(.public-site) .panel-alert.warning {
   border-left-color: var(--pms-status-warning);
   color: #7a5800;
 }
+body:not(.public-site) .panel-alert.danger {
+  background: #fff5f5;
+  border-left-color: #c0392b;
+  color: #8b0000;
+}
 body:not(.public-site) .panel-note { border-bottom-color: var(--pms-border-thin); color: var(--pms-text-primary); }
 body:not(.public-site) .panel-note.important { border-left-color: var(--pms-status-warning); }
 body:not(.public-site) .panel-btn-danger { color: #c0392b; border-color: rgba(192,57,43,0.3); }
@@ -5028,6 +5034,335 @@ body:not(.public-site) .hk-counts {
   font-size: 0.44rem;
   color: var(--muted);
   white-space: nowrap;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   BOARD UPGRADE v2 – Command Strip, HK Overlay, Sticky Shell,
+   Stronger Today, Role Views, Enhanced Badges
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Sticky shell: pin toolbar + filter row at viewport top ── */
+:root { --board-shell-h: 0px; }
+body:not(.public-site) .planning-board-shell {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--pms-bg-surface, #fff);
+  border-bottom: 1px solid var(--pms-border-thin);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+/* Day header row + room heading: account for sticky shell offset */
+body:not(.public-site) .planning-board-room.heading,
+body:not(.public-site) .planning-board-days {
+  top: var(--board-shell-h, 0px);
+}
+
+/* ── Stronger today column ── */
+.planning-board-day.today {
+  background: linear-gradient(180deg, rgba(197,124,53,0.22), rgba(197,124,53,0.08));
+  box-shadow: inset 0 -3px 0 rgba(var(--accent-soft-rgb), 0.9), inset 0 3px 0 rgba(var(--accent-soft-rgb), 0.5);
+}
+.planning-board-day.today strong {
+  color: var(--accent-soft);
+  font-size: 1.05em;
+}
+body:not(.public-site) .planning-board-day.today {
+  background: #fff3d6;
+  box-shadow: inset 0 -3px 0 var(--accent), inset 0 2px 0 rgba(var(--accent-rgb), 0.35);
+}
+body:not(.public-site) .planning-board-day.today strong {
+  color: var(--accent);
+}
+
+/* ── Daily Command Strip ── */
+.fd-cmd-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  min-height: 44px;
+  flex-wrap: wrap;
+  overflow: hidden;
+}
+.fd-cmd-date {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 2px 6px 2px 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.fd-cmd-date strong { font-size: 1.05rem; color: var(--text); font-weight: 700; }
+.fd-cmd-day, .fd-cmd-mon { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.fd-cmd-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 4px 4px;
+  flex-shrink: 0;
+}
+.fd-cmd-spacer { flex: 1 1 0; min-width: 4px; }
+.fd-cmd-metric {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  line-height: 1.1;
+  min-width: 44px;
+  transition: background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.fd-cmd-metric:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.1); }
+.fd-cmd-metric:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+.fd-cmd-metric.active,
+.fd-cmd-metric[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.35);
+}
+.fd-metric-label {
+  font-size: 0.55rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.fd-metric-value {
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+  white-space: nowrap;
+}
+.fd-metric-sub {
+  font-size: 0.5rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* Status colour variants */
+.fd-cmd-metric.fd-ok .fd-metric-value { color: #9ff1c3; }
+.fd-cmd-metric.fd-warn { border-color: rgba(240,173,78,0.2); }
+.fd-cmd-metric.fd-warn .fd-metric-value { color: #ffd391; }
+.fd-cmd-metric.fd-warn .fd-metric-label { color: rgba(240,173,78,0.7); }
+.fd-cmd-metric.fd-urgent { border-color: rgba(207,95,109,0.25); background: rgba(207,95,109,0.08); }
+.fd-cmd-metric.fd-urgent .fd-metric-value { color: #ffb0b5; }
+.fd-cmd-metric.fd-urgent .fd-metric-label { color: rgba(207,95,109,0.8); }
+/* Arrival / departure colour hints */
+.fd-cmd-metric.fd-metric-arrival .fd-metric-label { color: rgba(77,157,255,0.8); }
+.fd-cmd-metric.fd-metric-dep .fd-metric-label { color: rgba(166,138,255,0.8); }
+
+/* ── Command strip right controls ── */
+.fd-cmd-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.fd-overlay-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.fd-overlay-btn:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+.fd-overlay-btn.active,
+.fd-overlay-btn[aria-pressed="true"] {
+  background: rgba(77,157,255,0.15);
+  border-color: rgba(77,157,255,0.35);
+  color: var(--accent-soft);
+}
+.fd-overlay-btn:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+
+/* ── Role preset view buttons ── */
+.fd-view-presets {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  padding: 2px;
+  background: rgba(255,255,255,0.03);
+}
+.fd-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+.fd-view-btn:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+.fd-view-btn.active { background: var(--accent); color: #fff; }
+.fd-view-btn:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 2px; }
+.fd-view-clear { opacity: 0.5; font-size: 0.65rem; }
+.fd-view-clear:hover { opacity: 1; color: var(--danger, #df5f67); }
+
+/* ── Reset chips button ── */
+.bqf-reset {
+  background: transparent;
+  border: 1px solid rgba(207,95,109,0.25);
+  color: rgba(255,255,255,0.4);
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  border-radius: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.bqf-reset:hover { background: rgba(207,95,109,0.15); color: #ffb0b5; border-color: rgba(207,95,109,0.4); }
+
+/* ── Special requests badge ── */
+.badge-special {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(240,173,78,0.2);
+  color: #ffd391;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* ── VIP guest badge ── */
+.badge-vip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(212,175,55,0.22);
+  color: #ffe082;
+  border: 1px solid rgba(212,175,55,0.4);
+  font-size: 0.55rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+
+/* ── HK Overlay Mode ── */
+#front-desk-board-surface.hk-overlay-active .planning-board-block {
+  opacity: 0.28;
+  transition: opacity 0.15s;
+}
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status] .planning-board-block { opacity: 0.38; }
+/* Dirty: strong highlight */
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="dirty"],
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="occupied_dirty"] {
+  background: rgba(207,95,109,0.22) !important;
+  outline: 1px solid rgba(207,95,109,0.4);
+}
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="dirty"] .planning-board-block,
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="occupied_dirty"] .planning-board-block { opacity: 0.8; }
+/* Clean: positive indicator */
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="clean"],
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="occupied_clean"] {
+  background: rgba(47,182,117,0.12) !important;
+  outline: 1px solid rgba(47,182,117,0.2);
+}
+/* Inspected: positive, blue */
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-hk-status="inspected"] {
+  background: rgba(77,157,255,0.12) !important;
+  outline: 1px solid rgba(77,157,255,0.2);
+}
+/* Conflict: urgent full-highlight */
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-is-conflict="true"] {
+  background: rgba(207,95,109,0.32) !important;
+  outline: 2px solid rgba(207,95,109,0.55);
+  z-index: 1;
+}
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-is-conflict="true"] .planning-board-block { opacity: 1 !important; }
+/* Vacant: muted */
+#front-desk-board-surface.hk-overlay-active [data-board-track][data-is-vacant="true"] { background: rgba(47,182,117,0.05) !important; }
+/* Room cell coloring in overlay mode using :has() */
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="dirty"]),
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="occupied_dirty"]) { background: rgba(207,95,109,0.1) !important; }
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="clean"]),
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="occupied_clean"]) { background: rgba(47,182,117,0.08) !important; }
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="inspected"]) { background: rgba(77,157,255,0.08) !important; }
+#front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-is-conflict="true"]) { background: rgba(207,95,109,0.18) !important; }
+
+/* ── Light-mode overrides for command strip (staff pages) ── */
+body:not(.public-site) .fd-cmd-strip {
+  background: var(--pms-bg-hover);
+  border-bottom: 1px solid var(--pms-border-thin);
+}
+body:not(.public-site) .fd-cmd-date strong { color: var(--pms-text-primary); }
+body:not(.public-site) .fd-cmd-date .fd-cmd-day,
+body:not(.public-site) .fd-cmd-date .fd-cmd-mon { color: var(--pms-text-muted); }
+body:not(.public-site) .fd-cmd-divider { background: var(--pms-border-thin); }
+body:not(.public-site) .fd-cmd-metric:hover { background: rgba(0,0,0,0.04); border-color: var(--pms-border-thin); }
+body:not(.public-site) .fd-cmd-metric.active,
+body:not(.public-site) .fd-cmd-metric[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.1);
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+body:not(.public-site) .fd-metric-label { color: var(--pms-text-muted); }
+body:not(.public-site) .fd-metric-value { color: var(--pms-text-primary); }
+body:not(.public-site) .fd-metric-sub { color: var(--pms-text-muted); }
+body:not(.public-site) .fd-cmd-metric.fd-ok .fd-metric-value { color: #2e7d32; }
+body:not(.public-site) .fd-cmd-metric.fd-warn .fd-metric-value { color: #e65100; }
+body:not(.public-site) .fd-cmd-metric.fd-warn .fd-metric-label { color: #ef6c00; }
+body:not(.public-site) .fd-cmd-metric.fd-urgent { background: rgba(211,47,47,0.06); border-color: rgba(211,47,47,0.2); }
+body:not(.public-site) .fd-cmd-metric.fd-urgent .fd-metric-value { color: #c62828; }
+body:not(.public-site) .fd-cmd-metric.fd-urgent .fd-metric-label { color: #d32f2f; }
+body:not(.public-site) .fd-cmd-metric.fd-metric-arrival .fd-metric-label { color: #1565c0; }
+body:not(.public-site) .fd-cmd-metric.fd-metric-dep .fd-metric-label { color: #5e35b1; }
+body:not(.public-site) .fd-overlay-btn { border-color: var(--pms-border-thin); color: var(--pms-text-muted); }
+body:not(.public-site) .fd-overlay-btn:hover { background: rgba(0,0,0,0.04); color: var(--pms-text-primary); }
+body:not(.public-site) .fd-overlay-btn.active,
+body:not(.public-site) .fd-overlay-btn[aria-pressed="true"] { background: #e3f2fd; border-color: #1565c0; color: #1565c0; }
+body:not(.public-site) .fd-view-presets { border-color: var(--pms-border-thin); background: transparent; }
+body:not(.public-site) .fd-view-btn { color: var(--pms-text-muted); }
+body:not(.public-site) .fd-view-btn:hover { background: rgba(0,0,0,0.04); color: var(--pms-text-primary); }
+body:not(.public-site) .fd-view-btn.active { background: var(--accent); color: #fff; }
+body:not(.public-site) .fd-view-clear:hover { color: #c62828; }
+body:not(.public-site) .bqf-reset { border-color: rgba(211,47,47,0.3); color: #999; }
+body:not(.public-site) .bqf-reset:hover { background: rgba(211,47,47,0.08); color: #c62828; }
+body:not(.public-site) .badge-special { background: rgba(240,173,78,0.18); color: #e65100; }
+body:not(.public-site) .badge-vip { background: rgba(212,175,55,0.15); color: #b8860b; border-color: rgba(212,175,55,0.35); }
+
+/* ── HK overlay light-mode overrides ── */
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="dirty"]),
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="occupied_dirty"]) { background: #ffebee !important; }
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="clean"]),
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="occupied_clean"]) { background: #e8f5e9 !important; }
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="inspected"]) { background: #e3f2fd !important; }
+body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-is-conflict="true"]) { background: #ffcdd2 !important; }
+
+/* ── Print: hide command strip controls ── */
+@media print {
+  .fd-cmd-strip .fd-cmd-right, .fd-cmd-strip .fd-cmd-spacer { display: none !important; }
+  .fd-cmd-strip { flex-wrap: wrap; border-bottom: 1px solid #ccc !important; background: #fff !important; }
+  .fd-cmd-metric { break-inside: avoid; }
 }
 
 /* ── Print Layout ── */

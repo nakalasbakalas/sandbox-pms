@@ -25,6 +25,16 @@
     <span class="bsr-label">Ready rooms</span>
     <strong class="bsr-value">{{ board.counts.ready_rooms }}</strong>
   </div>
+  <div class="board-stats-row{% if board.counts.checkin_readiness_pct < 80 %} bsr-warning{% endif %}">
+    <span class="bsr-label">Check-in readiness</span>
+    <strong class="bsr-value">{{ board.counts.checkin_readiness_pct }}%</strong>
+  </div>
+  {% if board.counts.conflict_count > 0 %}
+  <div class="board-stats-row bsr-danger">
+    <span class="bsr-label">⚠ Conflicts</span>
+    <strong class="bsr-value">{{ board.counts.conflict_count }}</strong>
+  </div>
+  {% endif %}
   {% if board.counts.turnaround_dirty > 0 %}
   <div class="board-stats-row bsr-danger">
     <span class="bsr-label">Turnaround dirty</span>

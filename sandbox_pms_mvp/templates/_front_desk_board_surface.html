@@ -1,85 +1,91 @@
-{# ── Daily Snapshot Panel ── #}
+{# ── Daily Command Strip ── #}
 {% set occ_pct = board.counts.occupancy_pct %}
-{% set ready_of_arrivals = board.counts.ready_rooms ~ ' of ' ~ board.counts.arrivals_today %}
-<details class="board-snapshot-panel" open>
-  <summary class="board-snapshot-toggle" aria-label="Toggle daily snapshot">
-    <span>Today's Overview</span>
-    <span class="board-snapshot-date">{{ board.today.strftime('%a %d %b') }}</span>
-  </summary>
-  <div class="board-snapshot-cards" role="region" aria-label="Daily operational snapshot">
-    <div class="board-snapshot-card{% if occ_pct >= 90 %} tone-danger{% elif occ_pct >= 70 %} tone-warning{% endif %}">
-      <span class="bsc-label">Occupancy</span>
-      <strong class="bsc-value">{{ occ_pct }}%</strong>
-      <span class="bsc-sub">{{ board.counts.occupied }}/{{ board.counts.total_rooms }} rooms</span>
-    </div>
-    <div class="board-snapshot-card tone-accent">
-      <span class="bsc-label">Arrivals</span>
-      <strong class="bsc-value">{{ board.counts.arrivals_today }}</strong>
-      <span class="bsc-sub">today</span>
-    </div>
-    <div class="board-snapshot-card">
-      <span class="bsc-label">Departures</span>
-      <strong class="bsc-value">{{ board.counts.departures_today }}</strong>
-      <span class="bsc-sub">today</span>
-    </div>
-    <div class="board-snapshot-card{% if board.counts.ready_rooms < board.counts.arrivals_today %} tone-warning{% else %} tone-success{% endif %}">
-      <span class="bsc-label">Room Ready</span>
-      <strong class="bsc-value">{{ ready_of_arrivals }}</strong>
-      <span class="bsc-sub">arrivals</span>
-    </div>
-    {% if board.counts.turnaround_dirty > 0 %}
-    <div class="board-snapshot-card tone-danger">
-      <span class="bsc-label">Turnaround</span>
-      <strong class="bsc-value">{{ board.counts.turnaround_dirty }}</strong>
-      <span class="bsc-sub">still dirty</span>
-    </div>
-    {% endif %}
-    {% if board.counts.unpaid_arrivals > 0 %}
-    <div class="board-snapshot-card tone-danger">
-      <span class="bsc-label">Unpaid</span>
-      <strong class="bsc-value">{{ board.counts.unpaid_arrivals }}</strong>
-      <span class="bsc-sub">arrivals</span>
-    </div>
-    {% endif %}
-    {% if board.counts.unassigned_arrivals_today > 0 %}
-    <div class="board-snapshot-card tone-warning">
-      <span class="bsc-label">Unallocated</span>
-      <strong class="bsc-value">{{ board.counts.unassigned_arrivals_today }}</strong>
-      <span class="bsc-sub">arrivals</span>
-    </div>
-    {% endif %}
-  </div>
-</details>
-
-<div class="planning-board-status-strip" role="region" aria-label="Planning board live status">
-  <span class="pbs-item"><small>Rooms</small><strong>{{ board.counts.total_rooms }}</strong></span>
-  <span class="pbs-item"><small>Arrivals</small><strong>{{ board.counts.arrivals_today }}</strong></span>
-  <span class="pbs-item"><small>Departures</small><strong>{{ board.counts.departures_today }}</strong></span>
-  <span class="pbs-item"><small>In-house</small><strong>{{ board.counts.occupied }}</strong></span>
-  <span class="pbs-item"><small>Stayovers</small><strong>{{ board.counts.stayovers }}</strong></span>
-  <span class="pbs-item"><small>Ready</small><strong>{{ board.counts.ready_rooms }}</strong></span>
-  <span class="pbs-item"><small>Unallocated</small><strong>{{ board.counts.unallocated }}</strong></span>
-  <span class="pbs-item"><small>OOO/Blocked</small><strong>{{ board.counts.out_of_order + board.counts.closed_or_blocked }}</strong></span>
-</div>
-
-<div class="planning-board-avail-strip" role="region" aria-label="Room availability by type">
-  {% for code, avail in board.counts.available_by_type.items() %}
-  {% set total = board.counts.total_by_type.get(code, 0) if board.counts.total_by_type else 0 %}
-  {% set avail_pct = ((avail / total * 100) | int) if total else 0 %}
-  <span class="pbs-avail-item">
-    <small>{{ code }}</small>
-    <strong>{{ avail }}</strong>
-    <span class="pbs-avail-label">avail</span>
-    {% if total > 0 %}
-    <span class="pbs-avail-bar" aria-hidden="true" title="{{ avail }} of {{ total }} available">
-      <span class="pbs-avail-bar-fill" style="width:{{ avail_pct }}%"></span>
-    </span>
-    {% endif %}
+{% set arrivals = board.counts.arrivals_today %}
+{% set departures = board.counts.departures_today %}
+{% set in_house = board.counts.occupied %}
+{% set stayovers = board.counts.stayovers %}
+{% set ready = board.counts.ready_rooms %}
+{% set dirty = board.counts.hk_dirty %}
+{% set unalloc = board.counts.unassigned_arrivals_today %}
+{% set conflicts = board.counts.conflict_count %}
+{% set unpaid = board.counts.unpaid_arrivals %}
+{% set readiness = board.counts.checkin_readiness_pct %}
+<div class="fd-cmd-strip" role="region" aria-label="Today's operational summary" data-cmd-strip>
+  <span class="fd-cmd-date">
+    <span class="fd-cmd-day">{{ board.today.strftime('%a') }}</span>
+    <strong>{{ board.today.day }}</strong>
+    <span class="fd-cmd-mon">{{ board.today.strftime('%b') }}</span>
   </span>
-  {% endfor %}
-  <span class="pbs-avail-item tone-hk"><small>Dirty</small><strong>{{ board.counts.hk_dirty }}</strong></span>
-  <span class="pbs-avail-item tone-hk"><small>Clean</small><strong>{{ board.counts.hk_clean }}</strong></span>
-  <span class="pbs-avail-item tone-hk"><small>Inspected</small><strong>{{ board.counts.hk_inspected }}</strong></span>
+  <span class="fd-cmd-divider" aria-hidden="true"></span>
+  <button type="button" class="fd-cmd-metric{% if occ_pct >= 90 %} fd-urgent{% elif occ_pct >= 70 %} fd-warn{% endif %}"
+          data-cmd-filter="in-house" title="Occupancy: {{ in_house }} of {{ board.counts.total_rooms }} rooms — click to filter in-house">
+    <span class="fd-metric-label">Occ</span>
+    <strong class="fd-metric-value">{{ occ_pct }}%</strong>
+  </button>
+  <button type="button" class="fd-cmd-metric" data-cmd-filter="in-house"
+          title="In-house guests — click to filter">
+    <span class="fd-metric-label">In-house</span>
+    <strong class="fd-metric-value">{{ in_house }}</strong>
+  </button>
+  <button type="button" class="fd-cmd-metric fd-metric-arrival" data-cmd-filter="arrival"
+          title="Arrivals today — click to filter">
+    <span class="fd-metric-label">↓ Arr</span>
+    <strong class="fd-metric-value">{{ arrivals }}</strong>
+  </button>
+  <button type="button" class="fd-cmd-metric fd-metric-dep" data-cmd-filter="departure"
+          title="Departures today — click to filter">
+    <span class="fd-metric-label">↑ Dep</span>
+    <strong class="fd-metric-value">{{ departures }}</strong>
+  </button>
+  <button type="button" class="fd-cmd-metric" data-cmd-filter="stayover"
+          title="Stayovers (in-house, no checkout today) — click to filter">
+    <span class="fd-metric-label">Stay</span>
+    <strong class="fd-metric-value">{{ stayovers }}</strong>
+  </button>
+  <span class="fd-cmd-divider" aria-hidden="true"></span>
+  <button type="button" class="fd-cmd-metric{% if ready < arrivals %} fd-warn{% else %} fd-ok{% endif %}"
+          data-cmd-filter="dirty" title="Room readiness: {{ ready }} ready of {{ arrivals }} arrivals. {{ readiness }}% check-in ready — click to filter dirty">
+    <span class="fd-metric-label">Ready</span>
+    <strong class="fd-metric-value">{{ ready }}/{{ arrivals }}</strong>
+    <span class="fd-metric-sub">{{ readiness }}%</span>
+  </button>
+  <button type="button" class="fd-cmd-metric{% if dirty > 0 %} fd-warn{% endif %}"
+          data-cmd-filter="dirty" title="Dirty rooms — click to filter">
+    <span class="fd-metric-label">Dirty</span>
+    <strong class="fd-metric-value">{{ dirty }}</strong>
+  </button>
+  <span class="fd-cmd-divider" aria-hidden="true"></span>
+  <button type="button" class="fd-cmd-metric{% if unalloc > 0 %} fd-warn{% else %} fd-ok{% endif %}"
+          data-cmd-filter="unallocated" title="Unallocated arrivals today — click to filter">
+    <span class="fd-metric-label">Unalloc</span>
+    <strong class="fd-metric-value">{{ unalloc }}</strong>
+  </button>
+  {% if conflicts > 0 %}
+  <button type="button" class="fd-cmd-metric fd-urgent"
+          data-cmd-filter="conflict" title="Conflicts: dirty turnarounds + unallocated arrivals — click to filter">
+    <span class="fd-metric-label">⚠ Conflict</span>
+    <strong class="fd-metric-value">{{ conflicts }}</strong>
+  </button>
+  {% endif %}
+  {% if unpaid > 0 %}
+  <button type="button" class="fd-cmd-metric fd-urgent"
+          data-cmd-filter="balance-due" title="Arrivals with unpaid balance — click to filter">
+    <span class="fd-metric-label">$ Unpaid</span>
+    <strong class="fd-metric-value">{{ unpaid }}</strong>
+  </button>
+  {% endif %}
+  <span class="fd-cmd-spacer"></span>
+  <div class="fd-cmd-right">
+    <button type="button" class="fd-overlay-btn" data-action="toggle-hk-overlay"
+            aria-pressed="false" title="HK Overlay: colour board by room readiness state">HK</button>
+    <div class="fd-view-presets" role="group" aria-label="Role preset views" data-view-presets>
+      <button type="button" class="fd-view-btn" data-view="front-desk" title="Front Desk: arrivals + departures">FD</button>
+      <button type="button" class="fd-view-btn" data-view="housekeeping" title="Housekeeping: dirty rooms + HK overlay">HK</button>
+      <button type="button" class="fd-view-btn" data-view="allocation" title="Allocation issues: unallocated rooms">Alloc</button>
+      <button type="button" class="fd-view-btn" data-view="night-shift" title="Night shift: in-house guests">Night</button>
+      <button type="button" class="fd-view-btn fd-view-clear" data-view="" title="Clear preset">✕</button>
+    </div>
+  </div>
 </div>
 
 {% if board.alerts %}
@@ -114,6 +120,9 @@
     {% for group in board.groups %}
     <div class="planning-board-group">{{ group.room_type_code }} - {{ group.room_type_name }}</div>
       {% for row in group.rows %}
+      {# Compute per-row balance-due state for JS filter #}
+      {% set ns = namespace(has_bal=false) %}
+      {% for b in row.visible_blocks %}{% if b.balanceDue and b.balanceDue > 0 %}{% set ns.has_bal = true %}{% endif %}{% endfor %}
       <div class="planning-board-room {% if row.is_unallocated %}unallocated{% endif %}" id="{{ row.anchor_id }}">
         <strong>{{ row.label }}</strong>
         <span>{{ row.secondary_label }}</span>
@@ -139,6 +148,9 @@
         data-has-arrival-today="{{ 'true' if row.has_arrival_today else 'false' }}"
         data-has-departure-today="{{ 'true' if row.has_departure_today else 'false' }}"
         data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"
+        data-is-stayover="{{ 'true' if row.is_occupied and not row.has_departure_today else 'false' }}"
+        data-has-balance-due="{{ 'true' if ns.has_bal else 'false' }}"
+        data-is-conflict="{{ 'true' if row.has_arrival_today and row.has_departure_today and row.housekeeping_status in ('dirty', 'occupied_dirty') else 'false' }}"
         aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
       >
@@ -177,6 +189,8 @@
               {% if block.readyForCheckIn %}<small class="badge-ready">Ready</small>{% endif %}
               {% if block.pendingModification %}<small class="badge-mod">Mod</small>{% endif %}
               {% if block.balanceDue and block.balanceDue > 0 %}<small class="badge-balance" title="Balance due: {{ currency }}{{ '%.0f'|format(block.balanceDue) }}">{{ currency }}{{ '%g'|format(block.balanceDue) }}</small>{% endif %}
+              {% if block.hasSpecialRequests %}<small class="badge-special" title="Special requests noted" aria-label="Special requests">★</small>{% endif %}
+              {% if block.isVip %}<small class="badge-vip" title="Gold/Platinum loyalty guest" aria-label="VIP guest">VIP</small>{% endif %}
               {% if block.displayVariant == 'unallocated' %}<small>Unallocated</small>{% elif block.status == 'conflict' %}<small>Conflict</small>{% elif block.displayVariant == 'in_house' %}<small>In-house</small>{% elif block.displayVariant == 'past' %}<small>Past</small>{% endif %}
             </span>
             {% if block.resizable %}<span class="planning-board-resize-handle end" data-resize-handle="end" aria-hidden="true"></span>{% endif %}
