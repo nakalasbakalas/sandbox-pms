@@ -488,12 +488,22 @@
     // Select the block on click
     selectBlock(block);
 
-    if (block.dataset.suppressClick !== "true") {
+    if (block.dataset.suppressClick === "true") {
+      block.dataset.suppressClick = "false";
+      event.preventDefault();
+      event.stopPropagation();
       return;
     }
-    block.dataset.suppressClick = "false";
-    event.preventDefault();
-    event.stopPropagation();
+
+    // Single click on reservation blocks opens side panel directly
+    // for fast check-in/check-out without leaving the board
+    if (block.dataset.reservationId) {
+      event.preventDefault(); // Prevent <details> toggle
+      openPanel(block);
+      return;
+    }
+    // Non-reservation blocks (closures, external blocks, etc.) allow
+    // the default <details> popover to open for inline editing
   }
 
   function onSurfaceKeydown(event) {
@@ -1579,10 +1589,6 @@
     }
   });
 
-  // Wire Enter key to open panel for selected block (from Sprint 2)
-  // Modify the global keyboard handler to call openPanel instead of a stub
-  // This will be handled in the onSurfaceKeydown handler by updating it to call openPanel
-
   // Global keyboard shortcuts for quick actions
   document.addEventListener("keydown", (event) => {
     // Ignore if user is typing in input/textarea
@@ -1598,6 +1604,44 @@
       case "?":
         event.preventDefault();
         showKeyboardHelp();
+        break;
+      case "t":
+      case "T": {
+        // Jump to today's date
+        event.preventDefault();
+        const todayLink = root && root.querySelector(".board-nav-btn.today");
+        if (todayLink && todayLink.href) {
+          window.location.href = todayLink.href;
+        }
+        break;
+      }
+      case "1": {
+        // Switch to 7-day view
+        event.preventDefault();
+        const tabs = root && root.querySelectorAll(".board-days-tab");
+        if (tabs && tabs[0] && tabs[0].href) window.location.href = tabs[0].href;
+        break;
+      }
+      case "2": {
+        // Switch to 14-day view
+        event.preventDefault();
+        const tabs = root && root.querySelectorAll(".board-days-tab");
+        if (tabs && tabs[1] && tabs[1].href) window.location.href = tabs[1].href;
+        break;
+      }
+      case "3": {
+        // Switch to 30-day view
+        event.preventDefault();
+        const tabs = root && root.querySelectorAll(".board-days-tab");
+        if (tabs && tabs[2] && tabs[2].href) window.location.href = tabs[2].href;
+        break;
+      }
+      case "n":
+      case "N":
+        if (selectedBlock && canEdit && !mutationInFlight) {
+          event.preventDefault();
+          performNoShow();
+        }
         break;
       case "a":
       case "A":
@@ -1644,16 +1688,19 @@
     const helpContent = `
       <strong>Keyboard Shortcuts</strong>
       <ul style="margin: 8px 0; padding-left: 20px;">
+        <li><kbd>T</kbd> : Jump to today</li>
+        <li><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> : Switch to 7 / 14 / 30 day view</li>
         <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
-        <li><kbd>Enter</kbd> : Confirm action or open details</li>
-        <li><kbd>Esc</kbd> : Cancel or close</li>
-        <li><kbd>/</kbd> : Open search</li>
-        <li><kbd>A</kbd> : Assign unallocated</li>
-        <li><kbd>C</kbd> : Check-in selected</li>
-        <li><kbd>O</kbd> : Check-out selected</li>
+        <li><kbd>C</kbd> : Check-in selected block</li>
+        <li><kbd>O</kbd> : Check-out selected block</li>
+        <li><kbd>N</kbd> : Mark selected block as no-show</li>
+        <li><kbd>A</kbd> : Assign unallocated block to a room</li>
+        <li><kbd>/</kbd> : Focus search box</li>
         <li><kbd>Ctrl+I</kbd> : Board stats drawer</li>
+        <li><kbd>Esc</kbd> : Cancel action / close panel</li>
       </ul>
     `;
     setFeedback(helpContent, "neutral", { allowHtml: true });
