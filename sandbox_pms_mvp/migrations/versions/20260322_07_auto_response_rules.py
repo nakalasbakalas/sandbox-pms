@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("trigger_keywords", sa.JSON, nullable=False),
         sa.Column("template_id", sa.Uuid(as_uuid=True), sa.ForeignKey("message_templates.id", ondelete="CASCADE"), nullable=False),
         sa.Column("channel", sa.String(50), nullable=False, server_default="email"),
-        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("1")),
+        sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("true")),
     )
     op.create_index("ix_auto_response_rules_is_active", "auto_response_rules", ["is_active"])
 
