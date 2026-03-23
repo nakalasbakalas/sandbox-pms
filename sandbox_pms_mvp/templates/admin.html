@@ -3,6 +3,14 @@
 {% block content %}
 {% include 'admin_nav.html' %}
 
+{% if setup_incomplete %}
+<div class="card subsection" style="border-left:4px solid var(--accent);margin-bottom:1.5rem">
+  <p><strong>Setup needed:</strong> Some essential property settings are not yet configured.
+    <a href="{{ url_for('admin.staff_admin_setup') }}">Complete setup →</a>
+  </p>
+</div>
+{% endif %}
+
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head">

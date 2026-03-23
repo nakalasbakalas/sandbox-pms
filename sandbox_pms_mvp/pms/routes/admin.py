@@ -92,6 +92,10 @@ from ..services.admin_settings_ops import (
     payment_settings_context,
     property_settings_context,
 )
+from ..services.setup_service import (
+    setup_completeness,
+    setup_context,
+)
 from ..services.extras_service import (
     BookingExtraPayload,
     list_booking_extras,
@@ -152,6 +156,111 @@ def staff_admin_test_error():
     actor = helpers["require_permission"]("audit.view")
     helpers["require_admin_role"](actor)
     raise RuntimeError("Sentry verification test")
+
+
+@admin_bp.route("/staff/admin/setup", methods=["GET", "POST"], endpoint="staff_admin_setup")
+def staff_admin_setup():
+    """Consolidated first-time setup page for property configuration."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("settings.edit")
+    helpers["require_admin_role"](actor)
+
+    if request.method == "POST":
+        section = request.form.get("section", "")
+        try:
+            if section == "property":
+                _save_setup_property(actor, helpers)
+                flash("Property information saved.", "success")
+            elif section == "financial":
+                _save_setup_financial(actor, helpers)
+                flash("Financial defaults saved.", "success")
+            elif section == "operational":
+                _save_setup_operational(actor, helpers)
+                flash("Operational defaults saved.", "success")
+            elif section == "branding":
+                _save_setup_branding(actor, helpers)
+                flash("Branding settings saved.", "success")
+            else:
+                flash("Unknown section.", "warning")
+        except (ValueError, KeyError) as exc:
+            flash(f"Error: {exc}", "error")
+        return redirect(url_for("admin.staff_admin_setup"))
+
+    completeness = setup_completeness()
+    ctx = setup_context()
+    room_types = db.session.execute(
+        sa.select(RoomType).order_by(RoomType.code)
+    ).scalars().all()
+    rooms = db.session.execute(
+        sa.select(Room).order_by(Room.number)
+    ).scalars().all()
+    users = db.session.execute(
+        sa.select(User).where(User.deleted_at.is_(None)).order_by(User.full_name)
+    ).scalars().all()
+    return render_template(
+        "admin_setup.html",
+        active_section="setup",
+        setup=ctx,
+        completeness=completeness,
+        room_types=room_types,
+        rooms=rooms,
+        users=users,
+    )
+
+
+def _save_setup_property(actor, helpers):
+    """Save property information settings from setup form."""
+    items = []
+    field_map = {
+        "hotel.name": ("hotel_name", "string"),
+        "hotel.brand_mark": ("brand_mark", "string"),
+        "hotel.contact_phone": ("contact_phone", "string"),
+        "hotel.contact_email": ("contact_email", "string"),
+        "hotel.address": ("address", "string"),
+        "hotel.check_in_time": ("check_in_time", "time"),
+        "hotel.check_out_time": ("check_out_time", "time"),
+        "hotel.timezone": ("timezone", "string"),
+        "hotel.currency": ("currency", "string"),
+        "hotel.tax_id": ("tax_id", "string"),
+        "hotel.public_base_url": ("public_base_url", "string"),
+    }
+    for key, (field, vtype) in field_map.items():
+        val = request.form.get(field, "").strip()
+        items.append({"key": key, "value": val, "value_type": vtype})
+    hotel_name = request.form.get("hotel_name", "").strip()
+    if not hotel_name:
+        raise ValueError("Hotel name is required.")
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_financial(actor, helpers):
+    """Save financial/booking default settings from setup form."""
+    items = [
+        {"key": "hotel.vat_rate", "value": request.form.get("vat_rate", "0.07").strip(), "value_type": "decimal"},
+        {"key": "hotel.service_charge_rate", "value": request.form.get("service_charge_rate", "0.00").strip(), "value_type": "decimal"},
+        {"key": "reservation.deposit_percentage", "value": request.form.get("deposit_percentage", "50.00").strip(), "value_type": "decimal"},
+        {"key": "reservation.code_prefix", "value": request.form.get("code_prefix", "RES").strip().upper(), "value_type": "string"},
+        {"key": "reservation.standard_cancellation_hours", "value": request.form.get("cancellation_hours", "24").strip(), "value_type": "integer"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_operational(actor, helpers):
+    """Save operational default settings from setup form."""
+    items = [
+        {"key": "notifications.sender_name", "value": request.form.get("notifications_sender_name", "").strip(), "value_type": "string"},
+        {"key": "hotel.support_contact_text", "value": request.form.get("support_contact_text", "").strip(), "value_type": "string"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_branding(actor, helpers):
+    """Save branding settings from setup form."""
+    items = [
+        {"key": "hotel.logo_url", "value": request.form.get("logo_url", "").strip(), "value_type": "string"},
+        {"key": "hotel.accent_color", "value": request.form.get("accent_color", "#C57C35").strip(), "value_type": "string"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
 
 
 @admin_bp.route("/staff/admin/staff-access", methods=["GET", "POST"], endpoint="staff_admin_staff_access")

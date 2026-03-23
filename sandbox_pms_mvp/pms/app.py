@@ -634,6 +634,22 @@ def register_url_topology_hooks(app: Flask) -> None:
         return None
 
 
+def _admin_setup_incomplete(staff_user) -> bool:
+    """Return True if admin setup is not yet complete (for admin-only banner)."""
+    if not staff_user:
+        return False
+    if not is_admin_user(staff_user):
+        return False
+    endpoint = request.endpoint or ""
+    if not endpoint.startswith("admin."):
+        return False
+    try:
+        from .services.setup_service import setup_completeness
+        return not setup_completeness()["complete"]
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def register_template_helpers(app: Flask) -> None:
     @app.template_filter("money")
     def money_filter(value) -> str:
@@ -782,6 +798,7 @@ def register_template_helpers(app: Flask) -> None:
             "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
+            "setup_incomplete": _admin_setup_incomplete(current_staff),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
             "csrf_token": ensure_csrf_token,
             "csrf_input": lambda: Markup(
