@@ -68,6 +68,15 @@ APP_SETTINGS_SEED = [
     ("dynamic_pricing_enabled", {"value": False}, "boolean", "Enable occupancy-based dynamic pricing", False, 49),
     ("dynamic_pricing_threshold", {"value": 85}, "integer", "Occupancy threshold (%) for dynamic pricing", False, 50),
     ("dynamic_pricing_markup_pct", {"value": 10}, "integer", "Dynamic pricing markup (%)", False, 51),
+    # Board configuration
+    ("board.default_days", {"value": 14}, "integer", "Default board horizon days (7, 14, or 30)", False, 60),
+    ("board.default_density", {"value": "compact"}, "string", "Default board density (spacious, comfortable, compact, ultra)", False, 61),
+    ("board.default_group_by", {"value": "type"}, "string", "Default board group by (type or floor)", False, 62),
+    ("board.show_unallocated_default", {"value": True}, "boolean", "Show unallocated lane by default", False, 63),
+    ("board.auto_refresh_seconds", {"value": 10}, "integer", "Board auto-refresh interval in seconds (0 to disable)", False, 64),
+    ("board.move_confirm_required", {"value": True}, "boolean", "Require confirmation before moving bookings", False, 65),
+    ("board.payment_warning_enabled", {"value": True}, "boolean", "Show payment warning badges on board", False, 66),
+    ("board.overbooking_warning_enabled", {"value": True}, "boolean", "Show overbooking warnings on board", False, 67),
 ]
 
 

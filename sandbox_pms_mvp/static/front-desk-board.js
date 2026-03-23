@@ -978,7 +978,7 @@
       case "vacant":      return track.dataset.isVacant === "true";
       case "arrival":     return track.dataset.hasArrivalToday === "true";
       case "departure":   return track.dataset.hasDepartureToday === "true";
-      case "maintenance": return track.dataset.isMaintenance === "true";
+      case "maintenance": return track.dataset.isMaintenance === "true" || track.dataset.isBlocked === "true";
       case "unallocated": return track.dataset.laneKind === "unallocated";
       case "in-house":    return track.dataset.isOccupied === "true";
       case "stayover":    return track.dataset.isStayover === "true";
@@ -1605,42 +1605,11 @@
         event.preventDefault();
         showKeyboardHelp();
         break;
-      case "t":
-      case "T": {
-        // Jump to today's date
-        event.preventDefault();
-        const todayLink = root && root.querySelector(".board-nav-btn.today");
-        if (todayLink && todayLink.href) {
-          window.location.href = todayLink.href;
-        }
-        break;
-      }
-      case "1": {
-        // Switch to 7-day view
-        event.preventDefault();
-        const tabs = root && root.querySelectorAll(".board-days-tab");
-        if (tabs && tabs[0] && tabs[0].href) window.location.href = tabs[0].href;
-        break;
-      }
-      case "2": {
-        // Switch to 14-day view
-        event.preventDefault();
-        const tabs = root && root.querySelectorAll(".board-days-tab");
-        if (tabs && tabs[1] && tabs[1].href) window.location.href = tabs[1].href;
-        break;
-      }
-      case "3": {
-        // Switch to 30-day view
-        event.preventDefault();
-        const tabs = root && root.querySelectorAll(".board-days-tab");
-        if (tabs && tabs[2] && tabs[2].href) window.location.href = tabs[2].href;
-        break;
-      }
       case "n":
       case "N":
-        if (selectedBlock && canEdit && !mutationInFlight) {
+        if (createBaseUrl && canEdit) {
           event.preventDefault();
-          performNoShow();
+          window.location.href = createBaseUrl + "?back=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
         }
         break;
       case "a":
@@ -1694,14 +1663,17 @@
         <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
-        <li><kbd>C</kbd> : Check-in selected block</li>
-        <li><kbd>O</kbd> : Check-out selected block</li>
-        <li><kbd>N</kbd> : Mark selected block as no-show</li>
-        <li><kbd>A</kbd> : Assign unallocated block to a room</li>
-        <li><kbd>/</kbd> : Focus search box</li>
+        <li><kbd>Enter</kbd> : Confirm action or open details</li>
+        <li><kbd>Esc</kbd> : Cancel or close</li>
+        <li><kbd>/</kbd> : Open search</li>
+        <li><kbd>N</kbd> : New reservation</li>
+        <li><kbd>A</kbd> : Assign unallocated</li>
+        <li><kbd>C</kbd> : Check-in selected</li>
+        <li><kbd>O</kbd> : Check-out selected</li>
         <li><kbd>Ctrl+I</kbd> : Board stats drawer</li>
-        <li><kbd>Esc</kbd> : Cancel action / close panel</li>
+        <li><kbd>?</kbd> : Show this help</li>
       </ul>
+      <p style="font-size:0.78rem;color:var(--muted);margin:4px 0 0;">Click any empty grid slot to quick-create a booking for that room + date.</p>
     `;
     setFeedback(helpContent, "neutral", { allowHtml: true });
   }
@@ -1977,6 +1949,64 @@
         const icsLink = blockEl.querySelector("a[href*='export.ics']");
         if (icsLink) window.location.href = icsLink.href;
       }
+    });
+  }
+
+  // ── Empty slot click: create booking pre-filled with room + date ──
+  const createBaseUrl = root.dataset.createUrl || "";
+  if (createBaseUrl && canEdit) {
+    surface.addEventListener("click", function onEmptySlotClick(e) {
+      // Only act on direct track clicks, not on blocks or other elements
+      const track = e.target.closest("[data-board-track]");
+      if (!track) return;
+      if (e.target.closest("[data-board-block]")) return;
+      if (e.target.closest("summary, button, a, form, input, select, textarea")) return;
+
+      const roomId = track.dataset.roomId;
+      const roomTypeId = track.dataset.roomTypeId;
+      if (!roomId) return; // Don't handle unallocated lane
+
+      // Compute which day column was clicked using track bounding box
+      const grid = track.closest(".planning-board-grid");
+      if (!grid) return;
+      const startDateAttr = grid.dataset.boardStartDate;
+      const days = parseInt(grid.dataset.boardDays, 10);
+      if (!startDateAttr || !days) return;
+
+      // Determine click position relative to the track
+      const rect = track.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const trackWidth = rect.width;
+      const colWidth = trackWidth / days;
+      const colIndex = Math.max(0, Math.min(days - 1, Math.floor(clickX / colWidth)));
+
+      // Format a Date as YYYY-MM-DD using local time (avoids UTC shift from toISOString)
+      function formatDateLocal(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return year + "-" + month + "-" + day;
+      }
+
+      // Compute date from column
+      const startDate = new Date(startDateAttr + "T00:00:00");
+      startDate.setDate(startDate.getDate() + colIndex);
+      const checkIn = formatDateLocal(startDate);
+      const nextDay = new Date(startDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const checkOut = formatDateLocal(nextDay);
+
+      // Navigate to reservation create form with pre-filled params
+      const params = new URLSearchParams({
+        check_in: checkIn,
+        check_out: checkOut,
+        room_id: roomId,
+        room_type_id: roomTypeId,
+        source_channel: "admin_manual",
+        status: "confirmed",
+        back: window.location.pathname + window.location.search + window.location.hash,
+      });
+      window.location.href = createBaseUrl + "?" + params.toString();
     });
   }
 

@@ -10,6 +10,9 @@
 {% set conflicts = board.counts.conflict_count %}
 {% set unpaid = board.counts.unpaid_arrivals %}
 {% set readiness = board.counts.checkin_readiness_pct %}
+{% set total_rooms = board.counts.total_rooms %}
+{% set available = board.counts.get('available_rooms', 0) %}
+{% set maint = board.counts.get('maintenance_count', 0) %}
 <div class="fd-cmd-strip" role="region" aria-label="Today's operational summary" data-cmd-strip>
   <span class="fd-cmd-date">
     <span class="fd-cmd-day">{{ board.today.strftime('%a') }}</span>
@@ -18,7 +21,7 @@
   </span>
   <span class="fd-cmd-divider" aria-hidden="true"></span>
   <button type="button" class="fd-cmd-metric{% if occ_pct >= 90 %} fd-urgent{% elif occ_pct >= 70 %} fd-warn{% endif %}"
-          data-cmd-filter="in-house" title="Occupancy: {{ in_house }} of {{ board.counts.total_rooms }} rooms — click to filter in-house">
+          data-cmd-filter="in-house" title="Occupancy: {{ in_house }} of {{ total_rooms }} rooms — click to filter in-house">
     <span class="fd-metric-label">Occ</span>
     <strong class="fd-metric-value">{{ occ_pct }}%</strong>
   </button>
@@ -43,6 +46,11 @@
     <strong class="fd-metric-value">{{ stayovers }}</strong>
   </button>
   <span class="fd-cmd-divider" aria-hidden="true"></span>
+  <button type="button" class="fd-cmd-metric fd-metric-avail" data-cmd-filter="vacant"
+          title="Available rooms: {{ available }} of {{ total_rooms }} — click to filter vacant">
+    <span class="fd-metric-label">Avail</span>
+    <strong class="fd-metric-value">{{ available }}/{{ total_rooms }}</strong>
+  </button>
   <button type="button" class="fd-cmd-metric{% if ready < arrivals %} fd-warn{% else %} fd-ok{% endif %}"
           data-cmd-filter="dirty" title="Room readiness: {{ ready }} ready of {{ arrivals }} arrivals. {{ readiness }}% check-in ready — click to filter dirty">
     <span class="fd-metric-label">Ready</span>
@@ -54,6 +62,13 @@
     <span class="fd-metric-label">Dirty</span>
     <strong class="fd-metric-value">{{ dirty }}</strong>
   </button>
+  {% if maint > 0 %}
+  <button type="button" class="fd-cmd-metric fd-warn"
+          data-cmd-filter="maintenance" title="Maintenance / blocked rooms — click to filter">
+    <span class="fd-metric-label">Maint</span>
+    <strong class="fd-metric-value">{{ maint }}</strong>
+  </button>
+  {% endif %}
   <span class="fd-cmd-divider" aria-hidden="true"></span>
   <button type="button" class="fd-cmd-metric{% if unalloc > 0 %} fd-warn{% else %} fd-ok{% endif %}"
           data-cmd-filter="unallocated" title="Unallocated arrivals today — click to filter">
@@ -63,7 +78,7 @@
   {% if conflicts > 0 %}
   <button type="button" class="fd-cmd-metric fd-urgent"
           data-cmd-filter="conflict" title="Conflicts: dirty turnarounds + unallocated arrivals — click to filter">
-    <span class="fd-metric-label">⚠ Conflict</span>
+    <span class="fd-metric-label">Conflict</span>
     <strong class="fd-metric-value">{{ conflicts }}</strong>
   </button>
   {% endif %}
@@ -98,7 +113,7 @@
 
 {% if board.groups %}
 <section class="planning-board-desktop">
-  <div class="planning-board-grid density-{{ user_density or 'compact' }}" data-board-days="{{ board.days }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }}; --today-column: {{ board.todayOffset or 0 }};">
+  <div class="planning-board-grid density-{{ user_density or 'compact' }}" data-board-days="{{ board.days }}" data-board-start-date="{{ board.start_date.isoformat() }}" style="--board-days: {{ board.days }}; --track-bg: {{ board.weekend_track_bg }}; --today-column: {{ board.todayOffset or 0 }};">
     <div class="planning-board-room heading">
       <strong>Rooms</strong>
       <span>Live status</span>
@@ -109,7 +124,7 @@
       {% if day.is_weekend %}{% set _ = day_classes.append('weekend') %}{% endif %}
       {% if day.is_today %}{% set _ = day_classes.append('today') %}{% endif %}
       {% if day.is_month_boundary %}{% set _ = day_classes.append('month-boundary') %}{% endif %}
-      <div class="{{ day_classes|join(' ') }}" {% if day.is_today %}aria-current="date"{% endif %} data-occupancy-pct="{{ board.per_day_occupancy[loop.index0] if board.per_day_occupancy else 0 }}">
+      <div class="{{ day_classes|join(' ') }}" {% if day.is_today %}aria-current="date"{% endif %} data-occupancy-pct="{{ board.per_day_occupancy[loop.index0] if board.per_day_occupancy else 0 }}" data-day-iso="{{ day.isoDate }}">
         <span>{{ day.day_label }}</span>
         <strong>{{ day.day_number }}</strong>
         <small>{{ day.month_label }}</small>
@@ -145,6 +160,7 @@
         data-hk-status="{{ row.housekeeping_status or '' }}"
         data-is-occupied="{{ 'true' if row.is_occupied else 'false' }}"
         data-is-maintenance="{{ 'true' if row.is_maintenance else 'false' }}"
+        data-is-blocked="{{ 'true' if row.is_blocked else 'false' }}"
         data-has-arrival-today="{{ 'true' if row.has_arrival_today else 'false' }}"
         data-has-departure-today="{{ 'true' if row.has_departure_today else 'false' }}"
         data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"

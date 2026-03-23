@@ -1299,6 +1299,15 @@ def _compute_extended_counts(
             total_by_type[code] = total_by_type.get(code, 0) + 1
     counts["total_by_type"] = total_by_type
 
+    # Available rooms (not occupied, not blocked, not maintenance)
+    counts["available_rooms"] = sum(avail_by_type.values())
+
+    # Maintenance/blocked count
+    counts["maintenance_count"] = sum(
+        1 for row in room_rows
+        if row.get("is_maintenance") or row.get("is_blocked")
+    )
+
     # Turnaround rooms needing attention
     counts["turnaround_dirty"] = sum(
         1 for row in room_rows

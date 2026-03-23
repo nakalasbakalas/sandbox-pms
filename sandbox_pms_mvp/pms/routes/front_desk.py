@@ -42,6 +42,7 @@ from ..helpers import (
     parse_request_date_arg,
     parse_request_int_arg,
     parse_request_uuid_arg,
+    require_any_permission,
     require_permission,
     require_user,
     safe_back_path,
@@ -440,6 +441,7 @@ def front_desk_board_context(
         "board_data_url": url_for("front_desk.staff_front_desk_board_data"),
         "board_rooms_url": url_for("front_desk.staff_front_desk_board_rooms"),
         "board_export_url": url_for("front_desk.staff_front_desk_board_export_ical"),
+        "board_create_url": url_for("staff_reservations.staff_reservation_create") if can("reservation.create") else "",
         "board_filter_query": front_desk_board_filter_query(filters),
         "board_current_url": back_url,
         "ical_import_report": ical_import_report,
@@ -1452,7 +1454,9 @@ def staff_front_desk_board_room_ready(reservation_id):
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel", methods=["GET"])
 def staff_front_desk_board_reservation_panel(reservation_id):
-    """Load panel content for a reservation."""
+    """Load panel content for a reservation — includes folio, charges, payments, notes, HK."""
+    from ..models import FolioCharge
+
     user = require_permission("reservation.view")
     reservation = db.session.get(Reservation, reservation_id) or abort(404)
 
@@ -1489,11 +1493,8 @@ def staff_front_desk_board_reservation_panel(reservation_id):
 
     # Check if arrival today and assigned room is dirty (turnaround conflict)
     is_conflict_room = False
-    if (
-        reservation.assigned_room_id
-        and reservation.current_status in ("tentative", "confirmed")
-        and reservation.check_in_date <= date.today()
-    ):
+    room_hk_status = None
+    if reservation.assigned_room_id:
         hk_code = db.session.execute(
             sa.select(HousekeepingStatus.code).join(
                 InventoryDay, InventoryDay.housekeeping_status_id == HousekeepingStatus.id
@@ -1502,7 +1503,25 @@ def staff_front_desk_board_reservation_panel(reservation_id):
                 InventoryDay.business_date == date.today(),
             )
         ).scalar_one_or_none()
-        is_conflict_room = hk_code in ("dirty", "occupied_dirty")
+        room_hk_status = hk_code
+        if (
+            reservation.current_status in ("tentative", "confirmed")
+            and reservation.check_in_date <= date.today()
+            and hk_code in ("dirty", "occupied_dirty")
+        ):
+            is_conflict_room = True
+
+    # Folio charges (non-voided, non-room, non-payment for extra charges display)
+    folio_charges = db.session.execute(
+        sa.select(FolioCharge)
+        .where(
+            FolioCharge.reservation_id == reservation.id,
+            FolioCharge.voided_at.is_(None),
+            FolioCharge.charge_type.notin_(["room", "deposit", "payment", "refund"]),
+        )
+        .order_by(FolioCharge.service_date.asc(), FolioCharge.posted_at.asc())
+        .limit(20)
+    ).scalars().all()
 
     context = {
         "reservation": reservation,
@@ -1519,9 +1538,111 @@ def staff_front_desk_board_reservation_panel(reservation_id):
         "can_cancel": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"],
         "can_no_show": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today(),
         "is_conflict_room": is_conflict_room,
+        "room_hk_status": room_hk_status,
+        "folio_charges": folio_charges,
+        "can_add_charge": user.has_permission("folio.charge_add"),
+        "can_add_payment": user.has_permission("payment.create"),
+        "can_add_note": user.has_permission("reservation.edit"),
+        "can_manage_hk": user.has_permission("housekeeping.edit") or user.has_permission("reservation.edit"),
     }
 
     return render_template("_panel_reservation_details.html", **context)
+
+
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/charge", methods=["POST"])
+def staff_front_desk_board_panel_charge(reservation_id):
+    """Post a quick charge from the board panel."""
+    from ..services.cashier_service import ManualAdjustmentPayload, post_manual_adjustment
+
+    user = require_permission("folio.charge_add")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    try:
+        post_manual_adjustment(
+            reservation_id,
+            ManualAdjustmentPayload(
+                charge_type=request.form.get("charge_type", "manual_charge"),
+                amount=Decimal(request.form.get("amount") or "0.00"),
+                description=request.form.get("description", ""),
+                note="Charged via board panel",
+            ),
+            actor_user_id=user.id,
+        )
+        flash("Charge posted.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(back_url)
+
+
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/payment", methods=["POST"])
+def staff_front_desk_board_panel_payment(reservation_id):
+    """Record a quick payment from the board panel."""
+    from ..services.cashier_service import PaymentPostingPayload, record_payment
+
+    user = require_permission("payment.create")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    try:
+        record_payment(
+            reservation_id,
+            PaymentPostingPayload(
+                amount=Decimal(request.form.get("amount") or "0.00"),
+                payment_method=request.form.get("payment_method", "cash"),
+                note=request.form.get("note") or "Recorded via board panel",
+            ),
+            actor_user_id=user.id,
+        )
+        flash("Payment recorded.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(back_url)
+
+
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/note", methods=["POST"])
+def staff_front_desk_board_panel_note(reservation_id):
+    """Add a note from the board panel."""
+    from ..services.staff_reservations_service import ReservationNotePayload, add_reservation_note
+
+    user = require_permission("reservation.edit")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    try:
+        add_reservation_note(
+            reservation_id,
+            ReservationNotePayload(
+                note_text=request.form.get("note_text", ""),
+                note_type="general",
+                is_important=request.form.get("is_important") == "on",
+                visibility_scope="all_staff",
+            ),
+            actor_user_id=user.id,
+        )
+        flash("Note added.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(back_url)
+
+
+@front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/hk", methods=["POST"])
+def staff_front_desk_board_panel_hk(reservation_id):
+    """Update housekeeping status from the board panel."""
+    from ..services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
+
+    user = require_any_permission("housekeeping.edit", "reservation.edit")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    reservation = db.session.get(Reservation, reservation_id) or abort(404)
+    if not reservation.assigned_room_id:
+        flash("No room assigned.", "error")
+        return redirect(back_url)
+    status_code = request.form.get("status_code", "clean")
+    try:
+        update_housekeeping_status(
+            reservation.assigned_room_id,
+            business_date=date.today(),
+            payload=RoomStatusUpdatePayload(status_code=status_code, note=f"Updated via board panel to {status_code}"),
+            actor_user_id=user.id,
+        )
+        flash(f"Room marked {status_code.replace('_', ' ')}.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(back_url)
 
 
 # --- Section: View Routes (walk-in, detail) ---

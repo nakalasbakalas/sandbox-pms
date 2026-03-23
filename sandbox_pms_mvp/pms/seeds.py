@@ -507,15 +507,16 @@ def seed_demo_guests_and_reservations(
     num_reservations: int = 80
 ) -> None:
     """
-    Create demo guests and reservations for March 2026.
+    Create demo guests and reservations centered around today's date.
 
     Distribution:
-    - ~50% checked_out (past 3 weeks, March 1-15)
-    - ~25% confirmed (future 2 weeks, March 16-31)
+    - ~30% checked_out (past 2 weeks)
+    - ~20% checked_in (currently in-house)
+    - ~25% confirmed (today + future 2 weeks)
     - ~10% cancelled (various dates)
-    - ~5% no_show (early March)
+    - ~5% no_show (past week)
     """
-    logger.info("Seeding demo guests and reservations for March 2026...")
+    logger.info("Seeding demo guests and reservations...")
 
     # Sample guest data: [(first_name, last_name, nationality)]
     guest_data = [
@@ -589,66 +590,135 @@ def seed_demo_guests_and_reservations(
         "DBL": 150,
     }
 
-    # March 2026 date range
-    march_start = date(2026, 3, 1)
-    march_end = date(2026, 3, 31)
-    today = date(2026, 3, 16)
+    # Use dynamic dates centered on today
+    today = date.today()
+    past_start = today - timedelta(days=14)
+    future_end = today + timedelta(days=14)
 
-    # Distribution: ~50%, ~25%, ~10%, ~5%
-    num_checked_out = int(num_reservations * 0.50)
+    # Distribution
+    num_checked_out = int(num_reservations * 0.30)
+    num_checked_in = int(num_reservations * 0.20)
     num_confirmed = int(num_reservations * 0.25)
     num_cancelled = int(num_reservations * 0.10)
     num_no_show = int(num_reservations * 0.05)
+    # Fill remainder with confirmed
+    remaining = num_reservations - num_checked_out - num_checked_in - num_confirmed - num_cancelled - num_no_show
+    num_confirmed += max(0, remaining)
 
     # Generate all reservations with unified counter
     res_reservations = []
     res_counter = 1000
 
-    # Define status configurations: (status, date_range_start, date_range_end, assign_room, count)
-    status_configs = [
-        (RESERVATION_STATUSES[4], march_start, march_end, True, num_checked_out),    # checked_out
-        (RESERVATION_STATUSES[2], today, march_end, False, num_confirmed),           # confirmed
-        (RESERVATION_STATUSES[5], march_start, march_end, False, num_cancelled),     # cancelled
-        (RESERVATION_STATUSES[6], march_start, march_start + timedelta(days=9), True, num_no_show),  # no_show
-    ]
+    # 1. Checked-out: past 2 weeks
+    for i in range(num_checked_out):
+        guest = created_guests[i % len(created_guests)]
+        nights = 1 + (i % 5)
+        start_offset = i % 14
+        check_in = past_start + timedelta(days=start_offset)
+        check_out = check_in + timedelta(days=nights)
+        if check_out > today:
+            check_out = today
+            if check_in >= check_out:
+                check_in = check_out - timedelta(days=1)
+        room_type = double_room_type if i % 3 != 0 else twin_room_type
+        reservation, res_counter = _create_single_reservation(
+            res_counter, guest, check_in, check_out, room_type,
+            RESERVATION_STATUSES[4], base_rates, admin_id,
+            True, rooms_by_type,
+        )
+        res_reservations.append(reservation)
 
-    for status, range_start, range_end, assign_room, count in status_configs:
-        for i in range(count):
-            guest = created_guests[i % len(created_guests)]
-            nights = 1 + (i % 6)
-            start_offset = i % ((range_end - range_start).days + 1)
-            check_in = range_start + timedelta(days=start_offset)
-            check_out = check_in + timedelta(days=nights)
+    # 2. Currently checked-in (in-house)
+    for i in range(num_checked_in):
+        guest = created_guests[(num_checked_out + i) % len(created_guests)]
+        nights = 2 + (i % 5)
+        check_in = today - timedelta(days=1 + (i % 3))
+        check_out = check_in + timedelta(days=nights)
+        if check_out <= today:
+            check_out = today + timedelta(days=1 + (i % 3))
+        room_type = double_room_type if i % 2 == 0 else twin_room_type
+        reservation, res_counter = _create_single_reservation(
+            res_counter, guest, check_in, check_out, room_type,
+            "checked_in", base_rates, admin_id,
+            True, rooms_by_type,
+        )
+        reservation.checked_in_at = utc_now()
+        # Vary deposit status: some paid, some partial, some unpaid
+        if i % 4 == 0:
+            reservation.deposit_received_amount = reservation.quoted_grand_total
+        elif i % 4 == 1:
+            reservation.deposit_received_amount = Decimal(str(round(float(reservation.quoted_grand_total) * 0.5, 2)))
+        elif i % 4 == 2:
+            reservation.deposit_received_amount = Decimal("0.00")
+        res_reservations.append(reservation)
 
-            # Ensure check_out doesn't exceed march_end, and maintain date constraint
-            if check_out > march_end:
-                check_out = march_end
-                # Ensure check_in < check_out (required by database constraint)
-                if check_in >= check_out:
-                    check_in = check_out - timedelta(days=1)
+    # 3. Confirmed (today arrivals + future)
+    for i in range(num_confirmed):
+        guest = created_guests[(num_checked_out + num_checked_in + i) % len(created_guests)]
+        nights = 1 + (i % 6)
+        # First few arrive today for realistic board view
+        if i < 5:
+            check_in = today
+        else:
+            check_in = today + timedelta(days=(i % 14))
+        check_out = check_in + timedelta(days=nights)
+        if check_out > future_end:
+            check_out = future_end
+            if check_in >= check_out:
+                check_in = check_out - timedelta(days=1)
+        room_type = double_room_type if i % 3 != 0 else twin_room_type
+        # Assign rooms to today's arrivals, leave some future ones unallocated
+        assign = (i < 5) or (i % 3 != 0)
+        reservation, res_counter = _create_single_reservation(
+            res_counter, guest, check_in, check_out, room_type,
+            RESERVATION_STATUSES[2], base_rates, admin_id,
+            assign, rooms_by_type if assign else None,
+        )
+        # Vary deposit status
+        if i % 3 == 0:
+            reservation.deposit_received_amount = reservation.deposit_required_amount
+        elif i % 3 == 1:
+            reservation.deposit_received_amount = Decimal("0.00")
+        res_reservations.append(reservation)
 
-            room_type = double_room_type if i % 3 != 0 else twin_room_type
-            adults = 1 + (i % 3)
+    # 4. Cancelled
+    for i in range(num_cancelled):
+        guest = created_guests[(i * 3) % len(created_guests)]
+        nights = 2 + (i % 4)
+        check_in = past_start + timedelta(days=i * 2)
+        check_out = check_in + timedelta(days=nights)
+        room_type = double_room_type if i % 2 == 0 else twin_room_type
+        reservation, res_counter = _create_single_reservation(
+            res_counter, guest, check_in, check_out, room_type,
+            RESERVATION_STATUSES[5], base_rates, admin_id,
+            False, None,
+        )
+        res_reservations.append(reservation)
 
-            reservation, res_counter = _create_single_reservation(
-                res_counter,
-                guest,
-                check_in,
-                check_out,
-                room_type,
-                status,
-                base_rates,
-                admin_id,
-                assign_room,
-                rooms_by_type if assign_room else None,
-            )
-            res_reservations.append(reservation)
+    # 5. No-show
+    for i in range(num_no_show):
+        guest = created_guests[(i * 5) % len(created_guests)]
+        nights = 1 + (i % 3)
+        check_in = today - timedelta(days=1 + (i % 5))
+        check_out = check_in + timedelta(days=nights)
+        room_type = twin_room_type
+        reservation, res_counter = _create_single_reservation(
+            res_counter, guest, check_in, check_out, room_type,
+            RESERVATION_STATUSES[6], base_rates, admin_id,
+            True, rooms_by_type,
+        )
+        res_reservations.append(reservation)
 
-    # Flush all at once
+    # Flush reservations
     for reservation in res_reservations:
         db.session.add(reservation)
-
     db.session.flush()
+
+    # ── Enrich seed data: folio charges, notes, HK statuses ──
+    _seed_demo_folio_charges(res_reservations, admin_id)
+    _seed_demo_notes(res_reservations, admin_id)
+    _seed_demo_housekeeping_statuses(sellable_rooms)
+
     logger.info(
         f"Created demo data: {len(created_guests)} guests and {len(res_reservations)} reservations"
     )
@@ -797,3 +867,117 @@ def _get_random_cancellation_reason(seed: int) -> str:
         "Change of plans",
     ]
     return reasons[seed % len(reasons)]
+
+
+def _seed_demo_folio_charges(reservations: list, admin_id: uuid.UUID | None) -> None:
+    """Add sample folio charges to in-house and checked-out reservations."""
+    from .models import FolioCharge
+
+    charge_templates = [
+        ("SNK", "manual_charge", "Minibar charges", Decimal("180.00")),
+        ("LND", "manual_charge", "Laundry service", Decimal("250.00")),
+        ("XTR", "manual_charge", "Restaurant — dinner", Decimal("750.00")),
+        ("XTR", "manual_charge", "Cafe — breakfast add-on", Decimal("120.00")),
+        ("XTR", "fee", "Airport transfer", Decimal("350.00")),
+        ("LCO", "fee", "Late check-out fee", Decimal("200.00")),
+        ("EXB", "fee", "Extra bed", Decimal("300.00")),
+    ]
+
+    active_reservations = [r for r in reservations if r.current_status in ("checked_in", "checked_out")]
+    for idx, res in enumerate(active_reservations):
+        # Add 1-3 charges per active reservation
+        num_charges = 1 + (idx % 3)
+        for j in range(num_charges):
+            template = charge_templates[(idx + j) % len(charge_templates)]
+            charge = FolioCharge(
+                reservation_id=res.id,
+                charge_code=template[0],
+                charge_type=template[1],
+                description=template[2],
+                quantity=1,
+                unit_amount=template[3],
+                line_amount=template[3],
+                tax_amount=Decimal(str(round(float(template[3]) * 0.07, 2))),
+                total_amount=template[3] + Decimal(str(round(float(template[3]) * 0.07, 2))),
+                service_date=res.check_in_date + timedelta(days=j),
+                posted_at=utc_now(),
+                posted_by_user_id=admin_id,
+                posting_key=f"DEMO-{res.reservation_code}-{j}",
+            )
+            db.session.add(charge)
+
+    db.session.flush()
+    logger.info(f"Seeded folio charges for {len(active_reservations)} active reservations")
+
+
+def _seed_demo_notes(reservations: list, admin_id: uuid.UUID | None) -> None:
+    """Add sample internal notes to some reservations."""
+    from .models import ReservationNote
+
+    note_templates = [
+        ("Guest requested extra pillows", "general", False),
+        ("VIP guest — arrange welcome amenity", "general", True),
+        ("Guest mentioned food allergy — no peanuts", "general", True),
+        ("Returning guest — preferred room 305", "general", False),
+        ("Late arrival expected after 22:00", "general", False),
+        ("Wedding anniversary celebration — room decoration requested", "general", True),
+        ("Guest traveling with infant — baby cot placed", "general", False),
+        ("Corporate rate verified with company HR", "general", False),
+    ]
+
+    for idx, res in enumerate(reservations):
+        if idx % 4 != 0:
+            continue
+        template = note_templates[idx % len(note_templates)]
+        note = ReservationNote(
+            reservation_id=res.id,
+            note_text=template[0],
+            note_type=template[1],
+            is_important=template[2],
+            visibility_scope="all_staff",
+            created_by_user_id=admin_id,
+        )
+        db.session.add(note)
+
+    db.session.flush()
+    logger.info("Seeded reservation notes")
+
+
+def _seed_demo_housekeeping_statuses(rooms: list) -> None:
+    """Set varied housekeeping statuses on today's inventory for a realistic board."""
+    today = date.today()
+
+    # Get HK status IDs
+    hk_statuses = {
+        row.code: row.id
+        for row in db.session.execute(sa.select(HousekeepingStatus)).scalars().all()
+    }
+
+    # Distribution across rooms: clean, dirty, inspected, occupied_dirty, out_of_order
+    hk_assignments = [
+        "clean", "clean", "clean", "dirty", "dirty", "inspected",
+        "clean", "occupied_clean", "dirty", "clean",
+        "clean", "inspected", "dirty", "clean", "clean",
+        "occupied_dirty", "clean", "clean", "occupied_clean", "clean",
+        "inspected", "dirty", "clean", "clean", "clean",
+        "clean", "dirty", "inspected", "clean", "out_of_order",
+    ]
+
+    for idx, room in enumerate(rooms):
+        inv = db.session.execute(
+            sa.select(InventoryDay).where(
+                InventoryDay.room_id == room.id,
+                InventoryDay.business_date == today,
+            )
+        ).scalar_one_or_none()
+        if not inv:
+            continue
+        hk_code = hk_assignments[idx % len(hk_assignments)]
+        if hk_code in hk_statuses:
+            inv.housekeeping_status_id = hk_statuses[hk_code]
+        if hk_code == "out_of_order":
+            inv.maintenance_flag = True
+            inv.maintenance_note = "Air conditioning repair scheduled"
+
+    db.session.flush()
+    logger.info("Seeded housekeeping statuses")
