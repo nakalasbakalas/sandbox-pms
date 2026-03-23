@@ -1793,7 +1793,7 @@ class TestBoardCommandPalette:
         assert 'const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");' in content
         assert "function setSurfaceLoading(isLoading)" in content
         assert "setSurfaceLoading(true);" in content
-        assert "surfaceContent.innerHTML = await response.text();" in content
+        assert "surfaceContent.innerHTML = html;" in content
 
     def test_command_palette_infrastructure_in_place(self, app_factory):
         """Global keyboard event listener should  handle command palette triggers."""

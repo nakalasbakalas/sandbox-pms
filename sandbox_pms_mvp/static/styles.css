@@ -5199,6 +5199,59 @@ body:not(.public-site) .hk-counts {
 .board-today-indicator:hover { background: var(--accent); }
 .board-today-indicator:focus-visible { outline: 2px solid var(--accent-soft); outline-offset: 3px; }
 
+/* ── Collapsible room-type group headers ── */
+.planning-board-group {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.planning-board-group::before {
+  content: "▾";
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 0.7em;
+  transition: transform 0.2s;
+}
+.planning-board-group.collapsed::before {
+  transform: rotate(-90deg);
+}
+.planning-board-group:hover {
+  background: rgba(255,255,255,0.06);
+}
+.planning-board-group:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+}
+.group-hidden {
+  display: none !important;
+}
+
+/* ── Collapsible toolbar (legend + row2) ── */
+.board-legend.toolbar-hidden,
+.planning-board-row2.toolbar-hidden {
+  display: none;
+}
+.board-toolbar-toggle[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.18);
+  border-color: rgba(var(--accent-soft-rgb), 0.35);
+  color: var(--accent-soft);
+}
+.board-help-btn {
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+}
+
+/* ── Quick filter no-results indicator ── */
+.planning-board-no-results {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.planning-board-no-results p {
+  margin-bottom: 10px;
+}
+
 /* ── Availability Mini Bar Chart ── */
 .pbs-avail-bar {
   display: block;

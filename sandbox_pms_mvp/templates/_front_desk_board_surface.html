@@ -118,7 +118,7 @@
     </div>
 
     {% for group in board.groups %}
-    <div class="planning-board-group">{{ group.room_type_code }} - {{ group.room_type_name }}</div>
+    <div class="planning-board-group" data-group-id="{{ group.room_type_id }}">{{ group.room_type_code }} - {{ group.room_type_name }}</div>
       {% for row in group.rows %}
       {# Compute per-row balance-due state for JS filter #}
       {% set ns = namespace(has_bal=false) %}
