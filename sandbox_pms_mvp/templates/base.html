@@ -64,6 +64,7 @@
   {% set header_mobile_action_href = '' %}
   {% set header_mobile_action_label = '' %}
   {% set header_current_language_label = language_labels.get(current_language, current_language|upper) %}
+  {% set staff_auth_page = (not is_public_site) and (not staff_logged_in) and request.endpoint in ['auth.staff_login', 'auth.staff_forgot_password', 'auth.staff_reset_password', 'auth.staff_mfa_verify'] %}
   {% if is_public_site %}
     {% set header_mobile_action_href = url_for('public.booking_entry', lang=current_language) %}
     {% set header_mobile_action_label = t('search_title') %}
@@ -78,7 +79,7 @@
     {% set header_mobile_action_href = url_for('provider.provider_bookings') %}
     {% set header_mobile_action_label = 'Search' %}
   {% endif %}
-  <header class="site-header{% if is_public_site %} public-header{% endif %}">
+  <header class="site-header{% if is_public_site %} public-header{% endif %}{% if staff_auth_page %} auth-entry-header{% endif %}">
     <div class="container app-header{% if is_public_site %} public-app-header{% endif %}">
       <div class="header-brand-group">
         <a class="brand{% if is_public_site %} public-brand{% endif %}" href="{{ header_brand_href }}">
@@ -175,9 +176,11 @@
             {{ csrf_input() }}
             <button type="submit" class="header-signout">Sign out</button>
           </form>
-        {% else %}
-          <a class="header-utility-link" href="{{ url_for('auth.staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
-        {% endif %}
+          {% elif not staff_auth_page %}
+            <a class="header-utility-link" href="{{ url_for('auth.staff_login') }}">{{ t('nav_staff_sign_in') }}</a>
+          {% else %}
+            <span class="header-auth-status">Authorized staff only</span>
+          {% endif %}
         {% if header_mobile_action_href %}
           <a class="header-mobile-action" href="{{ header_mobile_action_href }}"{% if is_public_site %} data-analytics-event="cta_click" data-analytics-label="header_search" data-analytics-context="header_nav"{% endif %}>{{ header_mobile_action_label }}</a>
         {% endif %}
