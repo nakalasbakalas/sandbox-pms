@@ -42,6 +42,7 @@ from ..helpers import (
     parse_request_date_arg,
     parse_request_int_arg,
     parse_request_uuid_arg,
+    require_any_permission,
     require_permission,
     require_user,
     safe_back_path,
@@ -1554,6 +1555,7 @@ def staff_front_desk_board_panel_charge(reservation_id):
     from ..services.cashier_service import ManualAdjustmentPayload, post_manual_adjustment
 
     user = require_permission("folio.charge_add")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         post_manual_adjustment(
             reservation_id,
@@ -1568,7 +1570,7 @@ def staff_front_desk_board_panel_charge(reservation_id):
         flash("Charge posted.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(url_for("front_desk.staff_front_desk_board"))
+    return redirect(back_url)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/payment", methods=["POST"])
@@ -1577,6 +1579,7 @@ def staff_front_desk_board_panel_payment(reservation_id):
     from ..services.cashier_service import PaymentPostingPayload, record_payment
 
     user = require_permission("payment.create")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         record_payment(
             reservation_id,
@@ -1590,7 +1593,7 @@ def staff_front_desk_board_panel_payment(reservation_id):
         flash("Payment recorded.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(url_for("front_desk.staff_front_desk_board"))
+    return redirect(back_url)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/note", methods=["POST"])
@@ -1599,6 +1602,7 @@ def staff_front_desk_board_panel_note(reservation_id):
     from ..services.staff_reservations_service import ReservationNotePayload, add_reservation_note
 
     user = require_permission("reservation.edit")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         add_reservation_note(
             reservation_id,
@@ -1613,7 +1617,7 @@ def staff_front_desk_board_panel_note(reservation_id):
         flash("Note added.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(url_for("front_desk.staff_front_desk_board"))
+    return redirect(back_url)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/hk", methods=["POST"])
@@ -1621,11 +1625,12 @@ def staff_front_desk_board_panel_hk(reservation_id):
     """Update housekeeping status from the board panel."""
     from ..services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
 
-    user = require_permission("reservation.edit")
+    user = require_any_permission("housekeeping.edit", "reservation.edit")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     reservation = db.session.get(Reservation, reservation_id) or abort(404)
     if not reservation.assigned_room_id:
         flash("No room assigned.", "error")
-        return redirect(url_for("front_desk.staff_front_desk_board"))
+        return redirect(back_url)
     status_code = request.form.get("status_code", "clean")
     try:
         update_housekeeping_status(
@@ -1637,7 +1642,7 @@ def staff_front_desk_board_panel_hk(reservation_id):
         flash(f"Room marked {status_code.replace('_', ' ')}.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(url_for("front_desk.staff_front_desk_board"))
+    return redirect(back_url)
 
 
 # --- Section: View Routes (walk-in, detail) ---

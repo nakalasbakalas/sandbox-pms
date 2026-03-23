@@ -102,7 +102,7 @@
         </div>
       </div>
       <div class="panel-folio-actions">
-        <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id, back=request.url) }}">Full folio</a>
+        <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id, back=request.full_path) }}">Full folio</a>
       </div>
     </div>
   </details>
@@ -116,6 +116,7 @@
     <div class="panel-collapsible-body">
       <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_charge', reservation_id=reservation.id) }}" class="stack-form compact">
         {{ csrf_input() }}
+        <input type="hidden" name="back_url" value="{{ request.full_path }}">
         <select name="charge_type" required>
           <option value="">Select charge type</option>
           <option value="manual_charge">Room charge</option>
@@ -143,6 +144,7 @@
     <div class="panel-collapsible-body">
       <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_payment', reservation_id=reservation.id) }}" class="stack-form compact">
         {{ csrf_input() }}
+        <input type="hidden" name="back_url" value="{{ request.full_path }}">
         <input type="number" name="amount" step="0.01" min="0" placeholder="Amount" value="{{ "%.2f"|format(balance) }}" required>
         <select name="payment_method" required>
           <option value="cash">Cash</option>
@@ -195,6 +197,7 @@
     <div class="panel-collapsible-body">
       <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_note', reservation_id=reservation.id) }}" class="stack-form compact">
         {{ csrf_input() }}
+        <input type="hidden" name="back_url" value="{{ request.full_path }}">
         <textarea name="note_text" rows="2" placeholder="Internal note..." required></textarea>
         <label class="panel-checkbox"><input type="checkbox" name="is_important" value="on"> Mark important</label>
         <button type="submit" class="button tiny">Save Note</button>
@@ -226,6 +229,7 @@
   </div>
   <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_hk', reservation_id=reservation.id) }}" class="panel-hk-actions">
     {{ csrf_input() }}
+    <input type="hidden" name="back_url" value="{{ request.full_path }}">
     <button type="submit" name="status_code" value="clean" class="button tiny secondary" title="Mark room clean">Clean</button>
     <button type="submit" name="status_code" value="dirty" class="button tiny secondary" title="Mark room dirty">Dirty</button>
     <button type="submit" name="status_code" value="inspected" class="button tiny secondary" title="Mark inspected">Inspected</button>
