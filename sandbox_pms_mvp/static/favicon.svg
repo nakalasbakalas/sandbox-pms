@@ -1,15 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title>Hotel favicon</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="fav-title">
+  <title id="fav-title">Sandbox Hotel</title>
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#c57c35"/>
-      <stop offset="100%" stop-color="#9d5820"/>
+    <linearGradient id="copper" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d4893f"/>
+      <stop offset="100%" stop-color="#a05d22"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="16" fill="#0b0d11"/>
-  <rect x="6" y="6" width="52" height="52" rx="14" fill="url(#g)"/>
-  <path d="M20 18h24v28H20z" fill="#fff" opacity="0.14"/>
-  <path d="M24 20h16v24H24z" fill="#fff"/>
-  <path d="M28 24h8v8h-8z" fill="#9d5820"/>
-  <path d="M31 36h4v8h-4z" fill="#9d5820"/>
+  <!-- Dark background -->
+  <rect width="64" height="64" rx="9" fill="#141210"/>
+  <!-- Outer square frame -->
+  <rect x="7" y="7" width="50" height="50" rx="1.5" fill="none" stroke="url(#copper)" stroke-width="2.5"/>
+  <!-- Horizontal crossbar at ~60% of frame height -->
+  <line x1="7" y1="38" x2="57" y2="38" stroke="url(#copper)" stroke-width="2.5" stroke-linecap="square"/>
+  <!-- Diagonal slope from bottom-left of frame up to crossbar -->
+  <line x1="7" y1="57" x2="21" y2="38" stroke="url(#copper)" stroke-width="2.5" stroke-linecap="square"/>
+  <!-- Primary dune arch: left frame+crossbar to center-right -->
+  <path d="M7 38 Q31 17 40 38" fill="none" stroke="url(#copper)" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- Secondary dune arch: center to right edge -->
+  <path d="M40 38 Q49 26 57 31" fill="none" stroke="url(#copper)" stroke-width="2.5" stroke-linecap="round"/>
 </svg>

@@ -1,22 +1,82 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
-  <title id="title">Sandbox Hotel share image</title>
-  <desc id="desc">Brand share image for hotel search and booking pages.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="share-title share-desc">
+  <title id="share-title">Sandbox Hotel</title>
+  <desc id="share-desc">Direct hotel booking for discerning guests.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0a0c10"/>
-      <stop offset="100%" stop-color="#11324d"/>
+    <linearGradient id="bg-grad" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0b0907"/>
+      <stop offset="60%" stop-color="#1a1410"/>
+      <stop offset="100%" stop-color="#221a13"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#c57c35"/>
-      <stop offset="100%" stop-color="#9d5820"/>
+    <linearGradient id="copper-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d4893f"/>
+      <stop offset="100%" stop-color="#a05d22"/>
     </linearGradient>
+    <linearGradient id="copper-h" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d4893f"/>
+      <stop offset="100%" stop-color="#a05d22"/>
+    </linearGradient>
+    <!-- Copper glow for mark -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
   </defs>
-  <rect width="1200" height="630" fill="url(#bg)"/>
-  <circle cx="170" cy="120" r="180" fill="#c57c35" fill-opacity="0.12"/>
-  <circle cx="1030" cy="520" r="220" fill="#f0c89a" fill-opacity="0.08"/>
-  <rect x="90" y="120" width="126" height="126" rx="30" fill="url(#accent)"/>
-  <text x="153" y="198" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="48" font-weight="700" fill="#ffffff">SBX</text>
-  <text x="90" y="320" font-family="Segoe UI, Arial, sans-serif" font-size="72" font-weight="700" fill="#eef2f7">Sandbox Hotel</text>
-  <text x="90" y="390" font-family="Segoe UI, Arial, sans-serif" font-size="30" fill="#d7dee8">Direct booking. Secure guest links. Multilingual reservation flow.</text>
-  <text x="90" y="450" font-family="Segoe UI, Arial, sans-serif" font-size="24" fill="#f0c89a">Search availability, confirm stays, and manage guest requests.</text>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg-grad)"/>
+
+  <!-- Subtle warm texture circles -->
+  <circle cx="900" cy="80"  r="340" fill="#C57C35" fill-opacity="0.06"/>
+  <circle cx="1100" cy="580" r="260" fill="#C57C35" fill-opacity="0.04"/>
+  <circle cx="80"   cy="560" r="200" fill="#C57C35" fill-opacity="0.03"/>
+
+  <!-- Horizontal rule -->
+  <line x1="72" y1="186" x2="520" y2="186" stroke="url(#copper-h)" stroke-width="1.5" stroke-opacity="0.45"/>
+
+  <!-- === Brand mark (dune icon in square frame) centered-left === -->
+  <!-- Frame -->
+  <rect x="72" y="210" width="192" height="192" rx="6"
+        fill="none" stroke="url(#copper-grad)" stroke-width="6" filter="url(#glow)"/>
+  <!-- Crossbar at 60% -->
+  <line x1="72" y1="325" x2="264" y2="325"
+        stroke="url(#copper-h)" stroke-width="6" stroke-linecap="square"/>
+  <!-- Diagonal slope -->
+  <line x1="72" y1="402" x2="126" y2="325"
+        stroke="url(#copper-grad)" stroke-width="6" stroke-linecap="square"/>
+  <!-- Primary dune arch -->
+  <path d="M72 325 Q168 248 222 325"
+        fill="none" stroke="url(#copper-grad)" stroke-width="6" stroke-linecap="round"/>
+  <!-- Secondary dune arch -->
+  <path d="M222 325 Q246 292 264 302"
+        fill="none" stroke="url(#copper-grad)" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- === Wordmark === -->
+  <!-- SANDBOX -->
+  <text x="300" y="293"
+        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="98" font-weight="700" letter-spacing="18"
+        fill="url(#copper-grad)">SANDBOX</text>
+  <!-- HOTEL -->
+  <text x="306" y="355"
+        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="46" font-weight="300" letter-spacing="28"
+        fill="#C9986A">HOTEL</text>
+
+  <!-- Divider -->
+  <line x1="72" y1="432" x2="520" y2="432" stroke="url(#copper-h)" stroke-width="1" stroke-opacity="0.35"/>
+
+  <!-- Tagline -->
+  <text x="72" y="472"
+        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="26" font-weight="300" letter-spacing="3"
+        fill="#b89070">Direct booking · Secure guest links · Multilingual reservations</text>
+
+  <!-- Large decorative dune mark (watermark right side) -->
+  <g transform="translate(680, 90) scale(2.4)" opacity="0.07" stroke="#C57C35" fill="none" stroke-width="5">
+    <rect x="7" y="7" width="186" height="186" rx="5"/>
+    <line x1="7"  y1="130" x2="193" y2="130"/>
+    <line x1="7"  y1="193" x2="58"  y2="130"/>
+    <path d="M7 130 Q100 64 154 130"/>
+    <path d="M154 130 Q174 100 193 112"/>
+  </g>
 </svg>
