@@ -919,6 +919,7 @@ def test_public_pages_render_seo_metadata_contact_links_and_json_ld(app_factory)
     assert ("tel:" in body) or ("mailto:" in body)
     assert "mailto:" in body
     assert 'property="og:image"' in body
+    assert 'property="og:image" content="http' in body
 
 
 def test_public_pages_render_analytics_and_consent_hooks(app_factory):

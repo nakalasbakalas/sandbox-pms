@@ -964,7 +964,7 @@
       case "vacant":      return track.dataset.isVacant === "true";
       case "arrival":     return track.dataset.hasArrivalToday === "true";
       case "departure":   return track.dataset.hasDepartureToday === "true";
-      case "maintenance": return track.dataset.isMaintenance === "true";
+      case "maintenance": return track.dataset.isMaintenance === "true" || track.dataset.isBlocked === "true";
       case "unallocated": return track.dataset.laneKind === "unallocated";
       case "in-house":    return track.dataset.isOccupied === "true";
       case "stayover":    return track.dataset.isStayover === "true";
@@ -1460,7 +1460,7 @@
       case "N":
         if (createBaseUrl && canEdit) {
           event.preventDefault();
-          window.location.href = createBaseUrl + "?back=" + encodeURIComponent(window.location.href);
+          window.location.href = createBaseUrl + "?back=" + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
         }
         break;
       case "a":
@@ -1821,10 +1821,6 @@
       const days = parseInt(grid.dataset.boardDays, 10);
       if (!startDateAttr || !days) return;
 
-      // Get day headers to figure out column widths
-      const dayHeaders = grid.querySelectorAll(".planning-board-days .planning-board-day");
-      if (!dayHeaders.length) return;
-
       // Determine click position relative to the track
       const rect = track.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
@@ -1832,13 +1828,21 @@
       const colWidth = trackWidth / days;
       const colIndex = Math.max(0, Math.min(days - 1, Math.floor(clickX / colWidth)));
 
+      // Format a Date as YYYY-MM-DD using local time (avoids UTC shift from toISOString)
+      function formatDateLocal(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return year + "-" + month + "-" + day;
+      }
+
       // Compute date from column
       const startDate = new Date(startDateAttr + "T00:00:00");
       startDate.setDate(startDate.getDate() + colIndex);
-      const checkIn = startDate.toISOString().slice(0, 10);
+      const checkIn = formatDateLocal(startDate);
       const nextDay = new Date(startDate);
       nextDay.setDate(nextDay.getDate() + 1);
-      const checkOut = nextDay.toISOString().slice(0, 10);
+      const checkOut = formatDateLocal(nextDay);
 
       // Navigate to reservation create form with pre-filled params
       const params = new URLSearchParams({
@@ -1848,7 +1852,7 @@
         room_type_id: roomTypeId,
         source_channel: "admin_manual",
         status: "confirmed",
-        back: window.location.href,
+        back: window.location.pathname + window.location.search + window.location.hash,
       });
       window.location.href = createBaseUrl + "?" + params.toString();
     });

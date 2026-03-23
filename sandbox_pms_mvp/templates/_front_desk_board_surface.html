@@ -160,6 +160,7 @@
         data-hk-status="{{ row.housekeeping_status or '' }}"
         data-is-occupied="{{ 'true' if row.is_occupied else 'false' }}"
         data-is-maintenance="{{ 'true' if row.is_maintenance else 'false' }}"
+        data-is-blocked="{{ 'true' if row.is_blocked else 'false' }}"
         data-has-arrival-today="{{ 'true' if row.has_arrival_today else 'false' }}"
         data-has-departure-today="{{ 'true' if row.has_departure_today else 'false' }}"
         data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"
