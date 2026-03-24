@@ -93,7 +93,7 @@ from .models import (
 from .pricing import get_setting_value
 from .permissions import default_dashboard_endpoint_for_user
 from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message
-from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
+from .seeds import bootstrap_inventory_horizon, clear_operational_data, seed_all, seed_reference_data, seed_roles_permissions
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .helpers import (
     absolute_public_url,
@@ -836,6 +836,24 @@ def register_cli(app: Flask) -> None:
         bootstrap_inventory_horizon(date.today(), app.config["INVENTORY_BOOTSTRAP_DAYS"])
         db.session.commit()
         print("Inventory horizon bootstrapped.")
+
+    @app.cli.command("clear-operational-data")
+    @click.option("--confirm", is_flag=True, default=False, help="Must pass --confirm to execute the clear.")
+    def clear_operational_data_command(confirm: bool) -> None:
+        """Remove all guest/booking/folio operational data while preserving accounts and config.
+
+        This is irreversible. Pass --confirm to proceed.
+        """
+        if not confirm:
+            print("ERROR: This command permanently deletes all guest and reservation data.")
+            print("Pass --confirm to execute.")
+            return
+        counts = clear_operational_data()
+        removed = sum(v for k, v in counts.items() if not k.endswith("_reset"))
+        print(f"Operational data cleared. {removed} rows removed across {len(counts)} tables.")
+        for table, count in counts.items():
+            if count:
+                print(f"  {table}: {count}")
 
     @app.cli.command("process-notifications")
     def process_notifications_command() -> None:
