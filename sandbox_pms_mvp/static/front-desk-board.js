@@ -2110,4 +2110,81 @@
     });
   }
 
+  /* ── Hover card for booking blocks ── */
+  (function initHoverCard() {
+    const hoverCard = document.getElementById("board-hover-card");
+    if (!hoverCard) return;
+    let hoverTimer = null;
+    let currentBlock = null;
+    const HOVER_DELAY = 280;
+
+    function showHoverCard(blockEl, evt) {
+      const d = blockEl.dataset;
+      const status = d.hoverStatus || "";
+      const statusLabel = status.replace(/_/g, " ");
+      let html = "";
+      html += '<div class="board-hover-card-guest">' + escapeHtml(d.hoverGuest || "") + "</div>";
+      if (d.hoverCode) html += '<div class="board-hover-card-code">' + escapeHtml(d.hoverCode) + "</div>";
+      html += '<dl class="board-hover-card-meta">';
+      html += "<dt>Dates</dt><dd>" + escapeHtml(d.hoverDates || "") + "</dd>";
+      html += "<dt>Room</dt><dd>" + escapeHtml(d.hoverRoom || "") + "</dd>";
+      html += "</dl>";
+      html += '<span class="board-hover-card-status status-' + escapeHtml(status) + '">' + escapeHtml(statusLabel) + "</span>";
+      const flags = [];
+      if (d.hoverBalance) flags.push('<span class="board-hover-card-flag flag-balance">Balance: ' + escapeHtml(d.hoverBalance) + "</span>");
+      if (d.hoverReady === "true") flags.push('<span class="board-hover-card-flag flag-ready">Room Ready</span>');
+      if (d.hoverVip === "true") flags.push('<span class="board-hover-card-flag flag-vip">VIP</span>');
+      if (d.hoverSpecial === "true") flags.push('<span class="board-hover-card-flag flag-special">★ Special Requests</span>');
+      if (flags.length) html += '<div class="board-hover-card-flags">' + flags.join("") + "</div>";
+      hoverCard.innerHTML = html;
+      positionHoverCard(evt);
+      hoverCard.classList.add("visible");
+    }
+
+    function positionHoverCard(evt) {
+      const pad = 12;
+      hoverCard.style.left = "0px";
+      hoverCard.style.top = "0px";
+      const rect = hoverCard.getBoundingClientRect();
+      let x = evt.clientX + pad;
+      let y = evt.clientY + pad;
+      if (x + rect.width > window.innerWidth - pad) x = evt.clientX - rect.width - pad;
+      if (y + rect.height > window.innerHeight - pad) y = evt.clientY - rect.height - pad;
+      hoverCard.style.left = Math.max(0, x) + "px";
+      hoverCard.style.top = Math.max(0, y) + "px";
+    }
+
+    function hideHoverCard() {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+      currentBlock = null;
+      hoverCard.classList.remove("visible");
+    }
+
+    function escapeHtml(str) {
+      const el = document.createElement("span");
+      el.textContent = str;
+      return el.innerHTML;
+    }
+
+    surface.addEventListener("mouseover", function (e) {
+      const blockEl = e.target.closest("[data-board-block]");
+      if (!blockEl || blockEl.open) { hideHoverCard(); return; }
+      if (blockEl === currentBlock) return;
+      clearTimeout(hoverTimer);
+      currentBlock = blockEl;
+      hoverTimer = setTimeout(function () { showHoverCard(blockEl, e); }, HOVER_DELAY);
+    });
+
+    surface.addEventListener("mousemove", function (e) {
+      if (hoverCard.classList.contains("visible")) {
+        positionHoverCard(e);
+      }
+    });
+
+    surface.addEventListener("mouseleave", hideHoverCard);
+    surface.addEventListener("mousedown", hideHoverCard);
+    surface.addEventListener("scroll", hideHoverCard, true);
+  })();
+
 })();
