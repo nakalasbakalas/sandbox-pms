@@ -82,8 +82,10 @@
   --pms-section-gap: 8px;
   --pms-page-pad-top: 2px;
   --pms-page-pad-bottom: 10px;
+  --pms-page-gutter: 8px;
   --pms-chip-height: 20px;
   --pms-modal-pad: 10px 14px;
+  --pms-dashboard-star-size: 0.82rem;
 
   /* Minimal rounding */
   --pms-radius: 4px;
@@ -3574,7 +3576,7 @@ body:not(.public-site) .shell {
   padding: var(--pms-page-pad-top) 0 var(--pms-page-pad-bottom);
 }
 body:not(.public-site) .container {
-  width: min(var(--container), calc(100% - 16px));
+  width: min(var(--container), calc(100% - (2 * var(--pms-page-gutter))));
 }
 
 /* ── Site header for staff ── */
@@ -3949,7 +3951,7 @@ body:not(.public-site) .dashboard-survey-value {
 }
 body:not(.public-site) .dashboard-survey-star {
   color: #f5a623;
-  font-size: 0.82rem;
+  font-size: var(--pms-dashboard-star-size);
 }
 body:not(.public-site) .dashboard-survey-distribution {
   margin-bottom: 4px;
