@@ -105,6 +105,7 @@ from ..services.pre_checkin_service import (
     fire_pre_checkin_not_completed_events,
 )
 from ..services.storage import get_storage_backend
+from ..seeds import clear_operational_data
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +634,13 @@ def staff_admin_operations():
                 actor = helpers["require_permission"]("settings.edit")
                 result = reset_notification_templates_to_defaults(actor_user_id=actor.id)
                 flash(f"Templates reset to defaults: {result['updated']} updated, {result['created']} created.", "success")
+                return redirect(url_for("admin.staff_admin_operations"))
+            elif action == "clear_operational_data":
+                actor = helpers["require_permission"]("settings.edit")
+                helpers["require_admin_role"](actor)
+                counts = clear_operational_data()
+                removed = sum(v for k, v in counts.items() if not k.endswith("_reset"))
+                flash(f"All reservations and guest data cleared. {removed} rows removed.", "success")
                 return redirect(url_for("admin.staff_admin_operations"))
             elif action == "housekeeping_defaults":
                 actor = helpers["require_permission"]("settings.edit")
