@@ -1428,7 +1428,7 @@ tbody tr:last-child td { border-bottom: 0; }
   min-width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: clip;
   position: relative;
   background: rgba(255,255,255,0.02);
 }
@@ -4479,11 +4479,26 @@ body:not(.public-site) .planning-board-search-inline input::placeholder {
   color: var(--pms-text-muted);
 }
 
+/* board skeleton on light bg */
+body:not(.public-site) .planning-board-skeleton {
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,249,250,0.94));
+}
+body:not(.public-site) .planning-board-skeleton-strip span,
+body:not(.public-site) .planning-board-skeleton-room,
+body:not(.public-site) .planning-board-skeleton-track {
+  background: rgba(0,0,0,0.05);
+}
+body:not(.public-site) .planning-board-skeleton-strip span::after,
+body:not(.public-site) .planning-board-skeleton-room::after,
+body:not(.public-site) .planning-board-skeleton-track::after {
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,0.06), transparent);
+}
+
 /* board room grid on light bg */
 body:not(.public-site) .planning-board-grid {
   border: 1px solid var(--pms-border-thin);
   border-radius: 3px;
-  overflow: hidden;
+  overflow: clip;
   background: #fff;
 }
 body:not(.public-site) .planning-board-room {
