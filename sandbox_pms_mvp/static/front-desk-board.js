@@ -498,7 +498,19 @@
 
   function onSurfaceClick(event) {
     const summary = resolveSummaryTarget(event.target);
+    const reservationBlock =
+      event.target instanceof Element && !event.target.closest(".planning-board-popover")
+        ? event.target.closest("[data-board-block][data-reservation-id]")
+        : null;
     if (!summary) {
+      if (reservationBlock) {
+        selectBlock(reservationBlock);
+        reservationBlock.removeAttribute("open");
+        event.preventDefault();
+        event.stopPropagation();
+        openPanel(reservationBlock);
+        return;
+      }
       // Clicking empty space on the board clears selection (but not on
       // command strip or other non-block elements)
       if (event.target.closest("[data-board-track]") && !event.target.closest("[data-board-block]")) {
@@ -525,7 +537,9 @@
     // Single click on reservation blocks opens side panel directly
     // for fast check-in/check-out without leaving the board
     if (block.dataset.reservationId) {
+      block.removeAttribute("open");
       event.preventDefault(); // Prevent <details> toggle
+      event.stopPropagation();
       openPanel(block);
       return;
     }
