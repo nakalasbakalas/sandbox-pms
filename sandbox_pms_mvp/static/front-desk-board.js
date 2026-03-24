@@ -1660,6 +1660,24 @@
         event.preventDefault();
         showKeyboardHelp();
         break;
+      case "t":
+      case "T":
+        event.preventDefault();
+        scrollToToday("smooth");
+        break;
+      case "1":
+      case "2":
+      case "3": {
+        // Switch day range: 1→7d, 2→14d, 3→30d
+        const dayRanges = { "1": "7", "2": "14", "3": "30" };
+        const targetDays = dayRanges[event.key];
+        const dayTab = root.querySelector(`.board-days-tab[href*="days=${targetDays}"]`);
+        if (dayTab) {
+          event.preventDefault();
+          dayTab.click();
+        }
+        break;
+      }
       case "n":
       case "N":
         if (createBaseUrl && canEdit) {
