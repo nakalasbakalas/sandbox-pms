@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, timedelta
 
 from werkzeug.security import generate_password_hash
@@ -1561,8 +1562,8 @@ class TestBoardKeyboardSelection:
         assert response.status_code == 200
         css = response.get_data(as_text=True)
         assert ".planning-board-room:has(+ .planning-board-track:hover)" in css
-        assert '.planning-board-grid[data-board-days="30"].density-compact .planning-board-room { min-height: 18px;' in css
-        assert '.planning-board-grid[data-board-days="30"].density-compact .planning-board-block > summary { min-height: 17px;' in css
+        assert re.search(r'\.planning-board-grid\[data-board-days="30"\]\.density-compact \.planning-board-room \{[^}]*min-height: 18px;', css, re.S)
+        assert re.search(r'\.planning-board-grid\[data-board-days="30"\]\.density-compact \.planning-board-block > summary \{[^}]*min-height: 17px;', css, re.S)
         assert ".board-hover-card-meta dd" in css
 
     def test_static_assets_send_cache_headers(self, app_factory):
