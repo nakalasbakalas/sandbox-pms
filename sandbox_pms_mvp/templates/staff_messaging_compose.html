@@ -19,14 +19,14 @@
     {% endif %}
 
     {% if guest %}
-    <div class="context-block" style="margin-bottom:1rem;padding:1rem;background:#f8f9fa;border-radius:8px">
+    <div class="context-block">
       <strong>Guest:</strong> {{ guest.full_name }}
       {% if guest.phone %} | 📱 {{ guest.phone }}{% endif %}
       {% if guest.email %} | ✉️ {{ guest.email }}{% endif %}
     </div>
     {% endif %}
     {% if reservation %}
-    <div class="context-block" style="margin-bottom:1rem;padding:1rem;background:#f8f9fa;border-radius:8px">
+    <div class="context-block">
       <strong>Reservation:</strong> {{ reservation.reservation_code }}
       | {{ reservation.current_status.replace('_', ' ').title() }}
       | {{ reservation.check_in_date }} → {{ reservation.check_out_date }}
