@@ -3,9 +3,9 @@
 {% block content %}
 {% set mode = workspace.mode %}
 <section class="card">
-  <div style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:wrap; margin-bottom:4px;">
-    <div style="display:flex; align-items:center; gap:6px;">
-      <h1 style="margin:0;">Front desk workspace</h1>
+  <div class="ops-page-header">
+    <div class="ops-title-group">
+      <h1>Front desk workspace</h1>
       <div class="actions" style="margin:0;">
         <a class="button secondary tiny" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
         <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
@@ -24,9 +24,9 @@
   <form class="toolbar subsection" method="get">
     <input type="hidden" name="mode" value="{{ mode }}">
     <label><span>Date</span><input type="date" name="date" value="{{ workspace.business_date.isoformat() }}"></label>
-    <label><span>Room type</span><select name="room_type_id"><option value="">All</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }}</option>{% endfor %}</select></label>
-    <label><span>Assigned</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if filters.assigned == 'assigned' %}selected{% endif %}>Yes</option><option value="unassigned" {% if filters.assigned == 'unassigned' %}selected{% endif %}>No</option></select></label>
-    <label><span>Ready</span><select name="ready"><option value="">Any</option><option value="ready" {% if filters.ready == 'ready' %}selected{% endif %}>Ready</option><option value="not_ready" {% if filters.ready == 'not_ready' %}selected{% endif %}>Not ready</option></select></label>
+    <label><span>Room type</span><select name="room_type_id" title="Filter by room type"><option value="">All</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if filters.room_type_id == room_type.id|string %}selected{% endif %}>{{ room_type.code }}</option>{% endfor %}</select></label>
+    <label><span>Assigned</span><select name="assigned" title="Filter by room assignment"><option value="">Any</option><option value="assigned" {% if filters.assigned == 'assigned' %}selected{% endif %}>Yes</option><option value="unassigned" {% if filters.assigned == 'unassigned' %}selected{% endif %}>No</option></select></label>
+    <label><span>Ready</span><select name="ready" title="Filter by room readiness"><option value="">Any</option><option value="ready" {% if filters.ready == 'ready' %}selected{% endif %}>Ready</option><option value="not_ready" {% if filters.ready == 'not_ready' %}selected{% endif %}>Not ready</option></select></label>
     <label><span>Deposit</span><select name="payment_state"><option value="">Any</option><option value="missing" {% if filters.payment_state == 'missing' %}selected{% endif %}>Missing</option><option value="partial" {% if filters.payment_state == 'partial' %}selected{% endif %}>Partial</option><option value="paid" {% if filters.payment_state == 'paid' %}selected{% endif %}>Paid</option></select></label>
     <label><span>Source</span><select name="booking_source"><option value="">Any</option>{% for code in booking_sources %}<option value="{{ code }}" {% if filters.booking_source == code %}selected{% endif %}>{{ code.replace('_', ' ') }}</option>{% endfor %}</select></label>
     <label><span>Issues</span><select name="flagged"><option value="">Any</option><option value="issues" {% if filters.flagged == 'issues' %}selected{% endif %}>Flagged</option></select></label>
@@ -110,11 +110,11 @@
 
   {% if can_create and can_check_in %}
   <details class="card walkin-drawer">
-    <summary class="walkin-drawer-toggle" style="cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center;">
+    <summary class="ops-collapsible-summary walkin-drawer-toggle">
       <h2 style="margin:0;">Walk-in check-in</h2>
-      <span style="font-size:11px; color:var(--pms-text-muted);">▼</span>
+      <span class="ops-collapse-indicator" aria-hidden="true">▼</span>
     </summary>
-    <div class="walkin-drawer-body" style="margin-top:6px;">
+    <div class="ops-drawer-body">
     <form class="stack-form compact-form" method="post" action="{{ url_for('front_desk.staff_front_desk_walk_in') }}">
       {{ csrf_input() }}
       <input type="hidden" name="back_mode" value="{{ mode }}">

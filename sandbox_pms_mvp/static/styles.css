@@ -3774,6 +3774,56 @@ body:not(.public-site) .metric-card.zero-value,
 body:not(.public-site) .metric-strip .zero-value {
   opacity: 0.5;
 }
+/* Reusable compact layout helpers */
+body:not(.public-site) .ops-page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+body:not(.public-site) .ops-page-header .ops-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+body:not(.public-site) .ops-page-header .ops-title-group h1 {
+  margin: 0;
+}
+body:not(.public-site) .ops-meta {
+  font-size: 11px;
+  color: var(--pms-text-muted);
+}
+body:not(.public-site) .ops-header-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--pms-text-muted);
+}
+body:not(.public-site) .ops-collapsible-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+body:not(.public-site) .ops-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+body:not(.public-site) .ops-collapse-indicator {
+  font-size: 9px;
+  color: var(--pms-text-muted);
+  transition: transform 0.15s;
+}
+body:not(.public-site) details[open] > .ops-collapsible-summary .ops-collapse-indicator {
+  transform: rotate(180deg);
+}
+body:not(.public-site) .ops-drawer-body {
+  margin-top: 6px;
+}
+body:not(.public-site) .count-danger {
+  color: var(--pms-status-danger);
+}
 /* Walk-in drawer: collapsed by default on front desk */
 body:not(.public-site) .walkin-drawer-toggle {
   cursor: pointer;

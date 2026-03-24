@@ -47,10 +47,10 @@
   </div>
 
   {# ── Board Legend (collapsible) ── #}
-  <details class="board-legend" style="cursor:pointer;">
-    <summary style="list-style:none; display:flex; align-items:center; gap:6px;">
+  <details class="board-legend">
+    <summary class="ops-collapsible-summary">
       <strong style="font-size:10px; color:var(--pms-text-secondary);">Legend</strong>
-      <span style="font-size:9px; color:var(--pms-text-muted);">▼</span>
+      <span class="ops-collapse-indicator" aria-hidden="true">▼</span>
     </summary>
     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
       <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
