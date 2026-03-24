@@ -24,20 +24,51 @@ from .constants import (
 from .extensions import db
 from .models import (
     AppSetting,
+    AuditLog,
+    ActivityLog,
     AutomationRule,
     BlackoutPeriod,
+    CancellationRequest,
+    CashierActivityLog,
+    CashierDocument,
+    ConversationThread,
+    DeliveryAttempt,
+    EmailOutbox,
+    ExternalCalendarBlock,
+    ExternalCalendarSyncRun,
+    FolioCharge,
     Guest,
+    GuestLoyalty,
+    GuestNote,
+    GuestSurvey,
     HousekeepingStatus,
+    HousekeepingTask,
     InventoryDay,
+    Message,
     MessageTemplate,
+    ModificationRequest,
+    NotificationDelivery,
     NotificationTemplate,
+    PaymentEvent,
+    PaymentRequest,
+    PendingAutomationEvent,
     Permission,
     PolicyDocument,
+    PreCheckIn,
     RateRule,
     Reservation,
+    ReservationCodeSequence,
+    ReservationDocument,
+    ReservationExtra,
+    ReservationHold,
+    ReservationNote,
+    ReservationReviewQueue,
+    ReservationStatusHistory,
     Role,
     Room,
+    RoomStatusHistory,
     RoomType,
+    StaffNotification,
     User,
     utc_now,
 )
@@ -45,10 +76,10 @@ from .services.auth_service import hash_password
 from .settings import APP_SETTINGS_SEED, AUTOMATION_RULES_SEED, MESSAGE_TEMPLATES_SEED, NOTIFICATION_TEMPLATES_SEED, POLICY_DOCUMENTS_SEED
 
 
-def seed_all(inventory_days: int = 730) -> None:
+def seed_all(inventory_days: int = 730, *, include_demo_data: bool = False) -> None:
     seed_reference_data(sync_existing_roles=True)
     bootstrap_inventory_horizon(date.today(), inventory_days)
-    if not _is_demo_data_already_seeded():
+    if include_demo_data and not _is_demo_data_already_seeded():
         seed_demo_guests_and_reservations()
     db.session.commit()
 
@@ -494,6 +525,206 @@ def bootstrap_inventory_horizon(start_date: date, days: int) -> None:
             )
 
 
+def clear_operational_data() -> dict[str, int]:
+    """Remove all guest/booking operational data while preserving accounts and configuration.
+
+    Deletes in FK-safe order:
+    - All reservations and their dependents (folios, payments, documents, notes, etc.)
+    - All guests and their dependents (notes, loyalty)
+    - All imported channel/OTA sync data (external calendar blocks and sync runs)
+    - All messaging conversation threads, messages, and delivery attempts
+    - All housekeeping tasks and room status history tied to stays
+    - Audit and activity log entries scoped to the removed entities
+
+    Preserves:
+    - User accounts, roles, permissions
+    - Rooms, room types, rate rules, app settings
+    - Hotel configuration (policies, templates, notification templates)
+    - Inventory day grid (reset to clean/available state)
+    - OTA channel configs and external calendar source configs
+
+    Returns a dict of table → row count deleted.
+    """
+    counts: dict[str, int] = {}
+
+    def _del(model: type, stmt: sa.delete | None = None) -> int:
+        if stmt is None:
+            stmt = sa.delete(model)
+        result = db.session.execute(stmt)
+        return result.rowcount
+
+    # ── 1. Automation event queue ──────────────────────────────────────────
+    counts["pending_automation_events"] = _del(PendingAutomationEvent)
+
+    # ── 2. Post-stay surveys ───────────────────────────────────────────────
+    counts["guest_surveys"] = _del(GuestSurvey)
+
+    # ── 3. Pre-check-in forms ──────────────────────────────────────────────
+    counts["pre_check_ins"] = _del(PreCheckIn)
+
+    # ── 4. Reservation documents / scanned IDs ────────────────────────────
+    counts["reservation_documents"] = _del(ReservationDocument)
+
+    # ── 5. Message delivery attempts (child of messages) ──────────────────
+    counts["delivery_attempts"] = _del(DeliveryAttempt)
+
+    # ── 6. Messages (child of conversation threads) ───────────────────────
+    counts["messages"] = _del(Message)
+
+    # ── 7. Conversation threads ────────────────────────────────────────────
+    counts["conversation_threads"] = _del(ConversationThread)
+
+    # ── 8. Notification deliveries ─────────────────────────────────────────
+    counts["notification_deliveries"] = _del(NotificationDelivery)
+
+    # ── 9. Payment events (child of payment requests) ─────────────────────
+    counts["payment_events"] = _del(PaymentEvent)
+
+    # ── 10. Payment requests (RESTRICT FK from reservations) ───────────────
+    counts["payment_requests"] = _del(PaymentRequest)
+
+    # ── 11. Cashier activity log ───────────────────────────────────────────
+    counts["cashier_activity_log"] = _del(CashierActivityLog)
+
+    # ── 12. Cashier documents (RESTRICT FK from reservations) ─────────────
+    counts["cashier_documents"] = _del(CashierDocument)
+
+    # ── 13. Folio charges — break self-referential reversal FK first ───────
+    db.session.execute(sa.update(FolioCharge).values(reversed_charge_id=None))
+    counts["folio_charges"] = _del(FolioCharge)
+
+    # ── 14. Reservation extras ─────────────────────────────────────────────
+    counts["reservation_extras"] = _del(ReservationExtra)
+
+    # ── 15. Modification requests ──────────────────────────────────────────
+    counts["modification_requests"] = _del(ModificationRequest)
+
+    # ── 16. Cancellation requests ──────────────────────────────────────────
+    counts["cancellation_requests"] = _del(CancellationRequest)
+
+    # ── 17. Staff notifications ────────────────────────────────────────────
+    counts["staff_notifications"] = _del(StaffNotification)
+
+    # ── 18. Email outbox ───────────────────────────────────────────────────
+    counts["email_outbox"] = _del(EmailOutbox)
+
+    # ── 19. Reservation review queue ───────────────────────────────────────
+    counts["reservation_review_queue"] = _del(ReservationReviewQueue)
+
+    # ── 20. Reservation status history ────────────────────────────────────
+    counts["reservation_status_history"] = _del(ReservationStatusHistory)
+
+    # ── 21. Reservation notes ──────────────────────────────────────────────
+    counts["reservation_notes"] = _del(ReservationNote)
+
+    # ── 22. Housekeeping tasks ─────────────────────────────────────────────
+    counts["housekeeping_tasks"] = _del(HousekeepingTask)
+
+    # ── 23. Room status history ────────────────────────────────────────────
+    counts["room_status_history"] = _del(RoomStatusHistory)
+
+    # ── 24. Imported external calendar blocks ─────────────────────────────
+    counts["external_calendar_blocks"] = _del(ExternalCalendarBlock)
+
+    # ── 25. External calendar sync run logs ───────────────────────────────
+    counts["external_calendar_sync_runs"] = _del(ExternalCalendarSyncRun)
+
+    # ── 26. Reset InventoryDay rows: release reservations and holds ────────
+    clean_status = db.session.execute(
+        sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "clean")
+    ).scalar_one_or_none()
+    oos_status = db.session.execute(
+        sa.select(HousekeepingStatus).where(HousekeepingStatus.code == "out_of_service")
+    ).scalar_one_or_none()
+
+    # Reset all sellable inventory days to available/clean
+    if clean_status:
+        db.session.execute(
+            sa.update(InventoryDay)
+            .where(InventoryDay.is_sellable == sa.true())
+            .values(
+                reservation_id=None,
+                hold_id=None,
+                availability_status="available",
+                housekeeping_status_id=clean_status.id,
+                is_blocked=False,
+                blocked_reason=None,
+                blocked_at=None,
+                blocked_until=None,
+                blocked_by_user_id=None,
+                maintenance_flag=False,
+                maintenance_note=None,
+                maintenance_flagged_at=None,
+                maintenance_flagged_by_user_id=None,
+                cleaned_at=None,
+                inspected_at=None,
+                nightly_rate=None,
+            )
+        )
+    # Reset non-sellable inventory days (out_of_service rooms)
+    if oos_status:
+        db.session.execute(
+            sa.update(InventoryDay)
+            .where(InventoryDay.is_sellable == sa.false())
+            .values(
+                reservation_id=None,
+                hold_id=None,
+                availability_status="out_of_service",
+                housekeeping_status_id=oos_status.id,
+                is_blocked=False,
+                blocked_reason=None,
+                blocked_at=None,
+                blocked_until=None,
+                blocked_by_user_id=None,
+                maintenance_flag=False,
+                maintenance_note=None,
+                maintenance_flagged_at=None,
+                maintenance_flagged_by_user_id=None,
+                cleaned_at=None,
+                inspected_at=None,
+                nightly_rate=None,
+            )
+        )
+
+    # ── 27. Reservation holds (InventoryDay.hold_id now nulled above) ──────
+    counts["reservation_holds"] = _del(ReservationHold)
+
+    # ── 28. Reservations (all RESTRICT dependents now cleared) ────────────
+    counts["reservations"] = _del(Reservation)
+
+    # ── 29. Guest notes ────────────────────────────────────────────────────
+    counts["guest_notes"] = _del(GuestNote)
+
+    # ── 30. Guest loyalty records ──────────────────────────────────────────
+    counts["guest_loyalties"] = _del(GuestLoyalty)
+
+    # ── 31. Guests ─────────────────────────────────────────────────────────
+    counts["guests"] = _del(Guest)
+
+    # ── 32. Reset booking/cashier document sequences ───────────────────────
+    seq_result = db.session.execute(
+        sa.update(ReservationCodeSequence).values(next_value=1)
+    )
+    counts["reservation_code_sequence_reset"] = seq_result.rowcount
+
+    # ── 33. Audit and activity log entries for removed entities ───────────
+    # Derive the set of entity-table names from every table we deleted above
+    # (all counts keys added so far are actual DB table names).
+    _deleted_tables = set(counts.keys())
+    counts["audit_log_entries"] = _del(
+        AuditLog,
+        sa.delete(AuditLog).where(AuditLog.entity_table.in_(_deleted_tables)),
+    )
+    counts["activity_log_entries"] = _del(
+        ActivityLog,
+        sa.delete(ActivityLog).where(ActivityLog.entity_table.in_(_deleted_tables)),
+    )
+
+    db.session.commit()
+    logger.info("Operational data cleared: %s", counts)
+    return counts
+
+
 def _is_demo_data_already_seeded() -> bool:
     """Check if demo data has already been seeded by looking for DEMO- phone prefix."""
     demo_guest_count = db.session.execute(
@@ -714,6 +945,9 @@ def seed_demo_guests_and_reservations(
         db.session.add(reservation)
     db.session.flush()
 
+    # ── Allocate inventory for demo reservations with assigned rooms ──
+    _allocate_demo_inventory(res_reservations)
+
     # ── Enrich seed data: folio charges, notes, HK statuses ──
     _seed_demo_folio_charges(res_reservations, admin_id)
     _seed_demo_notes(res_reservations, admin_id)
@@ -808,6 +1042,55 @@ def _create_single_reservation(
 
     _apply_status_timestamps(reservation, status, res_counter)
     return (reservation, res_counter)
+
+
+def _allocate_demo_inventory(reservations: list) -> None:
+    """Mark InventoryDay rows as consumed for demo reservations that have assigned rooms.
+
+    Without this step the seeded reservations would reference rooms whose
+    InventoryDay records still show ``availability_status='available'``, breaking
+    the database invariant and causing later reservation-creation attempts to
+    collide with the phantom allocations.
+    """
+    consuming_statuses = {"checked_in", "confirmed", "tentative", "house_use", "checked_out"}
+    for reservation in reservations:
+        if not reservation.assigned_room_id:
+            continue
+        if reservation.current_status not in consuming_statuses:
+            continue
+
+        if reservation.current_status == "checked_in":
+            inv_status = "occupied"
+        elif reservation.current_status == "house_use":
+            inv_status = "house_use"
+        elif reservation.current_status == "checked_out":
+            # Checked-out stays no longer hold inventory; release rows instead.
+            continue
+        else:
+            inv_status = "reserved"
+
+        nights = []
+        cursor = reservation.check_in_date
+        while cursor < reservation.check_out_date:
+            nights.append(cursor)
+            cursor += timedelta(days=1)
+        if not nights:
+            continue
+
+        rows = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == reservation.assigned_room_id,
+                    InventoryDay.business_date.in_(nights),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            if row.availability_status == "available" and row.is_sellable:
+                row.availability_status = inv_status
+                row.reservation_id = reservation.id
 
 
 def _calculate_room_total(nights: int, base_rate: float) -> float:

@@ -133,7 +133,7 @@ def postgres_seeded_app():
             connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
             connection.execute(sa.text("CREATE SCHEMA public"))
         upgrade(directory=str(MIGRATIONS_DIR))
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=True)
     return app
 
 
@@ -258,8 +258,10 @@ def test_mobile_housekeeping_route_renders_for_housekeeping_user(app_factory):
     text = response.get_data(as_text=True)
     assert "Daily housekeeping board" in text
     assert "Mobile" in text
+    assert "hk-date-input" in text
     assert "hk-mobile-summary" in text
     assert "hk-mobile-card" in text
+    assert "hk-mobile-room-subline" in text
     assert "Desk" in text
 
 

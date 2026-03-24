@@ -94,7 +94,7 @@ from .models import (
 from .pricing import get_setting_value
 from .permissions import default_dashboard_endpoint_for_user
 from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message
-from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
+from .seeds import bootstrap_inventory_horizon, clear_operational_data, seed_all, seed_reference_data, seed_roles_permissions
 from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .helpers import (
     absolute_public_url,
@@ -524,7 +524,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         if app.config["AUTO_BOOTSTRAP_SCHEMA"] and app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
             db.create_all()
             if app.config["AUTO_SEED_REFERENCE_DATA"]:
-                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+                include_demo = app.config.get("SEED_DEMO_DATA", False)
+                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=include_demo)
     return app
 
 
@@ -632,6 +633,22 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
+
+
+def _admin_setup_incomplete(staff_user) -> bool:
+    """Return True if admin setup is not yet complete (for admin-only banner)."""
+    if not staff_user:
+        return False
+    if not is_admin_user(staff_user):
+        return False
+    endpoint = request.endpoint or ""
+    if not endpoint.startswith("admin."):
+        return False
+    try:
+        from .services.setup_service import setup_completeness
+        return not setup_completeness()["complete"]
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -782,6 +799,7 @@ def register_template_helpers(app: Flask) -> None:
             "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
+            "setup_incomplete": _admin_setup_incomplete(current_staff),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
             "csrf_token": ensure_csrf_token,
             "csrf_input": lambda: Markup(
@@ -809,15 +827,34 @@ def register_cli(app: Flask) -> None:
         print("System role permissions synchronized.")
 
     @app.cli.command("seed-phase2")
-    def seed_phase2_command() -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        print("Phase 2 seed completed.")
+    @click.option("--demo-data", is_flag=True, default=False, help="Include demo guests and reservations")
+    def seed_phase2_command(demo_data: bool) -> None:
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=demo_data)
+        print("Phase 2 seed completed." + (" (with demo data)" if demo_data else ""))
 
     @app.cli.command("bootstrap-inventory")
     def bootstrap_inventory_command() -> None:
         bootstrap_inventory_horizon(date.today(), app.config["INVENTORY_BOOTSTRAP_DAYS"])
         db.session.commit()
         print("Inventory horizon bootstrapped.")
+
+    @app.cli.command("clear-operational-data")
+    @click.option("--confirm", is_flag=True, default=False, help="Must pass --confirm to execute the clear.")
+    def clear_operational_data_command(confirm: bool) -> None:
+        """Remove all guest/booking/folio operational data while preserving accounts and config.
+
+        This is irreversible. Pass --confirm to proceed.
+        """
+        if not confirm:
+            print("ERROR: This command permanently deletes all guest and reservation data.")
+            print("Pass --confirm to execute.")
+            return
+        counts = clear_operational_data()
+        removed = sum(v for k, v in counts.items() if not k.endswith("_reset"))
+        print(f"Operational data cleared. {removed} rows removed across {len(counts)} tables.")
+        for table, count in counts.items():
+            if count:
+                print(f"  {table}: {count}")
 
     @app.cli.command("process-notifications")
     def process_notifications_command() -> None:

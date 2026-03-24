@@ -244,12 +244,12 @@
         data-focus-urgency="{{ row.focusUrgency or '' }}"
         data-focus-reservation-id="{{ row.focusReservationId or '' }}"
         aria-label="{{ row.label }} planning lane"
-        style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
+        style="--row-lanes: {{ row.lane_count }};{% if row.lane_count > 1 %} --track-height: {{ row.track_height }}px;{% endif %} --today-column: {{ board.todayOffset or 0 }};"
       >
         {% for block in row.visible_blocks %}
         <details
-          class="planning-board-block {{ block.displayVariant }} {{ block.status }} urgency-{{ block.urgency or 'normal' }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
-          data-board-block
+          class="planning-board-block {{ block.displayVariant }} {{ block.status }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
+          data-board-block="true"
           data-block-id="{{ block.id }}"
           data-source-type="{{ block.sourceType }}"
           data-reservation-id="{{ block.reservationId or '' }}"
@@ -274,6 +274,15 @@
           data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
           data-move-url="{{ block.moveUrl or '' }}"
           data-resize-url="{{ block.resizeUrl or '' }}"
+          data-hover-guest="{{ block.label }}"
+          data-hover-code="{{ block.subtitle or '' }}"
+          data-hover-dates="{{ block.startDate }} → {{ block.endDate }}"
+          data-hover-status="{{ block.status }}"
+          data-hover-room="{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}"
+          data-hover-balance="{{ currency }}{{ '%.2f'|format(block.balanceDue) if block.balanceDue and block.balanceDue > 0 else '' }}"
+          data-hover-ready="{{ 'true' if block.readyForCheckIn else 'false' }}"
+          data-hover-vip="{{ 'true' if block.isVip else 'false' }}"
+          data-hover-special="{{ 'true' if block.hasSpecialRequests else 'false' }}"
           style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
         >
           <summary data-block-handle aria-label="{{ block.label }}{% if block.subtitle %}, {{ block.subtitle }}{% endif %}, {{ block.startDate }} to {{ block.endDate }}, {{ block.status.replace('_', ' ') }}" title="{{ block.label }} · {{ block.startDate }} to {{ block.endDate }}">

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
+import re
 from datetime import date, timedelta
 
 from werkzeug.security import generate_password_hash
@@ -1659,6 +1659,20 @@ class TestBoardKeyboardSelection:
         assert b".planning-board-block.selected > summary" in response.data
         assert b"outline:" in response.data
 
+    def test_board_css_tightens_dense_rows_and_hover_clarity(self, app_factory):
+        """Board CSS should keep dense rows visible and highlight the hovered room lane clearly."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        css = response.get_data(as_text=True)
+        assert ".planning-board-room:has(+ .planning-board-track:hover)" in css
+        assert re.search(r'\.planning-board-grid\[data-board-days="30"\]\.density-compact \.planning-board-room \{[^}]*min-height: 18px;', css, re.S)
+        assert re.search(r'\.planning-board-grid\[data-board-days="30"\]\.density-compact \.planning-board-block > summary \{[^}]*min-height: 17px;', css, re.S)
+        assert ".board-hover-card-meta dd" in css
+
     def test_static_assets_send_cache_headers(self, app_factory):
         app = app_factory(seed=True)
         client = app.test_client()
@@ -1902,6 +1916,19 @@ class TestBoardCommandPalette:
         assert "function setSurfaceLoading(isLoading)" in content
         assert "setSurfaceLoading(true);" in content
         assert "surfaceContent.innerHTML = html;" in content
+
+    def test_board_click_handler_has_reservation_panel_fallback(self, app_factory):
+        """Reservation clicks should still open the side panel even if the click lands on block chrome."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert 'closest("[data-board-block][data-reservation-id]")' in content
+        assert 'block.removeAttribute("open");' in content
+        assert "event.stopPropagation();" in content
 
     def test_command_palette_infrastructure_in_place(self, app_factory):
         """Global keyboard event listener should  handle command palette triggers."""
@@ -2155,4 +2182,3 @@ class TestBoardPollingAutoRefresh:
             assert len(activities) > 0
             event_types = {a.event_type for a in activities}
             assert any("reservation" in et or "front_desk.board" in et for et in event_types)
-

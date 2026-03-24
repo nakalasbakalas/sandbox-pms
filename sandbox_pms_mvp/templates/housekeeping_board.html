@@ -2,18 +2,17 @@
 {% block title %}Housekeeping | {{ hotel_name }}{% endblock %}
 {% block content %}
 
-<h1 class="hk-page-title">Housekeeping</h1>
-<p style="margin:0 0 6px; font-size:11px; color:var(--pms-text-muted);">Daily housekeeping board — {{ board.business_date.strftime('%A, %d %B %Y') }}</p>
-
 <div class="hk-header-bar">
+  <h1 class="hk-page-title">Housekeeping</h1>
+  <span class="ops-meta">Daily housekeeping board · {{ board.business_date.strftime('%a %d %b') }}</span>
   <div class="hk-date-toggle">
     <a class="hk-date-btn {% if board.business_date == today_date %}active{% endif %}"
        href="{{ url_for('housekeeping.staff_housekeeping', view='mobile' if filters.mobile else None) }}">Today</a>
     <a class="hk-date-btn {% if board.business_date == tomorrow_board.business_date %}active{% endif %}"
        href="{{ url_for('housekeeping.staff_housekeeping', date=tomorrow_board.business_date.isoformat(), view='mobile' if filters.mobile else None) }}">Tomorrow</a>
   </div>
-  <input type="date" name="nav_date" value="{{ board.business_date.isoformat() }}" style="height:28px; padding:0 6px; font-size:12px;"
-         data-hk-nav-base="{{ url_for('housekeeping.staff_housekeeping') }}" data-hk-mobile="{{ 'true' if filters.mobile else 'false' }}" aria-label="Go to date">
+  <input type="date" class="hk-date-input" name="nav_date" value="{{ board.business_date.isoformat() }}"
+          data-hk-nav-base="{{ url_for('housekeeping.staff_housekeeping') }}" data-hk-mobile="{{ 'true' if filters.mobile else 'false' }}" aria-label="Go to date">
   <span class="hk-date-label">
     Last: {{ board.refreshed_at.strftime('%H:%M') if board.refreshed_at is defined and board.refreshed_at else '—' }}
   </span>
@@ -44,14 +43,18 @@
 </div>
 
 <div class="hk-results-bar">
-  <span><strong>{{ board["items"] | length }}</strong> rooms shown{% if filters.floor or filters.status or filters.priority or filters.room_type_id or filters.arrival_today or filters.departure_today %} — filtered{% endif %}</span>
+  <span><strong>{{ board["items"] | length }}</strong> rooms{% if filters.floor or filters.status or filters.priority or filters.room_type_id or filters.arrival_today or filters.departure_today %} (filtered){% endif %}
+    · <span class="count-danger">{{ board.counts.dirty }} dirty</span>
+    · {{ board.counts.clean }} clean
+    · {{ board.counts.inspected }} insp
+  </span>
   {% if filters.mobile %}
   <span class="small muted">Last opened housekeeping pages stay available offline after they load once.</span>
   {% endif %}
 </div>
 
 {% if filters.mobile %}
-<section class="card hk-mobile-summary" style="margin-bottom:1rem;">
+<section class="card hk-mobile-summary hk-mobile-summary-section">
   <div class="card-head">
     <div>
       <h2>Mobile board</h2>
@@ -65,11 +68,11 @@
   </div>
   <div class="grid two gap-lg">
     {% for item in board["items"] %}
-    <article class="card inset hk-mobile-card" style="margin:0;">
+    <article class="card inset hk-mobile-card">
       <div class="card-head">
         <div>
-          <h3 style="margin:0;">Room {{ item.room_number }}</h3>
-          <p style="margin:0.25rem 0 0;">{{ item.room_type_code }} · Floor {{ item.floor_number }}</p>
+          <h3 class="hk-mobile-room-title">Room {{ item.room_number }}</h3>
+          <p class="hk-mobile-room-subline">{{ item.room_type_code }} · Floor {{ item.floor_number }}</p>
         </div>
         <span class="status {{ item.priority }}">{{ item.priority_label }}</span>
       </div>
@@ -77,9 +80,9 @@
         <div><small>HK</small><strong>{{ (item.housekeeping_status_code or 'pending').replace('_', ' ') }}</strong></div>
         <div><small>State</small><strong>{% if item.arrival_today %}Arrival{% elif item.departure_today %}Departure{% elif item.in_house %}Stay{% else %}Vacant{% endif %}</strong></div>
       </div>
-      <p style="margin:0 0 0.5rem;">{% if item.reservation_code %}<strong>{{ item.reservation_code }}</strong> {{ item.guest_name or '' }}{% else %}<span class="muted">No guest assigned</span>{% endif %}</p>
+      <p class="hk-mobile-guest-line">{% if item.reservation_code %}<strong>{{ item.reservation_code }}</strong> {{ item.guest_name or '' }}{% else %}<span class="muted">No guest assigned</span>{% endif %}</p>
       {% if item.note_count or item.maintenance_flag or item.is_blocked %}
-      <p class="small muted" style="margin:0 0 0.75rem;">
+      <p class="small muted hk-mobile-flags">
         {% if item.note_count %}Notes {{ item.note_count }}{% endif %}
         {% if item.maintenance_flag %}{% if item.note_count %} · {% endif %}Maintenance flagged{% endif %}
         {% if item.is_blocked %}{% if item.note_count or item.maintenance_flag %} · {% endif %}Room blocked{% endif %}
@@ -105,7 +108,7 @@
   </div>
 </section>
 
-<section class="card" style="margin-bottom:1rem;">
+<section class="card hk-mobile-following-day">
   <div class="card-head">
     <div>
       <h2>{% if board.business_date == today_date %}Tomorrow{% else %}{{ tomorrow_board.business_date.strftime('%A') }}{% endif %}</h2>
@@ -142,9 +145,9 @@
     <div class="list-row no-link">
       <div>
         <strong>{{ task.task_type.replace('_', ' ') }}</strong>
-        <p>Room {{ task.room.room_number if task.room else '—' }} · {{ task.status.replace('_', ' ') }}{% if task.assigned_to_user %} · {{ task.assigned_to_user.full_name }}{% endif %}{% if task.shift %} · <span class="pill subtle" style="font-size:9px;">{{ task.shift }}</span>{% endif %}</p>
+        <p>Room {{ task.room.room_number if task.room else '—' }} · {{ task.status.replace('_', ' ') }}{% if task.assigned_to_user %} · {{ task.assigned_to_user.full_name }}{% endif %}{% if task.shift %} · <span class="pill subtle hk-shift-pill">{{ task.shift }}</span>{% endif %}</p>
       </div>
-      <div class="right-stack" style="display:flex; gap:4px; align-items:center;">
+      <div class="right-stack hk-task-actions">
         <span class="status {{ task.priority }}">{{ task.priority }}</span>
         {% if can('housekeeping.task_manage') %}
           {% if task.status == 'completed' %}
@@ -197,7 +200,7 @@ if ('serviceWorker' in navigator) {
         <option value="">No change</option>
         {% for sc in housekeeping_statuses %}{% if can_manage_controls or sc not in ['out_of_order', 'out_of_service'] %}<option value="{{ sc }}">{{ sc.replace('_', ' ') }}</option>{% endif %}{% endfor %}
       </select></label>
-      <label style="flex:1; min-width:150px;"><span>Note</span><input type="text" name="note" placeholder="Add note or reason"></label>
+      <label class="hk-bulk-note-field"><span>Note</span><input type="text" name="note" placeholder="Add note or reason"></label>
       <button class="button tiny" type="submit">Apply to selected</button>
     </form>
   </details>

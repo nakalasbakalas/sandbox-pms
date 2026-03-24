@@ -47,19 +47,23 @@
     <button class="board-nav-btn board-help-btn" type="button" data-action="show-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
   </div>
 
-  {# ── Board Legend ── #}
-  <div class="board-legend">
-    <strong style="font-size:11px; color:var(--pms-text-secondary); margin-right:4px;">Legend:</strong>
-    <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
-    <span class="board-legend-item"><span class="board-legend-swatch pending"></span>Pending</span>
-    <span class="board-legend-item"><span class="board-legend-swatch in_house"></span>In-house</span>
-    <span class="board-legend-item"><span class="board-legend-swatch unallocated"></span>Unallocated</span>
-    <span class="board-legend-item"><span class="board-legend-swatch past"></span>Past</span>
-    <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
-    <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
-    <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
-    <span class="board-legend-hint" title="Press ? for keyboard shortcuts">⌨ ?</span>
-  </div>
+  {# ── Board Legend (collapsed by default for more board space) ── #}
+  <details class="board-legend">
+    <summary class="ops-collapsible-summary">
+      <strong style="font-size:10px; color:var(--pms-text-secondary);">Legend</strong>
+      <span class="ops-collapse-indicator" aria-hidden="true">▼</span>
+    </summary>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+      <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
+      <span class="board-legend-item"><span class="board-legend-swatch pending"></span>Pending</span>
+      <span class="board-legend-item"><span class="board-legend-swatch in_house"></span>In-house</span>
+      <span class="board-legend-item"><span class="board-legend-swatch unallocated"></span>Unallocated</span>
+      <span class="board-legend-item"><span class="board-legend-swatch past"></span>Past</span>
+      <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
+      <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
+      <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
+    </div>
+  </details>
 
   {# ── Row 2: Filters + search + density + overflow ── #}
   <div class="planning-board-row2">
@@ -290,6 +294,9 @@
   <hr>
   <button role="menuitem" data-ctx="export-ics">Export ICS</button>
 </div>
+
+{# ── Hover card (positioned by JS) ── #}
+<div id="board-hover-card" class="board-hover-card" aria-hidden="true"></div>
 
 {% endblock %}
 {% block extra_scripts %}
