@@ -1868,7 +1868,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day strong { font-size: 0.78rem; }
 .planning-board-grid.density-compact .planning-board-room strong { font-size: 0.72rem; }
 .planning-board-grid.density-compact .planning-board-room span { font-size: 0.58rem; }
-.planning-board-grid.density-compact .planning-board-room-badges { gap: 2px; }
+.planning-board-grid.density-compact .planning-board-room-badges { display: none; }
 .planning-board-grid.density-compact .planning-board-room-badge { min-height: 11px; padding: 0 3px; font-size: 0.46rem; }
 .planning-board-grid.density-compact .planning-board-room { min-height: 22px; gap: 0; padding: 1px 4px; }
 .planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(20px, auto)); }
@@ -1878,6 +1878,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-compact .planning-board-block-copy small,
 .planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.48rem; }
 .planning-board-grid.density-compact .planning-board-resize-handle { width: 9px; min-height: 14px; }
+.planning-board-grid.density-compact .planning-board-room-focus { display: none; }
 /* Ultra compact */
 .planning-board-grid.density-ultra .planning-board-day,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day,
@@ -1900,6 +1901,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-ultra .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-room-badges { display: none; }
+.planning-board-grid.density-ultra .planning-board-room-focus,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-focus,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room-focus { display: none; }
 .planning-board-grid.density-ultra .planning-board-group,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-group,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-group { padding: 1px 6px; font-size: 0.52rem; }
