@@ -714,6 +714,9 @@ def seed_demo_guests_and_reservations(
         db.session.add(reservation)
     db.session.flush()
 
+    # ── Allocate inventory for demo reservations with assigned rooms ──
+    _allocate_demo_inventory(res_reservations)
+
     # ── Enrich seed data: folio charges, notes, HK statuses ──
     _seed_demo_folio_charges(res_reservations, admin_id)
     _seed_demo_notes(res_reservations, admin_id)
@@ -808,6 +811,55 @@ def _create_single_reservation(
 
     _apply_status_timestamps(reservation, status, res_counter)
     return (reservation, res_counter)
+
+
+def _allocate_demo_inventory(reservations: list) -> None:
+    """Mark InventoryDay rows as consumed for demo reservations that have assigned rooms.
+
+    Without this step the seeded reservations would reference rooms whose
+    InventoryDay records still show ``availability_status='available'``, breaking
+    the database invariant and causing later reservation-creation attempts to
+    collide with the phantom allocations.
+    """
+    consuming_statuses = {"checked_in", "confirmed", "tentative", "house_use", "checked_out"}
+    for reservation in reservations:
+        if not reservation.assigned_room_id:
+            continue
+        if reservation.current_status not in consuming_statuses:
+            continue
+
+        if reservation.current_status == "checked_in":
+            inv_status = "occupied"
+        elif reservation.current_status == "house_use":
+            inv_status = "house_use"
+        elif reservation.current_status == "checked_out":
+            # Checked-out stays no longer hold inventory; release rows instead.
+            continue
+        else:
+            inv_status = "reserved"
+
+        nights = []
+        cursor = reservation.check_in_date
+        while cursor < reservation.check_out_date:
+            nights.append(cursor)
+            cursor += timedelta(days=1)
+        if not nights:
+            continue
+
+        rows = (
+            db.session.execute(
+                sa.select(InventoryDay).where(
+                    InventoryDay.room_id == reservation.assigned_room_id,
+                    InventoryDay.business_date.in_(nights),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            if row.availability_status == "available" and row.is_sellable:
+                row.availability_status = inv_status
+                row.reservation_id = reservation.id
 
 
 def _calculate_room_total(nights: int, base_rate: float) -> float:
