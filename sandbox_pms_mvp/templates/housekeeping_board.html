@@ -4,7 +4,7 @@
 
 <div class="hk-header-bar">
   <h1 class="hk-page-title">Housekeeping</h1>
-  <span style="font-size:10px; color:var(--pms-text-muted); margin-right:4px;">{{ board.business_date.strftime('%a %d %b') }}</span>
+  <span style="font-size:10px; color:var(--pms-text-muted); margin-right:4px;">Daily housekeeping board · {{ board.business_date.strftime('%a %d %b') }}</span>
   <div class="hk-date-toggle">
     <a class="hk-date-btn {% if board.business_date == today_date %}active{% endif %}"
        href="{{ url_for('housekeeping.staff_housekeeping', view='mobile' if filters.mobile else None) }}">Today</a>

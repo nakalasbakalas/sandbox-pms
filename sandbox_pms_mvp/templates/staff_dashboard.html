@@ -4,7 +4,7 @@
 <div style="display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
   <div style="display:flex; align-items:baseline; gap:8px;">
     <h1 style="margin:0;">Daily operations</h1>
-    <span style="font-size:12px; color:var(--pms-text-muted);">{{ dashboard.business_date.strftime('%a %d %b %Y') }}</span>
+    <span style="font-size:11px; color:var(--pms-text-muted);">Front Desk Dashboard · {{ dashboard.business_date.strftime('%a %d %b %Y') }}</span>
   </div>
   <div class="actions" style="margin:0;">
     {% if can_reports %}<a class="button secondary tiny" href="{{ url_for('reports.staff_reports') }}">Manager reports</a>{% endif %}
