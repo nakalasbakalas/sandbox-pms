@@ -18,6 +18,7 @@
   const panelCloseBtn = document.querySelector("[data-action='close-panel']");
   let mutationInFlight = false;
   let selectedBlock = null;
+  let selectedBlockId = null; // Track selected block ID for re-selection after refresh
   let moveMode = false;
   let moveTargetRoomId = null;
   let moveTargetTrack = null;
@@ -79,6 +80,7 @@
       selectedBlock.classList.remove("selected");
     }
     selectedBlock = blockEl;
+    selectedBlockId = blockEl.dataset.blockId || blockEl.dataset.reservationId || null;
     blockEl.classList.add("selected");
     focusBlockHandle(blockEl);
     announceSelection(blockEl);
@@ -96,6 +98,7 @@
     if (selectedBlock) {
       selectedBlock.classList.remove("selected");
       selectedBlock = null;
+      selectedBlockId = null;
       setFeedback("", "neutral");
     }
   }
@@ -367,6 +370,10 @@
       throw new Error("Unable to refresh the planning board.");
     }
     const html = await response.text();
+    // Stale the DOM reference before replacement
+    if (selectedBlock) {
+      selectedBlock = null;
+    }
     if (surfaceContent) {
       surfaceContent.style.visibility = "hidden";
       surfaceContent.innerHTML = html;
@@ -478,6 +485,12 @@
   function onSurfaceClick(event) {
     const summary = resolveSummaryTarget(event.target);
     if (!summary) {
+      // Clicking empty space on the board clears selection (but not on
+      // command strip or other non-block elements)
+      if (event.target.closest("[data-board-track]") && !event.target.closest("[data-board-block]")) {
+        // Let the empty-slot handler in the lower listener deal with this
+        return;
+      }
       return;
     }
     const block = summary.closest("[data-board-block]");
@@ -587,6 +600,21 @@
         event.preventDefault();
         moveSelectionDown();
         break;
+      case "ArrowLeft":
+      case "ArrowRight": {
+        // Navigate between blocks in the same track
+        event.preventDefault();
+        const currentTrack = getBlockTrack(selectedBlock);
+        if (!currentTrack) break;
+        const blocks = getBlocksInTrack(currentTrack);
+        const idx = blocks.indexOf(selectedBlock);
+        if (idx === -1) break;
+        const nextIdx = event.key === "ArrowLeft" ? idx - 1 : idx + 1;
+        if (nextIdx >= 0 && nextIdx < blocks.length) {
+          selectBlock(blocks[nextIdx]);
+        }
+        break;
+      }
       case "m":
       case "M":
         if (!canEdit || mutationInFlight) return;
@@ -695,7 +723,8 @@
   }
 
   function onSurfacePointerDown(event) {
-    // Prevent dragging when panel is open
+    // When the side panel is open, still allow block selection via click
+    // but don't initiate drag
     if (!panelEl.classList.contains("hidden")) {
       return;
     }
@@ -1196,6 +1225,20 @@
     syncRoleViewState();
     updateStickyOffset();
     initCollapsibleGroups();
+    // Re-select block after DOM replacement (selection persistence)
+    if (selectedBlockId) {
+      const restored = surface.querySelector(
+        `[data-board-block][data-block-id="${selectedBlockId}"], [data-board-block][data-reservation-id="${selectedBlockId}"]`
+      );
+      if (restored) {
+        selectedBlock = null; // Clear stale reference before re-selecting
+        selectBlock(restored);
+      } else {
+        // Block no longer exists in the refreshed DOM
+        selectedBlock = null;
+        selectedBlockId = null;
+      }
+    }
   }
 
   // ── Collapsible room-type group headers ──
@@ -1441,10 +1484,12 @@
     }
 
     const reservationId = blockEl.dataset.reservationId;
-    const summary = blockEl.querySelector("summary[data-block-handle]");
-    const label = summary ? summary.getAttribute("aria-label") : blockEl.dataset.blockId;
+    const copyEl = blockEl.querySelector(".planning-board-block-copy strong");
+    const guestName = copyEl ? copyEl.textContent.trim() : "";
+    const subtitleEl = blockEl.querySelector(".planning-board-block-copy small");
+    const code = subtitleEl ? subtitleEl.textContent.trim() : "";
 
-    panelTitle.textContent = label || "Reservation Details";
+    panelTitle.textContent = guestName ? `${guestName}${code ? " · " + code : ""}` : "Reservation Details";
 
     setBusyState(true);
     setFeedback("Loading details...", "pending");
@@ -1670,10 +1715,10 @@
         <li><kbd>T</kbd> : Jump to today</li>
         <li><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> : Switch to 7 / 14 / 30 day view</li>
         <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li>← → : Navigate blocks within the same room track</li>
         <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
-        <li><kbd>Enter</kbd> : Confirm action or open details</li>
         <li><kbd>Esc</kbd> : Cancel or close</li>
         <li><kbd>/</kbd> : Open search</li>
         <li><kbd>N</kbd> : New reservation</li>
