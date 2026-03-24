@@ -258,8 +258,10 @@ def test_mobile_housekeeping_route_renders_for_housekeeping_user(app_factory):
     text = response.get_data(as_text=True)
     assert "Daily housekeeping board" in text
     assert "Mobile" in text
+    assert "hk-date-input" in text
     assert "hk-mobile-summary" in text
     assert "hk-mobile-card" in text
+    assert "hk-mobile-room-subline" in text
     assert "Desk" in text
 
 

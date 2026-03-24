@@ -6,7 +6,7 @@
   <div class="ops-page-header">
     <div class="ops-title-group">
       <h1>Front desk workspace</h1>
-      <div class="actions" style="margin:0;">
+      <div class="actions">
         <a class="button secondary tiny" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
         <a class="button secondary tiny" href="{{ url_for('staff_reservations.staff_reservations') }}">Reservations</a>
         <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk_board', start_date=workspace.business_date.isoformat()) }}">Board</a>

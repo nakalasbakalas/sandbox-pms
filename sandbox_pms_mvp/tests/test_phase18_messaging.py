@@ -756,6 +756,18 @@ class TestMessagingRoutes:
             assert resp.status_code == 200
             assert b"Compose New Message" in resp.data
 
+    def test_compose_page_uses_compact_context_blocks(self, seeded_app):
+        with seeded_app.app_context():
+            admin = User.query.filter_by(email="admin@sandbox.local").first()
+            reservation = Reservation.query.order_by(Reservation.created_at.asc()).first()
+        with seeded_app.test_client() as client:
+            login_as(client, admin)
+            resp = client.get(f"/staff/messaging/compose?reservation_id={reservation.id}")
+            text = resp.get_data(as_text=True)
+            assert resp.status_code == 200
+            assert 'class="context-block"' in text
+            assert "margin-bottom:1rem" not in text
+
     def test_send_message_via_route(self, seeded_app):
         with seeded_app.app_context():
             admin = User.query.filter_by(email="admin@sandbox.local").first()

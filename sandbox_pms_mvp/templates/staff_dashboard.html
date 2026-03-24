@@ -6,7 +6,7 @@
     <h1>Daily operations</h1>
     <span class="ops-meta">Front Desk Dashboard · {{ dashboard.business_date.strftime('%a %d %b %Y') }}</span>
   </div>
-  <div class="actions" style="margin:0;">
+  <div class="actions">
     {% if can_reports %}<a class="button secondary tiny" href="{{ url_for('reports.staff_reports') }}">Manager reports</a>{% endif %}
   </div>
 </div>
@@ -247,33 +247,33 @@
   <div class="card-head">
     <div><h2>Guest Satisfaction (30d)</h2></div>
   </div>
-  <div style="padding:6px 8px;">
-    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:6px;">
-      <div>
+  <div class="dashboard-survey">
+    <div class="dashboard-survey-metrics">
+      <div class="dashboard-survey-stat">
         <span class="small muted">Responses</span>
-        <p style="font-size:1.1rem;font-weight:700;margin:0;">{{ survey_stats.total_responses }}</p>
+        <p class="dashboard-survey-value">{{ survey_stats.total_responses }}</p>
       </div>
-      <div>
+      <div class="dashboard-survey-stat">
         <span class="small muted">Avg Rating</span>
-        <p style="font-size:1.1rem;font-weight:700;margin:0;">
+        <p class="dashboard-survey-value">
           {{ survey_stats.average_rating }}/5
-          <span style="color:#f5a623;font-size:0.9rem;">&#9733;</span>
+          <span class="dashboard-survey-star">&#9733;</span>
         </p>
       </div>
     </div>
     {% if survey_stats.rating_distribution %}
-    <div style="margin-bottom:6px;">
+    <div class="dashboard-survey-distribution">
       <span class="small muted">Distribution</span>
-      <div style="display:flex;gap:0.4rem;margin-top:3px;">
+      <div class="dashboard-survey-chart">
         {% for star in range(5, 0, -1) %}
         {% set count = survey_stats.rating_distribution.get(star, 0) %}
         {% set pct = (count / survey_stats.total_responses * 100) | round(0) | int if survey_stats.total_responses > 0 else 0 %}
-        <div style="flex:1;text-align:center;">
-          <div style="font-size:9px;color:#888;">{{ star }}&#9733;</div>
-          <div style="background:#eee;border-radius:3px;height:28px;position:relative;overflow:hidden;">
-            <div style="background:#f5a623;height:100%;width:100%;position:absolute;bottom:0;transform:scaleY({{ pct / 100 }});transform-origin:bottom;border-radius:3px;"></div>
+        <div class="dashboard-survey-column">
+          <div class="dashboard-survey-label">{{ star }}&#9733;</div>
+          <div class="dashboard-survey-bar">
+            <div class="dashboard-survey-fill" style="transform:scaleY({{ pct / 100 }});"></div>
           </div>
-          <div style="font-size:9px;color:#666;margin-top:1px;">{{ count }}</div>
+          <div class="dashboard-survey-count">{{ count }}</div>
         </div>
         {% endfor %}
       </div>
@@ -282,7 +282,7 @@
     {% if survey_stats.category_averages %}
     <div>
       <span class="small muted">Categories</span>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:3px;">
+      <div class="dashboard-survey-categories">
         {% for cat, avg in survey_stats.category_averages.items() %}
         <span class="detail-pill">{{ cat | capitalize }}: <strong>{{ avg }}</strong></span>
         {% endfor %}
