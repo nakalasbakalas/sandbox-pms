@@ -114,23 +114,20 @@
     </div>
     {% if queue["items"] %}
     <div class="planning-board-queue-list">
-      {% for item in queue["items"][:3] %}
+      {% for item in queue["items"][:1] %}
       <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
         <span class="planning-board-queue-item-top">
           <strong>{{ item.label }}</strong>
           <small>{{ item.roomLabel }}</small>
         </span>
         {% if item.nextAction %}<span class="planning-board-queue-item-action">{{ item.nextAction }}</span>{% endif %}
-        {% if item.actionSummary %}<span class="planning-board-queue-item-summary">{{ item.actionSummary }}</span>{% endif %}
-        {% if item.blockers %}
-        <span class="planning-board-queue-item-flags">
-          {% for blocker in item.blockers[:2] %}
-          <small>{{ blocker }}</small>
-          {% endfor %}
-        </span>
-        {% endif %}
       </button>
       {% endfor %}
+      {% if queue["items"]|length > 1 %}
+      <button type="button" class="planning-board-queue-item" data-queue-focus="{{ queue.id }}">
+        <span class="planning-board-queue-item-top"><small>+{{ queue["items"]|length - 1 }} more</small></span>
+      </button>
+      {% endif %}
     </div>
     {% else %}
     <p class="small muted">Nothing queued right now.</p>
@@ -147,15 +144,19 @@
     </div>
     {% if board.handover["items"] %}
     <div class="planning-board-queue-list">
-      {% for item in board.handover["items"][:2] %}
+      {% for item in board.handover["items"][:1] %}
       <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
         <span class="planning-board-queue-item-top">
           <strong>{{ item.label }}</strong>
           <small>{{ item.roomLabel }}</small>
         </span>
-        <span class="planning-board-queue-item-summary">{{ item.actionSummary or item.nextAction }}</span>
       </button>
       {% endfor %}
+      {% if board.handover["items"]|length > 1 %}
+      <button type="button" class="planning-board-queue-item">
+        <span class="planning-board-queue-item-top"><small>+{{ board.handover["items"]|length - 1 }} more</small></span>
+      </button>
+      {% endif %}
     </div>
     {% else %}
     <p class="small muted">No unresolved carry-forward items.</p>
