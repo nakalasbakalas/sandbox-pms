@@ -32,6 +32,10 @@ from ..front_desk_board_runtime import (
     front_desk_board_v2_enabled,
     log_front_desk_board_metric,
 )
+from ..front_desk_board_preferences import (
+    extract_front_desk_board_state,
+    merge_front_desk_board_state,
+)
 from ..helpers import (
     action_datetime_for_form_date,
     add_anchor_to_path,
@@ -403,7 +407,11 @@ def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
         room_type_id=parse_request_uuid_arg("room_type_id") or "",
         show_unallocated=request.args.get("show_unallocated", "1") != "0",
         show_closed=request.args.get("show_closed") == "1",
-        group_by=request.args.get("group_by", "type") if request.args.get("group_by") in {"type", "floor"} else "type",
+        group_by=(
+            request.args.get("group_by", "type")
+            if request.args.get("group_by") in {"type", "floor", "action", "turnover"}
+            else "type"
+        ),
     )
 
 
@@ -417,19 +425,16 @@ def front_desk_board_context(
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
     room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
     board_v2_enabled = front_desk_board_v2_enabled()
-
-    # Load user density preference
-    user_density = "compact"  # default
     user = getattr(g, "current_staff_user", None)
-    if user and user.preferences:
-        user_density = (user.preferences.preferences or {}).get("frontDeskBoard", {}).get("density", "compact")
+    board_state = extract_front_desk_board_state(user.preferences.preferences if user and user.preferences else {})
 
     return {
         "board": board,
         "board_v2_enabled": board_v2_enabled,
         "filters": filters,
         "room_types": room_types,
-        "user_density": user_density,
+        "user_density": board_state["density"],
+        "board_state": board_state,
         "default_checkout_date": filters.start_date + timedelta(days=1),
         "can_create": can("reservation.create"),
         "can_edit": can("reservation.edit"),
@@ -448,6 +453,29 @@ def front_desk_board_context(
     }
 
 
+def board_request_wants_json() -> bool:
+    accept = request.headers.get("Accept", "")
+    return request.is_json or "application/json" in accept.lower()
+
+
+def board_json_or_redirect(
+    *,
+    ok: bool,
+    message: str,
+    status_code: int,
+    error: str | None = None,
+    **payload: object,
+):
+    body = {"ok": ok, "message": message, **payload}
+    if error:
+        body["error"] = error
+    if board_request_wants_json():
+        return jsonify(body), status_code
+    flash(error or message, "success" if ok else "error")
+    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
+    return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+
+
 def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, str]:
     query = {
         "start_date": filters.start_date.isoformat(),
@@ -460,8 +488,8 @@ def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, s
         query["room_type_id"] = filters.room_type_id
     if filters.show_closed:
         query["show_closed"] = "1"
-    if filters.group_by == "floor":
-        query["group_by"] = "floor"
+    if filters.group_by != "type":
+        query["group_by"] = filters.group_by
     return query
 
 
@@ -765,10 +793,13 @@ def staff_front_desk_board_data():
             {
                 "filters": serialize_front_desk_board(_front_desk_filters_payload(filters)),
                 "board": serialize_front_desk_board(context["board"]),
+                "boardState": serialize_front_desk_board(context["board_state"]),
                 "permissions": {
                     "canCreate": context["can_create"],
                     "canEdit": context["can_edit"],
                     "canManageClosures": context["can_manage_closures"],
+                    "canCheckIn": context["can_check_in"],
+                    "canCheckOut": context["can_check_out"],
                 },
             }
         )
@@ -814,7 +845,6 @@ def staff_front_desk_board_rooms():
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/room", methods=["POST"])
 def staff_front_desk_board_assign_room(reservation_id):
     user = require_permission("reservation.edit")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         assign_room(
             reservation_id,
@@ -822,16 +852,19 @@ def staff_front_desk_board_assign_room(reservation_id):
             actor_user_id=user.id,
             reason=request.form.get("reason") or "front_desk_board_reassign",
         )
-        flash("Room assignment updated from the planning board.", "success")
+        return board_json_or_redirect(ok=True, message="Room assignment updated from the planning board.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+        return board_json_or_redirect(
+            ok=False,
+            message="Room assignment could not be updated.",
+            error=public_error_message(exc),
+            status_code=409,
+        )
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/dates", methods=["POST"])
 def staff_front_desk_board_change_dates(reservation_id):
     user = require_permission("reservation.edit")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         reservation = db.session.get(Reservation, reservation_id)
         if not reservation:
@@ -848,10 +881,14 @@ def staff_front_desk_board_change_dates(reservation_id):
             ),
             actor_user_id=user.id,
         )
-        flash("Stay dates updated from the planning board.", "success")
+        return board_json_or_redirect(ok=True, message="Stay dates updated from the planning board.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(add_anchor_to_path(back_url, request.form.get("return_anchor")))
+        return board_json_or_redirect(
+            ok=False,
+            message="Stay dates could not be updated.",
+            error=public_error_message(exc),
+            status_code=409,
+        )
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/move", methods=["POST"])
@@ -1250,29 +1287,33 @@ def staff_front_desk_board_preferences():
     """Save user's front desk board preferences (density, layout, etc)."""
     user = require_permission("reservation.view")
     payload = request.get_json() or {}
-    density = payload.get("density", "compact")
-
-    if density not in ["comfortable", "compact", "spacious", "ultra"]:
-        abort(400, "Invalid density value")
-
     pref = db.session.execute(sa.select(UserPreference).filter_by(user_id=user.id)).scalar_one_or_none()
     if not pref:
         pref = UserPreference(user_id=user.id, preferences={})
         db.session.add(pref)
+    current_preferences = pref.preferences or {}
+    try:
+        board_state = merge_front_desk_board_state(current_preferences, payload)
+    except ValueError as exc:
+        abort(400, str(exc))
 
-    if "frontDeskBoard" not in pref.preferences:
-        pref.preferences["frontDeskBoard"] = {}
-
-    pref.preferences["frontDeskBoard"]["density"] = density
+    pref.preferences = {**current_preferences, "frontDeskBoard": board_state}
     db.session.commit()
 
+    density = board_state["density"]
     write_activity_log(
         actor_user_id=user.id,
-        event_type="front_desk.board_density_changed",
-        metadata={"density": density},
+        event_type="front_desk.board_preferences_changed",
+        metadata={
+            "density": density,
+            "activeRoleView": board_state["activeRoleView"],
+            "activeFilters": board_state["activeFilters"],
+            "hkOverlay": board_state["hkOverlay"],
+            "toolbarCollapsed": board_state["toolbarCollapsed"],
+        },
     )
 
-    return jsonify(ok=True, density=density)
+    return jsonify(ok=True, density=density, boardState=board_state)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/check_in", methods=["POST"])
@@ -1459,6 +1500,10 @@ def staff_front_desk_board_reservation_panel(reservation_id):
 
     user = require_permission("reservation.view")
     reservation = db.session.get(Reservation, reservation_id) or abort(404)
+    deposit_gap = max(
+        Decimal("0.00"),
+        Decimal(str(reservation.deposit_required_amount or 0)) - Decimal(str(reservation.deposit_received_amount or 0)),
+    )
 
     can_reassign = user.has_permission("reservation.edit")
     can_change_dates = user.has_permission("reservation.edit")
@@ -1539,6 +1584,9 @@ def staff_front_desk_board_reservation_panel(reservation_id):
         "can_no_show": user.has_permission("reservation.edit") and reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today(),
         "is_conflict_room": is_conflict_room,
         "room_hk_status": room_hk_status,
+        "deposit_gap": deposit_gap,
+        "arrival_due": reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today(),
+        "arrival_ready": reservation.current_status in ["tentative", "confirmed"] and reservation.check_in_date <= date.today() and bool(reservation.assigned_room_id) and not is_conflict_room and deposit_gap <= 0,
         "folio_charges": folio_charges,
         "can_add_charge": user.has_permission("folio.charge_add"),
         "can_add_payment": user.has_permission("payment.create"),
@@ -1555,7 +1603,6 @@ def staff_front_desk_board_panel_charge(reservation_id):
     from ..services.cashier_service import ManualAdjustmentPayload, post_manual_adjustment
 
     user = require_permission("folio.charge_add")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         post_manual_adjustment(
             reservation_id,
@@ -1567,10 +1614,9 @@ def staff_front_desk_board_panel_charge(reservation_id):
             ),
             actor_user_id=user.id,
         )
-        flash("Charge posted.", "success")
+        return board_json_or_redirect(ok=True, message="Charge posted.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(back_url)
+        return board_json_or_redirect(ok=False, message="Charge could not be posted.", error=public_error_message(exc), status_code=409)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/payment", methods=["POST"])
@@ -1579,7 +1625,6 @@ def staff_front_desk_board_panel_payment(reservation_id):
     from ..services.cashier_service import PaymentPostingPayload, record_payment
 
     user = require_permission("payment.create")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         record_payment(
             reservation_id,
@@ -1590,10 +1635,9 @@ def staff_front_desk_board_panel_payment(reservation_id):
             ),
             actor_user_id=user.id,
         )
-        flash("Payment recorded.", "success")
+        return board_json_or_redirect(ok=True, message="Payment recorded.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(back_url)
+        return board_json_or_redirect(ok=False, message="Payment could not be recorded.", error=public_error_message(exc), status_code=409)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/note", methods=["POST"])
@@ -1602,7 +1646,6 @@ def staff_front_desk_board_panel_note(reservation_id):
     from ..services.staff_reservations_service import ReservationNotePayload, add_reservation_note
 
     user = require_permission("reservation.edit")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     try:
         add_reservation_note(
             reservation_id,
@@ -1614,10 +1657,9 @@ def staff_front_desk_board_panel_note(reservation_id):
             ),
             actor_user_id=user.id,
         )
-        flash("Note added.", "success")
+        return board_json_or_redirect(ok=True, message="Note added.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(back_url)
+        return board_json_or_redirect(ok=False, message="Note could not be added.", error=public_error_message(exc), status_code=409)
 
 
 @front_desk_bp.route("/staff/front-desk/board/reservations/<uuid:reservation_id>/panel/hk", methods=["POST"])
@@ -1626,11 +1668,9 @@ def staff_front_desk_board_panel_hk(reservation_id):
     from ..services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
 
     user = require_any_permission("housekeeping.edit", "reservation.edit")
-    back_url = safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_front_desk_board"))
     reservation = db.session.get(Reservation, reservation_id) or abort(404)
     if not reservation.assigned_room_id:
-        flash("No room assigned.", "error")
-        return redirect(back_url)
+        return board_json_or_redirect(ok=False, message="Room status could not be updated.", error="No room assigned.", status_code=400)
     status_code = request.form.get("status_code", "clean")
     try:
         update_housekeeping_status(
@@ -1639,10 +1679,9 @@ def staff_front_desk_board_panel_hk(reservation_id):
             payload=RoomStatusUpdatePayload(status_code=status_code, note=f"Updated via board panel to {status_code}"),
             actor_user_id=user.id,
         )
-        flash(f"Room marked {status_code.replace('_', ' ')}.", "success")
+        return board_json_or_redirect(ok=True, message=f"Room marked {status_code.replace('_', ' ')}.", status_code=200)
     except Exception as exc:  # noqa: BLE001
-        flash(public_error_message(exc), "error")
-    return redirect(back_url)
+        return board_json_or_redirect(ok=False, message="Room status could not be updated.", error=public_error_message(exc), status_code=409)
 
 
 # --- Section: View Routes (walk-in, detail) ---

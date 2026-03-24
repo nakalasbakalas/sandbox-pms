@@ -55,6 +55,7 @@ from .front_desk_board_runtime import (
     front_desk_board_v2_enabled,
     log_front_desk_board_metric,
 )
+from .front_desk_board_preferences import extract_front_desk_board_state
 from .i18n import LANGUAGE_LABELS, normalize_language, t
 from .models import (
     ActivityLog,
@@ -1591,19 +1592,16 @@ def front_desk_board_context(
     hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
     room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
     board_v2_enabled = front_desk_board_v2_enabled()
-
-    # Load user density preference
-    user_density = "compact"  # default
     user = g.current_staff_user
-    if user and user.preferences:
-        user_density = (user.preferences.preferences or {}).get("frontDeskBoard", {}).get("density", "compact")
+    board_state = extract_front_desk_board_state(user.preferences.preferences if user and user.preferences else {})
 
     return {
         "board": board,
         "board_v2_enabled": board_v2_enabled,
         "filters": filters,
         "room_types": room_types,
-        "user_density": user_density,
+        "user_density": board_state["density"],
+        "board_state": board_state,
         "default_checkout_date": filters.start_date + timedelta(days=1),
         "can_create": can("reservation.create"),
         "can_edit": can("reservation.edit"),

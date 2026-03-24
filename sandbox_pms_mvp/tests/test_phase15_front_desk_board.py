@@ -530,6 +530,113 @@ def test_front_desk_board_data_endpoint_returns_normalized_blocks_and_operationa
     assert any(block["sourceType"] == "maintenance" for block in all_blocks)
 
 
+def test_front_desk_board_data_endpoint_returns_exception_queues_and_handover(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today()
+        staff_user = make_staff_user("front_desk", "board-queues@example.com")
+        reservation = create_staff_reservation(
+            first_name="Queue",
+            last_name="Guest",
+            phone="+66810000042",
+            room_type_code="DBL",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=2),
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+        reservation.special_requests = "Airport pickup"
+        reservation.quoted_grand_total = Decimal("1800.00")
+        reservation.deposit_received_amount = Decimal("0.00")
+        db.session.commit()
+
+    login_as(client, staff_user)
+    response = client.get(f"/staff/front-desk/board/data?start_date={start_date.isoformat()}&days=14")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    queues = {queue["id"]: queue for queue in payload["board"]["exceptionQueues"]}
+    assert payload["boardState"]["density"] == "compact"
+    assert payload["board"]["handover"]["count"] >= 1
+    assert queues["blocked_arrivals"]["count"] >= 1
+    assert queues["special_requests"]["count"] >= 1
+
+
+def test_front_desk_board_preferences_endpoint_persists_full_board_state(app_factory):
+    from pms.models import UserPreference
+
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        user = make_staff_user("front_desk", "board-state@example.com")
+
+    login_as(client, user)
+    response = client.post(
+        "/staff/front-desk/board/preferences",
+        json={
+            "state": {
+                "density": "ultra",
+                "activeRoleView": "arrivals",
+                "activeFilters": ["blocked-arrival", "special-request"],
+                "defaultQuickFilters": ["blocked-arrival"],
+                "hkOverlay": True,
+                "collapsedGroups": ["blocked_arrivals"],
+                "toolbarCollapsed": True,
+                "savedViews": [
+                    {
+                        "name": "AM Shift",
+                        "filters": ["blocked-arrival"],
+                        "hkOverlay": False,
+                        "activeRoleView": "arrivals",
+                    }
+                ],
+            }
+        },
+        headers={"X-CSRF-Token": "test-csrf-token"},
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["boardState"]["density"] == "ultra"
+    assert data["boardState"]["activeRoleView"] == "arrivals"
+    assert data["boardState"]["hkOverlay"] is True
+    assert data["boardState"]["savedViews"][0]["name"] == "AM Shift"
+
+    with app.app_context():
+        pref = UserPreference.query.filter_by(user_id=user.id).one()
+        assert pref.preferences["frontDeskBoard"]["toolbarCollapsed"] is True
+        assert pref.preferences["frontDeskBoard"]["collapsedGroups"] == ["blocked_arrivals"]
+
+
+def test_front_desk_board_data_endpoint_supports_action_grouping(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+    with app.app_context():
+        start_date = date.today()
+        staff_user = make_staff_user("front_desk", "board-action-layout@example.com")
+        create_staff_reservation(
+            first_name="Action",
+            last_name="Bucket",
+            phone="+66810000043",
+            room_type_code="TWN",
+            check_in_date=start_date,
+            check_out_date=start_date + timedelta(days=1),
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+
+    login_as(client, staff_user)
+    response = client.get(
+        f"/staff/front-desk/board/data?start_date={start_date.isoformat()}&days=14&group_by=action"
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    group_ids = {group["roomTypeId"] for group in payload["board"]["groups"]}
+    assert "blocked_arrivals" in group_ids
+
+
 def test_board_move_json_can_assign_unallocated_reservation_into_room_inventory(app_factory):
     app = app_factory(seed=True)
     client = app.test_client()

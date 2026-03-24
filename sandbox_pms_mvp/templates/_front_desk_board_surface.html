@@ -1,4 +1,3 @@
-{# ── Daily Command Strip ── #}
 {% set occ_pct = board.counts.occupancy_pct %}
 {% set arrivals = board.counts.arrivals_today %}
 {% set departures = board.counts.departures_today %}
@@ -13,6 +12,7 @@
 {% set total_rooms = board.counts.total_rooms %}
 {% set available = board.counts.get('available_rooms', 0) %}
 {% set maint = board.counts.get('maintenance_count', 0) %}
+
 <div class="fd-cmd-strip" role="region" aria-label="Today's operational summary" data-cmd-strip>
   <span class="fd-cmd-date">
     <span class="fd-cmd-day">{{ board.today.strftime('%a') }}</span>
@@ -20,85 +20,73 @@
     <span class="fd-cmd-mon">{{ board.today.strftime('%b') }}</span>
   </span>
   <span class="fd-cmd-divider" aria-hidden="true"></span>
-  <button type="button" class="fd-cmd-metric{% if occ_pct >= 90 %} fd-urgent{% elif occ_pct >= 70 %} fd-warn{% endif %}"
-          data-cmd-filter="in-house" title="Occupancy: {{ in_house }} of {{ total_rooms }} rooms — click to filter in-house">
+  <button type="button" class="fd-cmd-metric{% if occ_pct >= 90 %} fd-urgent{% elif occ_pct >= 70 %} fd-warn{% endif %}" data-cmd-filter="in-house" title="Occupancy: {{ in_house }} of {{ total_rooms }} rooms">
     <span class="fd-metric-label">Occ</span>
     <strong class="fd-metric-value">{{ occ_pct }}%</strong>
   </button>
-  <button type="button" class="fd-cmd-metric" data-cmd-filter="in-house"
-          title="In-house guests — click to filter">
+  <button type="button" class="fd-cmd-metric" data-cmd-filter="in-house" title="In-house guests">
     <span class="fd-metric-label">In-house</span>
     <strong class="fd-metric-value">{{ in_house }}</strong>
   </button>
-  <button type="button" class="fd-cmd-metric fd-metric-arrival" data-cmd-filter="arrival"
-          title="Arrivals today — click to filter">
-    <span class="fd-metric-label">↓ Arr</span>
+  <button type="button" class="fd-cmd-metric fd-metric-arrival" data-cmd-filter="arrival" title="Arrivals today">
+    <span class="fd-metric-label">Arr</span>
     <strong class="fd-metric-value">{{ arrivals }}</strong>
   </button>
-  <button type="button" class="fd-cmd-metric fd-metric-dep" data-cmd-filter="departure"
-          title="Departures today — click to filter">
-    <span class="fd-metric-label">↑ Dep</span>
+  <button type="button" class="fd-cmd-metric fd-metric-dep" data-cmd-filter="departure" title="Departures today">
+    <span class="fd-metric-label">Dep</span>
     <strong class="fd-metric-value">{{ departures }}</strong>
   </button>
-  <button type="button" class="fd-cmd-metric" data-cmd-filter="stayover"
-          title="Stayovers (in-house, no checkout today) — click to filter">
+  <button type="button" class="fd-cmd-metric" data-cmd-filter="stayover" title="Stayovers">
     <span class="fd-metric-label">Stay</span>
     <strong class="fd-metric-value">{{ stayovers }}</strong>
   </button>
   <span class="fd-cmd-divider" aria-hidden="true"></span>
-  <button type="button" class="fd-cmd-metric fd-metric-avail" data-cmd-filter="vacant"
-          title="Available rooms: {{ available }} of {{ total_rooms }} — click to filter vacant">
+  <button type="button" class="fd-cmd-metric fd-metric-avail" data-cmd-filter="vacant" title="Available rooms">
     <span class="fd-metric-label">Avail</span>
     <strong class="fd-metric-value">{{ available }}/{{ total_rooms }}</strong>
   </button>
-  <button type="button" class="fd-cmd-metric{% if ready < arrivals %} fd-warn{% else %} fd-ok{% endif %}"
-          data-cmd-filter="dirty" title="Room readiness: {{ ready }} ready of {{ arrivals }} arrivals. {{ readiness }}% check-in ready — click to filter dirty">
+  <button type="button" class="fd-cmd-metric{% if ready < arrivals %} fd-warn{% else %} fd-ok{% endif %}" data-cmd-filter="ready-arrival" title="Arrival readiness">
     <span class="fd-metric-label">Ready</span>
     <strong class="fd-metric-value">{{ ready }}/{{ arrivals }}</strong>
     <span class="fd-metric-sub">{{ readiness }}%</span>
   </button>
-  <button type="button" class="fd-cmd-metric{% if dirty > 0 %} fd-warn{% endif %}"
-          data-cmd-filter="dirty" title="Dirty rooms — click to filter">
+  <button type="button" class="fd-cmd-metric{% if dirty > 0 %} fd-warn{% endif %}" data-cmd-filter="dirty" title="Dirty rooms">
     <span class="fd-metric-label">Dirty</span>
     <strong class="fd-metric-value">{{ dirty }}</strong>
   </button>
   {% if maint > 0 %}
-  <button type="button" class="fd-cmd-metric fd-warn"
-          data-cmd-filter="maintenance" title="Maintenance / blocked rooms — click to filter">
+  <button type="button" class="fd-cmd-metric fd-warn" data-cmd-filter="maintenance" title="Maintenance or blocked rooms">
     <span class="fd-metric-label">Maint</span>
     <strong class="fd-metric-value">{{ maint }}</strong>
   </button>
   {% endif %}
   <span class="fd-cmd-divider" aria-hidden="true"></span>
-  <button type="button" class="fd-cmd-metric{% if unalloc > 0 %} fd-warn{% else %} fd-ok{% endif %}"
-          data-cmd-filter="unallocated" title="Unallocated arrivals today — click to filter">
+  <button type="button" class="fd-cmd-metric{% if unalloc > 0 %} fd-warn{% else %} fd-ok{% endif %}" data-cmd-filter="unallocated" title="Unallocated arrivals">
     <span class="fd-metric-label">Unalloc</span>
     <strong class="fd-metric-value">{{ unalloc }}</strong>
   </button>
   {% if conflicts > 0 %}
-  <button type="button" class="fd-cmd-metric fd-urgent"
-          data-cmd-filter="conflict" title="Conflicts: dirty turnarounds + unallocated arrivals — click to filter">
-    <span class="fd-metric-label">Conflict</span>
+  <button type="button" class="fd-cmd-metric fd-urgent" data-cmd-filter="blocked-arrival" title="Blocked arrivals and turnarounds">
+    <span class="fd-metric-label">Blocked</span>
     <strong class="fd-metric-value">{{ conflicts }}</strong>
   </button>
   {% endif %}
   {% if unpaid > 0 %}
-  <button type="button" class="fd-cmd-metric fd-urgent"
-          data-cmd-filter="balance-due" title="Arrivals with unpaid balance — click to filter">
-    <span class="fd-metric-label">$ Unpaid</span>
+  <button type="button" class="fd-cmd-metric fd-urgent" data-cmd-filter="balance-due" title="Arrivals with unpaid balance">
+    <span class="fd-metric-label">Unpaid</span>
     <strong class="fd-metric-value">{{ unpaid }}</strong>
   </button>
   {% endif %}
   <span class="fd-cmd-spacer"></span>
   <div class="fd-cmd-right">
-    <button type="button" class="fd-overlay-btn" data-action="toggle-hk-overlay"
-            aria-pressed="false" title="HK Overlay: colour board by room readiness state">HK</button>
+    <button type="button" class="fd-overlay-btn" data-action="toggle-hk-overlay" aria-pressed="false" title="Housekeeping overlay">HK</button>
     <div class="fd-view-presets" role="group" aria-label="Role preset views" data-view-presets>
-      <button type="button" class="fd-view-btn" data-view="front-desk" title="Front Desk: arrivals + departures">FD</button>
-      <button type="button" class="fd-view-btn" data-view="housekeeping" title="Housekeeping: dirty rooms + HK overlay">HK</button>
-      <button type="button" class="fd-view-btn" data-view="allocation" title="Allocation issues: unallocated rooms">Alloc</button>
-      <button type="button" class="fd-view-btn" data-view="night-shift" title="Night shift: in-house guests">Night</button>
-      <button type="button" class="fd-view-btn fd-view-clear" data-view="" title="Clear preset">✕</button>
+      <button type="button" class="fd-view-btn" data-view="front-desk" title="Front desk arrivals and departures">FD</button>
+      <button type="button" class="fd-view-btn" data-view="arrivals" title="Arrival command view">Arr</button>
+      <button type="button" class="fd-view-btn" data-view="housekeeping" title="Housekeeping readiness">HK</button>
+      <button type="button" class="fd-view-btn" data-view="allocation" title="Allocation issues">Alloc</button>
+      <button type="button" class="fd-view-btn" data-view="night-shift" title="Night shift">Night</button>
+      <button type="button" class="fd-view-btn fd-view-clear" data-view="" title="Clear preset">x</button>
     </div>
   </div>
 </div>
@@ -109,6 +97,71 @@
   <span class="pbs-alert tone-{{ alert.tone }}">{{ alert.message }}</span>
   {% endfor %}
 </div>
+{% endif %}
+
+{% if board.exceptionQueues %}
+<section class="planning-board-exception-rail" aria-label="Operational exception rail">
+  {% for queue in board.exceptionQueues %}
+  <article class="planning-board-queue tone-{{ queue.tone }}{% if not queue.count %} is-empty{% endif %}" data-queue-card="{{ queue.id }}">
+    <div class="planning-board-queue-head">
+      <div>
+        <p class="eyebrow">{{ queue.title }}</p>
+        <strong>{{ queue.count }}</strong>
+      </div>
+      {% if queue.count %}
+      <button type="button" class="button-link" data-queue-focus="{{ queue.id }}">Focus</button>
+      {% endif %}
+    </div>
+    {% if queue["items"] %}
+    <div class="planning-board-queue-list">
+      {% for item in queue["items"][:3] %}
+      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
+        <span class="planning-board-queue-item-top">
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.roomLabel }}</small>
+        </span>
+        {% if item.nextAction %}<span class="planning-board-queue-item-action">{{ item.nextAction }}</span>{% endif %}
+        {% if item.actionSummary %}<span class="planning-board-queue-item-summary">{{ item.actionSummary }}</span>{% endif %}
+        {% if item.blockers %}
+        <span class="planning-board-queue-item-flags">
+          {% for blocker in item.blockers[:2] %}
+          <small>{{ blocker }}</small>
+          {% endfor %}
+        </span>
+        {% endif %}
+      </button>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="small muted">Nothing queued right now.</p>
+    {% endif %}
+  </article>
+  {% endfor %}
+  <article class="planning-board-queue tone-neutral{% if not board.handover.count %} is-empty{% endif %}">
+    <div class="planning-board-queue-head">
+      <div>
+        <p class="eyebrow">Shift Handover</p>
+        <strong>{{ board.handover.count }}</strong>
+      </div>
+      <span class="planning-board-queue-note">Carry forward</span>
+    </div>
+    {% if board.handover["items"] %}
+    <div class="planning-board-queue-list">
+      {% for item in board.handover["items"][:2] %}
+      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
+        <span class="planning-board-queue-item-top">
+          <strong>{{ item.label }}</strong>
+          <small>{{ item.roomLabel }}</small>
+        </span>
+        <span class="planning-board-queue-item-summary">{{ item.actionSummary or item.nextAction }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="small muted">No unresolved carry-forward items.</p>
+    {% endif %}
+  </article>
+</section>
 {% endif %}
 
 {% if board.groups %}
@@ -133,11 +186,15 @@
     </div>
 
     {% for group in board.groups %}
-    <div class="planning-board-group" data-group-id="{{ group.room_type_id }}">{{ group.room_type_code }} - {{ group.room_type_name }}</div>
+    <div class="planning-board-group" data-group-id="{{ group.room_type_id }}">{{ group.room_type_code }}{% if group.room_type_name %} - {{ group.room_type_name }}{% endif %}</div>
       {% for row in group.rows %}
-      {# Compute per-row balance-due state for JS filter #}
-      {% set ns = namespace(has_bal=false) %}
-      {% for b in row.visible_blocks %}{% if b.balanceDue and b.balanceDue > 0 %}{% set ns.has_bal = true %}{% endif %}{% endfor %}
+      {% set row_state = namespace(has_bal=false, has_ready_arrival=false, has_blocked_arrival=false, has_special_request=false) %}
+      {% for b in row.visible_blocks %}
+        {% if b.balanceDue and b.balanceDue > 0 %}{% set row_state.has_bal = true %}{% endif %}
+        {% if b.workflowState == 'arrival_ready' %}{% set row_state.has_ready_arrival = true %}{% endif %}
+        {% if b.workflowState == 'arrival_blocked' %}{% set row_state.has_blocked_arrival = true %}{% endif %}
+        {% if b.hasSpecialRequests %}{% set row_state.has_special_request = true %}{% endif %}
+      {% endfor %}
       <div class="planning-board-room {% if row.is_unallocated %}unallocated{% endif %}" id="{{ row.anchor_id }}">
         <strong>{{ row.label }}</strong>
         <span>{{ row.secondary_label }}</span>
@@ -148,12 +205,25 @@
           {% endfor %}
         </div>
         {% endif %}
+        {% if row.focusAction %}
+        <button type="button" class="planning-board-room-focus tone-{{ row.focusUrgency or 'normal' }}" {% if row.focusReservationId %}data-queue-open data-reservation-id="{{ row.focusReservationId }}" data-room-anchor="{{ row.anchor_id }}"{% endif %}>
+          <span class="planning-board-room-focus-label">{{ row.focusAction }}</span>
+          {% if row.focusSummary %}<small>{{ row.focusSummary }}</small>{% endif %}
+          {% if row.focusBlockers %}
+          <span class="planning-board-room-focus-flags">
+            {% for blocker in row.focusBlockers %}
+            <small>{{ blocker.label }}</small>
+            {% endfor %}
+          </span>
+          {% endif %}
+        </button>
+        {% endif %}
       </div>
       <div
         class="planning-board-track"
         data-board-track
         data-room-id="{{ row.roomId or '' }}"
-        data-room-type-id="{{ group.room_type_id }}"
+        data-room-type-id="{{ row.roomTypeId or group.room_type_id }}"
         data-lane-kind="{{ row.laneKind }}"
         data-anchor-id="{{ row.anchor_id }}"
         data-has-today="{{ 'true' if board.todayOffset else 'false' }}"
@@ -165,8 +235,14 @@
         data-has-departure-today="{{ 'true' if row.has_departure_today else 'false' }}"
         data-is-vacant="{{ 'true' if not row.is_occupied and not row.is_maintenance and not row.is_blocked and row.laneKind == 'room' else 'false' }}"
         data-is-stayover="{{ 'true' if row.is_occupied and not row.has_departure_today else 'false' }}"
-        data-has-balance-due="{{ 'true' if ns.has_bal else 'false' }}"
+        data-has-balance-due="{{ 'true' if row_state.has_bal else 'false' }}"
+        data-has-ready-arrival="{{ 'true' if row_state.has_ready_arrival else 'false' }}"
+        data-has-blocked-arrival="{{ 'true' if row_state.has_blocked_arrival else 'false' }}"
+        data-has-special-request="{{ 'true' if row_state.has_special_request else 'false' }}"
         data-is-conflict="{{ 'true' if (row.has_arrival_today and row.has_departure_today and row.housekeeping_status in ('dirty', 'occupied_dirty')) or (row.is_unallocated and row.has_arrival_today) else 'false' }}"
+        data-focus-action="{{ row.focusAction or '' }}"
+        data-focus-urgency="{{ row.focusUrgency or '' }}"
+        data-focus-reservation-id="{{ row.focusReservationId or '' }}"
         aria-label="{{ row.label }} planning lane"
         style="--row-lanes: {{ row.lane_count }};{% if row.lane_count > 1 %} --track-height: {{ row.track_height }}px;{% endif %} --today-column: {{ board.todayOffset or 0 }};"
       >
@@ -184,6 +260,15 @@
           data-grid-start="{{ block.gridStart }}"
           data-grid-span="{{ block.gridSpan }}"
           data-allocation-state="{{ block.allocationState }}"
+          data-workflow-state="{{ block.workflowState or '' }}"
+          data-next-action="{{ block.nextAction or '' }}"
+          data-urgency="{{ block.urgency or '' }}"
+          data-arrival-due="{{ 'true' if block.arrivalDue else 'false' }}"
+          data-arrival-ready="{{ 'true' if block.readyForCheckIn else 'false' }}"
+          data-room-assigned="{{ 'true' if block.roomAssigned else 'false' }}"
+          data-room-ready="{{ 'true' if block.roomReady else 'false' }}"
+          data-turnaround-dirty="{{ 'true' if block.turnaroundDirty else 'false' }}"
+          data-has-special-request="{{ 'true' if block.hasSpecialRequests else 'false' }}"
           data-draggable="{{ 'true' if block.draggable else 'false' }}"
           data-resizable="{{ 'true' if block.resizable else 'false' }}"
           data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
@@ -200,21 +285,19 @@
           data-hover-special="{{ 'true' if block.hasSpecialRequests else 'false' }}"
           style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
         >
-          <summary
-            data-block-handle
-            aria-label="{{ block.label }}{% if block.subtitle %}, {{ block.subtitle }}{% endif %}, {{ block.startDate }} to {{ block.endDate }}, {{ block.status.replace('_', ' ') }}"
-            title="{{ block.label }} · {{ block.startDate }} to {{ block.endDate }}"
-          >
+          <summary data-block-handle aria-label="{{ block.label }}{% if block.subtitle %}, {{ block.subtitle }}{% endif %}, {{ block.startDate }} to {{ block.endDate }}, {{ block.status.replace('_', ' ') }}" title="{{ block.label }} · {{ block.startDate }} to {{ block.endDate }}">
             {% if block.resizable %}<span class="planning-board-resize-handle start" data-resize-handle="start" aria-hidden="true"></span>{% endif %}
             <span class="planning-board-block-copy">
               <strong>{{ block.label }}</strong>
               {% if block.subtitle %}<small>{{ block.subtitle }}</small>{% endif %}
+              {% if block.actionSummary %}<small class="planning-board-block-summary">{{ block.actionSummary }}</small>{% endif %}
             </span>
             <span class="planning-board-block-badges">
+              {% if block.nextAction %}<small class="badge-next badge-next-{{ block.urgency or 'normal' }}">{{ block.nextAction }}</small>{% endif %}
               {% if block.readyForCheckIn %}<small class="badge-ready">Ready</small>{% endif %}
               {% if block.pendingModification %}<small class="badge-mod">Mod</small>{% endif %}
               {% if block.balanceDue and block.balanceDue > 0 %}<small class="badge-balance" title="Balance due: {{ currency }}{{ '%.0f'|format(block.balanceDue) }}">{{ currency }}{{ '%g'|format(block.balanceDue) }}</small>{% endif %}
-              {% if block.hasSpecialRequests %}<small class="badge-special" title="Special requests noted" aria-label="Special requests">★</small>{% endif %}
+              {% if block.hasSpecialRequests %}<small class="badge-special" title="Special requests noted" aria-label="Special requests">*</small>{% endif %}
               {% if block.isVip %}<small class="badge-vip" title="Gold/Platinum loyalty guest" aria-label="VIP guest">VIP</small>{% endif %}
               {% if block.displayVariant == 'unallocated' %}<small>Unallocated</small>{% elif block.status == 'conflict' %}<small>Conflict</small>{% elif block.displayVariant == 'in_house' %}<small>In-house</small>{% elif block.displayVariant == 'past' %}<small>Past</small>{% endif %}
             </span>
@@ -226,15 +309,23 @@
             <div class="planning-board-popover-meta">
               <span>{{ block.startDate }} &rarr; {{ block.endDate }}</span>
               <span>{{ block.status.replace('_', ' ') }}</span>
-              <span>{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}</span>
+              <span>{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ row.roomTypeCode or group.room_type_code }} unallocated{% endif %}</span>
+              {% if block.nextAction %}<span>{{ block.nextAction }}</span>{% endif %}
               {% if block.balanceDue and block.balanceDue > 0 %}<span><strong>Balance due:</strong> {{ currency }}{{ '%.2f'|format(block.balanceDue) }}</span>{% endif %}
             </div>
+            {% if block.blockerReasons %}
+            <div class="planning-board-blockers">
+              {% for blocker in block.blockerReasons %}
+              <span class="planning-board-blocker tone-{{ blocker.tone or 'warning' }}">{{ blocker.label }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
             {% if block.startDate == board.today.isoformat() and block.status in ('confirmed', 'tentative') %}
             <div class="arrival-readiness-checklist" aria-label="Arrival readiness">
-              <span class="arc-item{% if block.allocationState == 'allocated' %} arc-ok{% else %} arc-warn{% endif %}" title="Room assignment">{% if block.allocationState == 'allocated' %}✓{% else %}✗{% endif %} Room assigned</span>
-              <span class="arc-item{% if block.readyForCheckIn %} arc-ok{% else %} arc-warn{% endif %}" title="Room ready for check-in">{% if block.readyForCheckIn %}✓{% else %}✗{% endif %} Room ready</span>
-              <span class="arc-item{% if not block.balanceDue or block.balanceDue == 0 %} arc-ok{% else %} arc-warn{% endif %}" title="Deposit/balance status">{% if not block.balanceDue or block.balanceDue == 0 %}✓{% else %}✗{% endif %} Balance clear</span>
-              {% if block.hasSpecialRequests %}<span class="arc-item arc-info" title="Special requests noted" aria-label="Special requests noted">&#9733; Special requests</span>{% endif %}
+              <span class="arc-item{% if block.roomAssigned %} arc-ok{% else %} arc-warn{% endif %}" title="Room assignment">{% if block.roomAssigned %}OK{% else %}X{% endif %} Room assigned</span>
+              <span class="arc-item{% if block.roomReady %} arc-ok{% else %} arc-warn{% endif %}" title="Room ready for check-in">{% if block.roomReady %}OK{% else %}X{% endif %} Room ready</span>
+              <span class="arc-item{% if not block.balanceDue or block.balanceDue == 0 %} arc-ok{% else %} arc-warn{% endif %}" title="Deposit or balance status">{% if not block.balanceDue or block.balanceDue == 0 %}OK{% else %}X{% endif %} Balance clear</span>
+              {% if block.hasSpecialRequests %}<span class="arc-item arc-info" title="Special requests noted" aria-label="Special requests noted">* Special requests</span>{% endif %}
             </div>
             {% endif %}
             <div class="actions">
@@ -303,7 +394,7 @@
     <div class="card-head">
       <div>
         <p class="eyebrow">{{ group.room_type_code }}</p>
-        <h2>{{ group.room_type_name }}</h2>
+        <h2>{{ group.room_type_name or group.room_type_code }}</h2>
       </div>
     </div>
     <div class="list-stack compact">
@@ -312,6 +403,7 @@
         <div class="grow">
           <strong>{{ row.label }}</strong>
           <p>{{ row.secondary_label }}</p>
+          {% if row.focusSummary %}<p class="small muted">{{ row.focusSummary }}</p>{% endif %}
           {% if row.visible_blocks %}
           <div class="planning-mobile-blocks">
             {% for block in row.visible_blocks %}
@@ -319,6 +411,14 @@
               <summary>{{ block.label }} <span>{{ block.startDate }} &rarr; {{ block.endDate }}</span></summary>
               <div class="planning-board-popover">
                 {% if block.subtitle %}<p>{{ block.subtitle }}</p>{% endif %}
+                {% if block.actionSummary %}<p class="small">{{ block.actionSummary }}</p>{% endif %}
+                {% if block.blockerReasons %}
+                <div class="planning-board-blockers">
+                  {% for blocker in block.blockerReasons[:2] %}
+                  <span class="planning-board-blocker tone-{{ blocker.tone or 'warning' }}">{{ blocker.label }}</span>
+                  {% endfor %}
+                </div>
+                {% endif %}
                 <div class="actions">
                   {% if block.detailUrl %}<a class="button tiny secondary" href="{{ block.detailUrl }}">Open</a>{% endif %}
                   {% if block.frontDeskUrl %}<a class="button tiny secondary" href="{{ block.frontDeskUrl }}">Front desk detail</a>{% endif %}

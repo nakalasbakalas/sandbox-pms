@@ -66,6 +66,18 @@
 </div>
 {% endif %}
 
+{% if board.exceptionQueues %}
+<div class="board-stats-section">
+  <h3>Command Queues</h3>
+  {% for queue in board.exceptionQueues %}
+  <div class="board-stats-row{% if queue.count > 0 %} bsr-{{ queue.tone }}{% endif %}">
+    <span class="bsr-label">{{ queue.title }}</span>
+    <strong class="bsr-value">{{ queue.count }}</strong>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if board.per_day_occupancy %}
 <div class="board-stats-section">
   <h3>{{ board.days }}-Day Occupancy Trend</h3>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 import sqlalchemy as sa
@@ -297,16 +298,14 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                 and reservation.primary_guest.loyalty.tier in ("gold", "platinum")
             ),
         )
-        # Flag reservation as ready for check-in: confirmed, arriving today, room assigned & ready
-        block["readyForCheckIn"] = (
-            reservation.current_status == "confirmed"
-            and reservation.check_in_date <= today
-            and allocation_state == "allocated"
-            and target_row is not None
-            and target_row.get("is_room_ready", False)
+        _annotate_reservation_block(
+            block=block,
+            reservation=reservation,
+            allocation_state=allocation_state,
+            target_row=target_row,
+            today=today,
+            pending_modification_count=_pending_mod_map.get(reservation.id, 0),
         )
-        # Flag reservation with pending modification request(s)
-        block["pendingModification"] = _pending_mod_map.get(reservation.id, 0) > 0
         if allocation_state == "unallocated" or target_row is None or reservation.assigned_room_id not in room_id_set:
             _ensure_unallocated_row(target_group)["blocks"].append(block)
             continue
@@ -424,13 +423,14 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             row["statusBadges"] = row["status_badges"]
             row["lane_count"] = _assign_block_lanes(visible_blocks)
             row["track_height"] = max(74, 18 + (row["lane_count"] * 54))
+            row.update(_row_focus_state(row))
             rows.append(row)
         if not filters.show_unallocated:
             rows = [row for row in rows if not row["is_unallocated"]]
         if rows:
             groups.append(group | {"rows": rows})
 
-    # If floor grouping is requested, re-key groups by floor number
+    # Re-key groups for alternate operating layouts
     if filters.group_by == "floor":
         floor_group_map: dict[int | str, dict[str, Any]] = {}
         floor_order: list[int | str] = []
@@ -457,6 +457,10 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
                         seen_ids.add(o["id"])
         groups = [floor_group_map[f] for f in sorted(floor_order, key=lambda x: (x is None, x))]
         # sort key: None sorts last; numeric floors sort ascending
+    elif filters.group_by == "action":
+        groups = _group_rows_by_action(groups)
+    elif filters.group_by == "turnover":
+        groups = _group_rows_by_turnover(groups)
 
     today_offset = (today - window_start).days + 1 if window_start <= today < window_end else None
     headers = _build_headers(window_start, filters.days, today=today)
@@ -519,6 +523,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             today=today,
             room_type_id_filter=filters.room_type_id,
         ),
+        "exceptionQueues": _build_exception_queues(groups),
+        "handover": _build_handover_snapshot(groups),
         "today_offset": today_offset,
         "todayOffset": today_offset,
         "current_window_label": f"{window_start.strftime('%d %b %Y')} - {(window_end - timedelta(days=1)).strftime('%d %b %Y')}",
@@ -779,6 +785,94 @@ def _reservation_block(
             "isVip": is_vip,
         },
     )
+
+
+def _annotate_reservation_block(
+    *,
+    block: dict[str, Any],
+    reservation: Reservation,
+    allocation_state: str,
+    target_row: dict[str, Any] | None,
+    today: date,
+    pending_modification_count: int,
+) -> None:
+    deposit_gap = max(
+        Decimal("0.00"),
+        Decimal(str(reservation.deposit_required_amount or 0)) - Decimal(str(reservation.deposit_received_amount or 0)),
+    )
+    is_arrival_due = reservation.current_status in {"tentative", "confirmed"} and reservation.check_in_date <= today
+    is_departure_due = reservation.current_status == "checked_in" and reservation.check_out_date == today
+    room_assigned = allocation_state == "allocated" and target_row is not None
+    room_ready = bool(target_row and target_row.get("is_room_ready"))
+    dirty_turnaround = bool(
+        is_arrival_due
+        and target_row
+        and target_row.get("has_departure_today")
+        and target_row.get("housekeeping_status") in {"dirty", "occupied_dirty"}
+    )
+
+    blocker_reasons: list[dict[str, Any]] = []
+    if is_arrival_due and not room_assigned:
+        blocker_reasons.append({"code": "room_assignment", "label": "Assign room", "tone": "warning", "blocking": True})
+    if is_arrival_due and dirty_turnaround:
+        blocker_reasons.append({"code": "dirty_turnaround", "label": "Dirty turnaround", "tone": "danger", "blocking": True})
+    elif is_arrival_due and room_assigned and not room_ready:
+        blocker_reasons.append({"code": "room_not_ready", "label": "Room not ready", "tone": "warning", "blocking": True})
+    if is_arrival_due and deposit_gap > Decimal("0.00"):
+        blocker_reasons.append({"code": "unpaid_deposit", "label": "Collect deposit", "tone": "danger", "blocking": True})
+    if reservation.special_requests and is_arrival_due:
+        blocker_reasons.append({"code": "special_requests", "label": "Review requests", "tone": "info", "blocking": False})
+    if pending_modification_count:
+        blocker_reasons.append({"code": "pending_modification", "label": "Pending change request", "tone": "muted", "blocking": False})
+
+    has_blocking_reason = any(item["blocking"] for item in blocker_reasons)
+    ready_for_checkin = is_arrival_due and room_assigned and room_ready and deposit_gap <= Decimal("0.00")
+
+    if ready_for_checkin:
+        workflow_state = "arrival_ready"
+        next_action = "Check in"
+        urgency = "high"
+        action_summary = "Ready to check in now"
+    elif is_arrival_due and has_blocking_reason:
+        workflow_state = "arrival_blocked"
+        first_blocker = next((item for item in blocker_reasons if item["blocking"]), None)
+        next_action = first_blocker["label"] if first_blocker else "Resolve blockers"
+        urgency = "critical" if any(item["code"] in {"room_assignment", "dirty_turnaround"} for item in blocker_reasons) else "high"
+        action_summary = "Resolve blockers before arrival"
+    elif is_departure_due:
+        workflow_state = "departure_due"
+        next_action = "Check out"
+        urgency = "high"
+        action_summary = "Departure due today"
+    elif reservation.current_status == "checked_in":
+        workflow_state = "in_house"
+        next_action = "Review stay"
+        urgency = "normal"
+        action_summary = "Guest currently in house"
+    elif allocation_state == "unallocated":
+        workflow_state = "unallocated"
+        next_action = "Assign room"
+        urgency = "medium"
+        action_summary = "Room still needs assignment"
+    else:
+        workflow_state = "scheduled"
+        next_action = "Open details"
+        urgency = "normal"
+        action_summary = "Scheduled stay"
+
+    block["readyForCheckIn"] = ready_for_checkin
+    block["pendingModification"] = pending_modification_count > 0
+    block["depositGap"] = float(deposit_gap)
+    block["arrivalDue"] = is_arrival_due
+    block["departureDue"] = is_departure_due
+    block["roomAssigned"] = room_assigned
+    block["roomReady"] = room_ready
+    block["turnaroundDirty"] = dirty_turnaround
+    block["workflowState"] = workflow_state
+    block["nextAction"] = next_action
+    block["urgency"] = urgency
+    block["actionSummary"] = action_summary
+    block["blockerReasons"] = blocker_reasons
 
 
 def _hold_block(
@@ -1210,6 +1304,199 @@ def _assign_block_lanes(blocks: list[dict[str, Any]]) -> int:
             block["laneIndex"] = len(lane_end_dates)
             block["lane_index"] = len(lane_end_dates)
     return max(len(lane_end_dates), 1)
+
+
+def _row_focus_state(row: dict[str, Any]) -> dict[str, Any]:
+    reservation_blocks = [block for block in row.get("visible_blocks", []) if block.get("sourceType") == "reservation"]
+    if not reservation_blocks:
+        return {
+            "focusAction": "",
+            "focusUrgency": "",
+            "focusSummary": "",
+            "focusReservationId": None,
+            "focusBlockers": [],
+        }
+    focus_block = sorted(
+        reservation_blocks,
+        key=lambda block: (
+            _urgency_rank(block.get("urgency")),
+            0 if block.get("arrivalDue") else 1,
+            0 if block.get("workflowState") == "departure_due" else 1,
+            block.get("label") or "",
+        ),
+    )[0]
+    return {
+        "focusAction": focus_block.get("nextAction") or "",
+        "focusUrgency": focus_block.get("urgency") or "",
+        "focusSummary": focus_block.get("actionSummary") or "",
+        "focusReservationId": focus_block.get("reservationId"),
+        "focusBlockers": focus_block.get("blockerReasons", [])[:2],
+    }
+
+
+def _build_exception_queues(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    queue_defs = [
+        ("ready_arrivals", "Ready Arrivals", "success", lambda item: item["workflowState"] == "arrival_ready"),
+        ("blocked_arrivals", "Blocked Arrivals", "danger", lambda item: item["workflowState"] == "arrival_blocked"),
+        ("dirty_turnarounds", "Dirty Turnarounds", "danger", lambda item: "dirty_turnaround" in item["blockerCodes"]),
+        ("unallocated_arrivals", "Unallocated Arrivals", "warning", lambda item: "room_assignment" in item["blockerCodes"]),
+        ("unpaid_arrivals", "Unpaid Arrivals", "danger", lambda item: "unpaid_deposit" in item["blockerCodes"]),
+        ("special_requests", "Special Requests", "info", lambda item: "special_requests" in item["blockerCodes"]),
+    ]
+    queue_items = _queue_items_for_blocks(groups)
+    queues: list[dict[str, Any]] = []
+    for queue_id, title, tone, matcher in queue_defs:
+        items = [item for item in queue_items if matcher(item)]
+        queues.append(
+            {
+                "id": queue_id,
+                "title": title,
+                "tone": tone,
+                "count": len(items),
+                "items": items[:6],
+            }
+        )
+    return queues
+
+
+def _build_handover_snapshot(groups: list[dict[str, Any]]) -> dict[str, Any]:
+    unresolved = [
+        item
+        for item in _queue_items_for_blocks(groups)
+        if item["workflowState"] in {"arrival_blocked", "departure_due"}
+        or item["blockerCodes"]
+    ]
+    return {
+        "items": unresolved[:10],
+        "count": len(unresolved),
+    }
+
+
+def _group_rows_by_action(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bucket_defs = [
+        ("blocked_arrivals", "Blocked Arrivals"),
+        ("ready_arrivals", "Ready Arrivals"),
+        ("dirty_turnarounds", "Dirty Turnarounds"),
+        ("departures", "Departures"),
+        ("in_house", "In-House Watch"),
+        ("quiet", "Quiet Rooms"),
+    ]
+    bucket_map = {
+        bucket_id: {
+            "room_type_id": bucket_id,
+            "roomTypeId": bucket_id,
+            "room_type_code": title,
+            "roomTypeCode": title,
+            "room_type_name": "",
+            "roomTypeName": "",
+            "room_options": [],
+            "rows": [],
+        }
+        for bucket_id, title in bucket_defs
+    }
+    for row in _flatten_group_rows(groups):
+        bucket_map[_action_bucket_for_row(row)]["rows"].append(row)
+    return [bucket_map[bucket_id] for bucket_id, _title in bucket_defs if bucket_map[bucket_id]["rows"]]
+
+
+def _group_rows_by_turnover(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    bucket_defs = [
+        ("turnovers_now", "Turnovers Now"),
+        ("arrivals", "Arrivals"),
+        ("departures", "Departures"),
+        ("watchlist", "Watchlist"),
+        ("quiet", "Quiet Rooms"),
+    ]
+    bucket_map = {
+        bucket_id: {
+            "room_type_id": bucket_id,
+            "roomTypeId": bucket_id,
+            "room_type_code": title,
+            "roomTypeCode": title,
+            "room_type_name": "",
+            "roomTypeName": "",
+            "room_options": [],
+            "rows": [],
+        }
+        for bucket_id, title in bucket_defs
+    }
+    for row in _flatten_group_rows(groups):
+        bucket_map[_turnover_bucket_for_row(row)]["rows"].append(row)
+    return [bucket_map[bucket_id] for bucket_id, _title in bucket_defs if bucket_map[bucket_id]["rows"]]
+
+
+def _flatten_group_rows(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for group in groups for row in group.get("rows", [])]
+
+
+def _action_bucket_for_row(row: dict[str, Any]) -> str:
+    reservation_blocks = [block for block in row.get("visible_blocks", []) if block.get("sourceType") == "reservation"]
+    if any(block.get("workflowState") == "arrival_blocked" for block in reservation_blocks):
+        return "blocked_arrivals"
+    if any(_block_has_reason(block, "dirty_turnaround") for block in reservation_blocks):
+        return "dirty_turnarounds"
+    if any(block.get("workflowState") == "arrival_ready" for block in reservation_blocks):
+        return "ready_arrivals"
+    if row.get("has_departure_today"):
+        return "departures"
+    if row.get("is_occupied") or any(block.get("displayVariant") == "in_house" for block in reservation_blocks):
+        return "in_house"
+    return "quiet"
+
+
+def _turnover_bucket_for_row(row: dict[str, Any]) -> str:
+    reservation_blocks = [block for block in row.get("visible_blocks", []) if block.get("sourceType") == "reservation"]
+    if row.get("has_arrival_today") and row.get("has_departure_today"):
+        return "turnovers_now"
+    if row.get("has_arrival_today") or any(block.get("workflowState", "").startswith("arrival_") for block in reservation_blocks):
+        return "arrivals"
+    if row.get("has_departure_today"):
+        return "departures"
+    if row.get("focusUrgency") in {"critical", "high"}:
+        return "watchlist"
+    return "quiet"
+
+
+def _block_has_reason(block: dict[str, Any], code: str) -> bool:
+    return any(reason.get("code") == code for reason in block.get("blockerReasons", []))
+
+
+def _queue_items_for_blocks(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for group in groups:
+        for row in group.get("rows", []):
+            for block in row.get("visible_blocks", []):
+                if block.get("sourceType") != "reservation":
+                    continue
+                blocker_reasons = block.get("blockerReasons", [])
+                items.append(
+                    {
+                        "reservationId": block.get("reservationId"),
+                        "label": block.get("label"),
+                        "roomLabel": row.get("label"),
+                        "roomSecondaryLabel": row.get("secondary_label"),
+                        "roomAnchorId": row.get("anchor_id"),
+                        "roomTypeCode": group.get("room_type_code"),
+                        "nextAction": block.get("nextAction"),
+                        "workflowState": block.get("workflowState"),
+                        "urgency": block.get("urgency"),
+                        "actionSummary": block.get("actionSummary"),
+                        "blockers": [reason.get("label") for reason in blocker_reasons],
+                        "blockerCodes": [reason.get("code") for reason in blocker_reasons],
+                    }
+                )
+    return sorted(
+        items,
+        key=lambda item: (
+            _urgency_rank(item.get("urgency")),
+            item.get("roomLabel") or "",
+            item.get("label") or "",
+        ),
+    )
+
+
+def _urgency_rank(value: str | None) -> int:
+    return {"critical": 0, "high": 1, "medium": 2, "normal": 3}.get((value or "").strip(), 4)
 
 
 def _search_text(*parts: Any) -> str:
