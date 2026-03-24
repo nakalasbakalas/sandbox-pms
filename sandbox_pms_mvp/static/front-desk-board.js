@@ -2143,6 +2143,7 @@
 
     function positionHoverCard(evt) {
       const pad = 12;
+      hoverCard.style.visibility = "hidden";
       hoverCard.style.left = "0px";
       hoverCard.style.top = "0px";
       const rect = hoverCard.getBoundingClientRect();
@@ -2152,6 +2153,7 @@
       if (y + rect.height > window.innerHeight - pad) y = evt.clientY - rect.height - pad;
       hoverCard.style.left = Math.max(0, x) + "px";
       hoverCard.style.top = Math.max(0, y) + "px";
+      hoverCard.style.visibility = "";
     }
 
     function hideHoverCard() {
@@ -2185,6 +2187,15 @@
     surface.addEventListener("mouseleave", hideHoverCard);
     surface.addEventListener("mousedown", hideHoverCard);
     surface.addEventListener("scroll", hideHoverCard, true);
+
+    surface.addEventListener("focusin", function (e) {
+      const blockEl = e.target.closest("[data-board-block]");
+      if (!blockEl || blockEl.open) { hideHoverCard(); return; }
+      currentBlock = blockEl;
+      const rect = blockEl.getBoundingClientRect();
+      showHoverCard(blockEl, { clientX: rect.right, clientY: rect.top });
+    });
+    surface.addEventListener("focusout", function () { hideHoverCard(); });
   })();
 
 })();
