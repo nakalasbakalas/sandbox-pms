@@ -87,6 +87,7 @@
   --pms-modal-pad: 10px 14px;
   --pms-dashboard-star-size: 0.82rem;
   --pms-rating-color: #f5a623;
+  --pms-survey-bar-height: 24px;
 
   /* Minimal rounding */
   --pms-radius: 4px;
@@ -3925,7 +3926,6 @@ body:not(.public-site) .context-block {
   margin-bottom: 4px;
   padding: 4px 6px;
   border: 1px solid var(--pms-border-thin);
-  border-bottom: none;
   background: var(--pms-bg-hover);
   border-radius: 3px;
 }
@@ -3974,7 +3974,7 @@ body:not(.public-site) .dashboard-survey-count {
 body:not(.public-site) .dashboard-survey-bar {
   background: #eee;
   border-radius: 3px;
-  height: 24px;
+  height: var(--pms-survey-bar-height);
   position: relative;
   overflow: hidden;
 }
