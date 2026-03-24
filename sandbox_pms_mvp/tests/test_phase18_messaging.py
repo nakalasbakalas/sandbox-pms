@@ -766,7 +766,7 @@ class TestMessagingRoutes:
             text = resp.get_data(as_text=True)
             assert resp.status_code == 200
             assert 'class="context-block"' in text
-            assert "margin-bottom:1rem" not in text
+            assert 'class="context-block" style=' not in text
 
     def test_send_message_via_route(self, seeded_app):
         with seeded_app.app_context():

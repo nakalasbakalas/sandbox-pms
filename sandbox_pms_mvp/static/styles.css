@@ -86,6 +86,7 @@
   --pms-chip-height: 20px;
   --pms-modal-pad: 10px 14px;
   --pms-dashboard-star-size: 0.82rem;
+  --pms-rating-color: #f5a623;
 
   /* Minimal rounding */
   --pms-radius: 4px;
@@ -3795,7 +3796,7 @@ body:not(.public-site) .grid {
   gap: 4px;
 }
 body:not(.public-site) .gap-lg {
-  gap: 5px;
+  gap: 6px;
 }
 body:not(.public-site) .report-hero {
   margin-bottom: 4px;
@@ -3950,7 +3951,7 @@ body:not(.public-site) .dashboard-survey-value {
   color: var(--pms-text-primary);
 }
 body:not(.public-site) .dashboard-survey-star {
-  color: #f5a623;
+  color: var(--pms-rating-color);
   font-size: var(--pms-dashboard-star-size);
 }
 body:not(.public-site) .dashboard-survey-distribution {
@@ -3978,7 +3979,7 @@ body:not(.public-site) .dashboard-survey-bar {
   overflow: hidden;
 }
 body:not(.public-site) .dashboard-survey-fill {
-  background: #f5a623;
+  background: var(--pms-rating-color);
   height: 100%;
   width: 100%;
   position: absolute;
