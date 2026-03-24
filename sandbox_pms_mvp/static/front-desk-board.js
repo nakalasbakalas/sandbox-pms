@@ -1884,13 +1884,13 @@
       return;
     }
 
-    const reservationId = blockEl.dataset.reservationId;
-    const copyEl = blockEl.querySelector(".planning-board-block-copy strong");
+    const copyEl = blockEl ? blockEl.querySelector(".planning-board-block-copy strong") : null;
     const guestName = copyEl ? copyEl.textContent.trim() : "";
-    const subtitleEl = blockEl.querySelector(".planning-board-block-copy small");
+    const subtitleEl = blockEl ? blockEl.querySelector(".planning-board-block-copy small") : null;
     const code = subtitleEl ? subtitleEl.textContent.trim() : "";
 
     panelTitle.textContent = guestName ? `${guestName}${code ? " · " + code : ""}` : "Reservation Details";
+    panelReservationId = reservationId;
 
     setBusyState(true);
     if (!options.silent) {
