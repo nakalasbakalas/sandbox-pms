@@ -3479,7 +3479,7 @@ body:not(.public-site) {
   color: var(--pms-text-primary);
 }
 body:not(.public-site) .shell {
-  padding: 10px 0 24px;
+  padding: 6px 0 16px;
 }
 
 /* ── Site header for staff ── */
@@ -3490,18 +3490,18 @@ body:not(.public-site) .site-header {
   box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 body:not(.public-site) .app-header {
-  min-height: 44px;
-  padding: 4px 0;
+  min-height: 38px;
+  padding: 2px 0;
 }
-body:not(.public-site) .brand strong { color: var(--pms-text-primary); }
-body:not(.public-site) .brand-copy small { color: var(--pms-text-muted); }
+body:not(.public-site) .brand strong { color: var(--pms-text-primary); font-size: 0.85rem; }
+body:not(.public-site) .brand-copy small { color: var(--pms-text-muted); font-size: 0.7rem; }
 body:not(.public-site) .brand-mark {
-  width: 32px; height: 32px;
+  width: 28px; height: 28px;
   border-radius: 6px;
   box-shadow: none;
 }
 body:not(.public-site) .brand-logo {
-  width: 32px; height: 32px;
+  width: 28px; height: 28px;
   border-radius: 4px;
 }
 body:not(.public-site) .header-brand-divider {
@@ -3511,9 +3511,9 @@ body:not(.public-site) .header-main-nav {
   gap: 0;
 }
 body:not(.public-site) .header-primary-link {
-  padding: 0 13px;
-  height: 44px;
-  font-size: 13px;
+  padding: 0 10px;
+  height: 38px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--pms-text-secondary);
   border-bottom: 2px solid transparent;
@@ -3540,8 +3540,9 @@ body:not(.public-site) .header-search {
 }
 body:not(.public-site) .header-search input {
   color: var(--pms-text-primary);
-  height: 28px;
-  width: clamp(140px, 16vw, 200px);
+  height: 24px;
+  width: clamp(120px, 14vw, 180px);
+  font-size: 12px;
 }
 body:not(.public-site) .header-search input::placeholder { color: var(--pms-text-muted); }
 body:not(.public-site) .header-search button,
@@ -3552,8 +3553,9 @@ body:not(.public-site) .header-signout {
   border: 1px solid var(--pms-border-thin);
   color: var(--pms-text-secondary);
   border-radius: 4px;
-  min-height: 30px;
-  font-size: 12px;
+  min-height: 26px;
+  font-size: 11px;
+  padding: 0 8px;
 }
 body:not(.public-site) .header-search button:hover,
 body:not(.public-site) .header-utility-link:hover,
@@ -3581,20 +3583,23 @@ body:not(.public-site) .metric-card {
   border: 1px solid var(--pms-border-thin);
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
   border-radius: 4px;
+  padding: 8px 10px;
 }
 body:not(.public-site) .card.inset {
   background: var(--pms-bg-hover);
+  padding: 8px 10px;
 }
 
 /* ── Typography ── */
-body:not(.public-site) h1 { font-size: 20px; color: var(--pms-text-primary); }
-body:not(.public-site) h2 { font-size: 16px; color: var(--pms-text-primary); }
-body:not(.public-site) h3 { font-size: 14px; color: var(--pms-text-primary); }
-body:not(.public-site) p { color: var(--pms-text-secondary); }
-body:not(.public-site) .eyebrow { color: var(--pms-text-muted); font-size: 11px; }
+body:not(.public-site) h1 { font-size: 16px; color: var(--pms-text-primary); margin-bottom: 2px; }
+body:not(.public-site) h2 { font-size: 14px; color: var(--pms-text-primary); margin-bottom: 2px; }
+body:not(.public-site) h3 { font-size: 13px; color: var(--pms-text-primary); margin-bottom: 1px; }
+body:not(.public-site) p { color: var(--pms-text-secondary); font-size: 12px; margin-bottom: 3px; }
+body:not(.public-site) .eyebrow { color: var(--pms-text-muted); font-size: 10px; margin-bottom: 1px; }
 body:not(.public-site) strong { color: var(--pms-text-primary); }
 body:not(.public-site) .muted { color: var(--pms-text-muted); }
-body:not(.public-site) .small { font-size: 12px; }
+body:not(.public-site) .small { font-size: 11px; }
+body:not(.public-site) .lead { font-size: 12px; margin-bottom: 2px; }
 
 /* ── Forms ── */
 body:not(.public-site) label { color: var(--pms-text-primary); font-size: 12px; }
@@ -3623,9 +3628,9 @@ body:not(.public-site) button.button {
   border-radius: 3px;
   font-weight: 600;
   box-shadow: none;
-  font-size: 13px;
-  padding: 6px 13px;
-  min-height: 30px;
+  font-size: 12px;
+  padding: 4px 10px;
+  min-height: 28px;
 }
 body:not(.public-site) .button:hover { transform: none; }
 body:not(.public-site) .button.secondary {
@@ -3638,14 +3643,14 @@ body:not(.public-site) .button.secondary:hover {
   border-color: var(--pms-text-secondary);
 }
 body:not(.public-site) .button.tiny {
-  padding: 4px 9px;
-  font-size: 12px;
-  min-height: 26px;
+  padding: 2px 7px;
+  font-size: 11px;
+  min-height: 22px;
 }
 body:not(.public-site) .pill {
   border-radius: 3px;
-  font-size: 12px;
-  padding: 5px 10px;
+  font-size: 11px;
+  padding: 3px 8px;
 }
 body:not(.public-site) .pill.subtle {
   background: #fff;
@@ -3657,6 +3662,182 @@ body:not(.public-site) .pill.active {
   background: linear-gradient(135deg, var(--accent), var(--accent-dark));
   color: #fff;
   border-color: transparent;
+}
+
+/* ── Operational Density: Spacing & Layout ── */
+body:not(.public-site) .card-head {
+  margin-bottom: 4px;
+  gap: 6px;
+}
+body:not(.public-site) .card-head .actions {
+  margin-top: 0;
+}
+body:not(.public-site) .metric-grid {
+  margin-bottom: 6px;
+}
+body:not(.public-site) .metric-card small,
+body:not(.public-site) .metric-strip small {
+  margin-bottom: 1px;
+  font-size: 10px;
+}
+body:not(.public-site) .metric-card strong,
+body:not(.public-site) .metric-strip strong {
+  font-size: 1rem;
+}
+body:not(.public-site) .metric-strip {
+  padding: 5px 8px;
+  margin-bottom: 4px;
+  gap: 4px;
+}
+body:not(.public-site) .grid {
+  gap: 6px;
+}
+body:not(.public-site) .gap-lg {
+  gap: 8px;
+}
+body:not(.public-site) .report-hero {
+  margin-bottom: 6px;
+}
+body:not(.public-site) .report-mini-grid {
+  gap: 4px;
+  margin-bottom: 4px;
+}
+body:not(.public-site) .subsection {
+  margin-top: 6px;
+}
+body:not(.public-site) .actions {
+  margin-top: 0;
+  gap: 4px;
+}
+body:not(.public-site) .list-stack {
+  gap: 3px;
+}
+body:not(.public-site) .list-row {
+  padding: 5px 8px;
+  gap: 6px;
+}
+body:not(.public-site) .list-row p {
+  margin: 1px 0 0;
+}
+body:not(.public-site) .status {
+  padding: 2px 6px;
+  font-size: 10px;
+}
+body:not(.public-site) .status-pair {
+  gap: 3px;
+}
+body:not(.public-site) .stack-form {
+  gap: 6px;
+}
+body:not(.public-site) .compact-form {
+  gap: 4px;
+}
+body:not(.public-site) .table-wrap {
+  border-radius: 3px;
+}
+body:not(.public-site) .compact-table th,
+body:not(.public-site) .compact-table td {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+body:not(.public-site) .compact-table thead th {
+  font-size: 10px;
+  padding: 4px 6px;
+}
+body:not(.public-site) .empty-state {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--pms-text-muted);
+}
+body:not(.public-site) .text-right {
+  font-size: 12px;
+}
+body:not(.public-site) .toolbar {
+  gap: 4px;
+}
+body:not(.public-site) .front-desk-tabs {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+body:not(.public-site) .status-card {
+  padding: 5px 8px;
+  gap: 2px;
+}
+body:not(.public-site) .status-card strong {
+  font-size: 1rem;
+}
+body:not(.public-site) .status-card span {
+  font-size: 10px;
+}
+/* Quiet zero-value metrics */
+body:not(.public-site) .metric-card.zero-value,
+body:not(.public-site) .metric-strip .zero-value {
+  opacity: 0.5;
+}
+/* Reusable compact layout helpers */
+body:not(.public-site) .ops-page-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+body:not(.public-site) .ops-page-header .ops-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+body:not(.public-site) .ops-page-header .ops-title-group h1 {
+  margin: 0;
+}
+body:not(.public-site) .ops-meta {
+  font-size: 11px;
+  color: var(--pms-text-muted);
+}
+body:not(.public-site) .ops-header-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--pms-text-muted);
+}
+body:not(.public-site) .ops-collapsible-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+body:not(.public-site) .ops-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+body:not(.public-site) .ops-collapse-indicator {
+  font-size: 9px;
+  color: var(--pms-text-muted);
+  transition: transform 0.15s;
+}
+body:not(.public-site) details[open] > .ops-collapsible-summary .ops-collapse-indicator {
+  transform: rotate(180deg);
+}
+body:not(.public-site) .ops-drawer-body {
+  margin-top: 6px;
+}
+body:not(.public-site) .count-danger {
+  color: var(--pms-status-danger);
+}
+/* Walk-in drawer: collapsed by default on front desk */
+body:not(.public-site) .walkin-drawer-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+body:not(.public-site) .walkin-drawer-toggle .card-head {
+  margin-bottom: 0;
+}
+body:not(.public-site) .walkin-drawer-body {
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+body:not(.public-site) .walkin-drawer[open] .walkin-drawer-body {
+  max-height: none;
 }
 
 body:not(.public-site) .header-auth-status {
@@ -4342,8 +4523,8 @@ body:not(.public-site) .hk-section-date { color: var(--pms-text-muted); }
   overflow: hidden;
 }
 .hk-date-btn {
-  padding: 5px 12px;
-  font-size: 12px;
+  padding: 3px 10px;
+  font-size: 11px;
   font-weight: 500;
   color: var(--pms-text-secondary);
   background: #fff;
@@ -4371,9 +4552,9 @@ body:not(.public-site) .hk-section-date { color: var(--pms-text-muted); }
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  font-size: 12px;
+  gap: 3px;
+  padding: 3px 10px;
+  font-size: 11px;
   font-weight: 600;
   background: #fff;
   border: 1px solid var(--pms-border-medium);
@@ -4387,17 +4568,18 @@ body:not(.public-site) .hk-section-date { color: var(--pms-text-muted); }
 
 /* ─── Compact Housekeeping Board ─── */
 body:not(.public-site) .hk-page-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--pms-text-primary);
-  margin: 0 0 6px;
+  margin: 0 0 2px;
+  display: inline;
 }
 
 .hk-header-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
+  gap: 4px;
+  margin-bottom: 4px;
   flex-wrap: wrap;
 }
 
@@ -4430,14 +4612,14 @@ body:not(.public-site) .hk-page-title {
 .hk-filter-block {
   background: #2c3e50;
   border-radius: 3px;
-  padding: 10px 12px;
-  margin-bottom: 6px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
 }
 
 .hk-filter-form {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 4px;
   align-items: end;
 }
 
@@ -4452,8 +4634,8 @@ body:not(.public-site) .hk-page-title {
 
 .hk-filter-form input,
 .hk-filter-form select {
-  height: 28px;
-  padding: 0 6px;
+  height: 24px;
+  padding: 0 5px;
   border: 1px solid rgba(255,255,255,0.15);
   background: rgba(255,255,255,0.08);
   color: #fff;
@@ -4467,8 +4649,8 @@ body:not(.public-site) .hk-page-title {
 }
 
 .hk-filter-form .button {
-  height: 28px;
-  padding: 0 12px;
+  height: 24px;
+  padding: 0 10px;
   font-size: 11px;
   margin: 0;
 }
@@ -4478,15 +4660,15 @@ body:not(.public-site) .hk-page-title {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
-  margin-bottom: 4px;
-  font-size: 12px;
+  padding: 2px 0;
+  margin-bottom: 2px;
+  font-size: 11px;
   color: var(--pms-text-secondary);
 }
 
 /* Table section with bulk actions */
 .hk-table-section {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .hk-bulk-header {
@@ -4511,10 +4693,10 @@ body:not(.public-site) .hk-page-title {
 }
 
 .hk-bulk-form {
-  padding: 8px 10px;
+  padding: 5px 8px;
   border-top: 1px solid var(--pms-border-thin);
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
   align-items: flex-end;
   font-size: 11px;
@@ -4547,13 +4729,13 @@ body:not(.public-site) .hk-page-title {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  padding: 4px 0;
+  padding: 2px 0;
   border-bottom: 1px solid var(--pms-border-thin);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 
 body:not(.public-site) .hk-table-head h2 {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   margin: 0;
   color: var(--pms-text-primary);
@@ -4580,22 +4762,23 @@ body:not(.public-site) .hk-counts {
 
 .hk-sheet th {
   background: var(--pms-bg-hover);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--pms-text-secondary);
-  padding: 5px 8px;
+  padding: 3px 6px;
   border-bottom: 1px solid var(--pms-border-medium);
   white-space: nowrap;
   text-align: left;
 }
 
 .hk-sheet td {
-  padding: 5px 8px;
+  padding: 3px 6px;
   border-bottom: 1px solid var(--pms-border-thin);
   color: var(--pms-text-primary);
   vertical-align: middle;
+  font-size: 11px;
 }
 
 .hk-sheet tbody tr:hover {

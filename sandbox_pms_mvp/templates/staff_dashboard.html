@@ -1,18 +1,15 @@
 {% extends 'base.html' %}
 {% block title %}Staff workspace | {{ hotel_name }}{% endblock %}
 {% block content %}
-<section class="card report-hero">
-  <div class="card-head">
-    <div>
-      <p class="eyebrow">Front Desk Dashboard</p>
-      <h1>Daily operations</h1>
-      <p class="lead">{{ dashboard.business_date.strftime('%A, %d %B %Y') }} — shift overview and quick actions.</p>
-    </div>
-    <div class="actions">
-      {% if can_reports %}<a class="button secondary tiny" href="{{ url_for('reports.staff_reports') }}">Manager reports</a>{% endif %}
-    </div>
+<div class="ops-page-header">
+  <div class="ops-title-group">
+    <h1>Daily operations</h1>
+    <span class="ops-meta">Front Desk Dashboard · {{ dashboard.business_date.strftime('%a %d %b %Y') }}</span>
   </div>
-</section>
+  <div class="actions" style="margin:0;">
+    {% if can_reports %}<a class="button secondary tiny" href="{{ url_for('reports.staff_reports') }}">Manager reports</a>{% endif %}
+  </div>
+</div>
 
 <section class="grid four metric-grid">
   {% for card in dashboard.headline %}
@@ -26,17 +23,14 @@
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
-      <div>
-        <h2>Arrivals today</h2>
-        <p>{{ arrivals_count }} arrival{{ '' if arrivals_count == 1 else 's' }} due today</p>
-      </div>
+      <div><h2>Arrivals today <span class="ops-header-count">({{ arrivals_count }})</span></h2></div>
       <div class="actions">
-        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open arrivals</a>
-        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">Full report</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open</a>
+        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">Report</a>
       </div>
     </div>
-    <div class="metric-strip">
-      <div><small>No room assigned</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
+    <div class="metric-strip" style="grid-template-columns:repeat(4,1fr);">
+      <div><small>No room</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
       <div><small>Not ready</small><strong>{{ dashboard.arrivals.not_ready_count }}</strong></div>
       <div><small>Deposit missing</small><strong>{{ dashboard.arrivals.deposit_missing_count }}</strong></div>
       <div><small>Flagged</small><strong>{{ dashboard.arrivals.flagged_count }}</strong></div>
@@ -69,18 +63,15 @@
 
   <article class="card inset">
     <div class="card-head">
-      <div>
-        <h2>Departures today</h2>
-        <p>{{ departures_count }} departure{{ '' if departures_count == 1 else 's' }} due today</p>
-      </div>
+      <div><h2>Departures today <span class="ops-header-count">({{ departures_count }})</span></h2></div>
       <div class="actions">
-        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open departures</a>
-        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">Full report</a>
+        <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open</a>
+        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">Report</a>
       </div>
     </div>
     <div class="metric-strip">
-      <div><small>Outstanding balance</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
-      <div><small>Not checked out</small><strong>{{ dashboard.departures.pending_checkout_count }}</strong></div>
+      <div><small>Balance due</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
+      <div><small>Pending checkout</small><strong>{{ dashboard.departures.pending_checkout_count }}</strong></div>
     </div>
     {% if dashboard.departures["items"] %}
       <div class="table-wrap">
@@ -113,29 +104,23 @@
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
-      <div>
-        <h2>Room status</h2>
-        <p>{{ dashboard.housekeeping.counts.sellable_ready }} ready room{{ '' if dashboard.housekeeping.counts.sellable_ready == 1 else 's' }}</p>
-      </div>
+      <div><h2>Room status <span class="ops-header-count">({{ dashboard.housekeeping.counts.sellable_ready }} ready)</span></h2></div>
       <div class="actions">
-        <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Housekeeping board</a>
-        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">Full report</a>
+        <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">HK board</a>
+        <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">Report</a>
       </div>
     </div>
     <div class="grid four report-mini-grid">
       <article class="status-card"><span>Ready</span><strong>{{ dashboard.housekeeping.counts.sellable_ready }}</strong></article>
       <article class="status-card"><span>Dirty</span><strong>{{ dashboard.housekeeping.counts.dirty }}</strong></article>
       <article class="status-card"><span>Blocked</span><strong>{{ dashboard.housekeeping.counts.blocked }}</strong></article>
-      <article class="status-card"><span>Out of order</span><strong>{{ dashboard.housekeeping.counts.out_of_order }}</strong></article>
+      <article class="status-card"><span>OOO</span><strong>{{ dashboard.housekeeping.counts.out_of_order }}</strong></article>
     </div>
   </article>
 
   <article class="card inset">
     <div class="card-head">
-      <div>
-        <h2>Urgent tasks</h2>
-        <p>{{ dashboard.urgent_tasks.count }} high-priority task{{ '' if dashboard.urgent_tasks.count == 1 else 's' }} today</p>
-      </div>
+      <div><h2>Urgent tasks <span class="ops-header-count">({{ dashboard.urgent_tasks.count }})</span></h2></div>
       <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open tasks</a>
     </div>
     {% if dashboard.urgent_tasks["items"] %}
@@ -166,11 +151,8 @@
 {% if can_folio and dashboard.balances_due %}
 <section class="card inset">
   <div class="card-head">
-    <div>
-      <h2>Outstanding balances</h2>
-      <p>{{ dashboard.balances_due.count }} folio{{ '' if dashboard.balances_due.count == 1 else 's' }} with balance due · {{ dashboard.balances_due.total_balance_due | money }}</p>
-    </div>
-    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='payment_due') }}">Full report</a>
+    <div><h2>Outstanding balances <span class="ops-header-count">({{ dashboard.balances_due.count }}) · {{ dashboard.balances_due.total_balance_due | money }}</span></h2></div>
+    <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='payment_due') }}">Report</a>
   </div>
   {% if dashboard.balances_due["items"] %}
     <div class="table-wrap">
@@ -200,36 +182,33 @@
 <section class="grid two gap-lg">
   <article class="card">
     <div class="card-head">
-      <div>
-        <p class="eyebrow">Workspace</p>
-        <h2>Quick actions</h2>
-      </div>
+      <div><h2>Quick actions</h2></div>
     </div>
     <div class="list-stack compact">
       <a class="list-row" href="{{ url_for('front_desk.staff_front_desk') }}">
-        <div><strong>Front desk workspace</strong><p>Arrivals, departures, and in-house management.</p></div>
+        <div><strong>Front desk workspace</strong></div>
       </a>
       <a class="list-row" href="{{ url_for('staff_reservations.staff_reservations') }}">
-        <div><strong>Reservations</strong><p>Search and manage all reservations.</p></div>
+        <div><strong>Reservations</strong></div>
       </a>
       {% if can_housekeeping %}
       <a class="list-row" href="{{ url_for('housekeeping.staff_housekeeping') }}">
-        <div><strong>Housekeeping board</strong><p>Room cleaning status and task management.</p></div>
+        <div><strong>Housekeeping board</strong></div>
       </a>
       {% endif %}
       <a class="list-row" href="{{ url_for('staff_reservations.staff_review_queue') }}">
-        <div><strong>Review queue</strong><p>New public bookings waiting for review.</p></div>
+        <div><strong>Review queue</strong></div>
         <span class="status confirmed">{{ queue_entries|length }}</span>
       </a>
       {% if can('messaging.view') %}
       <a class="list-row" href="{{ url_for('messaging.staff_messaging_inbox') }}">
-        <div><strong>Guest messaging</strong><p>Unified inbox for email, SMS, WhatsApp, and internal notes.</p></div>
+        <div><strong>Guest messaging</strong></div>
         {% if messaging_unread_count %}<span class="badge badge-unread">{{ messaging_unread_count }}</span>{% endif %}
       </a>
       {% endif %}
       {% if can('reports.view') %}
       <a class="list-row" href="{{ url_for('coupon_studio.staff_coupon_studio') }}">
-        <div><strong>Coupon Studio</strong><p>Create, edit, and print branded voucher coupon stripes.</p></div>
+        <div><strong>Coupon Studio</strong></div>
       </a>
       {% endif %}
     </div>
@@ -237,29 +216,26 @@
 
   <article class="card">
     <div class="card-head">
-      <div>
-        <p class="eyebrow">Daily Reports</p>
-        <h2>Report shortcuts</h2>
-      </div>
+      <div><h2>Reports</h2></div>
     </div>
     <div class="list-stack compact">
       <a class="list-row" href="{{ url_for('reports.staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">
-        <div><strong>Arrivals report</strong><p>Full arrival details with readiness and deposit status.</p></div>
+        <div><strong>Arrivals report</strong></div>
       </a>
       <a class="list-row" href="{{ url_for('reports.staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">
-        <div><strong>Departures report</strong><p>Checkout readiness and outstanding balances.</p></div>
+        <div><strong>Departures report</strong></div>
       </a>
       <a class="list-row" href="{{ url_for('reports.staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">
-        <div><strong>Room status report</strong><p>Room readiness, cleaning, and blocking status.</p></div>
+        <div><strong>Room status report</strong></div>
       </a>
       {% if can_folio %}
       <a class="list-row" href="{{ url_for('reports.staff_daily_report', report_type='payment_due') }}">
-        <div><strong>Payment due report</strong><p>Outstanding folio balances requiring attention.</p></div>
+        <div><strong>Payment due report</strong></div>
       </a>
       {% endif %}
       {% if can_reports %}
       <a class="list-row" href="{{ url_for('reports.staff_daily_report', report_type='no_show_cancellation') }}">
-        <div><strong>No-show & cancellation report</strong><p>Exceptions and lost bookings.</p></div>
+        <div><strong>No-show &amp; cancellations</strong></div>
       </a>
       {% endif %}
     </div>
@@ -269,38 +245,35 @@
 {% if survey_stats and survey_stats.total_responses > 0 %}
 <section class="card">
   <div class="card-head">
-    <div>
-      <p class="eyebrow">Guest Satisfaction</p>
-      <h2>Survey Results (Last 30 Days)</h2>
-    </div>
+    <div><h2>Guest Satisfaction (30d)</h2></div>
   </div>
-  <div style="padding:1rem 1.5rem;">
-    <div style="display:flex;gap:2rem;flex-wrap:wrap;margin-bottom:1rem;">
+  <div style="padding:6px 8px;">
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:6px;">
       <div>
         <span class="small muted">Responses</span>
-        <p style="font-size:1.5rem;font-weight:700;">{{ survey_stats.total_responses }}</p>
+        <p style="font-size:1.1rem;font-weight:700;margin:0;">{{ survey_stats.total_responses }}</p>
       </div>
       <div>
-        <span class="small muted">Average Rating</span>
-        <p style="font-size:1.5rem;font-weight:700;">
+        <span class="small muted">Avg Rating</span>
+        <p style="font-size:1.1rem;font-weight:700;margin:0;">
           {{ survey_stats.average_rating }}/5
-          <span style="color:#f5a623;font-size:1.2rem;">&#9733;</span>
+          <span style="color:#f5a623;font-size:0.9rem;">&#9733;</span>
         </p>
       </div>
     </div>
     {% if survey_stats.rating_distribution %}
-    <div style="margin-bottom:1rem;">
-      <span class="small muted">Rating Distribution</span>
-      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+    <div style="margin-bottom:6px;">
+      <span class="small muted">Distribution</span>
+      <div style="display:flex;gap:0.4rem;margin-top:3px;">
         {% for star in range(5, 0, -1) %}
         {% set count = survey_stats.rating_distribution.get(star, 0) %}
         {% set pct = (count / survey_stats.total_responses * 100) | round(0) | int if survey_stats.total_responses > 0 else 0 %}
         <div style="flex:1;text-align:center;">
-          <div style="font-size:0.8rem;color:#888;">{{ star }}&#9733;</div>
-          <div style="background:#eee;border-radius:4px;height:40px;position:relative;overflow:hidden;">
-            <div style="background:#f5a623;height:100%;width:100%;position:absolute;bottom:0;transform:scaleY({{ pct / 100 }});transform-origin:bottom;border-radius:4px;"></div>
+          <div style="font-size:9px;color:#888;">{{ star }}&#9733;</div>
+          <div style="background:#eee;border-radius:3px;height:28px;position:relative;overflow:hidden;">
+            <div style="background:#f5a623;height:100%;width:100%;position:absolute;bottom:0;transform:scaleY({{ pct / 100 }});transform-origin:bottom;border-radius:3px;"></div>
           </div>
-          <div style="font-size:0.75rem;color:#666;margin-top:2px;">{{ count }}</div>
+          <div style="font-size:9px;color:#666;margin-top:1px;">{{ count }}</div>
         </div>
         {% endfor %}
       </div>
@@ -308,8 +281,8 @@
     {% endif %}
     {% if survey_stats.category_averages %}
     <div>
-      <span class="small muted">Category Averages</span>
-      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem;">
+      <span class="small muted">Categories</span>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:3px;">
         {% for cat, avg in survey_stats.category_averages.items() %}
         <span class="detail-pill">{{ cat | capitalize }}: <strong>{{ avg }}</strong></span>
         {% endfor %}
@@ -322,10 +295,7 @@
 
 <section class="card">
   <div class="card-head">
-    <div>
-      <p class="eyebrow">Operational alerts</p>
-      <h2>Unread staff notifications</h2>
-    </div>
+    <div><h2>Staff notifications</h2></div>
   </div>
   {% if notifications %}
     <div class="list-stack compact">
