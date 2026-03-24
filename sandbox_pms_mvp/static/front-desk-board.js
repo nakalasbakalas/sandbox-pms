@@ -642,13 +642,15 @@
       return;
     }
 
+    // Capture target room before exitMoveMode clears it
+    const targetRoomId = moveTargetRoomId;
     exitMoveMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
     setFeedback("Saving move...", "pending");
 
     const payload = {
-      roomId: moveTargetRoomId || null,
+      roomId: targetRoomId || null,
       checkInDate: selectedBlock.dataset.startDate,
       checkOutDate: selectedBlock.dataset.endDate,
     };
@@ -674,7 +676,7 @@
     } catch (error) {
       setFeedback(error.message || "The move was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -685,6 +687,8 @@
       return;
     }
 
+    // Capture target end date before exitResizeMode clears it
+    const targetEndDate = resizeTargetEndDate;
     exitResizeMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
@@ -693,7 +697,7 @@
     const payload = {
       roomId: selectedBlock.dataset.roomId || null,
       checkInDate: selectedBlock.dataset.startDate,
-      checkOutDate: resizeTargetEndDate,
+      checkOutDate: targetEndDate,
     };
 
     try {
@@ -717,7 +721,7 @@
     } catch (error) {
       setFeedback(error.message || "The resize was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -1649,6 +1653,10 @@
     if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
       return;
     }
+    // Ignore navigation shortcuts when side panel is open (except Escape)
+    if (!panelEl.classList.contains("hidden") && event.key !== "Escape") {
+      return;
+    }
 
     switch (event.key) {
       case "/":
@@ -1783,7 +1791,7 @@
     } catch (error) {
       setFeedback(error.message || "Check-in failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -1821,11 +1829,10 @@
     } catch (error) {
       setFeedback(error.message || "Check-out failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
-
   function assignUnallocatedReservation() {
     if (!selectedBlock) {
       setFeedback("Select an unallocated block first.", "neutral");
