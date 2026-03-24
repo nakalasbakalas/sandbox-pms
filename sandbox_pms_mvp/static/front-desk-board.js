@@ -70,7 +70,7 @@
   }
 
   function selectBlock(blockEl) {
-    if (!blockEl || !blockEl.dataset.boardBlock) {
+    if (!blockEl || !blockEl.matches("[data-board-block]")) {
       return;
     }
     if (selectedBlock === blockEl) {
