@@ -1428,7 +1428,7 @@ tbody tr:last-child td { border-bottom: 0; }
   min-width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: visible;
+  overflow: hidden;
   position: relative;
   background: rgba(255,255,255,0.02);
 }
@@ -3759,7 +3759,7 @@ body:not(.public-site) .pill {
 body:not(.public-site) .pill.subtle {
   background: #fff;
   border: 1px solid var(--pms-border-medium);
-  color: var(--pms-text-secondary);
+  color: var(--pms-text-secondary) !important;
 }
 body:not(.public-site) .pill.subtle.active,
 body:not(.public-site) .pill.active {
@@ -4414,11 +4414,15 @@ body:not(.public-site) .planning-board-utility-links a:hover {
   color: var(--pms-text-primary);
 }
 body:not(.public-site) .board-days-tab {
-  background: transparent;
+  background: #fff;
   border-color: var(--pms-border-thin);
   color: var(--pms-text-secondary);
   font-size: 12px;
   border-radius: 3px;
+}
+body:not(.public-site) .board-days-tab:hover {
+  background: var(--pms-bg-hover);
+  color: var(--pms-text-primary);
 }
 body:not(.public-site) .board-days-tab.active {
   background: var(--accent);
@@ -4443,9 +4447,14 @@ body:not(.public-site) .board-apply-btn,
 body:not(.public-site) .board-overflow-btn {
   background: #fff;
   border: 1px solid var(--pms-border-medium);
-  color: var(--pms-text-secondary);
+  color: var(--pms-text-primary);
   border-radius: 3px;
   font-size: 12px;
+}
+body:not(.public-site) .board-apply-btn:hover,
+body:not(.public-site) .board-overflow-btn:hover {
+  background: var(--pms-bg-hover);
+  color: var(--pms-text-primary);
 }
 body:not(.public-site) .planning-board-filters-inline select,
 body:not(.public-site) .planning-board-filters-inline input[type="date"] {
@@ -4453,12 +4462,21 @@ body:not(.public-site) .planning-board-filters-inline input[type="date"] {
   padding: 0 6px;
   font-size: 12px;
   border-radius: 3px;
+  background: #fff;
+  border-color: var(--pms-border-medium);
+  color: var(--pms-text-primary);
 }
 body:not(.public-site) .planning-board-search-inline input {
   height: 28px;
   padding: 0 8px;
   font-size: 12px;
   border-radius: 3px;
+  background: #fff;
+  border-color: var(--pms-border-medium);
+  color: var(--pms-text-primary);
+}
+body:not(.public-site) .planning-board-search-inline input::placeholder {
+  color: var(--pms-text-muted);
 }
 
 /* board room grid on light bg */
@@ -4466,6 +4484,7 @@ body:not(.public-site) .planning-board-grid {
   border: 1px solid var(--pms-border-thin);
   border-radius: 3px;
   overflow: hidden;
+  background: #fff;
 }
 body:not(.public-site) .planning-board-room {
   background: #fff;
@@ -4494,6 +4513,8 @@ body:not(.public-site) .planning-board-room-badge.tone-accent { background: rgba
 body:not(.public-site) .planning-board-room-badge.tone-accent-soft { background: #e3f2fd; color: #1565c0; }
 body:not(.public-site) .planning-board-room-badge.tone-success { background: #e8f5e9; color: #2e7d32; }
 body:not(.public-site) .planning-board-room-badge.tone-warning { background: #fff3e0; color: #e65100; }
+body:not(.public-site) .planning-board-room-badge.tone-danger { background: #ffebee; color: #c62828; }
+body:not(.public-site) .planning-board-room-badge.tone-muted { background: #f5f5f5; color: #757575; }
 body:not(.public-site) .planning-board-day {
   background: var(--pms-bg-hover);
   border-bottom: 1px solid var(--pms-border-thin);
@@ -5935,25 +5956,17 @@ body:not(.public-site) .res-pagination {
 /* ── Sticky shell: pin toolbar + filter row at viewport top ── */
 :root { --board-shell-h: 0px; }
 body:not(.public-site) .planning-board-shell {
-  position: sticky;
-  top: 0;
-  z-index: 50;
+  position: relative;
+  z-index: 10;
   background: var(--pms-bg-surface, #fff);
   border-bottom: 1px solid var(--pms-border-thin);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  /* Ensure shell doesn't block pointer events on the board below */
-  pointer-events: auto;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
 }
-/* Allow pointer events on interactive children */
-body:not(.public-site) .planning-board-shell * {
-  pointer-events: auto;
-}
-/* Day header row + room heading: account for sticky shell offset */
+/* Day header row + room heading: sticky within the board scroll area */
 body:not(.public-site) .planning-board-room.heading,
 body:not(.public-site) .planning-board-days {
-  top: var(--board-shell-h, 0px);
-  /* Ensure day headers are below shell but above tracks */
-  z-index: 45;
+  top: 0;
+  z-index: 6;
 }
 
 /* ── Stronger today column ── */
@@ -6210,8 +6223,9 @@ body:not(.public-site) .planning-board-day.today strong {
 
 /* ── Light-mode overrides for command strip (staff pages) ── */
 body:not(.public-site) .fd-cmd-strip {
-  background: var(--pms-bg-hover);
+  background: #fff;
   border-bottom: 1px solid var(--pms-border-thin);
+  border-top: 1px solid var(--pms-border-thin);
 }
 body:not(.public-site) .fd-cmd-date strong { color: var(--pms-text-primary); }
 body:not(.public-site) .fd-cmd-date .fd-cmd-day,
@@ -6247,6 +6261,73 @@ body:not(.public-site) .bqf-reset { border-color: rgba(211,47,47,0.3); color: #9
 body:not(.public-site) .bqf-reset:hover { background: rgba(211,47,47,0.08); color: #c62828; }
 body:not(.public-site) .badge-special { background: rgba(240,173,78,0.18); color: #e65100; }
 body:not(.public-site) .badge-vip { background: rgba(212,175,55,0.15); color: #b8860b; border-color: rgba(212,175,55,0.35); }
+
+/* ── Quick filter chips light-mode ── */
+body:not(.public-site) .bqf-label { color: var(--pms-text-muted); }
+body:not(.public-site) .bqf-chip {
+  border-color: var(--pms-border-medium);
+  background: #fff;
+  color: var(--pms-text-secondary);
+}
+body:not(.public-site) .bqf-chip:hover {
+  background: var(--pms-bg-hover);
+  color: var(--pms-text-primary);
+  border-color: var(--pms-text-muted);
+}
+body:not(.public-site) .bqf-chip.active,
+body:not(.public-site) .bqf-chip[aria-pressed="true"] {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+/* ── Row 2 light-mode border ── */
+body:not(.public-site) .planning-board-row2 {
+  border-top-color: var(--pms-border-thin);
+}
+
+/* ── Track light-mode gridlines ── */
+body:not(.public-site) .planning-board-track {
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc((var(--today-column, 0) - 1) / var(--board-days) * 100%),
+      rgba(197, 124, 53, 0.10) calc((var(--today-column, 0) - 1) / var(--board-days) * 100%),
+      rgba(197, 124, 53, 0.10) calc(var(--today-column, 0) / var(--board-days) * 100%),
+      transparent calc(var(--today-column, 0) / var(--board-days) * 100%)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(100% / var(--board-days) - 1px),
+      var(--pms-border-thin) calc(100% / var(--board-days) - 1px)
+    );
+}
+body:not(.public-site) .planning-board-track:hover,
+body:not(.public-site) .planning-board-track:focus-within {
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.25);
+}
+body:not(.public-site) .planning-board-room:has(+ .planning-board-track:hover),
+body:not(.public-site) .planning-board-room:has(+ .planning-board-track:focus-within) {
+  background: #fafbfc;
+  box-shadow: none;
+}
+body:not(.public-site) .planning-board-track::after {
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.12);
+}
+
+/* ── Hover card light-mode ── */
+body:not(.public-site) .board-hover-card {
+  background: #fff;
+  border-color: var(--pms-border-medium);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  color: var(--pms-text-primary);
+}
+body:not(.public-site) .board-hover-card-guest { color: var(--pms-text-primary); }
+body:not(.public-site) .board-hover-card-code { color: var(--pms-text-muted); }
+body:not(.public-site) .board-hover-card-meta dt { color: var(--pms-text-muted); }
+body:not(.public-site) .board-hover-card-meta dd { color: var(--pms-text-primary); }
 
 /* ── HK overlay light-mode overrides ── */
 body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-board-room:has(+ [data-hk-status="dirty"]),
