@@ -575,6 +575,11 @@ def robots_txt():
             "User-agent: *",
             "Disallow: /staff/",
             "Disallow: /booking/hold",
+            "Disallow: /booking/confirmation/",
+            "Disallow: /booking/checkout/",
+            "Disallow: /payments/",
+            "Disallow: /pre-checkin/",
+            "Disallow: /survey/",
             f"Sitemap: {absolute_public_url(url_for('public.sitemap_xml'))}",
         ]
     )
@@ -616,22 +621,41 @@ def web_manifest():
 @public_bp.route("/sitemap.xml")
 def sitemap_xml():
     public_pages = [
-        ("public.index", {}),
-        ("public.booking_entry", {}),
-        ("public.booking_cancel_request", {}),
-        ("public.booking_modify_request", {}),
+        ("public.index", {}, "1.0", "daily"),
+        ("public.booking_entry", {}, "0.9", "daily"),
+        ("public.booking_cancel_request", {}, "0.5", "monthly"),
+        ("public.booking_modify_request", {}, "0.5", "monthly"),
     ]
-    urls: list[str] = []
-    for endpoint, values in public_pages:
-        urls.append(absolute_public_url(url_for(endpoint, **values)))
-        for language_code in LANGUAGE_LABELS:
-            urls.append(absolute_public_url(url_for(endpoint, lang=language_code, **values)))
-    unique_urls = list(dict.fromkeys(url for url in urls if url))
     body = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
+        ' xmlns:xhtml="http://www.w3.org/1999/xhtml">',
     ]
-    body.extend(f"<url><loc>{escape(url)}</loc></url>" for url in unique_urls)
+    seen_urls: set[str] = set()
+    for endpoint, values, priority, changefreq in public_pages:
+        canonical = absolute_public_url(url_for(endpoint, **values))
+        lang_urls = {
+            code: absolute_public_url(url_for(endpoint, lang=code, **values))
+            for code in LANGUAGE_LABELS
+        }
+        all_entries = [canonical] + list(lang_urls.values())
+        for loc in all_entries:
+            if loc in seen_urls:
+                continue
+            seen_urls.add(loc)
+            xhtml_links = [
+                f'    <xhtml:link rel="alternate" hreflang="{escape(code)}" href="{escape(href)}"/>'
+                for code, href in lang_urls.items()
+            ]
+            xhtml_links.append(
+                f'    <xhtml:link rel="alternate" hreflang="x-default" href="{escape(canonical)}"/>'
+            )
+            body.append("  <url>")
+            body.append(f"    <loc>{escape(loc)}</loc>")
+            body.extend(xhtml_links)
+            body.append(f"    <changefreq>{changefreq}</changefreq>")
+            body.append(f"    <priority>{priority}</priority>")
+            body.append("  </url>")
     body.append("</urlset>")
     return Response("\n".join(body), mimetype="application/xml")
 

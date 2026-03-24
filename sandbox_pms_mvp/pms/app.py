@@ -681,18 +681,28 @@ def register_template_helpers(app: Flask) -> None:
         hotel_contact_email_href = email_href(hotel_contact_email)
         hotel_contact_line_href = branding_line_href(hotel_contact_line_url)
         hotel_contact_whatsapp_href = branding_whatsapp_href(hotel_contact_whatsapp_url)
+        _language_name_map: dict[str, str] = {
+            "th": "Thai",
+            "en": "English",
+            "zh-Hans": "Chinese",
+        }
         hotel_structured_data: dict[str, object] = {
             "@context": "https://schema.org",
             "@type": "Hotel",
+            "@id": site_base_url,
             "name": hotel_name,
             "url": site_base_url,
-            "telephone": hotel_contact_phone,
-            "email": hotel_contact_email,
             "currenciesAccepted": hotel_currency,
-            "availableLanguage": list(LANGUAGE_LABELS.keys()),
-            "checkinTime": hotel_check_in_time,
-            "checkoutTime": hotel_check_out_time,
+            "availableLanguage": [_language_name_map.get(code, code) for code in LANGUAGE_LABELS],
         }
+        if hotel_contact_phone:
+            hotel_structured_data["telephone"] = hotel_contact_phone
+        if hotel_contact_email:
+            hotel_structured_data["email"] = hotel_contact_email
+        if hotel_check_in_time:
+            hotel_structured_data["checkinTime"] = hotel_check_in_time
+        if hotel_check_out_time:
+            hotel_structured_data["checkoutTime"] = hotel_check_out_time
         if share_image_url:
             hotel_structured_data["image"] = share_image_url
         if hotel_address:

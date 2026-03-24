@@ -1,5 +1,8 @@
 {% extends 'base.html' %}
-{% block title %}{{ hotel_name }}{% endblock %}
+{% block title %}{{ hotel_name }} — {{ t('home_direct_booking_title') }}{% endblock %}
+{% block og_title %}{{ hotel_name }} — {{ t('home_direct_booking_title') }}{% endblock %}
+{% block twitter_title %}{{ hotel_name }} — {{ t('home_direct_booking_title') }}{% endblock %}
+{% block meta_description %}{{ t('page_meta_home') }}{% endblock %}
 {% block content %}
 <div class="public-page">
   <section class="public-hero card">

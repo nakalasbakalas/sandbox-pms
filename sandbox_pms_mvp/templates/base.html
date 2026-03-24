@@ -4,7 +4,7 @@
   {% set suppress_social_metadata = (request.endpoint and (request.endpoint == 'front_desk.staff_dashboard' or request.endpoint.startswith('admin.') or request.endpoint.startswith('front_desk.') or request.endpoint.startswith('housekeeping.') or request.endpoint.startswith('messaging.') or request.endpoint.startswith('reports.') or request.endpoint.startswith('cashier.') or request.endpoint.startswith('staff_reservations.') or request.endpoint.startswith('provider.') or request.endpoint.startswith('coupon_studio.'))) or request.endpoint in ['public.booking_confirmation', 'public.booking_cancel_request', 'public.booking_modify_request', 'public.public_payment_return', 'public.public_payment_start'] %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="{{ hotel_name }} {{ t('meta_description') }}">
+  <meta name="description" content="{% block meta_description %}{{ hotel_name }} — {{ t('meta_description') }}{% endblock %}">
   <meta name="theme-color" content="{{ hotel_theme_color }}">
   <meta name="robots" content="{% if suppress_social_metadata %}noindex, nofollow{% else %}index, follow{% endif %}">
   <title>{% block title %}{{ hotel_name }}{% endblock %}</title>
@@ -23,12 +23,12 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ hotel_name }}">
   <meta property="og:title" content="{% block og_title %}{{ hotel_name }}{% endblock %}">
-  <meta property="og:description" content="{{ hotel_name }} {{ t('meta_description') }}">
+  <meta property="og:description" content="{{ self.meta_description() }}">
   <meta property="og:image" content="{{ share_image_url }}">
   <meta property="og:url" content="{{ canonical_url }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{% block twitter_title %}{{ hotel_name }}{% endblock %}">
-  <meta name="twitter:description" content="{{ hotel_name }} {{ t('meta_description') }}">
+  <meta name="twitter:description" content="{{ self.meta_description() }}">
   <meta name="twitter:image" content="{{ share_image_url }}">
   <script type="application/ld+json" nonce="{{ csp_nonce }}">{{ hotel_structured_data | tojson }}</script>
   {% endif %}

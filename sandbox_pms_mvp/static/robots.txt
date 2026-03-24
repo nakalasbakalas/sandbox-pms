@@ -1,3 +1,8 @@
 User-agent: *
 Disallow: /staff/
 Disallow: /booking/hold
+Disallow: /booking/confirmation/
+Disallow: /booking/checkout/
+Disallow: /payments/
+Disallow: /pre-checkin/
+Disallow: /survey/
