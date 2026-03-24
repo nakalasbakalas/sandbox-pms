@@ -1914,8 +1914,48 @@ class TestBoardCommandPalette:
         assert 'const surfaceContent = surface.querySelector("[data-board-surface-content]");' in content
         assert 'const surfaceSkeleton = surface.querySelector("[data-board-skeleton]");' in content
         assert "function setSurfaceLoading(isLoading)" in content
+        assert "function clearSurfacePresentationState()" in content
         assert "setSurfaceLoading(true);" in content
+        assert "clearSurfacePresentationState();" in content
+        assert "surface.style.pointerEvents = \"\";" in content
+        assert "surface.setAttribute(\"aria-busy\", mutationInFlight ? \"true\" : \"false\");" in content
         assert "surfaceContent.innerHTML = html;" in content
+
+    def test_board_refresh_clears_visual_loading_mask_in_finally(self, app_factory):
+        """Async refresh should clear loading classes and inline presentation styles in a finally block."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert "async function refreshSurface(options = {})" in content
+        assert "try {" in content
+        assert "} finally {" in content
+        assert "function clearSurfacePresentationState()" in content
+        assert "clearSurfacePresentationState();" in content
+        assert "classList.remove(\"is-loading\", \"is-refreshing\", \"is-pending\")" in content
+        assert "style.opacity = \"\";" in content
+        assert "style.pointerEvents = \"\";" in content
+
+    def test_board_restores_saved_filters_before_reapplying_state_on_load(self, app_factory):
+        """Board load should restore persisted quick filters and then reapply board state."""
+        app = app_factory(seed=True)
+        client = app.test_client()
+
+        response = client.get("/static/front-desk-board.js")
+
+        assert response.status_code == 200
+        content = response.get_data(as_text=True)
+        assert "function restoreFilterState()" in content
+        assert "const preferredFilters = boardState.activeFilters.length" in content
+        assert "? boardState.activeFilters" in content
+        assert ": boardState.defaultQuickFilters;" in content
+        assert "localStorage.getItem(\"board_active_filters\")" in content
+        assert "document.addEventListener(\"DOMContentLoaded\", () => {" in content
+        assert "restoreFilterState();" in content
+        assert "reapplyBoardState();" in content
 
     def test_board_click_handler_has_reservation_panel_fallback(self, app_factory):
         """Reservation clicks should still open the side panel even if the click lands on block chrome."""
