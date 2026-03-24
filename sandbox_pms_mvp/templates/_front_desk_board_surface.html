@@ -124,7 +124,7 @@
       </button>
       {% endfor %}
       {% if queue["items"]|length > 1 %}
-      <button type="button" class="planning-board-queue-item" data-queue-focus="{{ queue.id }}">
+      <button type="button" class="planning-board-queue-item" data-queue-focus="{{ queue.id }}" aria-label="View all {{ queue['items']|length }} items">
         <span class="planning-board-queue-item-top"><small>+{{ queue["items"]|length - 1 }} more</small></span>
       </button>
       {% endif %}
@@ -153,7 +153,7 @@
       </button>
       {% endfor %}
       {% if board.handover["items"]|length > 1 %}
-      <button type="button" class="planning-board-queue-item">
+      <button type="button" class="planning-board-queue-item" aria-label="View all {{ board.handover['items']|length }} handover items">
         <span class="planning-board-queue-item-top"><small>+{{ board.handover["items"]|length - 1 }} more</small></span>
       </button>
       {% endif %}
