@@ -41,9 +41,15 @@
     surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
+  let feedbackClearTimer = null;
+
   function setFeedback(message, tone, options) {
     if (!feedback) {
       return;
+    }
+    if (feedbackClearTimer) {
+      clearTimeout(feedbackClearTimer);
+      feedbackClearTimer = null;
     }
     const allowHtml = Boolean(options && options.allowHtml);
     if (allowHtml) {
@@ -53,6 +59,14 @@
     }
     feedback.dataset.tone = tone || "neutral";
     feedback.hidden = !message;
+    // Auto-clear success/error messages so stale feedback doesn't confuse staff
+    if (message && (tone === "success" || tone === "error")) {
+      feedbackClearTimer = setTimeout(() => {
+        feedback.textContent = "";
+        feedback.hidden = true;
+        feedbackClearTimer = null;
+      }, tone === "success" ? 4000 : 8000);
+    }
   }
 
   function focusBlockHandle(blockEl) {
@@ -989,7 +1003,6 @@
           setFeedback(`Layout set to ${density}.`, "success");
         } catch (error) {
           setFeedback("Could not save preference.", "error");
-          console.error("Density toggle error:", error);
         }
       });
     });
@@ -1151,8 +1164,7 @@
   let hkOverlayActive = false;
 
   function syncHkOverlayState() {
-    const surfaceEl = document.getElementById("front-desk-board-surface");
-    if (surfaceEl) surfaceEl.classList.toggle("hk-overlay-active", hkOverlayActive);
+    surface.classList.toggle("hk-overlay-active", hkOverlayActive);
     surface.querySelectorAll("[data-action='toggle-hk-overlay']").forEach((btn) => {
       btn.setAttribute("aria-pressed", hkOverlayActive ? "true" : "false");
       btn.classList.toggle("active", hkOverlayActive);
@@ -1903,9 +1915,10 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(() => {
-      if (!mutationInFlight) {
-        refreshSurface();
+      if (mutationInFlight || moveMode || resizeMode || !panelEl.classList.contains("hidden")) {
+        return;
       }
+      refreshSurface();
     }, 10000);
   }
 
@@ -1968,8 +1981,8 @@
 
       ctxMenu.classList.remove("hidden");
       ctxMenu.hidden = false;
-      var menuW = ctxMenu.offsetWidth || 200;
-      var menuH = ctxMenu.offsetHeight || 300;
+      const menuW = ctxMenu.offsetWidth || 200;
+      const menuH = ctxMenu.offsetHeight || 300;
       ctxMenu.style.left = Math.min(x, window.innerWidth - menuW - 8) + "px";
       ctxMenu.style.top = Math.min(y, window.innerHeight - menuH - 8) + "px";
       ctxMenu._block = blockEl;
