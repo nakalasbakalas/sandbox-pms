@@ -25,6 +25,75 @@
   let resizeTargetEndDate = null;
   let boardSearchSubmitTimer = null;
   let lastSubmittedSearchValue = searchInput ? searchInput.value.trim() : "";
+  let panelReservationId = "";
+  let preferencesSaveTimer = null;
+  const DEFAULT_BOARD_STATE = {
+    version: 2,
+    density: "compact",
+    activeRoleView: "",
+    activeFilters: [],
+    defaultQuickFilters: [],
+    hkOverlay: false,
+    collapsedGroups: [],
+    toolbarCollapsed: false,
+    savedViews: [],
+  };
+  const QUEUE_FILTER_MAP = {
+    ready_arrivals: ["ready-arrival"],
+    blocked_arrivals: ["blocked-arrival"],
+    dirty_turnarounds: ["dirty"],
+    unallocated_arrivals: ["unallocated"],
+    unpaid_arrivals: ["balance-due"],
+    special_requests: ["special-request"],
+  };
+  let boardState = normalizeBoardState(readInitialBoardState());
+
+  function readInitialBoardState() {
+    try {
+      return JSON.parse(root.dataset.boardState || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function normalizeStringList(value) {
+    return Array.isArray(value)
+      ? value.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+  }
+
+  function normalizeSavedViews(value) {
+    return Array.isArray(value)
+      ? value
+          .filter((item) => item && typeof item === "object" && String(item.name || "").trim())
+          .map((item) => ({
+            name: String(item.name || "").trim().slice(0, 40),
+            filters: normalizeStringList(item.filters),
+            hkOverlay: Boolean(item.hkOverlay),
+            activeRoleView: String(item.activeRoleView || "").trim(),
+          }))
+      : [];
+  }
+
+  function normalizeBoardState(raw) {
+    const candidate = raw && typeof raw === "object" ? raw : {};
+    return {
+      ...DEFAULT_BOARD_STATE,
+      ...candidate,
+      density: String(candidate.density || DEFAULT_BOARD_STATE.density),
+      activeRoleView: String(candidate.activeRoleView || ""),
+      activeFilters: normalizeStringList(candidate.activeFilters),
+      defaultQuickFilters: normalizeStringList(candidate.defaultQuickFilters),
+      hkOverlay: Boolean(candidate.hkOverlay),
+      collapsedGroups: normalizeStringList(candidate.collapsedGroups),
+      toolbarCollapsed: Boolean(candidate.toolbarCollapsed),
+      savedViews: normalizeSavedViews(candidate.savedViews),
+    };
+  }
+
+  function writeBoardStateToRoot() {
+    root.dataset.boardState = JSON.stringify(boardState);
+  }
 
   function setBusyState(isBusy) {
     mutationInFlight = isBusy;
@@ -354,7 +423,33 @@
     return 14;
   }
 
-  async function refreshSurface() {
+  function escapeSelectorValue(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(String(value || ""));
+    }
+    return String(value || "").replace(/["\\]/g, "\\$&");
+  }
+
+  function findBlockByReservationId(reservationId) {
+    if (!reservationId) {
+      return null;
+    }
+    return surface.querySelector(`[data-board-block][data-reservation-id="${escapeSelectorValue(reservationId)}"]`);
+  }
+
+  function scrollToBoardAnchor(anchorId) {
+    if (!anchorId) {
+      return;
+    }
+    const target = document.getElementById(anchorId) || document.getElementById(`mobile-${anchorId}`);
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  async function refreshSurface(options = {}) {
+    const reservationId = options.reservationId || panelReservationId || selectedBlock?.dataset.reservationId || "";
+    const reopenPanel = Boolean(options.reopenPanel && reservationId);
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
     setSurfaceLoading(true);
@@ -376,8 +471,17 @@
     }
     setSurfaceLoading(false);
     reapplyBoardState();
+    const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
+    if (nextBlock) {
+      selectBlock(nextBlock);
+    } else if (!reopenPanel) {
+      clearSelection();
+    }
     if (surfaceContent) surfaceContent.style.visibility = "";
     else surface.style.visibility = "";
+    if (reopenPanel && reservationId) {
+      await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+    }
   }
 
   function clearTrackHighlights() {
@@ -642,7 +746,7 @@
         return;
       }
       setFeedback(result.message || "Block moved.", "success");
-      await refreshSurface();
+      await refreshSurface({ reservationId: selectedBlock.dataset.reservationId || "" });
     } catch (error) {
       setFeedback(error.message || "The move was rejected.", "error");
     } finally {
@@ -685,7 +789,7 @@
         return;
       }
       setFeedback(result.message || "Block resized.", "success");
-      await refreshSurface();
+      await refreshSurface({ reservationId: selectedBlock.dataset.reservationId || "" });
     } catch (error) {
       setFeedback(error.message || "The resize was rejected.", "error");
     } finally {
@@ -891,7 +995,7 @@
           return;
         }
         setFeedback(result.message || "Board updated.", "success");
-        await refreshSurface();
+        await refreshSurface({ reservationId: block.dataset.reservationId || "" });
       } catch (error) {
         revertPreview(interaction);
         setFeedback(error.message || "The board change was rejected.", "error");
@@ -940,24 +1044,12 @@
           grid.classList.add(`density-${density}`);
         }
 
-        // Save to server
-        try {
-          const response = await fetch("/staff/front-desk/board/preferences", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRF-Token": csrfToken,
-            },
-            body: JSON.stringify({ density }),
-          });
-          if (!response.ok) {
-            throw new Error("Failed to save preference");
-          }
-          setFeedback(`Layout set to ${density}.`, "success");
-        } catch (error) {
-          setFeedback("Could not save preference.", "error");
-          console.error("Density toggle error:", error);
-        }
+        boardState = normalizeBoardState({
+          ...boardState,
+          density,
+        });
+        writeBoardStateToRoot();
+        await saveBoardState({ feedbackMessage: `Layout set to ${density}.` });
       });
     });
   }
@@ -971,6 +1063,181 @@
   // ── Quick filter chips – module-level state so command strip & role views share it ──
   const activeFilters = new Set();
 
+  function getActiveDensity() {
+    const activeButton = densityToggle ? densityToggle.querySelector("[data-density][data-active='true']") : null;
+    return activeButton?.dataset.density || boardState.density || DEFAULT_BOARD_STATE.density;
+  }
+
+  function isToolbarCollapsed() {
+    const legend = root.querySelector(".board-legend");
+    return Boolean(legend && legend.classList.contains("toolbar-hidden"));
+  }
+
+  function syncBoardStateFromUi() {
+    boardState = normalizeBoardState({
+      ...boardState,
+      density: getActiveDensity(),
+      activeFilters: [...activeFilters],
+      activeRoleView,
+      hkOverlay: hkOverlayActive,
+      collapsedGroups: [...collapsedGroups],
+      toolbarCollapsed: isToolbarCollapsed(),
+    });
+    writeBoardStateToRoot();
+  }
+
+  async function saveBoardState(options = {}) {
+    syncBoardStateFromUi();
+    try {
+      const response = await fetch("/staff/front-desk/board/preferences", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": csrfToken,
+        },
+        body: JSON.stringify({ state: boardState }),
+      });
+      const result = await readJsonResponse(response);
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Failed to save board preference.");
+      }
+      boardState = normalizeBoardState(result.boardState || boardState);
+      writeBoardStateToRoot();
+      renderSavedViewOptions();
+      if (options.feedbackMessage) {
+        setFeedback(options.feedbackMessage, "success");
+      }
+    } catch (error) {
+      if (!options.silent) {
+        setFeedback(error.message || "Could not save board preference.", "error");
+      }
+      console.error("Board preference save error:", error);
+    }
+  }
+
+  function scheduleBoardStateSave(options = {}) {
+    syncBoardStateFromUi();
+    if (preferencesSaveTimer) {
+      window.clearTimeout(preferencesSaveTimer);
+    }
+    preferencesSaveTimer = window.setTimeout(() => {
+      saveBoardState(options);
+    }, options.immediate ? 0 : 250);
+  }
+
+  function renderSavedViewOptions() {
+    const select = root.querySelector("[data-saved-view-select]");
+    const deleteBtn = root.querySelector("[data-action='delete-current-view']");
+    if (!select) {
+      return;
+    }
+    const selectedValue = select.value;
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Saved views";
+    select.appendChild(placeholder);
+    boardState.savedViews.forEach((view, index) => {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = view.name;
+      select.appendChild(option);
+    });
+    if (selectedValue && boardState.savedViews[Number(selectedValue)]) {
+      select.value = selectedValue;
+    }
+    if (deleteBtn) {
+      deleteBtn.disabled = boardState.savedViews.length === 0 || !select.value;
+    }
+  }
+
+  function saveDefaultFilters() {
+    boardState = normalizeBoardState({
+      ...boardState,
+      defaultQuickFilters: [...activeFilters],
+    });
+    writeBoardStateToRoot();
+    scheduleBoardStateSave({ feedbackMessage: "Default board filters updated." });
+  }
+
+  function saveCurrentView() {
+    const suggestedName = activeRoleView ? activeRoleView.replace(/-/g, " ") : "Current board";
+    const rawName = window.prompt("Save this board view as:", suggestedName);
+    const name = String(rawName || "").trim();
+    if (!name) {
+      return;
+    }
+    const nextViews = [...boardState.savedViews];
+    const nextView = {
+      name,
+      filters: [...activeFilters],
+      hkOverlay: hkOverlayActive,
+      activeRoleView,
+    };
+    const existingIndex = nextViews.findIndex((view) => view.name.toLowerCase() === name.toLowerCase());
+    if (existingIndex >= 0) {
+      nextViews.splice(existingIndex, 1, nextView);
+    } else {
+      nextViews.push(nextView);
+    }
+    boardState = normalizeBoardState({
+      ...boardState,
+      savedViews: nextViews,
+    });
+    writeBoardStateToRoot();
+    renderSavedViewOptions();
+    const select = root.querySelector("[data-saved-view-select]");
+    if (select) {
+      select.value = String(Math.max(0, nextViews.findIndex((view) => view.name === name)));
+    }
+    const deleteBtn = root.querySelector("[data-action='delete-current-view']");
+    if (deleteBtn) {
+      deleteBtn.disabled = false;
+    }
+    scheduleBoardStateSave({ feedbackMessage: `Saved view "${name}".` });
+  }
+
+  function deleteCurrentView() {
+    const select = root.querySelector("[data-saved-view-select]");
+    const index = select ? Number(select.value) : NaN;
+    if (!Number.isInteger(index) || index < 0 || !boardState.savedViews[index]) {
+      return;
+    }
+    const removedName = boardState.savedViews[index].name;
+    const nextViews = [...boardState.savedViews];
+    nextViews.splice(index, 1);
+    boardState = normalizeBoardState({
+      ...boardState,
+      savedViews: nextViews,
+    });
+    writeBoardStateToRoot();
+    renderSavedViewOptions();
+    if (select) {
+      select.value = "";
+    }
+    scheduleBoardStateSave({ feedbackMessage: `Deleted view "${removedName}".` });
+  }
+
+  function applySavedView(index) {
+    const view = boardState.savedViews[index];
+    if (!view) {
+      return;
+    }
+    activeRoleView = view.activeRoleView || "";
+    activeFilters.clear();
+    (view.filters || []).forEach((filterName) => activeFilters.add(filterName));
+    hkOverlayActive = Boolean(view.hkOverlay);
+    syncFilterState();
+    syncHkOverlayState();
+    syncRoleViewState();
+    applyQuickFilters();
+    persistFilterState();
+    scheduleBoardStateSave({ silent: true });
+    setFeedback(`Applied view "${view.name}".`, "success");
+  }
+
   function matchFilter(filterName, track) {
     const hk = track.dataset.hkStatus || "";
     switch (filterName) {
@@ -983,6 +1250,9 @@
       case "in-house":    return track.dataset.isOccupied === "true";
       case "stayover":    return track.dataset.isStayover === "true";
       case "balance-due": return track.dataset.hasBalanceDue === "true";
+      case "ready-arrival": return track.dataset.hasReadyArrival === "true";
+      case "blocked-arrival": return track.dataset.hasBlockedArrival === "true";
+      case "special-request": return track.dataset.hasSpecialRequest === "true";
       case "conflict":    return track.dataset.isConflict === "true";
       case "inspected":   return hk === "inspected";
       default:            return true;
@@ -991,21 +1261,9 @@
 
   function applyQuickFilters() {
     const tracks = surface.querySelectorAll("[data-board-track]");
-    const hasUnallocated = activeFilters.has("unallocated");
-    const nonUnallocatedFilters = [...activeFilters].filter((f) => f !== "unallocated");
     tracks.forEach((track) => {
-      const isUnallocated = track.dataset.laneKind === "unallocated";
-      let matches;
-      if (activeFilters.size === 0) {
-        matches = true;
-      } else if (isUnallocated) {
-        // Unallocated rows only visible when the "unallocated" filter is active
-        matches = hasUnallocated;
-      } else {
-        // Regular rows: show if they match any non-unallocated filter (OR semantics)
-        // When only the unallocated filter is active, hide regular rows
-        matches = nonUnallocatedFilters.length > 0 && nonUnallocatedFilters.some((f) => matchFilter(f, track));
-      }
+      const matches =
+        activeFilters.size === 0 ? true : [...activeFilters].some((filterName) => matchFilter(filterName, track));
       track.hidden = !matches;
       const prev = track.previousElementSibling;
       if (prev && prev.classList.contains("planning-board-room") && !prev.classList.contains("heading")) {
@@ -1035,12 +1293,14 @@
 
   function toggleQuickFilter(filter) {
     if (!filter) return;
+    activeRoleView = "";
     if (activeFilters.has(filter)) {
       activeFilters.delete(filter);
     } else {
       activeFilters.add(filter);
     }
     syncFilterState();
+    syncRoleViewState();
     applyQuickFilters();
     persistFilterState();
   }
@@ -1057,9 +1317,18 @@
 
   function persistFilterState() {
     try { localStorage.setItem("board_active_filters", JSON.stringify([...activeFilters])); } catch (_) { /* ignore */ }
+    scheduleBoardStateSave({ silent: true });
   }
 
   function restoreFilterState() {
+    activeFilters.clear();
+    const preferredFilters = boardState.activeFilters.length
+      ? boardState.activeFilters
+      : boardState.defaultQuickFilters;
+    if (preferredFilters.length) {
+      preferredFilters.forEach((filterName) => activeFilters.add(filterName));
+      return;
+    }
     try {
       const saved = localStorage.getItem("board_active_filters");
       if (saved) {
@@ -1071,6 +1340,10 @@
   const quickFiltersEl = document.querySelector("[data-quick-filters]");
   if (quickFiltersEl) {
     quickFiltersEl.addEventListener("click", (e) => {
+      if (e.target.closest("[data-action='save-default-filters']")) {
+        saveDefaultFilters();
+        return;
+      }
       if (e.target.closest("[data-action='reset-filters']")) {
         resetAllFilters();
         return;
@@ -1081,9 +1354,72 @@
     });
   }
 
+  function focusQueue(queueId) {
+    const mappedFilters = QUEUE_FILTER_MAP[queueId] || [];
+    if (!mappedFilters.length) {
+      return;
+    }
+    activeRoleView = "";
+    activeFilters.clear();
+    mappedFilters.forEach((filterName) => activeFilters.add(filterName));
+    syncFilterState();
+    syncRoleViewState();
+    applyQuickFilters();
+    persistFilterState();
+    setFeedback("Focused the board on that queue.", "success");
+  }
+
+  root.addEventListener("click", (event) => {
+    if (event.target.closest("[data-action='save-current-view']")) {
+      saveCurrentView();
+      return;
+    }
+    if (event.target.closest("[data-action='delete-current-view']")) {
+      deleteCurrentView();
+    }
+  });
+
+  root.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-saved-view-select]");
+    if (!select) {
+      return;
+    }
+    const index = Number(select.value);
+    if (Number.isInteger(index) && index >= 0) {
+      applySavedView(index);
+    }
+    const deleteBtn = root.querySelector("[data-action='delete-current-view']");
+    if (deleteBtn) {
+      deleteBtn.disabled = !select.value;
+    }
+  });
+
   // ── Command strip: click delegation on surface (survives AJAX refresh) ──
   surface.addEventListener("click", (e) => {
     // Metric filter button (not inside a board block or track)
+    const queueOpenBtn = e.target.closest("[data-queue-open]");
+    if (queueOpenBtn) {
+      const reservationId = queueOpenBtn.dataset.reservationId;
+      const roomAnchor = queueOpenBtn.dataset.roomAnchor;
+      if (roomAnchor) {
+        scrollToBoardAnchor(roomAnchor);
+      }
+      if (reservationId) {
+        const queueBlock = findBlockByReservationId(reservationId);
+        if (queueBlock) {
+          selectBlock(queueBlock);
+          openPanel(queueBlock);
+        } else {
+          loadPanelForReservation(reservationId, null);
+        }
+      }
+      return;
+    }
+    const queueFocusBtn = e.target.closest("[data-queue-focus]");
+    if (queueFocusBtn) {
+      focusQueue(queueFocusBtn.dataset.queueFocus);
+      return;
+    }
     const metricBtn = e.target.closest("[data-cmd-filter]");
     if (metricBtn && !metricBtn.closest("[data-board-block]") && !metricBtn.closest("[data-board-track]")) {
       toggleQuickFilter(metricBtn.dataset.cmdFilter);
@@ -1130,15 +1466,21 @@
     hkOverlayActive = !hkOverlayActive;
     syncHkOverlayState();
     try { localStorage.setItem("board_hk_overlay", hkOverlayActive ? "1" : "0"); } catch (_) { /* ignore */ }
+    scheduleBoardStateSave({ silent: true });
   }
 
   function restoreHkOverlay() {
+    if (boardState.hkOverlay) {
+      hkOverlayActive = true;
+      return;
+    }
     try { hkOverlayActive = localStorage.getItem("board_hk_overlay") === "1"; } catch (_) { /* ignore */ }
   }
 
   // ── Role View Presets ──
   const ROLE_VIEWS = {
     "front-desk":   { filters: ["arrival", "departure"], overlay: false },
+    "arrivals":     { filters: ["ready-arrival", "blocked-arrival", "unallocated", "balance-due", "special-request"], overlay: false },
     "housekeeping": { filters: ["dirty"],                overlay: true  },
     "allocation":   { filters: ["unallocated"],          overlay: false },
     "night-shift":  { filters: ["in-house"],             overlay: false },
@@ -1162,6 +1504,7 @@
     applyQuickFilters();
     persistFilterState();
     try { localStorage.setItem("board_active_view", activeRoleView); } catch (_) { /* ignore */ }
+    scheduleBoardStateSave({ silent: true });
   }
 
   function syncRoleViewState() {
@@ -1171,6 +1514,10 @@
   }
 
   function restoreRoleView() {
+    activeRoleView = boardState.activeRoleView || "";
+    if (activeRoleView) {
+      return;
+    }
     try { activeRoleView = localStorage.getItem("board_active_view") || ""; } catch (_) { /* ignore */ }
   }
 
@@ -1186,6 +1533,7 @@
     applyQuickFilters();
     syncHkOverlayState();
     syncRoleViewState();
+    renderSavedViewOptions();
     updateStickyOffset();
     initCollapsibleGroups();
   }
@@ -1194,6 +1542,11 @@
   const collapsedGroups = new Set();
 
   function restoreCollapsedGroups() {
+    collapsedGroups.clear();
+    if (boardState.collapsedGroups.length) {
+      boardState.collapsedGroups.forEach((groupId) => collapsedGroups.add(groupId));
+      return;
+    }
     try {
       const saved = localStorage.getItem("board_collapsed_groups");
       if (saved) JSON.parse(saved).forEach((g) => collapsedGroups.add(g));
@@ -1202,6 +1555,7 @@
 
   function persistCollapsedGroups() {
     try { localStorage.setItem("board_collapsed_groups", JSON.stringify([...collapsedGroups])); } catch (_) { /* ignore */ }
+    scheduleBoardStateSave({ silent: true });
   }
 
   function setGroupCollapsed(groupEl, collapsed) {
@@ -1265,9 +1619,14 @@
       toolbarToggle.title = collapsed ? "Show filters & legend" : "Hide filters & legend";
     }
     try { localStorage.setItem("board_toolbar_collapsed", collapsed ? "1" : "0"); } catch (_) { /* ignore */ }
+    scheduleBoardStateSave({ silent: true });
   }
 
   function restoreToolbarState() {
+    if (boardState.toolbarCollapsed) {
+      setToolbarCollapsed(true);
+      return;
+    }
     try {
       const saved = localStorage.getItem("board_toolbar_collapsed");
       if (saved === "1") setToolbarCollapsed(true);
@@ -1383,6 +1742,7 @@
   if (statsBtn) {
     statsBtn.addEventListener("click", () => {
       panelTitle.textContent = "Board Stats";
+      panelReservationId = "";
       setBusyState(true);
       const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
       target.search = window.location.search;
@@ -1405,6 +1765,7 @@
   if (handoverBtn) {
     handoverBtn.addEventListener("click", () => {
       panelTitle.textContent = "Shift Handover";
+      panelReservationId = "";
       setBusyState(true);
       const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
       target.search = window.location.search;
@@ -1424,51 +1785,62 @@
 
   // Side panel for reservation details
 
+  async function loadPanelForReservation(reservationId, blockEl, options = {}) {
+    if (!reservationId) {
+      setFeedback("Cannot open panel for this block.", "error");
+      return;
+    }
+    const summary = blockEl ? blockEl.querySelector("summary[data-block-handle]") : null;
+    const label = summary ? summary.getAttribute("aria-label") : "Reservation Details";
+
+    panelTitle.textContent = label || "Reservation Details";
+    panelReservationId = reservationId;
+
+    setBusyState(true);
+    if (!options.silent) {
+      setFeedback("Loading details...", "pending");
+    }
+
+    try {
+      const response = await fetch(`/staff/front-desk/board/reservations/${reservationId}/panel`, {
+        headers: { Accept: "text/html" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        throw new Error("Failed to load panel");
+      }
+      const html = await response.text();
+      panelContent.innerHTML = html;
+      panelEl.classList.remove("hidden");
+      panelEl.removeAttribute("inert");
+      panelEl.setAttribute("aria-hidden", "false");
+      if (!options.silent) {
+        setFeedback("", "neutral");
+      }
+      attachPanelHandlers();
+      panelCloseBtn.focus();
+    } catch (err) {
+      setFeedback(err.message || "Failed to load panel.", "error");
+    } finally {
+      setBusyState(false);
+    }
+  }
+
   function openPanel(blockEl) {
     if (!blockEl || !blockEl.dataset.reservationId) {
       setFeedback("Cannot open panel for this block.", "error");
       return;
     }
-
-    const reservationId = blockEl.dataset.reservationId;
-    const summary = blockEl.querySelector("summary[data-block-handle]");
-    const label = summary ? summary.getAttribute("aria-label") : blockEl.dataset.blockId;
-
-    panelTitle.textContent = label || "Reservation Details";
-
-    setBusyState(true);
-    setFeedback("Loading details...", "pending");
-
-    fetch(`/staff/front-desk/board/reservations/${reservationId}/panel`, {
-      headers: { "Accept": "text/html" },
-      credentials: "same-origin",
-    })
-    .then(resp => {
-      if (!resp.ok) throw new Error("Failed to load panel");
-      return resp.text();
-    })
-    .then(html => {
-      panelContent.innerHTML = html;
-      panelEl.classList.remove("hidden");
-      panelEl.removeAttribute("inert");
-      panelEl.setAttribute("aria-hidden", "false");
-      setFeedback("", "neutral");
-      attachPanelHandlers();
-      // Move focus to close button so screen readers announce the dialog
-      panelCloseBtn.focus();
-    })
-    .catch(err => {
-      setFeedback(err.message || "Failed to load panel.", "error");
-    })
-    .finally(() => setBusyState(false));
+    loadPanelForReservation(blockEl.dataset.reservationId, blockEl);
   }
 
-  function closePanel() {
+  function closePanel(options = {}) {
     panelEl.classList.add("hidden");
     panelEl.setAttribute("inert", "");
     panelEl.setAttribute("aria-hidden", "true");
     panelContent.innerHTML = "";
-    if (selectedBlock) {
+    panelReservationId = "";
+    if (!options.skipFocus && selectedBlock) {
       focusBlockHandle(selectedBlock);
     }
   }
@@ -1490,6 +1862,8 @@
   async function handlePanelFormSubmit(event) {
     event.preventDefault();
     const form = event.target;
+    const reservationId =
+      panelContent.querySelector("[data-panel-reservation-id]")?.dataset.panelReservationId || panelReservationId;
     setBusyState(true);
     setFeedback("Saving...", "pending");
 
@@ -1498,16 +1872,15 @@
         method: form.method || "POST",
         body: new FormData(form),
         credentials: "same-origin",
+        headers: { Accept: "application/json" },
       });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || "Save failed");
+      const result = await readJsonResponse(response);
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Save failed");
       }
 
-      setFeedback("Saved successfully.", "success");
-      closePanel();
-      await refreshSurface();
+      setFeedback(result.message || "Saved successfully.", "success");
+      await refreshSurface({ reopenPanel: true, reservationId });
     } catch (err) {
       setFeedback(err.message || "Save failed.", "error");
     } finally {
@@ -1534,7 +1907,7 @@
       const response = await fetch(url, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "X-CSRF-Token": csrfToken },
+        headers: { Accept: "application/json", "X-CSRF-Token": csrfToken },
       });
 
       const result = await readJsonResponse(response);
@@ -1543,8 +1916,7 @@
       }
 
       setFeedback(result.message || "Action completed.", "success");
-      closePanel();
-      await refreshSurface();
+      await refreshSurface({ reopenPanel: true, reservationId });
     } catch (err) {
       setFeedback(err.message || "Action failed.", "error");
     } finally {
@@ -1699,6 +2071,7 @@
         method: "POST",
         credentials: "same-origin",
         headers: {
+          Accept: "application/json",
           "X-CSRF-Token": csrfToken,
         },
       });
@@ -1707,7 +2080,7 @@
         throw new Error(result.error || "Check-in failed.");
       }
       setFeedback(result.message || "Checked in.", "success");
-      await refreshSurface();
+      await refreshSurface({ reservationId });
     } catch (error) {
       setFeedback(error.message || "Check-in failed.", "error");
     } finally {
@@ -1737,6 +2110,7 @@
         method: "POST",
         credentials: "same-origin",
         headers: {
+          Accept: "application/json",
           "X-CSRF-Token": csrfToken,
         },
       });
@@ -1745,7 +2119,7 @@
         throw new Error(result.error || "Check-out failed.");
       }
       setFeedback(result.message || "Checked out.", "success");
-      await refreshSurface();
+      await refreshSurface({ reservationId });
     } catch (error) {
       setFeedback(error.message || "Check-out failed.", "error");
     } finally {
@@ -1780,12 +2154,12 @@
       const response = await fetch(`/staff/front-desk/board/reservations/${reservationId}/no-show`, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "X-CSRF-Token": csrfToken },
+        headers: { Accept: "application/json", "X-CSRF-Token": csrfToken },
       });
       const result = await readJsonResponse(response);
       if (!response.ok || !result.ok) throw new Error(result.error || "No-show failed.");
       setFeedback(result.message || "Marked as no-show.", "success");
-      await refreshSurface();
+      await refreshSurface({ reservationId });
     } catch (error) {
       setFeedback(error.message || "No-show failed.", "error");
     } finally {
@@ -1805,13 +2179,13 @@
     fetch(`/staff/front-desk/board/reservations/${reservationId}/room-ready`, {
       method: "POST",
       credentials: "same-origin",
-      headers: { "X-CSRF-Token": csrfToken },
+      headers: { Accept: "application/json", "X-CSRF-Token": csrfToken },
     })
       .then((r) => readJsonResponse(r))
       .then((result) => {
         if (!result.ok) throw new Error(result.error || "Failed.");
         setFeedback(result.message || "Room marked clean.", "success");
-        return refreshSurface();
+        return refreshSurface({ reservationId });
       })
       .catch((err) => setFeedback(err.message || "Failed to mark room ready.", "error"))
       .finally(() => setBusyState(false));
@@ -1825,7 +2199,10 @@
     if (pollInterval) return;
     pollInterval = setInterval(() => {
       if (!mutationInFlight) {
-        refreshSurface();
+        refreshSurface({
+          reservationId: panelReservationId || selectedBlock?.dataset.reservationId || "",
+          reopenPanel: !panelEl.classList.contains("hidden") && Boolean(panelReservationId),
+        });
       }
     }, 10000);
   }
@@ -1841,6 +2218,7 @@
     restoreFilterState();
     restoreHkOverlay();
     restoreRoleView();
+    renderSavedViewOptions();
     startPolling();
   });
 

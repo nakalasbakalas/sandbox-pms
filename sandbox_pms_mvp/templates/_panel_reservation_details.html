@@ -1,299 +1,338 @@
-{# ── Board side panel: Reservation details, folio, charges, payments, notes, HK ── #}
+{% set room_assigned = reservation.assigned_room_id is not none %}
+{% set room_ready = room_assigned and (room_hk_status or '') in ('clean', 'inspected') %}
+{% set payment_clear = balance <= 0 %}
+{% set has_request_context = reservation.special_requests or reservation.internal_notes or recent_notes %}
 
-{# ── Section 1: Header ── #}
-<div class="panel-section panel-header-section">
-  <div class="panel-res-header">
-    <div>
-      <strong class="panel-res-code">{{ reservation.reservation_code }}</strong>
-      <span class="status {{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ')|title }}</span>
-    </div>
-    <div class="panel-res-guest">
-      <strong>{{ reservation.primary_guest.full_name if reservation.primary_guest else 'Unknown guest' }}</strong>
-      {% if reservation.primary_guest and reservation.primary_guest.phone %}<small>{{ reservation.primary_guest.phone }}</small>{% endif %}
-      {% if reservation.primary_guest and reservation.primary_guest.email %}<small>{{ reservation.primary_guest.email }}</small>{% endif %}
+<div class="panel-reservation-console" data-panel-reservation-id="{{ reservation.id }}">
+  <div class="panel-section panel-header-section">
+    <div class="panel-res-header">
+      <div>
+        <strong class="panel-res-code">{{ reservation.reservation_code }}</strong>
+        <span class="status {{ reservation.current_status }}">{{ reservation.current_status.replace('_', ' ')|title }}</span>
+      </div>
+      <div class="panel-res-guest">
+        <strong>{{ reservation.primary_guest.full_name if reservation.primary_guest else 'Unknown guest' }}</strong>
+        {% if reservation.primary_guest and reservation.primary_guest.phone %}<small>{{ reservation.primary_guest.phone }}</small>{% endif %}
+        {% if reservation.primary_guest and reservation.primary_guest.email %}<small>{{ reservation.primary_guest.email }}</small>{% endif %}
+      </div>
     </div>
   </div>
-</div>
 
-{# ── Section 2: Stay details ── #}
-<div class="panel-section">
-  <div class="panel-grid-2col">
-    <div class="panel-kv">
-      <span class="panel-kv-label">Room</span>
-      <span class="panel-kv-value">{% if reservation.assigned_room %}{{ reservation.assigned_room.room_number }}{% else %}<em class="panel-unallocated">Unallocated</em>{% endif %}</span>
+  <div class="panel-section panel-arrival-console">
+    <div class="panel-console-head">
+      <div>
+        <p class="eyebrow">Arrival Console</p>
+        <h3>{{ 'Ready to check in' if arrival_ready else 'Complete the next steps' }}</h3>
+        <p class="small muted">
+          {% if arrival_due %}Arrival is due in this shift.{% else %}Preparation is still in progress.{% endif %}
+          {% if deposit_gap > 0 %} {{ currency }} {{ "%.2f"|format(deposit_gap) }} still needs to be collected before arrival.{% endif %}
+        </p>
+      </div>
+      <span class="panel-console-pill tone-{{ 'success' if arrival_ready else 'warning' }}">{{ 'Ready' if arrival_ready else 'Blocked' }}</span>
     </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Type</span>
-      <span class="panel-kv-value">{{ reservation.room_type.code }}</span>
+    <div class="panel-console-steps" aria-label="Arrival workflow">
+      <div class="panel-console-step {{ 'done' if room_assigned else 'todo' }}">
+        <strong>1. Assign room</strong>
+        <small>{% if room_assigned %}Room {{ reservation.assigned_room.room_number }} is assigned.{% else %}Choose a room to keep the arrival on track.{% endif %}</small>
+      </div>
+      <div class="panel-console-step {{ 'done' if payment_clear else 'todo' }}">
+        <strong>2. Clear payment</strong>
+        <small>{% if payment_clear %}Arrival balance is clear.{% else %}Balance due: {{ currency }} {{ "%.2f"|format(balance) }}.{% endif %}</small>
+      </div>
+      <div class="panel-console-step {{ 'done' if room_ready else 'todo' }}">
+        <strong>3. Confirm readiness</strong>
+        <small>{% if room_ready %}Room is ready for check-in.{% elif room_assigned %}Housekeeping must release the room first.{% else %}Assign a room before housekeeping can confirm readiness.{% endif %}</small>
+      </div>
+      <div class="panel-console-step {{ 'done' if has_request_context else 'todo' }}">
+        <strong>4. Review notes</strong>
+        <small>{% if has_request_context %}Guest requests or internal notes are available below.{% else %}Add any arrival notes the next shift needs.{% endif %}</small>
+      </div>
     </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Check-in</span>
-      <span class="panel-kv-value">{{ reservation.check_in_date.strftime('%a, %b %d') }}</span>
+  </div>
+
+  {% if not room_assigned %}
+  <div class="panel-alert warning">
+    <strong>Unallocated</strong> - Choose a room to complete this reservation.
+  </div>
+  {% endif %}
+  {% if is_conflict_room %}
+  <div class="panel-alert danger">
+    <strong>Room not ready</strong> - Assigned room is dirty. Mark it ready or reassign before check-in.
+  </div>
+  {% endif %}
+  {% if not payment_clear %}
+  <div class="panel-alert warning">
+    <strong>Balance due</strong> - {{ currency }} {{ "%.2f"|format(balance) }} is still outstanding.
+  </div>
+  {% endif %}
+  {% if reservation.special_requests %}
+  <div class="panel-alert info">
+    <strong>Special requests</strong> - {{ reservation.special_requests }}
+  </div>
+  {% endif %}
+
+  <div class="panel-actions">
+    {% if can_check_in %}
+    <button class="button primary full-width" data-action="check-in" data-reservation-id="{{ reservation.id }}">Check In</button>
+    {% endif %}
+    {% if can_check_out %}
+    <button class="button primary full-width" data-action="check-out" data-reservation-id="{{ reservation.id }}">Check Out</button>
+    {% endif %}
+    <a class="button secondary full-width" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Full Detail</a>
+    <a class="button secondary full-width" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id) }}">Full Folio</a>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-grid-2col">
+      <div class="panel-kv">
+        <span class="panel-kv-label">Room</span>
+        <span class="panel-kv-value">{% if reservation.assigned_room %}{{ reservation.assigned_room.room_number }}{% else %}<em class="panel-unallocated">Unallocated</em>{% endif %}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Type</span>
+        <span class="panel-kv-value">{{ reservation.room_type.code }}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Check-in</span>
+        <span class="panel-kv-value">{{ reservation.check_in_date.strftime('%a, %b %d') }}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Check-out</span>
+        <span class="panel-kv-value">{{ reservation.check_out_date.strftime('%a, %b %d') }}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Nights</span>
+        <span class="panel-kv-value">{{ nights }}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Guests</span>
+        <span class="panel-kv-value">{{ reservation.adults }}A{% if reservation.children %} {{ reservation.children }}C{% endif %}{% if reservation.extra_guests %} +{{ reservation.extra_guests }}{% endif %}</span>
+      </div>
+      <div class="panel-kv">
+        <span class="panel-kv-label">Source</span>
+        <span class="panel-kv-value">{{ reservation.source_channel.replace('_', ' ')|title }}</span>
+      </div>
+      {% if reservation.primary_guest and reservation.primary_guest.nationality %}
+      <div class="panel-kv">
+        <span class="panel-kv-label">Nationality</span>
+        <span class="panel-kv-value">{{ reservation.primary_guest.nationality }}</span>
+      </div>
+      {% endif %}
     </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Check-out</span>
-      <span class="panel-kv-value">{{ reservation.check_out_date.strftime('%a, %b %d') }}</span>
-    </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Nights</span>
-      <span class="panel-kv-value">{{ nights }}</span>
-    </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Guests</span>
-      <span class="panel-kv-value">{{ reservation.adults }}A{% if reservation.children %} {{ reservation.children }}C{% endif %}{% if reservation.extra_guests %} +{{ reservation.extra_guests }}{% endif %}</span>
-    </div>
-    <div class="panel-kv">
-      <span class="panel-kv-label">Source</span>
-      <span class="panel-kv-value">{{ reservation.source_channel.replace('_', ' ')|title }}</span>
-    </div>
-    {% if reservation.primary_guest and reservation.primary_guest.nationality %}
-    <div class="panel-kv">
-      <span class="panel-kv-label">Nationality</span>
-      <span class="panel-kv-value">{{ reservation.primary_guest.nationality }}</span>
-    </div>
+  </div>
+
+  {% if can_reassign %}
+  <div class="panel-section">
+    <details class="panel-collapsible"{% if not room_assigned %} open{% endif %}>
+      <summary class="panel-collapsible-head"><h3>Room Assignment</h3></summary>
+      <div class="panel-collapsible-body">
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_assign_room', reservation_id=reservation.id) }}" class="stack-form compact">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
+          <select name="room_id" required>
+            <option value="">-- Choose room --</option>
+            {% for room in available_rooms %}
+            <option value="{{ room.id }}" {% if reservation.assigned_room and reservation.assigned_room.id|string == room.id %}selected{% endif %} {% if not room.available %}disabled{% endif %}>{{ room.label }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="button tiny">Assign Room</button>
+        </form>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  {% if reservation.assigned_room_id and can_manage_hk %}
+  <div class="panel-section">
+    <details class="panel-collapsible"{% if not room_ready %} open{% endif %}>
+      <summary class="panel-collapsible-head">
+        <h3>Room Readiness</h3>
+        <span class="panel-hk-badge {{ room_hk_status or 'unknown' }}">{{ (room_hk_status or 'Unknown').replace('_', ' ')|title }}</span>
+      </summary>
+      <div class="panel-collapsible-body">
+        <div class="panel-hk-status">
+          <span class="panel-kv-label">Current</span>
+          <span class="panel-hk-badge {{ room_hk_status or 'unknown' }}">{{ (room_hk_status or 'Unknown').replace('_', ' ')|title }}</span>
+        </div>
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_hk', reservation_id=reservation.id) }}" class="panel-hk-actions">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.full_path }}">
+          <button type="submit" name="status_code" value="clean" class="button tiny secondary" title="Mark room clean">Clean</button>
+          <button type="submit" name="status_code" value="dirty" class="button tiny secondary" title="Mark room dirty">Dirty</button>
+          <button type="submit" name="status_code" value="inspected" class="button tiny secondary" title="Mark inspected">Inspected</button>
+          <button type="submit" name="status_code" value="out_of_order" class="button tiny secondary panel-btn-warning" title="Out of order">OOO</button>
+        </form>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  <div class="panel-section">
+    <details class="panel-collapsible" open>
+      <summary class="panel-collapsible-head">
+        <h3>Folio</h3>
+        <span class="panel-balance-badge {{ payment_state }}">{{ currency }} {{ "%.2f"|format(balance) }}</span>
+      </summary>
+      <div class="panel-collapsible-body">
+        <div class="panel-folio-summary">
+          <div class="panel-folio-row">
+            <span>Room total</span>
+            <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_room_total or 0) }}</span>
+          </div>
+          {% if reservation.quoted_tax_total and reservation.quoted_tax_total > 0 %}
+          <div class="panel-folio-row">
+            <span>Tax</span>
+            <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_tax_total or 0) }}</span>
+          </div>
+          {% endif %}
+          {% if reservation.quoted_extras_total and reservation.quoted_extras_total > 0 %}
+          <div class="panel-folio-row">
+            <span>Extras</span>
+            <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_extras_total) }}</span>
+          </div>
+          {% endif %}
+          {% if folio_charges %}
+          {% for charge in folio_charges %}
+          <div class="panel-folio-row panel-folio-charge">
+            <span title="{{ charge.description or charge.charge_type }}">{{ charge.charge_code }} - {{ charge.description or charge.charge_type }}</span>
+            <span>{{ currency }} {{ "%.2f"|format(charge.total_amount) }}</span>
+          </div>
+          {% endfor %}
+          {% endif %}
+          <div class="panel-folio-row panel-folio-total">
+            <span>Grand total</span>
+            <strong>{{ currency }} {{ "%.2f"|format(reservation.quoted_grand_total or 0) }}</strong>
+          </div>
+          <div class="panel-folio-row">
+            <span>Paid / deposited</span>
+            <span>{{ currency }} {{ "%.2f"|format(reservation.deposit_received_amount or 0) }}</span>
+          </div>
+          <div class="panel-folio-row panel-folio-balance {{ payment_state }}">
+            <strong>Balance due</strong>
+            <strong>{{ currency }} {{ "%.2f"|format(balance) }}</strong>
+          </div>
+        </div>
+        <div class="panel-folio-actions">
+          <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id, back=request.full_path) }}">Full folio</a>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  {% if can_add_payment %}
+  <div class="panel-section">
+    <details class="panel-collapsible"{% if not payment_clear %} open{% endif %}>
+      <summary class="panel-collapsible-head"><h3>Record Payment</h3></summary>
+      <div class="panel-collapsible-body">
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_payment', reservation_id=reservation.id) }}" class="stack-form compact">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.full_path }}">
+          <input type="number" name="amount" step="0.01" min="0" placeholder="Amount" value="{{ "%.2f"|format(balance if balance > 0 else 0) }}" required>
+          <select name="payment_method" required>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="qr">QR / Mobile</option>
+            <option value="bank">Bank transfer</option>
+          </select>
+          <input type="text" name="note" placeholder="Reference / note (optional)">
+          <button type="submit" class="button tiny">Record Payment</button>
+        </form>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  {% if can_add_charge %}
+  <div class="panel-section">
+    <details class="panel-collapsible">
+      <summary class="panel-collapsible-head"><h3>Add Charge</h3></summary>
+      <div class="panel-collapsible-body">
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_charge', reservation_id=reservation.id) }}" class="stack-form compact">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.full_path }}">
+          <select name="charge_type" required>
+            <option value="">Select charge type</option>
+            <option value="manual_charge">Room charge</option>
+            <option value="extra_bed">Extra bed</option>
+            <option value="minibar">Minibar</option>
+            <option value="laundry">Laundry</option>
+            <option value="fnb">Restaurant / Cafe</option>
+            <option value="transport">Transfer / Taxi</option>
+            <option value="miscellaneous">Miscellaneous</option>
+          </select>
+          <input type="number" name="amount" step="0.01" min="0" placeholder="Amount" required>
+          <input type="text" name="description" placeholder="Description (optional)">
+          <button type="submit" class="button tiny">Post Charge</button>
+        </form>
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  {% if reservation.special_requests or reservation.internal_notes or recent_notes %}
+  <div class="panel-section">
+    <h3>Requests & Notes</h3>
+    {% if reservation.special_requests %}
+    <p class="panel-note important">{{ reservation.special_requests }}</p>
+    {% endif %}
+    {% if reservation.internal_notes %}
+    <p class="panel-note">{{ reservation.internal_notes }}</p>
+    {% endif %}
+    {% if recent_notes %}
+      {% for note in recent_notes %}
+      <div class="panel-note {% if note.is_important %}important{% endif %}">
+        <p>{{ note.note_text }}</p>
+        <small class="muted">{{ note.created_at.strftime('%b %d, %H:%M') if note.created_at else '' }}</small>
+      </div>
+      {% endfor %}
     {% endif %}
   </div>
-</div>
+  {% endif %}
 
-{# ── Section 3: Financial summary + folio ── #}
-<div class="panel-section">
-  <details class="panel-collapsible" open>
-    <summary class="panel-collapsible-head">
-      <h3>Folio</h3>
-      <span class="panel-balance-badge {{ payment_state }}">{{ currency }} {{ "%.2f"|format(balance) }}</span>
-    </summary>
-    <div class="panel-collapsible-body">
-      <div class="panel-folio-summary">
-        <div class="panel-folio-row">
-          <span>Room total</span>
-          <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_room_total or 0) }}</span>
-        </div>
-        {% if reservation.quoted_tax_total and reservation.quoted_tax_total > 0 %}
-        <div class="panel-folio-row">
-          <span>Tax</span>
-          <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_tax_total or 0) }}</span>
-        </div>
-        {% endif %}
-        {% if reservation.quoted_extras_total and reservation.quoted_extras_total > 0 %}
-        <div class="panel-folio-row">
-          <span>Extras</span>
-          <span>{{ currency }} {{ "%.2f"|format(reservation.quoted_extras_total) }}</span>
-        </div>
-        {% endif %}
-        {% if folio_charges %}
-        {% for charge in folio_charges %}
-        <div class="panel-folio-row panel-folio-charge">
-          <span title="{{ charge.description or charge.charge_type }}">{{ charge.charge_code }} — {{ charge.description or charge.charge_type }}</span>
-          <span>{{ currency }} {{ "%.2f"|format(charge.total_amount) }}</span>
-        </div>
-        {% endfor %}
-        {% endif %}
-        <div class="panel-folio-row panel-folio-total">
-          <span>Grand total</span>
-          <strong>{{ currency }} {{ "%.2f"|format(reservation.quoted_grand_total or 0) }}</strong>
-        </div>
-        <div class="panel-folio-row">
-          <span>Paid / deposited</span>
-          <span>{{ currency }} {{ "%.2f"|format(reservation.deposit_received_amount or 0) }}</span>
-        </div>
-        <div class="panel-folio-row panel-folio-balance {{ payment_state }}">
-          <strong>Balance due</strong>
-          <strong>{{ currency }} {{ "%.2f"|format(balance) }}</strong>
-        </div>
+  {% if can_add_note %}
+  <div class="panel-section">
+    <details class="panel-collapsible"{% if not has_request_context %} open{% endif %}>
+      <summary class="panel-collapsible-head"><h3>Add Note</h3></summary>
+      <div class="panel-collapsible-body">
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_note', reservation_id=reservation.id) }}" class="stack-form compact">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.full_path }}">
+          <textarea name="note_text" rows="2" placeholder="Internal note..." required></textarea>
+          <label class="panel-checkbox"><input type="checkbox" name="is_important" value="on"> Mark important</label>
+          <button type="submit" class="button tiny">Save Note</button>
+        </form>
       </div>
-      <div class="panel-folio-actions">
-        <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id, back=request.full_path) }}">Full folio</a>
+    </details>
+  </div>
+  {% endif %}
+
+  {% if can_change_dates %}
+  <div class="panel-section">
+    <details class="panel-collapsible">
+      <summary class="panel-collapsible-head"><h3>Change Dates</h3></summary>
+      <div class="panel-collapsible-body">
+        <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_change_dates', reservation_id=reservation.id) }}" class="stack-form compact">
+          {{ csrf_input() }}
+          <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
+          <div class="grid two">
+            <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ reservation.check_in_date.isoformat() }}" required></label>
+            <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ reservation.check_out_date.isoformat() }}" required></label>
+          </div>
+          <button type="submit" class="button tiny">Save Dates</button>
+        </form>
       </div>
-    </div>
-  </details>
-</div>
-
-{# ── Section 4: Quick charge (inline) ── #}
-{% if can_add_charge %}
-<div class="panel-section">
-  <details class="panel-collapsible">
-    <summary class="panel-collapsible-head"><h3>Add Charge</h3></summary>
-    <div class="panel-collapsible-body">
-      <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_charge', reservation_id=reservation.id) }}" class="stack-form compact">
-        {{ csrf_input() }}
-        <input type="hidden" name="back_url" value="{{ request.full_path }}">
-        <select name="charge_type" required>
-          <option value="">Select charge type</option>
-          <option value="manual_charge">Room charge</option>
-          <option value="extra_bed">Extra bed</option>
-          <option value="minibar">Minibar</option>
-          <option value="laundry">Laundry</option>
-          <option value="fnb">Restaurant / Cafe</option>
-          <option value="transport">Transfer / Taxi</option>
-          <option value="miscellaneous">Miscellaneous</option>
-        </select>
-        <input type="number" name="amount" step="0.01" min="0" placeholder="Amount" required>
-        <input type="text" name="description" placeholder="Description (optional)">
-        <button type="submit" class="button tiny">Post Charge</button>
-      </form>
-    </div>
-  </details>
-</div>
-{% endif %}
-
-{# ── Section 5: Quick payment (inline) ── #}
-{% if can_add_payment %}
-<div class="panel-section">
-  <details class="panel-collapsible">
-    <summary class="panel-collapsible-head"><h3>Record Payment</h3></summary>
-    <div class="panel-collapsible-body">
-      <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_payment', reservation_id=reservation.id) }}" class="stack-form compact">
-        {{ csrf_input() }}
-        <input type="hidden" name="back_url" value="{{ request.full_path }}">
-        <input type="number" name="amount" step="0.01" min="0" placeholder="Amount" value="{{ "%.2f"|format(balance) }}" required>
-        <select name="payment_method" required>
-          <option value="cash">Cash</option>
-          <option value="card">Card</option>
-          <option value="qr">QR / Mobile</option>
-          <option value="bank">Bank transfer</option>
-        </select>
-        <input type="text" name="note" placeholder="Reference / note (optional)">
-        <button type="submit" class="button tiny">Record Payment</button>
-      </form>
-    </div>
-  </details>
-</div>
-{% endif %}
-
-{# ── Section 6: Special requests ── #}
-{% if reservation.special_requests %}
-<div class="panel-section">
-  <h3>Special Requests</h3>
-  <p class="panel-note important">{{ reservation.special_requests }}</p>
-</div>
-{% endif %}
-
-{# ── Section 7: Internal notes ── #}
-{% if reservation.internal_notes %}
-<div class="panel-section">
-  <h3>Internal Notes</h3>
-  <p class="panel-note">{{ reservation.internal_notes }}</p>
-</div>
-{% endif %}
-
-{# ── Section 8: Recent notes ── #}
-{% if recent_notes %}
-<div class="panel-section">
-  <h3>Notes</h3>
-  {% for note in recent_notes %}
-  <div class="panel-note {% if note.is_important %}important{% endif %}">
-    <p>{{ note.note_text }}</p>
-    <small class="muted">{{ note.created_at.strftime('%b %d, %H:%M') if note.created_at else '' }}</small>
+    </details>
   </div>
-  {% endfor %}
-</div>
-{% endif %}
+  {% endif %}
 
-{# ── Section 9: Add note (inline) ── #}
-{% if can_add_note %}
-<div class="panel-section">
-  <details class="panel-collapsible">
-    <summary class="panel-collapsible-head"><h3>Add Note</h3></summary>
-    <div class="panel-collapsible-body">
-      <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_note', reservation_id=reservation.id) }}" class="stack-form compact">
-        {{ csrf_input() }}
-        <input type="hidden" name="back_url" value="{{ request.full_path }}">
-        <textarea name="note_text" rows="2" placeholder="Internal note..." required></textarea>
-        <label class="panel-checkbox"><input type="checkbox" name="is_important" value="on"> Mark important</label>
-        <button type="submit" class="button tiny">Save Note</button>
-      </form>
-    </div>
-  </details>
-</div>
-{% endif %}
-
-{# ── Section 10: Alerts ── #}
-{% if not reservation.assigned_room %}
-<div class="panel-alert warning">
-  <strong>Unallocated</strong> — Choose a room to complete this reservation
-</div>
-{% endif %}
-{% if is_conflict_room %}
-<div class="panel-alert danger">
-  <strong>Room not ready</strong> — Assigned room is dirty. Mark ready or reassign before check-in.
-</div>
-{% endif %}
-
-{# ── Section 11: HK room status (for assigned rooms) ── #}
-{% if reservation.assigned_room_id and can_manage_hk %}
-<div class="panel-section">
-  <h3>Room Status</h3>
-  <div class="panel-hk-status">
-    <span class="panel-kv-label">Current</span>
-    <span class="panel-hk-badge {{ room_hk_status or 'unknown' }}">{{ (room_hk_status or 'Unknown').replace('_', ' ')|title }}</span>
+  {% if can_cancel or can_no_show %}
+  <div class="panel-actions panel-actions-secondary">
+    {% if can_cancel %}
+    <a class="button secondary full-width panel-btn-danger" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Cancel</a>
+    {% endif %}
+    {% if can_no_show %}
+    <a class="button secondary full-width panel-btn-warning" href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=reservation.id) }}">No-Show</a>
+    {% endif %}
   </div>
-  <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_panel_hk', reservation_id=reservation.id) }}" class="panel-hk-actions">
-    {{ csrf_input() }}
-    <input type="hidden" name="back_url" value="{{ request.full_path }}">
-    <button type="submit" name="status_code" value="clean" class="button tiny secondary" title="Mark room clean">Clean</button>
-    <button type="submit" name="status_code" value="dirty" class="button tiny secondary" title="Mark room dirty">Dirty</button>
-    <button type="submit" name="status_code" value="inspected" class="button tiny secondary" title="Mark inspected">Inspected</button>
-    <button type="submit" name="status_code" value="out_of_order" class="button tiny secondary panel-btn-warning" title="Out of order">OOO</button>
-  </form>
-</div>
-{% endif %}
-
-{# ── Section 12: Room assignment form ── #}
-{% if can_reassign %}
-<div class="panel-section">
-  <details class="panel-collapsible"{% if not reservation.assigned_room %} open{% endif %}>
-    <summary class="panel-collapsible-head"><h3>Room Assignment</h3></summary>
-    <div class="panel-collapsible-body">
-      <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_assign_room', reservation_id=reservation.id) }}" class="stack-form compact">
-        {{ csrf_input() }}
-        <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
-        <select name="room_id" required>
-          <option value="">-- Choose room --</option>
-          {% for room in available_rooms %}
-          <option value="{{ room.id }}" {% if reservation.assigned_room and reservation.assigned_room.id|string == room.id %}selected{% endif %} {% if not room.available %}disabled{% endif %}>{{ room.label }}</option>
-          {% endfor %}
-        </select>
-        <button type="submit" class="button tiny">Assign Room</button>
-      </form>
-    </div>
-  </details>
-</div>
-{% endif %}
-
-{# ── Section 13: Date change form ── #}
-{% if can_change_dates %}
-<div class="panel-section">
-  <details class="panel-collapsible">
-    <summary class="panel-collapsible-head"><h3>Change Dates</h3></summary>
-    <div class="panel-collapsible-body">
-      <form method="POST" action="{{ url_for('front_desk.staff_front_desk_board_change_dates', reservation_id=reservation.id) }}" class="stack-form compact">
-        {{ csrf_input() }}
-        <input type="hidden" name="back_url" value="{{ request.referrer or url_for('front_desk.staff_front_desk_board') }}">
-        <div class="grid two">
-          <label><span>Check-in</span><input type="date" name="check_in_date" value="{{ reservation.check_in_date.isoformat() }}" required></label>
-          <label><span>Check-out</span><input type="date" name="check_out_date" value="{{ reservation.check_out_date.isoformat() }}" required></label>
-        </div>
-        <button type="submit" class="button tiny">Save Dates</button>
-      </form>
-    </div>
-  </details>
-</div>
-{% endif %}
-
-{# ── Section 14: Quick actions ── #}
-<div class="panel-actions">
-  {% if can_check_in %}
-  <button class="button primary full-width" data-action="check-in" data-reservation-id="{{ reservation.id }}">Check In</button>
   {% endif %}
-  {% if can_check_out %}
-  <button class="button primary full-width" data-action="check-out" data-reservation-id="{{ reservation.id }}">Check Out</button>
-  {% endif %}
-  {% if can_cancel %}
-  <a class="button secondary full-width panel-btn-danger" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Cancel</a>
-  {% endif %}
-  {% if can_no_show %}
-  <a class="button secondary full-width panel-btn-warning" href="{{ url_for('front_desk.staff_front_desk_detail', reservation_id=reservation.id) }}">No-Show</a>
-  {% endif %}
-  <a class="button secondary full-width" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=reservation.id) }}">Full Detail</a>
-  <a class="button secondary full-width" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=reservation.id) }}">Full Folio</a>
 </div>
