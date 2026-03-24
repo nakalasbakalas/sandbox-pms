@@ -2311,7 +2311,7 @@ body.public-site .header-search button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px;
+  padding: 10px 14px;
   background: rgba(10, 12, 16, 0.95);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
@@ -2322,12 +2322,12 @@ body.public-site .header-search button {
   margin: 0;
 }
 .nav-drawer-close {
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  padding: 6px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
   transition: background 0.15s ease;
@@ -2354,17 +2354,17 @@ body.public-site .header-search button {
 }
 
 .nav-drawer-section {
-  padding: 18px 16px;
+  padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 .nav-drawer-section:last-child {
   border-bottom: none;
-  padding-bottom: 24px;
+  padding-bottom: 16px;
 }
 .nav-section-label {
   display: block;
-  margin: 0 0 12px;
-  font-size: 0.74rem;
+  margin: 0 0 8px;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -3098,9 +3098,9 @@ body.public-site .consent-manage-button {
 /* Messaging layout */
 .messaging-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 1.5rem;
-  padding: 1rem;
+  grid-template-columns: 220px 1fr;
+  gap: 0.75rem;
+  padding: 0.5rem;
 }
 @media (max-width: 900px) {
   .messaging-layout {
@@ -3110,18 +3110,18 @@ body.public-site .consent-manage-button {
 
 .messaging-sidebar {
   border-right: 1px solid #e9ecef;
-  padding-right: 1rem;
+  padding-right: 0.5rem;
 }
 .messaging-sidebar h3 {
-  font-size: .85rem;
+  font-size: .78rem;
   text-transform: uppercase;
   letter-spacing: .05em;
   color: #666;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 .context-block {
-  margin-bottom: 1rem;
-  padding-bottom: 1rem;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid #eee;
 }
 .context-block h4 {
@@ -3142,23 +3142,23 @@ body.public-site .consent-manage-button {
   padding-right: .5rem;
 }
 .messaging-timeline h3 {
-  font-size: .85rem;
+  font-size: .78rem;
   text-transform: uppercase;
   letter-spacing: .05em;
   color: #666;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   position: sticky;
   top: 0;
   background: #fff;
-  padding: .5rem 0;
+  padding: .25rem 0;
   z-index: 1;
 }
 
 /* Message bubbles */
 .message-bubble {
-  margin-bottom: 1rem;
-  padding: .75rem 1rem;
-  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  padding: .5rem .75rem;
+  border-radius: 6px;
   border: 1px solid #e9ecef;
   background: #f8f9fa;
 }
@@ -3216,15 +3216,15 @@ body.public-site .consent-manage-button {
 
 /* Compose tabs */
 .messaging-compose-tabs {
-  padding: 1rem;
+  padding: 0.5rem;
 }
 .compose-tab-buttons {
   display: flex;
-  gap: .5rem;
-  margin-bottom: 1rem;
+  gap: .3rem;
+  margin-bottom: 0.5rem;
 }
 .compose-tab .form-group {
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 .compose-tab textarea {
   width: 100%;
@@ -5775,10 +5775,10 @@ body:not(.public-site) .planning-board-day.today strong {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  min-height: 30px;
+  min-height: 26px;
   flex-wrap: wrap;
   overflow: hidden;
 }
