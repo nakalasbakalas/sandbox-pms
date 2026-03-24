@@ -145,4 +145,24 @@
   <p class="muted">Requires audit.view permission.</p>
   {% endif %}
 </section>
+
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Danger zone</p>
+      <h2>Clear all operational data</h2>
+    </div>
+  </div>
+  {% if can('settings.edit') %}
+  <p class="muted">Permanently removes <strong>all reservations, folios, payments, guests, housekeeping tasks, and related records</strong>. Room configuration and staff accounts are preserved. This action cannot be undone.</p>
+  <form method="post"
+        onsubmit="var v=prompt('Type DELETE to confirm permanently removing all reservations and guests:'); if(v!=='DELETE'){alert('Cancelled — data was not cleared.');return false;} return true;">
+    {{ csrf_input() }}
+    <input type="hidden" name="action" value="clear_operational_data">
+    <button class="button" style="--btn-bg:var(--danger);--btn-text:#fff;" type="submit">Clear all reservations &amp; guests</button>
+  </form>
+  {% else %}
+  <p class="muted">Requires settings.edit permission.</p>
+  {% endif %}
+</section>
 {% endblock %}
