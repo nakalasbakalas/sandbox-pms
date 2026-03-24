@@ -370,7 +370,7 @@
       throw new Error("Unable to refresh the planning board.");
     }
     const html = await response.text();
-    // Stale the DOM reference before replacement
+    // Clear stale DOM reference before replacement
     if (selectedBlock) {
       selectedBlock = null;
     }
@@ -1231,7 +1231,6 @@
         `[data-board-block][data-block-id="${selectedBlockId}"], [data-board-block][data-reservation-id="${selectedBlockId}"]`
       );
       if (restored) {
-        selectedBlock = null; // Clear stale reference before re-selecting
         selectBlock(restored);
       } else {
         // Block no longer exists in the refreshed DOM
