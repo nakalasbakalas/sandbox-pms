@@ -28,16 +28,16 @@
   /* Planning board density defaults (responsive, overridable per-density mode) */
   --track-height-spacious: 80px;
   --track-height-comfortable: 56px;
-  --track-height-compact: 40px;
-  --track-height-ultra: 30px;
+  --track-height-compact: 36px;
+  --track-height-ultra: 26px;
   --day-header-height-spacious: 72px;
   --day-header-height-comfortable: 48px;
-  --day-header-height-compact: 34px;
-  --day-header-height-ultra: 26px;
+  --day-header-height-compact: 30px;
+  --day-header-height-ultra: 22px;
   --room-header-width-spacious: 240px;
-  --room-header-width-comfortable: 192px;
-  --room-header-width-compact: 152px;
-  --room-header-width-ultra: 124px;
+  --room-header-width-comfortable: 180px;
+  --room-header-width-compact: 136px;
+  --room-header-width-ultra: 110px;
   --day-column-min-spacious: 76px;
   --day-column-min-comfortable: 60px;
   --day-column-min-compact: 46px;
@@ -1020,15 +1020,15 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ===== Planning Board v2 – Compact Operations Console ===== */
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .planning-board-shell {
-  padding: 4px 10px 3px;
+  padding: 3px 8px 2px;
 }
 /* ── Row 1: title + tabs + nav + CTA ── */
 .planning-board-row1 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  min-height: 32px;
+  min-height: 28px;
 }
 .planning-board-title-compact {
   display: flex;
@@ -1038,7 +1038,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-title-compact h1 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 0.92rem;
   white-space: nowrap;
   letter-spacing: 0.01em;
 }
@@ -1061,9 +1061,9 @@ tbody tr:last-child td { border-bottom: 0; }
   align-items: center;
 }
 .planning-board-view-tabs .pill {
-  min-height: 28px;
-  padding: 4px 10px;
-  font-size: 0.76rem;
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
 }
 .planning-board-nav-actions {
   display: flex;
@@ -1075,24 +1075,24 @@ tbody tr:last-child td { border-bottom: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 2px 8px;
-  border-radius: 6px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 1px 6px;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   cursor: pointer;
   transition: background 0.15s;
 }
 .board-nav-btn:hover { background: rgba(255,255,255,0.1); }
-.board-nav-btn.today { padding: 2px 10px; font-size: 0.72rem; color: var(--accent-soft); border-color: rgba(var(--accent-soft-rgb), 0.3); }
+.board-nav-btn.today { padding: 1px 8px; font-size: 0.68rem; color: var(--accent-soft); border-color: rgba(var(--accent-soft-rgb), 0.3); }
 .planning-board-primary-cta {
-  min-height: 30px;
-  padding: 4px 12px;
-  font-size: 0.78rem;
+  min-height: 26px;
+  padding: 3px 10px;
+  font-size: 0.74rem;
   white-space: nowrap;
 }
 /* ── Day-range tabs (7d / 14d / 30d) in row1 ── */
@@ -1105,13 +1105,13 @@ tbody tr:last-child td { border-bottom: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 26px;
-  padding: 2px 9px;
-  border-radius: 6px;
+  min-height: 22px;
+  padding: 1px 7px;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   white-space: nowrap;
@@ -1129,10 +1129,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-row2 {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
-  margin-top: 4px;
-  padding-top: 4px;
+  margin-top: 2px;
+  padding-top: 2px;
   border-top: 1px solid rgba(255,255,255,0.05);
 }
 .planning-board-filters-inline {
@@ -1144,22 +1144,22 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-filters-inline select,
 .planning-board-filters-inline input[type="date"] {
   width: auto;
-  min-height: 28px;
-  padding: 3px 6px;
-  font-size: 0.74rem;
-  border-radius: 6px;
+  min-height: 24px;
+  padding: 2px 5px;
+  font-size: 0.72rem;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--text);
 }
 .board-apply-btn {
-  min-height: 28px;
-  padding: 3px 10px;
-  border-radius: 6px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.06);
   color: var(--text);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   cursor: pointer;
   text-transform: uppercase;
@@ -1172,14 +1172,14 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-search-inline input {
   width: 100%;
-  min-height: 28px;
-  padding: 3px 8px;
-  font-size: 0.76rem;
-  border-radius: 6px;
+  min-height: 24px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--text);
-  max-width: 220px;
+  max-width: 200px;
 }
 .planning-board-search-inline input::placeholder { color: var(--muted); }
 .planning-board-density-toggle {
@@ -1192,15 +1192,15 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-density-toggle legend { display: none; }
 .planning-board-density-toggle button {
-  min-width: 26px;
-  min-height: 26px;
-  padding: 2px 6px;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 1px 5px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.04);
   color: var(--muted);
-  border-radius: 5px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.02em;
   transition: all 0.15s;
@@ -1404,8 +1404,8 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ── Board grid ── */
 .planning-board-desktop {
   overflow-x: auto;
-  padding-bottom: 4px;
-  margin-top: 2px;
+  padding-bottom: 2px;
+  margin-top: 1px;
 }
 .planning-board-grid {
   display: grid;
@@ -1413,7 +1413,7 @@ tbody tr:last-child td { border-bottom: 0; }
   width: max-content;
   min-width: 100%;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: visible;
   position: relative;
   background: rgba(255,255,255,0.02);
@@ -1438,8 +1438,8 @@ tbody tr:last-child td { border-bottom: 0; }
   background: rgba(8,10,14,0.98);
   color: var(--accent-soft);
   box-shadow: 8px 0 16px rgba(0,0,0,0.14);
-  padding: 4px 8px;
-  font-size: 0.74rem;
+  padding: 2px 6px;
+  font-size: 0.68rem;
 }
 .planning-board-days {
   background: rgba(8,10,14,0.98);
@@ -1447,7 +1447,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-day {
   min-height: var(--day-header-height);
-  padding: 3px 4px;
+  padding: 2px 3px;
   display: grid;
   place-items: center;
   gap: 0;
@@ -1455,15 +1455,15 @@ tbody tr:last-child td { border-bottom: 0; }
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.6rem;
+  font-size: 0.56rem;
 }
 .planning-board-day strong {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   color: var(--text);
   line-height: 1;
 }
 .planning-board-day small {
-  font-size: 0.56rem;
+  font-size: 0.52rem;
   letter-spacing: 0.04em;
   line-height: 1;
 }
@@ -1482,11 +1482,11 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .planning-board-group {
   grid-column: 1 / -1;
-  padding: 4px 10px;
+  padding: 2px 8px;
   background: rgba(255,255,255,0.04);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1498,19 +1498,19 @@ tbody tr:last-child td { border-bottom: 0; }
   display: grid;
   gap: 0;
   align-content: center;
-  min-height: max(30px, calc(var(--track-height) - 6px));
-  padding: 3px 7px;
+  min-height: max(26px, calc(var(--track-height) - 8px));
+  padding: 2px 6px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: rgba(10,12,16,0.98);
   box-shadow: 8px 0 16px rgba(0,0,0,0.12);
 }
 .planning-board-room strong {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
 }
 .planning-board-room span {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.62rem;
 }
 .planning-board-room.unallocated {
   background: rgba(var(--accent-rgb), 0.06);
@@ -1524,11 +1524,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-room-badge {
   display: inline-flex;
   align-items: center;
-  min-height: 15px;
-  padding: 1px 5px;
+  min-height: 13px;
+  padding: 0 4px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.06);
-  font-size: 0.56rem;
+  font-size: 0.5rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1545,8 +1545,8 @@ tbody tr:last-child td { border-bottom: 0; }
 /* ── Track ── */
 .planning-board-track {
   position: relative;
-  min-height: max(36px, calc(var(--track-height, 60px) - var(--track-height-adjust, 0px)));
-  grid-template-rows: repeat(var(--row-lanes, 1), minmax(30px, auto));
+  min-height: max(28px, calc(var(--track-height, 60px) - var(--track-height-adjust, 0px)));
+  grid-template-rows: repeat(var(--row-lanes, 1), minmax(26px, auto));
   border-bottom: 1px solid var(--border);
   background-color: rgba(255,255,255,0.012);
   background-image:
@@ -1607,10 +1607,10 @@ tbody tr:last-child td { border-bottom: 0; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
-  min-height: 28px;
-  padding: 3px 6px;
-  border-radius: 6px;
+  gap: 3px;
+  min-height: 24px;
+  padding: 2px 5px;
+  border-radius: 5px;
   color: white;
   font-weight: 800;
   cursor: pointer;
@@ -1642,13 +1642,13 @@ tbody tr:last-child td { border-bottom: 0; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.planning-board-block-copy strong { font-size: 0.76rem; line-height: 1.2; }
+.planning-board-block-copy strong { font-size: 0.72rem; line-height: 1.15; }
 .planning-board-block-copy small,
 .planning-board-block-badges small {
   color: rgba(255,255,255,0.85);
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  font-size: 0.58rem;
+  font-size: 0.54rem;
   line-height: 1.1;
 }
 .planning-board-block-badges {
@@ -1836,58 +1836,58 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-comfortable .planning-board-day strong { font-size: 0.92rem; }
 /* Compact adjustments */
 .planning-board-grid.density-compact .planning-board-day,
-.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day { min-height: var(--day-header-height-compact); padding: 2px 3px; font-size: 0.57rem; }
+.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day { min-height: var(--day-header-height-compact); padding: 1px 2px; font-size: 0.54rem; }
 .planning-board-grid.density-compact .planning-board-day strong,
-.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day strong { font-size: 0.82rem; }
-.planning-board-grid.density-compact .planning-board-room { min-height: 30px; gap: 0; padding: 2px 6px; }
-.planning-board-grid.density-compact .planning-board-room strong { font-size: 0.75rem; }
-.planning-board-grid.density-compact .planning-board-room span { font-size: 0.62rem; }
+.planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day strong { font-size: 0.78rem; }
+.planning-board-grid.density-compact .planning-board-room { min-height: 24px; gap: 0; padding: 1px 5px; }
+.planning-board-grid.density-compact .planning-board-room strong { font-size: 0.72rem; }
+.planning-board-grid.density-compact .planning-board-room span { font-size: 0.58rem; }
 .planning-board-grid.density-compact .planning-board-room-badges { gap: 2px; }
-.planning-board-grid.density-compact .planning-board-room-badge { min-height: 13px; padding: 0 4px; font-size: 0.5rem; }
-.planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(26px, auto)); }
-.planning-board-grid.density-compact .planning-board-block { margin: 2px 1px; }
-.planning-board-grid.density-compact .planning-board-block > summary { min-height: 24px; gap: 3px; padding: 2px 5px; }
-.planning-board-grid.density-compact .planning-board-block-copy strong { font-size: 0.7rem; }
+.planning-board-grid.density-compact .planning-board-room-badge { min-height: 11px; padding: 0 3px; font-size: 0.46rem; }
+.planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(22px, auto)); }
+.planning-board-grid.density-compact .planning-board-block { margin: 1px 1px; }
+.planning-board-grid.density-compact .planning-board-block > summary { min-height: 20px; gap: 2px; padding: 1px 4px; }
+.planning-board-grid.density-compact .planning-board-block-copy strong { font-size: 0.66rem; }
 .planning-board-grid.density-compact .planning-board-block-copy small,
-.planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.52rem; }
-.planning-board-grid.density-compact .planning-board-resize-handle { width: 11px; min-height: 16px; }
+.planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.48rem; }
+.planning-board-grid.density-compact .planning-board-resize-handle { width: 9px; min-height: 14px; }
 /* Ultra compact */
 .planning-board-grid.density-ultra .planning-board-day,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-day { min-height: var(--day-header-height-ultra); padding: 1px 2px; font-size: 0.52rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-day { min-height: var(--day-header-height-ultra); padding: 1px 1px; font-size: 0.48rem; }
 .planning-board-grid.density-ultra .planning-board-day strong,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day strong,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-day strong { font-size: 0.72rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-day strong { font-size: 0.66rem; }
 .planning-board-grid.density-ultra .planning-board-day small,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day small,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-day small { display: none; }
 .planning-board-grid.density-ultra .planning-board-room,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-room { min-height: 26px; gap: 0; padding: 1px 4px; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room { min-height: 20px; gap: 0; padding: 1px 3px; }
 .planning-board-grid.density-ultra .planning-board-room strong,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room strong,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-room strong { font-size: 0.68rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room strong { font-size: 0.62rem; }
 .planning-board-grid.density-ultra .planning-board-room span,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room span,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-room span { font-size: 0.56rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room span { font-size: 0.5rem; }
 .planning-board-grid.density-ultra .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-room-badges { display: none; }
 .planning-board-grid.density-ultra .planning-board-group,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-group,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-group { padding: 2px 8px; font-size: 0.58rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-group { padding: 1px 6px; font-size: 0.52rem; }
 .planning-board-grid.density-ultra .planning-board-track,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-track,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(22px, auto)); }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(18px, auto)); }
 .planning-board-grid.density-ultra .planning-board-block,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-block { margin: 1px 1px; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block { margin: 1px 0; }
 .planning-board-grid.density-ultra .planning-board-block > summary,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block > summary,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-block > summary { min-height: 22px; gap: 2px; padding: 1px 4px; border-radius: 4px; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block > summary { min-height: 18px; gap: 2px; padding: 1px 3px; border-radius: 3px; }
 .planning-board-grid.density-ultra .planning-board-block-copy strong,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block-copy strong,
-.planning-board-grid[data-board-days="30"].density-compact .planning-board-block-copy strong { font-size: 0.6rem; }
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-block-copy strong { font-size: 0.56rem; }
 .planning-board-grid.density-ultra .planning-board-block-copy small,
 .planning-board-grid.density-ultra .planning-board-block-badges small,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-block-copy small,
@@ -1897,6 +1897,95 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-ultra .planning-board-resize-handle,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-resize-handle,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-resize-handle { width: 9px; min-height: 14px; }
+/* ── Hover tooltip for blocks ── */
+.board-hover-card {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  min-width: 220px;
+  max-width: 300px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(12, 14, 20, 0.97);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.board-hover-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.board-hover-card-guest {
+  font-weight: 700;
+  font-size: 0.84rem;
+  margin-bottom: 3px;
+  color: #fff;
+}
+.board-hover-card-code {
+  font-size: 0.66rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+.board-hover-card-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 0.72rem;
+}
+.board-hover-card-meta dt {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.board-hover-card-meta dd {
+  margin: 0;
+  color: var(--text);
+}
+.board-hover-card-status {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.board-hover-card-status.status-confirmed { background: rgba(78,138,50,0.25); color: #9ff1c3; }
+.board-hover-card-status.status-pending,
+.board-hover-card-status.status-tentative { background: rgba(184,90,47,0.25); color: #ffd391; }
+.board-hover-card-status.status-in_house,
+.board-hover-card-status.status-checked_in { background: rgba(31,107,114,0.25); color: #7dd8e3; }
+.board-hover-card-status.status-unallocated { background: rgba(100,72,160,0.25); color: #c4a8ff; }
+.board-hover-card-status.status-conflict { background: rgba(170,73,82,0.25); color: #ffb0b5; }
+.board-hover-card-status.status-closure { background: rgba(90,96,107,0.25); color: #bcc3d0; }
+.board-hover-card-status.status-past,
+.board-hover-card-status.status-checked_out { background: rgba(64,74,83,0.25); color: #a0a8b3; }
+.board-hover-card-flags {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.board-hover-card-flag {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.board-hover-card-flag.flag-balance { background: rgba(207,95,109,0.15); color: #ffb0b5; }
+.board-hover-card-flag.flag-ready { background: rgba(47,182,117,0.15); color: #9ff1c3; }
+.board-hover-card-flag.flag-vip { background: rgba(197,124,53,0.2); color: #ffd391; }
+.board-hover-card-flag.flag-special { background: rgba(197,124,53,0.15); color: #ffd391; }
 /* ── Side panel ── */
 .board-side-panel {
   position: fixed;
@@ -4476,27 +4565,27 @@ body:not(.public-site) .hk-section-date { color: var(--pms-text-muted); }
 /* ─── Board Legend ─── */
 .board-legend {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
-  padding: 4px 10px;
+  padding: 2px 8px;
   background: var(--pms-bg-hover);
   border: 1px solid var(--pms-border-thin);
   border-radius: 3px;
-  margin-bottom: 4px;
-  font-size: 11px;
+  margin-bottom: 2px;
+  font-size: 10px;
   color: var(--pms-text-secondary);
 }
 .board-legend-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   white-space: nowrap;
 }
 .board-legend-swatch {
   display: inline-block;
-  width: 12px;
-  height: 10px;
+  width: 10px;
+  height: 8px;
   border-radius: 2px;
   flex-shrink: 0;
 }
@@ -5407,12 +5496,12 @@ body:not(.public-site) .hk-counts {
 .board-quick-filters {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-wrap: wrap;
   flex: none;
 }
 .bqf-label {
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -5422,13 +5511,13 @@ body:not(.public-site) .hk-counts {
 .bqf-chip {
   display: inline-flex;
   align-items: center;
-  height: 26px;
-  padding: 0 9px;
+  height: 20px;
+  padding: 0 6px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.04);
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.56rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   cursor: pointer;
@@ -5672,25 +5761,25 @@ body:not(.public-site) .planning-board-day.today strong {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 10px;
+  padding: 2px 8px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  min-height: 38px;
+  min-height: 30px;
   flex-wrap: wrap;
   overflow: hidden;
 }
 .fd-cmd-date {
   display: flex;
   align-items: baseline;
-  gap: 3px;
-  font-size: 0.72rem;
+  gap: 2px;
+  font-size: 0.66rem;
   color: var(--muted);
-  padding: 2px 6px 2px 0;
+  padding: 1px 4px 1px 0;
   white-space: nowrap;
   flex-shrink: 0;
 }
-.fd-cmd-date strong { font-size: 1.05rem; color: var(--text); font-weight: 700; }
-.fd-cmd-day, .fd-cmd-mon { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.fd-cmd-date strong { font-size: 0.92rem; color: var(--text); font-weight: 700; }
+.fd-cmd-day, .fd-cmd-mon { font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .fd-cmd-divider {
   width: 1px;
   align-self: stretch;
@@ -5705,13 +5794,13 @@ body:not(.public-site) .planning-board-day.today strong {
   align-items: center;
   justify-content: center;
   gap: 0;
-  padding: 3px 6px;
-  border-radius: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
   line-height: 1.1;
-  min-width: 38px;
+  min-width: 34px;
   transition: background 0.12s, border-color 0.12s;
   flex-shrink: 0;
 }
@@ -5723,7 +5812,7 @@ body:not(.public-site) .planning-board-day.today strong {
   border-color: rgba(var(--accent-rgb), 0.35);
 }
 .fd-metric-label {
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -5731,14 +5820,14 @@ body:not(.public-site) .planning-board-day.today strong {
   white-space: nowrap;
 }
 .fd-metric-value {
-  font-size: 1.0rem;
+  font-size: 0.88rem;
   font-weight: 700;
   color: var(--text);
   line-height: 1;
   white-space: nowrap;
 }
 .fd-metric-sub {
-  font-size: 0.5rem;
+  font-size: 0.46rem;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -5765,11 +5854,11 @@ body:not(.public-site) .planning-board-day.today strong {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 9px;
-  border-radius: 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
   border: 1px solid rgba(255,255,255,0.12);
   background: transparent;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -5799,11 +5888,11 @@ body:not(.public-site) .planning-board-day.today strong {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 3px 8px;
-  border-radius: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
   border: none;
   background: transparent;
-  font-size: 0.6rem;
+  font-size: 0.56rem;
   font-weight: 600;
   letter-spacing: 0.03em;
   color: var(--muted);
@@ -5822,10 +5911,10 @@ body:not(.public-site) .planning-board-day.today strong {
   background: transparent;
   border: 1px solid rgba(207,95,109,0.25);
   color: rgba(255,255,255,0.4);
-  font-size: 0.7rem;
-  padding: 2px 7px;
-  border-radius: 12px;
-  line-height: 1.6;
+  font-size: 0.62rem;
+  padding: 1px 5px;
+  border-radius: 10px;
+  line-height: 1.4;
   cursor: pointer;
 }
 .bqf-reset:hover { background: rgba(207,95,109,0.15); color: #ffb0b5; border-color: rgba(207,95,109,0.4); }

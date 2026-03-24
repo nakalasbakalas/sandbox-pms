@@ -189,6 +189,15 @@
           data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
           data-move-url="{{ block.moveUrl or '' }}"
           data-resize-url="{{ block.resizeUrl or '' }}"
+          data-hover-guest="{{ block.label }}"
+          data-hover-code="{{ block.subtitle or '' }}"
+          data-hover-dates="{{ block.startDate }} → {{ block.endDate }}"
+          data-hover-status="{{ block.status }}"
+          data-hover-room="{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}"
+          data-hover-balance="{{ currency }}{{ '%.2f'|format(block.balanceDue) if block.balanceDue and block.balanceDue > 0 else '' }}"
+          data-hover-ready="{{ 'true' if block.readyForCheckIn else 'false' }}"
+          data-hover-vip="{{ 'true' if block.isVip else 'false' }}"
+          data-hover-special="{{ 'true' if block.hasSpecialRequests else 'false' }}"
           style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
         >
           <summary

@@ -270,6 +270,9 @@
   <button role="menuitem" data-ctx="export-ics">Export ICS</button>
 </div>
 
+{# ── Hover card (positioned by JS) ── #}
+<div id="board-hover-card" class="board-hover-card" aria-hidden="true"></div>
+
 {% endblock %}
 {% block extra_scripts %}
 <script src="{{ url_for('static', filename='front-desk-board.js') }}" defer></script>
