@@ -173,7 +173,7 @@
         {% for block in row.visible_blocks %}
         <details
           class="planning-board-block {{ block.displayVariant }} {{ block.status }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
-          data-board-block
+          data-board-block="true"
           data-block-id="{{ block.id }}"
           data-source-type="{{ block.sourceType }}"
           data-reservation-id="{{ block.reservationId or '' }}"

@@ -18,6 +18,7 @@
   const panelCloseBtn = document.querySelector("[data-action='close-panel']");
   let mutationInFlight = false;
   let selectedBlock = null;
+  let selectedBlockId = null; // Track selected block ID for re-selection after refresh
   let moveMode = false;
   let moveTargetRoomId = null;
   let moveTargetTrack = null;
@@ -40,9 +41,15 @@
     surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
+  let feedbackClearTimer = null;
+
   function setFeedback(message, tone, options) {
     if (!feedback) {
       return;
+    }
+    if (feedbackClearTimer) {
+      clearTimeout(feedbackClearTimer);
+      feedbackClearTimer = null;
     }
     const allowHtml = Boolean(options && options.allowHtml);
     if (allowHtml) {
@@ -52,6 +59,14 @@
     }
     feedback.dataset.tone = tone || "neutral";
     feedback.hidden = !message;
+    // Auto-clear success/error messages so stale feedback doesn't confuse staff
+    if (message && (tone === "success" || tone === "error")) {
+      feedbackClearTimer = setTimeout(() => {
+        feedback.textContent = "";
+        feedback.hidden = true;
+        feedbackClearTimer = null;
+      }, tone === "success" ? 4000 : 8000);
+    }
   }
 
   function focusBlockHandle(blockEl) {
@@ -69,7 +84,7 @@
   }
 
   function selectBlock(blockEl) {
-    if (!blockEl || !blockEl.dataset.boardBlock) {
+    if (!blockEl || !blockEl.matches("[data-board-block]")) {
       return;
     }
     if (selectedBlock === blockEl) {
@@ -79,6 +94,7 @@
       selectedBlock.classList.remove("selected");
     }
     selectedBlock = blockEl;
+    selectedBlockId = blockEl.dataset.blockId || blockEl.dataset.reservationId || null;
     blockEl.classList.add("selected");
     focusBlockHandle(blockEl);
     announceSelection(blockEl);
@@ -96,6 +112,7 @@
     if (selectedBlock) {
       selectedBlock.classList.remove("selected");
       selectedBlock = null;
+      selectedBlockId = null;
       setFeedback("", "neutral");
     }
   }
@@ -367,6 +384,10 @@
       throw new Error("Unable to refresh the planning board.");
     }
     const html = await response.text();
+    // Clear stale DOM reference before replacement
+    if (selectedBlock) {
+      selectedBlock = null;
+    }
     if (surfaceContent) {
       surfaceContent.style.visibility = "hidden";
       surfaceContent.innerHTML = html;
@@ -478,6 +499,12 @@
   function onSurfaceClick(event) {
     const summary = resolveSummaryTarget(event.target);
     if (!summary) {
+      // Clicking empty space on the board clears selection (but not on
+      // command strip or other non-block elements)
+      if (event.target.closest("[data-board-track]") && !event.target.closest("[data-board-block]")) {
+        // Let the empty-slot handler in the lower listener deal with this
+        return;
+      }
       return;
     }
     const block = summary.closest("[data-board-block]");
@@ -587,6 +614,21 @@
         event.preventDefault();
         moveSelectionDown();
         break;
+      case "ArrowLeft":
+      case "ArrowRight": {
+        // Navigate between blocks in the same track
+        event.preventDefault();
+        const currentTrack = getBlockTrack(selectedBlock);
+        if (!currentTrack) break;
+        const blocks = getBlocksInTrack(currentTrack);
+        const idx = blocks.indexOf(selectedBlock);
+        if (idx === -1) break;
+        const nextIdx = event.key === "ArrowLeft" ? idx - 1 : idx + 1;
+        if (nextIdx >= 0 && nextIdx < blocks.length) {
+          selectBlock(blocks[nextIdx]);
+        }
+        break;
+      }
       case "m":
       case "M":
         if (!canEdit || mutationInFlight) return;
@@ -614,13 +656,15 @@
       return;
     }
 
+    // Capture target room before exitMoveMode clears it
+    const targetRoomId = moveTargetRoomId;
     exitMoveMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
     setFeedback("Saving move...", "pending");
 
     const payload = {
-      roomId: moveTargetRoomId || null,
+      roomId: targetRoomId || null,
       checkInDate: selectedBlock.dataset.startDate,
       checkOutDate: selectedBlock.dataset.endDate,
     };
@@ -646,7 +690,7 @@
     } catch (error) {
       setFeedback(error.message || "The move was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -657,6 +701,8 @@
       return;
     }
 
+    // Capture target end date before exitResizeMode clears it
+    const targetEndDate = resizeTargetEndDate;
     exitResizeMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
@@ -665,7 +711,7 @@
     const payload = {
       roomId: selectedBlock.dataset.roomId || null,
       checkInDate: selectedBlock.dataset.startDate,
-      checkOutDate: resizeTargetEndDate,
+      checkOutDate: targetEndDate,
     };
 
     try {
@@ -689,13 +735,14 @@
     } catch (error) {
       setFeedback(error.message || "The resize was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
 
   function onSurfacePointerDown(event) {
-    // Prevent dragging when panel is open
+    // When the side panel is open, still allow block selection via click
+    // but don't initiate drag
     if (!panelEl.classList.contains("hidden")) {
       return;
     }
@@ -956,7 +1003,6 @@
           setFeedback(`Layout set to ${density}.`, "success");
         } catch (error) {
           setFeedback("Could not save preference.", "error");
-          console.error("Density toggle error:", error);
         }
       });
     });
@@ -1118,8 +1164,7 @@
   let hkOverlayActive = false;
 
   function syncHkOverlayState() {
-    const surfaceEl = document.getElementById("front-desk-board-surface");
-    if (surfaceEl) surfaceEl.classList.toggle("hk-overlay-active", hkOverlayActive);
+    surface.classList.toggle("hk-overlay-active", hkOverlayActive);
     surface.querySelectorAll("[data-action='toggle-hk-overlay']").forEach((btn) => {
       btn.setAttribute("aria-pressed", hkOverlayActive ? "true" : "false");
       btn.classList.toggle("active", hkOverlayActive);
@@ -1196,6 +1241,19 @@
     syncRoleViewState();
     updateStickyOffset();
     initCollapsibleGroups();
+    // Re-select block after DOM replacement (selection persistence)
+    if (selectedBlockId) {
+      const restored = surface.querySelector(
+        `[data-board-block][data-block-id="${selectedBlockId}"], [data-board-block][data-reservation-id="${selectedBlockId}"]`
+      );
+      if (restored) {
+        selectBlock(restored);
+      } else {
+        // Block no longer exists in the refreshed DOM
+        selectedBlock = null;
+        selectedBlockId = null;
+      }
+    }
   }
 
   // ── Collapsible room-type group headers ──
@@ -1441,10 +1499,12 @@
     }
 
     const reservationId = blockEl.dataset.reservationId;
-    const summary = blockEl.querySelector("summary[data-block-handle]");
-    const label = summary ? summary.getAttribute("aria-label") : blockEl.dataset.blockId;
+    const copyEl = blockEl.querySelector(".planning-board-block-copy strong");
+    const guestName = copyEl ? copyEl.textContent.trim() : "";
+    const subtitleEl = blockEl.querySelector(".planning-board-block-copy small");
+    const code = subtitleEl ? subtitleEl.textContent.trim() : "";
 
-    panelTitle.textContent = label || "Reservation Details";
+    panelTitle.textContent = guestName ? `${guestName}${code ? " · " + code : ""}` : "Reservation Details";
 
     setBusyState(true);
     setFeedback("Loading details...", "pending");
@@ -1605,6 +1665,10 @@
     if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
       return;
     }
+    // Ignore navigation shortcuts when side panel is open (except Escape)
+    if (!panelEl.classList.contains("hidden") && event.key !== "Escape") {
+      return;
+    }
 
     switch (event.key) {
       case "/":
@@ -1615,6 +1679,24 @@
         event.preventDefault();
         showKeyboardHelp();
         break;
+      case "t":
+      case "T":
+        event.preventDefault();
+        scrollToToday("smooth");
+        break;
+      case "1":
+      case "2":
+      case "3": {
+        // Switch day range: 1→7d, 2→14d, 3→30d
+        const dayRanges = { "1": "7", "2": "14", "3": "30" };
+        const targetDays = dayRanges[event.key];
+        const dayTab = root.querySelector(`.board-days-tab[href*="days=${targetDays}"]`);
+        if (dayTab) {
+          event.preventDefault();
+          dayTab.click();
+        }
+        break;
+      }
       case "n":
       case "N":
         if (createBaseUrl && canEdit) {
@@ -1670,10 +1752,10 @@
         <li><kbd>T</kbd> : Jump to today</li>
         <li><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> : Switch to 7 / 14 / 30 day view</li>
         <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li>← → : Navigate blocks within the same room track</li>
         <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
-        <li><kbd>Enter</kbd> : Confirm action or open details</li>
         <li><kbd>Esc</kbd> : Cancel or close</li>
         <li><kbd>/</kbd> : Open search</li>
         <li><kbd>N</kbd> : New reservation</li>
@@ -1721,7 +1803,7 @@
     } catch (error) {
       setFeedback(error.message || "Check-in failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -1759,11 +1841,10 @@
     } catch (error) {
       setFeedback(error.message || "Check-out failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
-
   function assignUnallocatedReservation() {
     if (!selectedBlock) {
       setFeedback("Select an unallocated block first.", "neutral");
@@ -1834,9 +1915,10 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(() => {
-      if (!mutationInFlight) {
-        refreshSurface();
+      if (mutationInFlight || moveMode || resizeMode || !panelEl.classList.contains("hidden")) {
+        return;
       }
+      refreshSurface();
     }, 10000);
   }
 
@@ -1899,8 +1981,8 @@
 
       ctxMenu.classList.remove("hidden");
       ctxMenu.hidden = false;
-      var menuW = ctxMenu.offsetWidth || 200;
-      var menuH = ctxMenu.offsetHeight || 300;
+      const menuW = ctxMenu.offsetWidth || 200;
+      const menuH = ctxMenu.offsetHeight || 300;
       ctxMenu.style.left = Math.min(x, window.innerWidth - menuW - 8) + "px";
       ctxMenu.style.top = Math.min(y, window.innerHeight - menuH - 8) + "px";
       ctxMenu._block = blockEl;
