@@ -121,3 +121,24 @@ def test_clear_operational_data_resets_inventory_days_to_available(app_factory):
             .count()
         )
         assert reservation_linked == 0, "no inventory days should reference a reservation after clear"
+
+        hold_linked = (
+            db.session.query(InventoryDay)
+            .filter(InventoryDay.hold_id.isnot(None))
+            .count()
+        )
+        assert hold_linked == 0, "no inventory days should reference a hold after clear"
+
+        still_blocked = (
+            db.session.query(InventoryDay)
+            .filter(InventoryDay.is_blocked == True)  # noqa: E712
+            .count()
+        )
+        assert still_blocked == 0, "no inventory days should remain marked is_blocked after clear"
+
+        with_maintenance = (
+            db.session.query(InventoryDay)
+            .filter(InventoryDay.maintenance_flag == True)  # noqa: E712
+            .count()
+        )
+        assert with_maintenance == 0, "no inventory days should have maintenance_flag set after clear"

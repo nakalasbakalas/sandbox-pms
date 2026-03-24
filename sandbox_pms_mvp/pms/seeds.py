@@ -702,26 +702,22 @@ def clear_operational_data() -> dict[str, int]:
     counts["guests"] = _del(Guest)
 
     # ── 32. Reset booking/cashier document sequences ───────────────────────
-    db.session.execute(
+    seq_result = db.session.execute(
         sa.update(ReservationCodeSequence).values(next_value=1)
     )
-    counts["reservation_code_sequence_reset"] = 1
+    counts["reservation_code_sequence_reset"] = seq_result.rowcount
 
     # ── 33. Audit and activity log entries for removed entities ───────────
-    _booking_guest_tables = {
-        "guests", "reservations", "folio_charges", "cashier_documents",
-        "payment_requests", "payment_events", "reservation_notes",
-        "reservation_status_history", "reservation_extras", "guest_notes",
-        "guest_loyalties", "pre_check_ins", "conversation_threads",
-        "messages", "reservation_documents", "housekeeping_tasks",
-    }
+    # Derive the set of entity-table names from every table we deleted above
+    # (all counts keys added so far are actual DB table names).
+    _deleted_tables = set(counts.keys())
     counts["audit_log_entries"] = _del(
         AuditLog,
-        sa.delete(AuditLog).where(AuditLog.entity_table.in_(_booking_guest_tables)),
+        sa.delete(AuditLog).where(AuditLog.entity_table.in_(_deleted_tables)),
     )
     counts["activity_log_entries"] = _del(
         ActivityLog,
-        sa.delete(ActivityLog).where(ActivityLog.entity_table.in_(_booking_guest_tables)),
+        sa.delete(ActivityLog).where(ActivityLog.entity_table.in_(_deleted_tables)),
     )
 
     db.session.commit()
