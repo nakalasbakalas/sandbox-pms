@@ -1253,6 +1253,26 @@ tbody tr:last-child td { border-bottom: 0; }
   min-width: 180px;
   z-index: 20;
 }
+.planning-board-overflow-menu .board-view-library {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+.planning-board-overflow-menu .board-view-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: unset;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+.planning-board-overflow-menu .board-view-picker select {
+  min-width: 0;
+  flex: 1;
+}
 .planning-board-surface {
   position: relative;
   min-height: 360px;
@@ -6263,6 +6283,11 @@ body:not(.public-site) .fd-cmd-metric.fd-urgent .fd-metric-value { color: #c6282
 body:not(.public-site) .fd-cmd-metric.fd-urgent .fd-metric-label { color: #d32f2f; }
 body:not(.public-site) .fd-cmd-metric.fd-metric-arrival .fd-metric-label { color: #1565c0; }
 body:not(.public-site) .fd-cmd-metric.fd-metric-dep .fd-metric-label { color: #5e35b1; }
+body:not(.public-site) .pbes-chip { background: rgba(0,0,0,0.03); border-color: var(--pms-border-thin); color: var(--pms-text-primary); }
+body:not(.public-site) .pbes-chip:hover:not(:disabled) { background: rgba(0,0,0,0.07); }
+body:not(.public-site) .pbes-chip.tone-warning { border-color: rgba(230,81,0,0.4); color: #e65100; }
+body:not(.public-site) .pbes-chip.tone-danger  { border-color: rgba(198,40,40,0.4); color: #c62828; }
+body:not(.public-site) .pbes-chip.tone-success { border-color: rgba(27,94,32,0.4); color: #1b5e20; }
 body:not(.public-site) .fd-overlay-btn { border-color: var(--pms-border-thin); color: var(--pms-text-muted); }
 body:not(.public-site) .fd-overlay-btn:hover { background: rgba(0,0,0,0.04); color: var(--pms-text-primary); }
 body:not(.public-site) .fd-overlay-btn.active,
@@ -6448,6 +6473,80 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 .bqf-chip.bqf-secondary {
   background: rgba(var(--accent-rgb), 0.08);
   color: var(--accent-soft);
+}
+
+/* ── Compact exception summary strip ── */
+.planning-board-exception-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.pbes-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.pbes-chip:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pbes-chip:disabled,
+.pbes-chip.pbes-chip-empty {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pbes-chip.tone-warning { border-color: rgba(240, 173, 78, 0.55); color: var(--warning); }
+.pbes-chip.tone-danger  { border-color: rgba(223, 95, 103, 0.55); color: var(--danger); }
+.pbes-chip.tone-success { border-color: rgba(47, 182, 117, 0.55); color: var(--success); }
+.pbes-chip.tone-info    { border-color: rgba(var(--accent-rgb), 0.55); }
+
+.pbes-label {
+  font-weight: 500;
+}
+
+.pbes-count {
+  font-size: 0.88em;
+  font-weight: 700;
+}
+
+/* ── Stats panel secondary collapsible ── */
+.board-stats-secondary {
+  margin-top: 4px;
+}
+
+.board-stats-secondary-toggle {
+  font-size: 0.78rem;
+  color: var(--pms-text-secondary);
+  cursor: pointer;
+  padding: 6px 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.board-stats-secondary-toggle::before {
+  content: "▶";
+  font-size: 0.6em;
+  transition: transform 0.15s ease;
+}
+
+.board-stats-secondary[open] > .board-stats-secondary-toggle::before {
+  transform: rotate(90deg);
 }
 
 .planning-board-exception-rail {

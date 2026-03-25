@@ -1484,8 +1484,51 @@
     }
   });
 
+  // ── Panel helpers (callable from any trigger inside or outside the surface) ──
+  function openStatsPanel() {
+    panelTitle.textContent = "Board Stats";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Stats unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
+  function openHandoverPanel() {
+    panelTitle.textContent = "Shift Handover";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Handover data unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
   // ── Command strip: click delegation on surface (survives AJAX refresh) ──
   surface.addEventListener("click", (e) => {
+    // Exception strip panel triggers (survive surface AJAX refresh)
+    if (e.target.closest("[data-action='open-stats-panel']")) { openStatsPanel(); return; }
+    if (e.target.closest("[data-action='open-handover-panel']")) { openHandoverPanel(); return; }
+
     // Metric filter button (not inside a board block or track)
     const queueOpenBtn = e.target.closest("[data-queue-open]");
     if (queueOpenBtn) {
@@ -1848,50 +1891,15 @@
     else if (pct > 0) dayEl.classList.add("occ-low");
   });
 
-  // ── Stats panel trigger ──
+  // ── Stats / handover triggers (overflow menu buttons outside the surface) ──
   const statsBtn = document.querySelector("[data-action='open-stats-panel']");
   if (statsBtn) {
-    statsBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Board Stats";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Stats unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    statsBtn.addEventListener("click", openStatsPanel);
   }
 
-  // ── Shift handover panel trigger ──
   const handoverBtn = document.querySelector("[data-action='open-handover-panel']");
   if (handoverBtn) {
-    handoverBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Shift Handover";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Handover data unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    handoverBtn.addEventListener("click", openHandoverPanel);
   }
 
   // Side panel for reservation details
