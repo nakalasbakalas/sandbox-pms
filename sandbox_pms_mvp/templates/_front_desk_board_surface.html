@@ -99,77 +99,29 @@
 </div>
 {% endif %}
 
-{% if board.exceptionQueues %}
-{% set total_q = board.exceptionQueues | sum(attribute='count') %}
-<details class="planning-board-exception-wrap" open>
-  <summary class="planning-board-exception-toggle" aria-expanded="true">
-    <span>Operational queues</span>
-    <small class="muted">{{ total_q }} item{{ 's' if total_q != 1 else '' }}</small>
-  </summary>
-  <section class="planning-board-exception-rail" aria-label="Operational exception rail">
-    {% for queue in board.exceptionQueues %}
-    <article class="planning-board-queue tone-{{ queue.tone }}{% if not queue.count %} is-empty{% endif %}" data-queue-card="{{ queue.id }}">
-      <div class="planning-board-queue-head">
-        <div>
-          <p class="eyebrow">{{ queue.title }}</p>
-          <strong>{{ queue.count }}</strong>
-        </div>
-        {% if queue.count %}
-        <button type="button" class="button-link" data-queue-focus="{{ queue.id }}">Focus</button>
-        {% endif %}
-      </div>
-    {% if queue["items"] %}
-    <div class="planning-board-queue-list">
-      {% for item in queue["items"][:1] %}
-      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
-        <span class="planning-board-queue-item-top">
-          <strong>{{ item.label }}</strong>
-          <small>{{ item.roomLabel }}</small>
-        </span>
-        {% if item.nextAction %}<span class="planning-board-queue-item-action">{{ item.nextAction }}</span>{% endif %}
-      </button>
-      {% endfor %}
-      {% if queue["items"]|length > 1 %}
-      <button type="button" class="planning-board-queue-item" data-queue-focus="{{ queue.id }}" aria-label="View all {{ queue['items']|length }} items">
-        <span class="planning-board-queue-item-top"><small>+{{ queue["items"]|length - 1 }} more</small></span>
-      </button>
-      {% endif %}
-    </div>
-    {% else %}
-    <p class="small muted">Nothing queued right now.</p>
-    {% endif %}
-  </article>
+{% if board.exceptionQueues or board.handover.count %}
+<div class="planning-board-exception-strip" role="region" aria-label="Operational exceptions">
+  {% for queue in board.exceptionQueues %}
+  {% set item_label = queue.title + ': ' + queue.count|string + (' item' if queue.count == 1 else ' items') %}
+  <button
+    type="button"
+    class="pbes-chip{% if queue.count %} tone-{{ queue.tone }}{% else %} pbes-chip-empty{% endif %}"
+    {% if queue.count %}data-queue-focus="{{ queue.id }}"{% else %}disabled{% endif %}
+    title="{{ item_label }}{% if not queue.count %} — cleared{% endif %}">
+    <span class="pbes-label">{{ queue.title }}</span>
+    <strong class="pbes-count">{{ queue.count }}</strong>
+  </button>
   {% endfor %}
-  <article class="planning-board-queue tone-neutral{% if not board.handover.count %} is-empty{% endif %}">
-    <div class="planning-board-queue-head">
-      <div>
-        <p class="eyebrow">Shift Handover</p>
-        <strong>{{ board.handover.count }}</strong>
-      </div>
-      <span class="planning-board-queue-note">Carry forward</span>
-    </div>
-    {% if board.handover["items"] %}
-    <div class="planning-board-queue-list">
-      {% for item in board.handover["items"][:1] %}
-      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
-        <span class="planning-board-queue-item-top">
-          <strong>{{ item.label }}</strong>
-          <small>{{ item.roomLabel }}</small>
-        </span>
-      </button>
-      {% endfor %}
-      {% if board.handover["items"]|length > 1 %}
-      <button type="button" class="planning-board-queue-item" aria-label="View all {{ board.handover['items']|length }} handover items">
-        <span class="planning-board-queue-item-top"><small>+{{ board.handover["items"]|length - 1 }} more</small></span>
-      </button>
-      {% endif %}
-    </div>
-    {% else %}
-    <p class="small muted">No unresolved carry-forward items.</p>
-    {% endif %}
-  </article>
-</section>
-</details>
+  {% set handover_label = 'Handover: ' + board.handover.count|string + (' carry-forward item' if board.handover.count == 1 else ' carry-forward items') %}
+  <button
+    type="button"
+    class="pbes-chip pbes-handover{% if not board.handover.count %} pbes-chip-empty{% endif %}"
+    data-action="open-handover-panel"
+    title="{{ handover_label }}">
+    <span class="pbes-label">Handover</span>
+    <strong class="pbes-count">{{ board.handover.count }}</strong>
+  </button>
+</div>
 {% endif %}
 
 {% if board.groups %}

@@ -110,6 +110,24 @@
     surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
+  function clearSurfacePresentationState() {
+    root.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.style.visibility = "";
+    surface.style.opacity = "";
+    surface.style.pointerEvents = "";
+    if (surfaceContent) {
+      surfaceContent.classList.remove("is-loading", "is-refreshing", "is-pending");
+      surfaceContent.style.visibility = "";
+      surfaceContent.style.opacity = "";
+      surfaceContent.style.pointerEvents = "";
+    }
+    if (surfaceSkeleton) {
+      surfaceSkeleton.hidden = true;
+    }
+    surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
+  }
+
   let feedbackClearTimer = null;
 
   function setFeedback(message, tone, options) {
@@ -470,38 +488,38 @@
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
     setSurfaceLoading(true);
-    const response = await fetch(target.toString(), {
-      headers: { Accept: "text/html" },
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      setSurfaceLoading(false);
-      throw new Error("Unable to refresh the planning board.");
-    }
-    const html = await response.text();
-    // Clear stale DOM reference before replacement
-    if (selectedBlock) {
-      selectedBlock = null;
-    }
-    if (surfaceContent) {
-      surfaceContent.style.visibility = "hidden";
-      surfaceContent.innerHTML = html;
-    } else {
-      surface.style.visibility = "hidden";
-      surface.innerHTML = html;
-    }
-    setSurfaceLoading(false);
-    reapplyBoardState();
-    const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
-    if (nextBlock) {
-      selectBlock(nextBlock);
-    } else if (!reopenPanel) {
-      clearSelection();
-    }
-    if (surfaceContent) surfaceContent.style.visibility = "";
-    else surface.style.visibility = "";
-    if (reopenPanel && reservationId) {
-      await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+    try {
+      const response = await fetch(target.toString(), {
+        headers: { Accept: "text/html" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to refresh the planning board.");
+      }
+      const html = await response.text();
+      // Clear stale DOM reference before replacement
+      if (selectedBlock) {
+        selectedBlock = null;
+      }
+      if (surfaceContent) {
+        surfaceContent.style.visibility = "hidden";
+        surfaceContent.innerHTML = html;
+      } else {
+        surface.style.visibility = "hidden";
+        surface.innerHTML = html;
+      }
+      reapplyBoardState();
+      const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
+      if (nextBlock) {
+        selectBlock(nextBlock);
+      } else if (!reopenPanel) {
+        clearSelection();
+      }
+      if (reopenPanel && reservationId) {
+        await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+      }
+    } finally {
+      clearSurfacePresentationState();
     }
   }
 
@@ -1466,8 +1484,51 @@
     }
   });
 
+  // ── Panel helpers (callable from any trigger inside or outside the surface) ──
+  function openStatsPanel() {
+    panelTitle.textContent = "Board Stats";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Stats unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
+  function openHandoverPanel() {
+    panelTitle.textContent = "Shift Handover";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Handover data unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
   // ── Command strip: click delegation on surface (survives AJAX refresh) ──
   surface.addEventListener("click", (e) => {
+    // Exception strip panel triggers (survive surface AJAX refresh)
+    if (e.target.closest("[data-action='open-stats-panel']")) { openStatsPanel(); return; }
+    if (e.target.closest("[data-action='open-handover-panel']")) { openHandoverPanel(); return; }
+
     // Metric filter button (not inside a board block or track)
     const queueOpenBtn = e.target.closest("[data-queue-open]");
     if (queueOpenBtn) {
@@ -1838,50 +1899,15 @@
     else if (pct > 0) dayEl.classList.add("occ-low");
   });
 
-  // ── Stats panel trigger ──
+  // ── Stats / handover triggers (overflow menu buttons outside the surface) ──
   const statsBtn = document.querySelector("[data-action='open-stats-panel']");
   if (statsBtn) {
-    statsBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Board Stats";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Stats unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    statsBtn.addEventListener("click", openStatsPanel);
   }
 
-  // ── Shift handover panel trigger ──
   const handoverBtn = document.querySelector("[data-action='open-handover-panel']");
   if (handoverBtn) {
-    handoverBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Shift Handover";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Handover data unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    handoverBtn.addEventListener("click", openHandoverPanel);
   }
 
   // Side panel for reservation details
@@ -2342,6 +2368,8 @@
     restoreHkOverlay();
     restoreRoleView();
     renderSavedViewOptions();
+    clearSurfacePresentationState();
+    reapplyBoardState();
     startPolling();
   });
 
@@ -2355,10 +2383,6 @@
   initializeBoardSearch();
   updateStickyOffset();
   setSurfaceLoading(true);
-  window.requestAnimationFrame(() => {
-    setSurfaceLoading(false);
-    reapplyBoardState();
-  });
 
   // ── Watch for shell height changes and update sticky offset ──
   if (window.ResizeObserver && root) {
