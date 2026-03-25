@@ -4393,10 +4393,6 @@ body:not(.public-site) .planning-board-row1,
 body:not(.public-site) .planning-board-row2 {
   background: transparent;
 }
-body:not(.public-site) .planning-board-group {
-  background: var(--pms-bg-hover);
-  color: var(--pms-text-secondary);
-}
 
 /* ── Compact planning board controls ── */
 body:not(.public-site) .board-nav-btn {
@@ -4584,7 +4580,8 @@ body:not(.public-site) .planning-board-popover {
 }
 
 /* Exception queue cards on light bg */
-body:not(.public-site) .planning-board-exception-rail { margin: 4px 0 6px; }
+body:not(.public-site) .planning-board-exception-toggle { color: var(--pms-text-muted); }
+body:not(.public-site) .planning-board-exception-rail { margin: 4px 0 0; }
 body:not(.public-site) .planning-board-queue {
   background: #fff;
   border-color: var(--pms-border-thin);
@@ -6489,12 +6486,40 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
   color: var(--accent-soft);
 }
 
+.planning-board-exception-wrap {
+  margin: 4px 0 6px;
+}
+.planning-board-exception-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 2px 0;
+  user-select: none;
+  list-style: none;
+}
+.planning-board-exception-toggle::-webkit-details-marker { display: none; }
+.planning-board-exception-toggle::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+.planning-board-exception-wrap[open] > .planning-board-exception-toggle::before {
+  transform: rotate(90deg);
+}
+.planning-board-exception-toggle small { font-weight: 400; }
+
 .planning-board-exception-rail {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 6px;
-  margin: 6px 0 8px;
+  margin: 4px 0 0;
 }
 
 .planning-board-queue {
@@ -6523,6 +6548,10 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
   justify-content: space-between;
   gap: 6px;
 }
+.planning-board-queue-head .button-link {
+  font-size: 0.58rem;
+  padding: 0;
+}
 
 .planning-board-queue-head strong {
   font-size: 1rem;
@@ -6530,7 +6559,7 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 }
 
 .planning-board-queue-note {
-  font-size: 0.72rem;
+  font-size: 0.58rem;
   color: var(--muted);
 }
 

@@ -100,18 +100,23 @@
 {% endif %}
 
 {% if board.exceptionQueues %}
-<section class="planning-board-exception-rail" aria-label="Operational exception rail">
-  {% for queue in board.exceptionQueues %}
-  <article class="planning-board-queue tone-{{ queue.tone }}{% if not queue.count %} is-empty{% endif %}" data-queue-card="{{ queue.id }}">
-    <div class="planning-board-queue-head">
-      <div>
-        <p class="eyebrow">{{ queue.title }}</p>
-        <strong>{{ queue.count }}</strong>
+<details class="planning-board-exception-wrap" open>
+  <summary class="planning-board-exception-toggle">
+    <span>Operational queues</span>
+    <small class="muted">{% set total_q = board.exceptionQueues | sum(attribute='count') %}{{ total_q }} item{{ 's' if total_q != 1 else '' }}</small>
+  </summary>
+  <section class="planning-board-exception-rail" aria-label="Operational exception rail">
+    {% for queue in board.exceptionQueues %}
+    <article class="planning-board-queue tone-{{ queue.tone }}{% if not queue.count %} is-empty{% endif %}" data-queue-card="{{ queue.id }}">
+      <div class="planning-board-queue-head">
+        <div>
+          <p class="eyebrow">{{ queue.title }}</p>
+          <strong>{{ queue.count }}</strong>
+        </div>
+        {% if queue.count %}
+        <button type="button" class="button-link" data-queue-focus="{{ queue.id }}">Focus</button>
+        {% endif %}
       </div>
-      {% if queue.count %}
-      <button type="button" class="button-link" data-queue-focus="{{ queue.id }}">Focus</button>
-      {% endif %}
-    </div>
     {% if queue["items"] %}
     <div class="planning-board-queue-list">
       {% for item in queue["items"][:1] %}
@@ -163,6 +168,7 @@
     {% endif %}
   </article>
 </section>
+</details>
 {% endif %}
 
 {% if board.groups %}
