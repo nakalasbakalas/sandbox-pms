@@ -30,30 +30,6 @@
   {% endif %}
 </div>
 
-<div class="board-stats-section">
-  <h3>Operational Snapshot</h3>
-  <div class="board-stats-row">
-    <span class="bsr-label">In-house guests</span>
-    <strong class="bsr-value">{{ board.counts.occupied }}</strong>
-  </div>
-  <div class="board-stats-row">
-    <span class="bsr-label">Arrivals today</span>
-    <strong class="bsr-value">{{ board.counts.arrivals_today }}</strong>
-  </div>
-  <div class="board-stats-row">
-    <span class="bsr-label">Departures today</span>
-    <strong class="bsr-value">{{ board.counts.departures_today }}</strong>
-  </div>
-  <div class="board-stats-row{% if board.counts.checkin_readiness_pct < 80 %} bsr-warning{% endif %}">
-    <span class="bsr-label">Check-in readiness</span>
-    <strong class="bsr-value">{{ board.counts.checkin_readiness_pct }}%</strong>
-  </div>
-  <div class="board-stats-row">
-    <span class="bsr-label">Occupancy</span>
-    <strong class="bsr-value">{{ board.counts.occupancy_pct }}%</strong>
-  </div>
-</div>
-
 {% if board.alerts %}
 <div class="board-stats-section">
   <h3>Active Alerts</h3>

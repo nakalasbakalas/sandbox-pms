@@ -113,20 +113,6 @@
       <button type="button" class="bqf-chip bqf-reset" data-action="reset-filters" aria-label="Clear all filters" title="Clear all filters">✕</button>
     </div>
 
-    <div class="board-view-library" data-board-view-library>
-      <label class="board-view-picker">
-        <span>Views</span>
-        <select data-saved-view-select aria-label="Saved board views">
-          <option value="">Saved views</option>
-          {% for view in board_state.savedViews %}
-          <option value="{{ loop.index0 }}">{{ view.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="button" class="board-mini-action" data-action="save-current-view">Save View</button>
-      <button type="button" class="board-mini-action subtle" data-action="delete-current-view" {% if not board_state.savedViews %}disabled{% endif %}>Delete</button>
-    </div>
-
     <fieldset class="planning-board-density-toggle" data-density-toggle>
       <legend class="sr-only">Layout density</legend>
       <button type="button" data-density="spacious" title="Spacious" aria-label="Spacious" aria-pressed="{{ 'true' if user_density == 'spacious' else 'false' }}" {% if user_density == 'spacious' %}data-active="true"{% endif %}>S</button>
@@ -224,6 +210,20 @@
               {% endif %}
             </form>
           </details>
+          <div class="board-view-library" data-board-view-library>
+            <label class="board-view-picker">
+              <span>Views</span>
+              <select data-saved-view-select aria-label="Saved board views">
+                <option value="">Saved views</option>
+                {% for view in board_state.savedViews %}
+                <option value="{{ loop.index0 }}">{{ view.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="button" class="board-overflow-item" data-action="save-current-view">Save view</button>
+            <button type="button" class="board-overflow-item" data-action="delete-current-view" {% if not board_state.savedViews %}disabled{% endif %}>Delete view</button>
+          </div>
+          <hr style="border-color:var(--border);margin:4px 0;">
           <button class="board-overflow-item" type="button" data-action="open-stats-panel">Board stats</button>
           <button class="board-overflow-item" type="button" data-action="open-handover-panel">Shift handover</button>
           <button class="board-overflow-item" type="button" data-window-print>Print view</button>
