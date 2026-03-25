@@ -110,6 +110,24 @@
     surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
+  function clearSurfacePresentationState() {
+    root.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.style.visibility = "";
+    surface.style.opacity = "";
+    surface.style.pointerEvents = "";
+    if (surfaceContent) {
+      surfaceContent.classList.remove("is-loading", "is-refreshing", "is-pending");
+      surfaceContent.style.visibility = "";
+      surfaceContent.style.opacity = "";
+      surfaceContent.style.pointerEvents = "";
+    }
+    if (surfaceSkeleton) {
+      surfaceSkeleton.hidden = true;
+    }
+    surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
+  }
+
   let feedbackClearTimer = null;
 
   function setFeedback(message, tone, options) {
@@ -470,38 +488,38 @@
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
     setSurfaceLoading(true);
-    const response = await fetch(target.toString(), {
-      headers: { Accept: "text/html" },
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      setSurfaceLoading(false);
-      throw new Error("Unable to refresh the planning board.");
-    }
-    const html = await response.text();
-    // Clear stale DOM reference before replacement
-    if (selectedBlock) {
-      selectedBlock = null;
-    }
-    if (surfaceContent) {
-      surfaceContent.style.visibility = "hidden";
-      surfaceContent.innerHTML = html;
-    } else {
-      surface.style.visibility = "hidden";
-      surface.innerHTML = html;
-    }
-    setSurfaceLoading(false);
-    reapplyBoardState();
-    const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
-    if (nextBlock) {
-      selectBlock(nextBlock);
-    } else if (!reopenPanel) {
-      clearSelection();
-    }
-    if (surfaceContent) surfaceContent.style.visibility = "";
-    else surface.style.visibility = "";
-    if (reopenPanel && reservationId) {
-      await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+    try {
+      const response = await fetch(target.toString(), {
+        headers: { Accept: "text/html" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to refresh the planning board.");
+      }
+      const html = await response.text();
+      // Clear stale DOM reference before replacement
+      if (selectedBlock) {
+        selectedBlock = null;
+      }
+      if (surfaceContent) {
+        surfaceContent.style.visibility = "hidden";
+        surfaceContent.innerHTML = html;
+      } else {
+        surface.style.visibility = "hidden";
+        surface.innerHTML = html;
+      }
+      reapplyBoardState();
+      const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
+      if (nextBlock) {
+        selectBlock(nextBlock);
+      } else if (!reopenPanel) {
+        clearSelection();
+      }
+      if (reopenPanel && reservationId) {
+        await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+      }
+    } finally {
+      clearSurfacePresentationState();
     }
   }
 
@@ -2334,6 +2352,8 @@
     restoreHkOverlay();
     restoreRoleView();
     renderSavedViewOptions();
+    clearSurfacePresentationState();
+    reapplyBoardState();
     startPolling();
   });
 
@@ -2347,10 +2367,6 @@
   initializeBoardSearch();
   updateStickyOffset();
   setSurfaceLoading(true);
-  window.requestAnimationFrame(() => {
-    setSurfaceLoading(false);
-    reapplyBoardState();
-  });
 
   // ── Watch for shell height changes and update sticky offset ──
   if (window.ResizeObserver && root) {
