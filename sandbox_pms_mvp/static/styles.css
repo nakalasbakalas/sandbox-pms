@@ -1283,13 +1283,16 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-skeleton {
   position: absolute;
   inset: 0;
-  display: grid;
+  display: none;
   gap: 14px;
   align-content: start;
   padding: 8px 0 0;
   background:
     linear-gradient(180deg, rgba(8,15,28,0.92), rgba(8,15,28,0.88));
   z-index: 2;
+}
+.planning-board-surface.is-loading > .planning-board-skeleton {
+  display: grid;
 }
 .planning-board-skeleton-strip {
   display: grid;
@@ -1885,7 +1888,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid[data-board-days="14"].density-comfortable .planning-board-day strong { font-size: 0.78rem; }
 .planning-board-grid.density-compact .planning-board-room strong { font-size: 0.72rem; }
 .planning-board-grid.density-compact .planning-board-room span { font-size: 0.58rem; }
-.planning-board-grid.density-compact .planning-board-room-badges { gap: 2px; }
+.planning-board-grid.density-compact .planning-board-room-badges { display: none; }
 .planning-board-grid.density-compact .planning-board-room-badge { min-height: 11px; padding: 0 3px; font-size: 0.46rem; }
 .planning-board-grid.density-compact .planning-board-room { min-height: 22px; gap: 0; padding: 1px 4px; }
 .planning-board-grid.density-compact .planning-board-track { grid-template-rows: repeat(var(--row-lanes, 1), minmax(20px, auto)); }
@@ -1895,6 +1898,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-compact .planning-board-block-copy small,
 .planning-board-grid.density-compact .planning-board-block-badges small { font-size: 0.48rem; }
 .planning-board-grid.density-compact .planning-board-resize-handle { width: 9px; min-height: 14px; }
+.planning-board-grid.density-compact .planning-board-room-focus { display: none; }
 /* Ultra compact */
 .planning-board-grid.density-ultra .planning-board-day,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-day,
@@ -1917,6 +1921,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .planning-board-grid.density-ultra .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-badges,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-room-badges { display: none; }
+.planning-board-grid.density-ultra .planning-board-room-focus,
+.planning-board-grid[data-board-days="30"].density-comfortable .planning-board-room-focus,
+.planning-board-grid[data-board-days="30"].density-compact .planning-board-room-focus { display: none; }
 .planning-board-grid.density-ultra .planning-board-group,
 .planning-board-grid[data-board-days="30"].density-comfortable .planning-board-group,
 .planning-board-grid[data-board-days="30"].density-compact .planning-board-group { padding: 1px 6px; font-size: 0.52rem; }
@@ -4406,10 +4413,6 @@ body:not(.public-site) .planning-board-row1,
 body:not(.public-site) .planning-board-row2 {
   background: transparent;
 }
-body:not(.public-site) .planning-board-group {
-  background: var(--pms-bg-hover);
-  color: var(--pms-text-secondary);
-}
 
 /* ── Compact planning board controls ── */
 body:not(.public-site) .board-nav-btn {
@@ -4595,6 +4598,39 @@ body:not(.public-site) .planning-board-popover {
   border-radius: 4px;
   color: var(--pms-text-primary);
 }
+
+/* Exception queue cards on light bg */
+body:not(.public-site) .planning-board-exception-toggle { color: var(--pms-text-muted); }
+body:not(.public-site) .planning-board-exception-rail { margin: 4px 0 0; }
+body:not(.public-site) .planning-board-queue {
+  background: #fff;
+  border-color: var(--pms-border-thin);
+  border-radius: 4px;
+}
+body:not(.public-site) .planning-board-queue.tone-success { border-color: rgba(47, 182, 117, 0.5); }
+body:not(.public-site) .planning-board-queue.tone-warning { border-color: rgba(240, 173, 78, 0.5); }
+body:not(.public-site) .planning-board-queue.tone-danger { border-color: rgba(223, 95, 103, 0.5); }
+body:not(.public-site) .planning-board-queue.tone-info { border-color: rgba(var(--accent-rgb), 0.4); }
+body:not(.public-site) .planning-board-queue-head strong { color: var(--pms-text-primary); }
+body:not(.public-site) .planning-board-queue-head .eyebrow { color: var(--pms-text-muted); }
+body:not(.public-site) .planning-board-queue-item {
+  border-color: var(--pms-border-thin);
+  background: var(--pms-bg-hover);
+  border-radius: 3px;
+}
+body:not(.public-site) .planning-board-queue-item-top small,
+body:not(.public-site) .planning-board-queue-item-summary { color: var(--pms-text-muted); }
+body:not(.public-site) .planning-board-queue-item-action { color: var(--accent); }
+body:not(.public-site) .planning-board-queue-note { color: var(--pms-text-muted); }
+
+/* Room focus on light bg */
+body:not(.public-site) .planning-board-room-focus {
+  border-color: var(--pms-border-thin);
+  background: var(--pms-bg-hover);
+  border-radius: 3px;
+}
+body:not(.public-site) .planning-board-room-focus small { color: var(--pms-text-muted); }
+body:not(.public-site) .planning-board-room-focus-flags small { background: rgba(0,0,0,0.04); }
 
 /* ── Board overflow/context menus ── */
 body:not(.public-site) .board-context-menu {
@@ -6550,20 +6586,24 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 }
 
 .planning-board-exception-rail {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 10px;
-  margin: 12px 0 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 0 0;
 }
 
 .planning-board-queue {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 4px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
-  box-shadow: 0 10px 22px rgba(8, 15, 24, 0.08);
+  box-shadow: none;
+  min-width: 130px;
+  flex: 1 1 130px;
+  max-width: 220px;
 }
 
 .planning-board-queue.tone-success { border-color: rgba(47, 182, 117, 0.35); }
@@ -6571,39 +6611,45 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 .planning-board-queue.tone-danger { border-color: rgba(223, 95, 103, 0.35); }
 .planning-board-queue.tone-info { border-color: rgba(var(--accent-rgb), 0.3); }
 .planning-board-queue.is-empty { opacity: 0.72; }
+.planning-board-queue.is-empty .planning-board-queue-list { display: none; }
 
 .planning-board-queue-head {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 6px;
+}
+.planning-board-queue-head .button-link {
+  font-size: 0.58rem;
+  padding: 0;
 }
 
 .planning-board-queue-head strong {
-  font-size: 1.5rem;
+  font-size: 1rem;
   line-height: 1;
 }
 
 .planning-board-queue-note {
-  font-size: 0.72rem;
+  font-size: 0.58rem;
   color: var(--muted);
 }
 
 .planning-board-queue-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .planning-board-queue-item {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
-  padding: 10px;
+  padding: 4px 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.03);
   color: inherit;
   text-align: left;
+  font-size: 0.72rem;
 }
 
 .planning-board-queue-item-top {
@@ -6620,7 +6666,7 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 }
 
 .planning-board-queue-item-action {
-  font-size: 0.76rem;
+  font-size: 0.64rem;
   font-weight: 700;
   color: var(--accent-soft);
 }
@@ -6628,41 +6674,43 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 .planning-board-queue-item-flags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 3px;
 }
 
 .planning-board-room-focus {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
-  margin-top: 8px;
-  padding: 8px 9px;
+  margin-top: 2px;
+  padding: 3px 5px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 4px;
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
   text-align: left;
 }
 
 .planning-board-room-focus-label {
-  font-size: 0.72rem;
+  font-size: 0.58rem;
   font-weight: 700;
 }
 
 .planning-board-room-focus small {
   color: var(--muted);
+  font-size: 0.5rem;
 }
 
 .planning-board-room-focus-flags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 2px;
 }
 
 .planning-board-room-focus-flags small {
-  padding: 2px 6px;
+  padding: 1px 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
+  font-size: 0.48rem;
 }
 
 .planning-board-room-focus.tone-critical,
