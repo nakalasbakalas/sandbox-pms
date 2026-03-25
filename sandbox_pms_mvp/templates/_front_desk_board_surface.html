@@ -100,10 +100,11 @@
 {% endif %}
 
 {% if board.exceptionQueues %}
+{% set total_q = board.exceptionQueues | sum(attribute='count') %}
 <details class="planning-board-exception-wrap" open>
-  <summary class="planning-board-exception-toggle">
+  <summary class="planning-board-exception-toggle" aria-expanded="true">
     <span>Operational queues</span>
-    <small class="muted">{% set total_q = board.exceptionQueues | sum(attribute='count') %}{{ total_q }} item{{ 's' if total_q != 1 else '' }}</small>
+    <small class="muted">{{ total_q }} item{{ 's' if total_q != 1 else '' }}</small>
   </summary>
   <section class="planning-board-exception-rail" aria-label="Operational exception rail">
     {% for queue in board.exceptionQueues %}

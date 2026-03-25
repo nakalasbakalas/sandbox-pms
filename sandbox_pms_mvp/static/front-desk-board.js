@@ -1512,6 +1512,14 @@
     }
   });
 
+  // ── Exception rail collapse: sync aria-expanded ──
+  surface.addEventListener("toggle", (e) => {
+    const wrap = e.target.closest(".planning-board-exception-wrap");
+    if (!wrap) return;
+    const summary = wrap.querySelector(".planning-board-exception-toggle");
+    if (summary) summary.setAttribute("aria-expanded", wrap.open ? "true" : "false");
+  }, true);
+
   // ── Double-click on block: navigate to full reservation detail ──
   surface.addEventListener("dblclick", (e) => {
     const blockEl = e.target.closest("[data-board-block]");
