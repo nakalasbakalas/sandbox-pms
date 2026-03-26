@@ -6891,3 +6891,130 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
     display: grid;
   }
 }
+
+/* ─── OTA Channel Manager ─────────────────────────────────── */
+
+.ota-summary-strip .ota-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: .5rem;
+  margin-top: .75rem;
+}
+
+.ota-metric {
+  text-align: center;
+  padding: .5rem .25rem;
+  border-radius: 6px;
+  background: var(--pms-surface-alt, rgba(255, 255, 255, .04));
+  border: 1px solid var(--pms-border, rgba(255, 255, 255, .08));
+}
+
+.ota-metric-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.ota-metric-label {
+  display: block;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  opacity: .7;
+  margin-top: 2px;
+}
+
+.ota-metric--healthy .ota-metric-value { color: var(--pms-success, #4ade80); }
+.ota-metric--warning .ota-metric-value { color: var(--pms-warning, #fbbf24); }
+.ota-metric--error .ota-metric-value { color: var(--pms-error, #f87171); }
+
+.ota-channel-card {
+  border-left: 3px solid var(--pms-border, rgba(255, 255, 255, .08));
+  transition: border-color .2s;
+}
+
+.ota-health--healthy { border-left-color: var(--pms-success, #4ade80); }
+.ota-health--warning { border-left-color: var(--pms-warning, #fbbf24); }
+.ota-health--error { border-left-color: var(--pms-error, #f87171); }
+.ota-health--inactive { border-left-color: var(--pms-border, rgba(255, 255, 255, .15)); }
+.ota-health--not_configured { border-left-color: var(--pms-border, rgba(255, 255, 255, .08)); }
+
+.ota-channel-badges {
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ota-quick-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem 1.5rem;
+  padding: .5rem 0;
+  font-size: .85rem;
+}
+
+.ota-quick-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ota-quick-stat strong {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  opacity: .6;
+}
+
+.ota-channel-details {
+  margin-top: .5rem;
+}
+
+.ota-details-toggle {
+  cursor: pointer;
+  font-size: .8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  opacity: .7;
+  padding: .35rem 0;
+  user-select: none;
+}
+
+.ota-details-toggle:hover {
+  opacity: 1;
+}
+
+.ota-action-row {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Light theme overrides for OTA dashboard */
+body:not(.public-site) .ota-metric {
+  background: rgba(0, 0, 0, .03);
+  border-color: rgba(0, 0, 0, .1);
+}
+
+body:not(.public-site) .ota-metric--healthy .ota-metric-value { color: #16a34a; }
+body:not(.public-site) .ota-metric--warning .ota-metric-value { color: #d97706; }
+body:not(.public-site) .ota-metric--error .ota-metric-value { color: #dc2626; }
+
+body:not(.public-site) .ota-health--healthy { border-left-color: #16a34a; }
+body:not(.public-site) .ota-health--warning { border-left-color: #d97706; }
+body:not(.public-site) .ota-health--error { border-left-color: #dc2626; }
+body:not(.public-site) .ota-health--inactive { border-left-color: rgba(0, 0, 0, .15); }
+body:not(.public-site) .ota-health--not_configured { border-left-color: rgba(0, 0, 0, .08); }
+
+@media (max-width: 640px) {
+  .ota-summary-strip .ota-status-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .ota-quick-stats {
+    gap: .5rem .75rem;
+  }
+}

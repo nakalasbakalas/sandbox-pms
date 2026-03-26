@@ -435,6 +435,9 @@ def available_admin_sections() -> list[dict[str, str]]:
         sections.append(
             {"key": "payments", "label": "Payments", "endpoint": "admin.staff_admin_payments", "description": "Hosted payment behavior"}
         )
+        sections.append(
+            {"key": "channels", "label": "OTA Channels", "endpoint": "admin.staff_admin_channels", "description": "OTA connectivity, mappings, sync status"}
+        )
     if can("rate_rule.view") or can("settings.view"):
         sections.append(
             {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "admin.staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}

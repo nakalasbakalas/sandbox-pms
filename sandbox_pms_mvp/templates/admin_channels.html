@@ -3,115 +3,374 @@
 {% block content %}
 {% include 'admin_nav.html' %}
 
-<section class="card subsection">
+{# ─── Status summary strip ─── #}
+<section class="card subsection ota-summary-strip">
   <div class="card-head">
     <div>
       <p class="eyebrow">Online Travel Agency integrations</p>
-      <h2>OTA channel API key management</h2>
+      <h2>OTA channel management</h2>
     </div>
   </div>
-  <p class="muted">Configure API credentials for each OTA channel. API keys are encrypted at rest and never shown in plaintext. Leave the key field blank to keep an existing credential unchanged.</p>
+  <div class="ota-status-grid">
+    <div class="ota-metric">
+      <span class="ota-metric-value">{{ summary.total_channels }}</span>
+      <span class="ota-metric-label">Channels</span>
+    </div>
+    <div class="ota-metric {% if summary.healthy > 0 %}ota-metric--healthy{% endif %}">
+      <span class="ota-metric-value">{{ summary.healthy }}</span>
+      <span class="ota-metric-label">Healthy</span>
+    </div>
+    <div class="ota-metric {% if summary.warning > 0 %}ota-metric--warning{% endif %}">
+      <span class="ota-metric-value">{{ summary.warning }}</span>
+      <span class="ota-metric-label">Warning</span>
+    </div>
+    <div class="ota-metric {% if summary.error > 0 %}ota-metric--error{% endif %}">
+      <span class="ota-metric-value">{{ summary.error }}</span>
+      <span class="ota-metric-label">Errors</span>
+    </div>
+    <div class="ota-metric">
+      <span class="ota-metric-value">{{ summary.total_mappings }}</span>
+      <span class="ota-metric-label">Mappings</span>
+    </div>
+    <div class="ota-metric {% if summary.total_unmapped > 0 %}ota-metric--warning{% endif %}">
+      <span class="ota-metric-value">{{ summary.total_unmapped }}</span>
+      <span class="ota-metric-label">Unmapped</span>
+    </div>
+  </div>
 </section>
 
+{# ─── Channel cards ─── #}
 {% for ch in channels %}
-<section class="card subsection">
+<section class="card subsection ota-channel-card ota-health--{{ ch.health }}">
   <div class="card-head">
     <div>
       <p class="eyebrow">Channel provider</p>
       <h2>{{ ch.display_name }}</h2>
     </div>
-    <div>
-      {% if ch.last_test_ok is not none %}
-        <span class="pill {% if ch.last_test_ok %}success{% else %}error{% endif %}">
-          {{ 'Connection OK' if ch.last_test_ok else 'Connection failed' }}
-        </span>
+    <div class="ota-channel-badges">
+      {% if ch.health == 'healthy' %}
+        <span class="pill success">Healthy</span>
+      {% elif ch.health == 'warning' %}
+        <span class="pill warning">Warning</span>
+      {% elif ch.health == 'error' %}
+        <span class="pill error">Connection failed</span>
+      {% elif ch.health == 'inactive' %}
+        <span class="pill subtle">Inactive</span>
+      {% elif ch.health == 'not_configured' %}
+        <span class="pill subtle">Not configured</span>
       {% else %}
-        <span class="pill subtle">Not tested</span>
+        <span class="pill subtle">Unknown</span>
+      {% endif %}
+      {% if ch.is_active %}
+        <span class="pill subtle">Active</span>
       {% endif %}
     </div>
   </div>
 
-  <div class="grid two gap-lg">
-    <article>
-      <form class="stack-form" method="post">
-        {{ csrf_input() }}
-        <input type="hidden" name="action" value="save_channel">
-        <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+  {# Quick status row #}
+  <div class="ota-quick-stats">
+    <div class="ota-quick-stat">
+      <strong>API key</strong>
+      <span>{{ ('…' ~ ch.record.api_key_hint) if ch.record and ch.record.api_key_hint else '—' }}</span>
+    </div>
+    <div class="ota-quick-stat">
+      <strong>Hotel ID</strong>
+      <span>{{ ch.hotel_id or '—' }}</span>
+    </div>
+    <div class="ota-quick-stat">
+      <strong>Mappings</strong>
+      <span>{{ ch.mapped_count }}{% if ch.unmapped_count > 0 %} <span class="pill error" style="font-size:.75rem;padding:1px 6px;">{{ ch.unmapped_count }} unmapped</span>{% endif %}</span>
+    </div>
+    <div class="ota-quick-stat">
+      <strong>Last sync</strong>
+      <span>{% if ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</span>
+    </div>
+    <div class="ota-quick-stat">
+      <strong>Last tested</strong>
+      <span>{% if ch.last_tested_at %}{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</span>
+    </div>
+    {% if ch.recent_error_count > 0 %}
+    <div class="ota-quick-stat">
+      <strong>Recent errors</strong>
+      <span class="pill error" style="font-size:.75rem;padding:1px 6px;">{{ ch.recent_error_count }}</span>
+    </div>
+    {% endif %}
+  </div>
 
-        <label class="toggle-row">
-          <input type="checkbox" name="is_active" {% if ch.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
-          <span>Active — include this channel in sync operations</span>
-        </label>
+  {# Expandable detail sections #}
+  <details class="ota-channel-details">
+    <summary class="ota-details-toggle">Configuration &amp; actions</summary>
+    <div class="grid two gap-lg" style="margin-top:.75rem;">
+      <article>
+        <form class="stack-form" method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="save_channel">
+          <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
 
-        <label>
-          <span>Hotel / property ID</span>
-          <input type="text" name="hotel_id" value="{{ ch.hotel_id or '' }}" placeholder="Your property code on {{ ch.display_name }}" {% if not can('settings.edit') %}disabled{% endif %}>
-        </label>
+          <label class="toggle-row">
+            <input type="checkbox" name="is_active" {% if ch.is_active %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+            <span>Active — include this channel in sync operations</span>
+          </label>
 
-        <label>
-          <span>API key{% if ch.api_key_hint %} <span class="muted">(saved: …{{ ch.api_key_hint }})</span>{% endif %}</span>
-          <input type="password" name="api_key" value="" autocomplete="new-password" placeholder="{% if ch.api_key_hint %}Leave blank to keep existing{% else %}Enter API key{% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
-        </label>
+          <label>
+            <span>Hotel / property ID</span>
+            <input type="text" name="hotel_id" value="{{ ch.hotel_id or '' }}" placeholder="Your property code on {{ ch.display_name }}" {% if not can('settings.edit') %}disabled{% endif %}>
+          </label>
 
-        <label>
-          <span>API secret{% if ch.api_secret_hint %} <span class="muted">(saved: …{{ ch.api_secret_hint }})</span>{% endif %}</span>
-          <input type="password" name="api_secret" value="" autocomplete="new-password" placeholder="{% if ch.api_secret_hint %}Leave blank to keep existing{% else %}Enter API secret (if required){% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
-        </label>
+          <label>
+            <span>API key{% if ch.record and ch.record.api_key_hint %} <span class="muted">(saved: …{{ ch.record.api_key_hint }})</span>{% endif %}</span>
+            <input type="password" name="api_key" value="" autocomplete="new-password" placeholder="{% if ch.record and ch.record.api_key_hint %}Leave blank to keep existing{% else %}Enter API key{% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
+          </label>
 
-        <label>
-          <span>Custom endpoint URL <span class="muted">(optional — leave blank for default)</span></span>
-          <input type="url" name="endpoint_url" value="{{ ch.endpoint_url or '' }}" placeholder="https://api.example.com/v1/" {% if not can('settings.edit') %}disabled{% endif %}>
-        </label>
+          <label>
+            <span>API secret{% if ch.record and ch.record.api_secret_hint %} <span class="muted">(saved: …{{ ch.record.api_secret_hint }})</span>{% endif %}</span>
+            <input type="password" name="api_secret" value="" autocomplete="new-password" placeholder="{% if ch.record and ch.record.api_secret_hint %}Leave blank to keep existing{% else %}Enter API secret (if required){% endif %}" {% if not can('settings.edit') %}disabled{% endif %}>
+          </label>
 
-        {% if can('settings.edit') %}
-          <button class="button" type="submit">Save {{ ch.display_name }} configuration</button>
-        {% endif %}
-      </form>
-    </article>
+          <label>
+            <span>Custom endpoint URL <span class="muted">(optional)</span></span>
+            <input type="url" name="endpoint_url" value="{{ (ch.record.endpoint_url or '') if ch.record else '' }}" placeholder="https://api.example.com/v1/" {% if not can('settings.edit') %}disabled{% endif %}>
+          </label>
 
-    <article>
-      <div class="card-head">
-        <div>
-          <p class="eyebrow">Credential status</p>
-          <h3>{{ ch.display_name }} connection health</h3>
-        </div>
-      </div>
-      <div class="list-stack compact">
-        <div class="list-row no-link">
-          <strong>API key</strong>
-          <span class="status">{{ ('…' ~ ch.api_key_hint) if ch.api_key_hint else 'Not configured' }}</span>
-        </div>
-        <div class="list-row no-link">
-          <strong>API secret</strong>
-          <span class="status">{{ ('…' ~ ch.api_secret_hint) if ch.api_secret_hint else 'Not configured' }}</span>
-        </div>
-        <div class="list-row no-link">
-          <strong>Status</strong>
-          <span class="status">{{ 'Active' if ch.is_active else 'Inactive' }}</span>
-        </div>
-        {% if ch.last_tested_at %}
-          <div class="list-row no-link">
-            <strong>Last tested</strong>
-            <span class="status">{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
-          </div>
-          {% if ch.last_test_error %}
-            <div class="list-row no-link">
-              <strong>Last error</strong>
-              <span class="status error">{{ ch.last_test_error }}</span>
+          {% if can('settings.edit') %}
+            <div class="ota-action-row">
+              <button class="button" type="submit">Save configuration</button>
             </div>
           {% endif %}
-        {% endif %}
-      </div>
-      <p class="muted">API credentials are encrypted at rest and never displayed in plaintext.</p>
+        </form>
+      </article>
 
-      <form method="post" style="margin-top: 1rem;">
-        {{ csrf_input() }}
-        <input type="hidden" name="action" value="test_connection">
-        <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
-        <button class="button subtle" type="submit">Test connection</button>
-      </form>
-    </article>
-  </div>
+      <article>
+        <div class="list-stack compact">
+          <div class="list-row no-link"><strong>API key</strong><span class="status">{{ ('…' ~ ch.record.api_key_hint) if ch.record and ch.record.api_key_hint else 'Not configured' }}</span></div>
+          <div class="list-row no-link"><strong>API secret</strong><span class="status">{{ ('…' ~ ch.record.api_secret_hint) if ch.record and ch.record.api_secret_hint else 'Not configured' }}</span></div>
+          <div class="list-row no-link"><strong>Status</strong><span class="status">{{ 'Active' if ch.is_active else 'Inactive' }}</span></div>
+          {% if ch.last_tested_at %}
+          <div class="list-row no-link"><strong>Last tested</strong><span class="status">{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></div>
+          {% endif %}
+          {% if ch.last_test_error %}
+          <div class="list-row no-link"><strong>Last error</strong><span class="status error">{{ ch.last_test_error }}</span></div>
+          {% endif %}
+        </div>
+        <p class="muted">API credentials are encrypted at rest and never displayed in plaintext.</p>
+        <form method="post" style="margin-top:.75rem;">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="test_connection">
+          <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+          <button class="button subtle" type="submit">Test connection</button>
+        </form>
+      </article>
+    </div>
+  </details>
+
+  {# Channel-specific recent logs #}
+  {% if ch.recent_logs %}
+  <details class="ota-channel-details">
+    <summary class="ota-details-toggle">Recent sync activity ({{ ch.recent_logs|length }})</summary>
+    <div class="table-wrap compact-table" style="margin-top:.5rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Direction</th>
+            <th>Action</th>
+            <th>Status</th>
+            <th>Records</th>
+            <th>Duration</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in ch.recent_logs %}
+          <tr>
+            <td>{{ log.created_at.strftime('%m-%d %H:%M') }}</td>
+            <td><span class="pill subtle" style="font-size:.7rem;">{{ log.direction }}</span></td>
+            <td>{{ log.action }}</td>
+            <td>
+              {% if log.status == 'success' %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">OK</span>
+              {% elif log.status == 'error' %}<span class="pill error" style="font-size:.7rem;padding:1px 6px;">Error</span>
+              {% else %}<span class="pill warning" style="font-size:.7rem;padding:1px 6px;">{{ log.status }}</span>{% endif %}
+            </td>
+            <td>{{ log.records_processed }}</td>
+            <td>{% if log.duration_ms is not none %}{{ log.duration_ms }}ms{% else %}—{% endif %}</td>
+            <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.error_summary or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </section>
 {% endfor %}
+
+{# ─── Room type mapping section ─── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Channel distribution mapping</p>
+      <h2>Room type &amp; rate plan mappings</h2>
+    </div>
+  </div>
+  <p class="muted">Map internal room types to OTA-specific codes. Missing mappings prevent accurate inventory distribution.</p>
+
+  {# Existing mappings table #}
+  {% set all_mappings = dashboard.all_mappings %}
+  {% if all_mappings %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Channel</th>
+          <th>Internal room type</th>
+          <th>External code</th>
+          <th>External name</th>
+          <th>Rate plan code</th>
+          <th>Active</th>
+          {% if can('settings.edit') %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in all_mappings %}
+        <tr>
+          <td><span class="pill subtle" style="font-size:.75rem;">{{ m.provider_key }}</span></td>
+          <td>{{ m.room_type.name if m.room_type else '—' }} <span class="muted">({{ m.room_type.code if m.room_type else '?' }})</span></td>
+          <td><code>{{ m.external_room_type_code }}</code></td>
+          <td>{{ m.external_room_type_name or '—' }}</td>
+          <td>{{ m.external_rate_plan_code or '—' }}</td>
+          <td>{% if m.is_active %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">Yes</span>{% else %}<span class="pill subtle" style="font-size:.7rem;padding:1px 6px;">No</span>{% endif %}</td>
+          {% if can('settings.edit') %}
+          <td>
+            <form method="post" style="display:inline;">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="delete_mapping">
+              <input type="hidden" name="mapping_id" value="{{ m.id }}">
+              <button type="submit" class="button subtle" style="font-size:.75rem;padding:2px 8px;" onclick="return confirm('Remove this mapping?')">Remove</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:.5rem 0;">No room type mappings configured yet. Add mappings below to enable OTA inventory distribution.</p>
+  {% endif %}
+
+  {# Add new mapping form #}
+  {% if can('settings.edit') %}
+  <details class="ota-channel-details" style="margin-top:.75rem;">
+    <summary class="ota-details-toggle">Add new mapping</summary>
+    <form class="stack-form" method="post" style="margin-top:.75rem;max-width:600px;">
+      {{ csrf_input() }}
+      <input type="hidden" name="action" value="save_mapping">
+
+      <div class="grid two">
+        <label>
+          <span>OTA channel</span>
+          <select name="provider_key" required>
+            <option value="">Select channel…</option>
+            {% for ch in channels %}
+            <option value="{{ ch.provider_key }}">{{ ch.display_name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Internal room type</span>
+          <select name="room_type_id" required>
+            <option value="">Select room type…</option>
+            {% for rt in room_types %}
+            <option value="{{ rt.id }}">{{ rt.name }} ({{ rt.code }})</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+
+      <div class="grid two">
+        <label>
+          <span>External room type code</span>
+          <input type="text" name="external_room_type_code" required placeholder="e.g. STANDARD_KING">
+        </label>
+        <label>
+          <span>External room type name <span class="muted">(optional)</span></span>
+          <input type="text" name="external_room_type_name" placeholder="e.g. Standard King Room">
+        </label>
+      </div>
+
+      <div class="grid two">
+        <label>
+          <span>External rate plan code <span class="muted">(optional)</span></span>
+          <input type="text" name="external_rate_plan_code" placeholder="e.g. BAR">
+        </label>
+        <label>
+          <span>External rate plan name <span class="muted">(optional)</span></span>
+          <input type="text" name="external_rate_plan_name" placeholder="e.g. Best Available Rate">
+        </label>
+      </div>
+
+      <label class="toggle-row">
+        <input type="checkbox" name="mapping_active" checked>
+        <span>Active — include in sync operations</span>
+      </label>
+
+      <label>
+        <span>Notes <span class="muted">(optional)</span></span>
+        <input type="text" name="mapping_notes" placeholder="Internal notes about this mapping">
+      </label>
+
+      <button class="button" type="submit">Save mapping</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+
+{# ─── Recent sync activity (global) ─── #}
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Sync operations log</p>
+      <h2>Recent OTA activity</h2>
+    </div>
+  </div>
+  {% if recent_logs %}
+  <div class="table-wrap compact-table">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Channel</th>
+          <th>Direction</th>
+          <th>Action</th>
+          <th>Status</th>
+          <th>Records</th>
+          <th>Duration</th>
+          <th>Error</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in recent_logs %}
+        <tr>
+          <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ log.provider_key }}</td>
+          <td><span class="pill subtle" style="font-size:.7rem;">{{ log.direction }}</span></td>
+          <td>{{ log.action }}</td>
+          <td>
+            {% if log.status == 'success' %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">OK</span>
+            {% elif log.status == 'error' %}<span class="pill error" style="font-size:.7rem;padding:1px 6px;">Error</span>
+            {% else %}<span class="pill warning" style="font-size:.7rem;padding:1px 6px;">{{ log.status }}</span>{% endif %}
+          </td>
+          <td>{{ log.records_processed }}</td>
+          <td>{% if log.duration_ms is not none %}{{ log.duration_ms }}ms{% else %}—{% endif %}</td>
+          <td class="muted" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.error_summary or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No sync activity recorded yet. Sync operations will appear here as they occur.</p>
+  {% endif %}
+</section>
+
 {% endblock %}

@@ -824,16 +824,19 @@ def staff_admin_payments():
 
 @admin_bp.route("/staff/admin/channels", methods=["GET", "POST"], endpoint="staff_admin_channels")
 def staff_admin_channels():
-    """OTA channel manager configuration panel.
+    """OTA channel manager — operational dashboard with status, mappings, sync logs, and config.
 
-    Lists all known OTA providers (Booking.com, Expedia, Agoda), shows their
-    current API credential status, and allows admins to save credentials or
-    test the connection for each provider.
+    Serves as the main OTA control centre for staff/admin users. Supports
+    channel configuration, connection testing, room type mapping management,
+    and provides operational visibility into sync status and recent activity.
     """
     from ..services.channel_service import (
-        list_ota_channels,
+        delete_ota_mapping,
+        list_sync_logs,
+        ota_dashboard_context,
         test_ota_channel_connection,
         upsert_ota_channel,
+        upsert_ota_mapping,
     )
 
     helpers = _get_app_helpers()
@@ -845,12 +848,12 @@ def staff_admin_channels():
     if request.method == "POST":
         action = request.form.get("action")
         provider_key = (request.form.get("provider_key") or "").strip()
-        if provider_key not in OTA_PROVIDER_KEYS:
-            flash("Unknown OTA provider.", "error")
-            return redirect(url_for("admin.staff_admin_channels"))
 
         try:
             if action == "save_channel":
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
                 actor = require_permission("settings.edit")
                 api_key = (request.form.get("api_key") or "").strip() or None
                 api_secret = (request.form.get("api_secret") or "").strip() or None
@@ -868,6 +871,9 @@ def staff_admin_channels():
                 flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)} configuration saved.", "success")
 
             elif action == "test_connection":
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
                 actor = require_permission("settings.view")
                 result = test_ota_channel_connection(provider_key, actor_user_id=actor.id)
                 if result["success"]:
@@ -879,34 +885,54 @@ def staff_admin_channels():
                         "error",
                     )
 
+            elif action == "save_mapping":
+                actor = require_permission("settings.edit")
+                from ..helpers import parse_optional_uuid
+                room_type_id = parse_optional_uuid(request.form.get("room_type_id"))
+                ext_code = (request.form.get("external_room_type_code") or "").strip()
+                if not provider_key or not room_type_id or not ext_code:
+                    flash("Provider, room type, and external code are required.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
+                upsert_ota_mapping(
+                    provider_key=provider_key,
+                    room_type_id=room_type_id,
+                    external_room_type_code=ext_code,
+                    external_room_type_name=(request.form.get("external_room_type_name") or "").strip() or None,
+                    external_rate_plan_code=(request.form.get("external_rate_plan_code") or "").strip() or None,
+                    external_rate_plan_name=(request.form.get("external_rate_plan_name") or "").strip() or None,
+                    is_active=truthy_setting(request.form.get("mapping_active")),
+                    notes=(request.form.get("mapping_notes") or "").strip() or None,
+                    actor_user_id=actor.id,
+                )
+                db.session.commit()
+                flash("Room type mapping saved.", "success")
+
+            elif action == "delete_mapping":
+                actor = require_permission("settings.edit")
+                from ..helpers import parse_optional_uuid
+                mapping_id = parse_optional_uuid(request.form.get("mapping_id"))
+                if mapping_id and delete_ota_mapping(mapping_id, actor_user_id=actor.id):
+                    db.session.commit()
+                    flash("Mapping removed.", "success")
+                else:
+                    flash("Mapping not found.", "error")
+
         except Exception as exc:  # noqa: BLE001
             db.session.rollback()
             flash(public_error_message(exc), "error")
 
         return redirect(url_for("admin.staff_admin_channels"))
 
-    # Build per-provider context so the template has a single list to iterate.
-    existing = {ch.provider_key: ch for ch in list_ota_channels()}
-    channels_context = []
-    for key in OTA_PROVIDER_KEYS:
-        record = existing.get(key)
-        channels_context.append({
-            "provider_key": key,
-            "display_name": OTA_PROVIDER_LABELS.get(key, key),
-            "is_active": record.is_active if record else False,
-            "hotel_id": record.hotel_id if record else "",
-            "endpoint_url": record.endpoint_url if record else "",
-            "api_key_hint": record.api_key_hint if record else None,
-            "api_secret_hint": record.api_secret_hint if record else None,
-            "last_tested_at": record.last_tested_at if record else None,
-            "last_test_ok": record.last_test_ok if record else None,
-            "last_test_error": record.last_test_error if record else None,
-        })
+    dashboard = ota_dashboard_context()
 
     return render_template(
         "admin_channels.html",
         active_section="channels",
-        channels=channels_context,
+        dashboard=dashboard,
+        channels=dashboard["channels"],
+        room_types=dashboard["room_types"],
+        recent_logs=dashboard["recent_logs"],
+        summary=dashboard["summary"],
     )
 
 
