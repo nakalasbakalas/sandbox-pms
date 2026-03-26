@@ -8,6 +8,8 @@ imports with app.py.
 
 from __future__ import annotations
 
+from typing import overload
+
 import hmac
 import secrets
 from datetime import date, datetime, timedelta
@@ -16,7 +18,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import abort, current_app, g, redirect, request, session, url_for
+from flask import abort, current_app, g, request, session, url_for
 from markupsafe import Markup, escape
 
 from .extensions import db
@@ -151,6 +153,10 @@ def parse_optional_datetime(value: str | None) -> datetime | None:
     return parsed
 
 
+@overload
+def parse_request_date_arg(name: str, *, default: date) -> date: ...
+@overload
+def parse_request_date_arg(name: str, *, default: None) -> date | None: ...
 def parse_request_date_arg(name: str, *, default: date | None) -> date | None:
     """Parse a query-string date argument, aborting 400 on bad input."""
     candidate = (request.args.get(name) or "").strip()

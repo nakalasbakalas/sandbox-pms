@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -228,7 +229,6 @@ def post_pos_charge(
             metadata=payload.metadata,
         )
     except Exception:
-        import logging
         logging.getLogger(__name__).debug(
             "POS adapter notification failed for charge %s (non-critical)", line.id, exc_info=True,
         )

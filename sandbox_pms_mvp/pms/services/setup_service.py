@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 
 from ..extensions import db
-from ..models import AppSetting, Room, RoomType, User
+from ..models import Room, RoomType, User
 from ..pricing import get_setting_value
 
 

@@ -133,7 +133,14 @@ def staff_guest_blacklist_toggle(guest_id):
         guest.blacklist_reason = reason
         guest.blacklisted_at = utc_now()
         guest.blacklisted_by_user_id = user.id
-        write_audit_log(guest, "guest_blacklisted", old_data=old_snapshot, new_data={"blacklist_flag": True, "blacklist_reason": reason}, actor_user_id=user.id)
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="guests",
+            entity_id=str(guest.id),
+            action="guest_blacklisted",
+            before_data=old_snapshot,
+            after_data={"blacklist_flag": True, "blacklist_reason": reason},
+        )
         db.session.commit()
         flash(f"Guest {guest.full_name} has been blacklisted.", "warning")
     elif action == "unblock":
@@ -142,7 +149,14 @@ def staff_guest_blacklist_toggle(guest_id):
         guest.blacklist_reason = None
         guest.blacklisted_at = None
         guest.blacklisted_by_user_id = None
-        write_audit_log(guest, "guest_unblacklisted", old_data=old_snapshot, new_data={"blacklist_flag": False, "blacklist_reason": None}, actor_user_id=user.id)
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="guests",
+            entity_id=str(guest.id),
+            action="guest_unblacklisted",
+            before_data=old_snapshot,
+            after_data={"blacklist_flag": False, "blacklist_reason": None},
+        )
         db.session.commit()
         flash(f"Guest {guest.full_name} has been removed from the blacklist.", "success")
     return redirect(url_for("staff_reservations.staff_guest_detail", guest_id=guest_id))
@@ -701,7 +715,7 @@ def staff_pre_checkin_send_email(reservation_id):
 
 @staff_reservations_bp.route("/staff/reservations/<uuid:reservation_id>/pre-checkin")
 def staff_pre_checkin_detail(reservation_id):
-    user = require_permission("reservation.view")
+    require_permission("reservation.view")
     reservation = db.session.get(Reservation, reservation_id)
     if not reservation:
         abort(404)
@@ -923,7 +937,7 @@ def staff_group_block_detail(group_block_code):
     require_permission("reservation.view")
     try:
         detail = get_group_block_detail(group_block_code)
-    except Exception:
+    except ValueError:
         abort(404)
     return render_template(
         "group_block_detail.html",

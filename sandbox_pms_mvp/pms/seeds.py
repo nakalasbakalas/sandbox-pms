@@ -27,7 +27,6 @@ from .models import (
     AuditLog,
     ActivityLog,
     AutomationRule,
-    BlackoutPeriod,
     CancellationRequest,
     CashierActivityLog,
     CashierDocument,

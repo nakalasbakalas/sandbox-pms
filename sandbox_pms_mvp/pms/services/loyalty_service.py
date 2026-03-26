@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import date
 
 import sqlalchemy as sa
 
 from ..activity import write_activity_log
-from ..audit import write_audit_log
 from ..extensions import db
 from ..models import GuestLoyalty, Guest, Reservation, utc_now
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 import re
 
@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from ..audit import write_audit_log
-from ..constants import INVENTORY_AVAILABILITY_STATUSES
 from ..extensions import db
 from ..models import (
     AppSetting,
