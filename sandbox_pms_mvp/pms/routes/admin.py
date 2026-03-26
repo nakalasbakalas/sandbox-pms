@@ -866,6 +866,11 @@ def staff_admin_channels():
                     api_key=api_key,
                     api_secret=api_secret,
                     actor_user_id=actor.id,
+                    sync_inventory_push=truthy_setting(request.form.get("sync_inventory_push")),
+                    sync_rate_push=truthy_setting(request.form.get("sync_rate_push")),
+                    sync_restriction_push=truthy_setting(request.form.get("sync_restriction_push")),
+                    sync_reservation_pull=truthy_setting(request.form.get("sync_reservation_pull")),
+                    environment_mode=(request.form.get("environment_mode") or "").strip() or None,
                 )
                 db.session.commit()
                 flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)} configuration saved.", "success")

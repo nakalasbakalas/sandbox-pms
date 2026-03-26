@@ -687,9 +687,15 @@ def upsert_ota_channel(
     api_key: str | None = None,
     api_secret: str | None = None,
     actor_user_id: uuid.UUID | None = None,
+    sync_inventory_push: bool | None = None,
+    sync_rate_push: bool | None = None,
+    sync_restriction_push: bool | None = None,
+    sync_reservation_pull: bool | None = None,
+    environment_mode: str | None = None,
 ) -> OtaChannel:
     """Create or update an OTA channel configuration."""
     channel = get_ota_channel(provider_key)
+    was_active = channel.is_active if channel else False
     if not channel:
         channel = OtaChannel(provider_key=provider_key, display_name=display_name)
         db.session.add(channel)
@@ -703,6 +709,21 @@ def upsert_ota_channel(
     if api_secret is not None:
         channel.api_secret_encrypted = api_secret
         channel.api_secret_hint = ("*" * max(0, len(api_secret) - 4)) + api_secret[-4:] if len(api_secret) >= 4 else "****"
+    # Sync direction flags
+    if sync_inventory_push is not None:
+        channel.sync_inventory_push = sync_inventory_push
+    if sync_rate_push is not None:
+        channel.sync_rate_push = sync_rate_push
+    if sync_restriction_push is not None:
+        channel.sync_restriction_push = sync_restriction_push
+    if sync_reservation_pull is not None:
+        channel.sync_reservation_pull = sync_reservation_pull
+    # Environment mode
+    if environment_mode and environment_mode in ("sandbox", "live"):
+        channel.environment_mode = environment_mode
+    # Track activation timestamp
+    if is_active and not was_active:
+        channel.activated_at = utc_now()
     if actor_user_id:
         channel.updated_by_user_id = actor_user_id
     return channel
@@ -1040,6 +1061,84 @@ def delete_ota_mapping(mapping_id: uuid.UUID, *, actor_user_id: uuid.UUID | None
 
 
 # ---------------------------------------------------------------------------
+# Onboarding readiness assessment
+# ---------------------------------------------------------------------------
+
+
+def assess_channel_readiness(
+    record: OtaChannel | None,
+    mapped_count: int,
+    total_room_types: int,
+    capabilities: ProviderCapabilities,
+) -> dict:
+    """Return a structured readiness assessment for a channel.
+
+    Returns a dict with:
+    - steps: list of {key, label, done, blocking} dicts
+    - ready_for_activation: bool — True if all blocking steps are done
+    - completion_pct: int — percentage of steps completed (0-100)
+    - blocking_issues: list of string descriptions of what blocks activation
+    """
+    steps = [
+        {
+            "key": "credentials",
+            "label": "API credentials configured",
+            "done": bool(record and record.api_key_encrypted),
+            "blocking": True,
+        },
+        {
+            "key": "hotel_id",
+            "label": "Hotel / property ID set",
+            "done": bool(record and record.hotel_id),
+            "blocking": True,
+        },
+        {
+            "key": "connection_tested",
+            "label": "Connection verified",
+            "done": bool(record and record.last_test_ok),
+            "blocking": True,
+        },
+        {
+            "key": "mappings",
+            "label": f"Room types mapped ({mapped_count}/{total_room_types})",
+            "done": mapped_count > 0 and mapped_count >= total_room_types,
+            "blocking": True,
+        },
+        {
+            "key": "sync_direction",
+            "label": "At least one sync direction enabled",
+            "done": bool(
+                record
+                and (
+                    record.sync_inventory_push
+                    or record.sync_rate_push
+                    or record.sync_restriction_push
+                    or record.sync_reservation_pull
+                )
+            ),
+            "blocking": True,
+        },
+        {
+            "key": "activated",
+            "label": "Channel activated",
+            "done": bool(record and record.is_active),
+            "blocking": False,
+        },
+    ]
+
+    blocking_issues = [s["label"] for s in steps if s["blocking"] and not s["done"]]
+    done_count = sum(1 for s in steps if s["done"])
+    completion_pct = int(done_count / len(steps) * 100) if steps else 0
+
+    return {
+        "steps": steps,
+        "ready_for_activation": len(blocking_issues) == 0,
+        "completion_pct": completion_pct,
+        "blocking_issues": blocking_issues,
+    }
+
+
+# ---------------------------------------------------------------------------
 # OTA dashboard context builder
 # ---------------------------------------------------------------------------
 
@@ -1118,6 +1217,22 @@ def ota_dashboard_context() -> dict:
         except Exception:
             capabilities = ProviderCapabilities()
 
+        # Onboarding readiness
+        readiness = assess_channel_readiness(
+            record=record,
+            mapped_count=len(provider_mappings),
+            total_room_types=len(room_types),
+            capabilities=capabilities,
+        )
+
+        # Sync direction summary
+        sync_directions = {
+            "inventory_push": bool(record and record.sync_inventory_push),
+            "rate_push": bool(record and record.sync_rate_push),
+            "restriction_push": bool(record and record.sync_restriction_push),
+            "reservation_pull": bool(record and record.sync_reservation_pull),
+        }
+
         channels.append({
             "provider_key": key,
             "display_name": OTA_PROVIDER_LABELS.get(key, key),
@@ -1129,6 +1244,7 @@ def ota_dashboard_context() -> dict:
             "last_tested_at": record.last_tested_at if record else None,
             "last_test_ok": record.last_test_ok if record else None,
             "last_test_error": record.last_test_error if record else None,
+            "environment_mode": record.environment_mode if record else "sandbox",
             "mappings": provider_mappings,
             "mapped_count": len(provider_mappings),
             "unmapped_count": unmapped_count,
@@ -1137,6 +1253,9 @@ def ota_dashboard_context() -> dict:
             "recent_error_count": recent_error_count,
             "recent_logs": provider_logs[:10],
             "capabilities": capabilities,
+            "readiness": readiness,
+            "sync_directions": sync_directions,
+            "last_successful_sync_at": record.last_successful_sync_at if record else None,
         })
 
     # Summary stats
