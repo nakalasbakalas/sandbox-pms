@@ -1,0 +1,38 @@
+<section class="card subsection">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Café &amp; POS</p>
+      <h2>{{ cafe_nav_title|default('Café') }}</h2>
+    </div>
+  </div>
+  <div class="list-row no-link">
+    {% if can('cafe.access') %}
+      <a class="pill subtle{% if request.endpoint == 'cafe.cafe_pos' %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_pos') }}">POS</a>
+    {% endif %}
+    {% if can('cafe.orders.view') %}
+      <a class="pill subtle{% if request.endpoint == 'cafe.cafe_orders' or request.endpoint == 'cafe.cafe_order_detail' %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_orders') }}">Orders</a>
+    {% endif %}
+    {% if can('cafe.access') %}
+      <a class="pill subtle{% if request.endpoint == 'cafe.cafe_prep' %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_prep') }}">Prep</a>
+    {% endif %}
+    {% if can('cafe.menu.manage') %}
+      <a class="pill subtle{% if request.endpoint and request.endpoint.startswith('cafe.cafe_menu') %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_menu') }}">Menu</a>
+    {% endif %}
+    {% if can('cafe.stock.manage') %}
+      <a class="pill subtle{% if request.endpoint == 'cafe.cafe_stock' %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_stock') }}">Stock</a>
+    {% endif %}
+    {% if can('cafe.reports.view') %}
+      <a class="pill subtle{% if request.endpoint == 'cafe.cafe_reports' %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_reports') }}">Reports</a>
+    {% endif %}
+    {% if can('cafe.access') %}
+      <a class="pill subtle{% if request.endpoint and request.endpoint.startswith('cafe.cafe_shift') %} active{% endif %}"
+         href="{{ url_for('cafe.cafe_shifts') }}">Shifts</a>
+    {% endif %}
+  </div>
+</section>
