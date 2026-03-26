@@ -221,7 +221,7 @@ def staff_reservations():
     result = list_reservations(filters)
     if result["items"]:
         _res_ids = [item["id"] for item in result["items"]]
-        _pc_rows = db.session.query(PreCheckIn).filter(PreCheckIn.reservation_id.in_(_res_ids)).all()
+        _pc_rows = db.session.execute(sa.select(PreCheckIn).where(PreCheckIn.reservation_id.in_(_res_ids))).scalars().all()
         _pc_map = {str(pc.reservation_id): pc for pc in _pc_rows}
         for item in result["items"]:
             item["pre_checkin"] = _pc_map.get(str(item["id"]))

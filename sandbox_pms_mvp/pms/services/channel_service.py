@@ -472,14 +472,14 @@ def build_outbound_inventory_updates(
     if not room_types:
         return []
 
-    availability_query = (
-        db.session.query(
+    availability_stmt = (
+        sa.select(
             InventoryDay.business_date,
             InventoryDay.room_type_id,
             sa.func.count(InventoryDay.id),
         )
         .join(Room, Room.id == InventoryDay.room_id)
-        .filter(
+        .where(
             InventoryDay.business_date >= date_from,
             InventoryDay.business_date <= date_to,
             Room.is_active.is_(True),
@@ -489,12 +489,14 @@ def build_outbound_inventory_updates(
         )
     )
     if room_type_id:
-        availability_query = availability_query.filter(InventoryDay.room_type_id == room_type_id)
+        availability_stmt = availability_stmt.where(InventoryDay.room_type_id == room_type_id)
     availability_counts = {
         (business_date, inventory_room_type_id): int(available_count or 0)
-        for business_date, inventory_room_type_id, available_count in availability_query.group_by(
-            InventoryDay.business_date,
-            InventoryDay.room_type_id,
+        for business_date, inventory_room_type_id, available_count in db.session.execute(
+            availability_stmt.group_by(
+                InventoryDay.business_date,
+                InventoryDay.room_type_id,
+            )
         ).all()
     }
 
