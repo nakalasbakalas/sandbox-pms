@@ -693,7 +693,12 @@ class ChannelSyncService:
             except Exception as exc:
                 errors.append(f"{res_data.external_booking_id}: {exc}")
 
-        status = "success" if len(errors) == 0 else ("partial" if imported > 0 else "error")
+        if not errors:
+            status = "success"
+        elif imported > 0:
+            status = "partial"
+        else:
+            status = "error"
         result = SyncResult(
             provider=self.provider.provider_key,
             direction="inbound",
@@ -950,21 +955,24 @@ def ota_dashboard_context() -> dict:
         provider_mappings = [m for m in all_mappings if m.provider_key == key]
         provider_logs = [log for log in recent_logs if log.provider_key == key]
 
-        # Determine connection health status
+        # Count mapping coverage (must precede health check)
+        mapped_room_type_ids = {m.room_type_id for m in provider_mappings if m.is_active}
+        unmapped_count = len([rt for rt in room_types if rt.id not in mapped_room_type_ids])
+
+        # Determine connection health status — clear state machine:
+        # not_configured → inactive → unknown → healthy/warning → error
         if not record or not record.api_key_encrypted:
             health = "not_configured"
         elif not record.is_active:
             health = "inactive"
-        elif record.last_test_ok is True:
-            health = "healthy"
         elif record.last_test_ok is False:
             health = "error"
+        elif record.last_test_ok is True:
+            # Connected OK — check for mapping gaps
+            health = "warning" if unmapped_count > 0 else "healthy"
         else:
+            # Credentials present, active, but never tested
             health = "unknown"
-
-        # Count mapping coverage
-        mapped_room_type_ids = {m.room_type_id for m in provider_mappings if m.is_active}
-        unmapped_count = len([rt for rt in room_types if rt.id not in mapped_room_type_ids])
 
         # Recent sync stats
         last_success = next(
@@ -974,9 +982,6 @@ def ota_dashboard_context() -> dict:
             (log for log in provider_logs if log.status == "error"), None
         )
         recent_error_count = sum(1 for log in provider_logs if log.status == "error")
-
-        if health == "healthy" and unmapped_count > 0:
-            health = "warning"
 
         if health == "healthy":
             total_healthy += 1

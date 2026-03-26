@@ -12,10 +12,6 @@
     </div>
   </div>
   <div class="ota-status-grid">
-    <div class="ota-metric">
-      <span class="ota-metric-value">{{ summary.total_channels }}</span>
-      <span class="ota-metric-label">Channels</span>
-    </div>
     <div class="ota-metric {% if summary.healthy > 0 %}ota-metric--healthy{% endif %}">
       <span class="ota-metric-value">{{ summary.healthy }}</span>
       <span class="ota-metric-label">Healthy</span>
@@ -51,27 +47,47 @@
       {% if ch.health == 'healthy' %}
         <span class="pill success">Healthy</span>
       {% elif ch.health == 'warning' %}
-        <span class="pill warning">Warning</span>
+        <span class="pill warning">Warning — unmapped rooms</span>
       {% elif ch.health == 'error' %}
         <span class="pill error">Connection failed</span>
       {% elif ch.health == 'inactive' %}
         <span class="pill subtle">Inactive</span>
       {% elif ch.health == 'not_configured' %}
         <span class="pill subtle">Not configured</span>
-      {% else %}
-        <span class="pill subtle">Unknown</span>
-      {% endif %}
-      {% if ch.is_active %}
-        <span class="pill subtle">Active</span>
+      {% elif ch.health == 'unknown' %}
+        <span class="pill subtle">Not tested</span>
       {% endif %}
     </div>
   </div>
 
-  {# Quick status row #}
+  {# Setup checklist — shows what's missing #}
+  {% set needs_setup = not ch.api_configured or ch.health == 'not_configured' or ch.health == 'unknown' %}
+  {% if needs_setup or ch.health == 'error' %}
+  <div class="ota-setup-checklist">
+    <div class="ota-check {% if ch.api_configured %}ota-check--done{% endif %}">
+      {% if ch.api_configured %}✓{% else %}○{% endif %} API credentials
+    </div>
+    <div class="ota-check {% if ch.hotel_id %}ota-check--done{% endif %}">
+      {% if ch.hotel_id %}✓{% else %}○{% endif %} Hotel / property ID
+    </div>
+    <div class="ota-check {% if ch.is_active %}ota-check--done{% endif %}">
+      {% if ch.is_active %}✓{% else %}○{% endif %} Channel activated
+    </div>
+    <div class="ota-check {% if ch.last_test_ok %}ota-check--done{% endif %}">
+      {% if ch.last_test_ok %}✓{% else %}○{% endif %} Connection verified
+    </div>
+    <div class="ota-check {% if ch.mapped_count > 0 %}ota-check--done{% endif %}">
+      {% if ch.mapped_count > 0 %}✓{% else %}○{% endif %} Room types mapped ({{ ch.mapped_count }}/{{ summary.total_room_types }})
+    </div>
+  </div>
+  {% endif %}
+
+  {# Quick status row — shown for configured channels #}
+  {% if ch.api_configured %}
   <div class="ota-quick-stats">
     <div class="ota-quick-stat">
       <strong>API key</strong>
-      <span>{{ ('…' ~ ch.record.api_key_hint) if ch.record and ch.record.api_key_hint else '—' }}</span>
+      <span>…{{ ch.record.api_key_hint }}</span>
     </div>
     <div class="ota-quick-stat">
       <strong>Hotel ID</strong>
@@ -79,28 +95,29 @@
     </div>
     <div class="ota-quick-stat">
       <strong>Mappings</strong>
-      <span>{{ ch.mapped_count }}{% if ch.unmapped_count > 0 %} <span class="pill error" style="font-size:.75rem;padding:1px 6px;">{{ ch.unmapped_count }} unmapped</span>{% endif %}</span>
+      <span>{{ ch.mapped_count }}{% if ch.unmapped_count > 0 %} <span class="pill-sm error">{{ ch.unmapped_count }} unmapped</span>{% endif %}</span>
     </div>
     <div class="ota-quick-stat">
       <strong>Last sync</strong>
-      <span>{% if ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</span>
+      <span>{% if ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</span>
     </div>
     <div class="ota-quick-stat">
       <strong>Last tested</strong>
-      <span>{% if ch.last_tested_at %}{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</span>
+      <span>{% if ch.last_tested_at %}{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</span>
     </div>
     {% if ch.recent_error_count > 0 %}
     <div class="ota-quick-stat">
       <strong>Recent errors</strong>
-      <span class="pill error" style="font-size:.75rem;padding:1px 6px;">{{ ch.recent_error_count }}</span>
+      <span class="pill-sm error">{{ ch.recent_error_count }}</span>
     </div>
     {% endif %}
   </div>
+  {% endif %}
 
-  {# Expandable detail sections #}
-  <details class="ota-channel-details">
+  {# Expandable configuration #}
+  <details class="ota-channel-details"{% if not ch.api_configured %} open{% endif %}>
     <summary class="ota-details-toggle">Configuration &amp; actions</summary>
-    <div class="grid two gap-lg" style="margin-top:.75rem;">
+    <div class="grid two gap-lg ota-config-grid">
       <article>
         <form class="stack-form" method="post">
           {{ csrf_input() }}
@@ -152,8 +169,8 @@
           <div class="list-row no-link"><strong>Last error</strong><span class="status error">{{ ch.last_test_error }}</span></div>
           {% endif %}
         </div>
-        <p class="muted">API credentials are encrypted at rest and never displayed in plaintext.</p>
-        <form method="post" style="margin-top:.75rem;">
+        <p class="muted">API credentials are stored securely and never displayed in plaintext.</p>
+        <form method="post" class="ota-test-form">
           {{ csrf_input() }}
           <input type="hidden" name="action" value="test_connection">
           <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
@@ -167,33 +184,25 @@
   {% if ch.recent_logs %}
   <details class="ota-channel-details">
     <summary class="ota-details-toggle">Recent sync activity ({{ ch.recent_logs|length }})</summary>
-    <div class="table-wrap compact-table" style="margin-top:.5rem;">
+    <div class="table-wrap compact-table ota-log-table">
       <table>
         <thead>
-          <tr>
-            <th>Time</th>
-            <th>Direction</th>
-            <th>Action</th>
-            <th>Status</th>
-            <th>Records</th>
-            <th>Duration</th>
-            <th>Error</th>
-          </tr>
+          <tr><th>Time</th><th>Direction</th><th>Action</th><th>Status</th><th>Records</th><th>Duration</th><th>Error</th></tr>
         </thead>
         <tbody>
           {% for log in ch.recent_logs %}
           <tr>
             <td>{{ log.created_at.strftime('%m-%d %H:%M') }}</td>
-            <td><span class="pill subtle" style="font-size:.7rem;">{{ log.direction }}</span></td>
+            <td><span class="pill-sm subtle">{{ log.direction }}</span></td>
             <td>{{ log.action }}</td>
             <td>
-              {% if log.status == 'success' %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">OK</span>
-              {% elif log.status == 'error' %}<span class="pill error" style="font-size:.7rem;padding:1px 6px;">Error</span>
-              {% else %}<span class="pill warning" style="font-size:.7rem;padding:1px 6px;">{{ log.status }}</span>{% endif %}
+              {% if log.status == 'success' %}<span class="pill-sm success">OK</span>
+              {% elif log.status == 'error' %}<span class="pill-sm error">Error</span>
+              {% else %}<span class="pill-sm warning">{{ log.status }}</span>{% endif %}
             </td>
             <td>{{ log.records_processed }}</td>
             <td>{% if log.duration_ms is not none %}{{ log.duration_ms }}ms{% else %}—{% endif %}</td>
-            <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.error_summary or '—' }}</td>
+            <td class="ota-error-cell">{{ log.error_summary or '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -211,6 +220,9 @@
       <p class="eyebrow">Channel distribution mapping</p>
       <h2>Room type &amp; rate plan mappings</h2>
     </div>
+    {% if summary.total_unmapped > 0 %}
+    <div><span class="pill warning">{{ summary.total_unmapped }} unmapped room{{ 's' if summary.total_unmapped != 1 else '' }}</span></div>
+    {% endif %}
   </div>
   <p class="muted">Map internal room types to OTA-specific codes. Missing mappings prevent accurate inventory distribution.</p>
 
@@ -225,7 +237,7 @@
           <th>Internal room type</th>
           <th>External code</th>
           <th>External name</th>
-          <th>Rate plan code</th>
+          <th>Rate plan</th>
           <th>Active</th>
           {% if can('settings.edit') %}<th></th>{% endif %}
         </tr>
@@ -233,19 +245,19 @@
       <tbody>
         {% for m in all_mappings %}
         <tr>
-          <td><span class="pill subtle" style="font-size:.75rem;">{{ m.provider_key }}</span></td>
+          <td><span class="pill-sm subtle">{{ m.provider_key }}</span></td>
           <td>{{ m.room_type.name if m.room_type else '—' }} <span class="muted">({{ m.room_type.code if m.room_type else '?' }})</span></td>
           <td><code>{{ m.external_room_type_code }}</code></td>
           <td>{{ m.external_room_type_name or '—' }}</td>
           <td>{{ m.external_rate_plan_code or '—' }}</td>
-          <td>{% if m.is_active %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">Yes</span>{% else %}<span class="pill subtle" style="font-size:.7rem;padding:1px 6px;">No</span>{% endif %}</td>
+          <td>{% if m.is_active %}<span class="pill-sm success">Yes</span>{% else %}<span class="pill-sm subtle">No</span>{% endif %}</td>
           {% if can('settings.edit') %}
           <td>
-            <form method="post" style="display:inline;">
+            <form method="post" class="ota-inline-form">
               {{ csrf_input() }}
               <input type="hidden" name="action" value="delete_mapping">
               <input type="hidden" name="mapping_id" value="{{ m.id }}">
-              <button type="submit" class="button subtle" style="font-size:.75rem;padding:2px 8px;" onclick="return confirm('Remove this mapping?')">Remove</button>
+              <button type="submit" class="button subtle pill-sm" onclick="return confirm('Remove this mapping?')">Remove</button>
             </form>
           </td>
           {% endif %}
@@ -255,14 +267,14 @@
     </table>
   </div>
   {% else %}
-  <p class="muted" style="padding:.5rem 0;">No room type mappings configured yet. Add mappings below to enable OTA inventory distribution.</p>
+  <p class="muted ota-empty-state">No room type mappings configured yet. Add mappings below to enable OTA inventory distribution.</p>
   {% endif %}
 
   {# Add new mapping form #}
   {% if can('settings.edit') %}
-  <details class="ota-channel-details" style="margin-top:.75rem;">
+  <details class="ota-channel-details ota-add-mapping"{% if not all_mappings %} open{% endif %}>
     <summary class="ota-details-toggle">Add new mapping</summary>
-    <form class="stack-form" method="post" style="margin-top:.75rem;max-width:600px;">
+    <form class="stack-form ota-mapping-form" method="post">
       {{ csrf_input() }}
       <input type="hidden" name="action" value="save_mapping">
 
@@ -290,22 +302,22 @@
       <div class="grid two">
         <label>
           <span>External room type code</span>
-          <input type="text" name="external_room_type_code" required placeholder="e.g. STANDARD_KING">
+          <input type="text" name="external_room_type_code" required maxlength="120" placeholder="e.g. STANDARD_KING">
         </label>
         <label>
           <span>External room type name <span class="muted">(optional)</span></span>
-          <input type="text" name="external_room_type_name" placeholder="e.g. Standard King Room">
+          <input type="text" name="external_room_type_name" maxlength="200" placeholder="e.g. Standard King Room">
         </label>
       </div>
 
       <div class="grid two">
         <label>
-          <span>External rate plan code <span class="muted">(optional)</span></span>
-          <input type="text" name="external_rate_plan_code" placeholder="e.g. BAR">
+          <span>Rate plan code <span class="muted">(optional)</span></span>
+          <input type="text" name="external_rate_plan_code" maxlength="120" placeholder="e.g. BAR">
         </label>
         <label>
-          <span>External rate plan name <span class="muted">(optional)</span></span>
-          <input type="text" name="external_rate_plan_name" placeholder="e.g. Best Available Rate">
+          <span>Rate plan name <span class="muted">(optional)</span></span>
+          <input type="text" name="external_rate_plan_name" maxlength="200" placeholder="e.g. Best Available Rate">
         </label>
       </div>
 
@@ -334,42 +346,33 @@
     </div>
   </div>
   {% if recent_logs %}
-  <div class="table-wrap compact-table">
+  <div class="table-wrap compact-table ota-log-table">
     <table>
       <thead>
-        <tr>
-          <th>Time</th>
-          <th>Channel</th>
-          <th>Direction</th>
-          <th>Action</th>
-          <th>Status</th>
-          <th>Records</th>
-          <th>Duration</th>
-          <th>Error</th>
-        </tr>
+        <tr><th>Time</th><th>Channel</th><th>Direction</th><th>Action</th><th>Status</th><th>Records</th><th>Duration</th><th>Error</th></tr>
       </thead>
       <tbody>
         {% for log in recent_logs %}
         <tr>
           <td>{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td>{{ log.provider_key }}</td>
-          <td><span class="pill subtle" style="font-size:.7rem;">{{ log.direction }}</span></td>
+          <td><span class="pill-sm subtle">{{ log.direction }}</span></td>
           <td>{{ log.action }}</td>
           <td>
-            {% if log.status == 'success' %}<span class="pill success" style="font-size:.7rem;padding:1px 6px;">OK</span>
-            {% elif log.status == 'error' %}<span class="pill error" style="font-size:.7rem;padding:1px 6px;">Error</span>
-            {% else %}<span class="pill warning" style="font-size:.7rem;padding:1px 6px;">{{ log.status }}</span>{% endif %}
+            {% if log.status == 'success' %}<span class="pill-sm success">OK</span>
+            {% elif log.status == 'error' %}<span class="pill-sm error">Error</span>
+            {% else %}<span class="pill-sm warning">{{ log.status }}</span>{% endif %}
           </td>
           <td>{{ log.records_processed }}</td>
           <td>{% if log.duration_ms is not none %}{{ log.duration_ms }}ms{% else %}—{% endif %}</td>
-          <td class="muted" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ log.error_summary or '—' }}</td>
+          <td class="ota-error-cell">{{ log.error_summary or '—' }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="muted">No sync activity recorded yet. Sync operations will appear here as they occur.</p>
+  <p class="muted ota-empty-state">No sync activity recorded yet. Operations will appear here as they occur.</p>
   {% endif %}
 </section>
 

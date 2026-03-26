@@ -6903,7 +6903,7 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 
 .ota-metric {
   text-align: center;
-  padding: .5rem .25rem;
+  padding: .4rem .25rem;
   border-radius: 6px;
   background: var(--pms-surface-alt, rgba(255, 255, 255, .04));
   border: 1px solid var(--pms-border, rgba(255, 255, 255, .08));
@@ -6911,14 +6911,14 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 
 .ota-metric-value {
   display: block;
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   font-weight: 700;
   line-height: 1.2;
 }
 
 .ota-metric-label {
   display: block;
-  font-size: .7rem;
+  font-size: .65rem;
   text-transform: uppercase;
   letter-spacing: .04em;
   opacity: .7;
@@ -6947,11 +6947,30 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
   flex-wrap: wrap;
 }
 
+/* Setup checklist for unconfigured channels */
+.ota-setup-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .25rem .75rem;
+  padding: .4rem 0;
+  font-size: .8rem;
+}
+
+.ota-check {
+  opacity: .5;
+}
+
+.ota-check--done {
+  opacity: 1;
+  color: var(--pms-success, #4ade80);
+}
+
+/* Quick stats row */
 .ota-quick-stats {
   display: flex;
   flex-wrap: wrap;
-  gap: .75rem 1.5rem;
-  padding: .5rem 0;
+  gap: .5rem 1.25rem;
+  padding: .4rem 0;
   font-size: .85rem;
 }
 
@@ -6962,24 +6981,25 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
 }
 
 .ota-quick-stat strong {
-  font-size: .7rem;
+  font-size: .65rem;
   text-transform: uppercase;
   letter-spacing: .03em;
   opacity: .6;
 }
 
+/* Collapsible details sections */
 .ota-channel-details {
   margin-top: .5rem;
 }
 
 .ota-details-toggle {
   cursor: pointer;
-  font-size: .8rem;
+  font-size: .75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .04em;
   opacity: .7;
-  padding: .35rem 0;
+  padding: .3rem 0;
   user-select: none;
 }
 
@@ -6992,6 +7012,64 @@ body:not(.public-site) #front-desk-board-surface.hk-overlay-active .planning-boa
   gap: .5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.ota-config-grid {
+  margin-top: .75rem;
+}
+
+.ota-test-form {
+  margin-top: .75rem;
+}
+
+/* Compact pill variant for tables/inline badges */
+.pill-sm {
+  display: inline-block;
+  font-size: .7rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.pill-sm.success { background: var(--pms-success, #4ade80); color: #000; }
+.pill-sm.error { background: var(--pms-error, #f87171); color: #000; }
+.pill-sm.warning { background: var(--pms-warning, #fbbf24); color: #000; }
+.pill-sm.subtle {
+  background: var(--pms-surface-alt, rgba(255, 255, 255, .08));
+  color: inherit;
+  opacity: .8;
+}
+
+/* Sync log table error column */
+.ota-error-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: .7;
+}
+
+.ota-log-table {
+  margin-top: .5rem;
+}
+
+.ota-inline-form {
+  display: inline;
+}
+
+.ota-empty-state {
+  padding: .5rem 0;
+}
+
+.ota-mapping-form {
+  margin-top: .75rem;
+  max-width: 600px;
+}
+
+.ota-add-mapping {
+  margin-top: .75rem;
 }
 
 /* Light theme overrides for OTA dashboard */
@@ -7010,11 +7088,21 @@ body:not(.public-site) .ota-health--error { border-left-color: #dc2626; }
 body:not(.public-site) .ota-health--inactive { border-left-color: rgba(0, 0, 0, .15); }
 body:not(.public-site) .ota-health--not_configured { border-left-color: rgba(0, 0, 0, .08); }
 
+body:not(.public-site) .ota-check--done { color: #16a34a; }
+
+body:not(.public-site) .pill-sm.success { background: #dcfce7; color: #166534; }
+body:not(.public-site) .pill-sm.error { background: #fee2e2; color: #991b1b; }
+body:not(.public-site) .pill-sm.warning { background: #fef3c7; color: #92400e; }
+body:not(.public-site) .pill-sm.subtle { background: rgba(0, 0, 0, .06); }
+
 @media (max-width: 640px) {
   .ota-summary-strip .ota-status-grid {
     grid-template-columns: repeat(3, 1fr);
   }
   .ota-quick-stats {
-    gap: .5rem .75rem;
+    gap: .4rem .75rem;
+  }
+  .ota-setup-checklist {
+    flex-direction: column;
   }
 }

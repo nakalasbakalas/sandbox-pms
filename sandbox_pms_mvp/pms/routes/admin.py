@@ -886,12 +886,18 @@ def staff_admin_channels():
                     )
 
             elif action == "save_mapping":
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
                 actor = require_permission("settings.edit")
                 from ..helpers import parse_optional_uuid
                 room_type_id = parse_optional_uuid(request.form.get("room_type_id"))
                 ext_code = (request.form.get("external_room_type_code") or "").strip()
-                if not provider_key or not room_type_id or not ext_code:
-                    flash("Provider, room type, and external code are required.", "error")
+                if not room_type_id or not ext_code:
+                    flash("Room type and external code are required.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
+                if len(ext_code) > 120:
+                    flash("External room type code is too long (max 120 characters).", "error")
                     return redirect(url_for("admin.staff_admin_channels"))
                 upsert_ota_mapping(
                     provider_key=provider_key,
