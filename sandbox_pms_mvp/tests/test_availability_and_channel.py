@@ -196,14 +196,16 @@ class TestAvailabilityService:
                 ),
                 actor_user_id=None,
             )
-            # Find another room of same type
-            other_rooms = Room.query.filter(
-                Room.room_type_id == rt.id,
-                Room.is_active.is_(True),
-                Room.id != res.assigned_room_id,
-            ).all()
-            if other_rooms:
-                result = can_move_reservation(res.id, other_rooms[0].id)
+            # Find another room of same type that is actually available
+            assignable = [
+                r for r in list_assignable_rooms(
+                    rt.id, today, tomorrow,
+                    exclude_reservation_id=res.id,
+                )
+                if r.is_assignable and r.room_id != res.assigned_room_id
+            ]
+            if assignable:
+                result = can_move_reservation(res.id, assignable[0].room_id)
                 assert result.is_assignable is True
 
     def test_can_move_reservation_wrong_type(self, app_factory):

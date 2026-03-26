@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -39,10 +39,8 @@ from ..extensions import db
 from ..models import (
     ExternalCalendarBlock,
     ExternalCalendarSource,
-    ExternalCalendarSyncRun,
     InventoryDay,
     OtaChannel,
-    Reservation,
     Room,
     RoomType,
     utc_now,

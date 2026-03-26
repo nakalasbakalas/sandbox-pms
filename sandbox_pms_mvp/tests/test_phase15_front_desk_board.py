@@ -1432,7 +1432,7 @@ class TestBoardDensityPreferences:
         """New users should default to compact density."""
         app = app_factory(seed=True)
         with app.app_context():
-            from pms.app import front_desk_board_context
+            from pms.routes.front_desk import front_desk_board_context
 
             user = make_staff_user("front_desk", "density-test@example.com")
             filters = FrontDeskBoardFilters(start_date=date.today())

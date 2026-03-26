@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import sqlalchemy as sa
 from sqlalchemy import CheckConstraint, ForeignKey, Index, UniqueConstraint, event
@@ -593,7 +593,7 @@ class RoomStatusHistory(db.Model):
     inventory_day_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("inventory_days.id", ondelete="SET NULL"), nullable=True
     )
-    business_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    business_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     previous_housekeeping_status_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("housekeeping_statuses.id", ondelete="SET NULL"), nullable=True
     )
@@ -649,7 +649,7 @@ class HousekeepingTask(AuditMixin, db.Model):
     )
     verified_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    business_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    business_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     shift: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
 
     room = relationship("Room", foreign_keys=[room_id])
@@ -701,8 +701,8 @@ class Reservation(AuditMixin, db.Model):
     )
     current_status: Mapped[str] = mapped_column(sa.String(30), nullable=False)
     source_channel: Mapped[str] = mapped_column(sa.String(80), nullable=False, default="direct")
-    check_in_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
-    check_out_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    check_in_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    check_out_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     adults: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     children: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     extra_guests: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
@@ -889,8 +889,8 @@ class ReservationHold(db.Model):
         UUIDType, ForeignKey("rooms.id", ondelete="SET NULL"), nullable=True
     )
     guest_email: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
-    check_in_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
-    check_out_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    check_in_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    check_out_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     adults: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     children: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     extra_guests: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
@@ -1090,7 +1090,7 @@ class InventoryDay(AuditMixin, db.Model):
     room_type_id: Mapped[uuid.UUID] = mapped_column(
         UUIDType, ForeignKey("room_types.id", ondelete="RESTRICT"), nullable=False
     )
-    business_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    business_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     availability_status: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="available")
     housekeeping_status_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("housekeeping_statuses.id", ondelete="SET NULL"), nullable=True
@@ -1224,7 +1224,7 @@ class FolioCharge(db.Model):
     line_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False)
     tax_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False, default=0)
     total_amount: Mapped[float] = mapped_column(sa.Numeric(10, 2), nullable=False)
-    service_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    service_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     posted_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
     posted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -1462,8 +1462,8 @@ class InventoryOverride(AuditMixin, db.Model):
     room_type_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("room_types.id", ondelete="SET NULL"), nullable=True
     )
-    start_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
-    end_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    start_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     reason: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
@@ -1502,8 +1502,8 @@ class BlackoutPeriod(AuditMixin, db.Model):
 
     name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     blackout_type: Mapped[str] = mapped_column(sa.String(30), nullable=False, default="closed_to_booking")
-    start_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
-    end_date: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    start_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     reason: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
 
@@ -1752,8 +1752,8 @@ class ExternalCalendarBlock(AuditMixin, db.Model):
     )
     external_uid: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     summary: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
-    starts_on: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
-    ends_on: Mapped[datetime] = mapped_column(sa.Date, nullable=False)
+    starts_on: Mapped[date] = mapped_column(sa.Date, nullable=False)
+    ends_on: Mapped[date] = mapped_column(sa.Date, nullable=False)
     event_created_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     event_updated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     raw_status: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)

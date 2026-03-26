@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..branding import branding_settings_context
-from ..constants import BOOKING_LANGUAGES, BOOKING_SOURCE_CHANNELS
+from ..constants import BOOKING_SOURCE_CHANNELS
 from ..extensions import db
 from ..i18n import normalize_language, t
 from ..models import (

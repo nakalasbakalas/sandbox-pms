@@ -15,7 +15,7 @@ from flask import g
 from ..audit import write_audit_log
 from ..activity import write_activity_log
 from ..extensions import db
-from ..models import Property, utc_now
+from ..models import Property
 
 
 # ---------------------------------------------------------------------------

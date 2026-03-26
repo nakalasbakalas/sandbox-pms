@@ -63,6 +63,7 @@ def test_public_payment_urls_use_booking_host_even_from_staff_request_context(ap
 
         assert entry_url.startswith("https://book.example.com/payments/request/")
         assert return_url.startswith("https://book.example.com/payments/return/")
+        assert payment_request.payment_url is not None
         assert "https%3A%2F%2Fbook.example.com%2Fpayments%2Frequest%2F" in payment_request.payment_url
 
 

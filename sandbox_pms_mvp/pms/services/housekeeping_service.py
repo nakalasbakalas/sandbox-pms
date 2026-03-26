@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
@@ -21,7 +21,6 @@ from ..models import (
     Room,
     RoomNote,
     RoomStatusHistory,
-    RoomType,
     User,
     utc_now,
 )

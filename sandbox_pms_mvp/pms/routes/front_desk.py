@@ -693,7 +693,7 @@ def _inventory_override_snapshot_for_audit(override_id: UUID) -> dict | None:
 @front_desk_bp.route("/staff/front-desk")
 def staff_front_desk():
     require_permission("reservation.view")
-    target_date = parse_request_date_arg("date", default=date.today()) or date.today()
+    target_date = parse_request_date_arg("date", default=date.today())
     filters = FrontDeskFilters(
         business_date=target_date,
         mode=request.args.get("mode", "arrivals"),

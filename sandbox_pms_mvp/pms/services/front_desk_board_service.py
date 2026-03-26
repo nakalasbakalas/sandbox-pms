@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
 from ..extensions import db
-from ..models import ExternalCalendarBlock, FolioCharge, Guest, GuestLoyalty, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, FolioCharge, Guest, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {

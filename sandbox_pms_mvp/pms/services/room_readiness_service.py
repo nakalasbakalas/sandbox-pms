@@ -21,7 +21,6 @@ from ..models import (
     InventoryDay,
     Reservation,
     Room,
-    RoomType,
 )
 
 
