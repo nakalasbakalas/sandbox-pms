@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from werkzeug.security import generate_password_hash
 
 from pms.constants import EXTRA_CHARGE_CATEGORIES, PAYMENT_STATUSES
