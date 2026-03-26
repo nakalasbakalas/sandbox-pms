@@ -394,8 +394,7 @@ def folio_summary(reservation: Reservation | uuid.UUID) -> dict:
 
     # Derive payment_status — kept separate from reservation lifecycle
     waiver_exists = any(
-        line.charge_type == "payment"
-        and (line.metadata_json or {}).get("method") == "complimentary"
+        line.charge_code == "PMT-COMP"
         for line in lines
     )
     if waiver_exists and balance_due == Decimal("0.00"):
