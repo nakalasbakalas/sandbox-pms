@@ -184,6 +184,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     from .routes.admin import admin_bp
     from .routes.public import public_bp
     from .routes.coupon_studio import coupon_studio_bp
+    from .routes.cafe import cafe_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(provider_bp)
     app.register_blueprint(housekeeping_bp)
@@ -195,6 +196,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(public_bp)
     app.register_blueprint(coupon_studio_bp)
+    app.register_blueprint(cafe_bp)
 
     with app.app_context():
         if app.config["AUTO_BOOTSTRAP_SCHEMA"] and app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):

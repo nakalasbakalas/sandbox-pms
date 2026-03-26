@@ -14,6 +14,13 @@ from .constants import (
     BOOKING_LANGUAGES,
     BOOKING_EXTRA_PRICING_MODES,
     BOOKING_SOURCE_CHANNELS,
+    CAFE_ORDER_STATUSES,
+    CAFE_ORDER_TYPES,
+    CAFE_PAYMENT_METHODS,
+    CAFE_PAYMENT_STATUSES,
+    CAFE_PREP_STATUSES,
+    CAFE_PREP_STATIONS,
+    CAFE_SHIFT_STATUSES,
     CASHIER_DOCUMENT_STATUSES,
     CASHIER_DOCUMENT_TYPES,
     CALENDAR_FEED_SCOPE_TYPES,
@@ -2191,6 +2198,262 @@ class GuestSurvey(AuditMixin, db.Model):
     )
 
 
+# ---------------------------------------------------------------------------
+# Café POS models
+# ---------------------------------------------------------------------------
+
+class CafeCategory(AuditMixin, db.Model):
+    __tablename__ = "cafe_categories"
+
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    items = relationship("CafeItem", back_populates="category", lazy="select")
+
+
+class CafeItem(AuditMixin, db.Model):
+    __tablename__ = "cafe_items"
+
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_categories.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    price: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    is_available: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    prep_station: Mapped[str] = mapped_column(
+        sa.String(40), nullable=False, default="counter",
+    )
+    stock_quantity: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    low_stock_threshold: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+
+    category = relationship("CafeCategory", back_populates="items")
+    modifier_groups = relationship(
+        "CafeModifierGroup",
+        secondary="cafe_item_modifier_groups",
+        back_populates="items",
+        lazy="select",
+    )
+
+    __table_args__ = (
+        Index("ix_cafe_items_category_id", "category_id"),
+        CheckConstraint(
+            f"prep_station IN ({', '.join(repr(v) for v in CAFE_PREP_STATIONS)})",
+            name="ck_cafe_items_prep_station",
+        ),
+    )
+
+
+class CafeModifierGroup(AuditMixin, db.Model):
+    __tablename__ = "cafe_modifier_groups"
+
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    is_required: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    max_selections: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+
+    modifiers = relationship("CafeModifier", back_populates="group", lazy="select", order_by="CafeModifier.sort_order")
+    items = relationship(
+        "CafeItem",
+        secondary="cafe_item_modifier_groups",
+        back_populates="modifier_groups",
+        lazy="select",
+    )
+
+
+class CafeItemModifierGroup(db.Model):
+    __tablename__ = "cafe_item_modifier_groups"
+
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    modifier_group_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_modifier_groups.id", ondelete="CASCADE"), primary_key=True
+    )
+
+
+class CafeModifier(AuditMixin, db.Model):
+    __tablename__ = "cafe_modifiers"
+
+    group_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_modifier_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    price_delta: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    sort_order: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+
+    group = relationship("CafeModifierGroup", back_populates="modifiers")
+
+    __table_args__ = (
+        Index("ix_cafe_modifiers_group_id", "group_id"),
+    )
+
+
+class CafeOrder(AuditMixin, db.Model):
+    __tablename__ = "cafe_orders"
+
+    order_number: Mapped[str] = mapped_column(sa.String(40), nullable=False, unique=True)
+    status: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="draft")
+    order_type: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="dine_in")
+    customer_name: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
+    table_label: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+    subtotal: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    discount_total: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    discount_note: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    grand_total: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    payment_status: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="unpaid")
+    payment_method: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+    shift_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("cafe_shifts.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    cancelled_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    cancel_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
+    items = relationship("CafeOrderItem", back_populates="order", lazy="select", cascade="all, delete-orphan")
+    payments = relationship("CafePayment", back_populates="order", lazy="select", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_cafe_orders_status", "status"),
+        Index("ix_cafe_orders_created_at", "created_at"),
+        Index("ix_cafe_orders_shift_id", "shift_id"),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in CAFE_ORDER_STATUSES)})",
+            name="ck_cafe_orders_status",
+        ),
+        CheckConstraint(
+            f"order_type IN ({', '.join(repr(v) for v in CAFE_ORDER_TYPES)})",
+            name="ck_cafe_orders_order_type",
+        ),
+    )
+
+
+class CafeOrderItem(AuditMixin, db.Model):
+    __tablename__ = "cafe_order_items"
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("cafe_items.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(sa.String(200), nullable=False)
+    unit_price: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    quantity: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    line_total: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    prep_station: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="counter")
+    prep_status: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="pending")
+
+    order = relationship("CafeOrder", back_populates="items")
+    modifiers = relationship("CafeOrderItemModifier", back_populates="order_item", lazy="select", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_cafe_order_items_order_id", "order_id"),
+        Index("ix_cafe_order_items_prep_status", "prep_status"),
+        CheckConstraint(
+            f"prep_status IN ({', '.join(repr(v) for v in CAFE_PREP_STATUSES)})",
+            name="ck_cafe_order_items_prep_status",
+        ),
+    )
+
+
+class CafeOrderItemModifier(db.Model):
+    __tablename__ = "cafe_order_item_modifiers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    order_item_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_order_items.id", ondelete="CASCADE"), nullable=False
+    )
+    modifier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("cafe_modifiers.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    price_delta: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+
+    order_item = relationship("CafeOrderItem", back_populates="modifiers")
+
+    __table_args__ = (
+        Index("ix_cafe_order_item_modifiers_order_item_id", "order_item_id"),
+    )
+
+
+class CafePayment(AuditMixin, db.Model):
+    __tablename__ = "cafe_payments"
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("cafe_orders.id", ondelete="CASCADE"), nullable=False
+    )
+    method: Mapped[str] = mapped_column(sa.String(40), nullable=False)
+    amount: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    amount_received: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    change_given: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    reference: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    is_refund: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False)
+    refund_reason: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+
+    order = relationship("CafeOrder", back_populates="payments")
+
+    __table_args__ = (
+        Index("ix_cafe_payments_order_id", "order_id"),
+        CheckConstraint(
+            f"method IN ({', '.join(repr(v) for v in CAFE_PAYMENT_METHODS)})",
+            name="ck_cafe_payments_method",
+        ),
+    )
+
+
+class CafeShift(AuditMixin, db.Model):
+    __tablename__ = "cafe_shifts"
+
+    status: Mapped[str] = mapped_column(sa.String(40), nullable=False, default="open")
+    opened_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    closed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    opening_cash: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    expected_cash: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    actual_cash: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    variance: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    closed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    notes: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
+
+    __table_args__ = (
+        Index("ix_cafe_shifts_status", "status"),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in CAFE_SHIFT_STATUSES)})",
+            name="ck_cafe_shifts_status",
+        ),
+    )
+
+
+class CafeAuditLog(db.Model):
+    __tablename__ = "cafe_audit_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUIDType, primary_key=True, default=uuid.uuid4)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    entity_type: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    entity_id: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+
+    __table_args__ = (
+        Index("ix_cafe_audit_logs_created_at", "created_at"),
+        Index("ix_cafe_audit_logs_entity_type", "entity_type"),
+    )
+
+
 def _timestamp_before_update(mapper, connection, target) -> None:  # noqa: ARG001
     target.updated_at = utc_now()
 
@@ -2236,6 +2499,14 @@ for model in (
     PendingAutomationEvent,
     HousekeepingTask,
     GuestSurvey,
+    CafeCategory,
+    CafeItem,
+    CafeModifierGroup,
+    CafeModifier,
+    CafeOrder,
+    CafeOrderItem,
+    CafePayment,
+    CafeShift,
 ):
     event.listen(model, "before_update", _timestamp_before_update)
 

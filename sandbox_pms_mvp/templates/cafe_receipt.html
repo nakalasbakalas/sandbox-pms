@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Receipt — #{{ order.order_number }}{% endblock %}
+{% block content %}
+<style>
+  @media print {
+    header, footer, nav, .no-print, .card-head .pill { display: none !important; }
+    .card { box-shadow: none !important; border: none !important; }
+    body { font-size: 12px; }
+  }
+  .receipt-wrap { max-width: 360px; margin: 0 auto; }
+</style>
+
+<div class="receipt-wrap">
+  <section class="card" style="text-align:center;padding:12px;">
+    <h2>Sandbox Hotel — Café</h2>
+    <p class="muted">Order #{{ order.order_number }}</p>
+    <p class="muted">{{ order.created_at.strftime('%d %b %Y  %H:%M') }}</p>
+    <p class="pill subtle">{{ order.order_type | replace('_',' ') | title }}</p>
+    {% if order.customer_name %}<p>{{ order.customer_name }}</p>{% endif %}
+    {% if order.table_label %}<p class="muted">Table: {{ order.table_label }}</p>{% endif %}
+  </section>
+
+  <section class="card subsection" style="padding:8px;">
+    {% for oi in order.items %}
+    <div class="split-row" style="padding:3px 0;border-bottom:1px solid var(--border);">
+      <span>{{ oi.name }} × {{ oi.quantity }}
+        {% for m in oi.modifiers %}
+          <br><small class="muted">+ {{ m.name }}{% if m.price_delta %} ฿{{ m.price_delta }}{% endif %}</small>
+        {% endfor %}
+      </span>
+      <span>฿{{ oi.line_total }}</span>
+    </div>
+    {% endfor %}
+
+    <div class="split-row" style="padding:4px 0;"><span>Subtotal</span><span>฿{{ order.subtotal }}</span></div>
+    {% if order.discount_total %}
+    <div class="split-row muted" style="padding:2px 0;"><span>Discount</span><span>−฿{{ order.discount_total }}</span></div>
+    {% endif %}
+    <div class="split-row" style="padding:6px 0;font-weight:700;font-size:1.1rem;border-top:2px solid var(--fg);">
+      <span>Total</span><span>฿{{ order.grand_total }}</span>
+    </div>
+
+    {% if order.payments %}
+    {% for p in order.payments %}
+    <p class="muted" style="margin-top:4px;">Paid: {{ p.method | replace('_',' ') | title }}{% if p.reference %} — {{ p.reference }}{% endif %}</p>
+    {% endfor %}
+    {% endif %}
+  </section>
+
+  <div class="actions no-print" style="margin-top:12px;gap:6px;justify-content:center;">
+    <button class="button" onclick="window.print()">Print</button>
+    <a class="button secondary" href="{{ url_for('cafe.cafe_pos') }}">New Order</a>
+  </div>
+</div>
+{% endblock %}

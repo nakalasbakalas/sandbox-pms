@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Café Orders{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<!-- Filters -->
+<section class="card subsection">
+  <form method="get" action="{{ url_for('cafe.cafe_orders') }}" class="toolbar" style="padding:8px;gap:6px;flex-wrap:wrap;">
+    <label class="eyebrow">From <input type="date" name="from_date" value="{{ filter_from_date }}"></label>
+    <label class="eyebrow">To <input type="date" name="to_date" value="{{ filter_to_date }}"></label>
+    <label class="eyebrow">Status
+      <select name="status">
+        <option value="">All</option>
+        {% for s in ['draft','open','sent','paid','cancelled','completed','refunded'] %}
+        <option value="{{ s }}"{% if filter_status == s %} selected{% endif %}>{{ s | title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="eyebrow">Type
+      <select name="order_type">
+        <option value="">All</option>
+        {% for t in ['dine_in','takeaway','delivery'] %}
+        <option value="{{ t }}"{% if filter_order_type == t %} selected{% endif %}>{{ t | replace('_',' ') | title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="eyebrow">Payment
+      <select name="payment_method">
+        <option value="">All</option>
+        {% for m in ['cash','card','qr_transfer'] %}
+        <option value="{{ m }}"{% if filter_payment_method == m %} selected{% endif %}>{{ m | replace('_',' ') | title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="button tiny" type="submit">Filter</button>
+  </form>
+</section>
+
+<!-- Orders table -->
+<section class="card subsection">
+  <div class="card-head"><h3>Orders</h3></div>
+  {% if orders %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr><th>#</th><th>Status</th><th>Type</th><th>Customer</th><th>Total</th><th>Payment</th><th>Time</th></tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+        <tr style="cursor:pointer;" onclick="location.href='{{ url_for('cafe.cafe_order_detail', order_id=o.id) }}'">
+          <td><a href="{{ url_for('cafe.cafe_order_detail', order_id=o.id) }}">{{ o.order_number }}</a></td>
+          <td><span class="status {{ o.status }}">{{ o.status | replace('_',' ') | title }}</span></td>
+          <td>{{ o.order_type | replace('_',' ') | title }}</td>
+          <td>{{ o.customer_name or '—' }}</td>
+          <td>฿{{ o.grand_total }}</td>
+          <td>
+            <span class="status {{ o.payment_status }}">{{ o.payment_status | title }}</span>
+            {% if o.payment_method %}<small class="muted">{{ o.payment_method | replace('_',' ') }}</small>{% endif %}
+          </td>
+          <td class="muted">{{ o.created_at.strftime('%H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:12px;">No orders found for the selected filters.</p>
+  {% endif %}
+</section>
+{% endblock %}

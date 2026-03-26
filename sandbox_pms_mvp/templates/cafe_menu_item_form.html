@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if item else 'New' }} Item{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<section class="card form-card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Menu</p>
+      <h2>{{ 'Edit' if item else 'New' }} Item</h2>
+    </div>
+  </div>
+
+  <form method="post" class="stack-form" style="padding:8px;">
+    {{ csrf_input() }}
+
+    <label>Name
+      <input type="text" name="name" required value="{{ item.name if item else '' }}" style="width:100%;padding:6px;">
+    </label>
+
+    <label>Category
+      <select name="category_id" required style="width:100%;padding:6px;">
+        {% for cat in categories %}
+        <option value="{{ cat.id }}"{% if item and item.category_id == cat.id %} selected{% endif %}>{{ cat.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <div class="grid two" style="gap:6px;">
+      <label>Price (฿)
+        <input type="number" name="price" min="0" required value="{{ item.price if item else 0 }}" style="width:100%;padding:6px;">
+      </label>
+      <label>Sort Order
+        <input type="number" name="sort_order" value="{{ item.sort_order if item else 0 }}" style="width:100%;padding:6px;">
+      </label>
+    </div>
+
+    <label>Description
+      <input type="text" name="description" value="{{ item.description if item and item.description else '' }}" style="width:100%;padding:6px;">
+    </label>
+
+    <label>Prep Station
+      <select name="prep_station" style="width:100%;padding:6px;">
+        {% for st in ['bar','kitchen','counter'] %}
+        <option value="{{ st }}"{% if item and item.prep_station == st %} selected{% endif %}>{{ st | title }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <div class="grid two" style="gap:6px;">
+      <label>Stock Quantity
+        <input type="number" name="stock_quantity" min="0" value="{{ item.stock_quantity if item and item.stock_quantity is not none else '' }}" style="width:100%;padding:6px;">
+      </label>
+      <label>Low Stock Threshold
+        <input type="number" name="low_stock_threshold" min="0" value="{{ item.low_stock_threshold if item and item.low_stock_threshold is not none else '' }}" style="width:100%;padding:6px;">
+      </label>
+    </div>
+
+    <label>
+      <input type="checkbox" name="is_available"{% if not item or item.is_available %} checked{% endif %}> Available
+    </label>
+
+    {% if modifier_groups %}
+    <fieldset style="border:1px solid var(--border);border-radius:4px;padding:8px;">
+      <legend class="eyebrow">Modifier Groups</legend>
+      {% for mg in modifier_groups %}
+      <label style="display:block;padding:2px 0;">
+        <input type="checkbox" name="modifier_group_ids" value="{{ mg.id }}"
+               {% if item and mg in item.modifier_groups %}checked{% endif %}>
+        {{ mg.name }}
+      </label>
+      {% endfor %}
+    </fieldset>
+    {% endif %}
+
+    <div class="actions" style="gap:6px;">
+      <button class="button" type="submit">Save</button>
+      <a class="button secondary" href="{{ url_for('cafe.cafe_menu') }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
