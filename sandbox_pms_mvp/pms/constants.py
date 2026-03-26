@@ -106,6 +106,7 @@ FOLIO_CHARGE_CODES = [
     "PMT-QR",
     "PMT-CARD",
     "PMT-BANK",
+    "PMT-COMP",
     "EXG",
     "EXB",
     "ECI",
@@ -114,6 +115,10 @@ FOLIO_CHARGE_CODES = [
     "SNK",
     "TEL",
     "XTR",
+    "FNB",
+    "MINI",
+    "TRNS",
+    "DMG",
     "ADJ_POS",
     "ADJ_NEG",
     "CORR",
@@ -131,6 +136,33 @@ FOLIO_CHARGE_TYPES = [
     "fee",
     "refund",
     "correction",
+]
+
+# ---------------------------------------------------------------------------
+# Payment status — kept separate from reservation lifecycle status
+# ---------------------------------------------------------------------------
+PAYMENT_STATUSES = [
+    "unpaid",
+    "partially_paid",
+    "paid",
+    "waived",
+    "refunded",
+]
+
+# ---------------------------------------------------------------------------
+# Extra charge categories — common hotel extras for front-desk posting
+# ---------------------------------------------------------------------------
+EXTRA_CHARGE_CATEGORIES: list[dict[str, str]] = [
+    {"code": "MINI", "label": "Minibar", "charge_type": "manual_charge"},
+    {"code": "LND", "label": "Laundry", "charge_type": "manual_charge"},
+    {"code": "FNB", "label": "Food & beverage", "charge_type": "manual_charge"},
+    {"code": "LCO", "label": "Late checkout", "charge_type": "fee"},
+    {"code": "EXB", "label": "Extra bed", "charge_type": "fee"},
+    {"code": "TRNS", "label": "Transport / transfer", "charge_type": "manual_charge"},
+    {"code": "DMG", "label": "Damage / cleaning", "charge_type": "manual_charge"},
+    {"code": "SNK", "label": "Snacks / pantry", "charge_type": "manual_charge"},
+    {"code": "TEL", "label": "Telephone", "charge_type": "manual_charge"},
+    {"code": "XTR", "label": "Miscellaneous", "charge_type": "manual_charge"},
 ]
 
 CASHIER_DOCUMENT_TYPES = ["folio", "invoice", "receipt"]

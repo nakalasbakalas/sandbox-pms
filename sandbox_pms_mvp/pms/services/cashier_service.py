@@ -32,6 +32,7 @@ PAYMENT_METHOD_CODES = {
     "qr": "PMT-QR",
     "card": "PMT-CARD",
     "bank": "PMT-BANK",
+    "complimentary": "PMT-COMP",
     "front_desk": "PMT-CASH",
 }
 
@@ -390,6 +391,24 @@ def folio_summary(reservation: Reservation | uuid.UUID) -> dict:
         settlement_state = "unpaid"
     else:
         settlement_state = "partially_paid"
+
+    # Derive payment_status — kept separate from reservation lifecycle
+    waiver_exists = any(
+        line.charge_type == "payment"
+        and (line.metadata_json or {}).get("method") == "complimentary"
+        for line in lines
+    )
+    if waiver_exists and balance_due == Decimal("0.00"):
+        payment_status = "waived"
+    elif refund_posted_total > Decimal("0.00") and balance_due == Decimal("0.00"):
+        payment_status = "refunded"
+    elif balance_due == Decimal("0.00") and credits_total > Decimal("0.00"):
+        payment_status = "paid"
+    elif credits_total > Decimal("0.00"):
+        payment_status = "partially_paid"
+    else:
+        payment_status = "unpaid"
+
     if reservation.deposit_required_amount == Decimal("0.00"):
         deposit_state = "not_required"
     elif deposit_received_total == Decimal("0.00"):
@@ -414,6 +433,7 @@ def folio_summary(reservation: Reservation | uuid.UUID) -> dict:
         "net_balance": net_total.quantize(Decimal("0.01")),
         "settlement_state": settlement_state,
         "payment_state": settlement_state,
+        "payment_status": payment_status,
         "deposit_state": deposit_state,
         "latest_payment_request_status": latest_payment_request.status if latest_payment_request else None,
         "pending_refund": pending_refund_exists is not None,
@@ -544,6 +564,83 @@ def post_manual_adjustment(
         metadata={"description": description},
     )
     db.session.commit()
+    return line
+
+
+@dataclass
+class ExtraChargePayload:
+    """Payload for posting a categorised hotel extra charge."""
+
+    charge_code: str
+    amount: Decimal
+    description: str
+    note: str = ""
+    service_date: date | None = None
+    quantity: int = 1
+
+
+def post_extra_charge(
+    reservation_id: uuid.UUID,
+    payload: ExtraChargePayload,
+    *,
+    actor_user_id: uuid.UUID,
+    commit: bool = True,
+) -> FolioCharge:
+    """Post a categorised extra charge (minibar, laundry, F&B, etc.).
+
+    Accepts any charge_code from ``EXTRA_CHARGE_CATEGORIES`` or the broader
+    ``FOLIO_CHARGE_CODES`` list.  The charge is always a debit (positive amount).
+    """
+    from ..constants import EXTRA_CHARGE_CATEGORIES
+
+    reservation = _load_reservation_for_update(reservation_id)
+    if not reservation:
+        raise ValueError("Reservation not found.")
+    amount = money(payload.amount)
+    if amount <= Decimal("0.00"):
+        raise ValueError("Extra charge amount must be greater than zero.")
+    description = (payload.description or "").strip()
+    if not description:
+        raise ValueError("Description is required for extra charges.")
+
+    known_codes = {cat["code"] for cat in EXTRA_CHARGE_CATEGORIES}
+    charge_code = payload.charge_code.upper() if payload.charge_code else "XTR"
+    if charge_code not in known_codes:
+        charge_code = "XTR"
+
+    # Determine charge_type from category definition
+    charge_type = "manual_charge"
+    for cat in EXTRA_CHARGE_CATEGORIES:
+        if cat["code"] == charge_code:
+            charge_type = cat["charge_type"]
+            break
+
+    qty = max(payload.quantity, 1)
+    unit_amount = amount
+    gross_amount = unit_amount * qty
+
+    line = _create_folio_line(
+        reservation=reservation,
+        charge_code=charge_code,
+        charge_type=charge_type,
+        description=description,
+        gross_amount=gross_amount,
+        service_date=payload.service_date or date.today(),
+        actor_user_id=actor_user_id,
+        metadata={"note": payload.note, "source": "extra_charge", "quantity": qty},
+    )
+    _sync_reservation_payment_fields(reservation)
+    _log_cashier_event(
+        reservation_id=reservation.id,
+        actor_user_id=actor_user_id,
+        event_type="cashier.extra_charge_posted",
+        amount=money(line.total_amount),
+        note=payload.note or description,
+        line_id=line.id,
+        metadata={"charge_code": charge_code, "description": description, "quantity": qty},
+    )
+    if commit:
+        db.session.commit()
     return line
 
 

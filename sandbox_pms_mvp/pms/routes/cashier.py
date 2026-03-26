@@ -8,6 +8,7 @@ from uuid import UUID
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, url_for
 
+from ..constants import EXTRA_CHARGE_CATEGORIES
 from ..extensions import db
 from ..helpers import (
     can,
@@ -22,6 +23,7 @@ from ..models import PaymentRequest, Reservation
 from ..security import public_error_message
 from ..services.cashier_service import (
     DocumentIssuePayload,
+    ExtraChargePayload,
     ManualAdjustmentPayload,
     PaymentPostingPayload,
     PosChargePayload,
@@ -32,6 +34,7 @@ from ..services.cashier_service import (
     ensure_room_charges_posted,
     get_cashier_detail,
     issue_cashier_document,
+    post_extra_charge,
     post_manual_adjustment,
     post_pos_charge,
     record_payment,
@@ -74,6 +77,7 @@ def staff_cashier_detail(reservation_id):
         can_refund=can("payment.refund"),
         can_payment_request=can("payment_request.create"),
         payments_enabled=payments_enabled(),
+        extra_charge_categories=EXTRA_CHARGE_CATEGORIES,
     )
 
 
@@ -115,6 +119,28 @@ def staff_cashier_adjustment(reservation_id):
             actor_user_id=user.id,
         )
         flash("Folio adjustment posted.", "success")
+    except Exception as exc:  # noqa: BLE001
+        flash(public_error_message(exc), "error")
+    return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
+
+
+@cashier_bp.route("/staff/cashier/<uuid:reservation_id>/extra-charges", methods=["POST"])
+def staff_cashier_extra_charge(reservation_id):
+    user = require_permission("folio.charge_add")
+    try:
+        post_extra_charge(
+            reservation_id,
+            ExtraChargePayload(
+                charge_code=request.form.get("charge_code", "XTR"),
+                amount=Decimal(request.form.get("amount") or "0.00"),
+                description=request.form.get("description", ""),
+                note=request.form.get("note", ""),
+                service_date=date.fromisoformat(request.form["service_date"]) if request.form.get("service_date") else None,
+                quantity=int(request.form.get("quantity") or "1"),
+            ),
+            actor_user_id=user.id,
+        )
+        flash("Extra charge posted to folio.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
     return redirect(url_for("cashier.staff_cashier_detail", reservation_id=reservation_id, back=request.form.get("back_url")))
