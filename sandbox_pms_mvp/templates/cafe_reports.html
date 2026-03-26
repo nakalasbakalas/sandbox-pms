@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Café Reports{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<!-- Date picker -->
+<section class="card subsection">
+  <form method="get" action="{{ url_for('cafe.cafe_reports') }}" class="toolbar" style="padding:8px;gap:6px;">
+    <label class="eyebrow">Date <input type="date" name="date" value="{{ report.date }}"></label>
+    <button class="button tiny" type="submit">View</button>
+  </form>
+</section>
+
+<!-- Summary cards -->
+<div class="grid three gap-lg" style="margin-top:8px;">
+  <div class="metric-card">
+    <p class="eyebrow">Total Sales</p>
+    <p style="font-size:1.6rem;font-weight:700;">฿{{ report.total_sales }}</p>
+    <p class="muted">{{ report.paid_orders }} paid orders</p>
+  </div>
+  <div class="metric-card">
+    <p class="eyebrow">Order Count</p>
+    <p style="font-size:1.6rem;font-weight:700;">{{ report.total_orders }}</p>
+  </div>
+  <div class="metric-card">
+    <p class="eyebrow">Avg Order Value</p>
+    <p style="font-size:1.6rem;font-weight:700;">฿{{ (report.total_sales // report.paid_orders) if report.paid_orders else 0 }}</p>
+  </div>
+</div>
+
+<div class="grid two gap-lg" style="margin-top:8px;">
+  <!-- Sales by payment method -->
+  <section class="card subsection">
+    <div class="card-head"><h3>Sales by Payment Method</h3></div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead><tr><th>Method</th><th>Amount</th></tr></thead>
+        <tbody>
+          {% for method, amount in report.sales_by_method.items() %}
+          <tr><td>{{ method | replace('_',' ') | title }}</td><td>฿{{ amount }}</td></tr>
+          {% else %}
+          <tr><td colspan="2" class="muted">No data</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Sales by order type -->
+  <section class="card subsection">
+    <div class="card-head"><h3>Sales by Order Type</h3></div>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead><tr><th>Type</th><th>Amount</th></tr></thead>
+        <tbody>
+          {% for otype, amount in report.sales_by_type.items() %}
+          <tr><td>{{ otype | replace('_',' ') | title }}</td><td>฿{{ amount }}</td></tr>
+          {% else %}
+          <tr><td colspan="2" class="muted">No data</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<!-- Top selling items -->
+<section class="card subsection">
+  <div class="card-head"><h3>Top Selling Items</h3></div>
+  {% if report.top_items %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Item</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+      <tbody>
+        {% for ti in report.top_items %}
+        <tr><td>{{ ti.name }}</td><td>{{ ti.quantity }}</td><td>฿{{ ti.revenue }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:12px;">No items sold.</p>
+  {% endif %}
+</section>
+
+<!-- Discounts, refunds, voids -->
+<div class="grid three gap-lg" style="margin-top:8px;">
+  <div class="metric-card">
+    <p class="eyebrow">Discounts</p>
+    <p style="font-size:1.3rem;font-weight:600;">฿{{ report.discount_total }}</p>
+  </div>
+  <div class="metric-card">
+    <p class="eyebrow">Refunds</p>
+    <p style="font-size:1.3rem;font-weight:600;">฿{{ report.refund_total }}</p>
+    <p class="muted">{{ report.refund_count }} orders</p>
+  </div>
+  <div class="metric-card">
+    <p class="eyebrow">Voids / Cancelled</p>
+    <p style="font-size:1.3rem;font-weight:600;">{{ report.void_count }}</p>
+  </div>
+</div>
+{% endblock %}

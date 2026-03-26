@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Café Stock{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<section class="card subsection">
+  <div class="card-head"><h3>Stock Management</h3></div>
+  {% if items %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Item</th><th>Category</th><th>Stock</th><th>Low Threshold</th><th>Available</th><th></th></tr></thead>
+      <tbody>
+        {% for item in items %}
+        <tr style="{% if item.stock_quantity is not none and item.stock_quantity == 0 %}background:var(--danger-bg,#fff0f0);{% elif item.stock_quantity is not none and item.low_stock_threshold is not none and item.stock_quantity <= item.low_stock_threshold %}background:var(--warning-bg,#fff8e0);{% endif %}">
+          <td>{{ item.name }}</td>
+          <td class="muted">{{ item.category.name if item.category else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('cafe.cafe_stock_update', item_id=item.id) }}" class="inline-form" style="display:flex;gap:4px;align-items:center;">
+              {{ csrf_input() }}
+              <input type="number" name="stock_quantity" value="{{ item.stock_quantity if item.stock_quantity is not none else '' }}"
+                     min="0" style="width:70px;padding:4px;" placeholder="—">
+              <input type="hidden" name="low_stock_threshold" value="{{ item.low_stock_threshold if item.low_stock_threshold is not none else '' }}">
+              <button class="button tiny" type="submit">Save</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('cafe.cafe_stock_update', item_id=item.id) }}" class="inline-form" style="display:flex;gap:4px;align-items:center;">
+              {{ csrf_input() }}
+              <input type="hidden" name="stock_quantity" value="{{ item.stock_quantity if item.stock_quantity is not none else '' }}">
+              <input type="number" name="low_stock_threshold" value="{{ item.low_stock_threshold if item.low_stock_threshold is not none else '' }}"
+                     min="0" style="width:70px;padding:4px;" placeholder="—">
+              <button class="button tiny" type="submit">Save</button>
+            </form>
+          </td>
+          <td>
+            {% if not item.is_available %}<span class="status cancelled">No</span>
+            {% elif item.stock_quantity is not none and item.stock_quantity == 0 %}<span class="status cancelled">Out of stock</span>
+            {% elif item.stock_quantity is not none and item.low_stock_threshold is not none and item.stock_quantity <= item.low_stock_threshold %}<span class="status pending">Low</span>
+            {% else %}<span class="status confirmed">OK</span>
+            {% endif %}
+          </td>
+          <td class="muted">{{ item.stock_quantity if item.stock_quantity is not none else '∞' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:12px;">No items to manage.</p>
+  {% endif %}
+</section>
+{% endblock %}

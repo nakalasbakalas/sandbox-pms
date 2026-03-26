@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Order {{ order.order_number }}{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Order</p>
+      <h2>#{{ order.order_number }}</h2>
+    </div>
+    <div>
+      <span class="status {{ order.status }}">{{ order.status | replace('_',' ') | title }}</span>
+      <span class="pill subtle">{{ order.order_type | replace('_',' ') | title }}</span>
+    </div>
+  </div>
+
+  <div class="grid two gap-lg" style="padding:8px;">
+    <div>
+      <p class="eyebrow">Customer</p>
+      <p>{{ order.customer_name or '—' }}</p>
+    </div>
+    <div>
+      <p class="eyebrow">Table</p>
+      <p>{{ order.table_label or '—' }}</p>
+    </div>
+  </div>
+</section>
+
+<!-- Items -->
+<section class="card subsection">
+  <div class="card-head"><h3>Items</h3></div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Line</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for oi in order.items %}
+        <tr>
+          <td>
+            {{ oi.name }}
+            {% for m in oi.modifiers %}
+              <br><small class="muted">+ {{ m.name }}{% if m.price_delta %} (฿{{ m.price_delta }}){% endif %}</small>
+            {% endfor %}
+          </td>
+          <td>{{ oi.quantity }}</td>
+          <td>฿{{ oi.unit_price }}</td>
+          <td>฿{{ oi.line_total }}</td>
+          <td class="muted">{{ oi.notes or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="padding:8px;text-align:right;">
+    <p>Subtotal: ฿{{ order.subtotal }}</p>
+    {% if order.discount_total %}
+    <p class="muted">Discount: −฿{{ order.discount_total }}{% if order.discount_note %} ({{ order.discount_note }}){% endif %}</p>
+    {% endif %}
+    <p style="font-weight:600;font-size:1.1rem;">Grand Total: ฿{{ order.grand_total }}</p>
+  </div>
+</section>
+
+<!-- Payments -->
+{% if order.payments %}
+<section class="card subsection">
+  <div class="card-head"><h3>Payments</h3></div>
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Method</th><th>Amount</th><th>Received</th><th>Change</th><th>Reference</th></tr></thead>
+      <tbody>
+        {% for p in order.payments %}
+        <tr{% if p.is_refund %} style="color:var(--danger);"{% endif %}>
+          <td>{{ p.method | replace('_',' ') | title }}{% if p.is_refund %} (Refund){% endif %}</td>
+          <td>฿{{ p.amount }}</td>
+          <td>฿{{ p.amount_received }}</td>
+          <td>฿{{ p.change_given }}</td>
+          <td class="muted">{{ p.reference or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<!-- Actions -->
+<section class="card subsection">
+  <div class="card-head"><h3>Actions</h3></div>
+  <div class="actions" style="padding:8px;gap:6px;flex-wrap:wrap;">
+    {% if order.status in ['draft','open'] %}
+    <form method="post" action="{{ url_for('cafe.cafe_order_send', order_id=order.id) }}" class="inline-form">
+      {{ csrf_input() }}
+      <button class="button" type="submit">Send to Prep</button>
+    </form>
+    {% endif %}
+
+    {% if order.status in ['open','sent'] %}
+    <a class="button" href="{{ url_for('cafe.cafe_order_pay', order_id=order.id) }}">Pay</a>
+    {% endif %}
+
+    {% if order.status == 'paid' %}
+    <form method="post" action="{{ url_for('cafe.cafe_order_complete', order_id=order.id) }}" class="inline-form">
+      {{ csrf_input() }}
+      <button class="button" type="submit">Complete</button>
+    </form>
+    {% endif %}
+
+    {% if order.status in ['paid','completed'] and can('cafe.refund.approve') %}
+    <form method="post" action="{{ url_for('cafe.cafe_order_refund', order_id=order.id) }}" class="inline-form"
+          onsubmit="return confirm('Refund this order?');">
+      {{ csrf_input() }}
+      <input type="hidden" name="reason" value="Staff refund">
+      <button class="button secondary" type="submit" style="color:var(--danger);">Refund</button>
+    </form>
+    {% endif %}
+
+    {% if order.status in ['draft','open','sent'] %}
+    <details style="width:100%;margin-top:8px;">
+      <summary class="button secondary" style="color:var(--danger);">Cancel Order…</summary>
+      <form method="post" action="{{ url_for('cafe.cafe_order_cancel', order_id=order.id) }}" class="stack-form" style="margin-top:6px;">
+        {{ csrf_input() }}
+        <label>Reason <input type="text" name="reason" placeholder="Cancellation reason" style="width:100%;padding:6px;"></label>
+        <button class="button" type="submit" style="background:var(--danger);">Confirm Cancel</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Discount -->
+{% if can('cafe.discount.approve') and order.status in ['draft','open','sent'] %}
+<section class="card subsection">
+  <div class="card-head"><h3>Apply Discount</h3></div>
+  <form method="post" action="{{ url_for('cafe.cafe_order_discount', order_id=order.id) }}" class="stack-form" style="padding:8px;">
+    {{ csrf_input() }}
+    <div class="grid two" style="gap:6px;">
+      <label>Amount (฿) <input type="number" name="discount_amount" min="0" required style="width:100%;padding:6px;"></label>
+      <label>Note <input type="text" name="discount_note" placeholder="Discount reason" style="width:100%;padding:6px;"></label>
+    </div>
+    <button class="button secondary" type="submit">Apply Discount</button>
+  </form>
+</section>
+{% endif %}
+
+<div style="margin-top:12px;">
+  <a class="button secondary" href="{{ url_for('cafe.cafe_orders') }}">← Back to Orders</a>
+</div>
+{% endblock %}

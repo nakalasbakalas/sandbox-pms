@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Payment — #{{ order.order_number }}{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Payment</p>
+      <h2>Order #{{ order.order_number }}</h2>
+    </div>
+    <span class="pill subtle">{{ order.order_type | replace('_',' ') | title }}</span>
+  </div>
+</section>
+
+<div class="grid two gap-lg">
+  <!-- Order summary -->
+  <section class="card subsection">
+    <div class="card-head"><h3>Order Summary</h3></div>
+    <div style="padding:8px;">
+      {% for oi in order.items %}
+      <div class="split-row" style="padding:3px 0;border-bottom:1px solid var(--border);">
+        <span>{{ oi.name }} × {{ oi.quantity }}</span>
+        <span>฿{{ oi.line_total }}</span>
+      </div>
+      {% endfor %}
+      {% if order.discount_total %}
+      <div class="split-row muted" style="padding:3px 0;">
+        <span>Discount</span>
+        <span>−฿{{ order.discount_total }}</span>
+      </div>
+      {% endif %}
+      <div class="split-row" style="padding:8px 0;font-weight:700;font-size:1.2rem;">
+        <span>Total</span>
+        <span>฿{{ order.grand_total }}</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Payment form -->
+  <section class="card subsection">
+    <div class="card-head"><h3>Payment Method</h3></div>
+    <form method="post" action="{{ url_for('cafe.cafe_order_pay', order_id=order.id) }}" class="stack-form" style="padding:8px;" id="pay-form">
+      {{ csrf_input() }}
+      <input type="hidden" name="amount" value="{{ order.grand_total }}">
+
+      <div class="grid three" style="gap:6px;margin-bottom:8px;" id="method-buttons">
+        <button type="button" class="button active" onclick="selectMethod('cash',this)">Cash</button>
+        <button type="button" class="button secondary" onclick="selectMethod('card',this)">Card</button>
+        <button type="button" class="button secondary" onclick="selectMethod('qr_transfer',this)">QR / Transfer</button>
+      </div>
+      <input type="hidden" name="payment_method" id="pay-method" value="cash">
+
+      <!-- Cash fields -->
+      <div id="cash-fields">
+        <label>Amount Received (฿)
+          <input type="number" name="amount_received" id="pay-received" min="{{ order.grand_total }}"
+                 value="{{ order.grand_total }}" style="width:100%;padding:6px;" oninput="calcChange()">
+        </label>
+        <div class="split-row" style="margin-top:6px;font-size:1.1rem;">
+          <span>Change</span>
+          <span id="pay-change">฿0</span>
+        </div>
+      </div>
+
+      <!-- QR reference field -->
+      <div id="qr-fields" style="display:none;">
+        <label>Reference / Transaction ID
+          <input type="text" name="reference" placeholder="Transfer reference" style="width:100%;padding:6px;">
+        </label>
+      </div>
+
+      <button class="button" type="submit" style="margin-top:12px;width:100%;min-height:48px;font-size:1.1rem;">Mark Paid</button>
+    </form>
+  </section>
+</div>
+
+<div style="margin-top:12px;">
+  <a class="button secondary" href="{{ url_for('cafe.cafe_order_detail', order_id=order.id) }}">← Back to Order</a>
+</div>
+
+{% block extra_scripts %}
+<script>
+var grandTotal = {{ order.grand_total }};
+function selectMethod(method, btn) {
+  document.getElementById('pay-method').value = method;
+  document.querySelectorAll('#method-buttons button').forEach(function(b){ b.className='button secondary'; });
+  btn.className = 'button active';
+  document.getElementById('cash-fields').style.display = method === 'cash' ? '' : 'none';
+  document.getElementById('qr-fields').style.display = method === 'qr_transfer' ? '' : 'none';
+}
+function calcChange() {
+  var received = parseInt(document.getElementById('pay-received').value) || 0;
+  var change = Math.max(0, received - grandTotal);
+  document.getElementById('pay-change').textContent = '฿' + change;
+}
+</script>
+{% endblock %}
+{% endblock %}
