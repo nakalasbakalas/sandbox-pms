@@ -274,12 +274,12 @@ def validate_csrf_request() -> None:
 # ---------------------------------------------------------------------------
 
 def is_staff_or_provider_endpoint(endpoint: str | None) -> bool:
-    """Return True if *endpoint* belongs to the staff or provider/integration surfaces."""
+    """Return True if *endpoint* belongs to the staff or provider/integration/café surfaces."""
     if not endpoint:
         return False
     # Strip blueprint prefix (e.g. "auth.staff_login" -> "staff_login")
     bare = endpoint.rsplit(".", 1)[-1] if "." in endpoint else endpoint
-    return bare.startswith(("staff_", "integration_", "provider_"))
+    return bare.startswith(("staff_", "integration_", "provider_", "cafe_"))
 
 
 # ---------------------------------------------------------------------------
