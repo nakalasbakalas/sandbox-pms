@@ -41,6 +41,8 @@ from ..models import (
     ExternalCalendarSource,
     InventoryDay,
     OtaChannel,
+    OtaRoomTypeMapping,
+    OtaSyncLog,
     Room,
     RoomType,
     utc_now,
@@ -590,16 +592,56 @@ def upsert_ota_channel(
 
 def test_ota_channel_connection(provider_key: str, *, actor_user_id: uuid.UUID | None = None) -> dict:
     """Test connectivity to an OTA channel. Returns dict with success and optional error."""
-    from datetime import datetime, timezone
-
+    started = utc_now()
     channel = get_ota_channel(provider_key)
     if not channel or not channel.api_key_encrypted:
+        write_sync_log(
+            provider_key=provider_key,
+            direction="outbound",
+            action="test_connection",
+            status="error",
+            error_summary="no credentials configured",
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
         return {"success": False, "error": "no credentials configured"}
-    channel.last_tested_at = datetime.now(timezone.utc)
-    channel.last_test_ok = True
-    channel.last_test_error = None
+
+    # Attempt real connection test via provider adapter
+    try:
+        provider = get_provider(provider_key)
+        ok = provider.test_connection()
+    except Exception as exc:
+        ok = False
+        channel.last_tested_at = utc_now()
+        channel.last_test_ok = False
+        channel.last_test_error = str(exc)[:500]
+        write_sync_log(
+            provider_key=provider_key,
+            direction="outbound",
+            action="test_connection",
+            status="error",
+            error_summary=str(exc)[:500],
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
+        return {"success": False, "error": str(exc)[:200]}
+
+    channel.last_tested_at = utc_now()
+    channel.last_test_ok = ok
+    channel.last_test_error = None if ok else "Connection test returned false"
+    write_sync_log(
+        provider_key=provider_key,
+        direction="outbound",
+        action="test_connection",
+        status="success" if ok else "error",
+        error_summary=None if ok else "Connection test returned false",
+        started_at=started,
+        actor_user_id=actor_user_id,
+    )
     db.session.commit()
-    return {"success": True}
+    return {"success": ok, "error": None if ok else "Connection test returned false"}
 
 
 
@@ -620,15 +662,27 @@ class ChannelSyncService:
         actor_user_id: uuid.UUID | None = None,
     ) -> SyncResult:
         """Pull reservations from the channel and import them idempotently."""
+        started = utc_now()
         try:
             inbound = self.provider.pull_reservations(since=since)
         except Exception as exc:
-            return SyncResult(
+            result = SyncResult(
                 provider=self.provider.provider_key,
                 direction="inbound",
                 success=False,
                 errors=[str(exc)],
             )
+            write_sync_log(
+                provider_key=self.provider.provider_key,
+                direction="inbound",
+                action="pull_reservations",
+                status="error",
+                error_summary=str(exc),
+                started_at=started,
+                actor_user_id=actor_user_id,
+            )
+            db.session.commit()
+            return result
 
         imported = 0
         errors: list[str] = []
@@ -639,13 +693,26 @@ class ChannelSyncService:
             except Exception as exc:
                 errors.append(f"{res_data.external_booking_id}: {exc}")
 
-        return SyncResult(
+        status = "success" if len(errors) == 0 else ("partial" if imported > 0 else "error")
+        result = SyncResult(
             provider=self.provider.provider_key,
             direction="inbound",
             success=len(errors) == 0,
             records_processed=imported,
             errors=errors,
         )
+        write_sync_log(
+            provider_key=self.provider.provider_key,
+            direction="inbound",
+            action="pull_reservations",
+            status=status,
+            records_processed=imported,
+            error_summary="; ".join(errors)[:2000] if errors else None,
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
+        return result
 
     def _import_single(
         self,
@@ -671,7 +738,19 @@ class ChannelSyncService:
         actor_user_id: uuid.UUID | None = None,
     ) -> SyncResult:
         """Push inventory / rate updates to the channel."""
+        started = utc_now()
         result = self.provider.push_inventory(updates)
+        write_sync_log(
+            provider_key=self.provider.provider_key,
+            direction="outbound",
+            action="push_inventory",
+            status="success" if result.success else "error",
+            records_processed=result.records_processed,
+            error_summary="; ".join(result.errors)[:2000] if result.errors else None,
+            details=result.details if result.details else None,
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
         if actor_user_id:
             write_audit_log(
                 actor_user_id=actor_user_id,
@@ -684,7 +763,7 @@ class ChannelSyncService:
                     "success": result.success,
                 },
             )
-            db.session.commit()
+        db.session.commit()
         return result
 
     # -- Health -----------------------------------------------------------
@@ -706,3 +785,245 @@ def _default_rate_for_room_type(room_type: RoomType, business_date: date) -> Dec
 
 def _channel_provider_setting(provider_key: str, field_name: str, default: str) -> str:
     return str(get_setting_value(f"channel_push.{provider_key}.{field_name}", default) or default).strip()
+
+
+# ---------------------------------------------------------------------------
+# Sync log helpers
+# ---------------------------------------------------------------------------
+
+
+def write_sync_log(
+    *,
+    provider_key: str,
+    direction: str,
+    action: str,
+    status: str,
+    records_processed: int = 0,
+    error_summary: str | None = None,
+    details: dict | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaSyncLog:
+    """Write a persistent sync log entry."""
+    now = utc_now()
+    duration_ms = None
+    if started_at and finished_at:
+        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    elif started_at:
+        finished_at = now
+        duration_ms = int((now - started_at).total_seconds() * 1000)
+
+    log_entry = OtaSyncLog(
+        provider_key=provider_key,
+        direction=direction,
+        action=action,
+        status=status,
+        records_processed=records_processed,
+        error_summary=error_summary[:2000] if error_summary else None,
+        details_json=details,
+        started_at=started_at or now,
+        finished_at=finished_at or now,
+        duration_ms=duration_ms,
+    )
+    if actor_user_id:
+        log_entry.created_by_user_id = actor_user_id
+    db.session.add(log_entry)
+    return log_entry
+
+
+def list_sync_logs(
+    *,
+    provider_key: str | None = None,
+    limit: int = 50,
+) -> list[OtaSyncLog]:
+    """Return recent sync log entries, optionally filtered by provider."""
+    query = sa.select(OtaSyncLog).order_by(OtaSyncLog.created_at.desc()).limit(limit)
+    if provider_key:
+        query = query.where(OtaSyncLog.provider_key == provider_key)
+    return db.session.execute(query).scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Room type mapping helpers
+# ---------------------------------------------------------------------------
+
+
+def list_ota_mappings(*, provider_key: str | None = None) -> list[OtaRoomTypeMapping]:
+    """Return all active OTA room type mappings."""
+    query = (
+        sa.select(OtaRoomTypeMapping)
+        .where(OtaRoomTypeMapping.deleted_at.is_(None))
+        .order_by(OtaRoomTypeMapping.provider_key.asc(), OtaRoomTypeMapping.external_room_type_code.asc())
+    )
+    if provider_key:
+        query = query.where(OtaRoomTypeMapping.provider_key == provider_key)
+    return db.session.execute(query).scalars().all()
+
+
+def upsert_ota_mapping(
+    *,
+    provider_key: str,
+    room_type_id: uuid.UUID,
+    external_room_type_code: str,
+    external_room_type_name: str | None = None,
+    external_rate_plan_code: str | None = None,
+    external_rate_plan_name: str | None = None,
+    is_active: bool = True,
+    occupancy_default: int | None = None,
+    notes: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaRoomTypeMapping:
+    """Create or update a room type mapping for an OTA channel."""
+    existing = db.session.execute(
+        sa.select(OtaRoomTypeMapping).where(
+            OtaRoomTypeMapping.provider_key == provider_key,
+            OtaRoomTypeMapping.room_type_id == room_type_id,
+            OtaRoomTypeMapping.external_room_type_code == external_room_type_code,
+            OtaRoomTypeMapping.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        mapping = existing
+    else:
+        mapping = OtaRoomTypeMapping(
+            provider_key=provider_key,
+            room_type_id=room_type_id,
+            external_room_type_code=external_room_type_code,
+        )
+        db.session.add(mapping)
+
+    mapping.external_room_type_name = external_room_type_name
+    mapping.external_rate_plan_code = external_rate_plan_code
+    mapping.external_rate_plan_name = external_rate_plan_name
+    mapping.is_active = is_active
+    mapping.occupancy_default = occupancy_default
+    mapping.notes = notes
+    if actor_user_id:
+        mapping.updated_by_user_id = actor_user_id
+    return mapping
+
+
+def delete_ota_mapping(mapping_id: uuid.UUID, *, actor_user_id: uuid.UUID | None = None) -> bool:
+    """Soft-delete an OTA room type mapping."""
+    mapping = db.session.get(OtaRoomTypeMapping, mapping_id)
+    if not mapping or mapping.deleted_at is not None:
+        return False
+    mapping.deleted_at = utc_now()
+    if actor_user_id:
+        mapping.deleted_by_user_id = actor_user_id
+    return True
+
+
+# ---------------------------------------------------------------------------
+# OTA dashboard context builder
+# ---------------------------------------------------------------------------
+
+
+def ota_dashboard_context() -> dict:
+    """Build the full context dict for the OTA dashboard page.
+
+    Returns aggregated status, mapping health, recent logs, and channel details.
+    """
+    from ..constants import OTA_PROVIDER_KEYS, OTA_PROVIDER_LABELS
+
+    existing_channels = {ch.provider_key: ch for ch in list_ota_channels()}
+    all_mappings = list_ota_mappings()
+    recent_logs = list_sync_logs(limit=30)
+
+    # Room types for mapping reference
+    room_types = db.session.execute(
+        sa.select(RoomType).where(RoomType.is_active.is_(True)).order_by(RoomType.code.asc())
+    ).scalars().all()
+
+    # Build per-channel summary
+    channels = []
+    total_healthy = 0
+    total_warning = 0
+    total_error = 0
+    total_mappings = 0
+    total_unmapped = 0
+
+    for key in OTA_PROVIDER_KEYS:
+        record = existing_channels.get(key)
+        provider_mappings = [m for m in all_mappings if m.provider_key == key]
+        provider_logs = [log for log in recent_logs if log.provider_key == key]
+
+        # Determine connection health status
+        if not record or not record.api_key_encrypted:
+            health = "not_configured"
+        elif not record.is_active:
+            health = "inactive"
+        elif record.last_test_ok is True:
+            health = "healthy"
+        elif record.last_test_ok is False:
+            health = "error"
+        else:
+            health = "unknown"
+
+        # Count mapping coverage
+        mapped_room_type_ids = {m.room_type_id for m in provider_mappings if m.is_active}
+        unmapped_count = len([rt for rt in room_types if rt.id not in mapped_room_type_ids])
+
+        # Recent sync stats
+        last_success = next(
+            (log for log in provider_logs if log.status == "success"), None
+        )
+        last_error_log = next(
+            (log for log in provider_logs if log.status == "error"), None
+        )
+        recent_error_count = sum(1 for log in provider_logs if log.status == "error")
+
+        if health == "healthy" and unmapped_count > 0:
+            health = "warning"
+
+        if health == "healthy":
+            total_healthy += 1
+        elif health == "warning":
+            total_warning += 1
+        elif health == "error":
+            total_error += 1
+
+        total_mappings += len(provider_mappings)
+        total_unmapped += unmapped_count
+
+        channels.append({
+            "provider_key": key,
+            "display_name": OTA_PROVIDER_LABELS.get(key, key),
+            "record": record,
+            "health": health,
+            "is_active": record.is_active if record else False,
+            "hotel_id": record.hotel_id if record else None,
+            "api_configured": bool(record and record.api_key_encrypted),
+            "last_tested_at": record.last_tested_at if record else None,
+            "last_test_ok": record.last_test_ok if record else None,
+            "last_test_error": record.last_test_error if record else None,
+            "mappings": provider_mappings,
+            "mapped_count": len(provider_mappings),
+            "unmapped_count": unmapped_count,
+            "last_success_log": last_success,
+            "last_error_log": last_error_log,
+            "recent_error_count": recent_error_count,
+            "recent_logs": provider_logs[:10],
+        })
+
+    # Summary stats
+    summary = {
+        "total_channels": len(OTA_PROVIDER_KEYS),
+        "healthy": total_healthy,
+        "warning": total_warning,
+        "error": total_error,
+        "not_configured": len(OTA_PROVIDER_KEYS) - total_healthy - total_warning - total_error,
+        "total_mappings": total_mappings,
+        "total_unmapped": total_unmapped,
+        "total_room_types": len(room_types),
+    }
+
+    return {
+        "summary": summary,
+        "channels": channels,
+        "room_types": room_types,
+        "all_mappings": all_mappings,
+        "recent_logs": recent_logs,
+    }
