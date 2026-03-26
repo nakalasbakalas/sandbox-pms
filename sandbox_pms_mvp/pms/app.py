@@ -2,24 +2,43 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import date, datetime
 from decimal import Decimal
-from urllib.parse import urlparse
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 import sqlalchemy as sa
-import click
-from flask import Flask, Response, abort, current_app, flash, g, redirect, request, session, url_for
+from flask import Flask, Response, abort, g, redirect, request, session, url_for
 from markupsafe import Markup
 
 from .audit import cleanup_audit_logs
+from .booking_attribution import (
+    BOOKING_ATTRIBUTION_SESSION_KEY,
+    BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS,
+    PUBLIC_BOOKING_LANDING_ENDPOINTS,
+    PUBLIC_NON_CACHEABLE_ENDPOINTS,
+    PUBLIC_WEBHOOK_ENDPOINTS,
+    booking_attribution_from_request,
+    booking_request_starts_new_attribution,
+    capture_public_booking_attribution,
+    clean_public_path,
+    clean_tracking_value,
+    current_booking_attribution,
+    default_booking_attribution,
+    derive_source_label,
+    external_referrer_host,
+    merge_booking_attribution,
+    normalize_tracking_slug,
+    referrer_source_label,
+    resolve_booking_source_channel,
+    source_metadata_from_request,
+)
 from .branding import (
     branding_settings_context,
     line_href as branding_line_href,
     whatsapp_href as branding_whatsapp_href,
 )
+from .cli_commands import register_cli
 from .config import Config, normalize_runtime_config
 from .constants import (
     BOOKING_SOURCE_CHANNELS,
@@ -33,7 +52,7 @@ from .models import (
     RoomType,
 )
 from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message
-from .seeds import bootstrap_inventory_horizon, clear_operational_data, seed_all, seed_reference_data, seed_roles_permissions
+from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data
 from .url_topology import canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .helpers import (
     absolute_public_url,
@@ -76,8 +95,6 @@ from .services.auth_service import (
     load_session_from_cookie,
 )
 from .services.communication_service import (
-    dispatch_notification_deliveries,
-    send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
 from .services.extras_service import (
@@ -97,57 +114,10 @@ from .services.public_booking_service import (
     build_room_type_content,
     search_public_availability,
 )
-from .services.pre_checkin_service import (
-    fire_pre_checkin_not_completed_events,
-)
-from .services.reservation_service import expire_stale_waitlist, promote_eligible_waitlist
 from .services.messaging_service import (
-    process_pending_automations,
     total_unread_count,
 )
 
-
-BOOKING_ATTRIBUTION_SESSION_KEY = "_booking_attribution"
-BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_content",
-    "source_label",
-    "referrer_host",
-    "entry_page",
-    "landing_path",
-    "entry_cta_source",
-}
-BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {
-    "index",
-    "public.index",
-    "availability",
-    "booking_entry",
-    "booking_hold",
-    "booking_confirm",
-    "public.availability",
-    "public.booking_entry",
-    "public.booking_hold",
-    "public.booking_confirm",
-}
-PUBLIC_BOOKING_LANDING_ENDPOINTS = {"index", "public.index", "availability", "booking_entry", "public.availability", "public.booking_entry"}
-PUBLIC_NON_CACHEABLE_ENDPOINTS = {
-    "booking_confirmation",
-    "booking_cancel_request",
-    "booking_modify_request",
-    "public_payment_return",
-    "public_payment_start",
-    "public.booking_confirmation",
-    "public.booking_cancel_request",
-    "public.public_digital_checkout",
-    "public.public_digital_checkout_complete",
-    "public.public_digital_checkout_pay_balance",
-    "public.booking_modify_request",
-    "public.public_payment_return",
-    "public.public_payment_start",
-}
-PUBLIC_WEBHOOK_ENDPOINTS = {"payment_webhook", "public.payment_webhook"}
 
 
 def _load_sentry_sdk():
@@ -520,137 +490,6 @@ def register_template_helpers(app: Flask) -> None:
         }
 
 
-def register_cli(app: Flask) -> None:
-    @app.cli.command("seed-reference-data")
-    def seed_reference_data_command() -> None:
-        seed_reference_data(sync_existing_roles=False)
-        print("Reference data seeded.")
-
-    @app.cli.command("sync-role-permissions")
-    def sync_role_permissions_command() -> None:
-        seed_roles_permissions(sync_existing_roles=True)
-        db.session.commit()
-        print("System role permissions synchronized.")
-
-    @app.cli.command("seed-phase2")
-    @click.option("--demo-data", is_flag=True, default=False, help="Include demo guests and reservations")
-    def seed_phase2_command(demo_data: bool) -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=demo_data)
-        print("Phase 2 seed completed." + (" (with demo data)" if demo_data else ""))
-
-    @app.cli.command("bootstrap-inventory")
-    def bootstrap_inventory_command() -> None:
-        bootstrap_inventory_horizon(date.today(), app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        db.session.commit()
-        print("Inventory horizon bootstrapped.")
-
-    @app.cli.command("clear-operational-data")
-    @click.option("--confirm", is_flag=True, default=False, help="Must pass --confirm to execute the clear.")
-    def clear_operational_data_command(confirm: bool) -> None:
-        """Remove all guest/booking/folio operational data while preserving accounts and config.
-
-        This is irreversible. Pass --confirm to proceed.
-        """
-        if not confirm:
-            print("ERROR: This command permanently deletes all guest and reservation data.")
-            print("Pass --confirm to execute.")
-            return
-        counts = clear_operational_data()
-        removed = sum(v for k, v in counts.items() if not k.endswith("_reset"))
-        print(f"Operational data cleared. {removed} rows removed across {len(counts)} tables.")
-        for table, count in counts.items():
-            if count:
-                print(f"  {table}: {count}")
-
-    @app.cli.command("process-notifications")
-    def process_notifications_command() -> None:
-        result = dispatch_notification_deliveries()
-        print(f"Notifications processed: {result}")
-
-    @app.cli.command("send-pre-arrival-reminders")
-    def send_pre_arrival_reminders_command() -> None:
-        result = send_due_pre_arrival_reminders(actor_user_id=None)
-        print(f"Pre-arrival reminders: {result}")
-
-    @app.cli.command("send-failed-payment-reminders")
-    def send_failed_payment_reminders_command() -> None:
-        result = send_due_failed_payment_reminders(actor_user_id=None)
-        print(f"Failed payment reminders: {result}")
-
-    @app.cli.command("fire-pre-checkin-reminders")
-    @click.option(
-        "--hours-before",
-        default=48,
-        type=int,
-        help="Hours before check-in to target (default: 48).",
-    )
-    def fire_pre_checkin_reminders_command(hours_before: int) -> None:
-        """Fire pre_checkin_not_completed automation events for upcoming arrivals.
-
-        Run daily via cron ~48 hours before check-in day to nudge guests who
-        have not submitted (or not started) their digital pre-check-in.
-        """
-        result = fire_pre_checkin_not_completed_events(hours_before=hours_before)
-        print(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}")
-
-    @app.cli.command("sync-ical-sources")
-    def sync_ical_sources_command() -> None:
-        result = sync_all_external_calendar_sources(actor_user_id=None)
-        print(f"iCal sync result: {result}")
-
-    @app.cli.command("process-automation-events")
-    def process_automation_events_command() -> None:
-        result = process_pending_automations()
-        print(
-            f"Automation events processed: {result['processed']} sent, "
-            f"{result['skipped']} skipped, {result['errors']} errors, "
-            f"{result.get('cleaned_up', 0)} cleaned up."
-        )
-
-    @app.cli.command("cleanup-audit-logs")
-    @click.option(
-        "--retention-days",
-        default=None,
-        type=int,
-        help="Delete audit logs older than N days. Defaults to AUDIT_LOG_RETENTION_DAYS.",
-    )
-    @click.option("--dry-run", is_flag=True, help="Report matching audit-log rows without deleting them.")
-    def cleanup_audit_logs_command(retention_days: int | None, dry_run: bool) -> None:
-        result = cleanup_audit_logs(retention_days=retention_days, dry_run=dry_run)
-        if not result["enabled"]:
-            print("Audit log cleanup skipped: AUDIT_LOG_RETENTION_DAYS is not set to a positive value.")
-            return
-        mode = "would delete" if dry_run else "deleted"
-        cutoff_val = result["cutoff"]
-        cutoff = cutoff_val.isoformat() if isinstance(cutoff_val, datetime) else "n/a"
-        print(
-            f"Audit log cleanup: {result['deleted']} rows {mode}, "
-            f"retention_days={result['retention_days']}, cutoff={cutoff}"
-        )
-
-    @app.cli.command("process-waitlist")
-    @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
-    def process_waitlist_command(max_age_days: int) -> None:
-        """Promote eligible waitlisted reservations and expire stale ones."""
-        promo = promote_eligible_waitlist()
-        expiry = expire_stale_waitlist(max_age_days=max_age_days)
-        print(
-            f"Waitlist: {promo['promoted']} promoted, {promo['skipped']} skipped, "
-            f"{expiry['expired']} expired."
-        )
-
-    @app.cli.command("auto-cancel-no-shows")
-    @click.option("--date", "target_date", default=None, type=click.DateTime(formats=["%Y-%m-%d"]), help="Business date (default: today).")
-    def auto_cancel_no_shows_command(target_date: datetime | None) -> None:
-        """Auto-cancel same-day no-shows after cutoff hour."""
-        biz_date = target_date.date() if target_date else None
-        result = auto_cancel_no_shows(business_date=biz_date)
-        print(
-            f"No-show auto-cancel: {result['processed']} processed, "
-            f"{result['skipped']} skipped, {result['errors']} errors."
-            + (f" ({result.get('reason', '')})" if result.get("reason") else "")
-        )
-
 
 
 
@@ -741,246 +580,6 @@ def public_request_form_defaults(*field_names: str) -> dict[str, str]:
     return {field_name: str(request.values.get(field_name) or "").strip() for field_name in field_names}
 
 
-def capture_public_booking_attribution() -> None:
-    existing = dict(session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
-    if not _should_track_booking_attribution():
-        g.booking_attribution = existing
-        return
-
-    incoming = booking_attribution_from_request()
-    if incoming:
-        base = {} if booking_request_starts_new_attribution() else existing
-        merged = merge_booking_attribution(base, incoming)
-    elif existing:
-        merged = existing
-    else:
-        merged = default_booking_attribution()
-
-    if merged:
-        merged["source_channel"] = resolve_booking_source_channel(merged.get("source_channel"), merged)
-        if merged != existing:
-            session[BOOKING_ATTRIBUTION_SESSION_KEY] = merged
-            session.modified = True
-        g.booking_attribution = merged
-        return
-
-    g.booking_attribution = {}
-
-
-def current_booking_attribution() -> dict:
-    return dict(getattr(g, "booking_attribution", None) or session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
-
-
-def booking_attribution_from_request() -> dict:
-    if not _should_track_booking_attribution():
-        return {}
-
-    referrer_host = external_referrer_host()
-    entry_page = clean_public_path(request.values.get("entry_page")) or clean_public_path(request.path)
-    source_label = derive_source_label(
-        request.values.get("source_label"),
-        request.values.get("utm_source"),
-        referrer_host,
-        request.values.get("source_channel"),
-    )
-    entry_cta_source = clean_tracking_value(request.values.get("cta_source") or request.values.get("entry_cta_source"))
-    incoming = {
-        "utm_source": clean_tracking_value(request.values.get("utm_source")),
-        "utm_medium": clean_tracking_value(request.values.get("utm_medium")),
-        "utm_campaign": clean_tracking_value(request.values.get("utm_campaign")),
-        "utm_content": clean_tracking_value(request.values.get("utm_content")),
-        "source_label": source_label,
-        "referrer_host": referrer_host or clean_tracking_value(request.values.get("referrer_host")),
-        "entry_page": entry_page,
-        "landing_path": clean_public_path(request.values.get("landing_path")) or entry_page,
-        "entry_cta_source": entry_cta_source,
-        "source_channel": clean_tracking_value(request.values.get("source_channel"), limit=40),
-    }
-    return {key: value for key, value in incoming.items() if value not in {None, ""}}
-
-
-def booking_request_starts_new_attribution() -> bool:
-    if request.method != "GET":
-        return False
-    if clean_public_path(request.args.get("entry_page")):
-        return False
-    if any(
-        clean_tracking_value(request.args.get(key))
-        for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
-    ):
-        return True
-    return bool(external_referrer_host() and request.endpoint in PUBLIC_BOOKING_LANDING_ENDPOINTS)
-
-
-def default_booking_attribution() -> dict:
-    if request.method != "GET" or request.endpoint not in PUBLIC_BOOKING_LANDING_ENDPOINTS:
-        return {}
-    entry_page = clean_public_path(request.path)
-    referrer_host = external_referrer_host()
-    default = {
-        "source_label": derive_source_label(None, None, referrer_host, "direct_web"),
-        "referrer_host": referrer_host,
-        "entry_page": entry_page,
-        "landing_path": entry_page,
-        "entry_cta_source": clean_tracking_value(request.args.get("cta_source") or request.args.get("entry_cta_source")),
-        "source_channel": "direct_web",
-    }
-    return {key: value for key, value in default.items() if value not in {None, ""}}
-
-
-def merge_booking_attribution(base: dict | None, incoming: dict | None) -> dict:
-    merged = dict(base or {})
-    for key, value in (incoming or {}).items():
-        if value in {None, ""}:
-            continue
-        if key in BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS and merged.get(key):
-            continue
-        merged[key] = value
-    return merged
-
-
-def clean_tracking_value(value: str | None, *, limit: int = 120) -> str | None:
-    cleaned = " ".join((value or "").strip().split())
-    if not cleaned:
-        return None
-    return cleaned[:limit]
-
-
-def clean_public_path(value: str | None) -> str | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    parsed = urlparse(candidate)
-    path = parsed.path or "/"
-    if not path.startswith("/"):
-        path = f"/{path.lstrip('/')}"
-    return path[:200]
-
-
-def normalize_tracking_slug(value: str | None) -> str | None:
-    cleaned = clean_tracking_value(value)
-    if not cleaned:
-        return None
-    return cleaned.lower().replace(" ", "_").replace("-", "_")
-
-
-def external_referrer_host() -> str | None:
-    referrer = (request.referrer or "").strip()
-    if not referrer:
-        return None
-    try:
-        host = (urlparse(referrer).hostname or "").lower()
-    except ValueError:
-        return None
-    if not host:
-        return None
-    request_host = (request.host.split(":", 1)[0] or "").lower()
-    app_base_url = str(current_app.config.get("APP_BASE_URL") or "").strip()
-    app_base_host = (urlparse(app_base_url).hostname or "").lower() if app_base_url else ""
-    if host in {request_host, app_base_host}:
-        return None
-    return host[:120]
-
-
-def derive_source_label(
-    explicit_source_label: str | None,
-    utm_source: str | None,
-    referrer_host: str | None,
-    source_channel: str | None,
-) -> str:
-    explicit = clean_tracking_value(explicit_source_label)
-    if explicit:
-        return explicit
-    utm = clean_tracking_value(utm_source)
-    if utm:
-        return utm
-    host = clean_tracking_value(referrer_host)
-    if host:
-        return referrer_source_label(host)
-    channel = normalize_tracking_slug(source_channel)
-    if channel in BOOKING_SOURCE_CHANNELS:
-        return "direct" if channel == "direct_web" else channel
-    return "direct"
-
-
-def referrer_source_label(referrer_host: str) -> str:
-    normalized = normalize_tracking_slug(referrer_host) or "referral"
-    if "google" in normalized:
-        return "google"
-    if "facebook" in normalized or normalized.startswith("fb"):
-        return "facebook"
-    if "instagram" in normalized:
-        return "instagram"
-    if "line" in normalized:
-        return "line"
-    if "whatsapp" in normalized:
-        return "whatsapp"
-    if "tiktok" in normalized:
-        return "tiktok"
-    labels = [part for part in referrer_host.split(".") if part and part not in {"www", "m", "l"}]
-    return labels[0][:80] if labels else referrer_host[:80]
-
-
-def resolve_booking_source_channel(explicit_source_channel: str | None, attribution: dict | None = None) -> str:
-    explicit = normalize_tracking_slug(explicit_source_channel)
-    if explicit in BOOKING_SOURCE_CHANNELS:
-        return explicit
-
-    attribution = attribution or {}
-    candidates = [
-        normalize_tracking_slug(attribution.get("source_label")),
-        normalize_tracking_slug(attribution.get("utm_source")),
-        normalize_tracking_slug(attribution.get("referrer_host")),
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        if candidate in {"direct", "direct_web"}:
-            return "direct_web"
-        if candidate in {"google_business", "gmb"}:
-            return "google_business"
-        if candidate in {"facebook", "fb"}:
-            return "facebook"
-        if "line" == candidate:
-            return "line"
-        if "whatsapp" == candidate:
-            return "whatsapp"
-        if candidate in {"qr", "qr_code"}:
-            return "qr"
-        if candidate in {"referral", "partner", "affiliate"}:
-            return "referral"
-        return "referral"
-    return "direct_web"
-
-
-def _should_track_booking_attribution() -> bool:
-    if request.endpoint in {None, "static", *PUBLIC_WEBHOOK_ENDPOINTS}:
-        return False
-    if is_staff_or_provider_endpoint(request.endpoint):
-        return False
-    return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
-
-
-def source_metadata_from_request(language: str, fallback: dict | None = None) -> dict:
-    metadata = merge_booking_attribution(fallback, current_booking_attribution())
-    metadata = merge_booking_attribution(metadata, booking_attribution_from_request())
-    if not metadata:
-        metadata = dict(fallback or {}) or default_booking_attribution()
-    if not metadata.get("entry_page"):
-        metadata["entry_page"] = clean_public_path(request.path) or "/"
-    if not metadata.get("landing_path"):
-        metadata["landing_path"] = metadata["entry_page"]
-    if not metadata.get("source_label"):
-        metadata["source_label"] = derive_source_label(
-            None,
-            metadata.get("utm_source"),
-            metadata.get("referrer_host"),
-            metadata.get("source_channel"),
-        )
-    metadata["device_class"] = "mobile" if "Mobile" in request.user_agent.string else "desktop"
-    metadata["language"] = language
-    metadata["created_from_public_booking_flow"] = True
-    return {key: value for key, value in metadata.items() if value not in {None, ""}}
 
 
 def public_booking_form_context(
