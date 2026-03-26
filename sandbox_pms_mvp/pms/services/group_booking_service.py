@@ -213,11 +213,9 @@ def _rollback_created_group_block(
     hold_ids = [hold.id for hold in holds if hold.id]
     if not hold_ids:
         return
-    stored_holds = (
-        db.session.query(ReservationHold)
-        .filter(ReservationHold.id.in_(hold_ids))
-        .all()
-    )
+    stored_holds = db.session.execute(
+        sa.select(ReservationHold).where(ReservationHold.id.in_(hold_ids))
+    ).scalars().all()
     for hold in stored_holds:
         if hold.status != "active":
             continue
@@ -243,17 +241,17 @@ def _load_group_block_holds(
     normalized_code = (group_block_code or "").strip().upper()
     if not normalized_code:
         return []
-    query = db.session.query(ReservationHold).order_by(
+    stmt = sa.select(ReservationHold).order_by(
         ReservationHold.created_at.asc(),
         ReservationHold.hold_code.asc(),
     )
     if active_only:
-        query = query.filter(ReservationHold.status == "active")
+        stmt = stmt.where(ReservationHold.status == "active")
     if for_update:
-        query = query.with_for_update()
+        stmt = stmt.with_for_update()
     return [
         hold
-        for hold in query.all()
+        for hold in db.session.execute(stmt).scalars().all()
         if _group_block_code(hold) == normalized_code
     ]
 

@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 
+import sqlalchemy as sa
 from flask import current_app
 from werkzeug.datastructures import FileStorage
 
@@ -192,11 +193,9 @@ def generate_pre_checkin(
     if reservation.current_status not in ("confirmed", "tentative"):
         raise ValueError("Pre-check-in can only be created for confirmed or tentative reservations.")
 
-    existing: PreCheckIn | None = (
-        db.session.query(PreCheckIn)
-        .filter(PreCheckIn.reservation_id == reservation_id)
-        .first()
-    )
+    existing: PreCheckIn | None = db.session.execute(
+        sa.select(PreCheckIn).where(PreCheckIn.reservation_id == reservation_id)
+    ).scalar_one_or_none()
 
     token = _generate_token()
     expires_at = _expiry_from_now(expiry_days)
@@ -263,7 +262,7 @@ def load_pre_checkin_by_token(token: str) -> PreCheckIn | None:
     """Look up a pre-check-in by its access token. Returns None if not found."""
     if not token:
         return None
-    return db.session.query(PreCheckIn).filter(PreCheckIn.token == token).first()
+    return db.session.execute(sa.select(PreCheckIn).where(PreCheckIn.token == token)).scalar_one_or_none()
 
 
 def validate_token_access(pc: PreCheckIn) -> str | None:
@@ -391,11 +390,9 @@ def _recompute_readiness(pc: PreCheckIn) -> None:
         return
 
     # Check documents
-    docs = (
-        db.session.query(ReservationDocument)
-        .filter(ReservationDocument.reservation_id == pc.reservation_id)
-        .all()
-    )
+    docs = db.session.execute(
+        sa.select(ReservationDocument).where(ReservationDocument.reservation_id == pc.reservation_id)
+    ).scalars().all()
     has_id = any(d.verification_status in ("pending", "verified") for d in docs)
     all_verified = all(d.verification_status == "verified" for d in docs) if docs else False
 
@@ -494,11 +491,9 @@ def verify_document(
     db.session.flush()
 
     # Recompute readiness on linked pre-check-in
-    pc = (
-        db.session.query(PreCheckIn)
-        .filter(PreCheckIn.reservation_id == doc.reservation_id)
-        .first()
-    )
+    pc = db.session.execute(
+        sa.select(PreCheckIn).where(PreCheckIn.reservation_id == doc.reservation_id)
+    ).scalar_one_or_none()
     if pc:
         _recompute_readiness(pc)
         db.session.flush()
@@ -589,20 +584,17 @@ def mark_rejected(
 
 
 def get_pre_checkin_for_reservation(reservation_id: uuid.UUID) -> PreCheckIn | None:
-    return (
-        db.session.query(PreCheckIn)
-        .filter(PreCheckIn.reservation_id == reservation_id)
-        .first()
-    )
+    return db.session.execute(
+        sa.select(PreCheckIn).where(PreCheckIn.reservation_id == reservation_id)
+    ).scalar_one_or_none()
 
 
 def get_documents_for_reservation(reservation_id: uuid.UUID) -> list[ReservationDocument]:
-    return (
-        db.session.query(ReservationDocument)
-        .filter(ReservationDocument.reservation_id == reservation_id)
+    return db.session.execute(
+        sa.select(ReservationDocument)
+        .where(ReservationDocument.reservation_id == reservation_id)
         .order_by(ReservationDocument.uploaded_at.desc())
-        .all()
-    )
+    ).scalars().all()
 
 
 def get_pre_checkin_context(pc: PreCheckIn) -> dict[str, Any]:
@@ -692,15 +684,14 @@ def send_pre_checkin_link_email(
 
 def list_todays_arrivals_with_readiness(business_date) -> list[dict[str, Any]]:
     """Return today's arriving reservations augmented with pre-check-in status."""
-    reservations = (
-        db.session.query(Reservation)
-        .filter(
+    reservations = db.session.execute(
+        sa.select(Reservation)
+        .where(
             Reservation.check_in_date == business_date,
             Reservation.current_status.in_(["confirmed", "tentative"]),
         )
         .order_by(Reservation.check_in_date)
-        .all()
-    )
+    ).scalars().all()
     result = []
     for res in reservations:
         pc = get_pre_checkin_for_reservation(res.id)
@@ -742,14 +733,13 @@ def fire_pre_checkin_not_completed_events(hours_before: int = 48) -> dict[str, i
     from .messaging_service import fire_automation_event  # local to avoid circular
 
     target_date = (utc_now() + timedelta(hours=hours_before)).date()
-    reservations = (
-        db.session.query(Reservation)
-        .filter(
+    reservations = db.session.execute(
+        sa.select(Reservation)
+        .where(
             Reservation.check_in_date == target_date,
             Reservation.current_status.in_(["confirmed", "tentative"]),
         )
-        .all()
-    )
+    ).scalars().all()
 
     fired = 0
     skipped = 0

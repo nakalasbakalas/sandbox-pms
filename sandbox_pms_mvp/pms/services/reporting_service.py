@@ -1057,38 +1057,40 @@ def revenue_management_dashboard_report(
     occupancy_rows = _occupancy_rows(date_from, date_to)
     actual_room_revenue = {
         service_date: money(amount or Decimal("0.00"))
-        for service_date, amount in db.session.query(
-            FolioCharge.service_date,
-            sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
-        )
-        .filter(
-            FolioCharge.voided_at.is_(None),
-            FolioCharge.charge_type == "room",
-            FolioCharge.service_date >= date_from,
-            FolioCharge.service_date <= date_to,
-        )
-        .group_by(FolioCharge.service_date)
-        .all()
+        for service_date, amount in db.session.execute(
+            sa.select(
+                FolioCharge.service_date,
+                sa.func.coalesce(sa.func.sum(FolioCharge.total_amount), 0),
+            )
+            .where(
+                FolioCharge.voided_at.is_(None),
+                FolioCharge.charge_type == "room",
+                FolioCharge.service_date >= date_from,
+                FolioCharge.service_date <= date_to,
+            )
+            .group_by(FolioCharge.service_date)
+        ).all()
     }
     forecast_room_revenue = {
         service_date: money(amount or Decimal("0.00"))
-        for service_date, amount in db.session.query(
-            InventoryDay.business_date,
-            sa.func.coalesce(sa.func.sum(InventoryDay.nightly_rate), 0),
-        )
-        .join(Room, Room.id == InventoryDay.room_id)
-        .join(Reservation, Reservation.id == InventoryDay.reservation_id)
-        .filter(
-            InventoryDay.business_date >= date_from,
-            InventoryDay.business_date <= date_to,
-            InventoryDay.nightly_rate.is_not(None),
-            Room.is_active.is_(True),
-            Room.is_sellable.is_(True),
-            Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
-            InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
-        )
-        .group_by(InventoryDay.business_date)
-        .all()
+        for service_date, amount in db.session.execute(
+            sa.select(
+                InventoryDay.business_date,
+                sa.func.coalesce(sa.func.sum(InventoryDay.nightly_rate), 0),
+            )
+            .join(Room, Room.id == InventoryDay.room_id)
+            .join(Reservation, Reservation.id == InventoryDay.reservation_id)
+            .where(
+                InventoryDay.business_date >= date_from,
+                InventoryDay.business_date <= date_to,
+                InventoryDay.nightly_rate.is_not(None),
+                Room.is_active.is_(True),
+                Room.is_sellable.is_(True),
+                Reservation.current_status.in_(tuple(SOLD_RESERVATION_STATUSES)),
+                InventoryDay.availability_status.in_(tuple(CONSUMING_INVENTORY_STATUSES)),
+            )
+            .group_by(InventoryDay.business_date)
+        ).all()
     }
 
     rows: list[dict] = []
