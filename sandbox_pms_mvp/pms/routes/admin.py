@@ -886,10 +886,10 @@ def staff_admin_channels():
                     )
 
             elif action == "save_mapping":
+                actor = require_permission("settings.edit")
                 if provider_key not in OTA_PROVIDER_KEYS:
                     flash("Unknown OTA provider.", "error")
                     return redirect(url_for("admin.staff_admin_channels"))
-                actor = require_permission("settings.edit")
                 from ..helpers import parse_optional_uuid
                 room_type_id = parse_optional_uuid(request.form.get("room_type_id"))
                 ext_code = (request.form.get("external_room_type_code") or "").strip()
