@@ -54,6 +54,20 @@ from ..pricing import get_setting_value, money, quote_reservation
 # Data transfer objects
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Declares what a provider adapter supports."""
+
+    supports_reservation_pull: bool = False
+    supports_inventory_push: bool = False
+    supports_rate_push: bool = False
+    supports_restriction_push: bool = False
+    supports_connection_test: bool = False
+    supports_webhooks: bool = False
+    supports_test_mode: bool = False
+    supports_full_refresh: bool = False
+
+
 @dataclass
 class InboundReservation:
     """Normalised external reservation payload ready for PMS import."""
@@ -114,6 +128,36 @@ class ChannelMapping:
     is_active: bool = True
 
 
+@dataclass
+class OutboundRateUpdate:
+    """Rate push payload for an external channel."""
+
+    room_type_code: str
+    rate_plan_code: str | None
+    date_from: date
+    date_to: date
+    rate_amount: Decimal
+    currency: str = "THB"
+    single_rate: Decimal | None = None
+    extra_adult_rate: Decimal | None = None
+    extra_child_rate: Decimal | None = None
+
+
+@dataclass
+class OutboundRestrictionUpdate:
+    """Restriction push payload for an external channel."""
+
+    room_type_code: str
+    rate_plan_code: str | None
+    date_from: date
+    date_to: date
+    closed_to_arrival: bool = False
+    closed_to_departure: bool = False
+    min_stay: int | None = None
+    max_stay: int | None = None
+    stop_sell: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Abstract provider
 # ---------------------------------------------------------------------------
@@ -125,6 +169,11 @@ class ChannelProvider(ABC):
     @abstractmethod
     def provider_key(self) -> str:
         """Unique identifier for this provider (e.g. ``booking_com``)."""
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this provider supports. Override to customize."""
+        return ProviderCapabilities()
 
     # -- Inbound (pull) ---------------------------------------------------
 
@@ -138,11 +187,40 @@ class ChannelProvider(ABC):
     def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
         """Push availability / rate updates to the external system."""
 
+    def push_rates(self, updates: list[OutboundRateUpdate]) -> SyncResult:
+        """Push rate updates. Default: not supported."""
+        return SyncResult(
+            provider=self.provider_key,
+            direction="outbound",
+            success=False,
+            errors=[f"{self.provider_key} does not support rate push."],
+        )
+
+    def push_restrictions(self, updates: list[OutboundRestrictionUpdate]) -> SyncResult:
+        """Push restriction updates. Default: not supported."""
+        return SyncResult(
+            provider=self.provider_key,
+            direction="outbound",
+            success=False,
+            errors=[f"{self.provider_key} does not support restriction push."],
+        )
+
     # -- Lifecycle --------------------------------------------------------
 
     @abstractmethod
     def test_connection(self) -> bool:
         """Return ``True`` if the provider credentials are valid."""
+
+    def validate_connection(self) -> dict:
+        """Extended connection validation returning detailed status.
+
+        Returns dict with keys: success, error, details.
+        """
+        try:
+            ok = self.test_connection()
+            return {"success": ok, "error": None if ok else "Connection test returned false", "details": {}}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)[:500], "details": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +236,18 @@ class MockChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "mock"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_inventory_push=True,
+            supports_rate_push=True,
+            supports_restriction_push=True,
+            supports_connection_test=True,
+            supports_test_mode=True,
+            supports_full_refresh=True,
+        )
 
     def __init__(self) -> None:
         self._log: list[dict] = []
@@ -202,6 +292,13 @@ class ICalChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "ical"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_connection_test=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         """Pull reservations from all active external calendar sources.
@@ -250,6 +347,14 @@ class WebhookChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "webhook"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_inventory_push=True,
+            supports_connection_test=True,
+            supports_webhooks=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         return []
@@ -341,6 +446,17 @@ class ConfiguredPushChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return self.provider_key_name
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_inventory_push=True,
+            supports_rate_push=True,
+            supports_restriction_push=True,
+            supports_connection_test=True,
+            supports_test_mode=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         return []
@@ -995,6 +1111,13 @@ def ota_dashboard_context() -> dict:
         total_mappings += len(provider_mappings)
         total_unmapped += unmapped_count
 
+        # Get provider capabilities
+        try:
+            provider = get_provider(key)
+            capabilities = provider.capabilities
+        except Exception:
+            capabilities = ProviderCapabilities()
+
         channels.append({
             "provider_key": key,
             "display_name": OTA_PROVIDER_LABELS.get(key, key),
@@ -1013,6 +1136,7 @@ def ota_dashboard_context() -> dict:
             "last_error_log": last_error_log,
             "recent_error_count": recent_error_count,
             "recent_logs": provider_logs[:10],
+            "capabilities": capabilities,
         })
 
     # Summary stats
