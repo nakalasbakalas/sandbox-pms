@@ -1671,6 +1671,53 @@ class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
     )
 
 
+class OtaSyncLog(AuditMixin, db.Model):
+    """Persistent log of OTA sync operations for operational visibility."""
+
+    __tablename__ = "ota_sync_logs"
+
+    provider_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    direction: Mapped[str] = mapped_column(sa.String(20), nullable=False)  # inbound | outbound
+    action: Mapped[str] = mapped_column(sa.String(40), nullable=False)  # pull_reservations | push_inventory | test_connection
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False)  # success | error | partial
+    records_processed: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    error_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    details_json: Mapped[dict | None] = mapped_column(sa.JSON, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_ota_sync_logs_provider_status", "provider_key", "status"),
+        Index("ix_ota_sync_logs_created", "created_at"),
+    )
+
+
+class OtaRoomTypeMapping(AuditMixin, SoftDeleteMixin, db.Model):
+    """Maps internal room types to external OTA room type / rate plan codes."""
+
+    __tablename__ = "ota_room_type_mappings"
+
+    provider_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    room_type_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType, ForeignKey("room_types.id", ondelete="CASCADE"), nullable=False
+    )
+    external_room_type_code: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    external_room_type_name: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
+    external_rate_plan_code: Mapped[str | None] = mapped_column(sa.String(120), nullable=True)
+    external_rate_plan_name: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
+    is_active: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    occupancy_default: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    room_type = db.relationship("RoomType", lazy="joined")
+
+    __table_args__ = (
+        UniqueConstraint("provider_key", "room_type_id", "external_room_type_code", name="uq_ota_mapping_provider_room_ext"),
+        Index("ix_ota_mapping_provider_active", "provider_key", "is_active"),
+    )
+
+
 class AppSetting(AuditMixin, SoftDeleteMixin, db.Model):
     __tablename__ = "app_settings"
 
