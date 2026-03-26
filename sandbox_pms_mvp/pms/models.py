@@ -1668,10 +1668,28 @@ class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
     last_test_ok: Mapped[bool | None] = mapped_column(sa.Boolean, nullable=True)
     last_test_error: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
 
+    # Sync direction configuration
+    sync_inventory_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
+    sync_rate_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
+    sync_restriction_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
+    sync_reservation_pull: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
+
+    # Environment mode
+    environment_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="sandbox", server_default=sa.text("'sandbox'"))
+
+    # Onboarding progress
+    setup_completed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    last_successful_sync_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+
     __table_args__ = (
         CheckConstraint(
             f"provider_key IN ({', '.join(repr(v) for v in OTA_PROVIDER_KEYS)})",
             name="ck_ota_channels_provider_key",
+        ),
+        CheckConstraint(
+            "environment_mode IN ('sandbox', 'live')",
+            name="ck_ota_channels_environment_mode",
         ),
         UniqueConstraint("provider_key", name="uq_ota_channels_provider_key"),
         Index("ix_ota_channels_provider_active", "provider_key", "is_active"),
