@@ -62,7 +62,7 @@ MIGRATIONS_DIR = PROJECT_ROOT / "migrations"
 
 
 def _make_user(role_code: str, email: str) -> User:
-    role = db.session.execute(sa.select(Role).where(Role.code == role_code)).scalar_one()
+    role = db.session.execute(sa.select(Role).where(Role.code == role_code)).scalars().unique().one()
     user = User(
         username=email.split("@")[0],
         email=email,
