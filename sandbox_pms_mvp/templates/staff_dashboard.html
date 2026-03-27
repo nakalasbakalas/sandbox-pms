@@ -13,9 +13,15 @@
 
 <section class="grid four metric-grid">
   {% for card in dashboard.headline %}
-    <article class="metric-card report-metric {{ card.tone }}">
+    <article class="metric-card report-metric {{ card.tier }} {% if card.zero %}zero-state{% elif card.status and card.status != 'default' %}status-{{ card.status }}{% endif %}">
       <small>{{ card.label }}</small>
       <strong>{{ card.value }}</strong>
+      {% if card.context %}<span class="metric-context">{{ card.context }}</span>{% endif %}
+      {% if card.progress %}
+        <div class="metric-progress-bar">
+          <div class="metric-progress-fill {{ card.progress.level }}" style="width: {{ card.progress.percentage }}%;"></div>
+        </div>
+      {% endif %}
     </article>
   {% endfor %}
 </section>
@@ -23,17 +29,32 @@
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
-      <div><h2>Arrivals today <span class="ops-header-count">({{ arrivals_count }})</span></h2></div>
+      <div class="section-header-primary">
+        <h2>Arrivals today</h2>
+        {% if dashboard.arrivals.count > 0 %}<span class="section-header-badge">{{ dashboard.arrivals.count }}</span>{% endif %}
+      </div>
       <div class="actions">
         <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='arrivals', date=dashboard.business_date.isoformat()) }}">Open</a>
         <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='arrivals', date=dashboard.business_date.isoformat()) }}">Report</a>
       </div>
     </div>
     <div class="metric-strip" style="grid-template-columns:repeat(4,1fr);">
-      <div><small>No room</small><strong>{{ dashboard.arrivals.unassigned_count }}</strong></div>
-      <div><small>Not ready</small><strong>{{ dashboard.arrivals.not_ready_count }}</strong></div>
-      <div><small>Deposit missing</small><strong>{{ dashboard.arrivals.deposit_missing_count }}</strong></div>
-      <div><small>Flagged</small><strong>{{ dashboard.arrivals.flagged_count }}</strong></div>
+      <div class="metric-strip-item {% if dashboard.arrivals.unassigned_count > 0 %}warning has-value{% endif %}">
+        <small>No room</small>
+        <strong>{{ dashboard.arrivals.unassigned_count }}</strong>
+      </div>
+      <div class="metric-strip-item {% if dashboard.arrivals.not_ready_count > 0 %}warning has-value{% endif %}">
+        <small>Not ready</small>
+        <strong>{{ dashboard.arrivals.not_ready_count }}</strong>
+      </div>
+      <div class="metric-strip-item {% if dashboard.arrivals.deposit_missing_count > 0 %}danger has-value{% endif %}">
+        <small>Deposit missing</small>
+        <strong>{{ dashboard.arrivals.deposit_missing_count }}</strong>
+      </div>
+      <div class="metric-strip-item {% if dashboard.arrivals.flagged_count > 0 %}danger has-value{% endif %}">
+        <small>Flagged</small>
+        <strong>{{ dashboard.arrivals.flagged_count }}</strong>
+      </div>
     </div>
     {% if dashboard.arrivals["items"] %}
       <div class="table-wrap">
@@ -63,15 +84,24 @@
 
   <article class="card inset">
     <div class="card-head">
-      <div><h2>Departures today <span class="ops-header-count">({{ departures_count }})</span></h2></div>
+      <div class="section-header-primary">
+        <h2>Departures today</h2>
+        {% if dashboard.departures.count > 0 %}<span class="section-header-badge">{{ dashboard.departures.count }}</span>{% endif %}
+      </div>
       <div class="actions">
         <a class="button secondary tiny" href="{{ url_for('front_desk.staff_front_desk', mode='departures', date=dashboard.business_date.isoformat()) }}">Open</a>
         <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='departures', date=dashboard.business_date.isoformat()) }}">Report</a>
       </div>
     </div>
     <div class="metric-strip">
-      <div><small>Balance due</small><strong>{{ dashboard.departures.outstanding_balance_count }}</strong></div>
-      <div><small>Pending checkout</small><strong>{{ dashboard.departures.pending_checkout_count }}</strong></div>
+      <div class="metric-strip-item {% if dashboard.departures.outstanding_balance_count > 0 %}danger has-value{% endif %}">
+        <small>Balance due</small>
+        <strong>{{ dashboard.departures.outstanding_balance_count }}</strong>
+      </div>
+      <div class="metric-strip-item {% if dashboard.departures.pending_checkout_count > 0 %}has-value{% endif %}">
+        <small>Pending checkout</small>
+        <strong>{{ dashboard.departures.pending_checkout_count }}</strong>
+      </div>
     </div>
     {% if dashboard.departures["items"] %}
       <div class="table-wrap">
@@ -104,7 +134,10 @@
 <section class="grid two gap-lg">
   <article class="card inset">
     <div class="card-head">
-      <div><h2>Room status <span class="ops-header-count">({{ dashboard.housekeeping.counts.sellable_ready }} ready)</span></h2></div>
+      <div class="section-header-primary">
+        <h2>Room status</h2>
+        <span class="section-header-badge {% if dashboard.housekeeping.counts.dirty > 0 %}warning{% endif %}">{{ dashboard.housekeeping.counts.sellable_ready }} ready</span>
+      </div>
       <div class="actions">
         <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">HK board</a>
         <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='room_status', date=dashboard.business_date.isoformat()) }}">Report</a>
@@ -120,7 +153,10 @@
 
   <article class="card inset">
     <div class="card-head">
-      <div><h2>Urgent tasks <span class="ops-header-count">({{ dashboard.urgent_tasks.count }})</span></h2></div>
+      <div class="section-header-primary">
+        <h2>Urgent tasks</h2>
+        {% if dashboard.urgent_tasks.count > 0 %}<span class="section-header-badge danger">{{ dashboard.urgent_tasks.count }}</span>{% endif %}
+      </div>
       <a class="button secondary tiny" href="{{ url_for('housekeeping.staff_housekeeping', date=dashboard.business_date.isoformat()) }}">Open tasks</a>
     </div>
     {% if dashboard.urgent_tasks["items"] %}
@@ -151,7 +187,11 @@
 {% if can_folio and dashboard.balances_due %}
 <section class="card inset">
   <div class="card-head">
-    <div><h2>Outstanding balances <span class="ops-header-count">({{ dashboard.balances_due.count }}) · {{ dashboard.balances_due.total_balance_due | money }}</span></h2></div>
+    <div class="section-header-primary">
+      <h2>Outstanding balances</h2>
+      {% if dashboard.balances_due.count > 0 %}<span class="section-header-badge danger">{{ dashboard.balances_due.count }}</span>{% endif %}
+      <span class="ops-header-count">{{ dashboard.balances_due.total_balance_due | money }}</span>
+    </div>
     <a class="button secondary tiny" href="{{ url_for('reports.staff_daily_report', report_type='payment_due') }}">Report</a>
   </div>
   {% if dashboard.balances_due["items"] %}
@@ -180,12 +220,12 @@
 {% endif %}
 
 <section class="grid two gap-lg">
-  <article class="card">
+  <article class="card tier-3">
     <div class="card-head">
       <div><h2>Quick actions</h2></div>
     </div>
     <div class="list-stack compact">
-      <a class="list-row" href="{{ url_for('front_desk.staff_front_desk') }}">
+      <a class="list-row quick-action-primary" href="{{ url_for('front_desk.staff_front_desk') }}">
         <div><strong>Front desk workspace</strong></div>
       </a>
       <a class="list-row" href="{{ url_for('staff_reservations.staff_reservations') }}">
@@ -198,7 +238,7 @@
       {% endif %}
       <a class="list-row" href="{{ url_for('staff_reservations.staff_review_queue') }}">
         <div><strong>Review queue</strong></div>
-        <span class="status confirmed">{{ queue_entries|length }}</span>
+        {% if queue_entries|length > 0 %}<span class="status confirmed">{{ queue_entries|length }}</span>{% endif %}
       </a>
       {% if can('messaging.view') %}
       <a class="list-row" href="{{ url_for('messaging.staff_messaging_inbox') }}">
@@ -214,7 +254,7 @@
     </div>
   </article>
 
-  <article class="card">
+  <article class="card tier-3">
     <div class="card-head">
       <div><h2>Reports</h2></div>
     </div>
@@ -243,7 +283,7 @@
 </section>
 
 {% if survey_stats and survey_stats.total_responses > 0 %}
-<section class="card">
+<section class="card tier-3">
   <div class="card-head">
     <div><h2>Guest Satisfaction (30d)</h2></div>
   </div>
@@ -293,7 +333,7 @@
 </section>
 {% endif %}
 
-<section class="card">
+<section class="card tier-3">
   <div class="card-head">
     <div><h2>Staff notifications</h2></div>
   </div>

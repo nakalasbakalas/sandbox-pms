@@ -244,34 +244,98 @@ def _urgent_tasks_summary(business_date: date) -> dict:
 
 
 def _front_desk_headline(dashboard: dict) -> list[dict]:
+    """Build headline KPI cards with tier and status metadata for dashboard hierarchy."""
+    # Tier 1: Core live KPIs (arrivals, departures, in-house, occupancy)
     cards = [
-        {"label": "Arrivals", "value": dashboard["arrivals"]["count"], "tone": "default"},
-        {"label": "Departures", "value": dashboard["departures"]["count"], "tone": "default"},
-        {"label": "In-house", "value": dashboard["in_house"]["count"], "tone": "default"},
+        {
+            "label": "Arrivals",
+            "value": dashboard["arrivals"]["count"],
+            "tone": "default",
+            "tier": "kpi-tier-1",
+            "status": "default" if dashboard["arrivals"]["count"] == 0 else "active",
+            "zero": dashboard["arrivals"]["count"] == 0,
+        },
+        {
+            "label": "Departures",
+            "value": dashboard["departures"]["count"],
+            "tone": "default",
+            "tier": "kpi-tier-1",
+            "status": "default" if dashboard["departures"]["count"] == 0 else "active",
+            "zero": dashboard["departures"]["count"] == 0,
+        },
+        {
+            "label": "In-house",
+            "value": dashboard["in_house"]["count"],
+            "tone": "default",
+            "tier": "kpi-tier-1",
+            "status": "default",
+            "zero": dashboard["in_house"]["count"] == 0,
+        },
         {
             "label": "Occupancy",
             "value": f"{dashboard['occupancy_today']['occupancy_percentage']:.0f}%",
             "tone": "accent",
+            "tier": "kpi-tier-1",
+            "status": "accent",
+            "zero": False,
+            "context": f"{dashboard['occupancy_today']['occupied_rooms']} of {dashboard['occupancy_today']['saleable_rooms']} rooms",
+            "progress": {
+                "percentage": dashboard['occupancy_today']['occupancy_percentage'],
+                "level": "high" if dashboard['occupancy_today']['occupancy_percentage'] >= 80 else "low" if dashboard['occupancy_today']['occupancy_percentage'] < 50 else "medium",
+            },
         },
     ]
+
+    # Tier 2: Operational condition metrics (housekeeping, financials)
     if "housekeeping" in dashboard:
         counts = dashboard["housekeeping"]["counts"]
         ready = counts.get("sellable_ready", 0)
         dirty = counts.get("dirty", 0)
-        cards.append({"label": "Rooms ready", "value": ready, "tone": "default"})
-        cards.append({"label": "Rooms dirty", "value": dirty, "tone": "warning" if dirty else "default"})
+
+        cards.append({
+            "label": "Rooms ready",
+            "value": ready,
+            "tone": "default",
+            "tier": "kpi-tier-2",
+            "status": "success" if ready > 0 else "default",
+            "zero": ready == 0,
+            "context": "All rooms ready" if ready == dashboard['occupancy_today']['saleable_rooms'] else None,
+        })
+        cards.append({
+            "label": "Rooms dirty",
+            "value": dirty,
+            "tone": "warning" if dirty else "default",
+            "tier": "kpi-tier-2",
+            "status": "warning" if dirty > 0 else "default",
+            "zero": dirty == 0,
+            "context": "No dirty rooms" if dirty == 0 else None,
+        })
+
     if "balances_due" in dashboard:
+        balance_count = dashboard["balances_due"]["count"]
+        balance_total = dashboard["balances_due"]["total_balance_due"]
         cards.append({
             "label": "Balance due",
-            "value": f"{dashboard['balances_due']['total_balance_due']:,.0f}",
-            "tone": "danger" if dashboard["balances_due"]["count"] else "default",
+            "value": f"{balance_total:,.0f}",
+            "tone": "danger" if balance_count else "default",
+            "tier": "kpi-tier-2",
+            "status": "danger" if balance_count > 0 else "default",
+            "zero": balance_count == 0,
+            "context": "No outstanding balances" if balance_count == 0 else f"{balance_count} reservation(s)",
         })
+
     if "urgent_tasks" in dashboard:
+        urgent_count = dashboard["urgent_tasks"]["count"]
         cards.append({
             "label": "Urgent tasks",
-            "value": dashboard["urgent_tasks"]["count"],
-            "tone": "danger" if dashboard["urgent_tasks"]["count"] else "default",
+            "value": urgent_count,
+            "tone": "danger" if urgent_count else "default",
+            "tier": "kpi-tier-2",
+            "status": "danger" if urgent_count > 0 else "default",
+            "zero": urgent_count == 0,
+            "context": "No urgent tasks" if urgent_count == 0 else None,
         })
+
     return cards
 
 
