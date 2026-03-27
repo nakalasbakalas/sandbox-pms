@@ -916,6 +916,99 @@ class ChannelSyncService:
         return self.provider.test_connection()
 
 
+# ---------------------------------------------------------------------------
+# Webhook / polling extension points
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InboundWebhookEvent:
+    """Normalised inbound webhook / event payload from an OTA provider.
+
+    This is the entry point for providers that push events to the PMS
+    (e.g. new reservation, modification, cancellation) rather than
+    requiring the PMS to poll for changes.
+    """
+
+    provider_key: str
+    event_type: str  # e.g. "reservation.new", "reservation.cancel", "reservation.modify"
+    external_id: str  # provider-side event or reservation ID
+    payload: dict[str, Any] = field(default_factory=dict)
+    signature: str | None = None  # raw signature header for verification
+    received_at: datetime = field(default_factory=utc_now)
+    idempotency_key: str | None = None  # for dedup if provider supplies one
+
+
+def verify_webhook_signature(
+    provider_key: str,
+    raw_body: bytes,
+    signature: str,
+) -> bool:
+    """Verify an inbound webhook payload signature.
+
+    Each provider has its own signing mechanism. This stub returns False
+    until a real provider adapter implements signature verification.
+    Provider-specific implementations should override in their adapter.
+    """
+    # Placeholder — real implementation requires provider-specific HMAC / key logic
+    current_app.logger.warning(
+        "webhook signature verification not implemented for %s", provider_key,
+    )
+    return False
+
+
+def process_inbound_webhook(event: InboundWebhookEvent) -> SyncResult:
+    """Process a normalised inbound webhook event.
+
+    Routes the event to the appropriate handler based on event_type.
+    Currently a scaffold — real implementations will be added per-provider.
+    Returns a SyncResult indicating processing outcome.
+    """
+    started = utc_now()
+    provider_key = event.provider_key
+
+    # Deduplication check placeholder
+    if event.idempotency_key:
+        existing = db.session.execute(
+            sa.select(OtaSyncLog).where(
+                OtaSyncLog.provider_key == provider_key,
+                OtaSyncLog.action == f"webhook:{event.event_type}",
+                OtaSyncLog.details_json["idempotency_key"].as_string() == event.idempotency_key,
+            ).limit(1)
+        ).scalar_one_or_none()
+        if existing:
+            return SyncResult(
+                provider=provider_key,
+                direction="inbound",
+                success=True,
+                details={"skipped": True, "reason": "duplicate idempotency_key"},
+            )
+
+    # Route by event type
+    result = SyncResult(
+        provider=provider_key,
+        direction="inbound",
+        success=False,
+        errors=[f"Unhandled webhook event type: {event.event_type}"],
+    )
+
+    write_sync_log(
+        provider_key=provider_key,
+        direction="inbound",
+        action=f"webhook:{event.event_type}",
+        status="success" if result.success else "error",
+        error_summary="; ".join(result.errors)[:2000] if result.errors else None,
+        details={
+            "event_type": event.event_type,
+            "external_id": event.external_id,
+            "idempotency_key": event.idempotency_key,
+        },
+        started_at=started,
+    )
+    db.session.commit()
+    return result
+
+
 def _default_rate_for_room_type(room_type: RoomType, business_date: date) -> Decimal:
     quote = quote_reservation(
         room_type=room_type,

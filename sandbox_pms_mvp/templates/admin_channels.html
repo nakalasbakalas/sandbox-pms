@@ -60,31 +60,31 @@
     </div>
   </div>
 
-  {# Setup checklist — shows what's missing #}
-  {% set needs_setup = not ch.api_configured or ch.health == 'not_configured' or ch.health == 'unknown' %}
-  {% if needs_setup or ch.health == 'error' %}
+  {# Setup readiness checklist — driven by assess_channel_readiness() #}
+  {% set rdns = ch.readiness %}
+  {% if not rdns.ready_for_activation or ch.health in ('not_configured', 'unknown', 'error') %}
   <div class="ota-setup-checklist">
-    <div class="ota-check {% if ch.api_configured %}ota-check--done{% endif %}">
-      {% if ch.api_configured %}✓{% else %}○{% endif %} API credentials
+    <div class="ota-readiness-bar" title="{{ rdns.completion_pct }}% complete">
+      <div class="ota-readiness-fill" style="width:{{ rdns.completion_pct }}%"></div>
     </div>
-    <div class="ota-check {% if ch.hotel_id %}ota-check--done{% endif %}">
-      {% if ch.hotel_id %}✓{% else %}○{% endif %} Hotel / property ID
+    {% for step in rdns.steps %}
+    <div class="ota-check {% if step.done %}ota-check--done{% endif %}{% if step.blocking and not step.done %} ota-check--blocking{% endif %}">
+      {% if step.done %}✓{% elif step.blocking %}✗{% else %}○{% endif %} {{ step.label }}
     </div>
-    <div class="ota-check {% if ch.is_active %}ota-check--done{% endif %}">
-      {% if ch.is_active %}✓{% else %}○{% endif %} Channel activated
-    </div>
-    <div class="ota-check {% if ch.last_test_ok %}ota-check--done{% endif %}">
-      {% if ch.last_test_ok %}✓{% else %}○{% endif %} Connection verified
-    </div>
-    <div class="ota-check {% if ch.mapped_count > 0 %}ota-check--done{% endif %}">
-      {% if ch.mapped_count > 0 %}✓{% else %}○{% endif %} Room types mapped ({{ ch.mapped_count }}/{{ summary.total_room_types }})
-    </div>
+    {% endfor %}
+    {% if rdns.blocking_issues %}
+    <p class="muted ota-blocking-note">Blocking: {{ rdns.blocking_issues | join(', ') }}</p>
+    {% endif %}
   </div>
   {% endif %}
 
   {# Quick status row — shown for configured channels #}
   {% if ch.api_configured %}
   <div class="ota-quick-stats">
+    <div class="ota-quick-stat">
+      <strong>Mode</strong>
+      <span>{% if ch.environment_mode == 'live' %}<span class="pill-sm warning">Live</span>{% else %}<span class="pill-sm subtle">Sandbox</span>{% endif %}</span>
+    </div>
     <div class="ota-quick-stat">
       <strong>API key</strong>
       <span>…{{ ch.record.api_key_hint }}</span>
@@ -99,7 +99,7 @@
     </div>
     <div class="ota-quick-stat">
       <strong>Last sync</strong>
-      <span>{% if ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</span>
+      <span>{% if ch.last_successful_sync_at %}{{ ch.last_successful_sync_at.strftime('%Y-%m-%d %H:%M') }}{% elif ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</span>
     </div>
     <div class="ota-quick-stat">
       <strong>Last tested</strong>
@@ -111,6 +111,13 @@
       <span class="pill-sm error">{{ ch.recent_error_count }}</span>
     </div>
     {% endif %}
+  </div>
+  {# Sync direction indicators #}
+  <div class="ota-sync-directions">
+    <span class="ota-sync-flag {% if ch.sync_directions.inventory_push %}ota-sync-flag--on{% endif %}">↑ Inventory</span>
+    <span class="ota-sync-flag {% if ch.sync_directions.rate_push %}ota-sync-flag--on{% endif %}">↑ Rates</span>
+    <span class="ota-sync-flag {% if ch.sync_directions.restriction_push %}ota-sync-flag--on{% endif %}">↑ Restrictions</span>
+    <span class="ota-sync-flag {% if ch.sync_directions.reservation_pull %}ota-sync-flag--on{% endif %}">↓ Reservations</span>
   </div>
   {% endif %}
 
@@ -149,6 +156,34 @@
             <input type="url" name="endpoint_url" value="{{ (ch.record.endpoint_url or '') if ch.record else '' }}" placeholder="https://api.example.com/v1/" {% if not can('settings.edit') %}disabled{% endif %}>
           </label>
 
+          <label>
+            <span>Environment mode</span>
+            <select name="environment_mode" {% if not can('settings.edit') %}disabled{% endif %}>
+              <option value="sandbox" {% if ch.environment_mode == 'sandbox' %}selected{% endif %}>Sandbox — testing only</option>
+              <option value="live" {% if ch.environment_mode == 'live' %}selected{% endif %}>Live — production traffic</option>
+            </select>
+          </label>
+
+          <fieldset class="ota-sync-fieldset">
+            <legend>Sync directions</legend>
+            <label class="toggle-row">
+              <input type="checkbox" name="sync_inventory_push" {% if ch.sync_directions.inventory_push %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+              <span>Push inventory availability</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" name="sync_rate_push" {% if ch.sync_directions.rate_push %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+              <span>Push rates</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" name="sync_restriction_push" {% if ch.sync_directions.restriction_push %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+              <span>Push restrictions (CTA/CTD, min stay)</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" name="sync_reservation_pull" {% if ch.sync_directions.reservation_pull %}checked{% endif %} {% if not can('settings.edit') %}disabled{% endif %}>
+              <span>Pull reservations from OTA</span>
+            </label>
+          </fieldset>
+
           {% if can('settings.edit') %}
             <div class="ota-action-row">
               <button class="button" type="submit">Save configuration</button>
@@ -162,6 +197,8 @@
           <div class="list-row no-link"><strong>API key</strong><span class="status">{{ ('…' ~ ch.record.api_key_hint) if ch.record and ch.record.api_key_hint else 'Not configured' }}</span></div>
           <div class="list-row no-link"><strong>API secret</strong><span class="status">{{ ('…' ~ ch.record.api_secret_hint) if ch.record and ch.record.api_secret_hint else 'Not configured' }}</span></div>
           <div class="list-row no-link"><strong>Status</strong><span class="status">{{ 'Active' if ch.is_active else 'Inactive' }}</span></div>
+          <div class="list-row no-link"><strong>Mode</strong><span class="status">{{ ch.environment_mode | capitalize }}</span></div>
+          <div class="list-row no-link"><strong>Readiness</strong><span class="status">{% if ch.readiness.ready_for_activation %}<span class="pill-sm success">Ready</span>{% else %}{{ ch.readiness.completion_pct }}% complete{% endif %}</span></div>
           {% if ch.last_tested_at %}
           <div class="list-row no-link"><strong>Last tested</strong><span class="status">{{ ch.last_tested_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></div>
           {% endif %}
