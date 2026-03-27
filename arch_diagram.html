@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sandbox Hotel PMS — Architecture Diagram</title>
+<style>
+  @page { size: A3 landscape; margin: 15mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8.5pt;
+    line-height: 1.35;
+    color: #111;
+    background: #fff;
+    padding: 20px 24px;
+  }
+  h1 {
+    font-size: 13pt;
+    font-weight: bold;
+    letter-spacing: 0.04em;
+    border-bottom: 2px solid #333;
+    padding-bottom: 6px;
+    margin-bottom: 16px;
+    font-family: "Consolas", "Courier New", monospace;
+  }
+  .diagram {
+    white-space: pre;
+    tab-size: 4;
+  }
+  section {
+    margin-bottom: 18px;
+  }
+  .section-title {
+    font-weight: bold;
+    font-size: 9.5pt;
+    background: #f0f0f0;
+    border-left: 4px solid #555;
+    padding: 3px 8px;
+    margin-bottom: 8px;
+    letter-spacing: 0.03em;
+  }
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .cols3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+  .box {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .box h3 {
+    font-size: 8.5pt;
+    font-weight: bold;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+    color: #222;
+  }
+  .box ul {
+    list-style: none;
+    padding: 0;
+  }
+  .box ul li::before { content: "• "; color: #666; }
+  .box ul li { margin-bottom: 1px; font-size: 8pt; }
+  .tag {
+    display: inline-block;
+    background: #e8e8e8;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 7.5pt;
+    margin: 1px 2px 1px 0;
+  }
+  .arch-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 14px;
+  }
+  .arch-block {
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    padding: 5px 14px;
+    text-align: center;
+    font-size: 8pt;
+    background: #fafafa;
+    min-width: 220px;
+  }
+  .arch-block.primary { background: #eef3fa; border-color: #7099cc; font-weight: bold; }
+  .arch-block.external { background: #fdf6e3; border-color: #c9a84c; }
+  .arch-block.database { background: #f0faf0; border-color: #5aaa5a; }
+  .arch-block.cron { background: #fdf0f0; border-color: #cc7070; }
+  .arrow { font-size: 11pt; color: #555; line-height: 1; }
+  .arrow-wide { display: flex; gap: 20px; align-items: center; justify-content: center; }
+  .arrow-wide .arrow { font-size: 9pt; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+    margin-top: 4px;
+  }
+  th {
+    background: #eee;
+    border: 1px solid #ccc;
+    padding: 3px 7px;
+    text-align: left;
+    font-size: 7.5pt;
+    font-weight: bold;
+  }
+  td {
+    border: 1px solid #ddd;
+    padding: 2px 7px;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #fafafa; }
+  .code { font-family: "Consolas", "Courier New", monospace; }
+  .footer {
+    margin-top: 20px;
+    font-size: 7.5pt;
+    color: #888;
+    border-top: 1px solid #ddd;
+    padding-top: 8px;
+    text-align: right;
+  }
+  @media print {
+    body { padding: 0; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="no-print" style="background:#fffbe6;border:1px solid #e6c84c;border-radius:6px;padding:10px 16px;margin-bottom:18px;font-size:9pt;">
+  <strong>To save as PDF:</strong> Press <kbd>Ctrl+P</kbd> (or <kbd>Cmd+P</kbd> on Mac), choose <em>Save as PDF</em>, set paper size to <strong>A3</strong>, orientation <strong>Landscape</strong>, and disable headers/footers for a clean export.
+</div>
+
+<h1>SANDBOX HOTEL PMS — Architecture Diagram</h1>
+
+<!-- ── TOP LEVEL FLOW ────────────────────────────────────────── -->
+<section>
+  <div class="section-title">DEPLOYMENT TOPOLOGY</div>
+  <div class="arch-flow">
+    <div style="display:flex;gap:24px;justify-content:center;">
+      <div class="arch-block external">book.sandboxhotel.com<br><span style="font-size:7.5pt;color:#888">Guest Booking</span></div>
+      <div class="arch-block external">staff.sandboxhotel.com<br><span style="font-size:7.5pt;color:#888">Staff PMS</span></div>
+      <div class="arch-block external">OTA Channels<br><span style="font-size:7.5pt;color:#888">Booking.com / Expedia / Agoda</span></div>
+    </div>
+    <div class="arrow">↓</div>
+    <div class="arch-block primary">Render.com — Gunicorn WSGI (2 workers, Python 3.11)<br><span style="font-size:7.5pt;font-weight:normal">Health: /health &nbsp;|&nbsp; Pre-deploy: flask db upgrade</span></div>
+    <div class="arrow">↓</div>
+    <div class="arch-block primary">Flask Application Factory — <span class="code">create_app()</span> · pms/app.py<br>
+      <span style="font-size:7.5pt;font-weight:normal">
+        Middleware: URL topology · Auth hooks (MFA gate, password-reset gate) · CSRF · CSP/HTTPS/ProxyFix · Fernet encryption · Multi-property resolution · Sentry
+      </span>
+    </div>
+  </div>
+</section>
+
+<!-- ── BLUEPRINTS ────────────────────────────────────────────── -->
+<section>
+  <div class="section-title">11 BLUEPRINTS (Route Layer)</div>
+  <div class="cols3">
+    <div>
+      <div class="box" style="margin-bottom:8px">
+        <h3>GUEST-FACING</h3>
+        <ul>
+          <li><strong>public</strong> — /, /book, /availability, /calendar/feed, payments (Stripe), pre-check-in, digital checkout, survey, maintenance request</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>AUTH</h3>
+        <ul>
+          <li><strong>auth</strong> — /staff/login, /staff/logout, /staff/mfa/verify, /staff/forgot-password, /staff/reset-password, /staff/security</li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="box">
+        <h3>STAFF-FACING</h3>
+        <ul>
+          <li><strong>front_desk</strong> — /staff/front-desk, planning board (drag-drop, room assign, check-in/out, no-show, walk-in, stats, handover)</li>
+          <li><strong>staff_reservations</strong> — /staff/reservations, /staff/guests, pre-checkin, docs, review queue, group blocks, scanner</li>
+          <li><strong>housekeeping</strong> — /staff/housekeeping, room status, tasks, inspections, bulk ops</li>
+          <li><strong>cashier</strong> — /staff/cashier, charges, adjustments, payments, refunds, voids, POS, documents, email receipts</li>
+          <li><strong>messaging</strong> — /staff/messaging, inbox, threads, compose, call log, inbound email, integrations</li>
+          <li><strong>reports</strong> — /staff/reports, daily reports, CSV export, audit log</li>
+          <li><strong>admin</strong> — /staff/admin, setup wizard, staff access, property, rates/inventory, operations, comms, payments, channels, rate calculator</li>
+          <li><strong>coupon_studio</strong> — /staff/coupon-studio</li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="box">
+        <h3>PARTNER-FACING</h3>
+        <ul>
+          <li><strong>provider</strong> — /provider/dashboard, /provider/bookings, payment requests, calendar feeds, iCal sources</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── SERVICES ─────────────────────────────────────────────── -->
+<section>
+  <div class="section-title">SERVICE LAYER (~45 modules — pms/services/)</div>
+  <table>
+    <thead>
+      <tr><th>Domain</th><th>Modules</th><th>Responsibility</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Booking &amp; Availability</td><td class="code">public_booking_service · reservation_service · availability_service · extras_service · group_booking_service · pricing</td><td>Public engine, search/hold/confirm, inventory mutations, rate calculation engine (QuoteResult), extras, group blocks</td></tr>
+      <tr><td>Front Desk</td><td class="code">front_desk_service · front_desk_board_service · front_desk_mutations · front_desk_queries · room_readiness_service</td><td>Planning board grid (71 KB), drag-drop, check-in/out, no-show, walk-in, room assignability source-of-truth</td></tr>
+      <tr><td>Housekeeping</td><td class="code">housekeeping_service</td><td>Housekeeping board, room status transitions, task management, inspections, shifts</td></tr>
+      <tr><td>Finance</td><td class="code">cashier_service · payment_integration_service · pos_adapter</td><td>Folio charges/payments/refunds/voids, Stripe hosted payments, webhook processing, POS push</td></tr>
+      <tr><td>Communication</td><td class="code">messaging_service · communication_service · communication_dispatch · communication_queue · sms_provider · sms_twilio_adapter</td><td>Unified messaging hub (conversations, multi-channel), SMTP dispatch, notification queue, Twilio SMS adapter</td></tr>
+      <tr><td>Guest &amp; Loyalty</td><td class="code">staff_reservations_service · pre_checkin_service · loyalty_service · survey_service · id_scanner_adapter</td><td>Staff reservation workspace, digital pre-check-in lifecycle, loyalty tiers, survey scoring, pluggable ID scanner</td></tr>
+      <tr><td>Channels &amp; Calendar</td><td class="code">channel_service · ical_service · provider_portal_service</td><td>OTA channel sync (rates, availability, reservations), iCal feed generation &amp; external source sync, provider portal backend</td></tr>
+      <tr><td>Admin &amp; Config</td><td class="code">admin_service · admin_settings_ops · admin_inventory_ops · admin_content_ops · setup_service · property_service</td><td>Property/room/rate/setting CRUD, blackouts, inventory overrides, policy docs, notification templates, roles, audit, multi-property</td></tr>
+      <tr><td>Reporting</td><td class="code">reporting_service · reporting_reports · reporting_base</td><td>Metrics, detail reports (72 KB), CSV exports</td></tr>
+      <tr><td>Infrastructure</td><td class="code">auth_service · rate_limiter · storage</td><td>Login/logout/MFA/password reset/session management, Redis/in-memory rate limiter, S3-compatible or local disk storage</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── CORE MODULES ──────────────────────────────────────────── -->
+<section>
+  <div class="section-title">CORE MODULES (pms/)</div>
+  <table>
+    <thead>
+      <tr><th>Module</th><th>Purpose</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="code">models.py</td><td>65 SQLAlchemy models, 2 mixins (AuditMixin, SoftDeleteMixin)</td></tr>
+      <tr><td class="code">config.py</td><td>Config class — DB URI normalisation, env var mapping, trusted hosts, security settings</td></tr>
+      <tr><td class="code">extensions.py</td><td>Flask extension singletons: <span class="code">db = SQLAlchemy(...)</span>, <span class="code">migrate = Migrate(...)</span></td></tr>
+      <tr><td class="code">helpers.py</td><td>47 shared view-layer helpers — auth enforcement, CSRF, request parsing, path helpers (single source of truth)</td></tr>
+      <tr><td class="code">security.py</td><td>Fernet encryption, HTTPS enforcement, ProxyFix, request ID, IP extraction, sensitive data sanitisation, error handlers</td></tr>
+      <tr><td class="code">constants.py</td><td>All domain enums: room/reservation/HK statuses, folio codes, roles, permissions, OTA providers, messaging channels, booking languages…</td></tr>
+      <tr><td class="code">settings.py</td><td>APP_SETTINGS_SEED — all configurable hotel settings (rates, policies, branding, payment, messaging)</td></tr>
+      <tr><td class="code">pricing.py</td><td>Rate calculation engine, QuoteResult dataclass, nightly rate resolution from rate rules and inventory</td></tr>
+      <tr><td class="code">branding.py</td><td>Dynamic branding: accent colours, logo URLs, favicon, contact info, SEO metadata from app settings</td></tr>
+      <tr><td class="code">i18n.py</td><td>3-language booking copy: Thai (primary), English, Simplified Chinese</td></tr>
+      <tr><td class="code">permissions.py</td><td>user_has_permission(), role-based dashboard routing, permission checking helpers</td></tr>
+      <tr><td class="code">audit.py / activity.py</td><td>Audit log (before/after entity changes, configurable retention) + activity log (IP/user-agent action recording)</td></tr>
+      <tr><td class="code">url_topology.py</td><td>Canonical host enforcement, booking vs. staff vs. provider path detection</td></tr>
+      <tr><td class="code">normalization.py</td><td>Email, phone, free-text sanitisation at system boundaries</td></tr>
+      <tr><td class="code">seeds.py</td><td>Reference data seeding: roles, permissions, room types, rooms, rates, demo reservations</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── DATA / INFRA ──────────────────────────────────────────── -->
+<section>
+  <div class="cols">
+    <div>
+      <div class="section-title">DATA MODEL — 65 SQLAlchemy Models</div>
+      <table>
+        <thead><tr><th>Group</th><th>Models</th></tr></thead>
+        <tbody>
+          <tr><td>Auth &amp; Users</td><td class="code" style="font-size:7.5pt">User, Role, Permission, UserRole, RolePermission, UserSession, UserPreference, PasswordResetToken, AuthAttempt, MfaFactor, MfaRecoveryCode, UserPasswordHistory</td></tr>
+          <tr><td>Activity / Audit</td><td class="code" style="font-size:7.5pt">ActivityLog, AuditLog</td></tr>
+          <tr><td>Guests</td><td class="code" style="font-size:7.5pt">Guest, GuestLoyalty, GuestNote</td></tr>
+          <tr><td>Property &amp; Rooms</td><td class="code" style="font-size:7.5pt">Property, RoomType, Room, HousekeepingStatus, RoomNote, RoomStatusHistory</td></tr>
+          <tr><td>Housekeeping</td><td class="code" style="font-size:7.5pt">HousekeepingTask</td></tr>
+          <tr><td>Reservations</td><td class="code" style="font-size:7.5pt">Reservation, ReservationStatusHistory, ReservationNote, ReservationExtra, ReservationHold, ReservationReviewQueue, StaffNotification, ReservationDocument, ReservationCodeSequence</td></tr>
+          <tr><td>Booking Ops</td><td class="code" style="font-size:7.5pt">CancellationRequest, ModificationRequest, EmailOutbox</td></tr>
+          <tr><td>Inventory &amp; Rates</td><td class="code" style="font-size:7.5pt">InventoryDay, RateRule, BookingExtra, InventoryOverride, BlackoutPeriod</td></tr>
+          <tr><td>Folio &amp; Payments</td><td class="code" style="font-size:7.5pt">FolioCharge, PaymentRequest, PaymentEvent, CashierDocument, CashierDocumentSequence, CashierActivityLog</td></tr>
+          <tr><td>Content &amp; Config</td><td class="code" style="font-size:7.5pt">PolicyDocument, NotificationTemplate, NotificationDelivery, AppSetting</td></tr>
+          <tr><td>Channels &amp; Calendar</td><td class="code" style="font-size:7.5pt">OtaChannel, CalendarFeed, ExternalCalendarSource, ExternalCalendarBlock, ExternalCalendarSyncRun</td></tr>
+          <tr><td>Pre-Check-In</td><td class="code" style="font-size:7.5pt">PreCheckIn</td></tr>
+          <tr><td>Messaging</td><td class="code" style="font-size:7.5pt">ConversationThread, Message, MessageTemplate, DeliveryAttempt, AutomationRule, PendingAutomationEvent, AutoResponseRule</td></tr>
+          <tr><td>Surveys</td><td class="code" style="font-size:7.5pt">GuestSurvey</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div class="section-title">RBAC — 5 Roles × 37 Permissions</div>
+      <table style="margin-bottom:12px">
+        <thead><tr><th>Role</th><th>Access</th></tr></thead>
+        <tbody>
+          <tr><td class="code">admin</td><td>Full access — all modules</td></tr>
+          <tr><td class="code">manager</td><td>Reservations, front desk, reports, cashier, messaging, housekeeping</td></tr>
+          <tr><td class="code">front_desk</td><td>Check-in/out, board, walk-in, cashier (limited)</td></tr>
+          <tr><td class="code">housekeeping</td><td>Room status, tasks, inspections</td></tr>
+          <tr><td class="code">provider</td><td>Own bookings, calendar, payment requests</td></tr>
+        </tbody>
+      </table>
+
+      <div class="section-title">INFRASTRUCTURE</div>
+      <table style="margin-bottom:12px">
+        <thead><tr><th>Component</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Database</td><td>PostgreSQL 17, Render basic-256mb, 27 Alembic migrations</td></tr>
+          <tr><td>File Storage</td><td>Render Disk 1 GB at /var/data/uploads/documents (or S3-compatible)</td></tr>
+          <tr><td>Error Monitoring</td><td>Sentry SDK</td></tr>
+          <tr><td>Payments</td><td>Stripe (hosted payment pages + webhooks)</td></tr>
+          <tr><td>SMS</td><td>Twilio (stdlib urllib adapter, no extra dependency)</td></tr>
+          <tr><td>OTA Channels</td><td>Booking.com, Expedia, Agoda via channel_service</td></tr>
+          <tr><td>Calendar</td><td>iCalendar RFC 5545 feeds + external source sync</td></tr>
+          <tr><td>Rate Limiting</td><td>Redis or in-memory sliding-window</td></tr>
+        </tbody>
+      </table>
+
+      <div class="section-title">9 CRON JOBS (Render)</div>
+      <table>
+        <thead><tr><th>Schedule</th><th>Job</th></tr></thead>
+        <tbody>
+          <tr><td>Every 5 min</td><td class="code">process-notifications, process-automation-events</td></tr>
+          <tr><td>Every 15 min</td><td class="code">sync-ical-sources, process-waitlist</td></tr>
+          <tr><td>Hourly</td><td class="code">auto-cancel-no-shows</td></tr>
+          <tr><td>Daily 8 AM</td><td class="code">fire-pre-checkin-reminders</td></tr>
+          <tr><td>Daily 9 AM</td><td class="code">send-pre-arrival-reminders</td></tr>
+          <tr><td>Daily 10 AM</td><td class="code">send-failed-payment-reminders</td></tr>
+          <tr><td>Daily 3:30 AM</td><td class="code">cleanup-audit-logs</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="footer">Sandbox Hotel PMS · Architecture Diagram · Generated 2026-03-26</div>
+
+</body>
+</html>
