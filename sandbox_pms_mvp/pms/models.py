@@ -1669,10 +1669,10 @@ class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
     last_test_error: Mapped[str | None] = mapped_column(sa.String(500), nullable=True)
 
     # Sync direction configuration
-    sync_inventory_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
-    sync_rate_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
-    sync_restriction_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
-    sync_reservation_pull: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("0"))
+    sync_inventory_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
+    sync_rate_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
+    sync_restriction_push: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
+    sync_reservation_pull: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=False, server_default=sa.text("false"))
 
     # Environment mode
     environment_mode: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="sandbox", server_default=sa.text("'sandbox'"))

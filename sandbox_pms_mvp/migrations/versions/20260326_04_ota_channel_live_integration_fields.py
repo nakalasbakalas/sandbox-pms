@@ -20,10 +20,10 @@ depends_on = None
 def upgrade():
     with op.batch_alter_table("ota_channels", schema=None) as batch_op:
         # Sync direction flags
-        batch_op.add_column(sa.Column("sync_inventory_push", sa.Boolean, nullable=False, server_default=sa.text("0")))
-        batch_op.add_column(sa.Column("sync_rate_push", sa.Boolean, nullable=False, server_default=sa.text("0")))
-        batch_op.add_column(sa.Column("sync_restriction_push", sa.Boolean, nullable=False, server_default=sa.text("0")))
-        batch_op.add_column(sa.Column("sync_reservation_pull", sa.Boolean, nullable=False, server_default=sa.text("0")))
+        batch_op.add_column(sa.Column("sync_inventory_push", sa.Boolean, nullable=False, server_default=sa.text("false")))
+        batch_op.add_column(sa.Column("sync_rate_push", sa.Boolean, nullable=False, server_default=sa.text("false")))
+        batch_op.add_column(sa.Column("sync_restriction_push", sa.Boolean, nullable=False, server_default=sa.text("false")))
+        batch_op.add_column(sa.Column("sync_reservation_pull", sa.Boolean, nullable=False, server_default=sa.text("false")))
 
         # Environment mode
         batch_op.add_column(sa.Column("environment_mode", sa.String(20), nullable=False, server_default=sa.text("'sandbox'")))
