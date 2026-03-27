@@ -1051,6 +1051,27 @@ tbody tr:last-child td { border-bottom: 0; }
 .quick-action-primary strong {
   color: var(--accent-soft);
 }
+
+/* Mini occupancy progress bar */
+.metric-progress-bar {
+  margin-top: 6px;
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.metric-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dark));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.metric-progress-fill.high {
+  background: linear-gradient(90deg, var(--success), #059669);
+}
+.metric-progress-fill.low {
+  background: linear-gradient(90deg, var(--warning), #d97706);
+}
 .report-mini-grid {
   gap: 8px;
   margin-bottom: 10px;
@@ -4352,6 +4373,23 @@ body:not(.public-site) .quick-action-primary:hover {
 }
 body:not(.public-site) .quick-action-primary strong {
   color: var(--accent-dark);
+}
+
+/* Mini occupancy progress bar (Light Mode) */
+body:not(.public-site) .metric-progress-bar {
+  margin-top: 3px;
+  height: 3px;
+  background: #e5e7eb;
+  border-radius: 2px;
+}
+body:not(.public-site) .metric-progress-fill {
+  background: linear-gradient(90deg, var(--accent), var(--accent-dark));
+}
+body:not(.public-site) .metric-progress-fill.high {
+  background: linear-gradient(90deg, #059669, #047857);
+}
+body:not(.public-site) .metric-progress-fill.low {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
 }
 
 body:not(.public-site) .ops-collapsible-summary {

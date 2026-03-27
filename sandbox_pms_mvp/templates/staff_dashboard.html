@@ -17,6 +17,11 @@
       <small>{{ card.label }}</small>
       <strong>{{ card.value }}</strong>
       {% if card.context %}<span class="metric-context">{{ card.context }}</span>{% endif %}
+      {% if card.progress %}
+        <div class="metric-progress-bar">
+          <div class="metric-progress-fill {{ card.progress.level }}" style="width: {{ card.progress.percentage }}%;"></div>
+        </div>
+      {% endif %}
     </article>
   {% endfor %}
 </section>

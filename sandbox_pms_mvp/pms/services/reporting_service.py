@@ -279,6 +279,10 @@ def _front_desk_headline(dashboard: dict) -> list[dict]:
             "status": "accent",
             "zero": False,
             "context": f"{dashboard['occupancy_today']['occupied_rooms']} of {dashboard['occupancy_today']['saleable_rooms']} rooms",
+            "progress": {
+                "percentage": dashboard['occupancy_today']['occupancy_percentage'],
+                "level": "high" if dashboard['occupancy_today']['occupancy_percentage'] >= 80 else "low" if dashboard['occupancy_today']['occupancy_percentage'] < 50 else "medium",
+            },
         },
     ]
 
