@@ -879,6 +879,178 @@ tbody tr:last-child td { border-bottom: 0; }
   color: var(--muted);
   font-size: 0.82rem;
 }
+
+/* ── Dashboard Card Hierarchy System ── */
+/* Tier 1: Core KPI Cards - Maximum visual prominence */
+.metric-card.kpi-tier-1 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.04);
+  position: relative;
+}
+.metric-card.kpi-tier-1::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dark));
+  border-radius: var(--radius) var(--radius) 0 0;
+  opacity: 0.7;
+}
+.metric-card.kpi-tier-1 small {
+  color: var(--accent-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.metric-card.kpi-tier-1 strong {
+  font-size: 1.8rem;
+  color: var(--text);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+/* Tier 2: Operational Condition Metrics - Strong but secondary */
+.metric-card.kpi-tier-2 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.metric-card.kpi-tier-2 small {
+  font-weight: 600;
+  font-size: 0.76rem;
+}
+.metric-card.kpi-tier-2 strong {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+/* Tier 3: Supporting/Detail Cards - Quiet, supportive */
+.card.tier-3 {
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+/* ── Semantic Status Colors ── */
+/* Warning state - for operational attention (dirty rooms, pending, etc) */
+.metric-card.status-warning {
+  border-left: 3px solid var(--warning);
+  background: linear-gradient(180deg, rgba(240,173,78,0.08), rgba(240,173,78,0.02));
+}
+.metric-card.status-warning strong {
+  color: #ffd391;
+}
+
+/* Danger state - for urgent issues (balances due, urgent tasks, etc) */
+.metric-card.status-danger {
+  border-left: 3px solid var(--danger);
+  background: linear-gradient(180deg, rgba(223,95,103,0.08), rgba(223,95,103,0.02));
+}
+.metric-card.status-danger strong {
+  color: #ffb0b5;
+}
+
+/* Success state - for positive metrics (high occupancy, rooms ready, etc) */
+.metric-card.status-success {
+  border-left: 3px solid var(--success);
+  background: linear-gradient(180deg, rgba(47,182,117,0.08), rgba(47,182,117,0.02));
+}
+.metric-card.status-success strong {
+  color: #97ebc0;
+}
+
+/* Accent state - for key informational metrics */
+.metric-card.status-accent {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(197,124,53,0.08), rgba(197,124,53,0.02));
+}
+.metric-card.status-accent strong {
+  color: var(--accent-soft);
+}
+
+/* Zero state - subdued appearance for zero values */
+.metric-card.zero-state {
+  opacity: 0.6;
+  border-color: rgba(255,255,255,0.04);
+}
+.metric-card.zero-state strong {
+  color: var(--muted);
+}
+
+/* Section header enhancement */
+.section-header-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.section-header-primary h2 {
+  font-weight: 700;
+}
+.section-header-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.1);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.section-header-badge.warning {
+  background: rgba(240,173,78,0.2);
+  color: #ffd391;
+}
+.section-header-badge.danger {
+  background: rgba(223,95,103,0.25);
+  color: #ffb0b5;
+}
+
+/* Enhanced metric strip for sub-metrics */
+.metric-strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.metric-strip-item.has-value strong {
+  font-weight: 700;
+}
+.metric-strip-item.warning strong {
+  color: #ffd391;
+}
+.metric-strip-item.danger strong {
+  color: #ffb0b5;
+}
+
+/* Supporting context text for metrics */
+.metric-context {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* Quick action emphasis */
+.quick-action-primary {
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  font-weight: 700;
+}
+.quick-action-primary:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.3);
+}
+.quick-action-primary strong {
+  color: var(--accent-soft);
+}
 .report-mini-grid {
   gap: 8px;
   margin-bottom: 10px;
@@ -4017,6 +4189,171 @@ body:not(.public-site) .dashboard-survey-fill {
 body:not(.public-site) .dashboard-survey-categories {
   margin-top: 2px;
 }
+
+/* ── Dashboard Card Hierarchy System (Light Mode) ── */
+/* Tier 1: Core KPI Cards - Maximum visual prominence */
+body:not(.public-site) .metric-card.kpi-tier-1 {
+  background: #fff;
+  border: 1px solid #d1d5da;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  position: relative;
+}
+body:not(.public-site) .metric-card.kpi-tier-1::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-dark));
+  border-radius: 3px 3px 0 0;
+}
+body:not(.public-site) .metric-card.kpi-tier-1 small {
+  color: var(--accent-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+  font-weight: 700;
+}
+body:not(.public-site) .metric-card.kpi-tier-1 strong {
+  font-size: 1.4rem;
+  color: var(--pms-text-primary);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+/* Tier 2: Operational Condition Metrics - Strong but secondary */
+body:not(.public-site) .metric-card.kpi-tier-2 {
+  background: #fff;
+  border: 1px solid #d1d5da;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+body:not(.public-site) .metric-card.kpi-tier-2 small {
+  font-weight: 600;
+  font-size: 9px;
+}
+body:not(.public-site) .metric-card.kpi-tier-2 strong {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* Tier 3: Supporting/Detail Cards - Quiet, supportive */
+body:not(.public-site) .card.tier-3 {
+  background: var(--pms-bg-hover);
+  border: 1px solid #e1e4e8;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* Semantic Status Colors (Light Mode) */
+body:not(.public-site) .metric-card.status-warning {
+  border-left: 3px solid #d97706;
+  background: linear-gradient(180deg, #fef3c7, #fff);
+}
+body:not(.public-site) .metric-card.status-warning strong {
+  color: #92400e;
+}
+
+body:not(.public-site) .metric-card.status-danger {
+  border-left: 3px solid #dc2626;
+  background: linear-gradient(180deg, #fee2e2, #fff);
+}
+body:not(.public-site) .metric-card.status-danger strong {
+  color: #991b1b;
+}
+
+body:not(.public-site) .metric-card.status-success {
+  border-left: 3px solid #059669;
+  background: linear-gradient(180deg, #d1fae5, #fff);
+}
+body:not(.public-site) .metric-card.status-success strong {
+  color: #065f46;
+}
+
+body:not(.public-site) .metric-card.status-accent {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, #fef3c7, #fff);
+}
+body:not(.public-site) .metric-card.status-accent strong {
+  color: var(--accent-dark);
+}
+
+body:not(.public-site) .metric-card.zero-state {
+  opacity: 0.5;
+  border-color: #e1e4e8;
+}
+body:not(.public-site) .metric-card.zero-state strong {
+  color: var(--pms-text-muted);
+}
+
+/* Section header enhancements (Light Mode) */
+body:not(.public-site) .section-header-primary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+body:not(.public-site) .section-header-primary h2 {
+  font-weight: 700;
+}
+body:not(.public-site) .section-header-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--pms-bg-hover);
+  border: 1px solid var(--pms-border-thin);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--pms-text-primary);
+}
+body:not(.public-site) .section-header-badge.warning {
+  background: #fef3c7;
+  border-color: #fbbf24;
+  color: #92400e;
+}
+body:not(.public-site) .section-header-badge.danger {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #991b1b;
+}
+
+/* Enhanced metric strip (Light Mode) */
+body:not(.public-site) .metric-strip-item.has-value strong {
+  font-weight: 700;
+}
+body:not(.public-site) .metric-strip-item.warning strong {
+  color: #92400e;
+}
+body:not(.public-site) .metric-strip-item.danger strong {
+  color: #991b1b;
+}
+
+/* Supporting context text (Light Mode) */
+body:not(.public-site) .metric-context {
+  display: block;
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--pms-text-muted);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Quick action emphasis (Light Mode) */
+body:not(.public-site) .quick-action-primary {
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  font-weight: 700;
+}
+body:not(.public-site) .quick-action-primary:hover {
+  background: #fde68a;
+  border-color: #f59e0b;
+}
+body:not(.public-site) .quick-action-primary strong {
+  color: var(--accent-dark);
+}
+
 body:not(.public-site) .ops-collapsible-summary {
   cursor: pointer;
   list-style: none;
