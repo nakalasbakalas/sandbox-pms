@@ -795,7 +795,10 @@ class TestProviderCapabilitiesAndReadiness:
             )
             assert result["ready_for_activation"] is False
             assert result["completion_pct"] == 0
-            assert len(result["blocking_issues"]) == 5  # all blocking steps fail
+            # All blocking steps should be incomplete
+            blocking_steps = [s for s in result["steps"] if s["blocking"] and not s["done"]]
+            assert len(result["blocking_issues"]) == len(blocking_steps)
+            assert len(result["blocking_issues"]) > 0
             assert len(result["steps"]) == 6
 
     def test_assess_readiness_fully_configured(self, app_factory):

@@ -7,9 +7,10 @@ integration layer.  Real connectivity to Booking.com, Expedia, Agoda, or a
 channel-management intermediary can be added by implementing a provider
 adapter — no core service rewrites required.
 
-> **Status** — The architecture is live-integration-ready.  Actual provider
-> API credentials and provider-specific payload mappings are still required
-> before connecting to a real OTA.
+> **Status** — The architecture scaffolding is complete and ready for
+> provider implementation.  Actual provider API credentials and
+> provider-specific payload mappings are still required before connecting
+> to a real OTA.
 
 ---
 

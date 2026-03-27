@@ -100,6 +100,7 @@
     <div class="ota-quick-stat">
       <strong>Last sync</strong>
       <span>{% if ch.last_successful_sync_at %}{{ ch.last_successful_sync_at.strftime('%Y-%m-%d %H:%M') }}{% elif ch.last_success_log %}{{ ch.last_success_log.created_at.strftime('%Y-%m-%d %H:%M') }}{% else %}Never{% endif %}</span>
+      {# Prefers last_successful_sync_at (channel-level field), falls back to most recent success log entry #}
     </div>
     <div class="ota-quick-stat">
       <strong>Last tested</strong>

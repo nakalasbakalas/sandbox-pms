@@ -946,15 +946,18 @@ def verify_webhook_signature(
 ) -> bool:
     """Verify an inbound webhook payload signature.
 
-    Each provider has its own signing mechanism. This stub returns False
-    until a real provider adapter implements signature verification.
-    Provider-specific implementations should override in their adapter.
+    Each provider has its own signing mechanism.  Until a real provider
+    adapter supplies verification logic this function raises
+    ``NotImplementedError`` so callers cannot silently skip verification.
+
+    To add provider-specific verification, extend this function with a
+    dispatch table keyed by *provider_key* that performs the appropriate
+    HMAC / signature check.
     """
-    # Placeholder — real implementation requires provider-specific HMAC / key logic
-    current_app.logger.warning(
-        "webhook signature verification not implemented for %s", provider_key,
+    raise NotImplementedError(
+        f"Webhook signature verification is not yet implemented for {provider_key}. "
+        "A provider-specific HMAC / key check must be added before accepting webhooks."
     )
-    return False
 
 
 def process_inbound_webhook(event: InboundWebhookEvent) -> SyncResult:
