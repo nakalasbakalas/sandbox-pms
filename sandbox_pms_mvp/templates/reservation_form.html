@@ -69,20 +69,23 @@
     </div>
 
     {# ── Pre-save discount / rate adjustment ── #}
-    <div class="grid three">
-      <label><span>Discount %</span><input type="number" name="manual_discount_pct" min="0" max="100" step="0.01" value="{{ initial.manual_discount_pct or 0 }}"></label>
-      <label class="span-two"><span>Discount note</span><input type="text" name="manual_discount_note" value="{{ initial.manual_discount_note or '' }}" placeholder="Corporate rate / VIP / long stay"></label>
-    </div>
+    <details class="rate-adjustment-toggle" style="margin:4px 0;">
+      <summary style="cursor:pointer;font-size:0.85rem;color:var(--muted);">+ Rate adjustment / discount</summary>
+      <div class="grid three" style="margin-top:6px;">
+        <label><span>Discount %</span><input type="number" name="manual_discount_pct" min="0" max="100" step="0.01" value="{{ initial.manual_discount_pct or 0 }}"><small class="muted">Applied to room + tax total</small></label>
+        <label class="span-two"><span>Reason for adjustment</span><input type="text" name="manual_discount_note" value="{{ initial.manual_discount_note or '' }}" placeholder="e.g. Corporate rate, Long stay 7+ nights, VIP, Staff rate"><small class="muted">Recorded in audit log</small></label>
+      </div>
+    </details>
 
     {# ── Rate preview ── #}
     <div id="rate-preview" class="rate-preview-box" hidden>
-      <h3>Rate Preview</h3>
+      <h3>💰 Rate Preview</h3>
       <dl>
         <dt>Nights</dt><dd id="rp-nights">-</dd>
-        <dt>Base room total</dt><dd id="rp-room-total">-</dd>
-        <dt id="rp-discount-label" hidden class="discount-line">Discount</dt><dd id="rp-discount-amount" hidden class="discount-line">-</dd>
-        <dt>Tax (VAT)</dt><dd id="rp-tax">-</dd>
-        <dt>Grand total</dt><dd id="rp-grand-total"><strong>-</strong></dd>
+        <dt>Room charges (before discount)</dt><dd id="rp-room-total">-</dd>
+        <dt id="rp-discount-label" hidden class="discount-line">Discount applied</dt><dd id="rp-discount-amount" hidden class="discount-line">-</dd>
+        <dt>Tax (VAT 7%)</dt><dd id="rp-tax">-</dd>
+        <dt><strong>Guest pays</strong></dt><dd id="rp-grand-total"><strong>-</strong></dd>
       </dl>
       <small class="muted" id="rp-nightly"></small>
     </div>

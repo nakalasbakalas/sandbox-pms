@@ -13,6 +13,12 @@
     <span class="bsr-label"><strong>Total available</strong></span>
     <strong class="bsr-value">{{ board.counts.available_rooms }}</strong>
   </div>
+  {% if board.counts.maintenance_count is defined and board.counts.maintenance_count > 0 %}
+  <div class="board-stats-row bsr-warning">
+    <span class="bsr-label">🔧 Out of service</span>
+    <strong class="bsr-value">{{ board.counts.maintenance_count }}</strong>
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 <div class="board-stats-section">

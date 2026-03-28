@@ -53,25 +53,27 @@
 
 {% if can_folio and detail.payment_summary.balance_due > 0 %}
 <div class="payment-cta-callout">
-  <span>💰 <strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong> balance due — collect payment to complete this booking.</span>
-  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>
+  <span>💰 <strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong> balance due.</span>
+  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Collect payment</a>
+  <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">Print invoice</a>
 </div>
 {% endif %}
 
 {% if can_folio %}
 <section class="card">
-  <div class="card-head"><h2>Cashier & Documents</h2></div>
-  <div class="actions" style="padding:8px 0;">
+  <div class="card-head"><h2>Cashier &amp; Documents</h2></div>
+  <div class="actions" style="padding:8px 0;flex-wrap:wrap;gap:6px;">
     <a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>
-    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">Print folio</a>
-    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">Print receipt</a>
-    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">Print invoice</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">🖨 Folio</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">🖨 Receipt</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">🖨 Invoice</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='confirmation') }}" target="_blank">🖨 Confirmation</a>
   </div>
   <div class="metric-strip" style="padding-top:4px;">
     <div><small>Deposit required</small><strong>{{ currency }} {{ detail.payment_summary.deposit_required_amount|money }}</strong></div>
     <div><small>Deposit received</small><strong>{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }}</strong></div>
-    <div><small>Balance due</small><strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
-    <div><small>Refund due</small><strong>{{ currency }} {{ detail.payment_summary.refund_due|money }}</strong></div>
+    <div><small>Balance due</small><strong style="{% if detail.payment_summary.balance_due > 0 %}color:#dc2626;{% endif %}">{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
+    <div><small>Refund due</small><strong style="{% if detail.payment_summary.refund_due > 0 %}color:#d97706;{% endif %}">{{ currency }} {{ detail.payment_summary.refund_due|money }}{% if detail.payment_summary.refund_due > 0 %} ⚠{% endif %}</strong></div>
   </div>
 </section>
 {% endif %}
@@ -80,8 +82,8 @@
 <section class="card">
   <div class="card-head"><h2>Key Card</h2></div>
   <div style="padding:8px 0;">
-    <span class="keycard-placeholder">🔑 Key card issuance — hardware integration pending</span>
-    <p class="small muted" style="margin-top:4px;">Key card encoding will be available once hardware is connected. Room: {{ detail.assigned_room_number or 'Unassigned' }}</p>
+    <div class="keycard-placeholder">🔑 Issue key card — Room {{ detail.assigned_room_number or 'TBD' }}</div>
+    <p class="small muted" style="margin-top:4px;">Key card encoding requires hardware integration. Mark as issued manually when physical key is handed to guest.</p>
   </div>
 </section>
 {% endif %}

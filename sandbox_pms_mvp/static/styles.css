@@ -7554,6 +7554,20 @@ body:not(.public-site) .pill-sm.subtle { background: rgba(0, 0, 0, .06); }
   flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
 }
+.planning-board-avail-strip .avail-strip-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.planning-board-avail-strip .avail-strip-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
 .planning-board-avail-strip .fd-cmd-metric {
   flex-direction: row;
   gap: 3px;
@@ -7564,6 +7578,7 @@ body:not(.public-site) .pill-sm.subtle { background: rgba(0, 0, 0, .06); }
   color: #ef4444;
   background: rgba(239,68,68,0.1);
   border-color: rgba(239,68,68,0.3);
+  font-weight: 700;
 }
 .planning-board-avail-strip .avail-low {
   color: #f59e0b;

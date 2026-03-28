@@ -5,27 +5,26 @@
 <section class="card">
   <div class="card-head">
     <div>
-      <p class="eyebrow">Operations</p>
-      <h1>{{ title }}</h1>
-      <p>{{ subtitle }}</p>
+      <p class="eyebrow">Operations · {{ target_date }}</p>
+      <h1>{{ title }} <span class="small muted" style="font-weight:400;">({{ items|length }} record{{ 's' if items|length != 1 else '' }})</span></h1>
     </div>
     <div class="actions">
-      <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservations') }}">All reservations</a>
-      <a class="button secondary" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
       <a class="button secondary" href="{{ url_for('front_desk.staff_front_desk_board') }}">Board</a>
+      <a class="button secondary" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
+      <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservations') }}">All reservations</a>
     </div>
   </div>
 
   <form class="toolbar" method="get">
     <label><span>Date</span><input type="date" name="date" value="{{ target_date }}"></label>
     {% if mode != 'in_house' %}
-    <label><span>Room type</span><select name="room_type_id"><option value="">All room types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if request.args.get('room_type_id') == room_type.id|string %}selected{% endif %}>{{ room_type.code }} - {{ room_type.name }}</option>{% endfor %}</select></label>
-    <label><span>Payment</span><select name="payment_state"><option value="">All payment states</option><option value="missing" {% if request.args.get('payment_state') == 'missing' %}selected{% endif %}>Deposit missing</option><option value="partial" {% if request.args.get('payment_state') == 'partial' %}selected{% endif %}>Partial deposit</option><option value="paid" {% if request.args.get('payment_state') == 'paid' %}selected{% endif %}>Deposit paid</option><option value="failed" {% if request.args.get('payment_state') == 'failed' %}selected{% endif %}>Payment failed</option></select></label>
+    <label><span>Room type</span><select name="room_type_id"><option value="">All types</option>{% for room_type in room_types %}<option value="{{ room_type.id }}" {% if request.args.get('room_type_id') == room_type.id|string %}selected{% endif %}>{{ room_type.code }} — {{ room_type.name }}</option>{% endfor %}</select></label>
+    <label><span>Payment</span><select name="payment_state"><option value="">All</option><option value="missing" {% if request.args.get('payment_state') == 'missing' %}selected{% endif %}>Deposit missing</option><option value="partial" {% if request.args.get('payment_state') == 'partial' %}selected{% endif %}>Partial</option><option value="paid" {% if request.args.get('payment_state') == 'paid' %}selected{% endif %}>Paid</option><option value="failed" {% if request.args.get('payment_state') == 'failed' %}selected{% endif %}>Failed</option></select></label>
     {% endif %}
     {% if mode == 'arrivals' %}
-    <label><span>Room assigned</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if request.args.get('assigned') == 'assigned' %}selected{% endif %}>Assigned</option><option value="unassigned" {% if request.args.get('assigned') == 'unassigned' %}selected{% endif %}>Unassigned</option></select></label>
+    <label><span>Room</span><select name="assigned"><option value="">Any</option><option value="assigned" {% if request.args.get('assigned') == 'assigned' %}selected{% endif %}>Assigned</option><option value="unassigned" {% if request.args.get('assigned') == 'unassigned' %}selected{% endif %}>Unassigned</option></select></label>
     {% endif %}
-    <button class="button" type="submit">Refresh</button>
+    <button class="button" type="submit">Filter</button>
   </form>
 </section>
 
@@ -34,13 +33,16 @@
     <table>
       <thead>
         <tr>
-          <th>Reference</th>
+          <th>Ref</th>
           <th>Guest</th>
           <th>Room</th>
-          <th>Stay</th>
+          <th>Type</th>
+          <th>Check-in</th>
+          <th>Check-out</th>
+          <th>Nights</th>
           <th>Status</th>
           <th>Payment</th>
-          <th></th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -48,17 +50,20 @@
         <tr>
           <td><strong>{{ item.reservation_code }}</strong></td>
           <td><strong>{{ item.guest_name }}</strong><div class="small muted">{{ item.guest_phone }}</div></td>
-          <td>{{ item.assigned_room_number or 'Unassigned' }}<div class="small muted">{{ item.room_type_code }}</div></td>
-          <td>{{ item.arrival_date }} → {{ item.departure_date }}</td>
+          <td>{{ item.assigned_room_number or '—' }}</td>
+          <td class="small">{{ item.room_type_code }}</td>
+          <td>{{ item.arrival_date }}</td>
+          <td>{{ item.departure_date }}</td>
+          <td class="center">{{ item.nights if item.nights is defined else '—' }}</td>
           <td><span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span></td>
-          <td>{% if can_folio %}<span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span><div class="small muted">{{ currency }} {{ item.balance_due|money }}</div>{% else %}<span class="small muted">Restricted</span>{% endif %}</td>
-          <td>
+          <td>{% if can_folio %}<span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span><div class="small muted">{{ currency }} {{ item.balance_due|money }}</div>{% else %}<span class="small muted">—</span>{% endif %}</td>
+          <td style="white-space:nowrap;">
             <a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a>
             {% if can_folio %}<a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Cashier</a>{% endif %}
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="center muted">No reservations matched this operational view.</td></tr>
+        <tr><td colspan="10" class="center muted">No {{ title|lower }} for this date.</td></tr>
         {% endfor %}
       </tbody>
     </table>

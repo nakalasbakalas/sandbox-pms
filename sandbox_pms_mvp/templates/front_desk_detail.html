@@ -47,8 +47,8 @@
 
 {% if can_folio and _bal > 0 %}
 <div class="payment-cta-callout">
-  <span>💰 <strong>{{ currency }} {{ _bal|money }}</strong> balance due — collect payment before check-in.</span>
-  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>
+  <span>💰 <strong>{{ currency }} {{ _bal|money }}</strong> balance due.</span>
+  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Collect payment</a>
 </div>
 {% endif %}
 
@@ -56,11 +56,15 @@
 <section class="card" style="padding:8px 12px;">
   <div class="actions" style="flex-wrap:wrap;gap:4px;">
     <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Cashier</a>
-    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">Print folio</a>
-    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">Print receipt</a>
-    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">Print invoice</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">🖨 Folio</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">🖨 Receipt</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">🖨 Invoice</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='confirmation') }}" target="_blank">🖨 Confirmation</a>
     {% if detail.status == 'checked_in' %}
-    <span class="keycard-placeholder">🔑 Key card — hardware pending</span>
+    <span class="keycard-placeholder">🔑 Issue key card — Room {{ detail.assigned_room_number or 'TBD' }}</span>
+    {% endif %}
+    {% if _ref > 0 %}
+    <span class="pill subtle" style="background:#fef3c7;color:#92400e;">Refund due: {{ currency }} {{ _ref|money }}</span>
     {% endif %}
   </div>
 </section>

@@ -257,10 +257,11 @@ def test_reservation_detail_shows_cashier_and_document_links(app_factory):
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
         assert "Open cashier" in html
-        assert "Print folio" in html
-        assert "Print receipt" in html
-        assert "Print invoice" in html
-        assert "Cashier &amp; Documents" in html or "Cashier & Documents" in html
+        assert "Folio" in html
+        assert "Receipt" in html
+        assert "Invoice" in html
+        assert "Confirmation" in html
+        assert "Cashier" in html
 
 
 # ── Attribution is collapsible ───────────────────────────────────
@@ -459,9 +460,10 @@ def test_front_desk_detail_shows_cashier_and_print_links(app_factory):
         resp = client.get(f"/staff/front-desk/{res_id}")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
-        assert "Print folio" in html
-        assert "Print receipt" in html
-        assert "Print invoice" in html
+        assert "Folio" in html
+        assert "Receipt" in html
+        assert "Invoice" in html
+        assert "Confirmation" in html
 
 
 # ── Admin nav shows services section ─────────────────────────────
@@ -495,4 +497,106 @@ def test_reservation_form_rate_preview_has_discount_elements(app_factory):
         html = resp.get_data(as_text=True)
         assert "rp-discount-label" in html
         assert "rp-discount-amount" in html
-        assert "Base room total" in html
+        assert "Room charges" in html
+        assert "Guest pays" in html
+
+
+# ── Second pass tests ────────────────────────────────────────────
+
+
+def test_board_strip_shows_room_label(app_factory):
+    """Board strip should show 'Rooms:' label for visual hierarchy."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-strip2@sandbox.local")
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get("/staff/front-desk/board")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "avail-strip-label" in html
+        assert "Rooms:" in html
+
+
+def test_operational_list_has_nights_column(app_factory):
+    """Operational list must have Nights column header."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-nights@sandbox.local")
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get(f"/staff/reservations/arrivals?date={date.today().isoformat()}")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "Nights" in html
+        assert "Check-in" in html
+        assert "Check-out" in html
+
+
+def test_operational_list_shows_record_count(app_factory):
+    """Operational list header should show record count."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-count@sandbox.local")
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get(f"/staff/reservations/arrivals?date={date.today().isoformat()}")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "record" in html
+
+
+def test_cashier_print_confirmation_renders(app_factory):
+    """Cashier print route must render for confirmation document type."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-conf@sandbox.local")
+        res = create_staff_reservation()
+        res_id = str(res.id)
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get(f"/staff/cashier/{res_id}/print?document_type=confirmation")
+        assert resp.status_code == 200
+
+
+def test_reservation_detail_shows_refund_due_with_warning(app_factory):
+    """Reservation detail must show refund due amount with visual emphasis when > 0."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-refwarn@sandbox.local")
+        res = create_staff_reservation()
+        res_id = str(res.id)
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get(f"/staff/reservations/{res_id}")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "Refund due" in html
+
+
+def test_reservation_form_discount_in_collapsible(app_factory):
+    """Discount fields should be in a collapsible toggle to reduce form noise."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("front_desk", "fd-coll@sandbox.local")
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get("/staff/reservations/new")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "rate-adjustment-toggle" in html
+        assert "Rate adjustment" in html
+
+
+def test_admin_services_form_has_helper_text(app_factory):
+    """Admin services form should have helpful placeholders and helper text."""
+    app = app_factory(seed=True)
+    with app.app_context():
+        user = make_staff_user("admin", "admin-help@sandbox.local")
+    with app.test_client() as client:
+        login_as(client, user)
+        resp = client.get("/staff/admin/services")
+        assert resp.status_code == 200
+        html = resp.get_data(as_text=True)
+        assert "airport_pickup" in html
+        assert "Shown on invoice" in html

@@ -50,11 +50,16 @@
   {# ── Compact room availability strip ── #}
   {% if board.counts.available_by_type %}
   <div class="planning-board-avail-strip" aria-label="Room availability">
+    <span class="avail-strip-label">Rooms:</span>
     {% for type_code, avail_count in board.counts.available_by_type.items() %}
-    <span class="fd-cmd-metric{% if avail_count == 0 %} avail-zero{% elif avail_count <= 2 %} avail-low{% endif %}" title="{{ type_code }}: {{ avail_count }} available">{{ type_code }} <strong>{{ avail_count }}</strong></span>
+    <span class="fd-cmd-metric{% if avail_count == 0 %} avail-zero{% elif avail_count <= 2 %} avail-low{% endif %}" title="{{ type_code }}: {{ avail_count }} available today">{{ type_code }}&nbsp;<strong>{{ avail_count }}</strong></span>
     {% endfor %}
-    <span class="fd-cmd-metric" title="Total available rooms"><strong>{{ board.counts.available_rooms }}</strong> avail</span>
-    <span class="fd-cmd-metric" title="Occupancy">{{ board.counts.occupancy_pct }}% occ</span>
+    <span class="avail-strip-sep"></span>
+    <span class="fd-cmd-metric" title="Total available rooms today"><strong>{{ board.counts.available_rooms }}</strong>&nbsp;avail</span>
+    <span class="fd-cmd-metric" title="Occupancy today">{{ board.counts.occupancy_pct }}%&nbsp;occ</span>
+    {% if board.counts.maintenance_count is defined and board.counts.maintenance_count > 0 %}
+    <span class="fd-cmd-metric avail-zero" title="{{ board.counts.maintenance_count }} rooms out of service">🔧&nbsp;<strong>{{ board.counts.maintenance_count }}</strong></span>
+    {% endif %}
   </div>
   {% endif %}
 

@@ -62,19 +62,20 @@
     <input type="hidden" name="action" value="upsert">
     <input type="hidden" name="extra_id" value="">
     <div class="grid three">
-      <label><span>Code</span><input type="text" name="code" required placeholder="pickup"></label>
-      <label><span>Name</span><input type="text" name="name" required placeholder="Pick up service"></label>
+      <label><span>Code</span><input type="text" name="code" required placeholder="airport_pickup"><small class="muted">Unique identifier</small></label>
+      <label><span>Service name</span><input type="text" name="name" required placeholder="Airport pickup"><small class="muted">Displayed to staff &amp; guests</small></label>
       <label><span>Pricing mode</span>
         <select name="pricing_mode">
           {% for mode in pricing_modes %}
           <option value="{{ mode }}">{{ mode.replace('_', ' ').title() }}</option>
           {% endfor %}
         </select>
+        <small class="muted">How this is charged</small>
       </label>
     </div>
     <div class="grid three">
-      <label><span>Unit price (THB)</span><input type="number" name="unit_price" min="0" step="0.01" value="0"></label>
-      <label><span>Sort order</span><input type="number" name="sort_order" min="0" value="100"></label>
+      <label><span>Unit price (THB)</span><input type="number" name="unit_price" min="0" step="0.01" value="0"><small class="muted">Price per unit/stay</small></label>
+      <label><span>Sort order</span><input type="number" name="sort_order" min="0" value="100"><small class="muted">Lower = shown first</small></label>
       <label><span>Active</span>
         <select name="is_active">
           <option value="1" selected>Active</option>
@@ -83,11 +84,11 @@
       </label>
     </div>
     <div class="grid two">
-      <label><span>Description</span><input type="text" name="description" placeholder="Service description for guest"></label>
-      <label><span>Public (visible to guests)</span>
+      <label><span>Description</span><input type="text" name="description" placeholder="One-way airport transfer to hotel (max 3 pax)"><small class="muted">Shown on invoice</small></label>
+      <label><span>Visible to guests</span>
         <select name="is_public">
-          <option value="1">Yes</option>
-          <option value="0">No — staff only</option>
+          <option value="1">Yes — shown during booking</option>
+          <option value="0">No — staff-only add-on</option>
         </select>
       </label>
     </div>
