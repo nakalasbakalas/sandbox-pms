@@ -7648,6 +7648,12 @@ body:not(.public-site) .planning-board-avail-strip .avail-low {
 }
 .payment-cta-callout .button { flex-shrink: 0; }
 
+/* ── Financial status warnings ───────────────────────────────────────── */
+.refund-balance-warn { color: #dc2626; }
+.refund-due-warn { color: #d97706; }
+body:not(.public-site) .refund-balance-warn { color: #ef4444; }
+body:not(.public-site) .refund-due-warn { color: #f59e0b; }
+
 /* ── Attribution collapsible ─────────────────────────────────────────── */
 .attribution-section summary {
   cursor: pointer;

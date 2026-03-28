@@ -72,8 +72,8 @@
   <div class="metric-strip" style="padding-top:4px;">
     <div><small>Deposit required</small><strong>{{ currency }} {{ detail.payment_summary.deposit_required_amount|money }}</strong></div>
     <div><small>Deposit received</small><strong>{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }}</strong></div>
-    <div><small>Balance due</small><strong style="{% if detail.payment_summary.balance_due > 0 %}color:#dc2626;{% endif %}">{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
-    <div><small>Refund due</small><strong style="{% if detail.payment_summary.refund_due > 0 %}color:#d97706;{% endif %}">{{ currency }} {{ detail.payment_summary.refund_due|money }}{% if detail.payment_summary.refund_due > 0 %} ⚠{% endif %}</strong></div>
+    <div><small>Balance due</small><strong class="{% if detail.payment_summary.balance_due > 0 %}refund-balance-warn{% endif %}">{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
+    <div><small>Refund due</small><strong class="{% if detail.payment_summary.refund_due > 0 %}refund-due-warn{% endif %}">{{ currency }} {{ detail.payment_summary.refund_due|money }}{% if detail.payment_summary.refund_due > 0 %} ⚠{% endif %}</strong></div>
   </div>
 </section>
 {% endif %}
