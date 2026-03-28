@@ -1159,10 +1159,16 @@ def staff_admin_services():
                 return redirect(url_for("admin.staff_admin_services"))
             description = (request.form.get("description") or "").strip() or None
             pricing_mode = request.form.get("pricing_mode", "per_stay")
-            unit_price = float(request.form.get("unit_price") or 0)
+            try:
+                unit_price = float(request.form.get("unit_price") or 0)
+            except (ValueError, TypeError):
+                unit_price = 0.0
             is_active = request.form.get("is_active") == "1"
             is_public = request.form.get("is_public") == "1"
-            sort_order = int(request.form.get("sort_order") or 100)
+            try:
+                sort_order = int(request.form.get("sort_order") or 100)
+            except (ValueError, TypeError):
+                sort_order = 100
             if extra_id:
                 extra = db.session.get(BookingExtra, extra_id)
                 if extra:
