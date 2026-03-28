@@ -15,10 +15,12 @@ from flask_migrate import upgrade
 from pms.app import create_app
 from pms.extensions import db
 from pms.models import (
+    ActivityLog,
     BookingExtra,
     CancellationRequest,
     EmailOutbox,
     FolioCharge,
+    HousekeepingTask,
     InventoryDay,
     ModificationRequest,
     Reservation,
@@ -43,6 +45,7 @@ from pms.services.public_booking_service import (
     submit_cancellation_request,
     submit_modification_request,
 )
+from pms.services.survey_service import build_survey_link, generate_survey, submit_survey
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -320,6 +323,75 @@ def test_guest_confirmation_email_is_queued_after_booking(app_factory):
         outbox = EmailOutbox.query.filter_by(reservation_id=reservation.id).one()
         assert outbox.email_type == "guest_confirmation"
         assert outbox.status in {"pending", "failed", "sent"}
+
+
+def test_guest_maintenance_request_creates_task_and_activity_log_with_real_entity_id(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    response = post_form(
+        client,
+        "/guest/maintenance",
+        data={
+            "room_number": "201",
+            "description": "Air conditioning is not cooling.",
+            "guest_name": "Jane Guest",
+            "guest_contact": "+66800000111",
+            "reservation_code": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Request Submitted" in response.get_data(as_text=True)
+
+    with app.app_context():
+        task = HousekeepingTask.query.filter_by(task_type="maintenance").order_by(HousekeepingTask.created_at.desc()).first()
+        activity = ActivityLog.query.filter_by(
+            event_type="housekeeping.maintenance_request_created"
+        ).order_by(ActivityLog.created_at.desc()).first()
+
+        assert task is not None
+        assert activity is not None
+        assert activity.entity_table == "housekeeping_tasks"
+        assert activity.entity_id == str(task.id)
+        assert "Air conditioning is not cooling." in (task.notes or "")
+
+
+def test_guest_survey_link_uses_resolved_public_base_url(app_factory):
+    app = app_factory(seed=True, config={"APP_BASE_URL": "https://book.example.test"})
+
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="survey-link-hold"))
+        reservation = confirm_public_booking(
+            make_booking_payload(hold.hold_code, idempotency_key="survey-link-hold")
+        )
+        survey = generate_survey(reservation.id, reservation.primary_guest_id)
+
+        assert build_survey_link(survey.token) == f"https://book.example.test/survey/{survey.token}"
+
+
+def test_submitted_survey_route_renders_already_submitted_state(app_factory):
+    app = app_factory(seed=True)
+    client = app.test_client()
+
+    with app.app_context():
+        twin = RoomType.query.filter_by(code="TWN").first()
+        hold = create_reservation_hold(make_hold_payload(twin.id, idempotency_key="survey-submitted-route"))
+        reservation = confirm_public_booking(
+            make_booking_payload(hold.hold_code, idempotency_key="survey-submitted-route")
+        )
+        survey = generate_survey(reservation.id, reservation.primary_guest_id)
+        submit_survey(survey.token, 5, "Great stay", {"service": 5})
+        db.session.commit()
+        token = survey.token
+
+    response = client.get(f"/survey/{token}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "already submitted your feedback" in body
+    assert "Overall rating:" in body
 
 
 def test_staff_review_queue_receives_new_reservation(app_factory):

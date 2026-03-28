@@ -68,6 +68,7 @@ Repo layout:
 - the application intentionally lives under `sandbox_pms_mvp/`
 - repo-level deployment files such as [render.yaml](render.yaml) and [.gitignore](.gitignore) now treat that subtree as the canonical app root
 - local-only state such as virtualenvs, SQLite files, caches, and instance data are ignored at the repo root
+- this repository root is the only supported source of truth for the PMS; do not place another `sandbox-pms` clone inside it
 
 Codex guardrails:
 

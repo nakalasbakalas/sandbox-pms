@@ -661,8 +661,11 @@ def guest_maintenance_request():
             submitted = True
             flash("Your maintenance request has been submitted. Our team will address it shortly.", "success")
         except ValueError as exc:
+            db.session.rollback()
             flash(str(exc), "error")
         except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            logger.exception("Guest maintenance request submission failed")
             flash(public_error_message(exc), "error")
     return render_template(
         "guest_maintenance_request.html",

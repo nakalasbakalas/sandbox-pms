@@ -18,6 +18,9 @@ htmlcov/
 .venv/
 sandbox_pms_mvp/.venv/
 
+# Prevent nested repo clones from becoming a second source of truth.
+/sandbox-pms/
+
 # Local runtime state
 instance/
 sandbox_pms_mvp/instance/

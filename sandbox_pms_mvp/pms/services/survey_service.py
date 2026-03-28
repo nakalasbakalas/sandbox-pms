@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from flask import current_app, url_for
 
 from ..activity import write_activity_log
+from ..branding import resolve_public_base_url
 from ..extensions import db
 from ..models import (
     Guest,
@@ -219,7 +220,7 @@ def build_survey_link(token: str) -> str:
         path = url_for("public.guest_survey_form", token=token)
     except RuntimeError:
         path = f"/survey/{token}"
-    base = current_app.config.get("PUBLIC_BASE_URL", "").rstrip("/")
+    base = resolve_public_base_url().rstrip("/")
     if base:
         return f"{base}{path}"
     return path
@@ -252,7 +253,7 @@ def send_survey_link(
     res_code = reservation.reservation_code
     guest_name = guest.full_name if guest else "Guest"
 
-    subject = f"How was your stay? — {res_code}"
+    subject = f"How was your stay? - {res_code}"
     body = (
         f"Dear {guest_name},\n\n"
         f"Thank you for staying at {hotel_name}. "
