@@ -701,10 +701,32 @@ def list_todays_arrivals_with_readiness(business_date) -> list[dict[str, Any]]:
         .order_by(Reservation.check_in_date)
         .all()
     )
+    if not reservations:
+        return []
+
+    res_ids = [r.id for r in reservations]
+
+    # Batch-fetch pre-check-ins (1 query instead of N)
+    pc_rows = db.session.query(PreCheckIn).filter(PreCheckIn.reservation_id.in_(res_ids)).all()
+    pc_map: dict = {pc.reservation_id: pc for pc in pc_rows}
+
+    # Batch-fetch documents for reservations that have pre-check-ins (1 query instead of N)
+    pc_res_ids = [rid for rid in res_ids if rid in pc_map]
+    doc_map: dict = {}
+    if pc_res_ids:
+        doc_rows = (
+            db.session.query(ReservationDocument)
+            .filter(ReservationDocument.reservation_id.in_(pc_res_ids))
+            .order_by(ReservationDocument.uploaded_at.desc())
+            .all()
+        )
+        for doc in doc_rows:
+            doc_map.setdefault(doc.reservation_id, []).append(doc)
+
     result = []
     for res in reservations:
-        pc = get_pre_checkin_for_reservation(res.id)
-        docs = get_documents_for_reservation(res.id) if pc else []
+        pc = pc_map.get(res.id)
+        docs = doc_map.get(res.id, []) if pc else []
         result.append({
             "reservation": res,
             "pre_checkin": pc,

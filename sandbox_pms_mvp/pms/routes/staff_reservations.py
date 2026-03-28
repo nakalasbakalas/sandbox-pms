@@ -152,13 +152,13 @@ def staff_guest_blacklist_toggle(guest_id):
 
 @staff_reservations_bp.route("/staff/guests/merge", methods=["GET"])
 def staff_guest_merge_form():
-    require_permission("admin.settings")
+    require_permission("settings.edit")
     return render_template("staff_guest_merge.html")
 
 
 @staff_reservations_bp.route("/staff/guests/merge", methods=["POST"])
 def staff_guest_merge_action():
-    user = require_permission("admin.settings")
+    user = require_permission("settings.edit")
     primary_id = parse_optional_uuid(request.form.get("primary_guest_id"))
     secondary_id = parse_optional_uuid(request.form.get("secondary_guest_id"))
     if not primary_id or not secondary_id:
@@ -817,7 +817,7 @@ def staff_document_verify(doc_id):
     except Exception as exc:  # noqa: BLE001
         db.session.rollback()
         flash(public_error_message(exc), "error")
-        return redirect(request.referrer or url_for("front_desk.staff_front_desk"))
+        return redirect(safe_back_path(request.referrer, url_for("front_desk.staff_front_desk")))
     return redirect(url_for("staff_reservations.staff_pre_checkin_detail", reservation_id=doc.reservation_id))
 
 
@@ -834,10 +834,12 @@ def staff_document_view(doc_id):
         data = read_document_bytes(doc)
     except FileNotFoundError:
         abort(404)
+    # Sanitize filename for Content-Disposition to prevent header injection
+    safe_filename = (doc.original_filename or "document").replace('"', "").replace("\r", "").replace("\n", "")
     return Response(
         data,
         mimetype=doc.content_type,
-        headers={"Content-Disposition": f'inline; filename="{doc.original_filename}"'},
+        headers={"Content-Disposition": f'inline; filename="{safe_filename}"'},
     )
 
 
@@ -847,6 +849,7 @@ def staff_document_view(doc_id):
 def staff_review_queue():
     user = require_permission("reservation.view")
     if request.method == "POST":
+        require_permission("reservation.edit")
         entry = db.session.get(ReservationReviewQueue, UUID(request.form["entry_id"]))
         if not entry:
             abort(404)
@@ -985,7 +988,7 @@ def staff_document_apply_ocr(doc_id):
         return redirect(url_for("staff_reservations.staff_pre_checkin_detail", reservation_id=document.reservation_id))
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-        return redirect(request.referrer or url_for("staff_reservations.staff_reservations"))
+        return redirect(safe_back_path(request.referrer, url_for("staff_reservations.staff_reservations")))
 
 
 @staff_reservations_bp.route("/api/integrations/scanner/capture", methods=["POST"])

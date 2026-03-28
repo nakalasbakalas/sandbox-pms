@@ -155,10 +155,14 @@ class User(AuditMixin, SoftDeleteMixin, db.Model):
 
     @property
     def permission_codes(self) -> set[str]:
+        cached = getattr(self, "_permission_codes_cache", None)
+        if cached is not None:
+            return cached
         codes: set[str] = set()
         for role in self.roles:
             for permission in role.permissions:
                 codes.add(permission.code)
+        self._permission_codes_cache = codes
         return codes
 
     def has_permission(self, permission_code: str) -> bool:

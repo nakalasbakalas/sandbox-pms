@@ -376,7 +376,7 @@ def staff_housekeeping_task_submit_inspection(task_id):
         flash("Task submitted for supervisor inspection.", "success")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<uuid:task_id>/supervisor-inspect", methods=["POST"])
@@ -391,7 +391,7 @@ def staff_housekeeping_task_supervisor_inspect(task_id):
             flash("Inspection failed — task reset to in-progress.", "warning")
     except Exception as exc:  # noqa: BLE001
         flash(public_error_message(exc), "error")
-    return redirect(request.form.get("back_url") or url_for("housekeeping.staff_housekeeping"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("housekeeping.staff_housekeeping")))
 
 
 @housekeeping_bp.route("/staff/housekeeping/tasks/<task_id>/cancel", methods=["POST"])

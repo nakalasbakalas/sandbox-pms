@@ -152,7 +152,7 @@ def list_reservations(filters: ReservationWorkspaceFilters) -> dict:
         .all()
     )
     return {
-        "items": [build_reservation_summary(item) for item in items],
+        "items": _build_summaries_batched(items),
         "total": total,
         "page": filters.page,
         "per_page": filters.per_page,
@@ -177,7 +177,7 @@ def list_arrivals(*, arrival_date: date, room_type_id: str = "", payment_state: 
         .scalars()
         .all()
     )
-    return [build_reservation_summary(item) for item in items]
+    return _build_summaries_batched(items)
 
 
 def list_departures(*, departure_date: date, room_type_id: str = "", payment_state: str = "") -> list[dict]:
@@ -196,7 +196,7 @@ def list_departures(*, departure_date: date, room_type_id: str = "", payment_sta
         .scalars()
         .all()
     )
-    return [build_reservation_summary(item) for item in items]
+    return _build_summaries_batched(items)
 
 
 def list_in_house(*, business_date: date) -> list[dict]:
@@ -211,7 +211,7 @@ def list_in_house(*, business_date: date) -> list[dict]:
         .scalars()
         .all()
     )
-    return [build_reservation_summary(item) for item in items]
+    return _build_summaries_batched(items)
 
 
 def get_reservation_detail(reservation_id: uuid.UUID, *, actor_user: User | None = None) -> dict:
@@ -279,15 +279,18 @@ def reservation_attribution_summary(reservation: Reservation) -> dict:
     }
 
 
-def build_reservation_summary(reservation: Reservation) -> dict:
+def build_reservation_summary(reservation: Reservation, *, _review_map: dict | None = None) -> dict:
     payment = payment_summary(reservation)
-    review_entry = (
-        db.session.execute(
-            sa.select(ReservationReviewQueue).where(ReservationReviewQueue.reservation_id == reservation.id)
+    if _review_map is not None:
+        review_entry = _review_map.get(reservation.id)
+    else:
+        review_entry = (
+            db.session.execute(
+                sa.select(ReservationReviewQueue).where(ReservationReviewQueue.reservation_id == reservation.id)
+            )
+            .scalars()
+            .first()
         )
-        .scalars()
-        .first()
-    )
     attribution = reservation_attribution_summary(reservation)
     return {
         "id": reservation.id,
@@ -318,6 +321,21 @@ def build_reservation_summary(reservation: Reservation) -> dict:
         "created_from_public_booking_flow": reservation.created_from_public_booking_flow,
     }
 
+
+def _batch_review_map(reservation_ids: list[uuid.UUID]) -> dict[uuid.UUID, ReservationReviewQueue]:
+    """Batch-fetch review queue entries for a list of reservation IDs (1 query)."""
+    if not reservation_ids:
+        return {}
+    entries = db.session.execute(
+        sa.select(ReservationReviewQueue).where(ReservationReviewQueue.reservation_id.in_(reservation_ids))
+    ).scalars().all()
+    return {entry.reservation_id: entry for entry in entries}
+
+
+def _build_summaries_batched(items: list[Reservation]) -> list[dict]:
+    """Build reservation summaries with batch-fetched review queue data."""
+    review_map = _batch_review_map([r.id for r in items])
+    return [build_reservation_summary(item, _review_map=review_map) for item in items]
 
 def payment_summary(reservation: Reservation) -> dict:
     from .cashier_service import folio_summary
@@ -447,36 +465,37 @@ def eligible_rooms(reservation: Reservation) -> list[Room]:
 
 
 def reservation_timeline(reservation: Reservation) -> list[dict]:
-    notes = [
+    # Collect all timeline items first, batch-fetch actor names after
+    raw_notes = [
         {
             "kind": "note",
             "created_at": note.created_at,
             "label": note.note_type.replace("_", " ").title(),
             "text": note.note_text,
             "important": note.is_important,
-            "actor": _actor_name(note.created_by_user_id),
+            "_actor_id": note.created_by_user_id,
         }
         for note in reservation.notes
     ]
-    history = [
+    raw_history = [
         {
             "kind": "status",
             "created_at": item.changed_at,
             "label": f"{item.old_status or 'new'} -> {item.new_status}",
             "text": item.note or item.reason or "",
             "important": item.new_status in {"cancelled", "no_show"},
-            "actor": _actor_name(item.changed_by_user_id),
+            "_actor_id": item.changed_by_user_id,
         }
         for item in reservation.status_history
     ]
-    audits = [
+    raw_audits = [
         {
             "kind": "audit",
             "created_at": item.created_at,
             "label": item.action.replace("_", " "),
             "text": item.entity_table,
             "important": False,
-            "actor": _actor_name(item.actor_user_id),
+            "_actor_id": item.actor_user_id,
         }
         for item in db.session.execute(
             sa.select(AuditLog)
@@ -490,14 +509,14 @@ def reservation_timeline(reservation: Reservation) -> list[dict]:
         .scalars()
         .all()
     ]
-    activities = [
+    raw_activities = [
         {
             "kind": "activity",
             "created_at": item.created_at,
             "label": item.event_type.replace(".", " "),
             "text": item.metadata_json.get("reservation_code", "") if item.metadata_json else "",
             "important": False,
-            "actor": _actor_name(item.actor_user_id),
+            "_actor_id": item.actor_user_id,
         }
         for item in db.session.execute(
             sa.select(ActivityLog)
@@ -511,7 +530,27 @@ def reservation_timeline(reservation: Reservation) -> list[dict]:
         .scalars()
         .all()
     ]
-    timeline = sorted(notes + history + audits + activities, key=lambda item: item["created_at"], reverse=True)
+    all_items = raw_notes + raw_history + raw_audits + raw_activities
+
+    # Batch-fetch all actor names in a single query
+    actor_ids = {item["_actor_id"] for item in all_items if item["_actor_id"]}
+    actor_map: dict = {}
+    if actor_ids:
+        actors = db.session.execute(
+            sa.select(User).where(User.id.in_(actor_ids))
+        ).scalars().all()
+        actor_map = {a.id: a.full_name for a in actors}
+
+    timeline = []
+    for item in all_items:
+        actor_id = item.pop("_actor_id")
+        if actor_id:
+            item["actor"] = actor_map.get(actor_id, str(actor_id))
+        else:
+            item["actor"] = None
+        timeline.append(item)
+
+    timeline.sort(key=lambda item: item["created_at"], reverse=True)
     return timeline[:40]
 
 

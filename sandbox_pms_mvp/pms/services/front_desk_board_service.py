@@ -170,15 +170,14 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
     }
     _hk_status_cache: dict[uuid.UUID, str] = {}
 
+    # Pre-fetch all HousekeepingStatus rows (typically 4-6 rows, 1 query instead of per-room)
+    _all_hk_statuses = db.session.execute(sa.select(HousekeepingStatus)).scalars().all()
+    _hk_status_cache = {s.id: s.code for s in _all_hk_statuses}
+
     def _hk_code(status_id: uuid.UUID | None) -> str | None:
         if not status_id:
             return None
-        if status_id in _hk_status_cache:
-            return _hk_status_cache[status_id]
-        s = db.session.get(HousekeepingStatus, status_id)
-        code = s.code if s else None
-        _hk_status_cache[status_id] = code
-        return code
+        return _hk_status_cache.get(status_id)
 
     for room in rooms:
         group = _ensure_group(group_map, room_type_meta=room_type_meta, room_type_id=room.room_type_id)

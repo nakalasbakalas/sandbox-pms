@@ -1591,7 +1591,7 @@ def staff_front_desk_board_reservation_panel(reservation_id):
         "can_add_charge": user.has_permission("folio.charge_add"),
         "can_add_payment": user.has_permission("payment.create"),
         "can_add_note": user.has_permission("reservation.edit"),
-        "can_manage_hk": user.has_permission("housekeeping.edit") or user.has_permission("reservation.edit"),
+        "can_manage_hk": user.has_permission("housekeeping.status_change") or user.has_permission("reservation.edit"),
     }
 
     return render_template("_panel_reservation_details.html", **context)
@@ -1667,7 +1667,7 @@ def staff_front_desk_board_panel_hk(reservation_id):
     """Update housekeeping status from the board panel."""
     from ..services.housekeeping_service import RoomStatusUpdatePayload, update_housekeeping_status
 
-    user = require_any_permission("housekeeping.edit", "reservation.edit")
+    user = require_any_permission("housekeeping.status_change", "reservation.edit")
     reservation = db.session.get(Reservation, reservation_id) or abort(404)
     if not reservation.assigned_room_id:
         return board_json_or_redirect(ok=False, message="Room status could not be updated.", error="No room assigned.", status_code=400)
@@ -2037,14 +2037,17 @@ def staff_dashboard():
 
 @front_desk_bp.route("/staff/notifications/<uuid:notification_id>/read", methods=["POST"])
 def staff_notification_read(notification_id):
-    require_permission("reservation.view")
+    user = require_permission("reservation.view")
     notification = db.session.get(StaffNotification, notification_id)
     if not notification:
         abort(404)
+    # Only allow marking your own notifications (or broadcast ones) as read
+    if notification.user_id is not None and notification.user_id != user.id:
+        abort(403)
     notification.status = "read"
     notification.read_at = utc_now()
     db.session.commit()
-    return redirect(request.form.get("back_url") or url_for("front_desk.staff_dashboard"))
+    return redirect(safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_dashboard")))
 
 
 @front_desk_bp.route("/staff/front-desk/board/stats-panel")
