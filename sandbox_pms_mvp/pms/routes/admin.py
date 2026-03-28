@@ -11,6 +11,7 @@ from ..models import (
     ActivityLog,
     AppSetting,
     BlackoutPeriod,
+    BookingExtra,
     InventoryOverride,
     NotificationTemplate,
     PaymentRequest,
@@ -1139,3 +1140,83 @@ def staff_admin_room_photos(room_id):
 
     flash("Room photo uploaded.", "success")
     return redirect(url_for("admin.staff_settings"))
+
+
+@admin_bp.route("/staff/admin/services", methods=["GET", "POST"])
+def staff_admin_services():
+    """Manage additional services / extras catalog."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("settings.view")
+    if request.method == "POST":
+        helpers["require_permission"]("settings.edit")
+        action = request.form.get("action", "upsert")
+        if action == "upsert":
+            extra_id = request.form.get("extra_id", "").strip()
+            code = (request.form.get("code") or "").strip()
+            name = (request.form.get("name") or "").strip()
+            if not code or not name:
+                flash("Code and name are required.", "error")
+                return redirect(url_for("admin.staff_admin_services"))
+            description = (request.form.get("description") or "").strip() or None
+            pricing_mode = request.form.get("pricing_mode", "per_stay")
+            try:
+                unit_price = float(request.form.get("unit_price") or 0)
+            except (ValueError, TypeError):
+                unit_price = 0.0
+            is_active = request.form.get("is_active") == "1"
+            is_public = request.form.get("is_public") == "1"
+            try:
+                sort_order = int(request.form.get("sort_order") or 100)
+            except (ValueError, TypeError):
+                sort_order = 100
+            if extra_id:
+                extra = db.session.get(BookingExtra, extra_id)
+                if extra:
+                    extra.code = code
+                    extra.name = name
+                    extra.description = description
+                    extra.pricing_mode = pricing_mode
+                    extra.unit_price = unit_price
+                    extra.is_active = is_active
+                    extra.is_public = is_public
+                    extra.sort_order = sort_order
+                    extra.updated_by_user_id = actor.id
+                    db.session.commit()
+                    flash(f"Service '{name}' updated.", "success")
+            else:
+                extra = BookingExtra(
+                    code=code,
+                    name=name,
+                    description=description,
+                    pricing_mode=pricing_mode,
+                    unit_price=unit_price,
+                    is_active=is_active,
+                    is_public=is_public,
+                    sort_order=sort_order,
+                    created_by_user_id=actor.id,
+                    updated_by_user_id=actor.id,
+                )
+                db.session.add(extra)
+                db.session.commit()
+                flash(f"Service '{name}' created.", "success")
+        elif action == "toggle":
+            extra_id = request.form.get("extra_id", "").strip()
+            if extra_id:
+                extra = db.session.get(BookingExtra, extra_id)
+                if extra:
+                    extra.is_active = not extra.is_active
+                    extra.updated_by_user_id = actor.id
+                    db.session.commit()
+                    flash(f"Service '{extra.name}' {'activated' if extra.is_active else 'deactivated'}.", "success")
+        return redirect(url_for("admin.staff_admin_services"))
+
+    extras = db.session.execute(
+        sa.select(BookingExtra).order_by(BookingExtra.sort_order.asc(), BookingExtra.name.asc())
+    ).scalars().all()
+    return render_template(
+        "admin_services.html",
+        is_staff=True,
+        extras=extras,
+        pricing_modes=BOOKING_EXTRA_PRICING_MODES,
+        active_section="services",
+    )

@@ -47,6 +47,22 @@
     <button class="board-nav-btn board-help-btn" type="button" data-action="show-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
   </div>
 
+  {# ── Compact room availability strip ── #}
+  {% if board.counts.available_by_type %}
+  <div class="planning-board-avail-strip" aria-label="Room availability">
+    <span class="avail-strip-label">Rooms:</span>
+    {% for type_code, avail_count in board.counts.available_by_type.items() %}
+    <span class="fd-cmd-metric{% if avail_count == 0 %} avail-zero{% elif avail_count <= 2 %} avail-low{% endif %}" title="{{ type_code }}: {{ avail_count }} available today">{{ type_code }}&nbsp;<strong>{{ avail_count }}</strong></span>
+    {% endfor %}
+    <span class="avail-strip-sep"></span>
+    <span class="fd-cmd-metric" title="Total available rooms today"><strong>{{ board.counts.available_rooms }}</strong>&nbsp;avail</span>
+    <span class="fd-cmd-metric" title="Occupancy today">{{ board.counts.occupancy_pct }}%&nbsp;occ</span>
+    {% if board.counts.maintenance_count is defined and board.counts.maintenance_count > 0 %}
+    <span class="fd-cmd-metric avail-zero" title="{{ board.counts.maintenance_count }} rooms out of service" aria-label="Maintenance: {{ board.counts.maintenance_count }} rooms">🔧&nbsp;<strong>{{ board.counts.maintenance_count }}</strong></span>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# ── Board Legend (collapsed by default for more board space) ── #}
   <details class="board-legend">
     <summary class="ops-collapsible-summary">
