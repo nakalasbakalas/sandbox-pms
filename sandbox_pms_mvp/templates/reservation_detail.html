@@ -12,6 +12,7 @@
       <a class="button secondary" href="{{ back_url }}">Back to list</a>
       {% if can('reservation.create') %}<a class="button secondary" href="{{ url_for('staff_reservations.staff_reservation_duplicate', reservation_id=detail.reservation.id, back=back_url) }}">Duplicate reservation</a>{% endif %}
       {% if can_folio %}<a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
+      {% if can_folio and detail.payment_summary.balance_due > 0 %}<a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">💰 Collect payment</a>{% endif %}
       <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ') }}</span>
       <span class="status {{ 'paid' if detail.deposit_state == 'paid' else 'pending' }}">{{ detail.deposit_state.replace('_', ' ') }}</span>
     </div>
@@ -50,8 +51,43 @@
   </div>
 </section>
 
+{% if can_folio and detail.payment_summary.balance_due > 0 %}
+<div class="payment-cta-callout">
+  <span>💰 <strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong> balance due — collect payment to complete this booking.</span>
+  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>
+</div>
+{% endif %}
+
+{% if can_folio %}
 <section class="card">
-  <div class="card-head"><h2>Attribution</h2></div>
+  <div class="card-head"><h2>Cashier & Documents</h2></div>
+  <div class="actions" style="padding:8px 0;">
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">Print folio</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">Print receipt</a>
+    <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">Print invoice</a>
+  </div>
+  <div class="metric-strip" style="padding-top:4px;">
+    <div><small>Deposit required</small><strong>{{ currency }} {{ detail.payment_summary.deposit_required_amount|money }}</strong></div>
+    <div><small>Deposit received</small><strong>{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }}</strong></div>
+    <div><small>Balance due</small><strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
+    <div><small>Refund due</small><strong>{{ currency }} {{ detail.payment_summary.refund_due|money }}</strong></div>
+  </div>
+</section>
+{% endif %}
+
+{% if detail.reservation.current_status == 'checked_in' %}
+<section class="card">
+  <div class="card-head"><h2>Key Card</h2></div>
+  <div style="padding:8px 0;">
+    <span class="keycard-placeholder">🔑 Key card issuance — hardware integration pending</span>
+    <p class="small muted" style="margin-top:4px;">Key card encoding will be available once hardware is connected. Room: {{ detail.assigned_room_number or 'Unassigned' }}</p>
+  </div>
+</section>
+{% endif %}
+
+<details class="card attribution-section">
+  <summary>Attribution & source tracking</summary>
   <div class="metric-strip">
     <div><small>Source channel</small><strong>{{ detail.source_channel.replace('_', ' ') }}</strong></div>
     <div><small>Source label</small><strong>{{ detail.attribution.source_label or 'direct' }}</strong></div>
@@ -65,7 +101,7 @@
     <article class="metric-card"><small>CTA source</small><strong>{{ detail.attribution.entry_cta_source or 'n/a' }}</strong></article>
   </div>
   <p class="muted">Referrer host: {{ detail.attribution.referrer_host or 'direct / unavailable' }}</p>
-</section>
+</details>
 
 <section class="grid two gap-lg">
   <article class="card">

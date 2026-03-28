@@ -47,6 +47,17 @@
     <button class="board-nav-btn board-help-btn" type="button" data-action="show-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
   </div>
 
+  {# ── Compact room availability strip ── #}
+  {% if board.counts.available_by_type %}
+  <div class="planning-board-avail-strip" aria-label="Room availability">
+    {% for type_code, avail_count in board.counts.available_by_type.items() %}
+    <span class="fd-cmd-metric{% if avail_count == 0 %} avail-zero{% elif avail_count <= 2 %} avail-low{% endif %}" title="{{ type_code }}: {{ avail_count }} available">{{ type_code }} <strong>{{ avail_count }}</strong></span>
+    {% endfor %}
+    <span class="fd-cmd-metric" title="Total available rooms"><strong>{{ board.counts.available_rooms }}</strong> avail</span>
+    <span class="fd-cmd-metric" title="Occupancy">{{ board.counts.occupancy_pct }}% occ</span>
+  </div>
+  {% endif %}
+
   {# ── Board Legend (collapsed by default for more board space) ── #}
   <details class="board-legend">
     <summary class="ops-collapsible-summary">

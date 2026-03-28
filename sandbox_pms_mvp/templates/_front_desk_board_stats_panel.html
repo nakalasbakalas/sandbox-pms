@@ -1,4 +1,20 @@
 {% set occ_pct = board.counts.occupancy_pct %}
+{% if board.counts.available_by_type %}
+<div class="board-stats-section board-avail-by-type">
+  <h3>Available rooms by type</h3>
+  {% for type_code, avail_count in board.counts.available_by_type.items() %}
+  {% set total_count = board.counts.total_by_type.get(type_code, 0) if board.counts.total_by_type else 0 %}
+  <div class="board-stats-row{% if avail_count == 0 %} bsr-danger{% elif avail_count <= 2 %} bsr-warning{% endif %}">
+    <span class="bsr-label">{{ type_code }}</span>
+    <strong class="bsr-value">{{ avail_count }} / {{ total_count }}</strong>
+  </div>
+  {% endfor %}
+  <div class="board-stats-row" style="border-top:1px solid var(--border);margin-top:4px;padding-top:4px;">
+    <span class="bsr-label"><strong>Total available</strong></span>
+    <strong class="bsr-value">{{ board.counts.available_rooms }}</strong>
+  </div>
+</div>
+{% endif %}
 <div class="board-stats-section">
   <h3>Today — {{ board.today.strftime('%A, %d %b %Y') }}</h3>
   <div class="board-stats-row">

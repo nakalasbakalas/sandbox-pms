@@ -442,6 +442,10 @@ def available_admin_sections() -> list[dict[str, str]]:
         sections.append(
             {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "admin.staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}
         )
+    if can("settings.view"):
+        sections.append(
+            {"key": "services", "label": "Services & Extras", "endpoint": "admin.staff_admin_services", "description": "Additional services, extras catalog, folio charges"}
+        )
     if can("user.view"):
         sections.append(
             {"key": "staff_access", "label": "Staff & Access", "endpoint": "admin.staff_admin_staff_access", "description": "Users, roles, permissions"}

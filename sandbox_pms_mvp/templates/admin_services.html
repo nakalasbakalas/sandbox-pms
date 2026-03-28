@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block title %}Services & Extras | {{ hotel_name }}{% endblock %}
+{% block content %}
+{% include 'admin_nav.html' %}
+
+<section class="card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Services & Extras</p>
+      <h1>Additional services catalog</h1>
+      <p>Configure services that front desk staff can add to reservations and bill on folio/invoice.</p>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Pricing</th>
+          <th>Price</th>
+          <th>Active</th>
+          <th>Public</th>
+          <th>Order</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for extra in extras %}
+        <tr>
+          <td><strong>{{ extra.code }}</strong></td>
+          <td>{{ extra.name }}{% if extra.description %}<div class="small muted">{{ extra.description }}</div>{% endif %}</td>
+          <td>{{ extra.pricing_mode.replace('_', ' ') }}</td>
+          <td>{{ extra.unit_price|money }}</td>
+          <td><span class="status {{ 'confirmed' if extra.is_active else 'cancelled' }}">{{ 'Active' if extra.is_active else 'Inactive' }}</span></td>
+          <td>{{ 'Yes' if extra.is_public else 'No' }}</td>
+          <td>{{ extra.sort_order }}</td>
+          <td>
+            <form method="post" style="display:inline;">
+              {{ csrf_input() }}
+              <input type="hidden" name="action" value="toggle">
+              <input type="hidden" name="extra_id" value="{{ extra.id }}">
+              <button type="submit" class="button tiny secondary">{{ 'Deactivate' if extra.is_active else 'Activate' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="center muted">No services configured yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card form-card">
+  <div class="card-head">
+    <h2>Add or edit service</h2>
+  </div>
+  <form method="post" class="stack-form">
+    {{ csrf_input() }}
+    <input type="hidden" name="action" value="upsert">
+    <input type="hidden" name="extra_id" value="">
+    <div class="grid three">
+      <label><span>Code</span><input type="text" name="code" required placeholder="pickup"></label>
+      <label><span>Name</span><input type="text" name="name" required placeholder="Pick up service"></label>
+      <label><span>Pricing mode</span>
+        <select name="pricing_mode">
+          {% for mode in pricing_modes %}
+          <option value="{{ mode }}">{{ mode.replace('_', ' ').title() }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <div class="grid three">
+      <label><span>Unit price (THB)</span><input type="number" name="unit_price" min="0" step="0.01" value="0"></label>
+      <label><span>Sort order</span><input type="number" name="sort_order" min="0" value="100"></label>
+      <label><span>Active</span>
+        <select name="is_active">
+          <option value="1" selected>Active</option>
+          <option value="0">Inactive</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid two">
+      <label><span>Description</span><input type="text" name="description" placeholder="Service description for guest"></label>
+      <label><span>Public (visible to guests)</span>
+        <select name="is_public">
+          <option value="1">Yes</option>
+          <option value="0">No — staff only</option>
+        </select>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="button" type="submit">Save service</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

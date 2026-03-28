@@ -58,13 +58,20 @@
     <div class="grid four">
       <label><span>Check-in</span><input type="date" name="check_in" value="{{ initial.check_in or '' }}" required></label>
       <label><span>Check-out</span><input type="date" name="check_out" value="{{ initial.check_out or '' }}" required></label>
+      <label><span>Arrival time</span><input type="time" name="arrival_time" value="{{ initial.arrival_time or '' }}" placeholder="14:00"></label>
       <label><span>Adults</span><input type="number" name="adults" min="1" max="3" value="{{ initial.adults or 2 }}" required></label>
-      <label><span>Children</span><input type="number" name="children" min="0" max="3" value="{{ initial.children or 0 }}" required></label>
     </div>
 
-    <div class="grid two">
+    <div class="grid three">
+      <label><span>Children</span><input type="number" name="children" min="0" max="3" value="{{ initial.children or 0 }}" required></label>
       <label><span>Extra guests</span><input type="number" name="extra_guests" min="0" max="1" value="{{ initial.extra_guests or 0 }}" required></label>
       <label><span>Special requests</span><input type="text" name="special_requests" value="{{ initial.special_requests or '' }}" placeholder="Late arrival / airport transfer / joining room"></label>
+    </div>
+
+    {# ── Pre-save discount / rate adjustment ── #}
+    <div class="grid three">
+      <label><span>Discount %</span><input type="number" name="manual_discount_pct" min="0" max="100" step="0.01" value="{{ initial.manual_discount_pct or 0 }}"></label>
+      <label class="span-two"><span>Discount note</span><input type="text" name="manual_discount_note" value="{{ initial.manual_discount_note or '' }}" placeholder="Corporate rate / VIP / long stay"></label>
     </div>
 
     {# ── Rate preview ── #}
@@ -72,7 +79,8 @@
       <h3>Rate Preview</h3>
       <dl>
         <dt>Nights</dt><dd id="rp-nights">-</dd>
-        <dt>Room total (net)</dt><dd id="rp-room-total">-</dd>
+        <dt>Base room total</dt><dd id="rp-room-total">-</dd>
+        <dt id="rp-discount-label" hidden class="discount-line">Discount</dt><dd id="rp-discount-amount" hidden class="discount-line">-</dd>
         <dt>Tax (VAT)</dt><dd id="rp-tax">-</dd>
         <dt>Grand total</dt><dd id="rp-grand-total"><strong>-</strong></dd>
       </dl>
@@ -101,7 +109,8 @@
     checkOut: form.querySelector('[name="check_out"]'),
     adults: form.querySelector('[name="adults"]'),
     children: form.querySelector('[name="children"]'),
-    extraGuests: form.querySelector('[name="extra_guests"]')
+    extraGuests: form.querySelector('[name="extra_guests"]'),
+    discountPct: form.querySelector('[name="manual_discount_pct"]')
   };
 
   var debounceTimer = null;
@@ -130,10 +139,34 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (!data.ok) { preview.hidden = true; return; }
+        var discountPct = parseFloat(fields.discountPct ? fields.discountPct.value : 0) || 0;
+        var roomTotal = data.room_total;
+        var taxTotal = data.tax_total;
+        var grandTotal = data.grand_total;
+
         document.getElementById('rp-nights').textContent = data.nights;
-        document.getElementById('rp-room-total').textContent = fmt(data.room_total);
-        document.getElementById('rp-tax').textContent = fmt(data.tax_total);
-        document.getElementById('rp-grand-total').innerHTML = '<strong>' + fmt(data.grand_total) + '</strong>';
+        document.getElementById('rp-room-total').textContent = fmt(roomTotal);
+
+        var discountLabel = document.getElementById('rp-discount-label');
+        var discountAmount = document.getElementById('rp-discount-amount');
+        if (discountPct > 0 && discountPct <= 100) {
+          var discountVal = grandTotal * (discountPct / 100);
+          var adjustedGrand = grandTotal - discountVal;
+          var adjustedRoom = roomTotal * (1 - discountPct / 100);
+          var adjustedTax = taxTotal * (1 - discountPct / 100);
+          discountLabel.textContent = 'Discount (' + discountPct + '%)';
+          discountAmount.textContent = '-' + fmt(discountVal);
+          discountLabel.hidden = false;
+          discountAmount.hidden = false;
+          document.getElementById('rp-tax').textContent = fmt(adjustedTax);
+          document.getElementById('rp-grand-total').innerHTML = '<strong>' + fmt(adjustedGrand) + '</strong>';
+        } else {
+          discountLabel.hidden = true;
+          discountAmount.hidden = true;
+          document.getElementById('rp-tax').textContent = fmt(taxTotal);
+          document.getElementById('rp-grand-total').innerHTML = '<strong>' + fmt(grandTotal) + '</strong>';
+        }
+
         var nightlyEl = document.getElementById('rp-nightly');
         if (data.nightly_rates && data.nightly_rates.length <= 7) {
           nightlyEl.textContent = data.nightly_rates.map(function(nr) { return nr.date + ': ' + fmt(nr.rate); }).join(' | ');
@@ -151,6 +184,12 @@
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(fetchPreview, 300);
       });
+      if (key === 'discountPct') {
+        fields[key].addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(fetchPreview, 300);
+        });
+      }
     }
   });
 

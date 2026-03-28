@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}{{ title }} | {{ hotel_name }}{% endblock %}
 {% block content %}
+<div class="operational-list-page">
 <section class="card">
   <div class="card-head">
     <div>
@@ -11,6 +12,7 @@
     <div class="actions">
       <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservations') }}">All reservations</a>
       <a class="button secondary" href="{{ url_for('front_desk.staff_dashboard') }}">Dashboard</a>
+      <a class="button secondary" href="{{ url_for('front_desk.staff_front_desk_board') }}">Board</a>
     </div>
   </div>
 
@@ -47,10 +49,13 @@
           <td><strong>{{ item.reservation_code }}</strong></td>
           <td><strong>{{ item.guest_name }}</strong><div class="small muted">{{ item.guest_phone }}</div></td>
           <td>{{ item.assigned_room_number or 'Unassigned' }}<div class="small muted">{{ item.room_type_code }}</div></td>
-          <td>{{ item.arrival_date }} -> {{ item.departure_date }}</td>
+          <td>{{ item.arrival_date }} → {{ item.departure_date }}</td>
           <td><span class="status {{ item.status }}">{{ item.status.replace('_', ' ') }}</span></td>
           <td>{% if can_folio %}<span class="status {{ 'paid' if item.deposit_state == 'paid' else 'pending' }}">{{ item.deposit_state.replace('_', ' ') }}</span><div class="small muted">{{ currency }} {{ item.balance_due|money }}</div>{% else %}<span class="small muted">Restricted</span>{% endif %}</td>
-          <td><a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a></td>
+          <td>
+            <a class="button tiny" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Open</a>
+            {% if can_folio %}<a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=item.id, back=request.full_path.rstrip('?')) }}">Cashier</a>{% endif %}
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="7" class="center muted">No reservations matched this operational view.</td></tr>
@@ -59,4 +64,5 @@
     </table>
   </div>
 </section>
+</div>
 {% endblock %}

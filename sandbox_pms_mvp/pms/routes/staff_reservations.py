@@ -321,6 +321,9 @@ def staff_reservation_create():
         "status": (request.values.get("status") or "confirmed").strip(),
         "special_requests": request.values.get("special_requests") or "",
         "internal_notes": request.values.get("internal_notes") or request.values.get("notes") or "",
+        "arrival_time": (request.values.get("arrival_time") or "").strip(),
+        "manual_discount_pct": (request.values.get("manual_discount_pct") or "0").strip(),
+        "manual_discount_note": (request.values.get("manual_discount_note") or "").strip(),
     }
     if initial["check_in"] and not initial["check_out"]:
         try:
@@ -329,6 +332,7 @@ def staff_reservation_create():
             initial["check_out"] = ""
     if request.method == "POST":
         try:
+            discount_pct = float(request.form.get("manual_discount_pct") or 0)
             reservation = create_reservation(
                 ReservationCreatePayload(
                     first_name=initial["first_name"],
@@ -345,10 +349,15 @@ def staff_reservation_create():
                     special_requests=request.form.get("special_requests"),
                     internal_notes=request.form.get("internal_notes"),
                     initial_status=request.form.get("status") or "confirmed",
+                    arrival_time=(request.form.get("arrival_time") or "").strip() or None,
+                    manual_discount_pct=discount_pct,
+                    manual_discount_note=(request.form.get("manual_discount_note") or "").strip() or None,
                 ),
                 actor_user_id=user.id,
             )
             flash(f"Reservation {reservation.reservation_code} created.", "success")
+            if reservation.deposit_required_amount and reservation.deposit_required_amount > 0:
+                flash("Deposit required — open cashier to collect payment.", "payment_cta")
             try:
                 fire_automation_event(
                     "reservation_created",

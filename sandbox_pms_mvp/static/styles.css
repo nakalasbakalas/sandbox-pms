@@ -7544,3 +7544,118 @@ body:not(.public-site) .pill-sm.subtle { background: rgba(0, 0, 0, .06); }
     flex-direction: column;
   }
 }
+
+/* ── Board availability strip ─────────────────────────────────────────── */
+.planning-board-avail-strip {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 8px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.planning-board-avail-strip .fd-cmd-metric {
+  flex-direction: row;
+  gap: 3px;
+  font-size: 0.75rem;
+  padding: 1px 6px;
+}
+.planning-board-avail-strip .avail-zero {
+  color: #ef4444;
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.3);
+}
+.planning-board-avail-strip .avail-low {
+  color: #f59e0b;
+  background: rgba(245,158,11,0.1);
+  border-color: rgba(245,158,11,0.3);
+}
+body:not(.public-site) .planning-board-avail-strip .avail-zero {
+  color: #dc2626;
+  background: rgba(220,38,38,0.08);
+}
+body:not(.public-site) .planning-board-avail-strip .avail-low {
+  color: #d97706;
+  background: rgba(217,119,6,0.08);
+}
+
+/* ── Operational list full-width layout ──────────────────────────────── */
+.operational-list-page { max-width: 100%; padding: 0 12px; }
+.operational-list-page .card { max-width: 100%; }
+.operational-list-page .table-wrap { overflow-x: auto; }
+.operational-list-page table { width: 100%; border-collapse: collapse; }
+.operational-list-page thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface, #fff);
+  z-index: 2;
+  border-bottom: 2px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.operational-list-page tbody td {
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border);
+}
+.operational-list-page tbody tr:hover { background: rgba(var(--accent-rgb, 59,130,246), 0.04); }
+.operational-list-page .toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+/* ── Rate preview box improvements ───────────────────────────────────── */
+.rate-preview-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin: 8px 0; background: var(--surface-alt, #f8fafc); }
+.rate-preview-box h3 { margin: 0 0 8px 0; font-size: 0.95rem; }
+.rate-preview-box dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.rate-preview-box dt { font-size: 0.82rem; color: var(--muted); }
+.rate-preview-box dd { font-size: 0.88rem; text-align: right; margin: 0; }
+.rate-preview-box .discount-line { color: #16a34a; }
+
+/* ── Payment CTA callout ─────────────────────────────────────────────── */
+.payment-cta-callout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  margin: 8px 0;
+  font-size: 0.88rem;
+}
+.payment-cta-callout .button { flex-shrink: 0; }
+
+/* ── Attribution collapsible ─────────────────────────────────────────── */
+.attribution-section summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.attribution-section[open] summary { margin-bottom: 8px; }
+
+/* ── Key card placeholder ────────────────────────────────────────────── */
+.keycard-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px dashed #d1d5db;
+}
+body:not(.public-site) .keycard-placeholder {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.15);
+  color: var(--muted);
+}
