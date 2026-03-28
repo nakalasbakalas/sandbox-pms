@@ -714,7 +714,9 @@ def staff_admin_channels():
     test the connection for each provider.
     """
     from ..services.channel_service import (
+        channel_sync_summary,
         list_ota_channels,
+        sync_single_channel,
         test_ota_channel_connection,
         upsert_ota_channel,
     )
@@ -762,6 +764,17 @@ def staff_admin_channels():
                         "error",
                     )
 
+            elif action == "force_sync":
+                actor = require_permission("settings.edit")
+                sync_result = sync_single_channel(provider_key, actor_user_id=actor.id)
+                inbound = sync_result.get("inbound", {})
+                outbound = sync_result.get("outbound", {})
+                flash(
+                    f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: sync complete — "
+                    f"inbound {inbound.get('processed', 0)} records, outbound {outbound.get('processed', 0)} records.",
+                    "success",
+                )
+
         except Exception as exc:  # noqa: BLE001
             db.session.rollback()
             flash(public_error_message(exc), "error")
@@ -770,9 +783,11 @@ def staff_admin_channels():
 
     # Build per-provider context so the template has a single list to iterate.
     existing = {ch.provider_key: ch for ch in list_ota_channels()}
+    sync_summaries = channel_sync_summary()
     channels_context = []
     for key in OTA_PROVIDER_KEYS:
         record = existing.get(key)
+        sync_info = sync_summaries.get(key, {})
         channels_context.append({
             "provider_key": key,
             "display_name": OTA_PROVIDER_LABELS.get(key, key),
@@ -784,6 +799,11 @@ def staff_admin_channels():
             "last_tested_at": record.last_tested_at if record else None,
             "last_test_ok": record.last_test_ok if record else None,
             "last_test_error": record.last_test_error if record else None,
+            "last_sync_at": sync_info.get("last_sync_at"),
+            "last_sync_status": sync_info.get("last_status"),
+            "total_processed": sync_info.get("total_processed", 0),
+            "total_failed": sync_info.get("total_failed", 0),
+            "recent_logs": sync_info.get("recent_logs", []),
         })
 
     return render_template(

@@ -253,6 +253,7 @@ def validate_csrf_request() -> None:
         "messaging.staff_messaging_inbound_email",
         "cashier.integration_pos_charge",
         "staff_reservations.integration_scanner_capture",
+        "public.channel_inbound_webhook",
     }:
         return
     expected = session.get("_csrf_token")

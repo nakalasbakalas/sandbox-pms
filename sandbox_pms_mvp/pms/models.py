@@ -18,6 +18,8 @@ from .constants import (
     CASHIER_DOCUMENT_TYPES,
     CALENDAR_FEED_SCOPE_TYPES,
     CANCELLATION_REQUEST_STATUSES,
+    CHANNEL_SYNC_DIRECTIONS,
+    CHANNEL_SYNC_LOG_STATUSES,
     CONVERSATION_CHANNEL_TYPES,
     CONVERSATION_STATUSES,
     DOCUMENT_TYPES,
@@ -735,6 +737,8 @@ class Reservation(AuditMixin, db.Model):
     identity_verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    external_booking_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    external_source: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
 
     primary_guest = relationship("Guest")
     room_type = relationship("RoomType")
@@ -778,6 +782,7 @@ class Reservation(AuditMixin, db.Model):
         Index("ix_reservations_primary_guest_id", "primary_guest_id"),
         Index("ix_reservations_assigned_room_id", "assigned_room_id"),
         Index("ix_reservations_source_channel", "source_channel"),
+        Index("ix_reservations_external_booking", "external_booking_id", "external_source", unique=True),
     )
 
 
@@ -1672,6 +1677,36 @@ class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
         ),
         UniqueConstraint("provider_key", name="uq_ota_channels_provider_key"),
         Index("ix_ota_channels_provider_active", "provider_key", "is_active"),
+    )
+
+
+class ChannelSyncLog(AuditMixin, db.Model):
+    """Records every channel sync operation for audit and admin dashboard display."""
+
+    __tablename__ = "channel_sync_logs"
+
+    provider_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    direction: Mapped[str] = mapped_column(sa.String(20), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    records_processed: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    records_failed: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="success")
+    error_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    details_json: Mapped[dict | None] = mapped_column("details", JSONType, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"direction IN ({', '.join(repr(v) for v in CHANNEL_SYNC_DIRECTIONS)})",
+            name="ck_channel_sync_logs_direction",
+        ),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in CHANNEL_SYNC_LOG_STATUSES)})",
+            name="ck_channel_sync_logs_status",
+        ),
+        CheckConstraint("records_processed >= 0", name="ck_channel_sync_logs_processed"),
+        CheckConstraint("records_failed >= 0", name="ck_channel_sync_logs_failed"),
+        Index("ix_channel_sync_logs_provider_started", "provider_key", "started_at"),
     )
 
 

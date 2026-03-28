@@ -165,6 +165,7 @@ class Config:
     LINE_STAFF_ALERT_WEBHOOK_URL = os.getenv("LINE_STAFF_ALERT_WEBHOOK_URL", "")
     WHATSAPP_STAFF_ALERT_WEBHOOK_URL = os.getenv("WHATSAPP_STAFF_ALERT_WEBHOOK_URL", "")
     CHANNEL_PUSH_WEBHOOK_URL = os.getenv("CHANNEL_PUSH_WEBHOOK_URL", "").strip()
+    CHANNEL_WEBHOOK_SECRET = os.getenv("CHANNEL_WEBHOOK_SECRET", "").strip()
     POS_ADAPTER = os.getenv("POS_ADAPTER", "null").strip().lower()
     POS_WEBHOOK_URL = os.getenv("POS_WEBHOOK_URL", "").strip()
     SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()

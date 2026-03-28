@@ -170,6 +170,11 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         after_data=reservation_snapshot(reservation),
     )
     db.session.commit()
+    try:
+        from .channel_service import trigger_outbound_push_for_change
+        trigger_outbound_push_for_change()
+    except Exception:
+        _log.debug("Outbound channel push after create failed", exc_info=True)
     return reservation
 
 
@@ -204,6 +209,11 @@ def cancel_reservation(reservation_id: uuid.UUID, actor_user_id: uuid.UUID | Non
         after_data=reservation_snapshot(reservation),
     )
     db.session.commit()
+    try:
+        from .channel_service import trigger_outbound_push_for_change
+        trigger_outbound_push_for_change()
+    except Exception:
+        _log.debug("Outbound channel push after cancel failed", exc_info=True)
     return reservation
 
 

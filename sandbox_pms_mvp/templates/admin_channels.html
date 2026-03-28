@@ -7,10 +7,10 @@
   <div class="card-head">
     <div>
       <p class="eyebrow">Online Travel Agency integrations</p>
-      <h2>OTA channel API key management</h2>
+      <h2>OTA channel management</h2>
     </div>
   </div>
-  <p class="muted">Configure API credentials for each OTA channel. API keys are encrypted at rest and never shown in plaintext. Leave the key field blank to keep an existing credential unchanged.</p>
+  <p class="muted">Configure API credentials, test connections, and monitor sync operations for each OTA channel. API keys are encrypted at rest and never shown in plaintext.</p>
 </section>
 
 {% for ch in channels %}
@@ -21,12 +21,15 @@
       <h2>{{ ch.display_name }}</h2>
     </div>
     <div>
+      {% if ch.is_active %}
+        <span class="pill success">Active</span>
+      {% else %}
+        <span class="pill subtle">Inactive</span>
+      {% endif %}
       {% if ch.last_test_ok is not none %}
         <span class="pill {% if ch.last_test_ok %}success{% else %}error{% endif %}">
-          {{ 'Connection OK' if ch.last_test_ok else 'Connection failed' }}
+          {{ 'Connected' if ch.last_test_ok else 'Connection failed' }}
         </span>
-      {% else %}
-        <span class="pill subtle">Not tested</span>
       {% endif %}
     </div>
   </div>
@@ -72,8 +75,8 @@
     <article>
       <div class="card-head">
         <div>
-          <p class="eyebrow">Credential status</p>
-          <h3>{{ ch.display_name }} connection health</h3>
+          <p class="eyebrow">Status and sync</p>
+          <h3>{{ ch.display_name }} health</h3>
         </div>
       </div>
       <div class="list-stack compact">
@@ -86,7 +89,7 @@
           <span class="status">{{ ('…' ~ ch.api_secret_hint) if ch.api_secret_hint else 'Not configured' }}</span>
         </div>
         <div class="list-row no-link">
-          <strong>Status</strong>
+          <strong>Channel status</strong>
           <span class="status">{{ 'Active' if ch.is_active else 'Inactive' }}</span>
         </div>
         {% if ch.last_tested_at %}
@@ -101,17 +104,79 @@
             </div>
           {% endif %}
         {% endif %}
+        <div class="list-row no-link">
+          <strong>Last sync</strong>
+          <span class="status">
+            {% if ch.last_sync_at %}
+              {{ ch.last_sync_at.strftime('%Y-%m-%d %H:%M UTC') }}
+              <span class="pill {% if ch.last_sync_status == 'success' %}success{% elif ch.last_sync_status == 'partial' %}warning{% else %}error{% endif %}">
+                {{ ch.last_sync_status or 'unknown' }}
+              </span>
+            {% else %}
+              Never synced
+            {% endif %}
+          </span>
+        </div>
+        <div class="list-row no-link">
+          <strong>Records synced</strong>
+          <span class="status">{{ ch.total_processed }} processed, {{ ch.total_failed }} failed</span>
+        </div>
       </div>
       <p class="muted">API credentials are encrypted at rest and never displayed in plaintext.</p>
 
-      <form method="post" style="margin-top: 1rem;">
-        {{ csrf_input() }}
-        <input type="hidden" name="action" value="test_connection">
-        <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
-        <button class="button subtle" type="submit">Test connection</button>
-      </form>
+      <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <form method="post">
+          {{ csrf_input() }}
+          <input type="hidden" name="action" value="test_connection">
+          <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+          <button class="button subtle" type="submit">Test connection</button>
+        </form>
+
+        {% if can('settings.edit') %}
+          <form method="post">
+            {{ csrf_input() }}
+            <input type="hidden" name="action" value="force_sync">
+            <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
+            <button class="button" type="submit">Force sync now</button>
+          </form>
+        {% endif %}
+      </div>
     </article>
   </div>
+
+  {% if ch.recent_logs %}
+  <details style="margin-top: 1rem;">
+    <summary class="muted" style="cursor: pointer;">Recent sync history ({{ ch.recent_logs|length }} entries)</summary>
+    <table class="res-table" style="margin-top: 0.5rem;">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Direction</th>
+          <th>Status</th>
+          <th>Processed</th>
+          <th>Failed</th>
+          <th>Errors</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in ch.recent_logs %}
+        <tr>
+          <td>{{ log.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ log.direction }}</td>
+          <td>
+            <span class="pill {% if log.status == 'success' %}success{% elif log.status == 'partial' %}warning{% else %}error{% endif %}">
+              {{ log.status }}
+            </span>
+          </td>
+          <td>{{ log.records_processed }}</td>
+          <td>{{ log.records_failed }}</td>
+          <td class="muted">{{ log.error_summary or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
 </section>
 {% endfor %}
 {% endblock %}

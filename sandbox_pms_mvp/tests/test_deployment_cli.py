@@ -179,6 +179,7 @@ def test_render_blueprint_enables_persistent_uploads_and_background_crons():
         "pms-process-notifications",
         "pms-process-automation-events",
         "pms-sync-ical-sources",
+        "pms-sync-channels",
         "pms-send-pre-arrival-reminders",
         "pms-send-failed-payment-reminders",
         "pms-fire-pre-checkin-reminders",
