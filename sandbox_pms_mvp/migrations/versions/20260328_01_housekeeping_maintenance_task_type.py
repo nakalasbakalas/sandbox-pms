@@ -1,7 +1,7 @@
 """Allow housekeeping maintenance tasks in the task_type constraint.
 
 Revision ID: 20260328_01
-Revises: 20260322_08
+Revises: 20260326_04
 Create Date: 2026-03-28 13:20:00.000000
 """
 
@@ -11,7 +11,7 @@ from alembic import op
 
 
 revision = "20260328_01"
-down_revision = "20260322_08"
+down_revision = "20260326_04"
 branch_labels = None
 depends_on = None
 

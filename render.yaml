@@ -8,7 +8,7 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    preDeployCommand: flask --app app db upgrade
+    preDeployCommand: flask --app app db upgrade heads
     startCommand: gunicorn --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-10000} --timeout 120 --worker-class sync --access-logfile - --error-logfile - app:app
     customDomains:
       - book.sandboxhotel.com
