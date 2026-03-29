@@ -215,9 +215,18 @@ def dispatch_notification_deliveries(
         )
     ids = db.session.execute(query.limit(limit)).scalars().all()
     results = {"processed": 0, "sent": 0, "failed": 0, "skipped": 0}
+
+    # Batch-fetch all deliveries in one query instead of per-ID lookups
+    deliveries_by_id: dict = {}
+    if ids:
+        fetched = db.session.execute(
+            sa.select(NotificationDelivery).where(NotificationDelivery.id.in_(ids))
+        ).scalars().all()
+        deliveries_by_id = {d.id: d for d in fetched}
+
     for delivery_id in ids:
         try:
-            delivery = db.session.get(NotificationDelivery, delivery_id)
+            delivery = deliveries_by_id.get(delivery_id)
             if not delivery:
                 continue
             if delivery.status in {"sent", "delivered", "cancelled", "skipped", "failed"}:

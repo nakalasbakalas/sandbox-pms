@@ -25,6 +25,8 @@ from .constants import (
     CASHIER_DOCUMENT_TYPES,
     CALENDAR_FEED_SCOPE_TYPES,
     CANCELLATION_REQUEST_STATUSES,
+    CHANNEL_SYNC_DIRECTIONS,
+    CHANNEL_SYNC_LOG_STATUSES,
     CONVERSATION_CHANNEL_TYPES,
     CONVERSATION_STATUSES,
     DOCUMENT_TYPES,
@@ -162,10 +164,14 @@ class User(AuditMixin, SoftDeleteMixin, db.Model):
 
     @property
     def permission_codes(self) -> set[str]:
+        cached = getattr(self, "_permission_codes_cache", None)
+        if cached is not None:
+            return cached
         codes: set[str] = set()
         for role in self.roles:
             for permission in role.permissions:
                 codes.add(permission.code)
+        self._permission_codes_cache = codes
         return codes
 
     def has_permission(self, permission_code: str) -> bool:
@@ -741,6 +747,8 @@ class Reservation(AuditMixin, db.Model):
     identity_verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUIDType, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    external_booking_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    external_source: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
 
     primary_guest = relationship("Guest")
     room_type = relationship("RoomType")
@@ -784,6 +792,7 @@ class Reservation(AuditMixin, db.Model):
         Index("ix_reservations_primary_guest_id", "primary_guest_id"),
         Index("ix_reservations_assigned_room_id", "assigned_room_id"),
         Index("ix_reservations_source_channel", "source_channel"),
+        Index("ix_reservations_external_booking", "external_booking_id", "external_source", unique=True),
     )
 
 

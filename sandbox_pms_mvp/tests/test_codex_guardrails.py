@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codex_guardrails import check_analytics_readiness, check_public_surface, check_required_docs, scan_for_placeholder_issues
+from codex_guardrails import (
+    check_analytics_readiness,
+    check_public_surface,
+    check_repo_integrity,
+    check_required_docs,
+    scan_for_placeholder_issues,
+)
 
 
 def write_file(path: Path, content: str) -> None:
@@ -111,3 +117,15 @@ def test_required_docs_and_analytics_checks_report_missing_layers(tmp_path):
         "analytics-events-missing",
         "consent-missing",
     }
+
+
+def test_repo_integrity_flags_nested_checkout(tmp_path):
+    repo_root = build_repo_fixture(tmp_path)
+    nested_root = repo_root / "sandbox-pms"
+    (nested_root / ".git").mkdir(parents=True, exist_ok=True)
+    (nested_root / "sandbox_pms_mvp").mkdir(parents=True, exist_ok=True)
+    write_file(nested_root / "render.yaml", "services: []\n")
+
+    issues = check_repo_integrity(repo_root)
+
+    assert {issue.code for issue in issues} == {"nested-checkout"}

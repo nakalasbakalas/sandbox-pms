@@ -190,6 +190,27 @@ services:
         sync: false
 
   - type: cron
+    name: pms-sync-channels
+    runtime: python
+    rootDir: sandbox_pms_mvp
+    region: oregon
+    plan: starter
+    schedule: "*/15 * * * *"
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: flask --app app sync-channels
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db-v43m
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: AUTH_ENCRYPTION_KEY
+        sync: false
+
+  - type: cron
     name: pms-send-pre-arrival-reminders
     runtime: python
     rootDir: sandbox_pms_mvp

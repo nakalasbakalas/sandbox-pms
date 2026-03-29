@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import subprocess
 
 
 PUBLIC_TEMPLATE_NAMES = {"availability.html", "base.html", "index.html"}
@@ -267,8 +268,55 @@ def check_analytics_readiness(root: Path) -> list[GuardrailIssue]:
     return issues
 
 
+def check_repo_integrity(root: Path) -> list[GuardrailIssue]:
+    issues: list[GuardrailIssue] = []
+    ignored_names = {".agents", ".codex", ".git", ".pytest_cache", ".venv", ".vscode", "node_modules"}
+
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or child.name in ignored_names:
+            continue
+        nested_git = child / ".git"
+        if not nested_git.exists():
+            continue
+        if (child / "sandbox_pms_mvp").is_dir() and (child / "render.yaml").exists():
+            issues.append(
+                GuardrailIssue(
+                    code="nested-checkout",
+                    message="Remove nested Sandbox PMS checkouts from the repo root so there is only one source of truth.",
+                    path=child,
+                )
+            )
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--stage"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return issues
+
+    for line in result.stdout.splitlines():
+        if not line.startswith("160000 "):
+            continue
+        parts = line.split(maxsplit=3)
+        if len(parts) < 4:
+            continue
+        gitlink_path = root / parts[3]
+        issues.append(
+            GuardrailIssue(
+                code="gitlink-present",
+                message="Remove tracked gitlinks or broken submodule entries from the repo root before launch.",
+                path=gitlink_path,
+            )
+        )
+    return issues
+
+
 def build_launch_gate(root: Path, *, strict_launch: bool) -> tuple[list[GuardrailIssue], list[GuardrailIssue]]:
     blockers = [
+        *check_repo_integrity(root),
         *scan_for_placeholder_issues(root),
         *check_public_surface(root),
         *check_required_docs(root),

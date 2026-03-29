@@ -247,7 +247,6 @@ def validate_csrf_request() -> None:
         "payment_webhook",
         "pre_checkin_save",
         "pre_checkin_upload",
-        "guest_survey_submit",
         "staff_messaging_inbound_webhook",
         "staff_messaging_inbound_email",
         "integration_scanner_capture",
@@ -256,11 +255,11 @@ def validate_csrf_request() -> None:
         "public.payment_webhook",
         "public.pre_checkin_save",
         "public.pre_checkin_upload",
-        "public.guest_survey_submit",
         "messaging.staff_messaging_inbound_webhook",
         "messaging.staff_messaging_inbound_email",
         "cashier.integration_pos_charge",
         "staff_reservations.integration_scanner_capture",
+        "public.channel_inbound_webhook",
     }:
         return
     expected = session.get("_csrf_token")

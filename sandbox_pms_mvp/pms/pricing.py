@@ -9,6 +9,22 @@ import sqlalchemy as sa
 from .extensions import db
 from .models import AppSetting, InventoryDay, RateRule, Room, RoomType
 
+# ---------------------------------------------------------------------------
+# Per-request settings cache — avoids 14+ individual DB queries per page load
+# ---------------------------------------------------------------------------
+
+def _get_settings_cache() -> dict[str, dict]:
+    """Return (and lazily populate) a per-request cache of all AppSetting rows."""
+    from flask import g
+    cache = getattr(g, "_settings_cache", None)
+    if cache is None:
+        rows = db.session.execute(
+            sa.select(AppSetting).where(AppSetting.deleted_at.is_(None))
+        ).scalars().all()
+        cache = {row.key: row.value_json for row in rows}
+        g._settings_cache = cache
+    return cache
+
 
 @dataclass
 class QuoteResult:
@@ -26,15 +42,23 @@ def daterange(start_date: date, end_date: date):
 
 
 def get_setting_value(key: str, default):
-    setting = db.session.execute(
-        sa.select(AppSetting).where(
-            AppSetting.key == key,
-            AppSetting.deleted_at.is_(None),
-        )
-    ).scalar_one_or_none()
-    if not setting:
+    try:
+        cache = _get_settings_cache()
+    except RuntimeError:
+        # Outside request context (e.g. CLI commands) — fall back to direct query
+        setting = db.session.execute(
+            sa.select(AppSetting).where(
+                AppSetting.key == key,
+                AppSetting.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if not setting:
+            return default
+        return setting.value_json.get("value", default)
+    value_json = cache.get(key)
+    if value_json is None:
         return default
-    return setting.value_json.get("value", default)
+    return value_json.get("value", default)
 
 
 def money(value) -> Decimal:

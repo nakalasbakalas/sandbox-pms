@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import os
 from uuid import UUID
 
@@ -14,6 +15,8 @@ from markupsafe import escape
 from ..extensions import db
 from ..helpers import parse_request_int_arg, require_permission
 from ..models import Guest, Reservation, User
+
+logger = logging.getLogger(__name__)
 from ..services.messaging_service import (
     ComposePayload as MessagingComposePayload,
     InboxFilters as MessagingInboxFilters,
@@ -281,6 +284,17 @@ def staff_messaging_inbound_email():
     ``in_reply_to`` / ``references`` headers to find the matching
     conversation thread via ``Message.provider_message_id``.
     """
+    # Require the same HMAC signature as the generic inbound webhook
+    secret = os.environ.get("INBOUND_WEBHOOK_SECRET", "").encode()
+    if secret:
+        sig_header = request.headers.get("X-Webhook-Signature", "")
+        raw_body = request.get_data()
+        expected = hmac.new(secret, raw_body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig_header, expected):
+            return jsonify({"error": "invalid signature"}), 401
+    else:
+        logger.warning("INBOUND_WEBHOOK_SECRET not configured — inbound email webhook has no authentication")
+
     data = request.get_json(silent=True) or {}
     sender = (data.get("from") or "").strip()
     subject = (data.get("subject") or "").strip() or None

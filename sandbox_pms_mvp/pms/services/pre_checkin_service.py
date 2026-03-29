@@ -694,8 +694,8 @@ def list_todays_arrivals_with_readiness(business_date) -> list[dict[str, Any]]:
     ).scalars().all()
     result = []
     for res in reservations:
-        pc = get_pre_checkin_for_reservation(res.id)
-        docs = get_documents_for_reservation(res.id) if pc else []
+        pc = pc_map.get(res.id)
+        docs = doc_map.get(res.id, []) if pc else []
         result.append({
             "reservation": res,
             "pre_checkin": pc,

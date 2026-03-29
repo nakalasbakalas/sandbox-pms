@@ -49,6 +49,7 @@ from pms.services.front_desk_service import (
     list_front_desk_in_house,
     prepare_checkout,
     process_no_show,
+    room_readiness_snapshot,
 )
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
 from pms.services.staff_reservations_service import assign_room
@@ -847,6 +848,25 @@ def test_check_in_route_updates_guest_identity_fields(app_factory):
         assert refreshed.current_status == "checked_in"
         assert refreshed.primary_guest.phone == "+66800000999"
         assert refreshed.identity_verified_at is not None
+
+
+def test_same_day_auto_assignment_prefers_arrival_ready_room(app_factory):
+    app = app_factory(seed=True)
+    with app.app_context():
+        reservation = create_staff_reservation(
+            first_name="Ready",
+            last_name="Assignment",
+            phone="+66800000121",
+            room_type_code="DBL",
+            check_in_date=date.today(),
+            check_out_date=date.today() + timedelta(days=1),
+        )
+
+        readiness = room_readiness_snapshot(reservation, reservation.check_in_date)
+
+        assert reservation.assigned_room_id is not None
+        assert readiness["is_ready"] is True
+        assert readiness["housekeeping_status_code"] in {"clean", "inspected"}
 
 
 def test_check_in_route_rejects_deposit_override_for_front_desk_role(app_factory):

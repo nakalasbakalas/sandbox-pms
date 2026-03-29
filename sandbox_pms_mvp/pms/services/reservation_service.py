@@ -15,6 +15,7 @@ from ..extensions import db
 from ..models import (
     AppSetting,
     Guest,
+    HousekeepingStatus,
     InventoryDay,
     PaymentEvent,
     PaymentRequest,
@@ -187,6 +188,11 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         after_data=reservation_snapshot(reservation),
     )
     db.session.commit()
+    try:
+        from .channel_service import trigger_outbound_push_for_change
+        trigger_outbound_push_for_change()
+    except Exception:
+        _log.debug("Outbound channel push after create failed", exc_info=True)
     return reservation
 
 
@@ -221,6 +227,11 @@ def cancel_reservation(reservation_id: uuid.UUID, actor_user_id: uuid.UUID | Non
         after_data=reservation_snapshot(reservation),
     )
     db.session.commit()
+    try:
+        from .channel_service import trigger_outbound_push_for_change
+        trigger_outbound_push_for_change()
+    except Exception:
+        _log.debug("Outbound channel push after cancel failed", exc_info=True)
     return reservation
 
 
@@ -321,6 +332,7 @@ def choose_available_room(
             .all()
         )
     nights = list(_stay_dates(check_in_date, check_out_date))
+    eligible_candidates: list[tuple[Room, list[InventoryDay]]] = []
     for room in candidates:
         if room_has_external_block(room.id, check_in_date, check_out_date, for_update=True):
             continue
@@ -339,7 +351,14 @@ def choose_available_room(
         if len(rows) != len(nights):
             continue
         if all(inventory_row_can_allocate(row) for row in rows):
+            eligible_candidates.append((room, rows))
+    if assigned_room_id and eligible_candidates:
+        return eligible_candidates[0][0]
+    for room, rows in eligible_candidates:
+        if inventory_rows_start_ready_for_arrival(rows):
             return room
+    if eligible_candidates:
+        return eligible_candidates[0][0]
     raise ValueError("No available room could be assigned without overbooking.")
 
 
@@ -449,6 +468,17 @@ def inventory_row_can_allocate(row: InventoryDay) -> bool:
         and not row.is_blocked
         and not row.maintenance_flag
     )
+
+
+def inventory_rows_start_ready_for_arrival(rows: list[InventoryDay]) -> bool:
+    if not rows:
+        return False
+    first_row = min(rows, key=lambda row: row.business_date)
+    if not inventory_row_can_allocate(first_row):
+        return False
+    status = db.session.get(HousekeepingStatus, first_row.housekeeping_status_id) if first_row.housekeeping_status_id else None
+    ready_codes = {"inspected"} if get_setting_value("housekeeping.require_inspected_for_ready", False) else {"clean", "inspected"}
+    return bool(status and status.code in ready_codes)
 
 
 def _stay_dates(check_in_date: date, check_out_date: date):

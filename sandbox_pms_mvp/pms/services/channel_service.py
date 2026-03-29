@@ -31,12 +31,15 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import logging
+
 import sqlalchemy as sa
 from flask import current_app
 
 from ..audit import write_audit_log
 from ..extensions import db
 from ..models import (
+    ChannelSyncLog,
     ExternalCalendarBlock,
     ExternalCalendarSource,
     InventoryDay,
@@ -48,6 +51,8 @@ from ..models import (
     utc_now,
 )
 from ..pricing import get_setting_value, money, quote_reservation
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -865,14 +870,83 @@ class ChannelSyncService:
     ) -> None:
         """Import one external reservation idempotently.
 
-        For iCal-based providers the data is stored as
-        ``ExternalCalendarBlock`` records by ``ical_service``.  For future
-        API-based providers this method would create ``Reservation`` records
-        directly, using ``external_booking_id`` stored in ``internal_notes``
-        and ``source_channel`` to guarantee idempotency.
+        Uses ``(external_booking_id, external_source)`` as the dedup key.
+        Handles new bookings, modifications (date/amount changes), and
+        cancellations.
         """
-        # For the iCal provider, blocks are managed by ical_service directly.
-        # For API-based providers the reservation would be created here.
+        from .reservation_service import (
+            ReservationCreatePayload,
+            cancel_reservation,
+            create_reservation,
+            release_inventory,
+            reservation_snapshot,
+        )
+        from ..models import ReservationStatusHistory
+
+        existing = _find_reservation_by_external_id(
+            data.external_booking_id, data.external_source,
+        )
+
+        # -- Cancellation of an existing OTA booking --------------------------
+        if data.is_cancellation:
+            if not existing:
+                _log.info(
+                    "Ignoring cancellation for unknown external booking %s from %s",
+                    data.external_booking_id, data.external_source,
+                )
+                return
+            if existing.current_status in ("cancelled", "no_show", "checked_out"):
+                return  # Already terminal — nothing to do.
+            cancel_reservation(existing.id, actor_user_id, reason=f"OTA cancellation ({data.external_source})")
+            return
+
+        # -- Modification of an existing OTA booking --------------------------
+        if existing:
+            _update_existing_reservation(existing, data, actor_user_id)
+            return
+
+        # -- New OTA booking --------------------------------------------------
+        room_type = _resolve_room_type(data.room_type_code)
+        if not room_type:
+            raise ValueError(
+                f"Unknown room type code {data.room_type_code!r} from {data.external_source}"
+            )
+        if not data.check_in or not data.check_out:
+            raise ValueError(
+                f"Missing dates for external booking {data.external_booking_id}"
+            )
+
+        guest_name_parts = (data.guest_name or "OTA Guest").strip().rsplit(" ", 1)
+        first_name = guest_name_parts[0] or "OTA"
+        last_name = guest_name_parts[1] if len(guest_name_parts) > 1 else "Guest"
+
+        source_channel = f"ota_{self.provider.provider_key}"
+
+        payload = ReservationCreatePayload(
+            first_name=first_name,
+            last_name=last_name,
+            phone=data.guest_phone or "0000000000",
+            email=data.guest_email,
+            room_type_id=room_type.id,
+            check_in_date=data.check_in,
+            check_out_date=data.check_out,
+            adults=data.adults or 2,
+            children=data.children or 0,
+            source_channel=source_channel,
+            internal_notes=f"External booking: {data.external_booking_id}",
+            initial_status="confirmed",
+            defer_room_assignment=True,
+        )
+        reservation = create_reservation(payload, actor_user_id=actor_user_id)
+
+        # Stamp external tracking fields
+        reservation.external_booking_id = data.external_booking_id
+        reservation.external_source = data.external_source
+        if data.raw_payload:
+            reservation.source_metadata_json = data.raw_payload
+        if data.total_amount is not None:
+            reservation.quoted_grand_total = data.total_amount
+        db.session.commit()
 
     # -- Outbound ---------------------------------------------------------
 

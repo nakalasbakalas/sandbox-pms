@@ -568,6 +568,161 @@ def health():
     )
 
 
+# ---------------------------------------------------------------------------
+# Channel inbound webhook
+# ---------------------------------------------------------------------------
+
+
+@public_bp.route("/api/channel/inbound", methods=["POST"])
+def channel_inbound_webhook():
+    """Receive OTA reservation data via HMAC-authenticated webhook.
+
+    Expected JSON body::
+
+        {
+            "provider": "booking_com",
+            "reservations": [
+                {
+                    "external_booking_id": "BC-123456",
+                    "guest_name": "John Smith",
+                    "guest_email": "john@example.com",
+                    "guest_phone": "+66812345678",
+                    "room_type_code": "DLX",
+                    "check_in": "2026-04-01",
+                    "check_out": "2026-04-05",
+                    "adults": 2,
+                    "children": 0,
+                    "total_amount": "12000.00",
+                    "currency": "THB",
+                    "is_cancellation": false,
+                    "raw_payload": {}
+                }
+            ]
+        }
+
+    Authentication: ``X-Channel-Signature`` header must contain
+    ``HMAC-SHA256(body, CHANNEL_WEBHOOK_SECRET)``.
+    """
+    import hmac
+    import hashlib
+    from ..services.channel_service import (
+        ChannelSyncService,
+        InboundReservation,
+        get_provider,
+        log_sync_operation,
+    )
+    from ..models import utc_now
+
+    _wh_log = logging.getLogger(__name__ + ".channel_webhook")
+
+    secret = current_app.config.get("CHANNEL_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        return jsonify({"error": "Channel webhook not configured"}), 503
+
+    # Verify HMAC signature
+    signature = request.headers.get("X-Channel-Signature", "")
+    body = request.get_data()
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected):
+        _wh_log.warning("Invalid channel webhook signature")
+        return jsonify({"error": "Invalid signature"}), 401
+
+    try:
+        data = request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    provider_key = (data.get("provider") or "").strip()
+    if not provider_key:
+        return jsonify({"error": "Missing provider field"}), 400
+
+    reservations_data = data.get("reservations", [])
+    if not isinstance(reservations_data, list):
+        return jsonify({"error": "reservations must be a list"}), 400
+
+    try:
+        provider = get_provider(provider_key)
+    except ValueError:
+        return jsonify({"error": f"Unknown provider: {provider_key}"}), 400
+
+    # Build InboundReservation DTOs from the webhook payload
+    inbound_items: list[InboundReservation] = []
+    for item in reservations_data:
+        check_in = None
+        check_out = None
+        if item.get("check_in"):
+            try:
+                check_in = date.fromisoformat(item["check_in"])
+            except (ValueError, TypeError):
+                pass
+        if item.get("check_out"):
+            try:
+                check_out = date.fromisoformat(item["check_out"])
+            except (ValueError, TypeError):
+                pass
+
+        total_amount = None
+        if item.get("total_amount") is not None:
+            try:
+                total_amount = Decimal(str(item["total_amount"]))
+            except Exception:
+                pass
+
+        inbound_items.append(InboundReservation(
+            external_booking_id=str(item.get("external_booking_id", "")),
+            external_source=provider_key,
+            guest_name=str(item.get("guest_name", "OTA Guest")),
+            guest_email=item.get("guest_email"),
+            guest_phone=item.get("guest_phone"),
+            room_type_code=item.get("room_type_code"),
+            check_in=check_in,
+            check_out=check_out,
+            adults=int(item.get("adults", 2)),
+            children=int(item.get("children", 0)),
+            total_amount=total_amount,
+            currency=str(item.get("currency", "THB")),
+            notes=item.get("notes"),
+            raw_payload=item.get("raw_payload", {}),
+            is_cancellation=bool(item.get("is_cancellation", False)),
+        ))
+
+    # Process via the sync service
+    service = ChannelSyncService(provider)
+    started = utc_now()
+
+    # Override pull to use our webhook data instead of provider.pull_reservations
+    imported = 0
+    errors: list[str] = []
+    for res_data in inbound_items:
+        try:
+            service._import_single(res_data, actor_user_id=None)
+            imported += 1
+        except Exception as exc:
+            errors.append(f"{res_data.external_booking_id}: {exc}")
+
+    from ..services.channel_service import SyncResult
+    result = SyncResult(
+        provider=provider_key,
+        direction="inbound",
+        success=len(errors) == 0,
+        records_processed=imported,
+        errors=errors,
+    )
+    log_sync_operation(
+        provider_key=provider_key,
+        direction="inbound",
+        result=result,
+        started_at=started,
+    )
+
+    status_code = 200 if result.success else 207
+    return jsonify({
+        "success": result.success,
+        "processed": imported,
+        "errors": errors[:10],
+    }), status_code
+
+
 @public_bp.route("/robots.txt")
 def robots_txt():
     body = "\n".join(
@@ -661,8 +816,11 @@ def guest_maintenance_request():
             submitted = True
             flash("Your maintenance request has been submitted. Our team will address it shortly.", "success")
         except ValueError as exc:
+            db.session.rollback()
             flash(str(exc), "error")
         except Exception as exc:  # noqa: BLE001
+            db.session.rollback()
+            logger.exception("Guest maintenance request submission failed")
             flash(public_error_message(exc), "error")
     return render_template(
         "guest_maintenance_request.html",

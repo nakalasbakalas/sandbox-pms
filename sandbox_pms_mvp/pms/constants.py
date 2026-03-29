@@ -306,6 +306,8 @@ OTA_PROVIDER_LABELS: dict[str, str] = {
 }
 
 OTA_CHANNEL_STATUSES = ["active", "inactive", "error"]
+CHANNEL_SYNC_LOG_STATUSES = ["success", "partial", "failed"]
+CHANNEL_SYNC_DIRECTIONS = ["inbound", "outbound"]
 
 # ---------------------------------------------------------------------------
 # Unified Guest Messaging Hub constants

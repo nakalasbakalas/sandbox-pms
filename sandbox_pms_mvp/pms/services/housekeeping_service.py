@@ -1630,6 +1630,7 @@ def create_maintenance_request(
         business_date=date.today(),
     )
     db.session.add(task)
+    db.session.flush()
 
     write_activity_log(
         actor_user_id=None,

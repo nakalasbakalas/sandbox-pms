@@ -40,6 +40,7 @@
   </div>
 
   <form method="POST" action="{{ url_for('public.guest_survey_submit', token=survey.token) }}">
+    {{ csrf_input() }}
 
     {# -- Overall Rating -- #}
     <div class="card" style="padding:1.5rem;margin-bottom:1rem;">

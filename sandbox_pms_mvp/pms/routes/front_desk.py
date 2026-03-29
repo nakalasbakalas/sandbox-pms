@@ -750,10 +750,13 @@ def staff_dashboard():
 
 @front_desk_bp.route("/staff/notifications/<uuid:notification_id>/read", methods=["POST"])
 def staff_notification_read(notification_id):
-    require_permission("reservation.view")
+    user = require_permission("reservation.view")
     notification = db.session.get(StaffNotification, notification_id)
     if not notification:
         abort(404)
+    # Only allow marking your own notifications (or broadcast ones) as read
+    if notification.user_id is not None and notification.user_id != user.id:
+        abort(403)
     notification.status = "read"
     notification.read_at = utc_now()
     db.session.commit()
