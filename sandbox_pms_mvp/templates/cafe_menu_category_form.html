@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if category else 'New' }} Category{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<section class="card form-card">
+  <div class="card-head">
+    <div>
+      <p class="eyebrow">Menu</p>
+      <h2>{{ 'Edit' if category else 'New' }} Category</h2>
+    </div>
+  </div>
+
+  <form method="post" class="stack-form" style="padding:8px;">
+    {{ csrf_input() }}
+
+    <label>Name
+      <input type="text" name="name" required value="{{ category.name if category else '' }}" style="width:100%;padding:6px;">
+    </label>
+
+    <label>Description
+      <input type="text" name="description" value="{{ category.description if category and category.description else '' }}" style="width:100%;padding:6px;">
+    </label>
+
+    <label>Sort Order
+      <input type="number" name="sort_order" value="{{ category.sort_order if category else 0 }}" style="width:100%;padding:6px;">
+    </label>
+
+    <label>
+      <input type="checkbox" name="is_active"{% if not category or category.is_active %} checked{% endif %}> Active
+    </label>
+
+    <div class="actions" style="gap:6px;">
+      <button class="button" type="submit">Save</button>
+      <a class="button secondary" href="{{ url_for('cafe.cafe_menu') }}">Cancel</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

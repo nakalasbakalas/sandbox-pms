@@ -167,7 +167,7 @@ def postgres_seeded_app():
             connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
             connection.execute(sa.text("CREATE SCHEMA public"))
         upgrade(directory=str(MIGRATIONS_DIR))
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=True)
     return app
 
 

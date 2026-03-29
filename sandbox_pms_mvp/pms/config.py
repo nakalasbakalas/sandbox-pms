@@ -111,6 +111,7 @@ class Config:
     ENFORCE_CANONICAL_HOSTS = os.getenv("ENFORCE_CANONICAL_HOSTS", "1" if APP_ENV in {"staging", "production"} else "0") == "1"
     AUTO_BOOTSTRAP_SCHEMA = os.getenv("AUTO_BOOTSTRAP_SCHEMA", "0") == "1"
     AUTO_SEED_REFERENCE_DATA = os.getenv("AUTO_SEED_REFERENCE_DATA", "0") == "1"
+    SEED_DEMO_DATA = os.getenv("SEED_DEMO_DATA", "0") == "1"
     INVENTORY_BOOTSTRAP_DAYS = int(os.getenv("INVENTORY_BOOTSTRAP_DAYS", "730"))
     RESERVATION_CODE_PREFIX = os.getenv("RESERVATION_CODE_PREFIX", "SBX")
     AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "sbx_staff_session")

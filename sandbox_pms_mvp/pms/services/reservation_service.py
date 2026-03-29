@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from decimal import Decimal
 import re
 
@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from ..audit import write_audit_log
-from ..constants import INVENTORY_AVAILABILITY_STATUSES
 from ..extensions import db
 from ..models import (
     AppSetting,
@@ -55,6 +54,9 @@ class ReservationCreatePayload:
     request_type: str = "deposit"
     initial_status: str | None = None
     defer_room_assignment: bool = False
+    arrival_time: str | None = None
+    manual_discount_pct: float = 0
+    manual_discount_note: str | None = None
 
 
 def create_reservation(payload: ReservationCreatePayload, actor_user_id: uuid.UUID | None = None) -> Reservation:
@@ -81,6 +83,19 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         adults=payload.adults + payload.extra_guests,
         children=payload.children,
     )
+    # Apply manual discount if specified
+    discount_pct = Decimal(str(payload.manual_discount_pct or 0))
+    if discount_pct < 0 or discount_pct > 100:
+        raise ValueError("Discount percentage must be between 0 and 100.")
+    if discount_pct > 0:
+        factor = (Decimal("100") - discount_pct) / Decimal("100")
+        adjusted_room = (quote.room_total * factor).quantize(Decimal("0.01"))
+        adjusted_tax = (quote.tax_total * factor).quantize(Decimal("0.01"))
+        adjusted_grand = (adjusted_room + adjusted_tax).quantize(Decimal("0.01"))
+    else:
+        adjusted_room = quote.room_total
+        adjusted_tax = quote.tax_total
+        adjusted_grand = quote.grand_total
     assigned_room = None
     if not payload.defer_room_assignment:
         assigned_room = choose_available_room(
@@ -90,7 +105,7 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
             assigned_room_id=payload.assigned_room_id,
         )
     reservation_code = next_reservation_code()
-    deposit_required = calculate_deposit_required(payload.check_in_date, payload.check_out_date, quote.grand_total)
+    deposit_required = calculate_deposit_required(payload.check_in_date, payload.check_out_date, adjusted_grand)
     requested_status = (payload.initial_status or "").strip() or None
     if requested_status == "house_use":
         deposit_required = Decimal("0.00")
@@ -109,10 +124,13 @@ def _create_reservation_once(payload: ReservationCreatePayload, actor_user_id: u
         extra_guests=payload.extra_guests,
         special_requests=payload.special_requests,
         internal_notes=payload.internal_notes,
-        quoted_room_total=quote.room_total,
-        quoted_tax_total=quote.tax_total,
+        arrival_time=payload.arrival_time,
+        manual_discount_pct=float(discount_pct),
+        manual_discount_note=payload.manual_discount_note,
+        quoted_room_total=adjusted_room,
+        quoted_tax_total=adjusted_tax,
         quoted_extras_total=Decimal("0.00"),
-        quoted_grand_total=quote.grand_total,
+        quoted_grand_total=adjusted_grand,
         deposit_required_amount=deposit_required,
         deposit_received_amount=Decimal("0.00"),
         booked_at=utc_now(),

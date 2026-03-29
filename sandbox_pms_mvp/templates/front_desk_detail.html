@@ -1,6 +1,12 @@
 {% extends 'base.html' %}
 {% block title %}Front Desk · {{ detail.reservation.reservation_code }} | {{ hotel_name }}{% endblock %}
 {% block content %}
+{# ── Payment status helper ────────────────────────────────────── #}
+{% set _ps = detail.payment_summary.payment_status|default('unpaid') %}
+{% set _ps_class = {'paid':'confirmed','partially_paid':'house_use','unpaid':'pending','waived':'confirmed','refunded':'checked_out'}.get(_ps, 'pending') %}
+{% set _bal = detail.payment_summary.balance_due %}
+{% set _ref = detail.payment_summary.refund_due %}
+
 <section class="card">
   <div class="card-head">
     <div>
@@ -12,7 +18,8 @@
       <a class="button secondary" href="{{ back_url }}">Back</a>
       <a class="button secondary" href="{{ url_for('staff_reservations.staff_reservation_detail', reservation_id=detail.reservation.id, back=back_url) }}">Full reservation view</a>
       {% if can_folio %}<a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Open cashier</a>{% endif %}
-      <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ') }}</span>
+      <span class="status {{ detail.status }}">{{ detail.status.replace('_', ' ')|title }}</span>
+      <span class="status {{ _ps_class }}">{{ _ps.replace('_', ' ')|title }}</span>
       <span class="status {{ 'confirmed' if detail.front_desk.room_ready else 'pending' }}">{{ detail.front_desk.room_readiness_label.replace('_', ' ') }}</span>
     </div>
   </div>
@@ -25,7 +32,7 @@
     <article class="metric-card"><small>Readiness</small><strong>{{ detail.front_desk.room_readiness_reason }}</strong></article>
     <article class="metric-card"><small>Source</small><strong>{{ detail.source_channel.replace('_', ' ') }}</strong></article>
     <article class="metric-card"><small>Deposit</small><strong>{% if can_folio %}{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }} / {{ detail.payment_summary.deposit_required_amount|money }}{% else %}Restricted{% endif %}</strong></article>
-    <article class="metric-card"><small>Balance / refund</small><strong>{% if can_folio %}{{ currency }} {{ detail.payment_summary.balance_due|money }}{% if detail.payment_summary.refund_due > 0 %} refund {{ detail.payment_summary.refund_due|money }}{% endif %}{% else %}Restricted{% endif %}</strong></article>
+    <article class="metric-card"><small>Balance due</small><strong style="{% if can_folio and _bal > 0 %}color:var(--pms-warning, #ffc107);{% elif can_folio and _bal == 0 and _ref == 0 %}color:var(--pms-success, #28a745);{% endif %}">{% if can_folio %}{% if _bal > 0 %}{{ currency }} {{ _bal|money }}{% elif _ref > 0 %}Refund {{ currency }} {{ _ref|money }}{% else %}Settled{% endif %}{% else %}Restricted{% endif %}</strong></article>
   </section>
 
   <div class="actions">
@@ -37,6 +44,31 @@
     {% if detail.pending_modification_requests %}<span class="pill subtle">Modification request pending</span>{% endif %}
   </div>
 </section>
+
+{% if can_folio and _bal > 0 %}
+<div class="payment-cta-callout">
+  <span>💰 <strong>{{ currency }} {{ _bal|money }}</strong> balance due.</span>
+  <a class="button" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Collect payment</a>
+</div>
+{% endif %}
+
+{% if can_folio %}
+<section class="card" style="padding:8px 12px;">
+  <div class="actions" style="flex-wrap:wrap;gap:4px;">
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Cashier</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank">🖨 Folio</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='receipt') }}" target="_blank">🖨 Receipt</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='invoice') }}" target="_blank">🖨 Invoice</a>
+    <a class="button tiny secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='confirmation') }}" target="_blank">🖨 Confirmation</a>
+    {% if detail.status == 'checked_in' %}
+    <span class="keycard-placeholder">🔑 Issue key card — Room {{ detail.assigned_room_number or 'TBD' }}</span>
+    {% endif %}
+    {% if _ref > 0 %}
+    <span class="pill subtle" style="background:#fef3c7;color:#92400e;">Refund due: {{ currency }} {{ _ref|money }}</span>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
 
 {% set _fd_pc = detail.front_desk.pre_checkin %}
 {% if _fd_pc %}
@@ -123,8 +155,8 @@
     <div class="metric-strip">
       <div><small>Quoted total</small><strong>{{ currency }} {{ detail.reservation.quoted_grand_total|money }}</strong></div>
       <div><small>Deposit received</small><strong>{{ currency }} {{ detail.payment_summary.deposit_received_amount|money }}</strong></div>
-      <div><small>Balance due</small><strong>{{ currency }} {{ detail.payment_summary.balance_due|money }}</strong></div>
-      <div><small>Refund due</small><strong>{{ currency }} {{ detail.payment_summary.refund_due|money }}</strong></div>
+      <div><small>Payments received</small><strong>{{ currency }} {{ detail.payment_summary.payment_total|money }}</strong></div>
+      <div><small>Balance due</small><strong style="{% if _bal > 0 %}color:var(--pms-warning, #ffc107);{% elif _bal == 0 and _ref == 0 %}color:var(--pms-success, #28a745);{% endif %}">{% if _bal > 0 %}{{ currency }} {{ _bal|money }}{% elif _ref > 0 %}Refund {{ currency }} {{ _ref|money }}{% else %}Settled{% endif %}</strong></div>
     </div>
     {% if detail.extras %}
     <div class="subsection">
@@ -149,7 +181,7 @@
         {% for charge in detail.front_desk.folio_charges %}
         <div class="list-row no-link">
           <div><strong>{{ charge.charge_code }}</strong><p>{{ charge.description }}</p></div>
-          <div class="right-stack"><span class="small muted">{{ charge.service_date }}</span><strong>{{ currency }} {{ charge.total_amount|money }}</strong></div>
+          <div class="right-stack"><span class="small muted">{{ charge.service_date }}</span><strong style="{% if charge.total_amount < 0 %}color:var(--pms-success, #28a745);{% endif %}">{{ currency }} {{ charge.total_amount|money }}</strong></div>
         </div>
         {% else %}
         <p class="muted">No folio charges have been posted yet.</p>
@@ -299,39 +331,83 @@
   <div class="card-head">
     <div>
       <p class="eyebrow">Check-Out</p>
-      <h2>Departure completion</h2>
-      <p>Checkout updates the reservation, payment state, and housekeeping handoff in one backend commit.</p>
+      <h2>Settlement & departure</h2>
+    </div>
+    {% if can_folio %}
+    <div class="actions">
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_detail', reservation_id=detail.reservation.id, back=back_url) }}">Full cashier</a>
+      <a class="button secondary" href="{{ url_for('cashier.staff_cashier_print', reservation_id=detail.reservation.id, document_type='folio') }}" target="_blank" rel="noopener">Print folio</a>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Settlement summary strip ───────────────────────────────── #}
+  {% if can_folio %}
+  {% set _co_sum = checkout_prep.checkout_payment_summary %}
+  {% set _co_bal = _co_sum.balance_due %}
+  {% set _co_ref = _co_sum.refund_due %}
+  <div class="metric-strip">
+    <div><small>Room charges</small><strong>{{ currency }} {{ _co_sum.charges_subtotal|money }}</strong></div>
+    <div><small>Discounts</small><strong>{% if _co_sum.discounts_subtotal > 0 %}-{% endif %}{{ currency }} {{ _co_sum.discounts_subtotal|money }}</strong></div>
+    <div><small>Tax</small><strong>{{ currency }} {{ _co_sum.tax_subtotal|money }}</strong></div>
+    <div><small>Payments received</small><strong>{{ currency }} {{ _co_sum.credits_total|money }}</strong></div>
+  </div>
+  <div style="display:flex;gap:1.5rem;align-items:center;padding:0.5rem 0;border-top:1px solid var(--pms-border, #333);">
+    {% if _co_bal > 0 %}
+    <div style="flex:1;">
+      <small style="text-transform:uppercase;letter-spacing:.06em;font-size:0.7rem;opacity:.7;">Final balance due</small>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--pms-warning, #ffc107);">{{ currency }} {{ _co_bal|money }}</div>
+    </div>
+    {% elif _co_ref > 0 %}
+    <div style="flex:1;">
+      <small style="text-transform:uppercase;letter-spacing:.06em;font-size:0.7rem;opacity:.7;">Refund due</small>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--pms-danger, #dc3545);">{{ currency }} {{ _co_ref|money }}</div>
+    </div>
+    {% else %}
+    <div style="flex:1;">
+      <small style="text-transform:uppercase;letter-spacing:.06em;font-size:0.7rem;opacity:.7;">Balance</small>
+      <div style="font-size:1.4rem;font-weight:700;color:var(--pms-success, #28a745);">Settled</div>
+    </div>
+    {% endif %}
+    <div>
+      <small style="text-transform:uppercase;letter-spacing:.06em;font-size:0.7rem;opacity:.7;">Late fee</small>
+      <div><strong>{% if checkout_prep.checkout_fee.applies %}{{ currency }} {{ checkout_prep.checkout_fee.amount|money }}{% else %}N/A{% endif %}</strong></div>
     </div>
   </div>
-  <div class="metric-strip">
-    <div><small>Balance due</small><strong>{% if can_folio %}{{ currency }} {{ checkout_prep.checkout_payment_summary.balance_due|money }}{% else %}Restricted{% endif %}</strong></div>
-    <div><small>Refund due</small><strong>{% if can_folio %}{{ currency }} {{ checkout_prep.checkout_payment_summary.refund_due|money }}{% else %}Restricted{% endif %}</strong></div>
-    <div><small>Late fee</small><strong>{% if checkout_prep.checkout_fee.applies %}{{ currency }} {{ checkout_prep.checkout_fee.amount|money }}{% else %}Not applicable{% endif %}</strong></div>
-    <div><small>Turnover</small><strong>Dirty handoff to housekeeping</strong></div>
-  </div>
+  {% endif %}
+
+  {# ── Checkout form ──────────────────────────────────────────── #}
   {% set checkout_values = checkout_form['values'] %}
-  <form class="stack-form" method="post" action="{{ url_for('front_desk.staff_front_desk_check_out', reservation_id=detail.reservation.id) }}">
+  <form class="stack-form" method="post" action="{{ url_for('front_desk.staff_front_desk_check_out', reservation_id=detail.reservation.id) }}" style="margin-top:0.75rem;">
     {{ csrf_input() }}
     <input type="hidden" name="back_url" value="{{ back_url }}">
     <input type="hidden" name="business_date" value="{{ business_date.isoformat() }}">
     <div class="grid two">
       {% if can_collect_payment %}
-      <label><span>Payment collected now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="{{ checkout_values.get('collect_payment_amount', '0.00') }}"></label>
+      <label><span>Collect payment now (THB)</span><input type="number" name="collect_payment_amount" min="0" step="0.01" value="{{ checkout_values.get('collect_payment_amount', '0.00') }}"></label>
       {% endif %}
-      <label><span>Payment method</span><select name="payment_method"><option value="front_desk" {% if checkout_values.get('payment_method') == 'front_desk' %}selected{% endif %}>Front desk</option><option value="cash" {% if checkout_values.get('payment_method') == 'cash' %}selected{% endif %}>Cash</option><option value="qr" {% if checkout_values.get('payment_method') == 'qr' %}selected{% endif %}>QR</option><option value="card" {% if checkout_values.get('payment_method') == 'card' %}selected{% endif %}>Card</option><option value="bank" {% if checkout_values.get('payment_method') == 'bank' %}selected{% endif %}>Bank transfer</option></select></label>
+      <label><span>Payment method</span>
+        <select name="payment_method">
+          <option value="cash" {% if checkout_values.get('payment_method') == 'cash' %}selected{% endif %}>Cash</option>
+          <option value="bank" {% if checkout_values.get('payment_method') == 'bank' %}selected{% endif %}>Bank transfer</option>
+          <option value="qr" {% if checkout_values.get('payment_method') == 'qr' %}selected{% endif %}>QR payment</option>
+          <option value="card" {% if checkout_values.get('payment_method') == 'card' %}selected{% endif %}>Card terminal</option>
+          <option value="front_desk" {% if checkout_values.get('payment_method', 'front_desk') == 'front_desk' %}selected{% endif %}>Front desk</option>
+        </select>
+      </label>
     </div>
     <label><span>Departure note</span><input type="text" name="departure_note" value="{{ checkout_values.get('departure_note', '') }}" placeholder="Room checked, key returned, transfer arranged"></label>
     {% if checkout_prep.checkout_fee.applies %}
     <div class="grid three">
       {% if can_charge %}<label class="toggle-row"><span>Apply late fee</span><input type="checkbox" name="apply_late_fee" {% if checkout_values.get('apply_late_fee') == 'on' %}checked{% endif %}></label>{% endif %}
       <label class="toggle-row"><span>Waive late fee</span><input type="checkbox" name="waive_late_fee" {% if checkout_values.get('waive_late_fee') == 'on' %}checked{% endif %}></label>
-      {% if checkout_prep.checkout_payment_summary.balance_due > 0 %}<label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance" {% if checkout_values.get('override_balance') == 'on' %}checked{% endif %}></label>{% endif %}
+      {% if _co_bal > 0 %}<label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance" {% if checkout_values.get('override_balance') == 'on' %}checked{% endif %}></label>{% endif %}
     </div>
     <label><span>Waiver reason</span><input type="text" name="waiver_reason" value="{{ checkout_values.get('waiver_reason', '') }}" placeholder="Loyalty guest / service recovery"></label>
-    {% elif checkout_prep.checkout_payment_summary.balance_due > 0 %}
+    {% elif can_folio and _co_bal > 0 %}
     <label class="toggle-row"><span>Override remaining balance</span><input type="checkbox" name="override_balance" {% if checkout_values.get('override_balance') == 'on' %}checked{% endif %}></label>
     {% endif %}
-    {% if checkout_prep.checkout_payment_summary.refund_due > 0 %}
+    {% if can_folio and _co_ref > 0 %}
     <div class="grid two">
       <label class="toggle-row"><span>Process refund now</span><input type="checkbox" name="process_refund" {% if checkout_values.get('process_refund') == 'on' %}checked{% endif %}></label>
       <label><span>Refund note</span><input type="text" name="refund_note" value="{{ checkout_values.get('refund_note', '') }}" placeholder="Cash refund / bank transfer pending"></label>

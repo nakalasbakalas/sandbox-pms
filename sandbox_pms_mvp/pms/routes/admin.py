@@ -11,6 +11,7 @@ from ..models import (
     ActivityLog,
     AppSetting,
     BlackoutPeriod,
+    BookingExtra,
     InventoryOverride,
     NotificationTemplate,
     PaymentRequest,
@@ -92,6 +93,10 @@ from ..services.admin_settings_ops import (
     payment_settings_context,
     property_settings_context,
 )
+from ..services.setup_service import (
+    setup_completeness,
+    setup_context,
+)
 from ..services.extras_service import (
     BookingExtraPayload,
     list_booking_extras,
@@ -101,6 +106,7 @@ from ..services.pre_checkin_service import (
     fire_pre_checkin_not_completed_events,
 )
 from ..services.storage import get_storage_backend
+from ..seeds import clear_operational_data
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +158,111 @@ def staff_admin_test_error():
     actor = helpers["require_permission"]("audit.view")
     helpers["require_admin_role"](actor)
     raise RuntimeError("Sentry verification test")
+
+
+@admin_bp.route("/staff/admin/setup", methods=["GET", "POST"], endpoint="staff_admin_setup")
+def staff_admin_setup():
+    """Consolidated first-time setup page for property configuration."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("settings.edit")
+    helpers["require_admin_role"](actor)
+
+    if request.method == "POST":
+        section = request.form.get("section", "")
+        try:
+            if section == "property":
+                _save_setup_property(actor, helpers)
+                flash("Property information saved.", "success")
+            elif section == "financial":
+                _save_setup_financial(actor, helpers)
+                flash("Financial defaults saved.", "success")
+            elif section == "operational":
+                _save_setup_operational(actor, helpers)
+                flash("Operational defaults saved.", "success")
+            elif section == "branding":
+                _save_setup_branding(actor, helpers)
+                flash("Branding settings saved.", "success")
+            else:
+                flash("Unknown section.", "warning")
+        except (ValueError, KeyError) as exc:
+            flash(f"Error: {exc}", "error")
+        return redirect(url_for("admin.staff_admin_setup"))
+
+    completeness = setup_completeness()
+    ctx = setup_context()
+    room_types = db.session.execute(
+        sa.select(RoomType).order_by(RoomType.code)
+    ).scalars().all()
+    rooms = db.session.execute(
+        sa.select(Room).order_by(Room.room_number)
+    ).scalars().all()
+    users = db.session.execute(
+        sa.select(User).where(User.deleted_at.is_(None)).order_by(User.full_name)
+    ).unique().scalars().all()
+    return render_template(
+        "admin_setup.html",
+        active_section="setup",
+        setup=ctx,
+        completeness=completeness,
+        room_types=room_types,
+        rooms=rooms,
+        users=users,
+    )
+
+
+def _save_setup_property(actor, helpers):
+    """Save property information settings from setup form."""
+    items = []
+    field_map = {
+        "hotel.name": ("hotel_name", "string"),
+        "hotel.brand_mark": ("brand_mark", "string"),
+        "hotel.contact_phone": ("contact_phone", "string"),
+        "hotel.contact_email": ("contact_email", "string"),
+        "hotel.address": ("address", "string"),
+        "hotel.check_in_time": ("check_in_time", "time"),
+        "hotel.check_out_time": ("check_out_time", "time"),
+        "hotel.timezone": ("timezone", "string"),
+        "hotel.currency": ("currency", "string"),
+        "hotel.tax_id": ("tax_id", "string"),
+        "hotel.public_base_url": ("public_base_url", "string"),
+    }
+    for key, (field, vtype) in field_map.items():
+        val = request.form.get(field, "").strip()
+        items.append({"key": key, "value": val, "value_type": vtype})
+    hotel_name = request.form.get("hotel_name", "").strip()
+    if not hotel_name:
+        raise ValueError("Hotel name is required.")
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_financial(actor, helpers):
+    """Save financial/booking default settings from setup form."""
+    items = [
+        {"key": "hotel.vat_rate", "value": request.form.get("vat_rate", "0.07").strip(), "value_type": "decimal"},
+        {"key": "hotel.service_charge_rate", "value": request.form.get("service_charge_rate", "0.00").strip(), "value_type": "decimal"},
+        {"key": "reservation.deposit_percentage", "value": request.form.get("deposit_percentage", "50.00").strip(), "value_type": "decimal"},
+        {"key": "reservation.code_prefix", "value": request.form.get("code_prefix", "RES").strip().upper(), "value_type": "string"},
+        {"key": "reservation.standard_cancellation_hours", "value": request.form.get("cancellation_hours", "24").strip(), "value_type": "integer"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_operational(actor, helpers):
+    """Save operational default settings from setup form."""
+    items = [
+        {"key": "notifications.sender_name", "value": request.form.get("notifications_sender_name", "").strip(), "value_type": "string"},
+        {"key": "hotel.support_contact_text", "value": request.form.get("support_contact_text", "").strip(), "value_type": "string"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
+
+
+def _save_setup_branding(actor, helpers):
+    """Save branding settings from setup form."""
+    items = [
+        {"key": "hotel.logo_url", "value": request.form.get("logo_url", "").strip(), "value_type": "string"},
+        {"key": "hotel.accent_color", "value": request.form.get("accent_color", "#C57C35").strip(), "value_type": "string"},
+    ]
+    upsert_settings_bundle(items, actor_user_id=actor.id)
 
 
 @admin_bp.route("/staff/admin/staff-access", methods=["GET", "POST"], endpoint="staff_admin_staff_access")
@@ -525,6 +636,13 @@ def staff_admin_operations():
                 result = reset_notification_templates_to_defaults(actor_user_id=actor.id)
                 flash(f"Templates reset to defaults: {result['updated']} updated, {result['created']} created.", "success")
                 return redirect(url_for("admin.staff_admin_operations"))
+            elif action == "clear_operational_data":
+                actor = helpers["require_permission"]("settings.edit")
+                helpers["require_admin_role"](actor)
+                counts = clear_operational_data()
+                removed = sum(v for k, v in counts.items() if not k.endswith("_reset"))
+                flash(f"All reservations and guest data cleared. {removed} rows removed.", "success")
+                return redirect(url_for("admin.staff_admin_operations"))
             elif action == "housekeeping_defaults":
                 actor = helpers["require_permission"]("settings.edit")
                 upsert_settings_bundle(
@@ -707,18 +825,20 @@ def staff_admin_payments():
 
 @admin_bp.route("/staff/admin/channels", methods=["GET", "POST"], endpoint="staff_admin_channels")
 def staff_admin_channels():
-    """OTA channel manager configuration panel.
+    """OTA channel manager — operational dashboard with status, mappings, sync logs, and config.
 
-    Lists all known OTA providers (Booking.com, Expedia, Agoda), shows their
-    current API credential status, and allows admins to save credentials or
-    test the connection for each provider.
+    Serves as the main OTA control centre for staff/admin users. Supports
+    channel configuration, connection testing, room type mapping management,
+    and provides operational visibility into sync status and recent activity.
     """
     from ..services.channel_service import (
-        channel_sync_summary,
-        list_ota_channels,
+        delete_ota_mapping,
+        list_sync_logs,
+        ota_dashboard_context,
         sync_single_channel,
         test_ota_channel_connection,
         upsert_ota_channel,
+        upsert_ota_mapping,
     )
 
     helpers = _get_app_helpers()
@@ -730,12 +850,12 @@ def staff_admin_channels():
     if request.method == "POST":
         action = request.form.get("action")
         provider_key = (request.form.get("provider_key") or "").strip()
-        if provider_key not in OTA_PROVIDER_KEYS:
-            flash("Unknown OTA provider.", "error")
-            return redirect(url_for("admin.staff_admin_channels"))
 
         try:
             if action == "save_channel":
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
                 actor = require_permission("settings.edit")
                 api_key = (request.form.get("api_key") or "").strip() or None
                 api_secret = (request.form.get("api_secret") or "").strip() or None
@@ -748,11 +868,19 @@ def staff_admin_channels():
                     api_key=api_key,
                     api_secret=api_secret,
                     actor_user_id=actor.id,
+                    sync_inventory_push=truthy_setting(request.form.get("sync_inventory_push")),
+                    sync_rate_push=truthy_setting(request.form.get("sync_rate_push")),
+                    sync_restriction_push=truthy_setting(request.form.get("sync_restriction_push")),
+                    sync_reservation_pull=truthy_setting(request.form.get("sync_reservation_pull")),
+                    environment_mode=(request.form.get("environment_mode") or "").strip() or None,
                 )
                 db.session.commit()
                 flash(f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)} configuration saved.", "success")
 
             elif action == "test_connection":
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
                 actor = require_permission("settings.view")
                 result = test_ota_channel_connection(provider_key, actor_user_id=actor.id)
                 if result["success"]:
@@ -775,41 +903,60 @@ def staff_admin_channels():
                     "success",
                 )
 
+            elif action == "save_mapping":
+                actor = require_permission("settings.edit")
+                if provider_key not in OTA_PROVIDER_KEYS:
+                    flash("Unknown OTA provider.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
+                from ..helpers import parse_optional_uuid
+                room_type_id = parse_optional_uuid(request.form.get("room_type_id"))
+                ext_code = (request.form.get("external_room_type_code") or "").strip()
+                if not room_type_id or not ext_code:
+                    flash("Room type and external code are required.", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
+                if len(ext_code) > 120:
+                    flash("External room type code is too long (max 120 characters).", "error")
+                    return redirect(url_for("admin.staff_admin_channels"))
+                upsert_ota_mapping(
+                    provider_key=provider_key,
+                    room_type_id=room_type_id,
+                    external_room_type_code=ext_code,
+                    external_room_type_name=(request.form.get("external_room_type_name") or "").strip() or None,
+                    external_rate_plan_code=(request.form.get("external_rate_plan_code") or "").strip() or None,
+                    external_rate_plan_name=(request.form.get("external_rate_plan_name") or "").strip() or None,
+                    is_active=truthy_setting(request.form.get("mapping_active")),
+                    notes=(request.form.get("mapping_notes") or "").strip() or None,
+                    actor_user_id=actor.id,
+                )
+                db.session.commit()
+                flash("Room type mapping saved.", "success")
+
+            elif action == "delete_mapping":
+                actor = require_permission("settings.edit")
+                from ..helpers import parse_optional_uuid
+                mapping_id = parse_optional_uuid(request.form.get("mapping_id"))
+                if mapping_id and delete_ota_mapping(mapping_id, actor_user_id=actor.id):
+                    db.session.commit()
+                    flash("Mapping removed.", "success")
+                else:
+                    flash("Mapping not found.", "error")
+
         except Exception as exc:  # noqa: BLE001
             db.session.rollback()
             flash(public_error_message(exc), "error")
 
         return redirect(url_for("admin.staff_admin_channels"))
 
-    # Build per-provider context so the template has a single list to iterate.
-    existing = {ch.provider_key: ch for ch in list_ota_channels()}
-    sync_summaries = channel_sync_summary()
-    channels_context = []
-    for key in OTA_PROVIDER_KEYS:
-        record = existing.get(key)
-        sync_info = sync_summaries.get(key, {})
-        channels_context.append({
-            "provider_key": key,
-            "display_name": OTA_PROVIDER_LABELS.get(key, key),
-            "is_active": record.is_active if record else False,
-            "hotel_id": record.hotel_id if record else "",
-            "endpoint_url": record.endpoint_url if record else "",
-            "api_key_hint": record.api_key_hint if record else None,
-            "api_secret_hint": record.api_secret_hint if record else None,
-            "last_tested_at": record.last_tested_at if record else None,
-            "last_test_ok": record.last_test_ok if record else None,
-            "last_test_error": record.last_test_error if record else None,
-            "last_sync_at": sync_info.get("last_sync_at"),
-            "last_sync_status": sync_info.get("last_status"),
-            "total_processed": sync_info.get("total_processed", 0),
-            "total_failed": sync_info.get("total_failed", 0),
-            "recent_logs": sync_info.get("recent_logs", []),
-        })
+    dashboard = ota_dashboard_context()
 
     return render_template(
         "admin_channels.html",
         active_section="channels",
-        channels=channels_context,
+        dashboard=dashboard,
+        channels=dashboard["channels"],
+        room_types=dashboard["room_types"],
+        recent_logs=dashboard["recent_logs"],
+        summary=dashboard["summary"],
     )
 
 
@@ -1005,3 +1152,83 @@ def staff_admin_room_photos(room_id):
 
     flash("Room photo uploaded.", "success")
     return redirect(url_for("admin.staff_settings"))
+
+
+@admin_bp.route("/staff/admin/services", methods=["GET", "POST"])
+def staff_admin_services():
+    """Manage additional services / extras catalog."""
+    helpers = _get_app_helpers()
+    actor = helpers["require_permission"]("settings.view")
+    if request.method == "POST":
+        helpers["require_permission"]("settings.edit")
+        action = request.form.get("action", "upsert")
+        if action == "upsert":
+            extra_id = request.form.get("extra_id", "").strip()
+            code = (request.form.get("code") or "").strip()
+            name = (request.form.get("name") or "").strip()
+            if not code or not name:
+                flash("Code and name are required.", "error")
+                return redirect(url_for("admin.staff_admin_services"))
+            description = (request.form.get("description") or "").strip() or None
+            pricing_mode = request.form.get("pricing_mode", "per_stay")
+            try:
+                unit_price = float(request.form.get("unit_price") or 0)
+            except (ValueError, TypeError):
+                unit_price = 0.0
+            is_active = request.form.get("is_active") == "1"
+            is_public = request.form.get("is_public") == "1"
+            try:
+                sort_order = int(request.form.get("sort_order") or 100)
+            except (ValueError, TypeError):
+                sort_order = 100
+            if extra_id:
+                extra = db.session.get(BookingExtra, extra_id)
+                if extra:
+                    extra.code = code
+                    extra.name = name
+                    extra.description = description
+                    extra.pricing_mode = pricing_mode
+                    extra.unit_price = unit_price
+                    extra.is_active = is_active
+                    extra.is_public = is_public
+                    extra.sort_order = sort_order
+                    extra.updated_by_user_id = actor.id
+                    db.session.commit()
+                    flash(f"Service '{name}' updated.", "success")
+            else:
+                extra = BookingExtra(
+                    code=code,
+                    name=name,
+                    description=description,
+                    pricing_mode=pricing_mode,
+                    unit_price=unit_price,
+                    is_active=is_active,
+                    is_public=is_public,
+                    sort_order=sort_order,
+                    created_by_user_id=actor.id,
+                    updated_by_user_id=actor.id,
+                )
+                db.session.add(extra)
+                db.session.commit()
+                flash(f"Service '{name}' created.", "success")
+        elif action == "toggle":
+            extra_id = request.form.get("extra_id", "").strip()
+            if extra_id:
+                extra = db.session.get(BookingExtra, extra_id)
+                if extra:
+                    extra.is_active = not extra.is_active
+                    extra.updated_by_user_id = actor.id
+                    db.session.commit()
+                    flash(f"Service '{extra.name}' {'activated' if extra.is_active else 'deactivated'}.", "success")
+        return redirect(url_for("admin.staff_admin_services"))
+
+    extras = db.session.execute(
+        sa.select(BookingExtra).order_by(BookingExtra.sort_order.asc(), BookingExtra.name.asc())
+    ).scalars().all()
+    return render_template(
+        "admin_services.html",
+        is_staff=True,
+        extras=extras,
+        pricing_modes=BOOKING_EXTRA_PRICING_MODES,
+        active_section="services",
+    )

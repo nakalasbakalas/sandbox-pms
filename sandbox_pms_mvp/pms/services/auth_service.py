@@ -19,7 +19,6 @@ from ..activity import write_activity_log
 from ..audit import write_audit_log
 from ..extensions import db
 from ..models import (
-    ActivityLog,
     AuthAttempt,
     EmailOutbox,
     MfaFactor,

@@ -106,6 +106,7 @@ FOLIO_CHARGE_CODES = [
     "PMT-QR",
     "PMT-CARD",
     "PMT-BANK",
+    "PMT-COMP",
     "EXG",
     "EXB",
     "ECI",
@@ -114,6 +115,10 @@ FOLIO_CHARGE_CODES = [
     "SNK",
     "TEL",
     "XTR",
+    "FNB",
+    "MINI",
+    "TRNS",
+    "DMG",
     "ADJ_POS",
     "ADJ_NEG",
     "CORR",
@@ -131,6 +136,33 @@ FOLIO_CHARGE_TYPES = [
     "fee",
     "refund",
     "correction",
+]
+
+# ---------------------------------------------------------------------------
+# Payment status — kept separate from reservation lifecycle status
+# ---------------------------------------------------------------------------
+PAYMENT_STATUSES = [
+    "unpaid",
+    "partially_paid",
+    "paid",
+    "waived",
+    "refunded",
+]
+
+# ---------------------------------------------------------------------------
+# Extra charge categories — common hotel extras for front-desk posting
+# ---------------------------------------------------------------------------
+EXTRA_CHARGE_CATEGORIES: list[dict[str, str]] = [
+    {"code": "MINI", "label": "Minibar", "charge_type": "manual_charge"},
+    {"code": "LND", "label": "Laundry", "charge_type": "manual_charge"},
+    {"code": "FNB", "label": "Food & beverage", "charge_type": "manual_charge"},
+    {"code": "LCO", "label": "Late checkout", "charge_type": "fee"},
+    {"code": "EXB", "label": "Extra bed", "charge_type": "fee"},
+    {"code": "TRNS", "label": "Transport / transfer", "charge_type": "manual_charge"},
+    {"code": "DMG", "label": "Damage / cleaning", "charge_type": "manual_charge"},
+    {"code": "SNK", "label": "Snacks / pantry", "charge_type": "manual_charge"},
+    {"code": "TEL", "label": "Telephone", "charge_type": "manual_charge"},
+    {"code": "XTR", "label": "Miscellaneous", "charge_type": "manual_charge"},
 ]
 
 CASHIER_DOCUMENT_TYPES = ["folio", "invoice", "receipt"]
@@ -337,6 +369,57 @@ AUTOMATION_EVENT_TYPES = [
     "maintenance_requested",
 ]
 
+# ---------------------------------------------------------------------------
+# Café POS constants
+# ---------------------------------------------------------------------------
+
+CAFE_ORDER_STATUSES = [
+    "draft",
+    "open",
+    "sent",
+    "paid",
+    "cancelled",
+    "completed",
+    "refunded",
+]
+
+CAFE_ORDER_TYPES = [
+    "dine_in",
+    "takeaway",
+    "delivery",
+]
+
+CAFE_PAYMENT_METHODS = [
+    "cash",
+    "card",
+    "qr_transfer",
+]
+
+CAFE_PAYMENT_STATUSES = [
+    "unpaid",
+    "paid",
+    "partial",
+    "refunded",
+]
+
+CAFE_PREP_STATUSES = [
+    "pending",
+    "in_progress",
+    "ready",
+    "completed",
+]
+
+CAFE_PREP_STATIONS = [
+    "bar",
+    "kitchen",
+    "counter",
+]
+
+CAFE_SHIFT_STATUSES = [
+    "open",
+    "closed",
+]
+
 PERMISSION_SEEDS = [
     ("reservation.view", "View reservations", "Reservations", "reservation"),
     ("reservation.create", "Create reservations", "Reservations", "reservation"),
@@ -376,6 +459,18 @@ PERMISSION_SEEDS = [
     ("messaging.view", "View guest messaging inbox", "Messaging", "messaging"),
     ("messaging.send", "Send guest messages", "Messaging", "messaging"),
     ("messaging.manage", "Manage messaging settings and templates", "Messaging", "messaging"),
+    # Café POS permissions
+    ("cafe.access", "Access café module", "Café", "cafe"),
+    ("cafe.pos.use", "Use café POS", "Café", "cafe"),
+    ("cafe.orders.view", "View café orders", "Café", "cafe"),
+    ("cafe.orders.edit", "Edit café orders", "Café", "cafe"),
+    ("cafe.payments.take", "Take café payments", "Café", "cafe"),
+    ("cafe.menu.manage", "Manage café menu", "Café", "cafe"),
+    ("cafe.reports.view", "View café reports", "Café", "cafe"),
+    ("cafe.stock.manage", "Manage café stock", "Café", "cafe"),
+    ("cafe.refund.approve", "Approve café refunds", "Café", "cafe"),
+    ("cafe.discount.approve", "Approve café discounts", "Café", "cafe"),
+    ("cafe.settings.manage", "Manage café settings", "Café", "cafe"),
 ]
 
 ROLE_SEEDS = [
@@ -384,6 +479,9 @@ ROLE_SEEDS = [
     ("front_desk", "Front Desk", "Front desk operations", True, 3),
     ("housekeeping", "Housekeeping", "Housekeeping operations", True, 4),
     ("provider", "Provider", "Provider portal access", True, 5),
+    ("cafe_manager", "Café Manager", "Full café access including menu, reports, stock, settings", True, 6),
+    ("cafe_supervisor", "Café Supervisor", "Café supervisor with void/discount/refund approval", True, 7),
+    ("cafe_staff", "Café Staff", "Café POS operations", True, 8),
 ]
 
 ROLE_PERMISSION_SEEDS = {
@@ -437,5 +535,33 @@ ROLE_PERMISSION_SEEDS = {
         "provider.payment_request.create",
         "provider.calendar.view",
         "provider.calendar.manage",
+    ],
+    "cafe_manager": [
+        "cafe.access",
+        "cafe.pos.use",
+        "cafe.orders.view",
+        "cafe.orders.edit",
+        "cafe.payments.take",
+        "cafe.menu.manage",
+        "cafe.reports.view",
+        "cafe.stock.manage",
+        "cafe.refund.approve",
+        "cafe.discount.approve",
+        "cafe.settings.manage",
+    ],
+    "cafe_supervisor": [
+        "cafe.access",
+        "cafe.pos.use",
+        "cafe.orders.view",
+        "cafe.orders.edit",
+        "cafe.payments.take",
+        "cafe.refund.approve",
+        "cafe.discount.approve",
+    ],
+    "cafe_staff": [
+        "cafe.access",
+        "cafe.pos.use",
+        "cafe.orders.view",
+        "cafe.payments.take",
     ],
 }

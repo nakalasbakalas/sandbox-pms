@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import urllib.error
 import urllib.parse
 import urllib.request
 import uuid

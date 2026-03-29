@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -42,11 +42,11 @@ from ..models import (
     ChannelSyncLog,
     ExternalCalendarBlock,
     ExternalCalendarSource,
-    ExternalCalendarSyncRun,
     Guest,
     InventoryDay,
     OtaChannel,
-    Reservation,
+    OtaRoomTypeMapping,
+    OtaSyncLog,
     Room,
     RoomType,
     utc_now,
@@ -59,6 +59,20 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data transfer objects
 # ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """Declares what a provider adapter supports."""
+
+    supports_reservation_pull: bool = False
+    supports_inventory_push: bool = False
+    supports_rate_push: bool = False
+    supports_restriction_push: bool = False
+    supports_connection_test: bool = False
+    supports_webhooks: bool = False
+    supports_test_mode: bool = False
+    supports_full_refresh: bool = False
+
 
 @dataclass
 class InboundReservation:
@@ -120,6 +134,36 @@ class ChannelMapping:
     is_active: bool = True
 
 
+@dataclass
+class OutboundRateUpdate:
+    """Rate push payload for an external channel."""
+
+    room_type_code: str
+    rate_plan_code: str | None
+    date_from: date
+    date_to: date
+    rate_amount: Decimal
+    currency: str = "THB"
+    single_rate: Decimal | None = None
+    extra_adult_rate: Decimal | None = None
+    extra_child_rate: Decimal | None = None
+
+
+@dataclass
+class OutboundRestrictionUpdate:
+    """Restriction push payload for an external channel."""
+
+    room_type_code: str
+    rate_plan_code: str | None
+    date_from: date
+    date_to: date
+    closed_to_arrival: bool = False
+    closed_to_departure: bool = False
+    min_stay: int | None = None
+    max_stay: int | None = None
+    stop_sell: bool = False
+
+
 # ---------------------------------------------------------------------------
 # Abstract provider
 # ---------------------------------------------------------------------------
@@ -131,6 +175,11 @@ class ChannelProvider(ABC):
     @abstractmethod
     def provider_key(self) -> str:
         """Unique identifier for this provider (e.g. ``booking_com``)."""
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this provider supports. Override to customize."""
+        return ProviderCapabilities()
 
     # -- Inbound (pull) ---------------------------------------------------
 
@@ -144,11 +193,40 @@ class ChannelProvider(ABC):
     def push_inventory(self, updates: list[OutboundInventoryUpdate]) -> SyncResult:
         """Push availability / rate updates to the external system."""
 
+    def push_rates(self, updates: list[OutboundRateUpdate]) -> SyncResult:
+        """Push rate updates. Default: not supported."""
+        return SyncResult(
+            provider=self.provider_key,
+            direction="outbound",
+            success=False,
+            errors=[f"{self.provider_key} does not support rate push."],
+        )
+
+    def push_restrictions(self, updates: list[OutboundRestrictionUpdate]) -> SyncResult:
+        """Push restriction updates. Default: not supported."""
+        return SyncResult(
+            provider=self.provider_key,
+            direction="outbound",
+            success=False,
+            errors=[f"{self.provider_key} does not support restriction push."],
+        )
+
     # -- Lifecycle --------------------------------------------------------
 
     @abstractmethod
     def test_connection(self) -> bool:
         """Return ``True`` if the provider credentials are valid."""
+
+    def validate_connection(self) -> dict:
+        """Extended connection validation returning detailed status.
+
+        Returns dict with keys: success, error, details.
+        """
+        try:
+            ok = self.test_connection()
+            return {"success": ok, "error": None if ok else "Connection test returned false", "details": {}}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)[:500], "details": {}}
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +242,18 @@ class MockChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "mock"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_inventory_push=True,
+            supports_rate_push=True,
+            supports_restriction_push=True,
+            supports_connection_test=True,
+            supports_test_mode=True,
+            supports_full_refresh=True,
+        )
 
     def __init__(self) -> None:
         self._log: list[dict] = []
@@ -208,6 +298,13 @@ class ICalChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "ical"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_connection_test=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         """Pull reservations from all active external calendar sources.
@@ -256,6 +353,14 @@ class WebhookChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return "webhook"
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_inventory_push=True,
+            supports_connection_test=True,
+            supports_webhooks=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         return []
@@ -347,6 +452,17 @@ class ConfiguredPushChannelProvider(ChannelProvider):
     @property
     def provider_key(self) -> str:
         return self.provider_key_name
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(
+            supports_reservation_pull=True,
+            supports_inventory_push=True,
+            supports_rate_push=True,
+            supports_restriction_push=True,
+            supports_connection_test=True,
+            supports_test_mode=True,
+        )
 
     def pull_reservations(self, since: datetime | None = None) -> list[InboundReservation]:
         return []
@@ -478,14 +594,14 @@ def build_outbound_inventory_updates(
     if not room_types:
         return []
 
-    availability_query = (
-        db.session.query(
+    availability_stmt = (
+        sa.select(
             InventoryDay.business_date,
             InventoryDay.room_type_id,
             sa.func.count(InventoryDay.id),
         )
         .join(Room, Room.id == InventoryDay.room_id)
-        .filter(
+        .where(
             InventoryDay.business_date >= date_from,
             InventoryDay.business_date <= date_to,
             Room.is_active.is_(True),
@@ -495,12 +611,14 @@ def build_outbound_inventory_updates(
         )
     )
     if room_type_id:
-        availability_query = availability_query.filter(InventoryDay.room_type_id == room_type_id)
+        availability_stmt = availability_stmt.where(InventoryDay.room_type_id == room_type_id)
     availability_counts = {
         (business_date, inventory_room_type_id): int(available_count or 0)
-        for business_date, inventory_room_type_id, available_count in availability_query.group_by(
-            InventoryDay.business_date,
-            InventoryDay.room_type_id,
+        for business_date, inventory_room_type_id, available_count in db.session.execute(
+            availability_stmt.group_by(
+                InventoryDay.business_date,
+                InventoryDay.room_type_id,
+            )
         ).all()
     }
 
@@ -575,9 +693,15 @@ def upsert_ota_channel(
     api_key: str | None = None,
     api_secret: str | None = None,
     actor_user_id: uuid.UUID | None = None,
+    sync_inventory_push: bool | None = None,
+    sync_rate_push: bool | None = None,
+    sync_restriction_push: bool | None = None,
+    sync_reservation_pull: bool | None = None,
+    environment_mode: str | None = None,
 ) -> OtaChannel:
     """Create or update an OTA channel configuration."""
     channel = get_ota_channel(provider_key)
+    was_active = channel.is_active if channel else False
     if not channel:
         channel = OtaChannel(provider_key=provider_key, display_name=display_name)
         db.session.add(channel)
@@ -591,6 +715,21 @@ def upsert_ota_channel(
     if api_secret is not None:
         channel.api_secret_encrypted = api_secret
         channel.api_secret_hint = ("*" * max(0, len(api_secret) - 4)) + api_secret[-4:] if len(api_secret) >= 4 else "****"
+    # Sync direction flags
+    if sync_inventory_push is not None:
+        channel.sync_inventory_push = sync_inventory_push
+    if sync_rate_push is not None:
+        channel.sync_rate_push = sync_rate_push
+    if sync_restriction_push is not None:
+        channel.sync_restriction_push = sync_restriction_push
+    if sync_reservation_pull is not None:
+        channel.sync_reservation_pull = sync_reservation_pull
+    # Environment mode
+    if environment_mode and environment_mode in ("sandbox", "live"):
+        channel.environment_mode = environment_mode
+    # Track activation timestamp
+    if is_active and not was_active:
+        channel.activated_at = utc_now()
     if actor_user_id:
         channel.updated_by_user_id = actor_user_id
     return channel
@@ -598,16 +737,56 @@ def upsert_ota_channel(
 
 def test_ota_channel_connection(provider_key: str, *, actor_user_id: uuid.UUID | None = None) -> dict:
     """Test connectivity to an OTA channel. Returns dict with success and optional error."""
-    from datetime import datetime, timezone
-
+    started = utc_now()
     channel = get_ota_channel(provider_key)
     if not channel or not channel.api_key_encrypted:
+        write_sync_log(
+            provider_key=provider_key,
+            direction="outbound",
+            action="test_connection",
+            status="error",
+            error_summary="no credentials configured",
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
         return {"success": False, "error": "no credentials configured"}
-    channel.last_tested_at = datetime.now(timezone.utc)
-    channel.last_test_ok = True
-    channel.last_test_error = None
+
+    # Attempt real connection test via provider adapter
+    try:
+        provider = get_provider(provider_key)
+        ok = provider.test_connection()
+    except Exception as exc:
+        ok = False
+        channel.last_tested_at = utc_now()
+        channel.last_test_ok = False
+        channel.last_test_error = str(exc)[:500]
+        write_sync_log(
+            provider_key=provider_key,
+            direction="outbound",
+            action="test_connection",
+            status="error",
+            error_summary=str(exc)[:500],
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
+        return {"success": False, "error": str(exc)[:200]}
+
+    channel.last_tested_at = utc_now()
+    channel.last_test_ok = ok
+    channel.last_test_error = None if ok else "Connection test returned false"
+    write_sync_log(
+        provider_key=provider_key,
+        direction="outbound",
+        action="test_connection",
+        status="success" if ok else "error",
+        error_summary=None if ok else "Connection test returned false",
+        started_at=started,
+        actor_user_id=actor_user_id,
+    )
     db.session.commit()
-    return {"success": True}
+    return {"success": ok, "error": None if ok else "Connection test returned false"}
 
 
 
@@ -628,15 +807,27 @@ class ChannelSyncService:
         actor_user_id: uuid.UUID | None = None,
     ) -> SyncResult:
         """Pull reservations from the channel and import them idempotently."""
+        started = utc_now()
         try:
             inbound = self.provider.pull_reservations(since=since)
         except Exception as exc:
-            return SyncResult(
+            result = SyncResult(
                 provider=self.provider.provider_key,
                 direction="inbound",
                 success=False,
                 errors=[str(exc)],
             )
+            write_sync_log(
+                provider_key=self.provider.provider_key,
+                direction="inbound",
+                action="pull_reservations",
+                status="error",
+                error_summary=str(exc),
+                started_at=started,
+                actor_user_id=actor_user_id,
+            )
+            db.session.commit()
+            return result
 
         imported = 0
         errors: list[str] = []
@@ -647,13 +838,31 @@ class ChannelSyncService:
             except Exception as exc:
                 errors.append(f"{res_data.external_booking_id}: {exc}")
 
-        return SyncResult(
+        if not errors:
+            status = "success"
+        elif imported > 0:
+            status = "partial"
+        else:
+            status = "error"
+        result = SyncResult(
             provider=self.provider.provider_key,
             direction="inbound",
             success=len(errors) == 0,
             records_processed=imported,
             errors=errors,
         )
+        write_sync_log(
+            provider_key=self.provider.provider_key,
+            direction="inbound",
+            action="pull_reservations",
+            status=status,
+            records_processed=imported,
+            error_summary="; ".join(errors)[:2000] if errors else None,
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
+        db.session.commit()
+        return result
 
     def _import_single(
         self,
@@ -748,7 +957,19 @@ class ChannelSyncService:
         actor_user_id: uuid.UUID | None = None,
     ) -> SyncResult:
         """Push inventory / rate updates to the channel."""
+        started = utc_now()
         result = self.provider.push_inventory(updates)
+        write_sync_log(
+            provider_key=self.provider.provider_key,
+            direction="outbound",
+            action="push_inventory",
+            status="success" if result.success else "error",
+            records_processed=result.records_processed,
+            error_summary="; ".join(result.errors)[:2000] if result.errors else None,
+            details=result.details if result.details else None,
+            started_at=started,
+            actor_user_id=actor_user_id,
+        )
         if actor_user_id:
             write_audit_log(
                 actor_user_id=actor_user_id,
@@ -761,13 +982,109 @@ class ChannelSyncService:
                     "success": result.success,
                 },
             )
-            db.session.commit()
+        db.session.commit()
         return result
 
     # -- Health -----------------------------------------------------------
 
     def test_connection(self) -> bool:
         return self.provider.test_connection()
+
+
+# ---------------------------------------------------------------------------
+# Webhook / polling extension points
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class InboundWebhookEvent:
+    """Normalised inbound webhook / event payload from an OTA provider.
+
+    This is the entry point for providers that push events to the PMS
+    (e.g. new reservation, modification, cancellation) rather than
+    requiring the PMS to poll for changes.
+    """
+
+    provider_key: str
+    event_type: str  # e.g. "reservation.new", "reservation.cancel", "reservation.modify"
+    external_id: str  # provider-side event or reservation ID
+    payload: dict[str, Any] = field(default_factory=dict)
+    signature: str | None = None  # raw signature header for verification
+    received_at: datetime = field(default_factory=utc_now)
+    idempotency_key: str | None = None  # for dedup if provider supplies one
+
+
+def verify_webhook_signature(
+    provider_key: str,
+    raw_body: bytes,
+    signature: str,
+) -> bool:
+    """Verify an inbound webhook payload signature.
+
+    Each provider has its own signing mechanism.  Until a real provider
+    adapter supplies verification logic this function raises
+    ``NotImplementedError`` so callers cannot silently skip verification.
+
+    To add provider-specific verification, extend this function with a
+    dispatch table keyed by *provider_key* that performs the appropriate
+    HMAC / signature check.
+    """
+    raise NotImplementedError(
+        f"Webhook signature verification is not yet implemented for {provider_key}. "
+        "A provider-specific HMAC / key check must be added before accepting webhooks."
+    )
+
+
+def process_inbound_webhook(event: InboundWebhookEvent) -> SyncResult:
+    """Process a normalised inbound webhook event.
+
+    Routes the event to the appropriate handler based on event_type.
+    Currently a scaffold — real implementations will be added per-provider.
+    Returns a SyncResult indicating processing outcome.
+    """
+    started = utc_now()
+    provider_key = event.provider_key
+
+    # Deduplication check placeholder
+    if event.idempotency_key:
+        existing = db.session.execute(
+            sa.select(OtaSyncLog).where(
+                OtaSyncLog.provider_key == provider_key,
+                OtaSyncLog.action == f"webhook:{event.event_type}",
+                OtaSyncLog.details_json["idempotency_key"].as_string() == event.idempotency_key,
+            ).limit(1)
+        ).scalar_one_or_none()
+        if existing:
+            return SyncResult(
+                provider=provider_key,
+                direction="inbound",
+                success=True,
+                details={"skipped": True, "reason": "duplicate idempotency_key"},
+            )
+
+    # Route by event type
+    result = SyncResult(
+        provider=provider_key,
+        direction="inbound",
+        success=False,
+        errors=[f"Unhandled webhook event type: {event.event_type}"],
+    )
+
+    write_sync_log(
+        provider_key=provider_key,
+        direction="inbound",
+        action=f"webhook:{event.event_type}",
+        status="success" if result.success else "error",
+        error_summary="; ".join(result.errors)[:2000] if result.errors else None,
+        details={
+            "event_type": event.event_type,
+            "external_id": event.external_id,
+            "idempotency_key": event.idempotency_key,
+        },
+        started_at=started,
+    )
+    db.session.commit()
+    return result
 
 
 def _default_rate_for_room_type(room_type: RoomType, business_date: date) -> Decimal:
@@ -1120,3 +1437,349 @@ def channel_sync_summary() -> dict[str, dict[str, Any]]:
         summary[key]["total_failed"] += log_entry.records_failed
 
     return summary
+
+# Sync log helpers
+# ---------------------------------------------------------------------------
+
+
+def write_sync_log(
+    *,
+    provider_key: str,
+    direction: str,
+    action: str,
+    status: str,
+    records_processed: int = 0,
+    error_summary: str | None = None,
+    details: dict | None = None,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaSyncLog:
+    """Write a persistent sync log entry."""
+    now = utc_now()
+    duration_ms = None
+    if started_at and finished_at:
+        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    elif started_at:
+        finished_at = now
+        duration_ms = int((now - started_at).total_seconds() * 1000)
+
+    log_entry = OtaSyncLog(
+        provider_key=provider_key,
+        direction=direction,
+        action=action,
+        status=status,
+        records_processed=records_processed,
+        error_summary=error_summary[:2000] if error_summary else None,
+        details_json=details,
+        started_at=started_at or now,
+        finished_at=finished_at or now,
+        duration_ms=duration_ms,
+    )
+    if actor_user_id:
+        log_entry.created_by_user_id = actor_user_id
+    db.session.add(log_entry)
+    return log_entry
+
+
+def list_sync_logs(
+    *,
+    provider_key: str | None = None,
+    limit: int = 50,
+) -> list[OtaSyncLog]:
+    """Return recent sync log entries, optionally filtered by provider."""
+    query = sa.select(OtaSyncLog).order_by(OtaSyncLog.created_at.desc()).limit(limit)
+    if provider_key:
+        query = query.where(OtaSyncLog.provider_key == provider_key)
+    return db.session.execute(query).scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Room type mapping helpers
+# ---------------------------------------------------------------------------
+
+
+def list_ota_mappings(*, provider_key: str | None = None) -> list[OtaRoomTypeMapping]:
+    """Return all active OTA room type mappings."""
+    query = (
+        sa.select(OtaRoomTypeMapping)
+        .where(OtaRoomTypeMapping.deleted_at.is_(None))
+        .order_by(OtaRoomTypeMapping.provider_key.asc(), OtaRoomTypeMapping.external_room_type_code.asc())
+    )
+    if provider_key:
+        query = query.where(OtaRoomTypeMapping.provider_key == provider_key)
+    return db.session.execute(query).scalars().all()
+
+
+def upsert_ota_mapping(
+    *,
+    provider_key: str,
+    room_type_id: uuid.UUID,
+    external_room_type_code: str,
+    external_room_type_name: str | None = None,
+    external_rate_plan_code: str | None = None,
+    external_rate_plan_name: str | None = None,
+    is_active: bool = True,
+    occupancy_default: int | None = None,
+    notes: str | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> OtaRoomTypeMapping:
+    """Create or update a room type mapping for an OTA channel."""
+    existing = db.session.execute(
+        sa.select(OtaRoomTypeMapping).where(
+            OtaRoomTypeMapping.provider_key == provider_key,
+            OtaRoomTypeMapping.room_type_id == room_type_id,
+            OtaRoomTypeMapping.external_room_type_code == external_room_type_code,
+            OtaRoomTypeMapping.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        mapping = existing
+    else:
+        mapping = OtaRoomTypeMapping(
+            provider_key=provider_key,
+            room_type_id=room_type_id,
+            external_room_type_code=external_room_type_code,
+        )
+        db.session.add(mapping)
+
+    mapping.external_room_type_name = external_room_type_name
+    mapping.external_rate_plan_code = external_rate_plan_code
+    mapping.external_rate_plan_name = external_rate_plan_name
+    mapping.is_active = is_active
+    mapping.occupancy_default = occupancy_default
+    mapping.notes = notes
+    if actor_user_id:
+        mapping.updated_by_user_id = actor_user_id
+    return mapping
+
+
+def delete_ota_mapping(mapping_id: uuid.UUID, *, actor_user_id: uuid.UUID | None = None) -> bool:
+    """Soft-delete an OTA room type mapping."""
+    mapping = db.session.get(OtaRoomTypeMapping, mapping_id)
+    if not mapping or mapping.deleted_at is not None:
+        return False
+    mapping.deleted_at = utc_now()
+    if actor_user_id:
+        mapping.deleted_by_user_id = actor_user_id
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Onboarding readiness assessment
+# ---------------------------------------------------------------------------
+
+
+def assess_channel_readiness(
+    record: OtaChannel | None,
+    mapped_count: int,
+    total_room_types: int,
+    capabilities: ProviderCapabilities,
+) -> dict:
+    """Return a structured readiness assessment for a channel.
+
+    Returns a dict with:
+    - steps: list of {key, label, done, blocking} dicts
+    - ready_for_activation: bool — True if all blocking steps are done
+    - completion_pct: int — percentage of steps completed (0-100)
+    - blocking_issues: list of string descriptions of what blocks activation
+    """
+    steps = [
+        {
+            "key": "credentials",
+            "label": "API credentials configured",
+            "done": bool(record and record.api_key_encrypted),
+            "blocking": True,
+        },
+        {
+            "key": "hotel_id",
+            "label": "Hotel / property ID set",
+            "done": bool(record and record.hotel_id),
+            "blocking": True,
+        },
+        {
+            "key": "connection_tested",
+            "label": "Connection verified",
+            "done": bool(record and record.last_test_ok),
+            "blocking": True,
+        },
+        {
+            "key": "mappings",
+            "label": f"Room types mapped ({mapped_count}/{total_room_types})",
+            "done": mapped_count > 0 and mapped_count >= total_room_types,
+            "blocking": True,
+        },
+        {
+            "key": "sync_direction",
+            "label": "At least one sync direction enabled",
+            "done": bool(
+                record
+                and (
+                    record.sync_inventory_push
+                    or record.sync_rate_push
+                    or record.sync_restriction_push
+                    or record.sync_reservation_pull
+                )
+            ),
+            "blocking": True,
+        },
+        {
+            "key": "activated",
+            "label": "Channel activated",
+            "done": bool(record and record.is_active),
+            "blocking": False,
+        },
+    ]
+
+    blocking_issues = [s["label"] for s in steps if s["blocking"] and not s["done"]]
+    done_count = sum(1 for s in steps if s["done"])
+    completion_pct = int(done_count / len(steps) * 100) if steps else 0
+
+    return {
+        "steps": steps,
+        "ready_for_activation": len(blocking_issues) == 0,
+        "completion_pct": completion_pct,
+        "blocking_issues": blocking_issues,
+    }
+
+
+# ---------------------------------------------------------------------------
+# OTA dashboard context builder
+# ---------------------------------------------------------------------------
+
+
+def ota_dashboard_context() -> dict:
+    """Build the full context dict for the OTA dashboard page.
+
+    Returns aggregated status, mapping health, recent logs, and channel details.
+    """
+    from ..constants import OTA_PROVIDER_KEYS, OTA_PROVIDER_LABELS
+
+    existing_channels = {ch.provider_key: ch for ch in list_ota_channels()}
+    all_mappings = list_ota_mappings()
+    recent_logs = list_sync_logs(limit=30)
+
+    # Room types for mapping reference
+    room_types = db.session.execute(
+        sa.select(RoomType).where(RoomType.is_active.is_(True)).order_by(RoomType.code.asc())
+    ).scalars().all()
+
+    # Build per-channel summary
+    channels = []
+    total_healthy = 0
+    total_warning = 0
+    total_error = 0
+    total_mappings = 0
+    total_unmapped = 0
+
+    for key in OTA_PROVIDER_KEYS:
+        record = existing_channels.get(key)
+        provider_mappings = [m for m in all_mappings if m.provider_key == key]
+        provider_logs = [log for log in recent_logs if log.provider_key == key]
+
+        # Count mapping coverage (must precede health check)
+        mapped_room_type_ids = {m.room_type_id for m in provider_mappings if m.is_active}
+        unmapped_count = len([rt for rt in room_types if rt.id not in mapped_room_type_ids])
+
+        # Determine connection health status — clear state machine:
+        # not_configured → inactive → unknown → healthy/warning → error
+        if not record or not record.api_key_encrypted:
+            health = "not_configured"
+        elif not record.is_active:
+            health = "inactive"
+        elif record.last_test_ok is False:
+            health = "error"
+        elif record.last_test_ok is True:
+            # Connected OK — check for mapping gaps
+            health = "warning" if unmapped_count > 0 else "healthy"
+        else:
+            # Credentials present, active, but never tested
+            health = "unknown"
+
+        # Recent sync stats
+        last_success = next(
+            (log for log in provider_logs if log.status == "success"), None
+        )
+        last_error_log = next(
+            (log for log in provider_logs if log.status == "error"), None
+        )
+        recent_error_count = sum(1 for log in provider_logs if log.status == "error")
+
+        if health == "healthy":
+            total_healthy += 1
+        elif health == "warning":
+            total_warning += 1
+        elif health == "error":
+            total_error += 1
+
+        total_mappings += len(provider_mappings)
+        total_unmapped += unmapped_count
+
+        # Get provider capabilities
+        try:
+            provider = get_provider(key)
+            capabilities = provider.capabilities
+        except Exception:
+            capabilities = ProviderCapabilities()
+
+        # Onboarding readiness
+        readiness = assess_channel_readiness(
+            record=record,
+            mapped_count=len(provider_mappings),
+            total_room_types=len(room_types),
+            capabilities=capabilities,
+        )
+
+        # Sync direction summary
+        sync_directions = {
+            "inventory_push": bool(record and record.sync_inventory_push),
+            "rate_push": bool(record and record.sync_rate_push),
+            "restriction_push": bool(record and record.sync_restriction_push),
+            "reservation_pull": bool(record and record.sync_reservation_pull),
+        }
+
+        channels.append({
+            "provider_key": key,
+            "display_name": OTA_PROVIDER_LABELS.get(key, key),
+            "record": record,
+            "health": health,
+            "is_active": record.is_active if record else False,
+            "hotel_id": record.hotel_id if record else None,
+            "api_configured": bool(record and record.api_key_encrypted),
+            "last_tested_at": record.last_tested_at if record else None,
+            "last_test_ok": record.last_test_ok if record else None,
+            "last_test_error": record.last_test_error if record else None,
+            "environment_mode": record.environment_mode if record else "sandbox",
+            "mappings": provider_mappings,
+            "mapped_count": len(provider_mappings),
+            "unmapped_count": unmapped_count,
+            "last_success_log": last_success,
+            "last_error_log": last_error_log,
+            "recent_error_count": recent_error_count,
+            "recent_logs": provider_logs[:10],
+            "capabilities": capabilities,
+            "readiness": readiness,
+            "sync_directions": sync_directions,
+            "last_successful_sync_at": record.last_successful_sync_at if record else None,
+        })
+
+    # Summary stats
+    summary = {
+        "total_channels": len(OTA_PROVIDER_KEYS),
+        "healthy": total_healthy,
+        "warning": total_warning,
+        "error": total_error,
+        "not_configured": len(OTA_PROVIDER_KEYS) - total_healthy - total_warning - total_error,
+        "total_mappings": total_mappings,
+        "total_unmapped": total_unmapped,
+        "total_room_types": len(room_types),
+    }
+
+    return {
+        "summary": summary,
+        "channels": channels,
+        "room_types": room_types,
+        "all_mappings": all_mappings,
+        "recent_logs": recent_logs,
+    }

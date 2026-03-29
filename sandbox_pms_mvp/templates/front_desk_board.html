@@ -47,19 +47,39 @@
     <button class="board-nav-btn board-help-btn" type="button" data-action="show-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
   </div>
 
-  {# ── Board Legend ── #}
-  <div class="board-legend">
-    <strong style="font-size:11px; color:var(--pms-text-secondary); margin-right:4px;">Legend:</strong>
-    <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
-    <span class="board-legend-item"><span class="board-legend-swatch pending"></span>Pending</span>
-    <span class="board-legend-item"><span class="board-legend-swatch in_house"></span>In-house</span>
-    <span class="board-legend-item"><span class="board-legend-swatch unallocated"></span>Unallocated</span>
-    <span class="board-legend-item"><span class="board-legend-swatch past"></span>Past</span>
-    <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
-    <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
-    <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
-    <span class="board-legend-hint" title="Press ? for keyboard shortcuts">⌨ ?</span>
+  {# ── Compact room availability strip ── #}
+  {% if board.counts.available_by_type %}
+  <div class="planning-board-avail-strip" aria-label="Room availability">
+    <span class="avail-strip-label">Rooms:</span>
+    {% for type_code, avail_count in board.counts.available_by_type.items() %}
+    <span class="fd-cmd-metric{% if avail_count == 0 %} avail-zero{% elif avail_count <= 2 %} avail-low{% endif %}" title="{{ type_code }}: {{ avail_count }} available today">{{ type_code }}&nbsp;<strong>{{ avail_count }}</strong></span>
+    {% endfor %}
+    <span class="avail-strip-sep"></span>
+    <span class="fd-cmd-metric" title="Total available rooms today"><strong>{{ board.counts.available_rooms }}</strong>&nbsp;avail</span>
+    <span class="fd-cmd-metric" title="Occupancy today">{{ board.counts.occupancy_pct }}%&nbsp;occ</span>
+    {% if board.counts.maintenance_count is defined and board.counts.maintenance_count > 0 %}
+    <span class="fd-cmd-metric avail-zero" title="{{ board.counts.maintenance_count }} rooms out of service" aria-label="Maintenance: {{ board.counts.maintenance_count }} rooms">🔧&nbsp;<strong>{{ board.counts.maintenance_count }}</strong></span>
+    {% endif %}
   </div>
+  {% endif %}
+
+  {# ── Board Legend (collapsed by default for more board space) ── #}
+  <details class="board-legend">
+    <summary class="ops-collapsible-summary">
+      <strong style="font-size:10px; color:var(--pms-text-secondary);">Legend</strong>
+      <span class="ops-collapse-indicator" aria-hidden="true">▼</span>
+    </summary>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:4px;">
+      <span class="board-legend-item"><span class="board-legend-swatch confirmed"></span>Confirmed</span>
+      <span class="board-legend-item"><span class="board-legend-swatch pending"></span>Pending</span>
+      <span class="board-legend-item"><span class="board-legend-swatch in_house"></span>In-house</span>
+      <span class="board-legend-item"><span class="board-legend-swatch unallocated"></span>Unallocated</span>
+      <span class="board-legend-item"><span class="board-legend-swatch past"></span>Past</span>
+      <span class="board-legend-item"><span class="board-legend-swatch external"></span>External/iCal</span>
+      <span class="board-legend-item"><span class="board-legend-swatch closure"></span>Closure</span>
+      <span class="board-legend-item"><span class="board-legend-swatch conflict"></span>Conflict</span>
+    </div>
+  </details>
 
   {# ── Row 2: Filters + search + density + overflow ── #}
   <div class="planning-board-row2">
@@ -107,20 +127,6 @@
       <button type="button" class="bqf-chip" data-filter="inspected" aria-pressed="false">Inspected</button>
       <button type="button" class="bqf-chip bqf-secondary" data-action="save-default-filters" title="Remember current quick filters as the board default">Remember</button>
       <button type="button" class="bqf-chip bqf-reset" data-action="reset-filters" aria-label="Clear all filters" title="Clear all filters">✕</button>
-    </div>
-
-    <div class="board-view-library" data-board-view-library>
-      <label class="board-view-picker">
-        <span>Views</span>
-        <select data-saved-view-select aria-label="Saved board views">
-          <option value="">Saved views</option>
-          {% for view in board_state.savedViews %}
-          <option value="{{ loop.index0 }}">{{ view.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="button" class="board-mini-action" data-action="save-current-view">Save View</button>
-      <button type="button" class="board-mini-action subtle" data-action="delete-current-view" {% if not board_state.savedViews %}disabled{% endif %}>Delete</button>
     </div>
 
     <fieldset class="planning-board-density-toggle" data-density-toggle>
@@ -220,6 +226,20 @@
               {% endif %}
             </form>
           </details>
+          <div class="board-view-library" data-board-view-library>
+            <label class="board-view-picker">
+              <span>Views</span>
+              <select data-saved-view-select aria-label="Saved board views">
+                <option value="">Saved views</option>
+                {% for view in board_state.savedViews %}
+                <option value="{{ loop.index0 }}">{{ view.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="button" class="board-overflow-item" data-action="save-current-view">Save view</button>
+            <button type="button" class="board-overflow-item" data-action="delete-current-view" {% if not board_state.savedViews %}disabled{% endif %}>Delete view</button>
+          </div>
+          <hr style="border-color:var(--border);margin:4px 0;">
           <button class="board-overflow-item" type="button" data-action="open-stats-panel">Board stats</button>
           <button class="board-overflow-item" type="button" data-action="open-handover-panel">Shift handover</button>
           <button class="board-overflow-item" type="button" data-window-print>Print view</button>
@@ -290,6 +310,9 @@
   <hr>
   <button role="menuitem" data-ctx="export-ics">Export ICS</button>
 </div>
+
+{# ── Hover card (positioned by JS) ── #}
+<div id="board-hover-card" class="board-hover-card" aria-hidden="true"></div>
 
 {% endblock %}
 {% block extra_scripts %}

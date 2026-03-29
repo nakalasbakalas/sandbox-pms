@@ -133,7 +133,14 @@ def staff_guest_blacklist_toggle(guest_id):
         guest.blacklist_reason = reason
         guest.blacklisted_at = utc_now()
         guest.blacklisted_by_user_id = user.id
-        write_audit_log(guest, "guest_blacklisted", old_data=old_snapshot, new_data={"blacklist_flag": True, "blacklist_reason": reason}, actor_user_id=user.id)
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="guests",
+            entity_id=str(guest.id),
+            action="guest_blacklisted",
+            before_data=old_snapshot,
+            after_data={"blacklist_flag": True, "blacklist_reason": reason},
+        )
         db.session.commit()
         flash(f"Guest {guest.full_name} has been blacklisted.", "warning")
     elif action == "unblock":
@@ -142,7 +149,14 @@ def staff_guest_blacklist_toggle(guest_id):
         guest.blacklist_reason = None
         guest.blacklisted_at = None
         guest.blacklisted_by_user_id = None
-        write_audit_log(guest, "guest_unblacklisted", old_data=old_snapshot, new_data={"blacklist_flag": False, "blacklist_reason": None}, actor_user_id=user.id)
+        write_audit_log(
+            actor_user_id=user.id,
+            entity_table="guests",
+            entity_id=str(guest.id),
+            action="guest_unblacklisted",
+            before_data=old_snapshot,
+            after_data={"blacklist_flag": False, "blacklist_reason": None},
+        )
         db.session.commit()
         flash(f"Guest {guest.full_name} has been removed from the blacklist.", "success")
     return redirect(url_for("staff_reservations.staff_guest_detail", guest_id=guest_id))
@@ -207,7 +221,7 @@ def staff_reservations():
     result = list_reservations(filters)
     if result["items"]:
         _res_ids = [item["id"] for item in result["items"]]
-        _pc_rows = db.session.query(PreCheckIn).filter(PreCheckIn.reservation_id.in_(_res_ids)).all()
+        _pc_rows = db.session.execute(sa.select(PreCheckIn).where(PreCheckIn.reservation_id.in_(_res_ids))).scalars().all()
         _pc_map = {str(pc.reservation_id): pc for pc in _pc_rows}
         for item in result["items"]:
             item["pre_checkin"] = _pc_map.get(str(item["id"]))
@@ -307,6 +321,9 @@ def staff_reservation_create():
         "status": (request.values.get("status") or "confirmed").strip(),
         "special_requests": request.values.get("special_requests") or "",
         "internal_notes": request.values.get("internal_notes") or request.values.get("notes") or "",
+        "arrival_time": (request.values.get("arrival_time") or "").strip(),
+        "manual_discount_pct": (request.values.get("manual_discount_pct") or "0").strip(),
+        "manual_discount_note": (request.values.get("manual_discount_note") or "").strip(),
     }
     if initial["check_in"] and not initial["check_out"]:
         try:
@@ -315,6 +332,7 @@ def staff_reservation_create():
             initial["check_out"] = ""
     if request.method == "POST":
         try:
+            discount_pct = float(request.form.get("manual_discount_pct") or 0)
             reservation = create_reservation(
                 ReservationCreatePayload(
                     first_name=initial["first_name"],
@@ -331,10 +349,15 @@ def staff_reservation_create():
                     special_requests=request.form.get("special_requests"),
                     internal_notes=request.form.get("internal_notes"),
                     initial_status=request.form.get("status") or "confirmed",
+                    arrival_time=(request.form.get("arrival_time") or "").strip() or None,
+                    manual_discount_pct=discount_pct,
+                    manual_discount_note=(request.form.get("manual_discount_note") or "").strip() or None,
                 ),
                 actor_user_id=user.id,
             )
             flash(f"Reservation {reservation.reservation_code} created.", "success")
+            if reservation.deposit_required_amount and reservation.deposit_required_amount > 0:
+                flash("Deposit required — open cashier to collect payment.", "payment_cta")
             try:
                 fire_automation_event(
                     "reservation_created",
@@ -701,7 +724,7 @@ def staff_pre_checkin_send_email(reservation_id):
 
 @staff_reservations_bp.route("/staff/reservations/<uuid:reservation_id>/pre-checkin")
 def staff_pre_checkin_detail(reservation_id):
-    user = require_permission("reservation.view")
+    require_permission("reservation.view")
     reservation = db.session.get(Reservation, reservation_id)
     if not reservation:
         abort(404)
@@ -926,7 +949,7 @@ def staff_group_block_detail(group_block_code):
     require_permission("reservation.view")
     try:
         detail = get_group_block_detail(group_block_code)
-    except Exception:
+    except ValueError:
         abort(404)
     return render_template(
         "group_block_detail.html",

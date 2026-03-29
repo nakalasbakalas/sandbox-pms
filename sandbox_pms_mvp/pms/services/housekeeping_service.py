@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
@@ -21,7 +21,6 @@ from ..models import (
     Room,
     RoomNote,
     RoomStatusHistory,
-    RoomType,
     User,
     utc_now,
 )
@@ -122,13 +121,14 @@ def list_housekeeping_board(filters: HousekeepingBoardFilters, *, actor_user: Us
     allowed_scopes = allowed_note_visibility_scopes(actor_user)
     note_counts = {
         room_id: count
-        for room_id, count in db.session.query(RoomNote.room_id, sa.func.count(RoomNote.id))
-        .filter(
-            sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == filters.business_date),
-            RoomNote.visibility_scope.in_(allowed_scopes),
-        )
-        .group_by(RoomNote.room_id)
-        .all()
+        for room_id, count in db.session.execute(
+            sa.select(RoomNote.room_id, sa.func.count(RoomNote.id))
+            .where(
+                sa.or_(RoomNote.business_date.is_(None), RoomNote.business_date == filters.business_date),
+                RoomNote.visibility_scope.in_(allowed_scopes),
+            )
+            .group_by(RoomNote.room_id)
+        ).all()
     }
     arrival_by_room, departure_by_room, in_house_by_room, arrival_pressure = _reservation_context(filters.business_date)
 

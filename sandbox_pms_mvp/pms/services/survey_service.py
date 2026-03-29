@@ -10,7 +10,6 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
 
 import sqlalchemy as sa
 from flask import current_app, url_for

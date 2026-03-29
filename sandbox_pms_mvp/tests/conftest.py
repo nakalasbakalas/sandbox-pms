@@ -38,7 +38,7 @@ def app_factory(tmp_path):
         with app.app_context():
             upgrade(directory=str(MIGRATIONS_DIR))
             if seed:
-                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=True)
         return app
 
     return factory

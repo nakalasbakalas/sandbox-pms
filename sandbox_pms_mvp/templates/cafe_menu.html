@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Café Menu Management{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+{% if not categories %}
+<section class="card subsection" style="text-align:center;padding:16px;">
+  <p>No menu categories found. Seed default café menu?</p>
+  <form method="post" action="{{ url_for('cafe.cafe_setup') }}" class="inline-form" style="margin-top:8px;">
+    {{ csrf_input() }}
+    <button class="button" type="submit">Seed Default Menu</button>
+  </form>
+</section>
+{% endif %}
+
+<!-- Categories -->
+<section class="card subsection">
+  <div class="card-head">
+    <h3>Categories</h3>
+    <a class="button tiny" href="{{ url_for('cafe.cafe_menu_category_new') }}">+ New Category</a>
+  </div>
+  {% if categories %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Name</th><th>Sort</th><th>Active</th><th></th></tr></thead>
+      <tbody>
+        {% for cat in categories %}
+        <tr>
+          <td>{{ cat.name }}</td>
+          <td class="muted">{{ cat.sort_order }}</td>
+          <td>{% if cat.is_active %}<span class="status confirmed">Yes</span>{% else %}<span class="status cancelled">No</span>{% endif %}</td>
+          <td><a class="button tiny secondary" href="{{ url_for('cafe.cafe_menu_category_edit', cat_id=cat.id) }}">Edit</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Items -->
+<section class="card subsection">
+  <div class="card-head">
+    <h3>Items</h3>
+    <a class="button tiny" href="{{ url_for('cafe.cafe_menu_item_new') }}">+ New Item</a>
+  </div>
+  {% if items %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Station</th><th>Available</th><th></th></tr></thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td class="muted">{{ item.category.name if item.category else '—' }}</td>
+          <td>฿{{ item.price }}</td>
+          <td class="muted">{{ item.prep_station | title }}</td>
+          <td>
+            <form method="post" action="{{ url_for('cafe.cafe_menu_item_toggle', item_id=item.id) }}" class="inline-form">
+              {{ csrf_input() }}
+              <button type="submit" class="button tiny {% if item.is_available %}secondary{% endif %}" style="{% if not item.is_available %}color:var(--danger);{% endif %}">
+                {{ 'Yes' if item.is_available else 'No' }}
+              </button>
+            </form>
+          </td>
+          <td><a class="button tiny secondary" href="{{ url_for('cafe.cafe_menu_item_edit', item_id=item.id) }}">Edit</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:12px;">No items yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

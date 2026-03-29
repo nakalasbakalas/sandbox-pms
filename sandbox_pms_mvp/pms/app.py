@@ -1,438 +1,123 @@
 from __future__ import annotations
 
-import hmac
-import json
 import logging
 import secrets
-from datetime import date, datetime, timedelta
 from decimal import Decimal
-from time import perf_counter
-from urllib.parse import urlparse
-from urllib.parse import urlencode
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
 import sqlalchemy as sa
-import click
-from flask import Flask, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, session, url_for
-from markupsafe import Markup, escape
+from flask import Flask, Response, abort, g, redirect, request, session, url_for
+from markupsafe import Markup
 
-from .activity import write_activity_log
-from .audit import cleanup_audit_logs, write_audit_log
+from .audit import cleanup_audit_logs
+from .booking_attribution import (
+    BOOKING_ATTRIBUTION_SESSION_KEY,
+    BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS,
+    PUBLIC_BOOKING_LANDING_ENDPOINTS,
+    PUBLIC_NON_CACHEABLE_ENDPOINTS,
+    PUBLIC_WEBHOOK_ENDPOINTS,
+    booking_attribution_from_request,
+    booking_request_starts_new_attribution,
+    capture_public_booking_attribution,
+    clean_public_path,
+    clean_tracking_value,
+    current_booking_attribution,
+    default_booking_attribution,
+    derive_source_label,
+    external_referrer_host,
+    merge_booking_attribution,
+    normalize_tracking_slug,
+    referrer_source_label,
+    resolve_booking_source_channel,
+    source_metadata_from_request,
+)
 from .branding import (
     branding_settings_context,
-    clean_branding_form,
     line_href as branding_line_href,
     whatsapp_href as branding_whatsapp_href,
 )
+from .cli_commands import register_cli
 from .config import Config, normalize_runtime_config
 from .constants import (
-    BLACKOUT_TYPES,
-    BOOKING_EXTRA_PRICING_MODES,
     BOOKING_SOURCE_CHANNELS,
     CONVERSATION_CHANNEL_TYPES,
     CONVERSATION_STATUSES,
-    INVENTORY_OVERRIDE_ACTIONS,
-    INVENTORY_OVERRIDE_SCOPE_TYPES,
-    NOTIFICATION_TEMPLATE_KEYS,
-    POLICY_DOCUMENT_CODES,
-    RATE_ADJUSTMENT_TYPES,
-    RATE_RULE_TYPES,
-    RESERVATION_STATUSES,
-    REVIEW_QUEUE_STATUSES,
-    ROLE_SEEDS,
-    ROOM_NOTE_TYPES,
-    ROOM_OPERATIONAL_STATUSES,
-    USER_ACCOUNT_STATES,
 )
 from .extensions import db, migrate
-from .front_desk_board_runtime import (
-    front_desk_board_v2_enabled,
-    log_front_desk_board_metric,
-)
-from .front_desk_board_preferences import extract_front_desk_board_state
 from .i18n import LANGUAGE_LABELS, normalize_language, t
 from .models import (
-    ActivityLog,
-    AuditLog,
-    BlackoutPeriod,
-    CalendarFeed,
-    CancellationRequest,
-    ConversationThread,
-    EmailOutbox,
-    ExternalCalendarBlock,
-    ExternalCalendarSource,
-    Guest,
-    InventoryOverride,
-    MfaFactor,
-    NotificationDelivery,
-    NotificationTemplate,
-    PaymentRequest,
-    Permission,
-    PolicyDocument,
-    PreCheckIn,
-    Reservation,
-    ReservationDocument,
     ReservationHold,
-    ReservationReviewQueue,
-    Role,
-    RateRule,
-    Room,
     RoomType,
-    StaffNotification,
-    User,
-    UserPreference,
-    UserSession,
-    utc_now,
 )
-from .pricing import get_setting_value
 from .security import configure_app_security, current_csp_nonce, current_request_id, public_error_message
-from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data, seed_roles_permissions
-from .url_topology import booking_engine_base_url, canonical_redirect_url, marketing_site_base_url, staff_app_base_url
+from .seeds import bootstrap_inventory_horizon, seed_all, seed_reference_data
+from .url_topology import canonical_redirect_url, marketing_site_base_url, staff_app_base_url
 from .helpers import (
     absolute_public_url,
-    action_datetime_for_form_date,
-    add_anchor_to_path,
     available_admin_sections,
     can,
-    can_access_admin_workspace,
     _contact_link,
-    current_app_testing,
     current_language,
     current_settings,
     current_user,
-    default_dashboard_endpoint,
     default_dashboard_url,
     email_href,
     ensure_csrf_token,
-    format_report_date_range,
     is_admin_user,
     is_staff_or_provider_endpoint,
-    make_language_url,
     parse_booking_extra_ids,
     parse_decimal,
     parse_optional_date,
-    permission_groups,
     parse_optional_datetime,
     parse_optional_decimal,
     parse_optional_int,
     parse_optional_uuid,
     parse_request_date_arg,
-    parse_request_form_date,
     parse_request_int_arg,
     parse_request_uuid_arg,
+    permission_groups,
     phone_href,
-    public_base_url,
-    report_date_presets,
     require_admin_role,
     require_admin_workspace_access,
     require_any_permission,
     require_permission,
     require_user,
-    resolve_report_date_range,
-    rotate_csrf_token,
     safe_back_path,
     truthy_setting,
     validate_csrf_request,
 )
 from .services.admin_service import (
-    BlackoutPayload,
-    InventoryOverridePayload,
-    NotificationTemplatePayload,
-    PolicyPayload,
-    RateRulePayload,
-    RoomPayload,
-    RoomTypePayload,
-    create_inventory_override,
     policy_text,
-    preview_notification_template,
-    query_audit_entries,
-    release_inventory_override,
-    summarize_audit_entry,
-    update_inventory_override,
-    update_role_permissions,
-    upsert_blackout_period,
-    upsert_notification_template,
-    upsert_policy_document,
-    upsert_rate_rule,
-    upsert_room,
-    upsert_room_type,
-    upsert_setting,
-    upsert_settings_bundle,
 )
 from .services.auth_service import (
-    active_mfa_factor,
-    admin_disable_mfa,
-    admin_issue_password_reset,
-    confirm_totp_enrollment,
-    create_staff_user,
-    create_totp_factor,
-    disable_mfa,
     load_session_from_cookie,
-    login_with_password,
-    pending_mfa_factor,
-    request_password_reset,
-    reset_password_with_token,
-    revoke_all_user_sessions,
-    revoke_session,
-    update_staff_user,
-    update_user_password,
-    verify_mfa_for_session,
-    verify_password_hash,
-)
-from .services.cashier_service import (
-    DocumentIssuePayload,
-    ManualAdjustmentPayload,
-    PaymentPostingPayload,
-    PosChargePayload,
-    RefundPostingPayload,
-    VoidChargePayload,
-    cashier_print_context,
-    ensure_room_charges_posted,
-    get_cashier_detail,
-    issue_cashier_document,
-    post_manual_adjustment,
-    post_pos_charge,
-    record_payment,
-    record_refund,
-    void_folio_charge,
-)
-from .services.channel_service import (
-    ChannelSyncService,
-    build_outbound_inventory_updates,
-    get_provider,
-    provider_push_context,
 )
 from .services.communication_service import (
-    communication_settings_context,
-    dispatch_notification_deliveries,
-    queue_cashier_receipt_email,
-    query_notification_history,
-    send_due_failed_payment_reminders,
     send_due_pre_arrival_reminders,
 )
 from .services.extras_service import (
-    BookingExtraPayload,
     list_booking_extras,
     quote_booking_extras,
     reservation_extra_summary,
     resolve_booking_extras,
-    upsert_booking_extra,
 )
 from .services.front_desk_service import (
-    CheckInPayload,
-    CheckoutPayload,
-    FrontDeskFilters,
-    NoShowPayload,
-    WalkInCheckInPayload,
     auto_cancel_no_shows,
-    complete_check_in,
-    complete_checkout,
-    create_walk_in_and_check_in,
-    get_front_desk_detail,
-    list_front_desk_workspace,
-    prepare_checkout,
-    process_no_show,
-)
-from .services.front_desk_board_service import (
-    FrontDeskBoardFilters,
-    build_front_desk_board,
-    flatten_front_desk_blocks,
-    list_front_desk_room_groups,
-    serialize_front_desk_board,
-)
-from .services.housekeeping_service import (
-    BlockRoomPayload,
-    BulkHousekeepingPayload,
-    CreateTaskPayload,
-    HousekeepingBoardFilters,
-    MaintenanceFlagPayload,
-    RoomNotePayload as HousekeepingRoomNotePayload,
-    RoomStatusUpdatePayload,
-    TaskListFilters,
-    add_room_note as add_housekeeping_room_note,
-    assign_housekeeping_task,
-    bulk_update_housekeeping,
-    cancel_housekeeping_task,
-    complete_housekeeping_task,
-    create_housekeeping_task,
-    get_housekeeping_room_detail,
-    inspect_housekeeping_task,
-    list_housekeeping_board,
-    list_housekeeping_tasks,
-    set_blocked_state,
-    set_maintenance_flag,
-    start_housekeeping_task,
-    update_housekeeping_status,
-)
-from .services.group_booking_service import (
-    GroupBlockCreatePayload,
-    create_group_room_block,
-    get_group_block_detail,
-    list_group_room_blocks,
-    release_group_room_block,
-)
-from .services.room_readiness_service import (
-    is_room_assignable,
-    room_readiness_board,
 )
 from .services.ical_service import (
-    create_calendar_feed,
-    create_external_calendar_source,
-    export_feed_ical,
-    export_front_desk_blocks_ical,
-    provider_calendar_context,
-    rotate_calendar_feed,
-    stage_ical_import,
     sync_all_external_calendar_sources,
-    sync_external_calendar_source,
-)
-from .services.payment_integration_service import (
-    DEPOSIT_HOSTED_REQUEST_TYPES,
-    create_or_reuse_payment_request,
-    handle_public_payment_start,
-    load_public_payment_return,
-    payments_enabled,
-    process_payment_webhook,
-    resend_payment_link,
-    sync_payment_request_status,
 )
 from .services.public_booking_service import (
-    HoldRequestPayload,
-    PublicBookingPayload,
     PublicSearchPayload,
-    VerificationRequestPayload,
     build_room_type_content,
-    confirm_public_booking,
-    create_reservation_hold,
-    load_public_confirmation,
     search_public_availability,
-    submit_cancellation_request,
-    submit_modification_request,
 )
-from .services.provider_portal_service import (
-    ProviderBookingFilters,
-    get_provider_booking_detail,
-    list_provider_bookings,
-    provider_cancel_booking,
-    provider_create_deposit_request,
-    provider_dashboard_context,
-    provider_refresh_payment_status,
-    provider_resend_payment_link,
-)
-from .services.pre_checkin_service import (
-    ScannerCapturePayload,
-    apply_document_ocr_to_guest,
-    DocumentVerifyPayload,
-    PreCheckInSavePayload,
-    build_pre_checkin_link,
-    fire_pre_checkin_not_completed_events,
-    generate_pre_checkin,
-    get_document_serve_url,
-    get_documents_for_reservation,
-    get_pre_checkin_context,
-    get_pre_checkin_for_reservation,
-    list_todays_arrivals_with_readiness,
-    load_pre_checkin_by_token,
-    mark_opened,
-    mark_rejected,
-    mark_verified,
-    ingest_scanner_capture,
-    read_document_bytes,
-    save_pre_checkin,
-    send_pre_checkin_link_email,
-    upload_document,
-    validate_token_access,
-    verify_document,
-)
-from .services.reporting_service import build_csv_rows, build_daily_report, build_front_desk_dashboard, build_manager_dashboard
-from .services.reservation_service import ReservationCreatePayload, create_reservation, expire_stale_waitlist, promote_eligible_waitlist
 from .services.messaging_service import (
-    ComposePayload as MessagingComposePayload,
-    InboxFilters as MessagingInboxFilters,
-    assign_thread,
-    close_thread,
-    fire_automation_event,
-    get_thread_detail,
-    list_inbox,
-    list_message_templates as list_msg_templates,
-    mark_thread_read,
-    process_pending_automations,
-    record_inbound_message,
-    reopen_thread,
-    reservation_messages,
-    send_message as messaging_send_message,
-    toggle_followup,
     total_unread_count,
-    upsert_message_template as upsert_msg_template,
-)
-from .services.staff_reservations_service import (
-    GuestUpdatePayload,
-    ReservationNotePayload,
-    ReservationWorkspaceFilters,
-    StayDateChangePayload,
-    add_reservation_note,
-    approve_modification_request,
-    assign_room,
-    build_reservation_summary,
-    cancel_reservation_workspace,
-    change_stay_dates,
-    decline_modification_request,
-    get_reservation_detail,
-    list_arrivals,
-    list_departures,
-    list_in_house,
-    list_reservations,
-    quote_modification_request,
-    resend_confirmation,
-    search_guests,
-    get_guest_detail,
-    update_guest_details,
 )
 
-
-BOOKING_ATTRIBUTION_SESSION_KEY = "_booking_attribution"
-BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS = {
-    "utm_source",
-    "utm_medium",
-    "utm_campaign",
-    "utm_content",
-    "source_label",
-    "referrer_host",
-    "entry_page",
-    "landing_path",
-    "entry_cta_source",
-}
-BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS = {
-    "index",
-    "public.index",
-    "availability",
-    "booking_entry",
-    "booking_hold",
-    "booking_confirm",
-    "public.availability",
-    "public.booking_entry",
-    "public.booking_hold",
-    "public.booking_confirm",
-}
-PUBLIC_BOOKING_LANDING_ENDPOINTS = {"index", "public.index", "availability", "booking_entry", "public.availability", "public.booking_entry"}
-PUBLIC_NON_CACHEABLE_ENDPOINTS = {
-    "booking_confirmation",
-    "booking_cancel_request",
-    "booking_modify_request",
-    "public_payment_return",
-    "public_payment_start",
-    "public.booking_confirmation",
-    "public.booking_cancel_request",
-    "public.public_digital_checkout",
-    "public.public_digital_checkout_complete",
-    "public.public_digital_checkout_pay_balance",
-    "public.booking_modify_request",
-    "public.public_payment_return",
-    "public.public_payment_start",
-}
-PUBLIC_WEBHOOK_ENDPOINTS = {"payment_webhook", "public.payment_webhook"}
 
 
 def _load_sentry_sdk():
@@ -499,6 +184,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     from .routes.admin import admin_bp
     from .routes.public import public_bp
     from .routes.coupon_studio import coupon_studio_bp
+    from .routes.cafe import cafe_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(provider_bp)
     app.register_blueprint(housekeeping_bp)
@@ -510,14 +196,14 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(public_bp)
     app.register_blueprint(coupon_studio_bp)
-
-    register_routes(app)
+    app.register_blueprint(cafe_bp)
 
     with app.app_context():
         if app.config["AUTO_BOOTSTRAP_SCHEMA"] and app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
             db.create_all()
             if app.config["AUTO_SEED_REFERENCE_DATA"]:
-                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+                include_demo = app.config.get("SEED_DEMO_DATA", False)
+                seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=include_demo)
     return app
 
 
@@ -547,7 +233,7 @@ def _resolve_current_property() -> None:
 
 def register_auth_hooks(app: Flask) -> None:
     @app.before_request
-    def load_authenticated_staff_session() -> None:
+    def load_authenticated_staff_session() -> Response | None:
         validate_csrf_request()
         g.current_staff_user = None
         g.pending_mfa_user = None
@@ -580,7 +266,7 @@ def register_auth_hooks(app: Flask) -> None:
                 "static",
             }
             if request.endpoint not in allowed_endpoints:
-                return redirect(url_for("auth.staff_mfa_verify"))
+                return redirect(url_for("auth.staff_mfa_verify"))  # type: ignore[return-value]
 
         if g.current_staff_user and (g.current_staff_user.force_password_reset or g.current_staff_user.account_state == "password_reset_required"):
             allowed_endpoints = {
@@ -591,10 +277,10 @@ def register_auth_hooks(app: Flask) -> None:
             }
             if request.endpoint not in allowed_endpoints:
                 flash("Password reset is required before continuing.", "warning")
-                return redirect(url_for("auth.staff_security"))
+                return redirect(url_for("auth.staff_security"))  # type: ignore[return-value]
 
         if g.current_staff_user and request.endpoint in {"auth.staff_login", "auth.staff_forgot_password", "auth.staff_reset_password"}:
-            return redirect(default_dashboard_url(g.current_staff_user))
+            return redirect(default_dashboard_url(g.current_staff_user))  # type: ignore[return-value]
 
     @app.after_request
     def persist_auth_cookie(response):
@@ -625,6 +311,22 @@ def register_url_topology_hooks(app: Flask) -> None:
         if redirect_url:
             return redirect(redirect_url, code=302)
         return None
+
+
+def _admin_setup_incomplete(staff_user) -> bool:
+    """Return True if admin setup is not yet complete (for admin-only banner)."""
+    if not staff_user:
+        return False
+    if not is_admin_user(staff_user):
+        return False
+    endpoint = request.endpoint or ""
+    if not endpoint.startswith("admin."):
+        return False
+    try:
+        from .services.setup_service import setup_completeness
+        return not setup_completeness()["complete"]
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def register_template_helpers(app: Flask) -> None:
@@ -693,7 +395,7 @@ def register_template_helpers(app: Flask) -> None:
                             continue
                         args[key] = value
                 args["lang"] = lang_code
-                return url_for(request.endpoint, **args)
+                return url_for(request.endpoint or "", **args)
             except Exception:  # noqa: BLE001
                 return url_for("public.index", lang=lang_code)
 
@@ -775,6 +477,7 @@ def register_template_helpers(app: Flask) -> None:
             "csp_nonce": current_csp_nonce(),
             "can": can,
             "admin_sections": available_admin_sections(),
+            "setup_incomplete": _admin_setup_incomplete(current_staff),
             "default_dashboard_url": default_dashboard_url(current_staff) if current_staff else "",
             "csrf_token": ensure_csrf_token,
             "csrf_input": lambda: Markup(
@@ -789,273 +492,7 @@ def register_template_helpers(app: Flask) -> None:
         }
 
 
-def register_cli(app: Flask) -> None:
-    @app.cli.command("seed-reference-data")
-    def seed_reference_data_command() -> None:
-        seed_reference_data(sync_existing_roles=False)
-        print("Reference data seeded.")
 
-    @app.cli.command("sync-role-permissions")
-    def sync_role_permissions_command() -> None:
-        seed_roles_permissions(sync_existing_roles=True)
-        db.session.commit()
-        print("System role permissions synchronized.")
-
-    @app.cli.command("seed-phase2")
-    def seed_phase2_command() -> None:
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        print("Phase 2 seed completed.")
-
-    @app.cli.command("bootstrap-inventory")
-    def bootstrap_inventory_command() -> None:
-        bootstrap_inventory_horizon(date.today(), app.config["INVENTORY_BOOTSTRAP_DAYS"])
-        db.session.commit()
-        print("Inventory horizon bootstrapped.")
-
-    @app.cli.command("process-notifications")
-    def process_notifications_command() -> None:
-        result = dispatch_notification_deliveries()
-        print(f"Notifications processed: {result}")
-
-    @app.cli.command("send-pre-arrival-reminders")
-    def send_pre_arrival_reminders_command() -> None:
-        result = send_due_pre_arrival_reminders(actor_user_id=None)
-        print(f"Pre-arrival reminders: {result}")
-
-    @app.cli.command("send-failed-payment-reminders")
-    def send_failed_payment_reminders_command() -> None:
-        result = send_due_failed_payment_reminders(actor_user_id=None)
-        print(f"Failed payment reminders: {result}")
-
-    @app.cli.command("fire-pre-checkin-reminders")
-    @click.option(
-        "--hours-before",
-        default=48,
-        type=int,
-        help="Hours before check-in to target (default: 48).",
-    )
-    def fire_pre_checkin_reminders_command(hours_before: int) -> None:
-        """Fire pre_checkin_not_completed automation events for upcoming arrivals.
-
-        Run daily via cron ~48 hours before check-in day to nudge guests who
-        have not submitted (or not started) their digital pre-check-in.
-        """
-        result = fire_pre_checkin_not_completed_events(hours_before=hours_before)
-        print(f"Pre-check-in reminder events: fired={result['fired']}, skipped={result['skipped']}")
-
-    @app.cli.command("sync-ical-sources")
-    def sync_ical_sources_command() -> None:
-        result = sync_all_external_calendar_sources(actor_user_id=None)
-        print(f"iCal sync result: {result}")
-
-    @app.cli.command("sync-channels")
-    def sync_channels_command() -> None:
-        """Pull inbound reservations and push outbound inventory for all active OTA channels."""
-        from pms.services.channel_service import sync_all_active_channels
-        result = sync_all_active_channels(actor_user_id=None)
-        for provider_key, summary in result.items():
-            inbound = summary.get("inbound", {})
-            outbound = summary.get("outbound", {})
-            print(
-                f"{provider_key}: inbound={inbound.get('processed', 0)} "
-                f"(errors={inbound.get('errors', 0)}) "
-                f"outbound={outbound.get('processed', 0)} "
-                f"(errors={outbound.get('errors', 0)})"
-            )
-        if not result:
-            print("No active OTA channels to sync.")
-
-    @app.cli.command("process-automation-events")
-    def process_automation_events_command() -> None:
-        result = process_pending_automations()
-        print(
-            f"Automation events processed: {result['processed']} sent, "
-            f"{result['skipped']} skipped, {result['errors']} errors, "
-            f"{result.get('cleaned_up', 0)} cleaned up."
-        )
-
-    @app.cli.command("cleanup-audit-logs")
-    @click.option(
-        "--retention-days",
-        default=None,
-        type=int,
-        help="Delete audit logs older than N days. Defaults to AUDIT_LOG_RETENTION_DAYS.",
-    )
-    @click.option("--dry-run", is_flag=True, help="Report matching audit-log rows without deleting them.")
-    def cleanup_audit_logs_command(retention_days: int | None, dry_run: bool) -> None:
-        result = cleanup_audit_logs(retention_days=retention_days, dry_run=dry_run)
-        if not result["enabled"]:
-            print("Audit log cleanup skipped: AUDIT_LOG_RETENTION_DAYS is not set to a positive value.")
-            return
-        mode = "would delete" if dry_run else "deleted"
-        cutoff = result["cutoff"].isoformat() if result["cutoff"] else "n/a"
-        print(
-            f"Audit log cleanup: {result['deleted']} rows {mode}, "
-            f"retention_days={result['retention_days']}, cutoff={cutoff}"
-        )
-
-    @app.cli.command("process-waitlist")
-    @click.option("--max-age-days", default=14, type=int, help="Expire waitlist entries older than N days (default: 14).")
-    def process_waitlist_command(max_age_days: int) -> None:
-        """Promote eligible waitlisted reservations and expire stale ones."""
-        promo = promote_eligible_waitlist()
-        expiry = expire_stale_waitlist(max_age_days=max_age_days)
-        print(
-            f"Waitlist: {promo['promoted']} promoted, {promo['skipped']} skipped, "
-            f"{expiry['expired']} expired."
-        )
-
-    @app.cli.command("auto-cancel-no-shows")
-    @click.option("--date", "target_date", default=None, type=click.DateTime(formats=["%Y-%m-%d"]), help="Business date (default: today).")
-    def auto_cancel_no_shows_command(target_date: datetime | None) -> None:
-        """Auto-cancel same-day no-shows after cutoff hour."""
-        biz_date = target_date.date() if target_date else None
-        result = auto_cancel_no_shows(business_date=biz_date)
-        print(
-            f"No-show auto-cancel: {result['processed']} processed, "
-            f"{result['skipped']} skipped, {result['errors']} errors."
-            + (f" ({result.get('reason', '')})" if result.get("reason") else "")
-        )
-
-
-    # Check-in form helpers moved to front_desk_bp
-
-
-def register_routes(app: Flask) -> None:
-    """All routes have been extracted to blueprints. This function is kept
-    as a no-op for backward compatibility with create_app()."""
-    pass
-
-
-
-def current_language() -> str:
-    return normalize_language(getattr(g, "public_language", None) or request.args.get("lang") or request.form.get("language") or "th")
-
-
-def make_language_url(language_code: str) -> str:
-    args = request.args.to_dict(flat=False)
-    args["lang"] = [normalize_language(language_code)]
-    query_string = urlencode(args, doseq=True)
-    if query_string:
-        return f"{request.path}?{query_string}"
-    return request.path
-
-
-def _public_asset_url(value: str | None) -> str:
-    candidate = str(value or "").strip()
-    if not candidate:
-        return ""
-    if candidate.startswith(("http://", "https://", "data:")):
-        return candidate
-    if candidate.startswith("/"):
-        return f"{request.url_root.rstrip('/')}{candidate}"
-    return f"{request.url_root.rstrip('/')}/{candidate.lstrip('/')}"
-
-
-def _phone_href(phone_number: str) -> str:
-    normalized = "".join(character for character in str(phone_number or "") if character.isdigit() or character == "+")
-    if not normalized:
-        return ""
-    return f"tel:{normalized}"
-
-
-def _email_href(email_address: str) -> str:
-    normalized = str(email_address or "").strip()
-    if not normalized:
-        return ""
-    return f"mailto:{normalized}"
-
-
-def _contact_link(href: str, label: str) -> Markup | str:
-    safe_label = escape(label or "")
-    if not href:
-        return safe_label
-    return Markup('<a class="contact-link subtle" href="{0}">{1}</a>').format(escape(href), safe_label)
-
-
-def _hotel_structured_data(
-    *,
-    hotel_name: str,
-    hotel_address: str,
-    hotel_contact_phone: str,
-    hotel_contact_email: str,
-    hotel_check_in_time: str,
-    hotel_check_out_time: str,
-    share_image_url: str,
-) -> dict[str, object]:
-    structured_data: dict[str, object] = {
-        "@context": "https://schema.org",
-        "@type": "Hotel",
-        "name": hotel_name,
-        "url": booking_engine_base_url(),
-    }
-    if hotel_address:
-        structured_data["address"] = {
-            "@type": "PostalAddress",
-            "streetAddress": hotel_address,
-        }
-    if hotel_contact_phone:
-        structured_data["telephone"] = hotel_contact_phone
-    if hotel_contact_email:
-        structured_data["email"] = hotel_contact_email
-    if hotel_check_in_time:
-        structured_data["checkinTime"] = hotel_check_in_time
-    if hotel_check_out_time:
-        structured_data["checkoutTime"] = hotel_check_out_time
-    if share_image_url:
-        structured_data["image"] = share_image_url
-    return structured_data
-
-
-def ensure_csrf_token() -> str:
-    token = session.get("_csrf_token")
-    if not token:
-        token = secrets.token_urlsafe(32)
-        session["_csrf_token"] = token
-    return token
-
-
-def rotate_csrf_token() -> str:
-    token = secrets.token_urlsafe(32)
-    session["_csrf_token"] = token
-    return token
-
-
-def integration_shared_token(name: str) -> str:
-    config_key = f"{name.upper()}_SHARED_TOKEN"
-    default = current_app.config.get(config_key, "")
-    return str(get_setting_value(f"integrations.{name}.shared_token", default) or "").strip()
-
-
-def require_integration_token(name: str) -> None:
-    expected = integration_shared_token(name)
-    if not expected:
-        abort(503, description=f"{name} integration token is not configured.")
-    provided = (
-        request.headers.get("X-Integration-Token")
-        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    )
-    if not provided or not hmac.compare_digest(expected, provided):
-        abort(403)
-
-
-def resolve_reservation_identifier(
-    *,
-    reservation_id_value: str | None = None,
-    reservation_code_value: str | None = None,
-) -> Reservation:
-    if reservation_id_value:
-        try:
-            reservation = db.session.get(Reservation, UUID(reservation_id_value))
-        except ValueError as exc:
-            raise ValueError("Invalid reservation ID.") from exc
-        if reservation:
-            return reservation
-    if reservation_code_value:
-        reservation = db.session.execute(sa.select(Reservation).filter_by(reservation_code=reservation_code_value.strip())).scalar_one_or_none()
-        if reservation:
-            return reservation
-    raise ValueError("Reservation not found.")
 
 
 def resolve_public_room_type_query() -> RoomType | None:
@@ -1145,246 +582,6 @@ def public_request_form_defaults(*field_names: str) -> dict[str, str]:
     return {field_name: str(request.values.get(field_name) or "").strip() for field_name in field_names}
 
 
-def capture_public_booking_attribution() -> None:
-    existing = dict(session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
-    if not _should_track_booking_attribution():
-        g.booking_attribution = existing
-        return
-
-    incoming = booking_attribution_from_request()
-    if incoming:
-        base = {} if booking_request_starts_new_attribution() else existing
-        merged = merge_booking_attribution(base, incoming)
-    elif existing:
-        merged = existing
-    else:
-        merged = default_booking_attribution()
-
-    if merged:
-        merged["source_channel"] = resolve_booking_source_channel(merged.get("source_channel"), merged)
-        if merged != existing:
-            session[BOOKING_ATTRIBUTION_SESSION_KEY] = merged
-            session.modified = True
-        g.booking_attribution = merged
-        return
-
-    g.booking_attribution = {}
-
-
-def current_booking_attribution() -> dict:
-    return dict(getattr(g, "booking_attribution", None) or session.get(BOOKING_ATTRIBUTION_SESSION_KEY) or {})
-
-
-def booking_attribution_from_request() -> dict:
-    if not _should_track_booking_attribution():
-        return {}
-
-    referrer_host = external_referrer_host()
-    entry_page = clean_public_path(request.values.get("entry_page")) or clean_public_path(request.path)
-    source_label = derive_source_label(
-        request.values.get("source_label"),
-        request.values.get("utm_source"),
-        referrer_host,
-        request.values.get("source_channel"),
-    )
-    entry_cta_source = clean_tracking_value(request.values.get("cta_source") or request.values.get("entry_cta_source"))
-    incoming = {
-        "utm_source": clean_tracking_value(request.values.get("utm_source")),
-        "utm_medium": clean_tracking_value(request.values.get("utm_medium")),
-        "utm_campaign": clean_tracking_value(request.values.get("utm_campaign")),
-        "utm_content": clean_tracking_value(request.values.get("utm_content")),
-        "source_label": source_label,
-        "referrer_host": referrer_host or clean_tracking_value(request.values.get("referrer_host")),
-        "entry_page": entry_page,
-        "landing_path": clean_public_path(request.values.get("landing_path")) or entry_page,
-        "entry_cta_source": entry_cta_source,
-        "source_channel": clean_tracking_value(request.values.get("source_channel"), limit=40),
-    }
-    return {key: value for key, value in incoming.items() if value not in {None, ""}}
-
-
-def booking_request_starts_new_attribution() -> bool:
-    if request.method != "GET":
-        return False
-    if clean_public_path(request.args.get("entry_page")):
-        return False
-    if any(
-        clean_tracking_value(request.args.get(key))
-        for key in ("utm_source", "utm_medium", "utm_campaign", "utm_content", "source_label")
-    ):
-        return True
-    return bool(external_referrer_host() and request.endpoint in PUBLIC_BOOKING_LANDING_ENDPOINTS)
-
-
-def default_booking_attribution() -> dict:
-    if request.method != "GET" or request.endpoint not in PUBLIC_BOOKING_LANDING_ENDPOINTS:
-        return {}
-    entry_page = clean_public_path(request.path)
-    referrer_host = external_referrer_host()
-    default = {
-        "source_label": derive_source_label(None, None, referrer_host, "direct_web"),
-        "referrer_host": referrer_host,
-        "entry_page": entry_page,
-        "landing_path": entry_page,
-        "entry_cta_source": clean_tracking_value(request.args.get("cta_source") or request.args.get("entry_cta_source")),
-        "source_channel": "direct_web",
-    }
-    return {key: value for key, value in default.items() if value not in {None, ""}}
-
-
-def merge_booking_attribution(base: dict | None, incoming: dict | None) -> dict:
-    merged = dict(base or {})
-    for key, value in (incoming or {}).items():
-        if value in {None, ""}:
-            continue
-        if key in BOOKING_ATTRIBUTION_FIRST_TOUCH_KEYS and merged.get(key):
-            continue
-        merged[key] = value
-    return merged
-
-
-def clean_tracking_value(value: str | None, *, limit: int = 120) -> str | None:
-    cleaned = " ".join((value or "").strip().split())
-    if not cleaned:
-        return None
-    return cleaned[:limit]
-
-
-def clean_public_path(value: str | None) -> str | None:
-    candidate = (value or "").strip()
-    if not candidate:
-        return None
-    parsed = urlparse(candidate)
-    path = parsed.path or "/"
-    if not path.startswith("/"):
-        path = f"/{path.lstrip('/')}"
-    return path[:200]
-
-
-def normalize_tracking_slug(value: str | None) -> str | None:
-    cleaned = clean_tracking_value(value)
-    if not cleaned:
-        return None
-    return cleaned.lower().replace(" ", "_").replace("-", "_")
-
-
-def external_referrer_host() -> str | None:
-    referrer = (request.referrer or "").strip()
-    if not referrer:
-        return None
-    try:
-        host = (urlparse(referrer).hostname or "").lower()
-    except ValueError:
-        return None
-    if not host:
-        return None
-    request_host = (request.host.split(":", 1)[0] or "").lower()
-    app_base_url = str(current_app.config.get("APP_BASE_URL") or "").strip()
-    app_base_host = (urlparse(app_base_url).hostname or "").lower() if app_base_url else ""
-    if host in {request_host, app_base_host}:
-        return None
-    return host[:120]
-
-
-def derive_source_label(
-    explicit_source_label: str | None,
-    utm_source: str | None,
-    referrer_host: str | None,
-    source_channel: str | None,
-) -> str:
-    explicit = clean_tracking_value(explicit_source_label)
-    if explicit:
-        return explicit
-    utm = clean_tracking_value(utm_source)
-    if utm:
-        return utm
-    host = clean_tracking_value(referrer_host)
-    if host:
-        return referrer_source_label(host)
-    channel = normalize_tracking_slug(source_channel)
-    if channel in BOOKING_SOURCE_CHANNELS:
-        return "direct" if channel == "direct_web" else channel
-    return "direct"
-
-
-def referrer_source_label(referrer_host: str) -> str:
-    normalized = normalize_tracking_slug(referrer_host) or "referral"
-    if "google" in normalized:
-        return "google"
-    if "facebook" in normalized or normalized.startswith("fb"):
-        return "facebook"
-    if "instagram" in normalized:
-        return "instagram"
-    if "line" in normalized:
-        return "line"
-    if "whatsapp" in normalized:
-        return "whatsapp"
-    if "tiktok" in normalized:
-        return "tiktok"
-    labels = [part for part in referrer_host.split(".") if part and part not in {"www", "m", "l"}]
-    return labels[0][:80] if labels else referrer_host[:80]
-
-
-def resolve_booking_source_channel(explicit_source_channel: str | None, attribution: dict | None = None) -> str:
-    explicit = normalize_tracking_slug(explicit_source_channel)
-    if explicit in BOOKING_SOURCE_CHANNELS:
-        return explicit
-
-    attribution = attribution or {}
-    candidates = [
-        normalize_tracking_slug(attribution.get("source_label")),
-        normalize_tracking_slug(attribution.get("utm_source")),
-        normalize_tracking_slug(attribution.get("referrer_host")),
-    ]
-    for candidate in candidates:
-        if not candidate:
-            continue
-        if candidate in {"direct", "direct_web"}:
-            return "direct_web"
-        if candidate in {"google_business", "gmb"}:
-            return "google_business"
-        if candidate in {"facebook", "fb"}:
-            return "facebook"
-        if "line" == candidate:
-            return "line"
-        if "whatsapp" == candidate:
-            return "whatsapp"
-        if candidate in {"qr", "qr_code"}:
-            return "qr"
-        if candidate in {"referral", "partner", "affiliate"}:
-            return "referral"
-        return "referral"
-    return "direct_web"
-
-
-def _should_track_booking_attribution() -> bool:
-    if request.endpoint in {None, "static", *PUBLIC_WEBHOOK_ENDPOINTS}:
-        return False
-    if is_staff_or_provider_endpoint(request.endpoint):
-        return False
-    return request.endpoint in BOOKING_ATTRIBUTION_TRACKED_ENDPOINTS
-
-
-def source_metadata_from_request(language: str, fallback: dict | None = None) -> dict:
-    metadata = merge_booking_attribution(fallback, current_booking_attribution())
-    metadata = merge_booking_attribution(metadata, booking_attribution_from_request())
-    if not metadata:
-        metadata = dict(fallback or {}) or default_booking_attribution()
-    if not metadata.get("entry_page"):
-        metadata["entry_page"] = clean_public_path(request.path) or "/"
-    if not metadata.get("landing_path"):
-        metadata["landing_path"] = metadata["entry_page"]
-    if not metadata.get("source_label"):
-        metadata["source_label"] = derive_source_label(
-            None,
-            metadata.get("utm_source"),
-            metadata.get("referrer_host"),
-            metadata.get("source_channel"),
-        )
-    metadata["device_class"] = "mobile" if "Mobile" in request.user_agent.string else "desktop"
-    metadata["language"] = language
-    metadata["created_from_public_booking_flow"] = True
-    return {key: value for key, value in metadata.items() if value not in {None, ""}}
 
 
 def public_booking_form_context(
@@ -1439,262 +636,4 @@ def public_booking_form_context(
             "privacy": policy_text("privacy_notice", language, ""),
         },
     }
-def front_desk_board_filters_from_request() -> FrontDeskBoardFilters:
-    start_date = parse_request_date_arg("start_date", default=date.today())
-    days = parse_request_int_arg("days", default=14, minimum=7, maximum=30)
-    if days not in {7, 14, 30}:
-        abort(400, description="Invalid days query parameter.")
-    return FrontDeskBoardFilters(
-        start_date=start_date,
-        days=days,
-        q=(request.args.get("q") or "").strip(),
-        room_type_id=parse_request_uuid_arg("room_type_id") or "",
-        show_unallocated=request.args.get("show_unallocated", "1") != "0",
-        show_closed=request.args.get("show_closed") == "1",
-        group_by=request.args.get("group_by", "type") if request.args.get("group_by") in {"type", "floor"} else "type",
-    )
-
-
-def front_desk_board_context(
-    filters: FrontDeskBoardFilters,
-    *,
-    ical_import_report: dict | None = None,
-) -> dict:
-    board = build_front_desk_board(filters)
-    back_url = front_desk_board_url(filters)
-    hydrate_front_desk_board_urls(board, back_url=back_url, board_date=filters.start_date)
-    room_types = db.session.execute(sa.select(RoomType).order_by(RoomType.code.asc())).scalars().all()
-    board_v2_enabled = front_desk_board_v2_enabled()
-    user = g.current_staff_user
-    board_state = extract_front_desk_board_state(user.preferences.preferences if user and user.preferences else {})
-
-    return {
-        "board": board,
-        "board_v2_enabled": board_v2_enabled,
-        "filters": filters,
-        "room_types": room_types,
-        "user_density": board_state["density"],
-        "board_state": board_state,
-        "default_checkout_date": filters.start_date + timedelta(days=1),
-        "can_create": can("reservation.create"),
-        "can_edit": can("reservation.edit"),
-        "can_manage_closures": can("operations.override"),
-        "board_url": url_for("front_desk.staff_front_desk_board"),
-        "board_fragment_url": url_for("front_desk.staff_front_desk_board_fragment"),
-        "board_data_url": url_for("front_desk.staff_front_desk_board_data"),
-        "board_rooms_url": url_for("front_desk.staff_front_desk_board_rooms"),
-        "board_export_url": url_for("front_desk.staff_front_desk_board_export_ical"),
-        "board_filter_query": front_desk_board_filter_query(filters),
-        "board_current_url": back_url,
-        "ical_import_report": ical_import_report,
-    }
-
-
-def front_desk_board_filter_query(filters: FrontDeskBoardFilters) -> dict[str, str]:
-    query = {
-        "start_date": filters.start_date.isoformat(),
-        "days": str(filters.days),
-        "show_unallocated": "1" if filters.show_unallocated else "0",
-    }
-    if filters.q:
-        query["q"] = filters.q
-    if filters.room_type_id:
-        query["room_type_id"] = filters.room_type_id
-    if filters.show_closed:
-        query["show_closed"] = "1"
-    if filters.group_by == "floor":
-        query["group_by"] = "floor"
-    return query
-
-
-def front_desk_board_url(filters: FrontDeskBoardFilters) -> str:
-    return url_for("front_desk.staff_front_desk_board", **front_desk_board_filter_query(filters))
-
-
-def hydrate_front_desk_board_urls(board: dict, *, back_url: str, board_date: date) -> None:
-    for group in board.get("groups", []):
-        reassign_options = group.get("room_options", [])
-        for row in group.get("rows", []):
-            for block in row.get("blocks", []):
-                block["backUrl"] = back_url
-                block["returnAnchor"] = row.get("anchor_id")
-                reservation_id = block.get("reservationId")
-                override_id = block.get("overrideId")
-                if reservation_id:
-                    block["detailUrl"] = url_for(
-                        "staff_reservations.staff_reservation_detail",
-                        reservation_id=UUID(reservation_id),
-                        back=back_url,
-                    )
-                    block["frontDeskUrl"] = url_for(
-                        "front_desk.staff_front_desk_detail",
-                        reservation_id=UUID(reservation_id),
-                        back=back_url,
-                        date=board_date.isoformat(),
-                    )
-                    block["reassignUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_assign_room",
-                        reservation_id=UUID(reservation_id),
-                    )
-                    block["moveUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_move_reservation",
-                        reservation_id=UUID(reservation_id),
-                    )
-                    block["resizeUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_resize_reservation",
-                        reservation_id=UUID(reservation_id),
-                    )
-                    block["datesFormUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_change_dates",
-                        reservation_id=UUID(reservation_id),
-                    )
-                    block["reassignOptions"] = reassign_options
-                if override_id:
-                    block["releaseUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_release_closure",
-                        override_id=UUID(override_id),
-                    )
-                    block["editUrl"] = url_for(
-                        "front_desk.staff_front_desk_board_update_closure",
-                        override_id=UUID(override_id),
-                    )
-                    block["canRelease"] = True
-                    block["canEdit"] = True
-
-
-def _front_desk_filters_payload(filters: FrontDeskBoardFilters) -> dict[str, str | bool]:
-    return {
-        "startDate": filters.start_date.isoformat(),
-        "days": filters.days,
-        "q": filters.q,
-        "roomTypeId": filters.room_type_id,
-        "showUnallocated": filters.show_unallocated,
-        "showClosed": filters.show_closed,
-        "groupBy": filters.group_by,
-    }
-
-
-class BoardMutationRequestError(ValueError):
-    """Raised when a planning-board request payload is malformed."""
-
-
-def board_request_payload() -> dict:
-    if request.is_json:
-        payload = request.get_json(silent=True) or {}
-        if isinstance(payload, dict):
-            return payload
-        abort(400, description="Invalid JSON payload.")
-    return request.form.to_dict()
-
-
-def parse_board_date(payload: dict, label: str, *field_names: str) -> date:
-    candidate = _first_board_payload_value(payload, *field_names)
-    if not candidate:
-        raise BoardMutationRequestError(f"{label.capitalize()} is required.")
-    try:
-        return date.fromisoformat(str(candidate))
-    except ValueError as exc:
-        raise BoardMutationRequestError(f"{label.capitalize()} must be a valid ISO date.") from exc
-
-
-def parse_board_room_id(payload: dict, *, required: bool) -> UUID | None:
-    candidate = _first_board_payload_value(payload, "room_id", "roomId")
-    if candidate is None:
-        if required:
-            raise BoardMutationRequestError("Room is required.")
-        return None
-    candidate_text = str(candidate).strip()
-    if not candidate_text or candidate_text.lower() == "null":
-        if required:
-            raise BoardMutationRequestError("Room is required.")
-        return None
-    try:
-        return UUID(candidate_text)
-    except ValueError as exc:
-        raise BoardMutationRequestError("Room identifier is invalid.") from exc
-
-
-def parse_board_reason(payload: dict) -> str | None:
-    candidate = _first_board_payload_value(payload, "reason", "moveReason")
-    if candidate is None:
-        return None
-    return str(candidate).strip() or None
-
-
-def _first_board_payload_value(payload: dict, *field_names: str):
-    for field_name in field_names:
-        if field_name in payload:
-            return payload.get(field_name)
-    return None
-
-
-def read_ical_upload_payload() -> bytes:
-    upload = request.files.get("ical_file")
-    if upload and upload.filename:
-        payload = upload.read()
-        if payload:
-            return payload
-    text_payload = (request.form.get("ical_text") or "").strip()
-    if text_payload:
-        return text_payload.encode("utf-8")
-    raise ValueError("Provide an .ics file or paste iCalendar content.")
-
-
-def record_board_mutation_rejection(
-    *,
-    actor_user_id: UUID,
-    entity_table: str,
-    entity_id: str,
-    action: str,
-    before_data: dict | None,
-    payload: dict,
-    reason: str,
-) -> None:
-    db.session.rollback()
-    write_audit_log(
-        actor_user_id=actor_user_id,
-        entity_table=entity_table,
-        entity_id=entity_id,
-        action=action,
-        before_data=before_data,
-        after_data={"request": payload, "failure_reason": reason},
-    )
-    write_activity_log(
-        actor_user_id=actor_user_id,
-        event_type="front_desk.board_mutation_rejected",
-        entity_table=entity_table,
-        entity_id=entity_id,
-        metadata={"action": action, "failure_reason": reason},
-    )
-    db.session.commit()
-
-
-def _reservation_snapshot_for_audit(reservation_id: UUID) -> dict | None:
-    reservation = db.session.get(Reservation, reservation_id)
-    if not reservation:
-        return None
-    return {
-        "reservation_code": reservation.reservation_code,
-        "status": reservation.current_status,
-        "assigned_room_id": str(reservation.assigned_room_id) if reservation.assigned_room_id else None,
-        "check_in_date": reservation.check_in_date.isoformat(),
-        "check_out_date": reservation.check_out_date.isoformat(),
-    }
-
-
-def _inventory_override_snapshot_for_audit(override_id: UUID) -> dict | None:
-    override = db.session.get(InventoryOverride, override_id)
-    if not override:
-        return None
-    return {
-        "name": override.name,
-        "scope_type": override.scope_type,
-        "override_action": override.override_action,
-        "room_id": str(override.room_id) if override.room_id else None,
-        "room_type_id": str(override.room_type_id) if override.room_type_id else None,
-        "start_date": override.start_date.isoformat(),
-        "end_date": override.end_date.isoformat(),
-        "is_active": override.is_active,
-    }
-
 

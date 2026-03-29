@@ -593,7 +593,7 @@ def test_postgres_webhook_processing_remains_idempotent_under_repeated_calls():
             connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
             connection.execute(sa.text("CREATE SCHEMA public"))
         upgrade(directory=str(MIGRATIONS_DIR))
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=True)
         reservation = create_public_reservation()
         request_row = create_or_reuse_deposit_request(reservation.id, actor_user_id=None, send_email=False, language="en", source="test")
         payload = __import__("json").dumps(
@@ -637,7 +637,7 @@ def test_postgres_webhook_processing_remains_idempotent_under_concurrent_calls()
             connection.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
             connection.execute(sa.text("CREATE SCHEMA public"))
         upgrade(directory=str(MIGRATIONS_DIR))
-        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"])
+        seed_all(app.config["INVENTORY_BOOTSTRAP_DAYS"], include_demo_data=True)
         reservation = create_public_reservation()
         request_row = create_or_reuse_deposit_request(reservation.id, actor_user_id=None, send_email=False, language="en", source="test")
         payload = __import__("json").dumps(

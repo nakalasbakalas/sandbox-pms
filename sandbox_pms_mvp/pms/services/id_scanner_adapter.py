@@ -10,7 +10,6 @@ Configuration:
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, Protocol, runtime_checkable
 
 from flask import current_app

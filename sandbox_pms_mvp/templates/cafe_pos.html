@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Café POS{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+{% if current_shift %}
+<p class="pill subtle" style="margin-bottom:8px;">Shift open since {{ current_shift.opened_at.strftime('%H:%M') }}</p>
+{% else %}
+<p class="pill subtle" style="margin-bottom:8px;color:var(--danger);">No shift open — <a href="{{ url_for('cafe.cafe_shifts') }}">open a shift</a></p>
+{% endif %}
+
+<div class="grid three gap-lg" id="pos-layout">
+  <!-- LEFT: Categories -->
+  <section class="card" id="pos-categories">
+    <div class="card-head"><h3>Categories</h3></div>
+    <div class="grid two" style="padding:8px;gap:6px;">
+      {% for cat in categories %}
+      <button type="button" class="button{% if selected_category_id == cat.id|string or (loop.first and not selected_category_id) %} active{% else %} secondary{% endif %}"
+              data-category-id="{{ cat.id }}"
+              onclick="posLoadCategory('{{ cat.id }}', this)"
+              style="min-height:44px;">{{ cat.name }}</button>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- CENTER: Items grid -->
+  <section class="card" id="pos-items">
+    <div class="card-head"><h3>Items</h3></div>
+    <div class="grid three" id="items-grid" style="padding:8px;gap:6px;">
+      {% for item in items %}
+      {% if item.is_available %}
+      <button type="button" class="button secondary"
+              data-item-id="{{ item.id }}"
+              data-item-name="{{ item.name }}"
+              data-item-price="{{ item.price }}"
+              onclick="posAddItem('{{ item.id }}','{{ item.name }}',{{ item.price }})"
+              style="min-height:56px;text-align:center;line-height:1.2;">
+        {{ item.name }}<br><small class="muted">฿{{ item.price }}</small>
+      </button>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- RIGHT: Order cart -->
+  <section class="card" id="pos-cart">
+    <div class="card-head"><h3>Current Order</h3></div>
+    <div style="padding:8px;">
+      <!-- Order type & customer -->
+      <div class="grid three" style="gap:6px;margin-bottom:8px;">
+        <select id="pos-order-type" style="padding:6px;">
+          <option value="dine_in">Dine-in</option>
+          <option value="takeaway">Takeaway</option>
+          <option value="delivery">Delivery</option>
+        </select>
+        <input id="pos-customer" type="text" placeholder="Customer name" style="padding:6px;">
+        <input id="pos-table" type="text" placeholder="Table" style="padding:6px;">
+      </div>
+
+      <!-- Cart items list -->
+      <div id="cart-items" style="min-height:120px;border:1px solid var(--border);border-radius:4px;padding:4px;margin-bottom:8px;">
+        <p class="muted center" id="cart-empty">No items added</p>
+      </div>
+
+      <!-- Total -->
+      <div class="split-row" style="font-weight:600;font-size:1.1rem;margin-bottom:8px;">
+        <span>Total</span>
+        <span id="cart-total">฿0</span>
+      </div>
+
+      <!-- Notes -->
+      <textarea id="pos-notes" placeholder="Order notes..." rows="2" style="width:100%;margin-bottom:8px;padding:6px;"></textarea>
+
+      <!-- Hidden form for submission -->
+      <form id="pos-form" method="post" action="{{ url_for('cafe.cafe_order_create') }}">
+        {{ csrf_input() }}
+        <input type="hidden" name="order_type" id="form-order-type">
+        <input type="hidden" name="customer_name" id="form-customer">
+        <input type="hidden" name="table_label" id="form-table">
+        <input type="hidden" name="notes" id="form-notes">
+        <div id="form-items"></div>
+        <div class="actions" style="gap:6px;">
+          <button type="button" class="button secondary" onclick="posClearCart()">Clear</button>
+          <button type="submit" class="button" id="btn-create-order">Send to Prep</button>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+
+{% block extra_scripts %}
+<script>
+(function(){
+  var cart = [];
+
+  window.posLoadCategory = function(catId, btn) {
+    document.querySelectorAll('#pos-categories button').forEach(function(b){ b.className = 'button secondary'; });
+    btn.className = 'button active';
+    fetch('{{ url_for("cafe.cafe_api_items") }}?category_id=' + catId)
+      .then(function(r){ return r.json(); })
+      .then(function(items){
+        var grid = document.getElementById('items-grid');
+        grid.innerHTML = '';
+        items.forEach(function(item){
+          if (!item.is_available) return;
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'button secondary';
+          b.style.cssText = 'min-height:56px;text-align:center;line-height:1.2;';
+          b.setAttribute('data-item-id', item.id);
+          b.setAttribute('data-item-name', item.name);
+          b.setAttribute('data-item-price', item.price);
+          b.onclick = function(){ posAddItem(item.id, item.name, item.price); };
+          b.innerHTML = item.name + '<br><small class="muted">฿' + item.price + '</small>';
+          grid.appendChild(b);
+        });
+      });
+  };
+
+  window.posAddItem = function(id, name, price) {
+    var existing = cart.find(function(c){ return c.id === id; });
+    if (existing) {
+      existing.qty += 1;
+    } else {
+      cart.push({ id: id, name: name, price: price, qty: 1, notes: '', modifiers: '' });
+    }
+    renderCart();
+  };
+
+  window.posRemoveItem = function(idx) {
+    cart.splice(idx, 1);
+    renderCart();
+  };
+
+  window.posChangeQty = function(idx, delta) {
+    cart[idx].qty += delta;
+    if (cart[idx].qty < 1) cart.splice(idx, 1);
+    renderCart();
+  };
+
+  window.posClearCart = function() {
+    cart = [];
+    renderCart();
+  };
+
+  function renderCart() {
+    var el = document.getElementById('cart-items');
+    var empty = document.getElementById('cart-empty');
+    if (cart.length === 0) {
+      el.innerHTML = '<p class="muted center" id="cart-empty">No items added</p>';
+      document.getElementById('cart-total').textContent = '฿0';
+      return;
+    }
+    var total = 0;
+    var html = '';
+    cart.forEach(function(item, idx){
+      var line = item.price * item.qty;
+      total += line;
+      html += '<div class="split-row" style="padding:4px 0;border-bottom:1px solid var(--border);">';
+      html += '<div>';
+      html += '<strong>' + item.name + '</strong>';
+      html += ' <small class="muted">x' + item.qty + '</small>';
+      html += '</div>';
+      html += '<div style="display:flex;align-items:center;gap:4px;">';
+      html += '<span>฿' + line + '</span>';
+      html += '<button type="button" class="button tiny secondary" onclick="posChangeQty(' + idx + ',-1)" style="padding:2px 6px;">−</button>';
+      html += '<button type="button" class="button tiny secondary" onclick="posChangeQty(' + idx + ',1)" style="padding:2px 6px;">+</button>';
+      html += '<button type="button" class="button tiny secondary" onclick="posRemoveItem(' + idx + ')" style="padding:2px 6px;color:var(--danger);">✕</button>';
+      html += '</div></div>';
+    });
+    el.innerHTML = html;
+    document.getElementById('cart-total').textContent = '฿' + total;
+  }
+
+  document.getElementById('pos-form').addEventListener('submit', function(e){
+    if (cart.length === 0) { e.preventDefault(); alert('Add items to the order.'); return; }
+    document.getElementById('form-order-type').value = document.getElementById('pos-order-type').value;
+    document.getElementById('form-customer').value = document.getElementById('pos-customer').value;
+    document.getElementById('form-table').value = document.getElementById('pos-table').value;
+    document.getElementById('form-notes').value = document.getElementById('pos-notes').value;
+    var container = document.getElementById('form-items');
+    container.innerHTML = '';
+    cart.forEach(function(item){
+      var inp = function(n, v) {
+        var i = document.createElement('input');
+        i.type = 'hidden'; i.name = n; i.value = v;
+        container.appendChild(i);
+      };
+      inp('item_id', item.id);
+      inp('item_quantity', item.qty);
+      inp('item_notes', item.notes);
+      inp('item_modifiers', item.modifiers);
+    });
+  });
+})();
+</script>
+{% endblock %}
+{% endblock %}

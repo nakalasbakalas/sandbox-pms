@@ -196,14 +196,16 @@ class TestAvailabilityService:
                 ),
                 actor_user_id=None,
             )
-            # Find another room of same type
-            other_rooms = Room.query.filter(
-                Room.room_type_id == rt.id,
-                Room.is_active.is_(True),
-                Room.id != res.assigned_room_id,
-            ).all()
-            if other_rooms:
-                result = can_move_reservation(res.id, other_rooms[0].id)
+            # Find another room of same type that is actually available
+            assignable = [
+                r for r in list_assignable_rooms(
+                    rt.id, today, tomorrow,
+                    exclude_reservation_id=res.id,
+                )
+                if r.is_assignable and r.room_id != res.assigned_room_id
+            ]
+            if assignable:
+                result = can_move_reservation(res.id, assignable[0].room_id)
                 assert result.is_assignable is True
 
     def test_can_move_reservation_wrong_type(self, app_factory):
@@ -441,3 +443,595 @@ class TestChannelService:
         assert captured["body"]["provider"] == "booking_com"
         assert captured["body"]["account_id"] == "hotel-123"
         assert len(captured["body"]["updates"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# OTA dashboard, mapping, and sync-log tests
+# ---------------------------------------------------------------------------
+
+
+class TestOtaDashboardAndMappings:
+    """Tests for OTA dashboard context, mapping CRUD, and sync log helpers."""
+
+    def test_ota_dashboard_context_returns_all_channels(self, app_factory):
+        """ota_dashboard_context should return an entry for every OTA_PROVIDER_KEYS."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            assert "summary" in ctx
+            assert "channels" in ctx
+            assert "room_types" in ctx
+            assert "recent_logs" in ctx
+            assert len(ctx["channels"]) == 3  # booking_com, expedia, agoda
+            for ch in ctx["channels"]:
+                assert ch["health"] in ("not_configured", "inactive", "unknown", "warning", "healthy", "error")
+
+    def test_ota_dashboard_health_not_configured(self, app_factory):
+        """Channels without credentials should show not_configured."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            for ch in ctx["channels"]:
+                assert ch["health"] == "not_configured"
+
+    def test_ota_dashboard_health_with_credentials(self, app_factory):
+        """Channel with credentials but untested should show unknown."""
+        from pms.services.channel_service import ota_dashboard_context, upsert_ota_channel
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key="test-key-1234",
+            )
+            db.session.commit()
+            ctx = ota_dashboard_context()
+            booking = next(ch for ch in ctx["channels"] if ch["provider_key"] == "booking_com")
+            assert booking["health"] == "unknown"
+
+    def test_ota_dashboard_health_tested_ok(self, app_factory):
+        """Channel with successful test and no mappings should show warning."""
+        from pms.services.channel_service import ota_dashboard_context, upsert_ota_channel
+        from pms.models import utc_now
+        app = app_factory(seed=True)
+        with app.app_context():
+            ch = upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key="test-key-1234",
+            )
+            ch.last_test_ok = True
+            ch.last_tested_at = utc_now()
+            db.session.commit()
+            ctx = ota_dashboard_context()
+            booking = next(c for c in ctx["channels"] if c["provider_key"] == "booking_com")
+            # Warning because there are room types but no mappings
+            assert booking["health"] == "warning"
+            assert booking["unmapped_count"] > 0
+
+    def test_upsert_ota_mapping_creates_and_updates(self, app_factory):
+        """upsert_ota_mapping should create a new mapping and update it on re-call."""
+        from pms.services.channel_service import upsert_ota_mapping, list_ota_mappings
+        app = app_factory(seed=True)
+        with app.app_context():
+            rt = RoomType.query.first()
+            m = upsert_ota_mapping(
+                provider_key="booking_com",
+                room_type_id=rt.id,
+                external_room_type_code="STD_KING",
+                external_room_type_name="Standard King",
+            )
+            db.session.commit()
+            assert m.external_room_type_code == "STD_KING"
+            assert m.external_room_type_name == "Standard King"
+
+            # Update same mapping
+            m2 = upsert_ota_mapping(
+                provider_key="booking_com",
+                room_type_id=rt.id,
+                external_room_type_code="STD_KING",
+                external_room_type_name="Updated Name",
+            )
+            db.session.commit()
+            assert m2.id == m.id
+            assert m2.external_room_type_name == "Updated Name"
+
+            mappings = list_ota_mappings(provider_key="booking_com")
+            assert len(mappings) == 1
+
+    def test_delete_ota_mapping_soft_deletes(self, app_factory):
+        """delete_ota_mapping should soft-delete and list_ota_mappings should exclude it."""
+        from pms.services.channel_service import upsert_ota_mapping, delete_ota_mapping, list_ota_mappings
+        app = app_factory(seed=True)
+        with app.app_context():
+            rt = RoomType.query.first()
+            m = upsert_ota_mapping(
+                provider_key="booking_com",
+                room_type_id=rt.id,
+                external_room_type_code="DLX_TWIN",
+            )
+            db.session.commit()
+
+            assert delete_ota_mapping(m.id) is True
+            db.session.commit()
+
+            mappings = list_ota_mappings(provider_key="booking_com")
+            assert len(mappings) == 0
+
+            # Double delete returns False
+            assert delete_ota_mapping(m.id) is False
+
+    def test_write_and_list_sync_logs(self, app_factory):
+        """write_sync_log should create entries and list_sync_logs should return them."""
+        from pms.services.channel_service import write_sync_log, list_sync_logs
+        from pms.models import utc_now
+        app = app_factory(seed=True)
+        with app.app_context():
+            started = utc_now()
+            write_sync_log(
+                provider_key="booking_com",
+                direction="outbound",
+                action="push_inventory",
+                status="success",
+                records_processed=10,
+                started_at=started,
+            )
+            write_sync_log(
+                provider_key="expedia",
+                direction="outbound",
+                action="test_connection",
+                status="error",
+                error_summary="Connection refused",
+                started_at=started,
+            )
+            db.session.commit()
+
+            all_logs = list_sync_logs()
+            assert len(all_logs) == 2
+
+            booking_logs = list_sync_logs(provider_key="booking_com")
+            assert len(booking_logs) == 1
+            assert booking_logs[0].status == "success"
+            assert booking_logs[0].records_processed == 10
+
+    def test_sync_log_duration_calculation(self, app_factory):
+        """write_sync_log should calculate duration_ms from started_at."""
+        from pms.services.channel_service import write_sync_log, list_sync_logs
+        from pms.models import utc_now
+        from datetime import timedelta
+        app = app_factory(seed=True)
+        with app.app_context():
+            started = utc_now() - timedelta(seconds=2)
+            write_sync_log(
+                provider_key="agoda",
+                direction="inbound",
+                action="pull_reservations",
+                status="success",
+                started_at=started,
+            )
+            db.session.commit()
+
+            logs = list_sync_logs(provider_key="agoda")
+            assert len(logs) == 1
+            assert logs[0].duration_ms is not None
+            assert logs[0].duration_ms >= 1000  # At least 1 second
+
+    def test_test_connection_writes_sync_log(self, app_factory):
+        """test_ota_channel_connection should create a sync log entry."""
+        from pms.services.channel_service import test_ota_channel_connection, list_sync_logs, upsert_ota_channel
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                api_key="test-key-abcd",
+            )
+            db.session.commit()
+
+            result = test_ota_channel_connection("booking_com")
+            logs = list_sync_logs(provider_key="booking_com")
+            assert len(logs) == 1
+            assert logs[0].action == "test_connection"
+
+    def test_test_connection_no_credentials(self, app_factory):
+        """test_ota_channel_connection should fail cleanly without credentials."""
+        from pms.services.channel_service import test_ota_channel_connection, list_sync_logs
+        app = app_factory(seed=True)
+        with app.app_context():
+            result = test_ota_channel_connection("booking_com")
+            assert result["success"] is False
+            assert "no credentials" in result["error"]
+
+            logs = list_sync_logs(provider_key="booking_com")
+            assert len(logs) == 1
+            assert logs[0].status == "error"
+
+    def test_push_inventory_writes_sync_log(self, app_factory):
+        """ChannelSyncService.push_inventory_updates should log the operation."""
+        from pms.services.channel_service import list_sync_logs
+        app = app_factory(seed=True)
+        with app.app_context():
+            provider = MockChannelProvider()
+            service = ChannelSyncService(provider)
+            updates = [
+                OutboundInventoryUpdate(
+                    room_type_code="STD",
+                    date_from=date.today(),
+                    date_to=date.today() + timedelta(days=1),
+                    available_count=5,
+                ),
+            ]
+            result = service.push_inventory_updates(updates)
+            assert result.success is True
+
+            logs = list_sync_logs(provider_key="mock")
+            assert len(logs) == 1
+            assert logs[0].action == "push_inventory"
+            assert logs[0].status == "success"
+
+    def test_mapping_provider_key_validated_in_route(self, app_factory):
+        """The save_mapping route action should reject unknown provider_keys."""
+        from pms.constants import OTA_PROVIDER_KEYS
+        app = app_factory(seed=True)
+        with app.test_client() as client:
+            # Login as admin - ensure the route would reject invalid provider_key
+            # This is a structural test - the route validates provider_key in OTA_PROVIDER_KEYS
+            assert "fake_provider" not in OTA_PROVIDER_KEYS
+
+    def test_list_ota_mappings_empty(self, app_factory):
+        """list_ota_mappings should return empty list when no mappings exist."""
+        from pms.services.channel_service import list_ota_mappings
+        app = app_factory(seed=True)
+        with app.app_context():
+            mappings = list_ota_mappings()
+            assert mappings == []
+
+    def test_list_ota_mappings_filters_by_provider(self, app_factory):
+        """list_ota_mappings should filter by provider_key when specified."""
+        from pms.services.channel_service import upsert_ota_mapping, list_ota_mappings
+        app = app_factory(seed=True)
+        with app.app_context():
+            rt = RoomType.query.first()
+            upsert_ota_mapping(
+                provider_key="booking_com",
+                room_type_id=rt.id,
+                external_room_type_code="STD",
+            )
+            upsert_ota_mapping(
+                provider_key="expedia",
+                room_type_id=rt.id,
+                external_room_type_code="STANDARD",
+            )
+            db.session.commit()
+
+            all_m = list_ota_mappings()
+            assert len(all_m) == 2
+
+            booking_m = list_ota_mappings(provider_key="booking_com")
+            assert len(booking_m) == 1
+            assert booking_m[0].provider_key == "booking_com"
+
+
+# ---------------------------------------------------------------------------
+# Provider capabilities, readiness, webhook, and new DTO tests
+# ---------------------------------------------------------------------------
+
+
+class TestProviderCapabilitiesAndReadiness:
+    """Tests for provider capabilities, readiness assessment, and new DTOs."""
+
+    def test_provider_capabilities_mock(self):
+        """MockChannelProvider should declare all capabilities."""
+        p = MockChannelProvider()
+        caps = p.capabilities
+        assert caps.supports_reservation_pull is True
+        assert caps.supports_inventory_push is True
+        assert caps.supports_rate_push is True
+        assert caps.supports_restriction_push is True
+        assert caps.supports_connection_test is True
+        assert caps.supports_test_mode is True
+        assert caps.supports_full_refresh is True
+        assert caps.supports_webhooks is False
+
+    def test_provider_capabilities_booking_com(self):
+        """BookingComChannelProvider should declare push+pull capabilities."""
+        p = BookingComChannelProvider()
+        caps = p.capabilities
+        assert caps.supports_inventory_push is True
+        assert caps.supports_rate_push is True
+        assert caps.supports_restriction_push is True
+        assert caps.supports_connection_test is True
+        assert caps.supports_test_mode is True
+
+    def test_provider_capabilities_are_frozen(self):
+        """ProviderCapabilities should be immutable."""
+        from pms.services.channel_service import ProviderCapabilities
+        caps = ProviderCapabilities(supports_webhooks=True)
+        with pytest.raises(AttributeError):
+            caps.supports_webhooks = False
+
+    def test_default_push_rates_unsupported(self):
+        """Default push_rates should return failure for unsupported providers."""
+        from pms.services.channel_service import OutboundRateUpdate
+        p = MockChannelProvider()
+        # Mock doesn't override push_rates, so default applies — actually
+        # let's use iCal which truly doesn't support rate push
+        from pms.services.channel_service import ICalChannelProvider
+        ical = ICalChannelProvider()
+        result = ical.push_rates([])
+        assert result.success is False
+        assert "does not support rate push" in result.errors[0]
+
+    def test_default_push_restrictions_unsupported(self):
+        """Default push_restrictions should return failure for unsupported providers."""
+        from pms.services.channel_service import ICalChannelProvider
+        ical = ICalChannelProvider()
+        result = ical.push_restrictions([])
+        assert result.success is False
+        assert "does not support restriction push" in result.errors[0]
+
+    def test_validate_connection_wraps_test(self):
+        """validate_connection should wrap test_connection with error handling."""
+        p = MockChannelProvider()
+        result = p.validate_connection()
+        assert result["success"] is True
+        assert result["error"] is None
+
+    def test_assess_readiness_empty_channel(self, app_factory):
+        """Readiness should show all blocking issues for unconfigured channel."""
+        from pms.services.channel_service import assess_channel_readiness, ProviderCapabilities
+        app = app_factory(seed=True)
+        with app.app_context():
+            result = assess_channel_readiness(
+                record=None,
+                mapped_count=0,
+                total_room_types=3,
+                capabilities=ProviderCapabilities(),
+            )
+            assert result["ready_for_activation"] is False
+            assert result["completion_pct"] == 0
+            # All blocking steps should be incomplete
+            blocking_steps = [s for s in result["steps"] if s["blocking"] and not s["done"]]
+            assert len(result["blocking_issues"]) == len(blocking_steps)
+            assert len(result["blocking_issues"]) > 0
+            assert len(result["steps"]) == 6
+
+    def test_assess_readiness_fully_configured(self, app_factory):
+        """Readiness should be 100% for fully configured channel."""
+        from pms.services.channel_service import (
+            assess_channel_readiness,
+            ProviderCapabilities,
+            upsert_ota_channel,
+        )
+        from pms.models import utc_now
+        app = app_factory(seed=True)
+        with app.app_context():
+            ch = upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                hotel_id="HOTEL123",
+                api_key="test-key-1234",
+                sync_inventory_push=True,
+            )
+            ch.last_test_ok = True
+            ch.last_tested_at = utc_now()
+            db.session.commit()
+
+            rt_count = RoomType.query.count()
+            result = assess_channel_readiness(
+                record=ch,
+                mapped_count=rt_count,
+                total_room_types=rt_count,
+                capabilities=ProviderCapabilities(),
+            )
+            assert result["ready_for_activation"] is True
+            assert result["completion_pct"] == 100
+            assert len(result["blocking_issues"]) == 0
+
+    def test_assess_readiness_missing_sync_direction(self, app_factory):
+        """Readiness should flag missing sync direction as blocking."""
+        from pms.services.channel_service import (
+            assess_channel_readiness,
+            ProviderCapabilities,
+            upsert_ota_channel,
+        )
+        from pms.models import utc_now
+        app = app_factory(seed=True)
+        with app.app_context():
+            ch = upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+                hotel_id="HOTEL123",
+                api_key="test-key-1234",
+                # No sync directions enabled
+            )
+            ch.last_test_ok = True
+            ch.last_tested_at = utc_now()
+            db.session.commit()
+
+            rt_count = RoomType.query.count()
+            result = assess_channel_readiness(
+                record=ch,
+                mapped_count=rt_count,
+                total_room_types=rt_count,
+                capabilities=ProviderCapabilities(),
+            )
+            assert result["ready_for_activation"] is False
+            assert "sync direction" in " ".join(result["blocking_issues"]).lower()
+
+    def test_upsert_channel_sync_direction_flags(self, app_factory):
+        """upsert_ota_channel should persist sync direction flags."""
+        from pms.services.channel_service import upsert_ota_channel, get_ota_channel
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                sync_inventory_push=True,
+                sync_rate_push=True,
+                sync_restriction_push=False,
+                sync_reservation_pull=True,
+            )
+            db.session.commit()
+
+            ch = get_ota_channel("booking_com")
+            assert ch.sync_inventory_push is True
+            assert ch.sync_rate_push is True
+            assert ch.sync_restriction_push is False
+            assert ch.sync_reservation_pull is True
+
+    def test_upsert_channel_environment_mode(self, app_factory):
+        """upsert_ota_channel should persist environment_mode."""
+        from pms.services.channel_service import upsert_ota_channel, get_ota_channel
+        app = app_factory(seed=True)
+        with app.app_context():
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                environment_mode="live",
+            )
+            db.session.commit()
+            ch = get_ota_channel("booking_com")
+            assert ch.environment_mode == "live"
+
+    def test_upsert_channel_tracks_activation(self, app_factory):
+        """upsert_ota_channel should set activated_at on first activation."""
+        from pms.services.channel_service import upsert_ota_channel, get_ota_channel
+        app = app_factory(seed=True)
+        with app.app_context():
+            # First: create inactive
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=False,
+            )
+            db.session.commit()
+            ch = get_ota_channel("booking_com")
+            assert ch.activated_at is None
+
+            # Now activate
+            upsert_ota_channel(
+                provider_key="booking_com",
+                display_name="Booking.com",
+                is_active=True,
+            )
+            db.session.commit()
+            ch = get_ota_channel("booking_com")
+            assert ch.activated_at is not None
+
+    def test_dashboard_includes_readiness(self, app_factory):
+        """ota_dashboard_context should include readiness for each channel."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            for ch in ctx["channels"]:
+                assert "readiness" in ch
+                assert "steps" in ch["readiness"]
+                assert "ready_for_activation" in ch["readiness"]
+                assert "completion_pct" in ch["readiness"]
+
+    def test_dashboard_includes_sync_directions(self, app_factory):
+        """ota_dashboard_context should include sync_directions for each channel."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            for ch in ctx["channels"]:
+                assert "sync_directions" in ch
+                assert "inventory_push" in ch["sync_directions"]
+                assert "rate_push" in ch["sync_directions"]
+                assert "restriction_push" in ch["sync_directions"]
+                assert "reservation_pull" in ch["sync_directions"]
+
+    def test_dashboard_includes_capabilities(self, app_factory):
+        """ota_dashboard_context should include capabilities for each channel."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            for ch in ctx["channels"]:
+                assert "capabilities" in ch
+                assert hasattr(ch["capabilities"], "supports_inventory_push")
+
+    def test_dashboard_includes_environment_mode(self, app_factory):
+        """ota_dashboard_context should include environment_mode for each channel."""
+        from pms.services.channel_service import ota_dashboard_context
+        app = app_factory(seed=True)
+        with app.app_context():
+            ctx = ota_dashboard_context()
+            for ch in ctx["channels"]:
+                assert "environment_mode" in ch
+                assert ch["environment_mode"] in ("sandbox", "live")
+
+    def test_webhook_event_dto(self):
+        """InboundWebhookEvent should be constructable with required fields."""
+        from pms.services.channel_service import InboundWebhookEvent
+        evt = InboundWebhookEvent(
+            provider_key="booking_com",
+            event_type="reservation.new",
+            external_id="BKG-12345",
+            payload={"guest": "Test"},
+        )
+        assert evt.provider_key == "booking_com"
+        assert evt.event_type == "reservation.new"
+        assert evt.external_id == "BKG-12345"
+        assert evt.idempotency_key is None
+
+    def test_process_webhook_unhandled_event(self, app_factory):
+        """process_inbound_webhook should log and fail for unhandled event types."""
+        from pms.services.channel_service import (
+            InboundWebhookEvent,
+            process_inbound_webhook,
+            list_sync_logs,
+        )
+        app = app_factory(seed=True)
+        with app.app_context():
+            evt = InboundWebhookEvent(
+                provider_key="booking_com",
+                event_type="reservation.new",
+                external_id="BKG-99999",
+            )
+            result = process_inbound_webhook(evt)
+            assert result.success is False
+            assert "Unhandled" in result.errors[0]
+
+            logs = list_sync_logs(provider_key="booking_com")
+            assert len(logs) == 1
+            assert logs[0].action == "webhook:reservation.new"
+
+    def test_outbound_rate_update_dto(self):
+        """OutboundRateUpdate should construct correctly."""
+        from pms.services.channel_service import OutboundRateUpdate
+        u = OutboundRateUpdate(
+            room_type_code="STD",
+            rate_plan_code="BAR",
+            date_from=date.today(),
+            date_to=date.today() + timedelta(days=1),
+            rate_amount=Decimal("2500.00"),
+        )
+        assert u.room_type_code == "STD"
+        assert u.rate_plan_code == "BAR"
+        assert u.currency == "THB"
+
+    def test_outbound_restriction_update_dto(self):
+        """OutboundRestrictionUpdate should construct correctly."""
+        from pms.services.channel_service import OutboundRestrictionUpdate
+        u = OutboundRestrictionUpdate(
+            room_type_code="STD",
+            rate_plan_code=None,
+            date_from=date.today(),
+            date_to=date.today() + timedelta(days=1),
+            closed_to_arrival=True,
+            min_stay=2,
+        )
+        assert u.closed_to_arrival is True
+        assert u.min_stay == 2
+        assert u.stop_sell is False

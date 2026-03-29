@@ -99,69 +99,29 @@
 </div>
 {% endif %}
 
-{% if board.exceptionQueues %}
-<section class="planning-board-exception-rail" aria-label="Operational exception rail">
+{% if board.exceptionQueues or board.handover.count %}
+<div class="planning-board-exception-strip" role="region" aria-label="Operational exceptions">
   {% for queue in board.exceptionQueues %}
-  <article class="planning-board-queue tone-{{ queue.tone }}{% if not queue.count %} is-empty{% endif %}" data-queue-card="{{ queue.id }}">
-    <div class="planning-board-queue-head">
-      <div>
-        <p class="eyebrow">{{ queue.title }}</p>
-        <strong>{{ queue.count }}</strong>
-      </div>
-      {% if queue.count %}
-      <button type="button" class="button-link" data-queue-focus="{{ queue.id }}">Focus</button>
-      {% endif %}
-    </div>
-    {% if queue["items"] %}
-    <div class="planning-board-queue-list">
-      {% for item in queue["items"][:3] %}
-      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
-        <span class="planning-board-queue-item-top">
-          <strong>{{ item.label }}</strong>
-          <small>{{ item.roomLabel }}</small>
-        </span>
-        {% if item.nextAction %}<span class="planning-board-queue-item-action">{{ item.nextAction }}</span>{% endif %}
-        {% if item.actionSummary %}<span class="planning-board-queue-item-summary">{{ item.actionSummary }}</span>{% endif %}
-        {% if item.blockers %}
-        <span class="planning-board-queue-item-flags">
-          {% for blocker in item.blockers[:2] %}
-          <small>{{ blocker }}</small>
-          {% endfor %}
-        </span>
-        {% endif %}
-      </button>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="small muted">Nothing queued right now.</p>
-    {% endif %}
-  </article>
+  {% set item_label = queue.title + ': ' + queue.count|string + (' item' if queue.count == 1 else ' items') %}
+  <button
+    type="button"
+    class="pbes-chip{% if queue.count %} tone-{{ queue.tone }}{% else %} pbes-chip-empty{% endif %}"
+    {% if queue.count %}data-queue-focus="{{ queue.id }}"{% else %}disabled{% endif %}
+    title="{{ item_label }}{% if not queue.count %} — cleared{% endif %}">
+    <span class="pbes-label">{{ queue.title }}</span>
+    <strong class="pbes-count">{{ queue.count }}</strong>
+  </button>
   {% endfor %}
-  <article class="planning-board-queue tone-neutral{% if not board.handover.count %} is-empty{% endif %}">
-    <div class="planning-board-queue-head">
-      <div>
-        <p class="eyebrow">Shift Handover</p>
-        <strong>{{ board.handover.count }}</strong>
-      </div>
-      <span class="planning-board-queue-note">Carry forward</span>
-    </div>
-    {% if board.handover["items"] %}
-    <div class="planning-board-queue-list">
-      {% for item in board.handover["items"][:2] %}
-      <button type="button" class="planning-board-queue-item" data-queue-open data-reservation-id="{{ item.reservationId }}" data-room-anchor="{{ item.roomAnchorId }}">
-        <span class="planning-board-queue-item-top">
-          <strong>{{ item.label }}</strong>
-          <small>{{ item.roomLabel }}</small>
-        </span>
-        <span class="planning-board-queue-item-summary">{{ item.actionSummary or item.nextAction }}</span>
-      </button>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="small muted">No unresolved carry-forward items.</p>
-    {% endif %}
-  </article>
-</section>
+  {% set handover_label = 'Handover: ' + board.handover.count|string + (' carry-forward item' if board.handover.count == 1 else ' carry-forward items') %}
+  <button
+    type="button"
+    class="pbes-chip pbes-handover{% if not board.handover.count %} pbes-chip-empty{% endif %}"
+    data-action="open-handover-panel"
+    title="{{ handover_label }}">
+    <span class="pbes-label">Handover</span>
+    <strong class="pbes-count">{{ board.handover.count }}</strong>
+  </button>
+</div>
 {% endif %}
 
 {% if board.groups %}
@@ -244,12 +204,12 @@
         data-focus-urgency="{{ row.focusUrgency or '' }}"
         data-focus-reservation-id="{{ row.focusReservationId or '' }}"
         aria-label="{{ row.label }} planning lane"
-        style="--row-lanes: {{ row.lane_count }}; --track-height: {{ row.track_height }}px; --today-column: {{ board.todayOffset or 0 }};"
+        style="--row-lanes: {{ row.lane_count }};{% if row.lane_count > 1 %} --track-height: {{ row.track_height }}px;{% endif %} --today-column: {{ board.todayOffset or 0 }};"
       >
         {% for block in row.visible_blocks %}
         <details
-          class="planning-board-block {{ block.displayVariant }} {{ block.status }} urgency-{{ block.urgency or 'normal' }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
-          data-board-block
+          class="planning-board-block {{ block.displayVariant }} {{ block.status }} {% if block.clippedStart %}clip-left{% endif %} {% if block.clippedEnd %}clip-right{% endif %}"
+          data-board-block="true"
           data-block-id="{{ block.id }}"
           data-source-type="{{ block.sourceType }}"
           data-reservation-id="{{ block.reservationId or '' }}"
@@ -274,6 +234,15 @@
           data-drag-policy="{{ block.metadata.dragPolicy if block.metadata.dragPolicy else 'none' }}"
           data-move-url="{{ block.moveUrl or '' }}"
           data-resize-url="{{ block.resizeUrl or '' }}"
+          data-hover-guest="{{ block.label }}"
+          data-hover-code="{{ block.subtitle or '' }}"
+          data-hover-dates="{{ block.startDate }} → {{ block.endDate }}"
+          data-hover-status="{{ block.status }}"
+          data-hover-room="{% if row.roomId %}Room {{ row.roomNumber }}{% else %}{{ group.room_type_code }} unallocated{% endif %}"
+          data-hover-balance="{{ currency }}{{ '%.2f'|format(block.balanceDue) if block.balanceDue and block.balanceDue > 0 else '' }}"
+          data-hover-ready="{{ 'true' if block.readyForCheckIn else 'false' }}"
+          data-hover-vip="{{ 'true' if block.isVip else 'false' }}"
+          data-hover-special="{{ 'true' if block.hasSpecialRequests else 'false' }}"
           style="grid-column: {{ block.gridStart }} / span {{ block.gridSpan }}; grid-row: {{ block.laneIndex }};"
         >
           <summary data-block-handle aria-label="{{ block.label }}{% if block.subtitle %}, {{ block.subtitle }}{% endif %}, {{ block.startDate }} to {{ block.endDate }}, {{ block.status.replace('_', ' ') }}" title="{{ block.label }} · {{ block.startDate }} to {{ block.endDate }}">

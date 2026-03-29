@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..activity import write_activity_log
 from ..audit import write_audit_log
-from ..branding import branding_settings_context, resolve_public_base_url
+from ..branding import branding_settings_context
 from ..extensions import db
 from ..i18n import normalize_language, t
 from ..pricing import get_setting_value, money

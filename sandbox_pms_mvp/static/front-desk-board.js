@@ -18,6 +18,7 @@
   const panelCloseBtn = document.querySelector("[data-action='close-panel']");
   let mutationInFlight = false;
   let selectedBlock = null;
+  let selectedBlockId = null; // Track selected block ID for re-selection after refresh
   let moveMode = false;
   let moveTargetRoomId = null;
   let moveTargetTrack = null;
@@ -109,9 +110,33 @@
     surface.setAttribute("aria-busy", isLoading || mutationInFlight ? "true" : "false");
   }
 
+  function clearSurfacePresentationState() {
+    root.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.classList.remove("is-loading", "is-refreshing", "is-pending");
+    surface.style.visibility = "";
+    surface.style.opacity = "";
+    surface.style.pointerEvents = "";
+    if (surfaceContent) {
+      surfaceContent.classList.remove("is-loading", "is-refreshing", "is-pending");
+      surfaceContent.style.visibility = "";
+      surfaceContent.style.opacity = "";
+      surfaceContent.style.pointerEvents = "";
+    }
+    if (surfaceSkeleton) {
+      surfaceSkeleton.hidden = true;
+    }
+    surface.setAttribute("aria-busy", mutationInFlight ? "true" : "false");
+  }
+
+  let feedbackClearTimer = null;
+
   function setFeedback(message, tone, options) {
     if (!feedback) {
       return;
+    }
+    if (feedbackClearTimer) {
+      clearTimeout(feedbackClearTimer);
+      feedbackClearTimer = null;
     }
     const allowHtml = Boolean(options && options.allowHtml);
     if (allowHtml) {
@@ -121,6 +146,14 @@
     }
     feedback.dataset.tone = tone || "neutral";
     feedback.hidden = !message;
+    // Auto-clear success/error messages so stale feedback doesn't confuse staff
+    if (message && (tone === "success" || tone === "error")) {
+      feedbackClearTimer = setTimeout(() => {
+        feedback.textContent = "";
+        feedback.hidden = true;
+        feedbackClearTimer = null;
+      }, tone === "success" ? 4000 : 8000);
+    }
   }
 
   function focusBlockHandle(blockEl) {
@@ -138,7 +171,7 @@
   }
 
   function selectBlock(blockEl) {
-    if (!blockEl || !blockEl.dataset.boardBlock) {
+    if (!blockEl || !blockEl.matches("[data-board-block]")) {
       return;
     }
     if (selectedBlock === blockEl) {
@@ -148,6 +181,7 @@
       selectedBlock.classList.remove("selected");
     }
     selectedBlock = blockEl;
+    selectedBlockId = blockEl.dataset.blockId || blockEl.dataset.reservationId || null;
     blockEl.classList.add("selected");
     focusBlockHandle(blockEl);
     announceSelection(blockEl);
@@ -165,6 +199,7 @@
     if (selectedBlock) {
       selectedBlock.classList.remove("selected");
       selectedBlock = null;
+      selectedBlockId = null;
       setFeedback("", "neutral");
     }
   }
@@ -453,34 +488,38 @@
     const target = new URL(root.dataset.fragmentUrl, window.location.origin);
     target.search = window.location.search;
     setSurfaceLoading(true);
-    const response = await fetch(target.toString(), {
-      headers: { Accept: "text/html" },
-      credentials: "same-origin",
-    });
-    if (!response.ok) {
-      setSurfaceLoading(false);
-      throw new Error("Unable to refresh the planning board.");
-    }
-    const html = await response.text();
-    if (surfaceContent) {
-      surfaceContent.style.visibility = "hidden";
-      surfaceContent.innerHTML = html;
-    } else {
-      surface.style.visibility = "hidden";
-      surface.innerHTML = html;
-    }
-    setSurfaceLoading(false);
-    reapplyBoardState();
-    const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
-    if (nextBlock) {
-      selectBlock(nextBlock);
-    } else if (!reopenPanel) {
-      clearSelection();
-    }
-    if (surfaceContent) surfaceContent.style.visibility = "";
-    else surface.style.visibility = "";
-    if (reopenPanel && reservationId) {
-      await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+    try {
+      const response = await fetch(target.toString(), {
+        headers: { Accept: "text/html" },
+        credentials: "same-origin",
+      });
+      if (!response.ok) {
+        throw new Error("Unable to refresh the planning board.");
+      }
+      const html = await response.text();
+      // Clear stale DOM reference before replacement
+      if (selectedBlock) {
+        selectedBlock = null;
+      }
+      if (surfaceContent) {
+        surfaceContent.style.visibility = "hidden";
+        surfaceContent.innerHTML = html;
+      } else {
+        surface.style.visibility = "hidden";
+        surface.innerHTML = html;
+      }
+      reapplyBoardState();
+      const nextBlock = reservationId ? findBlockByReservationId(reservationId) : null;
+      if (nextBlock) {
+        selectBlock(nextBlock);
+      } else if (!reopenPanel) {
+        clearSelection();
+      }
+      if (reopenPanel && reservationId) {
+        await loadPanelForReservation(reservationId, nextBlock, { silent: true });
+      }
+    } finally {
+      clearSurfacePresentationState();
     }
   }
 
@@ -581,7 +620,25 @@
 
   function onSurfaceClick(event) {
     const summary = resolveSummaryTarget(event.target);
+    const reservationBlock =
+      event.target instanceof Element && !event.target.closest(".planning-board-popover")
+        ? event.target.closest("[data-board-block][data-reservation-id]")
+        : null;
     if (!summary) {
+      if (reservationBlock) {
+        selectBlock(reservationBlock);
+        reservationBlock.removeAttribute("open");
+        event.preventDefault();
+        event.stopPropagation();
+        openPanel(reservationBlock);
+        return;
+      }
+      // Clicking empty space on the board clears selection (but not on
+      // command strip or other non-block elements)
+      if (event.target.closest("[data-board-track]") && !event.target.closest("[data-board-block]")) {
+        // Let the empty-slot handler in the lower listener deal with this
+        return;
+      }
       return;
     }
     const block = summary.closest("[data-board-block]");
@@ -602,7 +659,9 @@
     // Single click on reservation blocks opens side panel directly
     // for fast check-in/check-out without leaving the board
     if (block.dataset.reservationId) {
+      block.removeAttribute("open");
       event.preventDefault(); // Prevent <details> toggle
+      event.stopPropagation();
       openPanel(block);
       return;
     }
@@ -691,6 +750,21 @@
         event.preventDefault();
         moveSelectionDown();
         break;
+      case "ArrowLeft":
+      case "ArrowRight": {
+        // Navigate between blocks in the same track
+        event.preventDefault();
+        const currentTrack = getBlockTrack(selectedBlock);
+        if (!currentTrack) break;
+        const blocks = getBlocksInTrack(currentTrack);
+        const idx = blocks.indexOf(selectedBlock);
+        if (idx === -1) break;
+        const nextIdx = event.key === "ArrowLeft" ? idx - 1 : idx + 1;
+        if (nextIdx >= 0 && nextIdx < blocks.length) {
+          selectBlock(blocks[nextIdx]);
+        }
+        break;
+      }
       case "m":
       case "M":
         if (!canEdit || mutationInFlight) return;
@@ -718,13 +792,15 @@
       return;
     }
 
+    // Capture target room before exitMoveMode clears it
+    const targetRoomId = moveTargetRoomId;
     exitMoveMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
     setFeedback("Saving move...", "pending");
 
     const payload = {
-      roomId: moveTargetRoomId || null,
+      roomId: targetRoomId || null,
       checkInDate: selectedBlock.dataset.startDate,
       checkOutDate: selectedBlock.dataset.endDate,
     };
@@ -750,7 +826,7 @@
     } catch (error) {
       setFeedback(error.message || "The move was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -761,6 +837,8 @@
       return;
     }
 
+    // Capture target end date before exitResizeMode clears it
+    const targetEndDate = resizeTargetEndDate;
     exitResizeMode(false);
     selectedBlock.classList.add("is-pending");
     setBusyState(true);
@@ -769,7 +847,7 @@
     const payload = {
       roomId: selectedBlock.dataset.roomId || null,
       checkInDate: selectedBlock.dataset.startDate,
-      checkOutDate: resizeTargetEndDate,
+      checkOutDate: targetEndDate,
     };
 
     try {
@@ -793,13 +871,14 @@
     } catch (error) {
       setFeedback(error.message || "The resize was rejected.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
 
   function onSurfacePointerDown(event) {
-    // Prevent dragging when panel is open
+    // When the side panel is open, still allow block selection via click
+    // but don't initiate drag
     if (!panelEl.classList.contains("hidden")) {
       return;
     }
@@ -1044,12 +1123,23 @@
           grid.classList.add(`density-${density}`);
         }
 
-        boardState = normalizeBoardState({
-          ...boardState,
-          density,
-        });
-        writeBoardStateToRoot();
-        await saveBoardState({ feedbackMessage: `Layout set to ${density}.` });
+        // Save to server
+        try {
+          const response = await fetch("/staff/front-desk/board/preferences", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRF-Token": csrfToken,
+            },
+            body: JSON.stringify({ density }),
+          });
+          if (!response.ok) {
+            throw new Error("Failed to save preference");
+          }
+          setFeedback(`Layout set to ${density}.`, "success");
+        } catch (error) {
+          setFeedback("Could not save preference.", "error");
+        }
       });
     });
   }
@@ -1394,8 +1484,51 @@
     }
   });
 
+  // ── Panel helpers (callable from any trigger inside or outside the surface) ──
+  function openStatsPanel() {
+    panelTitle.textContent = "Board Stats";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Stats unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
+  function openHandoverPanel() {
+    panelTitle.textContent = "Shift Handover";
+    panelReservationId = "";
+    setBusyState(true);
+    const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
+    target.search = window.location.search;
+    fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
+      .then((r) => r.ok ? r.text() : Promise.reject())
+      .then((html) => {
+        panelContent.innerHTML = html;
+        panelEl.classList.remove("hidden");
+        panelEl.removeAttribute("inert");
+        panelEl.setAttribute("aria-hidden", "false");
+        panelCloseBtn.focus();
+      })
+      .catch(() => setFeedback("Handover data unavailable.", "error"))
+      .finally(() => setBusyState(false));
+  }
+
   // ── Command strip: click delegation on surface (survives AJAX refresh) ──
   surface.addEventListener("click", (e) => {
+    // Exception strip panel triggers (survive surface AJAX refresh)
+    if (e.target.closest("[data-action='open-stats-panel']")) { openStatsPanel(); return; }
+    if (e.target.closest("[data-action='open-handover-panel']")) { openHandoverPanel(); return; }
+
     // Metric filter button (not inside a board block or track)
     const queueOpenBtn = e.target.closest("[data-queue-open]");
     if (queueOpenBtn) {
@@ -1440,6 +1573,14 @@
     }
   });
 
+  // ── Exception rail collapse: sync aria-expanded ──
+  surface.addEventListener("toggle", (e) => {
+    const wrap = e.target.closest(".planning-board-exception-wrap");
+    if (!wrap) return;
+    const summary = wrap.querySelector(".planning-board-exception-toggle");
+    if (summary) summary.setAttribute("aria-expanded", wrap.open ? "true" : "false");
+  }, true);
+
   // ── Double-click on block: navigate to full reservation detail ──
   surface.addEventListener("dblclick", (e) => {
     const blockEl = e.target.closest("[data-board-block]");
@@ -1454,8 +1595,7 @@
   let hkOverlayActive = false;
 
   function syncHkOverlayState() {
-    const surfaceEl = document.getElementById("front-desk-board-surface");
-    if (surfaceEl) surfaceEl.classList.toggle("hk-overlay-active", hkOverlayActive);
+    surface.classList.toggle("hk-overlay-active", hkOverlayActive);
     surface.querySelectorAll("[data-action='toggle-hk-overlay']").forEach((btn) => {
       btn.setAttribute("aria-pressed", hkOverlayActive ? "true" : "false");
       btn.classList.toggle("active", hkOverlayActive);
@@ -1524,7 +1664,15 @@
   // ── Sticky shell: set CSS variable so day headers account for shell height ──
   function updateStickyOffset() {
     if (!root) return;
-    document.documentElement.style.setProperty("--board-shell-h", root.offsetHeight + "px");
+    const shellHeight = root.offsetHeight;
+    document.documentElement.style.setProperty("--board-shell-h", shellHeight + "px");
+    // Also update on next frame to catch any layout shifts
+    window.requestAnimationFrame(() => {
+      const newHeight = root.offsetHeight;
+      if (newHeight !== shellHeight) {
+        document.documentElement.style.setProperty("--board-shell-h", newHeight + "px");
+      }
+    });
   }
 
   // ── Post-refresh: reapply all stateful board decoration ──
@@ -1536,6 +1684,19 @@
     renderSavedViewOptions();
     updateStickyOffset();
     initCollapsibleGroups();
+    // Re-select block after DOM replacement (selection persistence)
+    if (selectedBlockId) {
+      const restored = surface.querySelector(
+        `[data-board-block][data-block-id="${selectedBlockId}"], [data-board-block][data-reservation-id="${selectedBlockId}"]`
+      );
+      if (restored) {
+        selectBlock(restored);
+      } else {
+        // Block no longer exists in the refreshed DOM
+        selectedBlock = null;
+        selectedBlockId = null;
+      }
+    }
   }
 
   // ── Collapsible room-type group headers ──
@@ -1619,7 +1780,8 @@
       toolbarToggle.title = collapsed ? "Show filters & legend" : "Hide filters & legend";
     }
     try { localStorage.setItem("board_toolbar_collapsed", collapsed ? "1" : "0"); } catch (_) { /* ignore */ }
-    scheduleBoardStateSave({ silent: true });
+    // Update sticky offset after toolbar height changes
+    window.requestAnimationFrame(() => updateStickyOffset());
   }
 
   function restoreToolbarState() {
@@ -1737,50 +1899,15 @@
     else if (pct > 0) dayEl.classList.add("occ-low");
   });
 
-  // ── Stats panel trigger ──
+  // ── Stats / handover triggers (overflow menu buttons outside the surface) ──
   const statsBtn = document.querySelector("[data-action='open-stats-panel']");
   if (statsBtn) {
-    statsBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Board Stats";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/stats-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Stats unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    statsBtn.addEventListener("click", openStatsPanel);
   }
 
-  // ── Shift handover panel trigger ──
   const handoverBtn = document.querySelector("[data-action='open-handover-panel']");
   if (handoverBtn) {
-    handoverBtn.addEventListener("click", () => {
-      panelTitle.textContent = "Shift Handover";
-      panelReservationId = "";
-      setBusyState(true);
-      const target = new URL("/staff/front-desk/board/handover-panel", window.location.origin);
-      target.search = window.location.search;
-      fetch(target.toString(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
-        .then((r) => r.ok ? r.text() : Promise.reject())
-        .then((html) => {
-          panelContent.innerHTML = html;
-          panelEl.classList.remove("hidden");
-          panelEl.removeAttribute("inert");
-          panelEl.setAttribute("aria-hidden", "false");
-          panelCloseBtn.focus();
-        })
-        .catch(() => setFeedback("Handover data unavailable.", "error"))
-        .finally(() => setBusyState(false));
-    });
+    handoverBtn.addEventListener("click", openHandoverPanel);
   }
 
   // Side panel for reservation details
@@ -1790,10 +1917,13 @@
       setFeedback("Cannot open panel for this block.", "error");
       return;
     }
-    const summary = blockEl ? blockEl.querySelector("summary[data-block-handle]") : null;
-    const label = summary ? summary.getAttribute("aria-label") : "Reservation Details";
 
-    panelTitle.textContent = label || "Reservation Details";
+    const copyEl = blockEl ? blockEl.querySelector(".planning-board-block-copy strong") : null;
+    const guestName = copyEl ? copyEl.textContent.trim() : "";
+    const subtitleEl = blockEl ? blockEl.querySelector(".planning-board-block-copy small") : null;
+    const code = subtitleEl ? subtitleEl.textContent.trim() : "";
+
+    panelTitle.textContent = guestName ? `${guestName}${code ? " · " + code : ""}` : "Reservation Details";
     panelReservationId = reservationId;
 
     setBusyState(true);
@@ -1967,6 +2097,10 @@
     if (["INPUT", "TEXTAREA", "SELECT"].includes(event.target.tagName)) {
       return;
     }
+    // Ignore navigation shortcuts when side panel is open (except Escape)
+    if (!panelEl.classList.contains("hidden") && event.key !== "Escape") {
+      return;
+    }
 
     switch (event.key) {
       case "/":
@@ -1977,6 +2111,24 @@
         event.preventDefault();
         showKeyboardHelp();
         break;
+      case "t":
+      case "T":
+        event.preventDefault();
+        scrollToToday("smooth");
+        break;
+      case "1":
+      case "2":
+      case "3": {
+        // Switch day range: 1→7d, 2→14d, 3→30d
+        const dayRanges = { "1": "7", "2": "14", "3": "30" };
+        const targetDays = dayRanges[event.key];
+        const dayTab = root.querySelector(`.board-days-tab[href*="days=${targetDays}"]`);
+        if (dayTab) {
+          event.preventDefault();
+          dayTab.click();
+        }
+        break;
+      }
       case "n":
       case "N":
         if (createBaseUrl && canEdit) {
@@ -2032,10 +2184,10 @@
         <li><kbd>T</kbd> : Jump to today</li>
         <li><kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> : Switch to 7 / 14 / 30 day view</li>
         <li>↑ ↓ : Navigate blocks across room tracks</li>
+        <li>← → : Navigate blocks within the same room track</li>
         <li><kbd>Enter</kbd> : Open reservation details panel</li>
         <li><kbd>M</kbd> : Move mode (keyboard alternative to drag)</li>
         <li><kbd>R</kbd> : Resize mode (keyboard alternative to drag)</li>
-        <li><kbd>Enter</kbd> : Confirm action or open details</li>
         <li><kbd>Esc</kbd> : Cancel or close</li>
         <li><kbd>/</kbd> : Open search</li>
         <li><kbd>N</kbd> : New reservation</li>
@@ -2084,7 +2236,7 @@
     } catch (error) {
       setFeedback(error.message || "Check-in failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
@@ -2123,11 +2275,10 @@
     } catch (error) {
       setFeedback(error.message || "Check-out failed.", "error");
     } finally {
-      selectedBlock.classList.remove("is-pending");
+      if (selectedBlock) selectedBlock.classList.remove("is-pending");
       setBusyState(false);
     }
   }
-
   function assignUnallocatedReservation() {
     if (!selectedBlock) {
       setFeedback("Select an unallocated block first.", "neutral");
@@ -2198,12 +2349,10 @@
   function startPolling() {
     if (pollInterval) return;
     pollInterval = setInterval(() => {
-      if (!mutationInFlight) {
-        refreshSurface({
-          reservationId: panelReservationId || selectedBlock?.dataset.reservationId || "",
-          reopenPanel: !panelEl.classList.contains("hidden") && Boolean(panelReservationId),
-        });
+      if (mutationInFlight || moveMode || resizeMode || !panelEl.classList.contains("hidden")) {
+        return;
       }
+      refreshSurface();
     }, 10000);
   }
 
@@ -2219,6 +2368,8 @@
     restoreHkOverlay();
     restoreRoleView();
     renderSavedViewOptions();
+    clearSurfacePresentationState();
+    reapplyBoardState();
     startPolling();
   });
 
@@ -2232,10 +2383,14 @@
   initializeBoardSearch();
   updateStickyOffset();
   setSurfaceLoading(true);
-  window.requestAnimationFrame(() => {
-    setSurfaceLoading(false);
-    reapplyBoardState();
-  });
+
+  // ── Watch for shell height changes and update sticky offset ──
+  if (window.ResizeObserver && root) {
+    const shellObserver = new ResizeObserver(() => {
+      updateStickyOffset();
+    });
+    shellObserver.observe(root);
+  }
 
   // ── Context menu (right-click on blocks) ──
   const ctxMenu = document.getElementById("board-context-menu");
@@ -2259,8 +2414,8 @@
 
       ctxMenu.classList.remove("hidden");
       ctxMenu.hidden = false;
-      var menuW = ctxMenu.offsetWidth || 200;
-      var menuH = ctxMenu.offsetHeight || 300;
+      const menuW = ctxMenu.offsetWidth || 200;
+      const menuH = ctxMenu.offsetHeight || 300;
       ctxMenu.style.left = Math.min(x, window.innerWidth - menuW - 8) + "px";
       ctxMenu.style.top = Math.min(y, window.innerHeight - menuH - 8) + "px";
       ctxMenu._block = blockEl;
@@ -2387,5 +2542,93 @@
       window.location.href = createBaseUrl + "?" + params.toString();
     });
   }
+
+  /* ── Hover card for booking blocks ── */
+  (function initHoverCard() {
+    const hoverCard = document.getElementById("board-hover-card");
+    if (!hoverCard) return;
+    let hoverTimer = null;
+    let currentBlock = null;
+    const HOVER_DELAY = 280;
+
+    function showHoverCard(blockEl, evt) {
+      const d = blockEl.dataset;
+      const status = d.hoverStatus || "";
+      const statusLabel = status.replace(/_/g, " ");
+      let html = "";
+      html += '<div class="board-hover-card-guest">' + escapeHtml(d.hoverGuest || "") + "</div>";
+      if (d.hoverCode) html += '<div class="board-hover-card-code">' + escapeHtml(d.hoverCode) + "</div>";
+      html += '<dl class="board-hover-card-meta">';
+      html += "<dt>Dates</dt><dd>" + escapeHtml(d.hoverDates || "") + "</dd>";
+      html += "<dt>Room</dt><dd>" + escapeHtml(d.hoverRoom || "") + "</dd>";
+      html += "</dl>";
+      html += '<span class="board-hover-card-status status-' + escapeHtml(status) + '">' + escapeHtml(statusLabel) + "</span>";
+      const flags = [];
+      if (d.hoverBalance) flags.push('<span class="board-hover-card-flag flag-balance">Balance: ' + escapeHtml(d.hoverBalance) + "</span>");
+      if (d.hoverReady === "true") flags.push('<span class="board-hover-card-flag flag-ready">Room Ready</span>');
+      if (d.hoverVip === "true") flags.push('<span class="board-hover-card-flag flag-vip">VIP</span>');
+      if (d.hoverSpecial === "true") flags.push('<span class="board-hover-card-flag flag-special">★ Special Requests</span>');
+      if (flags.length) html += '<div class="board-hover-card-flags">' + flags.join("") + "</div>";
+      hoverCard.innerHTML = html;
+      positionHoverCard(evt);
+      hoverCard.classList.add("visible");
+    }
+
+    function positionHoverCard(evt) {
+      const pad = 12;
+      hoverCard.style.visibility = "hidden";
+      hoverCard.style.left = "0px";
+      hoverCard.style.top = "0px";
+      const rect = hoverCard.getBoundingClientRect();
+      let x = evt.clientX + pad;
+      let y = evt.clientY + pad;
+      if (x + rect.width > window.innerWidth - pad) x = evt.clientX - rect.width - pad;
+      if (y + rect.height > window.innerHeight - pad) y = evt.clientY - rect.height - pad;
+      hoverCard.style.left = Math.max(0, x) + "px";
+      hoverCard.style.top = Math.max(0, y) + "px";
+      hoverCard.style.visibility = "";
+    }
+
+    function hideHoverCard() {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+      currentBlock = null;
+      hoverCard.classList.remove("visible");
+    }
+
+    function escapeHtml(str) {
+      const el = document.createElement("span");
+      el.textContent = str;
+      return el.innerHTML;
+    }
+
+    surface.addEventListener("mouseover", function (e) {
+      const blockEl = e.target.closest("[data-board-block]");
+      if (!blockEl || blockEl.open) { hideHoverCard(); return; }
+      if (blockEl === currentBlock) return;
+      clearTimeout(hoverTimer);
+      currentBlock = blockEl;
+      hoverTimer = setTimeout(function () { showHoverCard(blockEl, e); }, HOVER_DELAY);
+    });
+
+    surface.addEventListener("mousemove", function (e) {
+      if (hoverCard.classList.contains("visible")) {
+        positionHoverCard(e);
+      }
+    });
+
+    surface.addEventListener("mouseleave", hideHoverCard);
+    surface.addEventListener("mousedown", hideHoverCard);
+    surface.addEventListener("scroll", hideHoverCard, true);
+
+    surface.addEventListener("focusin", function (e) {
+      const blockEl = e.target.closest("[data-board-block]");
+      if (!blockEl || blockEl.open) { hideHoverCard(); return; }
+      currentBlock = blockEl;
+      const rect = blockEl.getBoundingClientRect();
+      showHoverCard(blockEl, { clientX: rect.right, clientY: rect.top });
+    });
+    surface.addEventListener("focusout", function () { hideHoverCard(); });
+  })();
 
 })();

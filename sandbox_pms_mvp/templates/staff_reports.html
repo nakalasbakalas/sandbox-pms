@@ -750,7 +750,7 @@
         </tbody>
       </table>
     </div>
-    <div class="metric-strip" style="margin-top:1rem;">
+    <div class="metric-strip subsection">
       <div><small>Peak ADR</small><strong>{% if dashboard.revenue_management.peak_adr %}{{ dashboard.revenue_management.peak_adr.adr | money }} on {{ dashboard.revenue_management.peak_adr.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
       <div><small>Peak RevPAR</small><strong>{% if dashboard.revenue_management.peak_revpar %}{{ dashboard.revenue_management.peak_revpar.revpar | money }} on {{ dashboard.revenue_management.peak_revpar.date.strftime('%d %b') }}{% else %}—{% endif %}</strong></div>
     </div>

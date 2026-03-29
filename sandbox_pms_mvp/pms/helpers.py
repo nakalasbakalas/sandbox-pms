@@ -8,6 +8,8 @@ imports with app.py.
 
 from __future__ import annotations
 
+from typing import overload
+
 import hmac
 import secrets
 from datetime import date, datetime, timedelta
@@ -16,7 +18,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import sqlalchemy as sa
-from flask import abort, current_app, g, redirect, request, session, url_for
+from flask import abort, current_app, g, request, session, url_for
 from markupsafe import Markup, escape
 
 from .extensions import db
@@ -151,6 +153,10 @@ def parse_optional_datetime(value: str | None) -> datetime | None:
     return parsed
 
 
+@overload
+def parse_request_date_arg(name: str, *, default: date) -> date: ...
+@overload
+def parse_request_date_arg(name: str, *, default: None) -> date | None: ...
 def parse_request_date_arg(name: str, *, default: date | None) -> date | None:
     """Parse a query-string date argument, aborting 400 on bad input."""
     candidate = (request.args.get(name) or "").strip()
@@ -267,12 +273,12 @@ def validate_csrf_request() -> None:
 # ---------------------------------------------------------------------------
 
 def is_staff_or_provider_endpoint(endpoint: str | None) -> bool:
-    """Return True if *endpoint* belongs to the staff or provider/integration surfaces."""
+    """Return True if *endpoint* belongs to the staff or provider/integration/café surfaces."""
     if not endpoint:
         return False
     # Strip blueprint prefix (e.g. "auth.staff_login" -> "staff_login")
     bare = endpoint.rsplit(".", 1)[-1] if "." in endpoint else endpoint
-    return bare.startswith(("staff_", "integration_", "provider_"))
+    return bare.startswith(("staff_", "integration_", "provider_", "cafe_"))
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +417,10 @@ def available_admin_sections() -> list[dict[str, str]]:
     if not user:
         return []
     sections: list[dict[str, str]] = []
+    if can("settings.edit") and is_admin_user(user):
+        sections.append(
+            {"key": "setup", "label": "Setup", "endpoint": "admin.staff_admin_setup", "description": "First-time configuration and system essentials"}
+        )
     if can("settings.view"):
         sections.append(
             {"key": "property", "label": "Property Setup", "endpoint": "admin.staff_admin_property", "description": "Rooms, room types, branding"}
@@ -424,9 +434,16 @@ def available_admin_sections() -> list[dict[str, str]]:
         sections.append(
             {"key": "payments", "label": "Payments", "endpoint": "admin.staff_admin_payments", "description": "Hosted payment behavior"}
         )
+        sections.append(
+            {"key": "channels", "label": "OTA Channels", "endpoint": "admin.staff_admin_channels", "description": "OTA connectivity, mappings, sync status"}
+        )
     if can("rate_rule.view") or can("settings.view"):
         sections.append(
             {"key": "rates_inventory", "label": "Rates & Inventory", "endpoint": "admin.staff_admin_rates_inventory", "description": "Rate rules, overrides, blackout dates"}
+        )
+    if can("settings.view"):
+        sections.append(
+            {"key": "services", "label": "Services & Extras", "endpoint": "admin.staff_admin_services", "description": "Additional services, extras catalog, folio charges"}
         )
     if can("user.view"):
         sections.append(

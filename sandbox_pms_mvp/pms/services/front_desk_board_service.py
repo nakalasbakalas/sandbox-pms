@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import joinedload
 
 from ..extensions import db
-from ..models import ExternalCalendarBlock, FolioCharge, Guest, GuestLoyalty, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
+from ..models import ExternalCalendarBlock, FolioCharge, Guest, HousekeepingStatus, InventoryDay, InventoryOverride, ModificationRequest, Reservation, ReservationHold, Room, utc_now
 
 
 ACTIVE_BOARD_RESERVATION_STATUSES = {
@@ -241,7 +241,7 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             "blocks": [],
             "visible_blocks": [],
             "lane_count": 1,
-            "track_height": 74,
+            "track_height": None,
             "search_text": _search_text(
                 room.room_number,
                 group["room_type_code"],
@@ -421,7 +421,8 @@ def build_front_desk_board(filters: FrontDeskBoardFilters) -> dict[str, Any]:
             row["status_badges"] = _room_status_badges(row=row, today=today)
             row["statusBadges"] = row["status_badges"]
             row["lane_count"] = _assign_block_lanes(visible_blocks)
-            row["track_height"] = max(74, 18 + (row["lane_count"] * 54))
+            if row["lane_count"] > 1:
+                row["track_height"] = max(74, 18 + (row["lane_count"] * 54))
             row.update(_row_focus_state(row))
             rows.append(row)
         if not filters.show_unallocated:
@@ -697,7 +698,7 @@ def _ensure_unallocated_row(group: dict[str, Any]) -> dict[str, Any]:
         "blocks": [],
         "visible_blocks": [],
         "lane_count": 1,
-        "track_height": 74,
+        "track_height": None,
         "search_text": _search_text("unallocated", group["room_type_code"], group["room_type_name"]),
     }
     group["rows"].append(row)

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Café Prep Board{% endblock %}
+{% block content %}
+<meta http-equiv="refresh" content="30">
+{% include "_cafe_nav.html" %}
+
+<!-- Station filter -->
+<section class="card subsection">
+  <div class="list-row no-link" style="gap:6px;">
+    <a class="pill subtle{% if not selected_station %} active{% endif %}" href="{{ url_for('cafe.cafe_prep') }}">All</a>
+    {% for st in ['bar','kitchen','counter'] %}
+    <a class="pill subtle{% if selected_station == st %} active{% endif %}" href="{{ url_for('cafe.cafe_prep', station=st) }}">{{ st | title }}</a>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- Three columns: Pending / In Progress / Ready -->
+<div class="grid three gap-lg">
+  {% for col_status, col_label in [('pending','Pending'),('in_progress','In Progress'),('ready','Ready')] %}
+  <section class="card">
+    <div class="card-head"><h3>{{ col_label }}</h3></div>
+    <div style="padding:6px;display:flex;flex-direction:column;gap:6px;">
+      {% for pi in prep_items if pi.prep_status == col_status %}
+      <div class="card inset" style="padding:8px;">
+        <p><strong>{{ pi.name }}</strong></p>
+        {% for m in pi.modifiers %}
+        <p class="muted" style="font-size:0.85rem;">+ {{ m.name }}</p>
+        {% endfor %}
+        {% if pi.notes %}<p class="muted" style="font-size:0.85rem;">📝 {{ pi.notes }}</p>{% endif %}
+        <p class="muted" style="font-size:0.8rem;">
+          #{{ pi.order.order_number }} · {{ pi.order.order_type | replace('_',' ') | title }}
+          · {{ pi.prep_station | title }}
+        </p>
+        <form method="post" action="{{ url_for('cafe.cafe_prep_update', order_item_id=pi.id) }}" class="inline-form" style="margin-top:6px;">
+          {{ csrf_input() }}
+          {% if selected_station %}<input type="hidden" name="station" value="{{ selected_station }}">{% endif %}
+          {% if col_status == 'pending' %}
+          <input type="hidden" name="prep_status" value="in_progress">
+          <button class="button tiny" type="submit">Start</button>
+          {% elif col_status == 'in_progress' %}
+          <input type="hidden" name="prep_status" value="ready">
+          <button class="button tiny" type="submit">Ready</button>
+          {% elif col_status == 'ready' %}
+          <input type="hidden" name="prep_status" value="completed">
+          <button class="button tiny" type="submit">Done</button>
+          {% endif %}
+        </form>
+      </div>
+      {% else %}
+      <p class="muted center" style="padding:12px;">—</p>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}

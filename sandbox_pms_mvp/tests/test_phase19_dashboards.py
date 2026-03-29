@@ -12,7 +12,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import inspect as sa_inspect
 from werkzeug.security import generate_password_hash
 
 from pms.extensions import db
@@ -36,7 +35,6 @@ from pms.services.housekeeping_service import (
     start_housekeeping_task,
     update_housekeeping_status,
 )
-from pms.services.payment_integration_service import create_or_reuse_deposit_request
 from pms.services.reporting_service import build_daily_report, build_front_desk_dashboard, build_manager_dashboard
 from pms.services.reservation_service import ReservationCreatePayload, create_reservation
 from pms.services.staff_reservations_service import cancel_reservation_workspace
@@ -48,14 +46,13 @@ def utc_dt(day: date, hour: int, minute: int = 0) -> datetime:
 
 def make_staff_user(role_code: str, email: str) -> User:
     role = Role.query.filter_by(code=role_code).one()
-    user = User(
-        username=email.split("@", 1)[0],
-        email=email,
-        full_name=email.split("@", 1)[0].replace(".", " ").title(),
-        password_hash=generate_password_hash("password123456"),
-        is_active=True,
-        account_state="active",
-    )
+    user = User()
+    user.username = email.split("@", 1)[0]
+    user.email = email
+    user.full_name = email.split("@", 1)[0].replace(".", " ").title()
+    user.password_hash = generate_password_hash("password123456")
+    user.is_active = True
+    user.account_state = "active"
     user.roles = [role]
     db.session.add(user)
     db.session.commit()
@@ -63,10 +60,8 @@ def make_staff_user(role_code: str, email: str) -> User:
 
 
 def login_as(client, user: User) -> None:
-    identity = sa_inspect(user).identity
-    user_id = identity[0] if identity else user.id
     with client.session_transaction() as session:
-        session["staff_user_id"] = str(user_id)
+        session["staff_user_id"] = str(user.id)
         session["_csrf_token"] = "test-csrf-token"
 
 
@@ -210,13 +205,12 @@ def build_dashboard_dataset() -> dict:
     )
 
     # Create urgent housekeeping task
-    task = HousekeepingTask(
-        room_id=free_rooms[0].id,
-        task_type="rush_clean",
-        priority="urgent",
-        status="open",
-        business_date=today,
-    )
+    task = HousekeepingTask()
+    task.room_id = free_rooms[0].id
+    task.task_type = "rush_clean"
+    task.priority = "urgent"
+    task.status = "open"
+    task.business_date = today
     db.session.add(task)
     db.session.commit()
 

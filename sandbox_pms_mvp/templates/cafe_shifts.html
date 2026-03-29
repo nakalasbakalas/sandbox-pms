@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Café Shifts{% endblock %}
+{% block content %}
+{% include "_cafe_nav.html" %}
+
+<!-- Current shift status -->
+<section class="card subsection">
+  <div class="card-head"><h3>Current Shift</h3></div>
+  <div style="padding:8px;">
+    {% if current_shift %}
+    <div class="split-row" style="margin-bottom:8px;">
+      <span class="pill subtle active">Shift Open</span>
+      <span class="muted">Since {{ current_shift.opened_at.strftime('%d %b %Y %H:%M') }}</span>
+    </div>
+    <p>Opening Cash: ฿{{ current_shift.opening_cash }}</p>
+    <p>Expected Cash: ฿{{ current_shift.expected_cash }}</p>
+
+    <details style="margin-top:8px;">
+      <summary class="button secondary">Close Shift…</summary>
+      <form method="post" action="{{ url_for('cafe.cafe_shift_close', shift_id=current_shift.id) }}" class="stack-form" style="margin-top:8px;">
+        {{ csrf_input() }}
+        <label>Actual Cash in Drawer (฿)
+          <input type="number" name="actual_cash" min="0" required style="width:100%;padding:6px;" id="close-actual"
+                 oninput="document.getElementById('close-variance').textContent='฿'+(parseInt(this.value||0)-{{ current_shift.expected_cash }})">
+        </label>
+        <div class="split-row">
+          <span class="eyebrow">Variance</span>
+          <span id="close-variance">—</span>
+        </div>
+        <label>Notes
+          <textarea name="notes" rows="2" style="width:100%;padding:6px;" placeholder="Shift notes..."></textarea>
+        </label>
+        <button class="button" type="submit">Close Shift</button>
+      </form>
+    </details>
+    {% else %}
+    <p class="muted" style="margin-bottom:8px;">No shift currently open.</p>
+    <form method="post" action="{{ url_for('cafe.cafe_shift_open') }}" class="stack-form">
+      {{ csrf_input() }}
+      <label>Opening Cash (฿)
+        <input type="number" name="opening_cash" min="0" value="0" required style="width:100%;padding:6px;">
+      </label>
+      <button class="button" type="submit">Open Shift</button>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Shift history -->
+<section class="card subsection">
+  <div class="card-head"><h3>Shift History</h3></div>
+  {% if shifts %}
+  <div class="table-wrap">
+    <table class="compact-table">
+      <thead>
+        <tr><th>Opened</th><th>Closed</th><th>Opening</th><th>Expected</th><th>Actual</th><th>Variance</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        {% for s in shifts %}
+        <tr>
+          <td>{{ s.opened_at.strftime('%d %b %H:%M') }}</td>
+          <td>{{ s.closed_at.strftime('%d %b %H:%M') if s.closed_at else '—' }}</td>
+          <td>฿{{ s.opening_cash }}</td>
+          <td>฿{{ s.expected_cash }}</td>
+          <td>{{ ('฿' ~ s.actual_cash) if s.actual_cash is not none else '—' }}</td>
+          <td style="{% if s.variance is not none and s.variance < 0 %}color:var(--danger);{% elif s.variance is not none and s.variance > 0 %}color:var(--success,green);{% endif %}">
+            {{ ('฿' ~ s.variance) if s.variance is not none else '—' }}
+          </td>
+          <td class="muted">{{ s.notes or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted" style="padding:12px;">No shifts recorded yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
