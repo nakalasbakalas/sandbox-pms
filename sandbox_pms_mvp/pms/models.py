@@ -1708,6 +1708,36 @@ class OtaChannel(AuditMixin, SoftDeleteMixin, db.Model):
     )
 
 
+class ChannelSyncLog(AuditMixin, db.Model):
+    """Records every channel sync operation for audit and admin dashboard display."""
+
+    __tablename__ = "channel_sync_logs"
+
+    provider_key: Mapped[str] = mapped_column(sa.String(80), nullable=False)
+    direction: Mapped[str] = mapped_column(sa.String(20), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), nullable=False, default=utc_now)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    records_processed: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    records_failed: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(sa.String(20), nullable=False, default="success")
+    error_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    details_json: Mapped[dict | None] = mapped_column("details", JSONType, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"direction IN ({', '.join(repr(v) for v in CHANNEL_SYNC_DIRECTIONS)})",
+            name="ck_channel_sync_logs_direction",
+        ),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(v) for v in CHANNEL_SYNC_LOG_STATUSES)})",
+            name="ck_channel_sync_logs_status",
+        ),
+        CheckConstraint("records_processed >= 0", name="ck_channel_sync_logs_processed"),
+        CheckConstraint("records_failed >= 0", name="ck_channel_sync_logs_failed"),
+        Index("ix_channel_sync_logs_provider_started", "provider_key", "started_at"),
+    )
+
+
 class OtaSyncLog(AuditMixin, db.Model):
     """Persistent log of OTA sync operations for operational visibility."""
 
