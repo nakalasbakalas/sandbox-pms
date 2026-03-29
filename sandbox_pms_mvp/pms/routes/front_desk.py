@@ -760,7 +760,7 @@ def staff_notification_read(notification_id):
     notification.status = "read"
     notification.read_at = utc_now()
     db.session.commit()
-    return redirect(safe_back_path(request.form.get("back_url"), url_for("front_desk.staff_dashboard")))
+    return redirect(request.form.get("back_url") or url_for("front_desk.staff_dashboard"))
 
 
 @front_desk_bp.route("/staff/sw.js")

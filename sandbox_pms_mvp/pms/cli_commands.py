@@ -162,20 +162,3 @@ def register_cli(app: Flask) -> None:
             f"{result['skipped']} skipped, {result['errors']} errors."
             + (f" ({result.get('reason', '')})" if result.get("reason") else "")
         )
-
-    @app.cli.command("sync-channels")
-    def sync_channels_command() -> None:
-        """Pull inbound reservations and push outbound inventory for all active OTA channels."""
-        from .services.channel_service import sync_all_active_channels
-        result = sync_all_active_channels(actor_user_id=None)
-        for provider_key, summary in result.items():
-            inbound = summary.get("inbound", {})
-            outbound = summary.get("outbound", {})
-            print(
-                f"{provider_key}: inbound={inbound.get('processed', 0)} "
-                f"(errors={inbound.get('errors', 0)}) "
-                f"outbound={outbound.get('processed', 0)} "
-                f"(errors={outbound.get('errors', 0)})"
-            )
-        if not result:
-            print("No active OTA channels to sync.")

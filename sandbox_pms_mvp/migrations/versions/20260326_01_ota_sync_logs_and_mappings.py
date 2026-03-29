@@ -12,7 +12,7 @@ from alembic import op
 
 
 revision = "20260326_01"
-down_revision = "20260328_02"
+down_revision = "20260322_08"
 branch_labels = None
 depends_on = None
 

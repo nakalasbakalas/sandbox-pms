@@ -214,14 +214,6 @@
           <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
           <button class="button subtle" type="submit">Test connection</button>
         </form>
-        {% if can('settings.edit') %}
-          <form method="post">
-            {{ csrf_input() }}
-            <input type="hidden" name="action" value="force_sync">
-            <input type="hidden" name="provider_key" value="{{ ch.provider_key }}">
-            <button class="button" type="submit">Force sync now</button>
-          </form>
-        {% endif %}
       </article>
     </div>
   </details>

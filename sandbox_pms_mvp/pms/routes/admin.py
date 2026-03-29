@@ -835,7 +835,6 @@ def staff_admin_channels():
         delete_ota_mapping,
         list_sync_logs,
         ota_dashboard_context,
-        sync_single_channel,
         test_ota_channel_connection,
         upsert_ota_channel,
         upsert_ota_mapping,
@@ -891,17 +890,6 @@ def staff_admin_channels():
                         f"{result.get('error') or 'no credentials configured'}.",
                         "error",
                     )
-
-            elif action == "force_sync":
-                actor = require_permission("settings.edit")
-                sync_result = sync_single_channel(provider_key, actor_user_id=actor.id)
-                inbound = sync_result.get("inbound", {})
-                outbound = sync_result.get("outbound", {})
-                flash(
-                    f"{OTA_PROVIDER_LABELS.get(provider_key, provider_key)}: sync complete — "
-                    f"inbound {inbound.get('processed', 0)} records, outbound {outbound.get('processed', 0)} records.",
-                    "success",
-                )
 
             elif action == "save_mapping":
                 actor = require_permission("settings.edit")

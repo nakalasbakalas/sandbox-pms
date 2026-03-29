@@ -115,7 +115,7 @@ def admin_user(app):
     with app.app_context():
         return db.session.execute(
             sa.select(User).where(User.email == "admin@sandbox.local")
-        ).unique().scalar_one()
+        ).scalar_one()
 
 
 @pytest.fixture()
