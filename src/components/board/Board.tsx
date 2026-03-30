@@ -3,11 +3,13 @@ import type { BoardRoomCard, DragOperation } from '@/types/board'
 import { RoomCard } from './RoomCard'
 import { BoardStatsBar } from './BoardStatsBar'
 import { QuickActionsBar } from './QuickActionsBar'
+import { StatusLegend } from './StatusLegend'
 import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-data'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight } from '@phosphor-icons/react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -220,6 +222,16 @@ export function Board() {
           <Button variant="outline" size="sm" className="h-9 w-9 p-0">
             <Funnel className="w-4 h-4" />
           </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 w-9 p-0">
+                <Info className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[480px]">
+              <StatusLegend />
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
