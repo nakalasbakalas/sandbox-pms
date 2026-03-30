@@ -32,6 +32,8 @@ import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCatego
 import { toast } from 'sonner'
 import { useRoomSync, convertBoardRoomToHousekeepingRoom } from '@/hooks/use-room-sync'
 import { generateMockBoardData } from '@/lib/mock-board-data'
+import { useNotifications } from '@/hooks/use-notifications'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -46,6 +48,7 @@ export function MobileHousekeepingView() {
   const [statusHistory, setStatusHistory] = useKV<Record<string, StatusHistoryEntry[]>>('status-history', {})
   const [selectedRoom, setSelectedRoom] = useState<HousekeepingRoom | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const { addNotification } = useNotifications()
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -103,6 +106,23 @@ export function MobileHousekeepingView() {
     
     setMaintenanceIssues((current) => [...(current || []), newIssue])
 
+    if (issue.priority === 'URGENT' || issue.priority === 'HIGH') {
+      addNotification({
+        type: issue.priority === 'URGENT' ? 'MAINTENANCE_URGENT' : 'HOUSEKEEPING_URGENT',
+        priority: issue.priority,
+        title: `${issue.priority === 'URGENT' ? '🚨 URGENT' : '⚠️'} Maintenance: Room ${issue.roomNumber}`,
+        message: `${issue.category}: ${issue.title}`,
+        roomNumber: issue.roomNumber,
+        roomId: issue.roomId,
+        actionRequired: true,
+        metadata: {
+          issueId: newIssue.id,
+          category: issue.category,
+          blockRoom: issue.blockRoom
+        }
+      })
+    }
+
     toast.success(`Maintenance issue reported for Room ${issue.roomNumber}`)
   }
 
@@ -134,8 +154,11 @@ export function MobileHousekeepingView() {
   return (
     <div className="min-h-screen bg-background pb-24">
       <div className="sticky top-0 z-10 bg-primary text-primary-foreground px-4 py-6 shadow-lg">
-        <h1 className="text-2xl font-semibold">Housekeeping</h1>
-        <div className="grid grid-cols-4 gap-4 mt-4 text-sm">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-semibold">Housekeeping</h1>
+          <NotificationBell />
+        </div>
+        <div className="grid grid-cols-4 gap-4 text-sm">
           <div>
             <div className="text-3xl font-bold">{checkoutRooms.length}</div>
             <div className="opacity-90 text-xs">Checkouts</div>
