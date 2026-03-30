@@ -55,42 +55,8 @@ export function PlaceholderView({ title, description, icon: Icon, features }: Pl
 
 export { FrontDeskView } from '../front-desk/FrontDeskView'
 export { SettingsView } from '../settings/SettingsView'
-
-export function ReservationsView() {
-  return (
-    <PlaceholderView
-      title="Reservations"
-      description="View and manage all bookings across channels"
-      icon={Calendar}
-      features={[
-        'Comprehensive reservations calendar',
-        'Booking creation and modification',
-        'Reservation search and filtering',
-        'Channel source tracking',
-        'Cancellation and no-show management',
-        'Group reservations',
-      ]}
-    />
-  )
-}
-
-export function GuestsView() {
-  return (
-    <PlaceholderView
-      title="Guests"
-      description="Guest profiles and stay history"
-      icon={Users}
-      features={[
-        'Guest profile management',
-        'Stay history and preferences',
-        'Contact information',
-        'ID document storage',
-        'Guest notes and warnings',
-        'Loyalty tracking',
-      ]}
-    />
-  )
-}
+export { ReservationsView } from '../reservations/ReservationsView'
+export { GuestsView } from '../guests/GuestsView'
 
 export function HousekeepingView() {
   return (
