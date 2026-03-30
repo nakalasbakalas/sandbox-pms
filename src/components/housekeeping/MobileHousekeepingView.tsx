@@ -26,7 +26,9 @@ import {
   Plus,
   X,
   User,
-  CalendarBlank
+  CalendarBlank,
+  CaretDown,
+  CaretUp
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
@@ -35,6 +37,7 @@ import { generateMockBoardData } from '@/lib/mock-board-data'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
+import { addDays, isToday, isTomorrow, format, startOfDay } from 'date-fns'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -49,6 +52,7 @@ export function MobileHousekeepingView() {
   const [statusHistory, setStatusHistory] = useKV<Record<string, StatusHistoryEntry[]>>('status-history', {})
   const [selectedRoom, setSelectedRoom] = useState<HousekeepingRoom | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [expandedFloors, setExpandedFloors] = useState<Record<string, boolean>>({ '2': true, '3': true })
   const { addNotification } = useNotifications()
   const { sendNotification, shouldNotify } = useRoomReadyNotifications()
 
@@ -136,13 +140,15 @@ export function MobileHousekeepingView() {
     toast.success('Note added')
   }
 
+  const toggleFloor = (floor: string) => {
+    setExpandedFloors(prev => ({ ...prev, [floor]: !prev[floor] }))
+  }
+
   const dirtyRooms = (rooms || []).filter(r => r.cleanStatus === 'DIRTY').sort((a, b) => b.priority - a.priority)
   const cleanRooms = (rooms || []).filter(r => r.cleanStatus === 'CLEAN')
   const inProgressRooms = (rooms || []).filter(r => r.cleanStatus === 'CLEANING')
+  const inspectedRooms = (rooms || []).filter(r => r.cleanStatus === 'INSPECTED')
   const maintenanceRooms = (rooms || []).filter(r => r.hasMaintenanceIssue)
-
-  const checkoutRooms = dirtyRooms.filter(r => r.isDepartureToday)
-  const stayoverRooms = dirtyRooms.filter(r => !r.isDepartureToday)
 
   if (selectedRoom) {
     return <RoomDetailView 
@@ -158,171 +164,183 @@ export function MobileHousekeepingView() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-24">
-      <div className="sticky top-0 z-10 bg-primary text-primary-foreground px-4 py-6 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-semibold">Housekeeping</h1>
+    <div className="min-h-screen bg-background">
+      <div className="sticky top-0 z-10 bg-primary text-primary-foreground px-6 py-4 shadow-md">
+        <div className="flex items-center justify-between mb-3">
+          <h1 className="text-xl font-semibold">Housekeeping</h1>
           <NotificationBell />
         </div>
-        <div className="grid grid-cols-4 gap-4 text-sm">
+        <div className="grid grid-cols-4 gap-3 text-xs">
           <div>
-            <div className="text-3xl font-bold">{checkoutRooms.length}</div>
-            <div className="opacity-90 text-xs">Checkouts</div>
+            <div className="text-2xl font-bold">{dirtyRooms.length}</div>
+            <div className="opacity-90">To Clean</div>
           </div>
           <div>
-            <div className="text-3xl font-bold">{dirtyRooms.length}</div>
-            <div className="opacity-90 text-xs">To Clean</div>
+            <div className="text-2xl font-bold">{inProgressRooms.length}</div>
+            <div className="opacity-90">Cleaning</div>
           </div>
           <div>
-            <div className="text-3xl font-bold">{inProgressRooms.length}</div>
-            <div className="opacity-90 text-xs">Cleaning</div>
+            <div className="text-2xl font-bold">{cleanRooms.length}</div>
+            <div className="opacity-90">Clean</div>
           </div>
           <div>
-            <div className="text-3xl font-bold">{cleanRooms.length}</div>
-            <div className="opacity-90 text-xs">Ready</div>
+            <div className="text-2xl font-bold">{inspectedRooms.length}</div>
+            <div className="opacity-90">Inspected</div>
           </div>
         </div>
       </div>
 
-      <Tabs defaultValue="checkouts" className="w-full">
-        <TabsList className="w-full rounded-none border-b sticky top-[140px] bg-background z-10">
-          <TabsTrigger value="checkouts" className="flex-1 text-xs">
-            Checkouts ({checkoutRooms.length})
-          </TabsTrigger>
-          <TabsTrigger value="stayovers" className="flex-1 text-xs">
-            Stayovers ({stayoverRooms.length})
-          </TabsTrigger>
-          <TabsTrigger value="progress" className="flex-1 text-xs">
-            In Progress ({inProgressRooms.length})
-          </TabsTrigger>
-          <TabsTrigger value="issues" className="flex-1 text-xs">
-            Issues ({maintenanceRooms.length})
-          </TabsTrigger>
-        </TabsList>
+      <div className="p-4 space-y-4">
+        <div className="text-sm text-muted-foreground mb-2">
+          {format(new Date(), 'EEEE, MMMM d, yyyy')}
+        </div>
 
-        <TabsContent value="checkouts" className="m-0 px-4 pt-4">
-          <div className="space-y-3">
-            {checkoutRooms.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <CheckCircle size={48} className="mx-auto mb-3 opacity-50" />
-                <p>All checkout rooms cleaned!</p>
-              </div>
-            ) : (
-              checkoutRooms.map(room => (
-                <RoomCard key={room.roomId} room={room} onSelect={setSelectedRoom} />
-              ))
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="stayovers" className="m-0 px-4 pt-4">
-          <div className="space-y-3">
-            {stayoverRooms.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <CheckCircle size={48} className="mx-auto mb-3 opacity-50" />
-                <p>All stayover rooms cleaned!</p>
-              </div>
-            ) : (
-              stayoverRooms.map(room => (
-                <RoomCard key={room.roomId} room={room} onSelect={setSelectedRoom} />
-              ))
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="progress" className="m-0 px-4 pt-4">
-          <div className="space-y-3">
-            {inProgressRooms.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Broom size={48} className="mx-auto mb-3 opacity-50" />
-                <p>No rooms being cleaned right now</p>
-              </div>
-            ) : (
-              inProgressRooms.map(room => (
-                <RoomCard key={room.roomId} room={room} onSelect={setSelectedRoom} />
-              ))
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="issues" className="m-0 px-4 pt-4">
-          <div className="space-y-3">
-            {maintenanceRooms.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <CheckCircle size={48} className="mx-auto mb-3 opacity-50" />
-                <p>No maintenance issues!</p>
-              </div>
-            ) : (
-              maintenanceRooms.map(room => (
-                <RoomCard key={room.roomId} room={room} onSelect={setSelectedRoom} showMaintenance />
-              ))
-            )}
-          </div>
-        </TabsContent>
-      </Tabs>
+        <div className="space-y-3">
+          <FloorSection
+            floor="2"
+            title="Twin Rooms (201-215)"
+            rooms={rooms.filter(r => r.floor === 2)}
+            expanded={expandedFloors['2']}
+            onToggle={() => toggleFloor('2')}
+            onSelectRoom={setSelectedRoom}
+            maintenanceIssues={maintenanceIssues || []}
+          />
+          
+          <FloorSection
+            floor="3"
+            title="Double Rooms (301-315)"
+            rooms={rooms.filter(r => r.floor === 3)}
+            expanded={expandedFloors['3']}
+            onToggle={() => toggleFloor('3')}
+            onSelectRoom={setSelectedRoom}
+            maintenanceIssues={maintenanceIssues || []}
+          />
+        </div>
+      </div>
     </div>
   )
 }
 
-interface RoomCardProps {
-  room: HousekeepingRoom
-  onSelect: (room: HousekeepingRoom) => void
-  showMaintenance?: boolean
+interface FloorSectionProps {
+  floor: string
+  title: string
+  rooms: HousekeepingRoom[]
+  expanded: boolean
+  onToggle: () => void
+  onSelectRoom: (room: HousekeepingRoom) => void
+  maintenanceIssues: MaintenanceIssue[]
 }
 
-function RoomCard({ room, onSelect, showMaintenance }: RoomCardProps) {
+function FloorSection({ floor, title, rooms, expanded, onToggle, onSelectRoom, maintenanceIssues }: FloorSectionProps) {
+  const sortedRooms = [...rooms].sort((a, b) => a.number.localeCompare(b.number))
+  
+  const dirtyCount = rooms.filter(r => r.cleanStatus === 'DIRTY').length
+  const cleaningCount = rooms.filter(r => r.cleanStatus === 'CLEANING').length
+  const cleanCount = rooms.filter(r => r.cleanStatus === 'CLEAN').length
+  const inspectedCount = rooms.filter(r => r.cleanStatus === 'INSPECTED').length
+
   return (
-    <Card 
-      className="p-4 active:scale-[0.98] transition-transform cursor-pointer"
+    <Card className="overflow-hidden">
+      <button
+        onClick={onToggle}
+        className="w-full px-4 py-3 flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          {expanded ? <CaretUp size={18} weight="bold" /> : <CaretDown size={18} weight="bold" />}
+          <div className="text-left">
+            <div className="font-semibold">{title}</div>
+            <div className="text-xs text-muted-foreground">
+              {dirtyCount} dirty • {cleaningCount} cleaning • {cleanCount} clean • {inspectedCount} inspected
+            </div>
+          </div>
+        </div>
+      </button>
+      
+      {expanded && (
+        <div className="divide-y">
+          {sortedRooms.map(room => (
+            <CompactRoomRow 
+              key={room.roomId} 
+              room={room} 
+              onSelect={onSelectRoom}
+              maintenanceIssues={maintenanceIssues.filter(i => i.roomId === room.roomId)}
+            />
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+interface CompactRoomRowProps {
+  room: HousekeepingRoom
+  onSelect: (room: HousekeepingRoom) => void
+  maintenanceIssues: MaintenanceIssue[]
+}
+
+function CompactRoomRow({ room, onSelect, maintenanceIssues }: CompactRoomRowProps) {
+  return (
+    <button
       onClick={() => onSelect(room)}
+      className="w-full px-4 py-2.5 hover:bg-muted/30 transition-colors text-left"
     >
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <div className="text-2xl font-bold">{room.number}</div>
-            <Badge variant="secondary" className="text-xs">
-              {room.type}
-            </Badge>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="font-semibold text-base w-12 flex-shrink-0">{room.number}</div>
+          
+          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+            <StatusDot status={room.cleanStatus} />
+            
             {room.isArrivalToday && (
-              <Badge variant="default" className="text-xs bg-green-600">
-                Arrival {room.arrivalTime}
+              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-green-600">
+                Arr {room.arrivalTime}
               </Badge>
             )}
-            {room.hasMaintenanceIssue && (
-              <Badge variant="destructive" className="text-xs">
-                <Wrench size={12} className="mr-1" weight="bold" />
-                Issue
+            
+            {room.isDepartureToday && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-orange-600">
+                Dep {room.checkOutTime}
               </Badge>
+            )}
+            
+            {maintenanceIssues.length > 0 && (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
+                <Wrench size={10} className="mr-0.5" weight="bold" />
+                {maintenanceIssues.length}
+              </Badge>
+            )}
+            
+            {room.guestName && (
+              <span className="text-xs text-muted-foreground truncate">{room.guestName}</span>
             )}
           </div>
-          
-          {room.guestName && (
-            <div className="text-sm text-muted-foreground mb-1">
-              {room.guestName}
-            </div>
-          )}
-          
-          {room.isDepartureToday && room.checkOutTime && (
-            <div className="flex items-center gap-1 text-sm text-orange-600 dark:text-orange-400">
-              <Clock size={14} weight="bold" />
-              <span>Checkout {room.checkOutTime}</span>
-            </div>
-          )}
-
-          {showMaintenance && room.maintenanceNotes && (
-            <div className="flex items-start gap-2 mt-2 text-sm">
-              <Wrench size={16} className="text-red-600 mt-0.5 flex-shrink-0" weight="bold" />
-              <span className="text-red-600 dark:text-red-400">{room.maintenanceNotes}</span>
-            </div>
-          )}
         </div>
-
-        <div className="flex flex-col items-end gap-2">
-          <StatusBadge status={room.cleanStatus} />
-          <CaretRight size={20} className="text-muted-foreground" />
-        </div>
+        
+        <CaretRight size={16} className="text-muted-foreground flex-shrink-0" />
       </div>
-    </Card>
+    </button>
+  )
+}
+
+interface StatusDotProps {
+  status: CleanStatus
+}
+
+function StatusDot({ status }: StatusDotProps) {
+  const config = {
+    CLEAN: { color: 'bg-green-500', label: 'Clean' },
+    DIRTY: { color: 'bg-orange-500', label: 'Dirty' },
+    INSPECTED: { color: 'bg-blue-500', label: 'Inspected' },
+    CLEANING: { color: 'bg-purple-500', label: 'Cleaning' },
+  }
+
+  const { color, label } = config[status]
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className={`w-2.5 h-2.5 rounded-full ${color}`} title={label} />
+      <span className="text-xs text-muted-foreground">{label}</span>
+    </div>
   )
 }
 
