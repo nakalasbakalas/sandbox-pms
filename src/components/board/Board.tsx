@@ -6,9 +6,12 @@ import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-dat
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { MagnifyingGlass, Funnel } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
+import { CommandPalette } from '@/components/CommandPalette'
+import { useCommandPalette } from '@/hooks/use-command-palette'
+import { createPMSCommands } from '@/lib/pms-commands'
 
 export function Board() {
   const [rooms] = useState<BoardRoomCard[]>(() => generateMockBoardData())
@@ -16,6 +19,9 @@ export function Board() {
   const [selectedRoom, setSelectedRoom] = useState<BoardRoomCard | null>(null)
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  
+  const commandPalette = useCommandPalette()
+  const commands = useMemo(() => createPMSCommands(), [])
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
 
@@ -110,6 +116,17 @@ export function Board() {
         </div>
         
         <div className="flex items-center gap-3">
+          <Button 
+            variant="outline" 
+            onClick={commandPalette.open}
+            className="gap-2"
+          >
+            <Command className="w-4 h-4" />
+            <span className="hidden md:inline">Commands</span>
+            <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground md:inline-flex">
+              <span className="text-xs">⌘</span>K
+            </kbd>
+          </Button>
           <div className="relative w-80">
             <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
@@ -240,6 +257,12 @@ export function Board() {
           )}
         </SheetContent>
       </Sheet>
+
+      <CommandPalette
+        open={commandPalette.isOpen}
+        onOpenChange={commandPalette.close}
+        commands={commands}
+      />
     </div>
   )
 }
