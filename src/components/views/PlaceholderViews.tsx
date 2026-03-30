@@ -57,6 +57,9 @@ export { FrontDeskView } from '../front-desk/FrontDeskView'
 export { SettingsView } from '../settings/SettingsView'
 export { ReservationsView } from '../reservations/ReservationsView'
 export { GuestsView } from '../guests/GuestsView'
+export { CashierView } from '../cashier/CashierView'
+export { RatesView } from '../rates/RatesView'
+export { ChannelsView } from '../channels/ChannelsView'
 
 export function HousekeepingView() {
   return (
@@ -71,60 +74,6 @@ export function HousekeepingView() {
         'Maintenance flagging',
         'Turnover pressure indicators',
         'Mobile-optimized interface',
-      ]}
-    />
-  )
-}
-
-export function CashierView() {
-  return (
-    <PlaceholderView
-      title="Cashier"
-      description="Payments, folios, and financial operations"
-      icon={CurrencyCircleDollar}
-      features={[
-        'Guest folio management',
-        'Charge posting and extras',
-        'Payment collection',
-        'Deposit tracking',
-        'Invoice and receipt generation',
-        'Balance due alerts',
-      ]}
-    />
-  )
-}
-
-export function RatesView() {
-  return (
-    <PlaceholderView
-      title="Rates & Pricing"
-      description="Dynamic pricing rules and rate management"
-      icon={ChartLineUp}
-      features={[
-        'Room type base rates',
-        'Seasonal pricing rules',
-        'Weekend and weekday rates',
-        'Long-stay discounts',
-        'Rate calendar visualization',
-        'Pricing rule builder',
-      ]}
-    />
-  )
-}
-
-export function ChannelsView() {
-  return (
-    <PlaceholderView
-      title="Channels"
-      description="OTA integrations and channel manager"
-      icon={ArrowsClockwise}
-      features={[
-        'Booking.com integration',
-        'Agoda integration',
-        'Expedia integration',
-        'Real-time inventory sync',
-        'Rate parity management',
-        'Channel performance analytics',
       ]}
     />
   )
