@@ -12,6 +12,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { Checkbox } from '@/components/ui/checkbox'
 import { 
   Calendar as CalendarIcon, 
   MagnifyingGlass, 
@@ -28,9 +30,17 @@ import {
   X,
   Warning,
   Note,
-  ArrowRight
+  ArrowRight,
+  DoorOpen,
+  Key,
+  IdentificationCard,
+  CreditCard,
+  Receipt,
+  SignIn,
+  SignOut,
+  Info
 } from '@phosphor-icons/react'
-import type { ReservationWithDetails, Reservation, Guest, BookingSource, ReservationStatus } from '@/types'
+import type { ReservationWithDetails, Reservation, Guest, BookingSource, ReservationStatus, Room, RoomWithDetails } from '@/types'
 import { toast } from 'sonner'
 import { format, addDays, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
@@ -43,9 +53,12 @@ interface ReservationData extends Omit<Reservation, 'guest' | 'roomType'> {
 
 export function ReservationsView() {
   const [reservations, setReservations] = useKV<ReservationData[]>('reservations', [])
+  const [rooms, setRooms] = useKV<RoomWithDetails[]>('rooms', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedReservation, setSelectedReservation] = useState<ReservationData | null>(null)
   const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
+  const [showCheckInDialog, setShowCheckInDialog] = useState(false)
+  const [showCheckOutDialog, setShowCheckOutDialog] = useState(false)
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | 'ALL'>('ALL')
 
   const filteredReservations = useMemo(() => {
