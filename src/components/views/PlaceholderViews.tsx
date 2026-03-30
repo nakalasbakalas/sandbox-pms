@@ -60,6 +60,7 @@ export { GuestsView } from '../guests/GuestsView'
 export { CashierView } from '../cashier/CashierView'
 export { RatesView } from '../rates/RatesView'
 export { ChannelsView } from '../channels/ChannelsView'
+export { ReportsView } from '../reports/ReportsView'
 
 export function HousekeepingView() {
   return (
@@ -74,24 +75,6 @@ export function HousekeepingView() {
         'Maintenance flagging',
         'Turnover pressure indicators',
         'Mobile-optimized interface',
-      ]}
-    />
-  )
-}
-
-export function ReportsView() {
-  return (
-    <PlaceholderView
-      title="Reports"
-      description="Analytics and operational intelligence"
-      icon={ChartBar}
-      features={[
-        'Occupancy and revenue metrics',
-        'ADR and RevPAR analysis',
-        'Channel performance comparison',
-        'Guest booking patterns',
-        'Housekeeping efficiency',
-        'Financial summaries',
       ]}
     />
   )
