@@ -1,11 +1,14 @@
 import { useState, useMemo } from 'react'
 import type { ArrivalItem, DepartureItem, CheckInData, CheckOutData } from '@/types/front-desk'
+import type { ReceiptData } from '@/types/receipt'
 import { FrontDeskStatsBar } from './FrontDeskStatsBar'
 import { ArrivalList } from './ArrivalList'
 import { DepartureList } from './DepartureList'
 import { CheckInDialog } from './CheckInDialog'
 import { CheckOutDialog } from './CheckOutDialog'
+import { ReceiptDialog } from './ReceiptDialog'
 import { generateMockArrivals, generateMockDepartures, calculateFrontDeskStats } from '@/lib/mock-front-desk-data'
+import { generateReceiptFromCheckOut } from '@/lib/receipt-generator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,6 +29,8 @@ export function FrontDeskView() {
   const [checkInDialogOpen, setCheckInDialogOpen] = useState(false)
   const [checkOutDialogOpen, setCheckOutDialogOpen] = useState(false)
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [receiptDialogOpen, setReceiptDialogOpen] = useState(false)
+  const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -105,12 +110,15 @@ export function FrontDeskView() {
       )
     )
 
+    const receipt = generateReceiptFromCheckOut(selectedDeparture, data)
+    setCurrentReceipt(receipt)
+
     toast.success(`${selectedDeparture.guestName} checked out successfully`, {
       description: `Room ${selectedDeparture.roomNumber} at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
     })
 
     setCheckOutDialogOpen(false)
-    setDepartureItem(null)
+    setReceiptDialogOpen(true)
   }
 
   return (
@@ -203,6 +211,19 @@ export function FrontDeskView() {
         open={checkOutDialogOpen}
         onOpenChange={setCheckOutDialogOpen}
         onConfirm={confirmCheckOut}
+      />
+
+      <ReceiptDialog
+        receipt={currentReceipt}
+        open={receiptDialogOpen}
+        onOpenChange={(open) => {
+          setReceiptDialogOpen(open)
+          if (!open) {
+            setCurrentReceipt(null)
+            setDepartureItem(null)
+          }
+        }}
+        type="RECEIPT"
       />
 
       <CommandPalette 
