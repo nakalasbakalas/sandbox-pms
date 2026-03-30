@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import type { ArrivalItem, DepartureItem, CheckInData, CheckOutData } from '@/types/front-desk'
 import type { ReceiptData } from '@/types/receipt'
+import type { PropertySetup } from '@/types/onboarding'
+import { useKV } from '@github/spark/hooks'
 import { FrontDeskStatsBar } from './FrontDeskStatsBar'
 import { ArrivalList } from './ArrivalList'
 import { DepartureList } from './DepartureList'
@@ -32,6 +34,7 @@ export function FrontDeskView() {
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false)
   const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null)
+  const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -131,7 +134,7 @@ export function FrontDeskView() {
       })
     }
 
-    const receipt = generateReceiptFromCheckOut(selectedDeparture, data)
+    const receipt = generateReceiptFromCheckOut(selectedDeparture, data, propertyData)
     setCurrentReceipt(receipt)
 
     toast.success(`${selectedDeparture.guestName} checked out successfully`, {

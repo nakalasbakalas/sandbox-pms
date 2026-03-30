@@ -1,9 +1,12 @@
 import type { ReceiptData, ReceiptLineItem } from '@/types/receipt'
 import type { CheckOutData, DepartureItem } from '@/types/front-desk'
+import type { PropertySetup } from '@/types/onboarding'
+import { calculateTaxes, getDefaultTaxConfiguration } from './tax-calculator'
 
 export function generateReceiptFromCheckOut(
   departure: DepartureItem,
-  checkOutData: CheckOutData
+  checkOutData: CheckOutData,
+  propertySetup?: PropertySetup
 ): ReceiptData {
   const now = new Date()
   const receiptNumber = `RCP-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
@@ -15,6 +18,7 @@ export function generateReceiptFromCheckOut(
       quantity: departure.nights,
       unitPrice: departure.folioTotal / departure.nights,
       total: departure.folioTotal,
+      category: 'ROOM'
     },
   ]
 
@@ -26,6 +30,7 @@ export function generateReceiptFromCheckOut(
       quantity: 1,
       unitPrice: checkOutData.minibarCharges,
       total: checkOutData.minibarCharges,
+      category: 'BEVERAGE'
     })
   }
 
@@ -35,6 +40,7 @@ export function generateReceiptFromCheckOut(
       quantity: 1,
       unitPrice: checkOutData.damageFees,
       total: checkOutData.damageFees,
+      category: 'DAMAGE'
     })
   }
 
@@ -45,19 +51,18 @@ export function generateReceiptFromCheckOut(
         quantity: 1,
         unitPrice: charge.amount,
         total: charge.amount,
+        category: 'OTHER'
       })
     })
   }
 
-  const subtotal =
-    roomCharges.reduce((sum, item) => sum + item.total, 0) +
-    additionalCharges.reduce((sum, item) => sum + item.total, 0)
+  const allItems = [...roomCharges, ...additionalCharges]
+  
+  const taxConfig = propertySetup?.taxConfiguration || getDefaultTaxConfiguration()
+  const taxCalculation = calculateTaxes(allItems, taxConfig)
 
-  const tax = 0
-  const total = subtotal + tax
-
-  const paid = checkOutData.balanceSettled ? total : departure.folioTotal - departure.balanceDue
-  const balance = total - paid
+  const paid = checkOutData.balanceSettled ? taxCalculation.grandTotal : departure.folioTotal - departure.balanceDue
+  const balance = taxCalculation.grandTotal - paid
 
   const checkInDate = new Date()
   checkInDate.setDate(checkInDate.getDate() - departure.nights)
@@ -77,20 +82,21 @@ export function generateReceiptFromCheckOut(
     nights: departure.nights,
     roomCharges,
     additionalCharges,
-    subtotal,
-    tax,
-    total,
+    subtotal: taxCalculation.subtotal,
+    tax: taxCalculation.totalTax,
+    taxBreakdown: taxCalculation.taxBreakdown,
+    total: taxCalculation.grandTotal,
     paid,
     balance,
     paymentMethod: checkOutData.paymentMethod,
     paymentReference: undefined,
     notes: checkOutData.additionalNotes,
     companyInfo: {
-      name: 'Sandbox Hotel',
-      address: '123 Beach Road, Patong, Phuket 83150, Thailand',
-      phone: '+66 (0)76 123 4567',
-      email: 'info@sandboxhotel.com',
-      taxId: 'TAX-0123456789',
+      name: propertySetup?.name || 'Sandbox Hotel',
+      address: propertySetup?.address || '123 Beach Road, Patong, Phuket 83150, Thailand',
+      phone: propertySetup?.phone || '+66 (0)76 123 4567',
+      email: propertySetup?.email || 'info@sandboxhotel.com',
+      taxId: propertySetup?.taxId || 'TAX-0123456789',
     },
   }
 }

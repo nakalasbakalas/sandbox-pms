@@ -3,6 +3,14 @@ export interface ReceiptLineItem {
   quantity: number
   unitPrice: number
   total: number
+  category?: 'ROOM' | 'FOOD' | 'BEVERAGE' | 'EXTRA_GUEST' | 'CHILD_FEE' | 'DAMAGE' | 'OTHER'
+}
+
+export interface TaxBreakdown {
+  name: string
+  rate: number
+  baseAmount: number
+  taxAmount: number
 }
 
 export interface ReceiptData {
@@ -22,6 +30,7 @@ export interface ReceiptData {
   additionalCharges: ReceiptLineItem[]
   subtotal: number
   tax: number
+  taxBreakdown: TaxBreakdown[]
   total: number
   paid: number
   balance: number

@@ -357,7 +357,23 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
                   <td className="text-right font-semibold">Subtotal:</td>
                   <td className="text-right">฿{receipt.subtotal.toLocaleString()}</td>
                 </tr>
-                {receipt.tax > 0 && (
+                {receipt.taxBreakdown && receipt.taxBreakdown.length > 0 && (
+                  <>
+                    {receipt.taxBreakdown.map((taxItem, index) => (
+                      <tr key={index}>
+                        <td className="text-right text-sm text-muted-foreground">
+                          {taxItem.name} ({taxItem.rate}%):
+                        </td>
+                        <td className="text-right text-sm">฿{taxItem.taxAmount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td className="text-right font-semibold">Total Tax:</td>
+                      <td className="text-right font-semibold">฿{receipt.tax.toLocaleString()}</td>
+                    </tr>
+                  </>
+                )}
+                {receipt.tax > 0 && (!receipt.taxBreakdown || receipt.taxBreakdown.length === 0) && (
                   <tr>
                     <td className="text-right font-semibold">Tax:</td>
                     <td className="text-right">฿{receipt.tax.toLocaleString()}</td>

@@ -26,6 +26,21 @@ export interface PropertySetup {
   logoUrl?: string
   brandColor?: string
   receiptFooter?: string
+  taxConfiguration?: TaxConfiguration
+}
+
+export interface TaxConfiguration {
+  enabled: boolean
+  pricesIncludeTax: boolean
+  taxes: TaxRate[]
+}
+
+export interface TaxRate {
+  id: string
+  name: string
+  rate: number
+  appliesTo: 'ROOM' | 'FOOD' | 'BEVERAGE' | 'ALL' | 'EXTRAS'
+  included: boolean
 }
 
 export interface RoomTypeSetup {
