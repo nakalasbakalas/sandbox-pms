@@ -7,7 +7,7 @@ import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-dat
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { MagnifyingGlass, Funnel, Command } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -15,6 +15,8 @@ import { useCommandPalette } from '@/hooks/use-command-palette'
 import { useNavigation } from '@/hooks/use-navigation'
 import { createPMSCommands } from '@/lib/pms-commands'
 import { useRoomSync } from '@/hooks/use-room-sync'
+import { cn } from '@/lib/utils'
+import { addDays, format, isSameDay } from 'date-fns'
 
 export function Board() {
   const { rooms, lastUpdate, initializeRooms } = useRoomSync()
@@ -23,6 +25,8 @@ export function Board() {
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'7day' | '14day' | '30day'>('7day')
+  const [collapsedRoomTypes, setCollapsedRoomTypes] = useState<Set<string>>(new Set())
+  const [startDate] = useState(new Date())
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -77,6 +81,12 @@ export function Board() {
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [selectedRoom])
 
+  const dayCount = viewMode === '7day' ? 7 : viewMode === '14day' ? 14 : 30
+  
+  const dateColumns = useMemo(() => {
+    return Array.from({ length: dayCount }, (_, i) => addDays(startDate, i))
+  }, [startDate, dayCount])
+
   const filteredRooms = useMemo(() => {
     if (!searchQuery) return rooms
     
@@ -97,6 +107,18 @@ export function Board() {
     filteredRooms.filter(r => r.type === 'DOUBLE').sort((a, b) => Number(a.number) - Number(b.number)),
     [filteredRooms]
   )
+
+  const toggleRoomType = (roomType: string) => {
+    setCollapsedRoomTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(roomType)) {
+        next.delete(roomType)
+      } else {
+        next.add(roomType)
+      }
+      return next
+    })
+  }
 
   const handleRoomClick = (room: BoardRoomCard) => {
     setSelectedRoom(room)
@@ -210,53 +232,80 @@ export function Board() {
       />
 
       <div className="flex-1 overflow-auto">
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2 px-1">
-              <span className="text-muted-foreground">Floor 2 •</span>
-              <span>Twin Rooms</span>
-              <span className="text-xs text-muted-foreground">({twinRooms.length})</span>
-            </h2>
-            <div className="grid grid-cols-6 gap-2">
-              {twinRooms.map((room) => (
-                <RoomCard
-                  key={room.roomId}
-                  room={room}
-                  onClick={() => handleRoomClick(room)}
-                  onDragStart={handleDragStart(room)}
-                  onDragOver={handleDragOver(room)}
-                  onDrop={handleDrop(room)}
-                  onDragLeave={handleDragLeave}
-                  onDragEnd={handleDragEnd}
-                  isDragging={draggingRoom === room.roomId}
-                  isDropTarget={dropTarget === room.roomId}
-                />
-              ))}
+        <div className="calendar-board">
+          <div className="sticky top-0 z-20 bg-background pb-2">
+            <div className="flex border-b border-border">
+              <div className="w-32 flex-shrink-0 border-r border-border py-2 px-3">
+                <div className="text-xs font-medium text-muted-foreground">Room Type</div>
+              </div>
+              
+              <div className="flex-1 flex overflow-x-auto">
+                {dateColumns.map((date, i) => {
+                  const isToday = isSameDay(date, new Date())
+                  return (
+                    <div 
+                      key={i} 
+                      className={cn(
+                        "flex-1 min-w-[100px] border-r border-border py-2 px-2 text-center",
+                        isToday && "bg-primary/5"
+                      )}
+                    >
+                      <div className={cn(
+                        "text-[10px] font-medium uppercase tracking-wide",
+                        isToday ? "text-primary" : "text-muted-foreground"
+                      )}>
+                        {format(date, 'EEE')}
+                      </div>
+                      <div className={cn(
+                        "text-sm font-semibold",
+                        isToday ? "text-primary" : "text-foreground"
+                      )}>
+                        {format(date, 'd')}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {format(date, 'MMM')}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
 
-          <div>
-            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2 px-1">
-              <span className="text-muted-foreground">Floor 3 •</span>
-              <span>Double Rooms</span>
-              <span className="text-xs text-muted-foreground">({doubleRooms.length})</span>
-            </h2>
-            <div className="grid grid-cols-6 gap-2">
-              {doubleRooms.map((room) => (
-                <RoomCard
-                  key={room.roomId}
-                  room={room}
-                  onClick={() => handleRoomClick(room)}
-                  onDragStart={handleDragStart(room)}
-                  onDragOver={handleDragOver(room)}
-                  onDrop={handleDrop(room)}
-                  onDragLeave={handleDragLeave}
-                  onDragEnd={handleDragEnd}
-                  isDragging={draggingRoom === room.roomId}
-                  isDropTarget={dropTarget === room.roomId}
-                />
-              ))}
-            </div>
+          <div className="space-y-1">
+            <RoomTypeRow
+              title="Twin Rooms"
+              subtitle="Floor 2"
+              rooms={twinRooms}
+              dateColumns={dateColumns}
+              isCollapsed={collapsedRoomTypes.has('TWIN')}
+              onToggleCollapse={() => toggleRoomType('TWIN')}
+              onRoomClick={handleRoomClick}
+              draggingRoom={draggingRoom}
+              dropTarget={dropTarget}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragLeave={handleDragLeave}
+              onDragEnd={handleDragEnd}
+            />
+
+            <RoomTypeRow
+              title="Double Rooms"
+              subtitle="Floor 3"
+              rooms={doubleRooms}
+              dateColumns={dateColumns}
+              isCollapsed={collapsedRoomTypes.has('DOUBLE')}
+              onToggleCollapse={() => toggleRoomType('DOUBLE')}
+              onRoomClick={handleRoomClick}
+              draggingRoom={draggingRoom}
+              dropTarget={dropTarget}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragLeave={handleDragLeave}
+              onDragEnd={handleDragEnd}
+            />
           </div>
         </div>
       </div>
@@ -332,6 +381,208 @@ export function Board() {
         onOpenChange={commandPalette.close}
         commands={commands}
       />
+    </div>
+  )
+}
+
+interface RoomTypeRowProps {
+  title: string
+  subtitle: string
+  rooms: BoardRoomCard[]
+  dateColumns: Date[]
+  isCollapsed: boolean
+  onToggleCollapse: () => void
+  onRoomClick: (room: BoardRoomCard) => void
+  draggingRoom: string | null
+  dropTarget: string | null
+  onDragStart: (room: BoardRoomCard) => (e: React.DragEvent) => void
+  onDragOver: (room: BoardRoomCard) => (e: React.DragEvent) => void
+  onDrop: (room: BoardRoomCard) => (e: React.DragEvent) => void
+  onDragLeave: () => void
+  onDragEnd: () => void
+}
+
+function RoomTypeRow({
+  title,
+  subtitle,
+  rooms,
+  dateColumns,
+  isCollapsed,
+  onToggleCollapse,
+  onRoomClick,
+  draggingRoom,
+  dropTarget,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragLeave,
+  onDragEnd,
+}: RoomTypeRowProps) {
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={onToggleCollapse}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-card hover:bg-accent/50 transition-colors border-b border-border"
+      >
+        {isCollapsed ? (
+          <CaretRight className="w-4 h-4 text-muted-foreground" />
+        ) : (
+          <CaretDown className="w-4 h-4 text-muted-foreground" />
+        )}
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <span className="text-muted-foreground">{subtitle} •</span>
+          <span>{title}</span>
+          <span className="text-xs text-muted-foreground">({rooms.length})</span>
+        </div>
+      </button>
+
+      {!isCollapsed && (
+        <div className="divide-y divide-border/50">
+          {rooms.map((room) => (
+            <CalendarRoomRow
+              key={room.roomId}
+              room={room}
+              dateColumns={dateColumns}
+              onClick={() => onRoomClick(room)}
+              isDragging={draggingRoom === room.roomId}
+              isDropTarget={dropTarget === room.roomId}
+              onDragStart={onDragStart(room)}
+              onDragOver={onDragOver(room)}
+              onDrop={onDrop(room)}
+              onDragLeave={onDragLeave}
+              onDragEnd={onDragEnd}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface CalendarRoomRowProps {
+  room: BoardRoomCard
+  dateColumns: Date[]
+  onClick: () => void
+  isDragging: boolean
+  isDropTarget: boolean
+  onDragStart: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDrop: (e: React.DragEvent) => void
+  onDragLeave: () => void
+  onDragEnd: () => void
+}
+
+function CalendarRoomRow({
+  room,
+  dateColumns,
+  onClick,
+  isDragging,
+  isDropTarget,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragLeave,
+  onDragEnd,
+}: CalendarRoomRowProps) {
+  const getStatusColor = (status: BoardRoomCard['status']) => {
+    switch (status) {
+      case 'OCCUPIED_CLEAN':
+        return 'bg-primary/20 border-primary/40'
+      case 'OCCUPIED_DIRTY':
+        return 'bg-destructive/20 border-destructive/40'
+      case 'VACANT_CLEAN':
+        return 'bg-green-500/10 border-green-500/30'
+      case 'VACANT_DIRTY':
+        return 'bg-orange-500/10 border-orange-500/30'
+      default:
+        return 'bg-muted border-border'
+    }
+  }
+
+  const getCleanStatusIndicator = (cleanStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED') => {
+    switch (cleanStatus) {
+      case 'CLEAN':
+        return 'bg-green-500'
+      case 'DIRTY':
+        return 'bg-orange-500'
+      case 'INSPECTED':
+        return 'bg-blue-500'
+    }
+  }
+
+  const isRoomOccupied = room.guestName && room.reservationId
+
+  return (
+    <div className="flex hover:bg-accent/20 transition-colors">
+      <div 
+        className="w-32 flex-shrink-0 border-r border-border py-2 px-3 flex items-center gap-2 cursor-pointer"
+        onClick={onClick}
+      >
+        <div className={cn("w-1.5 h-1.5 rounded-full", getCleanStatusIndicator(room.cleanStatus))} />
+        <div className="text-sm font-medium">{room.number}</div>
+        {room.operationalStatus === 'OUT_OF_SERVICE' && (
+          <div className="ml-auto w-2 h-2 rounded-full bg-destructive" />
+        )}
+        {room.operationalStatus === 'BLOCKED' && (
+          <div className="ml-auto w-2 h-2 rounded-full bg-orange-500" />
+        )}
+      </div>
+      
+      <div className="flex-1 flex overflow-x-auto">
+        {dateColumns.map((date, i) => {
+          const isInStay = room.checkIn && room.checkOut &&
+            date >= room.checkIn && date < room.checkOut
+
+          const isCheckIn = room.checkIn && isSameDay(date, room.checkIn)
+          const isCheckOut = room.checkOut && isSameDay(date, room.checkOut)
+          const isToday = isSameDay(date, new Date())
+
+          return (
+            <div 
+              key={i}
+              className={cn(
+                "flex-1 min-w-[100px] border-r border-border py-2 px-1 relative",
+                isToday && "bg-primary/5"
+              )}
+              draggable={!!(isRoomOccupied && isInStay)}
+              onDragStart={isInStay ? onDragStart : undefined}
+              onDragOver={onDragOver}
+              onDrop={onDrop}
+              onDragLeave={onDragLeave}
+              onDragEnd={onDragEnd}
+            >
+              {isInStay && (
+                <div 
+                  className={cn(
+                    "h-full rounded border cursor-move transition-all",
+                    getStatusColor(room.status),
+                    isDragging && "opacity-40",
+                    isDropTarget && !isDragging && "ring-2 ring-primary"
+                  )}
+                  onClick={onClick}
+                >
+                  <div className="px-2 py-1">
+                    {isCheckIn && (
+                      <div className="text-[10px] font-medium truncate">
+                        {room.guestName}
+                      </div>
+                    )}
+                    {room.isArrivalToday && isCheckIn && (
+                      <div className="text-[9px] text-primary font-medium">→ IN</div>
+                    )}
+                    {room.isDepartureToday && isCheckOut && (
+                      <div className="text-[9px] text-destructive font-medium">← OUT</div>
+                    )}
+                    {room.depositStatus === 'PENDING' && isCheckIn && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-orange-500 mt-0.5" />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
