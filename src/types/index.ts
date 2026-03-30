@@ -274,6 +274,7 @@ export interface DashboardStats {
 
 export * from './board'
 export * from './command-palette'
+export * from './daily-summary'
 export * from './front-desk'
 export * from './navigation'
 export * from './onboarding'

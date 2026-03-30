@@ -5,7 +5,8 @@ import { BrandingSettings } from '@/components/settings/BrandingSettings'
 import { LineSettings } from '@/components/settings/LineSettings'
 import { StaffAlertSettings } from '@/components/settings/StaffAlertSettings'
 import { RoomReadyNotificationSettings } from '@/components/settings/RoomReadyNotificationSettings'
-import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging } from '@phosphor-icons/react'
+import { DailySummarySettings } from '@/components/settings/DailySummarySettings'
+import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine } from '@phosphor-icons/react'
 
 export function SettingsView() {
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
@@ -28,7 +29,7 @@ export function SettingsView() {
 
       <div className="p-6 max-w-5xl mx-auto">
         <Tabs defaultValue="branding" className="w-full">
-          <TabsList className="grid w-full grid-cols-7 mb-6">
+          <TabsList className="grid w-full grid-cols-8 mb-6">
             <TabsTrigger value="branding" className="gap-2">
               <Image size={18} weight="duotone" />
               Branding
@@ -44,6 +45,10 @@ export function SettingsView() {
             <TabsTrigger value="room-ready" className="gap-2">
               <BellRinging size={18} weight="duotone" />
               Room Ready
+            </TabsTrigger>
+            <TabsTrigger value="daily-summary" className="gap-2">
+              <ChartLine size={18} weight="duotone" />
+              Daily Reports
             </TabsTrigger>
             <TabsTrigger value="property" className="gap-2">
               <Buildings size={18} weight="duotone" />
@@ -73,6 +78,10 @@ export function SettingsView() {
 
           <TabsContent value="room-ready" className="space-y-6">
             <RoomReadyNotificationSettings />
+          </TabsContent>
+
+          <TabsContent value="daily-summary" className="space-y-6">
+            <DailySummarySettings />
           </TabsContent>
 
           <TabsContent value="property" className="space-y-6">
