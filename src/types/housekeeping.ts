@@ -11,6 +11,7 @@ export interface HousekeepingRoom {
   
   cleanStatus: CleanStatus
   isOccupied: boolean
+  guestCount?: number
   
   isDepartureToday: boolean
   isArrivalToday: boolean

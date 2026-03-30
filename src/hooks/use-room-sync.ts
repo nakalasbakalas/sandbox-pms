@@ -120,6 +120,7 @@ export function convertBoardRoomToHousekeepingRoom(boardRoom: BoardRoomCard): Ho
     type: boardRoom.type,
     cleanStatus: housekeepingCleanStatus,
     isOccupied: boardRoom.status === 'OCCUPIED_CLEAN' || boardRoom.status === 'OCCUPIED_DIRTY',
+    guestCount: boardRoom.guestCount,
     isDepartureToday,
     isArrivalToday,
     arrivalTime: isArrivalToday ? '14:00' : undefined,

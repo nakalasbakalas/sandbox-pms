@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +28,9 @@ import {
   User,
   CalendarBlank,
   CaretDown,
-  CaretUp
+  CaretUp,
+  Users,
+  ArrowCounterClockwise
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
@@ -38,12 +40,21 @@ import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
 import { addDays, isToday, isTomorrow, format, startOfDay } from 'date-fns'
+import { motion, AnimatePresence } from 'framer-motion'
 
 interface StatusHistoryEntry {
   timestamp: Date
   status: CleanStatus
   user: string
   notes?: string
+}
+
+interface UndoAction {
+  roomId: string
+  roomNumber: string
+  previousStatus: CleanStatus
+  newStatus: CleanStatus
+  timestamp: number
 }
 
 export function MobileHousekeepingView() {
@@ -55,6 +66,8 @@ export function MobileHousekeepingView() {
   const [expandedFloors, setExpandedFloors] = useState<Record<string, boolean>>({ '2': true, '3': true })
   const { addNotification } = useNotifications()
   const { sendNotification, shouldNotify } = useRoomReadyNotifications()
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
+  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -108,6 +121,27 @@ export function MobileHousekeepingView() {
   }
 
   const handleQuickUpdate = (roomId: string, newStatus: CleanStatus) => {
+    const room = rooms?.find(r => r.roomId === roomId)
+    if (!room) return
+    
+    const previousStatus = room.cleanStatus
+    
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current)
+    }
+    
+    setUndoAction({
+      roomId,
+      roomNumber: room.number,
+      previousStatus,
+      newStatus,
+      timestamp: Date.now()
+    })
+    
+    undoTimeoutRef.current = setTimeout(() => {
+      setUndoAction(null)
+    }, 5000)
+    
     updateRoomStatus({
       roomId,
       cleanStatus: newStatus,
@@ -130,14 +164,36 @@ export function MobileHousekeepingView() {
       }
     })
 
-    const room = rooms?.find(r => r.roomId === roomId)
-    if (room) {
-      toast.success(`Room ${room.number} marked as ${newStatus.toLowerCase()}`)
-      
-      if ((newStatus === 'CLEAN' || newStatus === 'INSPECTED') && shouldNotify(newStatus)) {
-        sendNotification(room, newStatus)
-      }
+    toast.success(`Room ${room.number} marked as ${newStatus.toLowerCase()}`)
+    
+    if ((newStatus === 'CLEAN' || newStatus === 'INSPECTED') && shouldNotify(newStatus)) {
+      sendNotification(room, newStatus)
     }
+  }
+
+  const handleUndo = () => {
+    if (!undoAction) return
+    
+    if (undoTimeoutRef.current) {
+      clearTimeout(undoTimeoutRef.current)
+    }
+    
+    updateRoomStatus({
+      roomId: undoAction.roomId,
+      cleanStatus: undoAction.previousStatus
+    })
+    
+    setStatusHistory((current) => {
+      const currentHistory = current || {}
+      const history = currentHistory[undoAction.roomId] || []
+      return {
+        ...currentHistory,
+        [undoAction.roomId]: history.slice(0, -1)
+      }
+    })
+    
+    toast.success(`Undone: Room ${undoAction.roomNumber} back to ${undoAction.previousStatus.toLowerCase()}`)
+    setUndoAction(null)
   }
 
   const addMaintenanceIssue = (issue: Omit<MaintenanceIssue, 'id' | 'reportedAt'>) => {
@@ -176,6 +232,14 @@ export function MobileHousekeepingView() {
   const toggleFloor = (floor: string) => {
     setExpandedFloors(prev => ({ ...prev, [floor]: !prev[floor] }))
   }
+
+  useEffect(() => {
+    return () => {
+      if (undoTimeoutRef.current) {
+        clearTimeout(undoTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const dirtyRooms = (rooms || []).filter(r => r.cleanStatus === 'DIRTY').sort((a, b) => b.priority - a.priority)
   const cleanRooms = (rooms || []).filter(r => r.cleanStatus === 'CLEAN')
@@ -222,6 +286,32 @@ export function MobileHousekeepingView() {
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {undoAction && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50"
+          >
+            <div className="bg-card border shadow-lg rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="text-sm">
+                <span className="font-medium">Room {undoAction.roomNumber}</span> updated
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleUndo}
+                className="h-8 gap-2"
+              >
+                <ArrowCounterClockwise size={16} weight="bold" />
+                Undo
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="p-4 space-y-4">
         <div className="text-sm text-muted-foreground mb-2">
@@ -317,71 +407,132 @@ interface CompactRoomRowProps {
 }
 
 function CompactRoomRow({ room, onSelect, onQuickUpdate, maintenanceIssues }: CompactRoomRowProps) {
+  const swipeRef = useRef<HTMLDivElement>(null)
+  const [swipeX, setSwipeX] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const startXRef = useRef(0)
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    startXRef.current = e.touches[0].clientX
+    setIsDragging(true)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return
+    const currentX = e.touches[0].clientX
+    const diff = currentX - startXRef.current
+    setSwipeX(diff)
+  }
+
+  const handleTouchEnd = () => {
+    setIsDragging(false)
+    const threshold = 100
+    
+    if (Math.abs(swipeX) > threshold) {
+      if (swipeX > 0 && (room.cleanStatus === 'DIRTY' || room.cleanStatus === 'CLEANING')) {
+        onQuickUpdate(room.roomId, 'CLEAN')
+      } else if (swipeX < 0 && (room.cleanStatus === 'CLEAN' || room.cleanStatus === 'INSPECTED')) {
+        onQuickUpdate(room.roomId, 'DIRTY')
+      }
+    }
+    
+    setSwipeX(0)
+  }
+
   const handleQuickAction = (e: React.MouseEvent, status: CleanStatus) => {
     e.stopPropagation()
     onQuickUpdate(room.roomId, status)
   }
 
   return (
-    <div className="w-full px-4 py-2.5 hover:bg-muted/30 transition-colors flex items-center justify-between gap-2">
-      <button
-        onClick={() => onSelect(room)}
-        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+    <div className="relative overflow-hidden">
+      <motion.div
+        ref={swipeRef}
+        animate={{ x: swipeX }}
+        transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="w-full px-4 py-2.5 hover:bg-muted/30 transition-colors flex items-center justify-between gap-2 bg-background relative z-10"
       >
-        <div className="font-semibold text-base w-12 flex-shrink-0">{room.number}</div>
+        <button
+          onClick={() => onSelect(room)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+        >
+          <div className="font-semibold text-base w-12 flex-shrink-0">{room.number}</div>
+          
+          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+            <StatusDot status={room.cleanStatus} />
+            
+            {room.isOccupied && room.guestCount && room.guestCount > 0 && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-purple-50 border-purple-200">
+                <Users size={10} className="mr-0.5" weight="bold" />
+                {room.guestCount}
+              </Badge>
+            )}
+            
+            {room.isArrivalToday && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-green-600">
+                Arr {room.arrivalTime}
+              </Badge>
+            )}
+            
+            {room.isDepartureToday && (
+              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-orange-600">
+                Dep {room.checkOutTime}
+              </Badge>
+            )}
+            
+            {maintenanceIssues.length > 0 && (
+              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
+                <Wrench size={10} className="mr-0.5" weight="bold" />
+                {maintenanceIssues.length}
+              </Badge>
+            )}
+            
+            {room.guestName && (
+              <span className="text-xs text-muted-foreground truncate">{room.guestName}</span>
+            )}
+          </div>
+        </button>
         
-        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-          <StatusDot status={room.cleanStatus} />
-          
-          {room.isArrivalToday && (
-            <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-green-600">
-              Arr {room.arrivalTime}
-            </Badge>
-          )}
-          
-          {room.isDepartureToday && (
-            <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-orange-600">
-              Dep {room.checkOutTime}
-            </Badge>
-          )}
-          
-          {maintenanceIssues.length > 0 && (
-            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
-              <Wrench size={10} className="mr-0.5" weight="bold" />
-              {maintenanceIssues.length}
-            </Badge>
-          )}
-          
-          {room.guestName && (
-            <span className="text-xs text-muted-foreground truncate">{room.guestName}</span>
-          )}
-        </div>
-      </button>
-      
-      <div className="flex items-center gap-1 flex-shrink-0">
-        {room.cleanStatus === 'DIRTY' && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
-            onClick={(e) => handleQuickAction(e, 'CLEAN')}
-            title="Mark as Clean"
-          >
-            <CheckCircle size={16} weight="bold" />
-          </Button>
-        )}
-        
-        {room.cleanStatus === 'CLEAN' && (
-          <>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {room.cleanStatus === 'DIRTY' && (
             <Button
               size="sm"
               variant="outline"
-              className="h-8 px-2 bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700"
-              onClick={(e) => handleQuickAction(e, 'INSPECTED')}
-              title="Mark as Inspected"
+              className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+              onClick={(e) => handleQuickAction(e, 'CLEAN')}
+              title="Mark as Clean"
             >
               <CheckCircle size={16} weight="bold" />
             </Button>
+          )}
+          
+          {room.cleanStatus === 'CLEAN' && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700"
+                onClick={(e) => handleQuickAction(e, 'INSPECTED')}
+                title="Mark as Inspected"
+              >
+                <CheckCircle size={16} weight="bold" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2 bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700"
+                onClick={(e) => handleQuickAction(e, 'DIRTY')}
+                title="Mark as Dirty"
+              >
+                <Circle size={16} />
+              </Button>
+            </>
+          )}
+          
+          {room.cleanStatus === 'INSPECTED' && (
             <Button
               size="sm"
               variant="outline"
@@ -391,40 +542,42 @@ function CompactRoomRow({ room, onSelect, onQuickUpdate, maintenanceIssues }: Co
             >
               <Circle size={16} />
             </Button>
-          </>
-        )}
-        
-        {room.cleanStatus === 'INSPECTED' && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-2 bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700"
-            onClick={(e) => handleQuickAction(e, 'DIRTY')}
-            title="Mark as Dirty"
+          )}
+          
+          {room.cleanStatus === 'CLEANING' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+              onClick={(e) => handleQuickAction(e, 'CLEAN')}
+              title="Mark as Clean"
+            >
+              <CheckCircle size={16} weight="bold" />
+            </Button>
+          )}
+          
+          <button
+            onClick={() => onSelect(room)}
+            className="flex items-center justify-center h-8 w-8 hover:bg-muted rounded"
           >
-            <Circle size={16} />
-          </Button>
-        )}
-        
-        {room.cleanStatus === 'CLEANING' && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
-            onClick={(e) => handleQuickAction(e, 'CLEAN')}
-            title="Mark as Clean"
-          >
-            <CheckCircle size={16} weight="bold" />
-          </Button>
-        )}
-        
-        <button
-          onClick={() => onSelect(room)}
-          className="flex items-center justify-center h-8 w-8 hover:bg-muted rounded"
-        >
-          <CaretRight size={16} className="text-muted-foreground" />
-        </button>
-      </div>
+            <CaretRight size={16} className="text-muted-foreground" />
+          </button>
+        </div>
+      </motion.div>
+      
+      {swipeX > 0 && (room.cleanStatus === 'DIRTY' || room.cleanStatus === 'CLEANING') && (
+        <div className="absolute inset-y-0 left-0 bg-green-500 flex items-center px-6 text-white font-semibold">
+          <CheckCircle size={24} weight="bold" />
+          <span className="ml-2">Clean</span>
+        </div>
+      )}
+      
+      {swipeX < 0 && (room.cleanStatus === 'CLEAN' || room.cleanStatus === 'INSPECTED') && (
+        <div className="absolute inset-y-0 right-0 bg-orange-500 flex items-center px-6 text-white font-semibold">
+          <span className="mr-2">Dirty</span>
+          <Circle size={24} weight="bold" />
+        </div>
+      )}
     </div>
   )
 }
