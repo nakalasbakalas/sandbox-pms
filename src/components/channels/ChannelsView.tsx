@@ -34,6 +34,7 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { InventorySyncPanel } from './InventorySyncPanel'
 import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
+import { RateParityPanel } from './RateParityPanel'
 
 interface Channel {
   id: string
@@ -342,6 +343,10 @@ export function ChannelsView() {
             <TabsTrigger value="channels">
               Channels ({connectedChannels.length}/{channels.length})
             </TabsTrigger>
+            <TabsTrigger value="rate-parity">
+              <CurrencyCircleDollar className="w-4 h-4 mr-2" />
+              Rate Parity
+            </TabsTrigger>
             <TabsTrigger value="inventory-sync">
               <Lightning className="w-4 h-4 mr-2" />
               Real-Time Sync
@@ -453,6 +458,10 @@ export function ChannelsView() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="rate-parity" className="flex-1 mt-6">
+            <RateParityPanel connectedChannels={channels} />
           </TabsContent>
 
           <TabsContent value="inventory-sync" className="flex-1 mt-6">
