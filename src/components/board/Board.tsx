@@ -14,9 +14,10 @@ import { CommandPalette } from '@/components/CommandPalette'
 import { useCommandPalette } from '@/hooks/use-command-palette'
 import { useNavigation } from '@/hooks/use-navigation'
 import { createPMSCommands } from '@/lib/pms-commands'
+import { useRoomSync } from '@/hooks/use-room-sync'
 
 export function Board() {
-  const [rooms] = useState<BoardRoomCard[]>(() => generateMockBoardData())
+  const { rooms, lastUpdate, initializeRooms } = useRoomSync()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<BoardRoomCard | null>(null)
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
@@ -28,6 +29,24 @@ export function Board() {
   const commandPalette = useCommandPalette(commands)
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
+
+  useEffect(() => {
+    if (rooms.length === 0) {
+      initializeRooms(generateMockBoardData())
+    }
+  }, [rooms.length, initializeRooms])
+
+  useEffect(() => {
+    if (lastUpdate) {
+      const room = rooms.find(r => r.roomId === lastUpdate.roomId)
+      if (room) {
+        toast.success(
+          `Room ${room.number} updated to ${lastUpdate.cleanStatus}`,
+          { duration: 2000 }
+        )
+      }
+    }
+  }, [lastUpdate, rooms])
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -149,6 +168,12 @@ export function Board() {
         </div>
         
         <div className="flex items-center gap-2">
+          {lastUpdate && (
+            <div className="text-xs text-muted-foreground flex items-center gap-1 mr-2">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span>Live sync active</span>
+            </div>
+          )}
           <Button 
             variant="outline" 
             size="sm"

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +30,8 @@ import {
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
+import { useRoomSync, convertBoardRoomToHousekeepingRoom } from '@/hooks/use-room-sync'
+import { generateMockBoardData } from '@/lib/mock-board-data'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -39,110 +41,31 @@ interface StatusHistoryEntry {
 }
 
 export function MobileHousekeepingView() {
-  const [rooms, setRooms] = useKV<HousekeepingRoom[]>('housekeeping-rooms', [])
+  const { rooms: boardRooms, updateRoomStatus, initializeRooms } = useRoomSync()
   const [maintenanceIssues, setMaintenanceIssues] = useKV<MaintenanceIssue[]>('maintenance-issues', [])
   const [statusHistory, setStatusHistory] = useKV<Record<string, StatusHistoryEntry[]>>('status-history', {})
   const [selectedRoom, setSelectedRoom] = useState<HousekeepingRoom | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
 
   useEffect(() => {
-    if (!rooms || rooms.length === 0) {
-      initializeMockRooms()
+    if (boardRooms.length === 0) {
+      initializeRooms(generateMockBoardData())
     }
-  }, [])
+  }, [boardRooms.length, initializeRooms])
 
-  const initializeMockRooms = () => {
-    const mockRooms: HousekeepingRoom[] = [
-      {
-        roomId: '1',
-        number: '201',
-        floor: 2,
-        type: 'TWIN',
-        cleanStatus: 'DIRTY',
-        isOccupied: false,
-        isDepartureToday: true,
-        isArrivalToday: true,
-        guestName: 'John Smith',
-        checkOutTime: '11:00',
-        priority: 10,
-        hasMaintenanceIssue: false,
-        needsDeepClean: false,
-        arrivalTime: '14:00'
-      },
-      {
-        roomId: '2',
-        number: '202',
-        floor: 2,
-        type: 'TWIN',
-        cleanStatus: 'DIRTY',
-        isOccupied: false,
-        isDepartureToday: true,
-        isArrivalToday: false,
-        priority: 8,
-        hasMaintenanceIssue: false,
-        needsDeepClean: false
-      },
-      {
-        roomId: '3',
-        number: '301',
-        floor: 3,
-        type: 'DOUBLE',
-        cleanStatus: 'CLEAN',
-        isOccupied: true,
-        isDepartureToday: false,
-        isArrivalToday: false,
-        guestName: 'Sarah Johnson',
-        priority: 3,
-        hasMaintenanceIssue: false,
-        needsDeepClean: false
-      },
-      {
-        roomId: '4',
-        number: '302',
-        floor: 3,
-        type: 'DOUBLE',
-        cleanStatus: 'DIRTY',
-        isOccupied: true,
-        isDepartureToday: false,
-        isArrivalToday: false,
-        guestName: 'Mike Chen',
-        priority: 5,
-        hasMaintenanceIssue: true,
-        maintenanceNotes: 'AC not cooling properly',
-        needsDeepClean: false
-      },
-      {
-        roomId: '5',
-        number: '203',
-        floor: 2,
-        type: 'TWIN',
-        cleanStatus: 'CLEANING',
-        isOccupied: false,
-        isDepartureToday: true,
-        isArrivalToday: true,
-        priority: 9,
-        hasMaintenanceIssue: false,
-        needsDeepClean: false,
-        arrivalTime: '15:00'
-      }
-    ]
-    setRooms(mockRooms)
-  }
+  const rooms = useMemo(() => 
+    boardRooms.map(convertBoardRoomToHousekeepingRoom),
+    [boardRooms]
+  )
 
-  const updateRoomStatus = (roomId: string, newStatus: CleanStatus, notes?: string) => {
+  const handleUpdateRoomStatus = (roomId: string, newStatus: CleanStatus, notes?: string) => {
     setIsUpdating(true)
-    setRooms((current) => {
-      if (!current) return []
-      return current.map(room => 
-        room.roomId === roomId 
-          ? { 
-              ...room, 
-              cleanStatus: newStatus,
-              lastCleaned: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? new Date() : room.lastCleaned,
-              cleanedBy: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? 'Current User' : room.cleanedBy
-            }
-          : room
-      )
+    
+    updateRoomStatus({
+      roomId,
+      cleanStatus: newStatus,
+      lastCleaned: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? new Date() : undefined,
+      cleanedBy: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? 'Current User' : undefined
     })
 
     setStatusHistory((current) => {
@@ -164,8 +87,10 @@ export function MobileHousekeepingView() {
     setTimeout(() => {
       setIsUpdating(false)
       setSelectedRoom(null)
-      const roomNumber = rooms?.find(r => r.roomId === roomId)?.number
-      toast.success(`Room ${roomNumber} updated to ${newStatus}`)
+      const room = rooms?.find(r => r.roomId === roomId)
+      if (room) {
+        toast.success(`Room ${room.number} updated to ${newStatus}`)
+      }
     }, 300)
   }
 
@@ -177,27 +102,11 @@ export function MobileHousekeepingView() {
     }
     
     setMaintenanceIssues((current) => [...(current || []), newIssue])
-    setRooms((current) => {
-      if (!current) return []
-      return current.map(room => 
-        room.roomId === issue.roomId 
-          ? { ...room, hasMaintenanceIssue: true, maintenanceNotes: issue.title }
-          : room
-      )
-    })
 
     toast.success(`Maintenance issue reported for Room ${issue.roomNumber}`)
   }
 
   const addRoomNote = (roomId: string, note: string) => {
-    setRooms((current) => {
-      if (!current) return []
-      return current.map(room => 
-        room.roomId === roomId 
-          ? { ...room, specialInstructions: note }
-          : room
-      )
-    })
     toast.success('Note added')
   }
 
@@ -213,7 +122,7 @@ export function MobileHousekeepingView() {
     return <RoomDetailView 
       room={selectedRoom} 
       onBack={() => setSelectedRoom(null)}
-      onUpdateStatus={updateRoomStatus}
+      onUpdateStatus={handleUpdateRoomStatus}
       isUpdating={isUpdating}
       onAddMaintenanceIssue={addMaintenanceIssue}
       onAddNote={addRoomNote}
