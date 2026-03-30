@@ -10,6 +10,8 @@ import {
   ReportsView,
   SettingsView,
 } from './components/views/PlaceholderViews'
+import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
+import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { useOnboarding } from './hooks/use-onboarding'
@@ -28,7 +30,7 @@ function AppRouter() {
     case 'guests':
       return <GuestsView />
     case 'housekeeping':
-      return <HousekeepingView />
+      return <MobileHousekeepingView />
     case 'cashier':
       return <CashierView />
     case 'rates':
@@ -39,6 +41,8 @@ function AppRouter() {
       return <ReportsView />
     case 'settings':
       return <SettingsView />
+    case 'messaging':
+      return <CommunicationCenterView />
     default:
       return <Board />
   }

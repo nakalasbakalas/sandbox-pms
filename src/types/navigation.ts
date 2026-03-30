@@ -9,6 +9,7 @@ export type NavigationRoute =
   | 'channels'
   | 'reports'
   | 'settings'
+  | 'messaging'
 
 export interface NavigationState {
   currentRoute: NavigationRoute
