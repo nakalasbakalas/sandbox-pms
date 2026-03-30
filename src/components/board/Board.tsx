@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
 import { useCommandPalette } from '@/hooks/use-command-palette'
+import { useNavigation } from '@/hooks/use-navigation'
 import { createPMSCommands } from '@/lib/pms-commands'
 
 export function Board() {
@@ -20,8 +21,9 @@ export function Board() {
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   
-  const commandPalette = useCommandPalette()
-  const commands = useMemo(() => createPMSCommands(), [])
+  const { navigate } = useNavigation()
+  const commands = useMemo(() => createPMSCommands(navigate), [navigate])
+  const commandPalette = useCommandPalette(commands)
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
 

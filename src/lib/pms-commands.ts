@@ -1,4 +1,5 @@
 import type { Command } from '@/types/command-palette'
+import type { NavigationRoute } from '@/types/navigation'
 import {
   HouseLine,
   Calendar,
@@ -23,7 +24,7 @@ import {
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
-export function createPMSCommands(): Command[] {
+export function createPMSCommands(navigate?: (route: NavigationRoute) => void): Command[] {
   return [
     {
       id: 'nav-board',
@@ -34,7 +35,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+1',
       icon: HouseLine,
       action: () => {
-        toast.info('Navigate to Board')
+        navigate?.('board')
       },
     },
     {
@@ -46,7 +47,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+2',
       icon: Calendar,
       action: () => {
-        toast.info('Navigate to Front Desk')
+        navigate?.('front-desk')
       },
     },
     {
@@ -58,7 +59,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+3',
       icon: Calendar,
       action: () => {
-        toast.info('Navigate to Reservations')
+        navigate?.('reservations')
       },
     },
     {
@@ -70,7 +71,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+4',
       icon: Users,
       action: () => {
-        toast.info('Navigate to Guests')
+        navigate?.('guests')
       },
     },
     {
@@ -82,7 +83,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+5',
       icon: Broom,
       action: () => {
-        toast.info('Navigate to Housekeeping')
+        navigate?.('housekeeping')
       },
     },
     {
@@ -94,7 +95,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+6',
       icon: CurrencyCircleDollar,
       action: () => {
-        toast.info('Navigate to Cashier')
+        navigate?.('cashier')
       },
     },
     {
@@ -105,7 +106,7 @@ export function createPMSCommands(): Command[] {
       keywords: ['rates', 'pricing', 'revenue'],
       icon: ChartLineUp,
       action: () => {
-        toast.info('Navigate to Rates')
+        navigate?.('rates')
       },
       disabled: true,
     },
@@ -117,7 +118,7 @@ export function createPMSCommands(): Command[] {
       keywords: ['channels', 'ota', 'booking.com', 'agoda'],
       icon: ArrowsClockwise,
       action: () => {
-        toast.info('Navigate to Channels')
+        navigate?.('channels')
       },
       disabled: true,
     },
@@ -130,7 +131,7 @@ export function createPMSCommands(): Command[] {
       shortcut: 'cmd+r',
       icon: ChartBar,
       action: () => {
-        toast.info('Navigate to Reports')
+        navigate?.('reports')
       },
       disabled: true,
     },
@@ -142,7 +143,7 @@ export function createPMSCommands(): Command[] {
       keywords: ['settings', 'admin', 'config'],
       icon: Gear,
       action: () => {
-        toast.info('Navigate to Settings')
+        navigate?.('settings')
       },
       disabled: true,
     },

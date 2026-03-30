@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { Command, CommandGroup, CommandCategory } from '@/types/command-palette'
 
-export function useCommandPalette() {
+export function useCommandPalette(commands?: Command[]) {
   const [isOpen, setIsOpen] = useState(false)
 
   const toggle = useCallback(() => {
@@ -21,16 +21,28 @@ export function useCommandPalette() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         toggle()
+        return
       }
       
       if (e.key === 'Escape' && isOpen) {
         close()
+        return
+      }
+
+      if (commands && !isOpen) {
+        for (const command of commands) {
+          if (command.shortcut && matchesShortcut(e, command.shortcut) && !command.disabled) {
+            e.preventDefault()
+            command.action()
+            return
+          }
+        }
       }
     }
 
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, toggle, close])
+  }, [isOpen, toggle, close, commands])
 
   return {
     isOpen,
@@ -38,6 +50,28 @@ export function useCommandPalette() {
     close,
     toggle,
   }
+}
+
+function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut.toLowerCase().split('+')
+  const key = parts[parts.length - 1]
+  const modifiers = parts.slice(0, -1)
+
+  if (e.key.toLowerCase() !== key) {
+    return false
+  }
+
+  const hasCmd = modifiers.includes('cmd') || modifiers.includes('meta')
+  const hasCtrl = modifiers.includes('ctrl')
+  const hasShift = modifiers.includes('shift')
+  const hasAlt = modifiers.includes('alt') || modifiers.includes('option')
+
+  if (hasCmd && !(e.metaKey || e.ctrlKey)) return false
+  if (hasCtrl && !e.ctrlKey) return false
+  if (hasShift && !e.shiftKey) return false
+  if (hasAlt && !e.altKey) return false
+
+  return true
 }
 
 export function groupCommandsByCategory(commands: Command[]): CommandGroup[] {
