@@ -32,6 +32,8 @@ import { toast } from 'sonner'
 import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { RatePushPanel } from './RatePushPanel'
+import { RatePlanManager } from './RatePlanManager'
+import { TaxDiscountManager } from './TaxDiscountManager'
 
 interface RoomType {
   id: string
@@ -286,6 +288,8 @@ export function RatesView() {
         <Tabs defaultValue="rates" className="h-full flex flex-col">
           <TabsList>
             <TabsTrigger value="rates">Rate Calendar</TabsTrigger>
+            <TabsTrigger value="rate-plans">Rate Plans</TabsTrigger>
+            <TabsTrigger value="taxes-discounts">Taxes & Discounts</TabsTrigger>
             <TabsTrigger value="rate-push">
               <ArrowUp className="w-4 h-4 mr-2" />
               Channel Push
@@ -523,6 +527,14 @@ export function RatesView() {
           </Card>
         </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="rate-plans" className="flex-1 mt-6 overflow-auto">
+            <RatePlanManager />
+          </TabsContent>
+
+          <TabsContent value="taxes-discounts" className="flex-1 mt-6 overflow-auto">
+            <TaxDiscountManager />
           </TabsContent>
 
           <TabsContent value="rate-push" className="flex-1 mt-6">

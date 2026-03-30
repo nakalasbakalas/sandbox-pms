@@ -31,6 +31,7 @@ import type { ChargeCategory, PaymentMethod, Reservation, Guest } from '@/types'
 import { toast } from 'sonner'
 import { format, startOfDay, endOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { AccountingDashboard } from './AccountingDashboard'
 
 interface Folio {
   id: string
@@ -88,7 +89,7 @@ export function CashierView() {
   
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
-  const [currentView, setCurrentView] = useState<'folios' | 'daily-report'>('folios')
+  const [currentView, setCurrentView] = useState<'folios' | 'daily-report' | 'accounting'>('folios')
   
   const [showAddChargeDialog, setShowAddChargeDialog] = useState(false)
   const [showAddPaymentDialog, setShowAddPaymentDialog] = useState(false)
@@ -440,6 +441,13 @@ export function CashierView() {
               <ChartLine className="w-4 h-4 mr-2" />
               Daily Report
             </Button>
+            <Button 
+              variant={currentView === 'accounting' ? 'default' : 'outline'}
+              onClick={() => setCurrentView('accounting')}
+            >
+              <CurrencyCircleDollar className="w-4 h-4 mr-2" />
+              Accounting
+            </Button>
           </div>
         </div>
 
@@ -789,7 +797,7 @@ export function CashierView() {
             )}
           </div>
         </div>
-      ) : (
+      ) : currentView === 'daily-report' ? (
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-4xl mx-auto space-y-6">
             <Card>
@@ -903,6 +911,10 @@ export function CashierView() {
               </CardContent>
             </Card>
           </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-auto p-6">
+          <AccountingDashboard />
         </div>
       )}
 
