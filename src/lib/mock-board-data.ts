@@ -32,7 +32,7 @@ export function generateMockBoardData(): BoardRoomCard[] {
       operationalStatus = 'OUT_OF_SERVICE'
       status = 'VACANT_CLEAN'
     } else if (random < 0.65) {
-      status = 'OCCUPIED'
+      status = 'OCCUPIED_CLEAN'
       guestName = generateGuestName()
       reservationId = `RES${roomNumber}${Math.floor(Math.random() * 1000)}`
       checkIn = new Date(Date.now() - Math.floor(Math.random() * 5) * 24 * 60 * 60 * 1000)
@@ -73,12 +73,12 @@ export function generateMockBoardData(): BoardRoomCard[] {
     
     const depositRandom = Math.random()
     const depositStatus = 
-      status === 'OCCUPIED' ? 
+      (status === 'OCCUPIED_CLEAN' || status === 'OCCUPIED_DIRTY') ? 
         (depositRandom < 0.7 ? 'PAID' : depositRandom < 0.9 ? 'PENDING' : 'NONE') : 
         'NONE'
     
     const balanceDue = 
-      status === 'OCCUPIED' && depositStatus !== 'PAID' ? 
+      (status === 'OCCUPIED_CLEAN' || status === 'OCCUPIED_DIRTY') && depositStatus !== 'PAID' ? 
         Math.floor(Math.random() * 5000) + 1000 : 
         undefined
     
@@ -121,7 +121,7 @@ function generateGuestName(): string {
 
 export function calculateBoardStats(rooms: BoardRoomCard[]): BoardStats {
   const activeRooms = rooms.filter(r => r.operationalStatus === 'AVAILABLE')
-  const occupied = rooms.filter(r => r.status === 'OCCUPIED' || r.status === 'OCCUPIED_DIRTY').length
+  const occupied = rooms.filter(r => r.status === 'OCCUPIED_CLEAN' || r.status === 'OCCUPIED_DIRTY').length
   const vacant = rooms.filter(r => (r.status === 'VACANT_CLEAN' || r.status === 'VACANT_DIRTY') && r.operationalStatus === 'AVAILABLE').length
   const arrivalsToday = rooms.filter(r => r.isArrivalToday).length
   const departuresToday = rooms.filter(r => r.isDepartureToday).length

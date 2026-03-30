@@ -1,46 +1,145 @@
-export type {
-  Property,
-  RoomType,
-  Room,
-  Guest,
-  Reservation,
-  RoomDateInventory,
-  InventoryHold,
-  Folio,
-  Charge,
-  Payment,
-  GuestDocument,
-  ReservationLog,
-  RoomStatusLog,
-  User,
-  RateRule,
-  RateCalendar,
-  Channel,
-  ChannelMapping,
-  ChannelSyncLog,
-  Message,
-  MessageTemplate,
-  AuditLog,
-} from '@prisma/client'
+export type RoomOpStatus = 'AVAILABLE' | 'BLOCKED' | 'OUT_OF_SERVICE' | 'OUT_OF_ORDER'
+export type RoomStatus = 'VACANT_CLEAN' | 'VACANT_DIRTY' | 'OCCUPIED_CLEAN' | 'OCCUPIED_DIRTY'
+export type ReservationStatus = 'PENDING' | 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'CANCELLED' | 'NO_SHOW'
+export type BookingSource = 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN' | 'PHONE' | 'OTHER'
+export type InventoryStatus = 'AVAILABLE' | 'RESERVED' | 'BLOCKED'
+export type HoldStatus = 'ACTIVE' | 'RELEASED' | 'CONVERTED'
+export type FolioStatus = 'OPEN' | 'CLOSED' | 'VOIDED'
+export type ChargeCategory = 'ROOM' | 'FOOD' | 'BEVERAGE' | 'EXTRA_GUEST' | 'CHILD_FEE' | 'DAMAGE' | 'OTHER'
+export type PaymentMethod = 'CASH' | 'CREDIT_CARD' | 'BANK_TRANSFER' | 'OTHER'
+export type ReservationAction = 'CREATED' | 'MODIFIED' | 'CANCELLED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'NO_SHOW'
+export type UserRole = 'ADMIN' | 'MANAGER' | 'FRONT_DESK' | 'HOUSEKEEPING' | 'CASHIER' | 'CAFE_STAFF'
+export type RateAdjustmentType = 'PERCENTAGE' | 'FIXED_DELTA' | 'LONG_STAY_DISCOUNT'
+export type ChannelProvider = 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
+export type ChannelSyncType = 'RESERVATION_PULL' | 'INVENTORY_PUSH' | 'RATE_PUSH' | 'RESTRICTION_PUSH'
+export type MessageChannel = 'EMAIL' | 'LINE' | 'SMS'
+export type MessageStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED'
 
-export type {
-  RoomOpStatus,
-  RoomStatus,
-  ReservationStatus,
-  BookingSource,
-  InventoryStatus,
-  HoldStatus,
-  FolioStatus,
-  ChargeCategory,
-  PaymentMethod,
-  ReservationAction,
-  UserRole,
-  RateAdjustmentType,
-  ChannelProvider,
-  ChannelSyncType,
-  MessageChannel,
-  MessageStatus,
-} from '@prisma/client'
+export interface Property {
+  id: string
+  name: string
+  address: string
+  city: string
+  country: string
+  phone?: string | null
+  email?: string | null
+  website?: string | null
+  taxId?: string | null
+  timeZone: string
+  currency: string
+  defaultCheckIn: string
+  defaultCheckOut: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface RoomType {
+  id: string
+  propertyId: string
+  name: string
+  baseOccupancy: number
+  maxOccupancy: number
+  extraGuestFee: number
+  childFreeAge: number
+  childFeeAge: number
+  childFee: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Room {
+  id: string
+  propertyId: string
+  roomTypeId: string
+  number: string
+  floor?: number | null
+  operationalStatus: RoomOpStatus
+  cleanStatus: RoomStatus
+  notes?: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Guest {
+  id: string
+  propertyId: string
+  firstName: string
+  lastName: string
+  email?: string | null
+  phone?: string | null
+  nationality?: string | null
+  idType?: string | null
+  idNumber?: string | null
+  dateOfBirth?: Date | null
+  vipStatus: boolean
+  blacklisted: boolean
+  cautionFlag: boolean
+  preferences?: Record<string, unknown> | null
+  notes?: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Reservation {
+  id: string
+  propertyId: string
+  guestId: string
+  roomTypeId: string
+  assignedRoomId?: string | null
+  status: ReservationStatus
+  source: BookingSource
+  channelRef?: string | null
+  checkIn: Date
+  checkOut: Date
+  actualCheckIn?: Date | null
+  actualCheckOut?: Date | null
+  adults: number
+  children: number
+  childAges?: number[] | null
+  ratePerNight: number
+  totalAmount: number
+  depositAmount: number
+  depositPaid: boolean
+  specialRequests?: string | null
+  notes?: string | null
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Folio {
+  id: string
+  reservationId: string
+  status: FolioStatus
+  balance: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface Charge {
+  id: string
+  folioId: string
+  category: ChargeCategory
+  description: string
+  amount: number
+  quantity: number
+  total: number
+  createdBy: string
+  createdAt: Date
+  voidedAt?: Date | null
+  voidedBy?: string | null
+}
+
+export interface Payment {
+  id: string
+  folioId: string
+  method: PaymentMethod
+  amount: number
+  reference?: string | null
+  receivedBy: string
+  receivedAt: Date
+  voidedAt?: Date | null
+  voidedBy?: string | null
+}
 
 export interface ReservationWithDetails extends Reservation {
   guest: Guest

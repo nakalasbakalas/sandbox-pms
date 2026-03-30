@@ -30,7 +30,7 @@ export function RoomCard({
     if (room.operationalStatus === 'BLOCKED') return 'bg-gray-500/90'
     
     switch (room.status) {
-      case 'OCCUPIED':
+      case 'OCCUPIED_CLEAN':
       case 'OCCUPIED_DIRTY':
         return 'bg-blue-500/90'
       case 'VACANT_CLEAN':
@@ -47,8 +47,8 @@ export function RoomCard({
     if (room.operationalStatus === 'BLOCKED') return 'BLOCKED'
     
     switch (room.status) {
-      case 'OCCUPIED':
-        return room.cleanStatus === 'DIRTY' ? 'OCCUPIED • DIRTY' : 'OCCUPIED'
+      case 'OCCUPIED_CLEAN':
+        return 'OCCUPIED'
       case 'OCCUPIED_DIRTY':
         return 'OCCUPIED • DIRTY'
       case 'VACANT_CLEAN':
@@ -76,7 +76,7 @@ export function RoomCard({
     return ''
   }
 
-  const draggable = room.status === 'OCCUPIED' || room.status === 'OCCUPIED_DIRTY'
+  const draggable = room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
 
   return (
     <motion.div
