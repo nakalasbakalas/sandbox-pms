@@ -1,82 +1,101 @@
 import type { BoardStats } from '@/types/board'
 import { Card } from '@/components/ui/card'
-import { TrendUp, Users, DoorOpen, Broom, Wrench } from '@phosphor-icons/react'
+import { TrendUp, TrendDown, Users, DoorOpen, Broom, ChartBar } from '@phosphor-icons/react'
+import { cn } from '@/lib/utils'
 
 interface BoardStatsBarProps {
   stats: BoardStats
 }
 
 export function BoardStatsBar({ stats }: BoardStatsBarProps) {
+  const occupancyColor = 
+    stats.occupancyRate >= 80 ? 'text-green-600' :
+    stats.occupancyRate >= 60 ? 'text-blue-600' :
+    stats.occupancyRate >= 40 ? 'text-orange-600' :
+    'text-muted-foreground'
+
   return (
-    <div className="grid grid-cols-6 gap-2">
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-blue-500/10 flex-shrink-0">
-            <Users weight="bold" className="w-4 h-4 text-blue-600" />
+    <div className="grid grid-cols-6 gap-3">
+      <Card className="p-3.5 border-l-4 border-l-primary/50 bg-gradient-to-br from-primary/5 to-transparent hover:shadow-md transition-shadow">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10 flex-shrink-0">
+            <Users weight="bold" className="w-5 h-5 text-primary" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.occupied}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Occupied</div>
+            <div className="text-2xl font-bold leading-none">{stats.occupied}</div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Occupied</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-emerald-500/10 flex-shrink-0">
-            <DoorOpen weight="bold" className="w-4 h-4 text-emerald-600" />
+      <Card className="p-3.5 border-l-4 border-l-green-500/50 bg-gradient-to-br from-green-50 to-transparent hover:shadow-md transition-shadow">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-green-500/10 flex-shrink-0">
+            <DoorOpen weight="bold" className="w-5 h-5 text-green-600" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.vacant}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Vacant</div>
+            <div className="text-2xl font-bold leading-none">{stats.vacant}</div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Vacant</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-green-500/10 flex-shrink-0">
-            <TrendUp weight="bold" className="w-4 h-4 text-green-600" />
+      <Card className="p-3.5 border-l-4 border-l-emerald-500/50 bg-gradient-to-br from-emerald-50 to-transparent hover:shadow-md transition-shadow">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-emerald-500/10 flex-shrink-0">
+            <TrendUp weight="bold" className="w-5 h-5 text-emerald-600" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.arrivalsToday}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Arrivals</div>
+            <div className="text-2xl font-bold leading-none">{stats.arrivalsToday}</div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Arrivals</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-red-500/10 flex-shrink-0">
-            <TrendUp weight="bold" className="w-4 h-4 text-red-600 rotate-180" />
+      <Card className="p-3.5 border-l-4 border-l-red-500/50 bg-gradient-to-br from-red-50 to-transparent hover:shadow-md transition-shadow">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-red-500/10 flex-shrink-0">
+            <TrendDown weight="bold" className="w-5 h-5 text-red-600" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.departuresToday}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Departures</div>
+            <div className="text-2xl font-bold leading-none">{stats.departuresToday}</div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Departures</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-amber-500/10 flex-shrink-0">
-            <Broom weight="bold" className="w-4 h-4 text-amber-600" />
+      <Card className="p-3.5 border-l-4 border-l-orange-500/50 bg-gradient-to-br from-orange-50 to-transparent hover:shadow-md transition-shadow">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-orange-500/10 flex-shrink-0">
+            <Broom weight="bold" className="w-5 h-5 text-orange-600" />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.dirty}</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Dirty</div>
+            <div className="text-2xl font-bold leading-none">{stats.dirty}</div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Dirty</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-2.5">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-md bg-purple-500/10 flex-shrink-0">
-            <TrendUp weight="bold" className="w-4 h-4 text-purple-600" />
+      <Card className={cn(
+        "p-3.5 border-l-4 bg-gradient-to-br to-transparent hover:shadow-md transition-shadow",
+        stats.occupancyRate >= 80 ? "border-l-green-500/50 from-green-50" :
+        stats.occupancyRate >= 60 ? "border-l-blue-500/50 from-blue-50" :
+        "border-l-orange-500/50 from-orange-50"
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            "p-2 rounded-lg flex-shrink-0",
+            stats.occupancyRate >= 80 ? "bg-green-500/10" :
+            stats.occupancyRate >= 60 ? "bg-blue-500/10" :
+            "bg-orange-500/10"
+          )}>
+            <ChartBar weight="bold" className={cn("w-5 h-5", occupancyColor)} />
           </div>
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-none">{stats.occupancyRate.toFixed(0)}%</div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Occupancy</div>
+            <div className={cn("text-2xl font-bold leading-none", occupancyColor)}>
+              {stats.occupancyRate.toFixed(0)}%
+            </div>
+            <div className="text-[11px] font-medium text-muted-foreground mt-1 uppercase tracking-wide">Occupancy</div>
           </div>
         </div>
       </Card>
