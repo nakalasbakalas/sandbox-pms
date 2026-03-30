@@ -51,6 +51,12 @@ export function Board() {
   const [showUnassigned, setShowUnassigned] = useState(true)
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
+  const [resizingReservation, setResizingReservation] = useState<{
+    roomId: string
+    direction: 'start' | 'end'
+    initialDate: Date
+    currentDate: Date
+  } | null>(null)
   const [filters, setFilters] = useState<BoardFilters>({
     showArrivals: true,
     showDepartures: true,
@@ -511,6 +517,55 @@ export function Board() {
     toast.success(`Stay shortened by ${nights} night${nights !== 1 ? 's' : ''}`)
   }
 
+  const handleStayResize = (roomId: string, newCheckIn?: Date, newCheckOut?: Date) => {
+    const room = rooms.find(r => r.roomId === roomId)
+    if (!room) return
+
+    if (newCheckOut && newCheckOut <= new Date()) {
+      toast.error('Cannot set checkout to past date')
+      return
+    }
+
+    if (newCheckIn && newCheckOut && newCheckIn >= newCheckOut) {
+      toast.error('Check-in must be before check-out')
+      return
+    }
+
+    setRooms((currentRooms) =>
+      currentRooms.map(r =>
+        r.roomId === roomId
+          ? {
+              ...r,
+              checkIn: newCheckIn || r.checkIn,
+              checkOut: newCheckOut || r.checkOut,
+              nightsRemaining: newCheckOut
+                ? Math.ceil((newCheckOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+                : r.nightsRemaining,
+              isDepartureToday: newCheckOut ? isSameDay(newCheckOut, new Date()) : r.isDepartureToday,
+              isArrivalToday: newCheckIn ? isSameDay(newCheckIn, new Date()) : r.isArrivalToday
+            }
+          : r
+      )
+    )
+
+    const oldCheckIn = room.checkIn
+    const oldCheckOut = room.checkOut
+    const finalCheckIn = newCheckIn || oldCheckIn
+    const finalCheckOut = newCheckOut || oldCheckOut
+
+    if (finalCheckIn && finalCheckOut && oldCheckIn && oldCheckOut) {
+      const oldNights = Math.ceil((oldCheckOut.getTime() - oldCheckIn.getTime()) / (24 * 60 * 60 * 1000))
+      const newNights = Math.ceil((finalCheckOut.getTime() - finalCheckIn.getTime()) / (24 * 60 * 60 * 1000))
+      const nightDiff = newNights - oldNights
+
+      if (nightDiff > 0) {
+        toast.success(`Stay extended by ${nightDiff} night${nightDiff !== 1 ? 's' : ''}`)
+      } else if (nightDiff < 0) {
+        toast.success(`Stay shortened by ${Math.abs(nightDiff)} night${Math.abs(nightDiff) !== 1 ? 's' : ''}`)
+      }
+    }
+  }
+
   const handleQuickCheckIn = (room: BoardRoomCard) => {
     const mockReservation = unassignedReservations.find(r => r.roomType === room.type)
     
@@ -762,11 +817,15 @@ export function Board() {
                 draggingRoom={draggingRoom}
                 draggingReservation={draggingReservation}
                 dropTarget={dropTarget}
+                resizingReservation={resizingReservation}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 onDragLeave={handleDragLeave}
                 onDragEnd={handleDragEnd}
+                onStayResize={handleStayResize}
+                onResizeStart={setResizingReservation}
+                onResizeEnd={() => setResizingReservation(null)}
               />
 
               <RoomTypeRow
@@ -780,11 +839,15 @@ export function Board() {
                 draggingRoom={draggingRoom}
                 draggingReservation={draggingReservation}
                 dropTarget={dropTarget}
+                resizingReservation={resizingReservation}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 onDragLeave={handleDragLeave}
                 onDragEnd={handleDragEnd}
+                onStayResize={handleStayResize}
+                onResizeStart={setResizingReservation}
+                onResizeEnd={() => setResizingReservation(null)}
               />
             </div>
           </div>
@@ -1088,11 +1151,20 @@ interface RoomTypeRowProps {
   draggingRoom: string | null
   draggingReservation: string | null
   dropTarget: string | null
+  resizingReservation: {
+    roomId: string
+    direction: 'start' | 'end'
+    initialDate: Date
+    currentDate: Date
+  } | null
   onDragStart: (room: BoardRoomCard) => (e: React.DragEvent) => void
   onDragOver: (room: BoardRoomCard) => (e: React.DragEvent) => void
   onDrop: (room: BoardRoomCard) => (e: React.DragEvent) => void
   onDragLeave: () => void
   onDragEnd: () => void
+  onStayResize: (roomId: string, newCheckIn?: Date, newCheckOut?: Date) => void
+  onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
+  onResizeEnd: () => void
 }
 
 function RoomTypeRow({
@@ -1106,11 +1178,15 @@ function RoomTypeRow({
   draggingRoom,
   draggingReservation,
   dropTarget,
+  resizingReservation,
   onDragStart,
   onDragOver,
   onDrop,
   onDragLeave,
   onDragEnd,
+  onStayResize,
+  onResizeStart,
+  onResizeEnd,
 }: RoomTypeRowProps) {
   const occupiedCount = rooms.filter(r => r.status.includes('OCCUPIED')).length
   const cleanCount = rooms.filter(r => r.cleanStatus === 'CLEAN').length
@@ -1158,11 +1234,15 @@ function RoomTypeRow({
               isDragging={draggingRoom === room.roomId}
               isDropTarget={dropTarget === room.roomId}
               draggingReservation={draggingReservation}
+              resizingReservation={resizingReservation}
               onDragStart={onDragStart(room)}
               onDragOver={onDragOver(room)}
               onDrop={onDrop(room)}
               onDragLeave={onDragLeave}
               onDragEnd={onDragEnd}
+              onStayResize={onStayResize}
+              onResizeStart={onResizeStart}
+              onResizeEnd={onResizeEnd}
             />
           ))}
         </div>
@@ -1178,11 +1258,20 @@ interface CalendarRoomRowProps {
   isDragging: boolean
   isDropTarget: boolean
   draggingReservation: string | null
+  resizingReservation: {
+    roomId: string
+    direction: 'start' | 'end'
+    initialDate: Date
+    currentDate: Date
+  } | null
   onDragStart: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
   onDrop: (e: React.DragEvent) => void
   onDragLeave: () => void
   onDragEnd: () => void
+  onStayResize: (roomId: string, newCheckIn?: Date, newCheckOut?: Date) => void
+  onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
+  onResizeEnd: () => void
 }
 
 function CalendarRoomRow({
@@ -1192,11 +1281,15 @@ function CalendarRoomRow({
   isDragging,
   isDropTarget,
   draggingReservation,
+  resizingReservation,
   onDragStart,
   onDragOver,
   onDrop,
   onDragLeave,
   onDragEnd,
+  onStayResize,
+  onResizeStart,
+  onResizeEnd,
 }: CalendarRoomRowProps) {
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
@@ -1228,8 +1321,58 @@ function CalendarRoomRow({
   const isAvailableForAssignment = room.operationalStatus === 'AVAILABLE' && 
     (room.status === 'VACANT_CLEAN' || room.status === 'VACANT_DIRTY')
 
+  const isResizing = resizingReservation?.roomId === room.roomId
+  const [hoveredCell, setHoveredCell] = useState<number | null>(null)
+
+  const handleResizeMouseDown = (direction: 'start' | 'end', date: Date) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (!room.checkIn || !room.checkOut) return
+    
+    onResizeStart({
+      roomId: room.roomId,
+      direction,
+      initialDate: direction === 'start' ? room.checkIn : room.checkOut,
+      currentDate: date
+    })
+  }
+
+  const handleResizeMouseMove = (date: Date) => (e: React.MouseEvent) => {
+    if (!isResizing) return
+    
+    if (resizingReservation) {
+      onResizeStart({
+        ...resizingReservation,
+        currentDate: date
+      })
+    }
+  }
+
+  const handleResizeMouseUp = () => {
+    if (!isResizing || !resizingReservation || !room.checkIn || !room.checkOut) {
+      onResizeEnd()
+      return
+    }
+
+    const { direction, currentDate } = resizingReservation
+
+    if (direction === 'end') {
+      const newCheckOut = addDays(currentDate, 1)
+      onStayResize(room.roomId, undefined, newCheckOut)
+    } else {
+      onStayResize(room.roomId, currentDate, undefined)
+    }
+
+    onResizeEnd()
+  }
+
   return (
-    <div className="flex hover:bg-accent/10 transition-colors group">
+    <div 
+      className="flex hover:bg-accent/10 transition-colors group"
+      onMouseUp={handleResizeMouseUp}
+      onMouseLeave={handleResizeMouseUp}
+    >
       <div 
         className="w-28 flex-shrink-0 border-r border-border py-1.5 px-3 flex items-center gap-2 cursor-pointer bg-muted/20 group-hover:bg-muted/40 transition-colors"
         onClick={onClick}
@@ -1275,25 +1418,30 @@ function CalendarRoomRow({
                 "flex-1 min-w-[90px] border-r border-border py-1.5 px-1.5 relative transition-colors",
                 isToday && "bg-primary/10",
                 isWeekendDay && !isToday && "bg-accent/5",
-                draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/30"
+                draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/30",
+                isResizing && "cursor-col-resize"
               )}
-              draggable={!!(isRoomOccupied && isInStay)}
-              onDragStart={isInStay ? onDragStart : undefined}
+              draggable={!!(isRoomOccupied && isInStay && !isResizing)}
+              onDragStart={isInStay && !isResizing ? onDragStart : undefined}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onDragLeave={onDragLeave}
               onDragEnd={onDragEnd}
+              onMouseMove={handleResizeMouseMove(date)}
+              onMouseEnter={() => setHoveredCell(i)}
+              onMouseLeave={() => setHoveredCell(null)}
             >
               {isInStay && (
                 <div 
                   className={cn(
-                    "h-full rounded border transition-all hover:shadow-sm relative overflow-hidden",
+                    "h-full rounded border transition-all hover:shadow-sm relative overflow-hidden group/reservation",
                     getStatusColor(room.status),
                     isDragging && "opacity-40 scale-95",
                     isDropTarget && !isDragging && "ring-2 ring-primary ring-offset-1",
                     isFirstDay && "rounded-l-md",
                     isLastDay && "rounded-r-md",
-                    isRoomOccupied && "cursor-move"
+                    isRoomOccupied && !isResizing && "cursor-move",
+                    isResizing && "ring-2 ring-primary shadow-lg z-10"
                   )}
                   onClick={onClick}
                 >
@@ -1328,12 +1476,47 @@ function CalendarRoomRow({
                       )}
                     </div>
                   </div>
+
+                  {isCheckIn && isRoomOccupied && (
+                    <div
+                      className={cn(
+                        "absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/40 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-primary/60"
+                      )}
+                      onMouseDown={handleResizeMouseDown('start', date)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/80 rounded-full" />
+                    </div>
+                  )}
+
+                  {isLastDay && isRoomOccupied && (
+                    <div
+                      className={cn(
+                        "absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/40 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-primary/60"
+                      )}
+                      onMouseDown={handleResizeMouseDown('end', date)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/80 rounded-full" />
+                    </div>
+                  )}
                   
                   {isDropTarget && !isDragging && (
                     <div className="absolute inset-0 bg-primary/30 backdrop-blur-[2px] flex items-center justify-center border-2 border-primary rounded">
                       <Badge className="text-[9px] font-bold">
                         Drop here
                       </Badge>
+                    </div>
+                  )}
+
+                  {isResizing && resizingReservation && (
+                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap z-20">
+                      {resizingReservation.direction === 'end' 
+                        ? `Check-out: ${format(addDays(resizingReservation.currentDate, 1), 'MMM d, yyyy')}`
+                        : `Check-in: ${format(resizingReservation.currentDate, 'MMM d, yyyy')}`
+                      }
                     </div>
                   )}
                 </div>
@@ -1343,6 +1526,14 @@ function CalendarRoomRow({
                 <div className="h-full rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center transition-all hover:bg-primary/10 hover:border-primary/60">
                   <span className="text-[9px] text-primary/70 font-medium">Drop to assign</span>
                 </div>
+              )}
+
+              {!isInStay && isResizing && resizingReservation && hoveredCell === i && (
+                <div className={cn(
+                  "h-full rounded border-2 border-dashed transition-all",
+                  resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-primary/60 bg-primary/10",
+                  resizingReservation.direction === 'start' && date < (room.checkOut || new Date()) && "border-primary/60 bg-primary/10"
+                )} />
               )}
             </div>
           )
