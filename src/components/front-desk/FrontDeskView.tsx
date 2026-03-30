@@ -19,6 +19,7 @@ import { useCommandPalette } from '@/hooks/use-command-palette'
 import { createPMSCommands } from '@/lib/pms-commands'
 import { useNavigation } from '@/hooks/use-navigation'
 import { CommandPalette } from '@/components/CommandPalette'
+import { useRoomSync } from '@/hooks/use-room-sync'
 
 export function FrontDeskView() {
   const [arrivals, setArrivals] = useState<ArrivalItem[]>(() => generateMockArrivals())
@@ -35,6 +36,7 @@ export function FrontDeskView() {
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
   const commandPalette = useCommandPalette(commands)
+  const { updateRoomStatus, getRoomByNumber } = useRoomSync()
 
   const stats = useMemo(() => calculateFrontDeskStats(arrivals, departures), [arrivals, departures])
 
@@ -91,6 +93,17 @@ export function FrontDeskView() {
       )
     )
 
+    if (selectedArrival.roomNumber) {
+      const room = getRoomByNumber(selectedArrival.roomNumber)
+      if (room) {
+        updateRoomStatus({
+          roomId: room.roomId,
+          cleanStatus: 'CLEAN',
+          lastCleaned: new Date()
+        })
+      }
+    }
+
     toast.success(`${selectedArrival.guestName} checked in successfully`, {
       description: `Room ${selectedArrival.roomNumber || 'assigned'} at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
     })
@@ -110,11 +123,19 @@ export function FrontDeskView() {
       )
     )
 
+    const room = getRoomByNumber(selectedDeparture.roomNumber)
+    if (room) {
+      updateRoomStatus({
+        roomId: room.roomId,
+        cleanStatus: 'DIRTY'
+      })
+    }
+
     const receipt = generateReceiptFromCheckOut(selectedDeparture, data)
     setCurrentReceipt(receipt)
 
     toast.success(`${selectedDeparture.guestName} checked out successfully`, {
-      description: `Room ${selectedDeparture.roomNumber} at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+      description: `Room ${selectedDeparture.roomNumber} marked as dirty and ready for housekeeping`,
     })
 
     setCheckOutDialogOpen(false)
