@@ -30,7 +30,8 @@ import {
   CaretDown,
   CaretUp,
   Users,
-  ArrowCounterClockwise
+  ArrowCounterClockwise,
+  UserList
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
@@ -41,6 +42,7 @@ import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
 import { addDays, isToday, isTomorrow, format, startOfDay } from 'date-fns'
 import { motion, AnimatePresence } from 'framer-motion'
+import { StaffAssignmentView } from './StaffAssignmentView'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -68,6 +70,7 @@ export function MobileHousekeepingView() {
   const { sendNotification, shouldNotify } = useRoomReadyNotifications()
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const [showStaffAssignment, setShowStaffAssignment] = useState(false)
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -247,6 +250,15 @@ export function MobileHousekeepingView() {
   const inspectedRooms = (rooms || []).filter(r => r.cleanStatus === 'INSPECTED')
   const maintenanceRooms = (rooms || []).filter(r => r.hasMaintenanceIssue)
 
+  if (showStaffAssignment) {
+    return (
+      <StaffAssignmentView
+        rooms={rooms || []}
+        onBack={() => setShowStaffAssignment(false)}
+      />
+    )
+  }
+
   if (selectedRoom) {
     return <RoomDetailView 
       room={selectedRoom} 
@@ -265,7 +277,18 @@ export function MobileHousekeepingView() {
       <div className="sticky top-0 z-10 bg-primary text-primary-foreground px-6 py-4 shadow-md">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold">Housekeeping</h1>
-          <NotificationBell />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowStaffAssignment(true)}
+              className="gap-2"
+            >
+              <UserList size={18} weight="bold" />
+              Staff
+            </Button>
+            <NotificationBell />
+          </div>
         </div>
         <div className="grid grid-cols-4 gap-3 text-xs">
           <div>
@@ -407,10 +430,14 @@ interface CompactRoomRowProps {
 }
 
 function CompactRoomRow({ room, onSelect, onQuickUpdate, maintenanceIssues }: CompactRoomRowProps) {
+  const [assignments] = useKV<Record<string, string>>('room-staff-assignments', {})
+  const [staff] = useKV<Array<{ id: string; name: string; color: string }>>('housekeeping-staff', [])
   const swipeRef = useRef<HTMLDivElement>(null)
   const [swipeX, setSwipeX] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const startXRef = useRef(0)
+
+  const assignedStaff = staff?.find(s => assignments?.[room.roomId] === s.id)
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startXRef.current = e.touches[0].clientX
@@ -488,6 +515,16 @@ function CompactRoomRow({ room, onSelect, onQuickUpdate, maintenanceIssues }: Co
                 <Wrench size={10} className="mr-0.5" weight="bold" />
                 {maintenanceIssues.length}
               </Badge>
+            )}
+            
+            {assignedStaff && (
+              <div 
+                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-semibold border border-white/30"
+                style={{ backgroundColor: assignedStaff.color }}
+                title={`Assigned to ${assignedStaff.name}`}
+              >
+                {assignedStaff.name.charAt(0).toUpperCase()}
+              </div>
             )}
             
             {room.guestName && (
