@@ -16,6 +16,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CheckCircle, Warning, Bed } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { getAvailableRoomsForWalkIn } from '@/lib/mock-front-desk-data'
+import { GuestVerification, type GuestVerificationData } from './GuestVerification'
+import { RoomConditionCheck, type RoomConditionData } from './RoomConditionCheck'
+import { PaymentCollection, type PaymentData } from './PaymentCollection'
+import { Separator } from '@/components/ui/separator'
 
 interface CheckInDialogProps {
   arrival: ArrivalItem | null
@@ -26,12 +30,28 @@ interface CheckInDialogProps {
 
 export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckInDialogProps) {
   const [selectedRoomId, setSelectedRoomId] = useState('')
-  const [guestVerified, setGuestVerified] = useState(false)
-  const [depositConfirmed, setDepositConfirmed] = useState(false)
   const [documentsCollected, setDocumentsCollected] = useState(false)
-  const [roomConditionNoted, setRoomConditionNoted] = useState(false)
   const [welcomePackProvided, setWelcomePackProvided] = useState(false)
   const [additionalNotes, setAdditionalNotes] = useState('')
+  
+  const [guestVerification, setGuestVerification] = useState<GuestVerificationData>({
+    idType: '',
+    idNumber: '',
+    nationality: '',
+    verified: false
+  })
+  
+  const [roomCondition, setRoomCondition] = useState<RoomConditionData>({
+    status: 'GOOD',
+    notes: ''
+  })
+  
+  const [depositPayment, setDepositPayment] = useState<PaymentData>({
+    method: 'CARD',
+    amount: 0,
+    reference: '',
+    confirmed: false
+  })
 
   if (!arrival) return null
 
@@ -39,8 +59,23 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
     ? [{ id: 'assigned', number: arrival.roomNumber }]
     : getAvailableRoomsForWalkIn(arrival.roomType)
 
-  const allChecksComplete = guestVerified && depositConfirmed && documentsCollected && 
-                            roomConditionNoted && welcomePackProvided
+  const depositDue = arrival.depositPaid ? 0 : (arrival.totalAmount * 0.3)
+  
+  const verificationComplete = guestVerification.verified && 
+                                guestVerification.idType && 
+                                guestVerification.idNumber &&
+                                guestVerification.nationality
+  
+  const depositComplete = depositDue === 0 || (depositPayment.confirmed && depositPayment.amount >= depositDue)
+  
+  const roomReadyForCheckIn = roomCondition.status === 'GOOD' || 
+                              (roomCondition.status !== 'MAJOR_DAMAGE' && roomCondition.notes)
+  
+  const allChecksComplete = verificationComplete && 
+                            depositComplete && 
+                            roomReadyForCheckIn &&
+                            documentsCollected && 
+                            welcomePackProvided
 
   const handleSubmit = () => {
     if (!allChecksComplete) {
@@ -58,10 +93,10 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
       reservationId: arrival.reservationId,
       roomId,
       actualCheckIn: new Date(),
-      guestVerified,
-      depositConfirmed,
+      guestVerified: true,
+      depositConfirmed: depositComplete,
       documentsCollected,
-      roomConditionNoted,
+      roomConditionNoted: true,
       welcomePackProvided,
       additionalNotes: additionalNotes || undefined,
     }
@@ -72,12 +107,25 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
 
   const resetForm = () => {
     setSelectedRoomId('')
-    setGuestVerified(false)
-    setDepositConfirmed(false)
     setDocumentsCollected(false)
-    setRoomConditionNoted(false)
     setWelcomePackProvided(false)
     setAdditionalNotes('')
+    setGuestVerification({
+      idType: '',
+      idNumber: '',
+      nationality: '',
+      verified: false
+    })
+    setRoomCondition({
+      status: 'GOOD',
+      notes: ''
+    })
+    setDepositPayment({
+      method: 'CARD',
+      amount: 0,
+      reference: '',
+      confirmed: false
+    })
   }
 
   return (
@@ -85,7 +133,7 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
       if (!o) resetForm() 
       onOpenChange(o)
     }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl max-h-[95vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center gap-2">
             <CheckCircle className="text-blue-600" weight="duotone" size={24} />
@@ -147,40 +195,41 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
             </div>
           )}
 
+          <Separator />
+
+          <GuestVerification
+            data={guestVerification}
+            onChange={setGuestVerification}
+            guestName={arrival.guestName}
+          />
+
+          <Separator />
+
+          <RoomConditionCheck
+            data={roomCondition}
+            onChange={setRoomCondition}
+            roomNumber={arrival.roomNumber || selectedRoomId || 'TBD'}
+            type="check-in"
+          />
+
+          <Separator />
+
+          {depositDue > 0 && (
+            <>
+              <PaymentCollection
+                data={depositPayment}
+                onChange={setDepositPayment}
+                amountDue={depositDue}
+                label="Deposit Collection"
+              />
+              <Separator />
+            </>
+          )}
+
           <div className="space-y-3">
-            <Label className="text-base font-semibold">Check-in Checklist</Label>
+            <Label className="text-base font-semibold">Final Checklist</Label>
             
             <div className="space-y-3 pl-1">
-              <div className="flex items-start gap-3">
-                <Checkbox 
-                  id="guest-verified" 
-                  checked={guestVerified}
-                  onCheckedChange={(checked) => setGuestVerified(checked as boolean)}
-                />
-                <div className="flex-1">
-                  <label htmlFor="guest-verified" className="text-sm font-medium cursor-pointer">
-                    Guest identity verified
-                  </label>
-                  <p className="text-xs text-muted-foreground">ID or passport checked and recorded</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <Checkbox 
-                  id="deposit-confirmed" 
-                  checked={depositConfirmed}
-                  onCheckedChange={(checked) => setDepositConfirmed(checked as boolean)}
-                />
-                <div className="flex-1">
-                  <label htmlFor="deposit-confirmed" className="text-sm font-medium cursor-pointer">
-                    Deposit payment confirmed
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    {arrival.depositPaid ? 'Pre-paid deposit verified' : 'Deposit collected and recorded'}
-                  </p>
-                </div>
-              </div>
-
               <div className="flex items-start gap-3">
                 <Checkbox 
                   id="documents-collected" 
@@ -189,23 +238,9 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
                 />
                 <div className="flex-1">
                   <label htmlFor="documents-collected" className="text-sm font-medium cursor-pointer">
-                    Documents collected
+                    Registration documents collected
                   </label>
                   <p className="text-xs text-muted-foreground">Registration form signed, policies acknowledged</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <Checkbox 
-                  id="room-condition" 
-                  checked={roomConditionNoted}
-                  onCheckedChange={(checked) => setRoomConditionNoted(checked as boolean)}
-                />
-                <div className="flex-1">
-                  <label htmlFor="room-condition" className="text-sm font-medium cursor-pointer">
-                    Room condition noted
-                  </label>
-                  <p className="text-xs text-muted-foreground">Initial room state verified and clean</p>
                 </div>
               </div>
 
@@ -239,9 +274,16 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
           {!allChecksComplete && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
               <Warning className="text-amber-600 flex-shrink-0 mt-0.5" size={18} weight="bold" />
-              <p className="text-sm text-amber-800">
-                Please complete all checklist items to proceed with check-in
-              </p>
+              <div className="text-sm text-amber-800">
+                <p className="font-medium">Please complete all requirements:</p>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {!verificationComplete && <li>• Complete guest verification</li>}
+                  {!depositComplete && <li>• Collect deposit payment</li>}
+                  {!roomReadyForCheckIn && <li>• Verify room condition</li>}
+                  {!documentsCollected && <li>• Collect registration documents</li>}
+                  {!welcomePackProvided && <li>• Provide welcome pack</li>}
+                </ul>
+              </div>
             </div>
           )}
         </div>
