@@ -51,13 +51,13 @@ function AppRouter() {
 function App() {
     const { completed } = useOnboarding()
     
-    if (!completed) {
-      return <OnboardingWizard />
-    }
-    
     return (
         <NavigationProvider>
-            <AppRouter />
+            {!completed ? (
+                <OnboardingWizard />
+            ) : (
+                <AppRouter />
+            )}
             <Toaster />
         </NavigationProvider>
     )

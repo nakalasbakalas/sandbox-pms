@@ -401,7 +401,7 @@ export function LineSettings() {
                               checked={template.enabled}
                               onCheckedChange={(enabled) => {
                                 setTemplates((current) =>
-                                  current.map((t) =>
+                                  (current || []).map((t) =>
                                     t.id === template.id ? { ...t, enabled } : t
                                   )
                                 )
@@ -456,7 +456,7 @@ export function LineSettings() {
                               checked={template.enabled}
                               onCheckedChange={(enabled) => {
                                 setTemplates((current) =>
-                                  current.map((t) =>
+                                  (current || []).map((t) =>
                                     t.id === template.id ? { ...t, enabled } : t
                                   )
                                 )
