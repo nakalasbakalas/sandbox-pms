@@ -2,7 +2,8 @@ import { useKV } from '@github/spark/hooks'
 import type { PropertySetup } from '@/types/onboarding'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BrandingSettings } from '@/components/settings/BrandingSettings'
-import { Gear, Image, Buildings, Users } from '@phosphor-icons/react'
+import { LineSettings } from '@/components/settings/LineSettings'
+import { Gear, Image, Buildings, Users, ChatCircle } from '@phosphor-icons/react'
 
 export function SettingsView() {
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
@@ -25,10 +26,14 @@ export function SettingsView() {
 
       <div className="p-6 max-w-5xl mx-auto">
         <Tabs defaultValue="branding" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="branding" className="gap-2">
               <Image size={18} weight="duotone" />
               Branding
+            </TabsTrigger>
+            <TabsTrigger value="line" className="gap-2">
+              <ChatCircle size={18} weight="duotone" />
+              LINE
             </TabsTrigger>
             <TabsTrigger value="property" className="gap-2">
               <Buildings size={18} weight="duotone" />
@@ -46,6 +51,10 @@ export function SettingsView() {
 
           <TabsContent value="branding" className="space-y-6">
             <BrandingSettings />
+          </TabsContent>
+
+          <TabsContent value="line" className="space-y-6">
+            <LineSettings />
           </TabsContent>
 
           <TabsContent value="property" className="space-y-6">
