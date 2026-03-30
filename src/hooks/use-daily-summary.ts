@@ -7,7 +7,8 @@ import type {
   DailySummaryLog,
   DailySummaryAlert,
   DailySummaryRoomDetail,
-  DEFAULT_DAILY_SUMMARY_SETTINGS
+  DEFAULT_DAILY_SUMMARY_SETTINGS,
+  WeeklyPerformanceMetrics
 } from '@/types/daily-summary'
 import type { StaffMember } from '@/types/staff-alerts'
 import type { BoardRoomCard } from '@/types/board'
@@ -39,6 +40,10 @@ export function useDailySummary() {
   )
   const [staffMembers] = useKV<StaffMember[]>('staff-members', [])
   const [rooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
+  const [historicalMetrics, setHistoricalMetrics] = useKV<WeeklyPerformanceMetrics[]>(
+    'weekly-performance-history',
+    []
+  )
 
   const getRecipients = useCallback((): StaffMember[] => {
     const activeStaff = (staffMembers || []).filter(s => s.active && s.receiveAlerts)
@@ -240,6 +245,30 @@ export function useDailySummary() {
   const sendReport = useCallback(async (
     report: DailySummaryReport
   ): Promise<DailySummaryLog> => {
+    const recordMetrics = (report: DailySummaryReport) => {
+      const metrics: WeeklyPerformanceMetrics = {
+        date: report.reportDate,
+        readinessScore: report.readinessScore.score,
+        cleanRoomPercentage: report.roomStatus.total > 0 
+          ? ((report.roomStatus.clean + report.roomStatus.inspected) / report.roomStatus.total) * 100 
+          : 100,
+        arrivalReadiness: report.todaySchedule.readinessPercentage,
+        housekeepingCompletionRate: report.housekeepingProgress.totalTasks > 0
+          ? (report.housekeepingProgress.completed / report.housekeepingProgress.totalTasks) * 100
+          : 100,
+        maintenanceIssues: report.maintenanceIssues.total,
+        totalRooms: report.roomStatus.total,
+        arrivals: report.todaySchedule.arrivals,
+        departures: report.todaySchedule.departures,
+        averageCleanTime: report.housekeepingProgress.averageCompletionTime,
+      }
+
+      setHistoricalMetrics((current) => {
+        const updated = [...(current || []), metrics]
+        return updated.slice(-90)
+      })
+    }
+
     if (!settings?.enabled) {
       const log: DailySummaryLog = {
         id: `log-${Date.now()}`,
@@ -258,6 +287,7 @@ export function useDailySummary() {
       }
       
       setReportLogs((current) => [log, ...(current || [])].slice(0, 50))
+      recordMetrics(report)
       return log
     }
 
@@ -281,6 +311,7 @@ export function useDailySummary() {
       }
       
       setReportLogs((current) => [log, ...(current || [])].slice(0, 50))
+      recordMetrics(report)
       return log
     }
 
@@ -318,6 +349,7 @@ export function useDailySummary() {
 
     setReportLogs((current) => [log, ...(current || [])].slice(0, 50))
     setLastGeneratedReport(report)
+    recordMetrics(report)
 
     toast.success('Daily Summary Sent', {
       description: `Report sent to ${recipients.length} staff via ${sentVia.join(', ').toUpperCase()}`,
@@ -325,7 +357,7 @@ export function useDailySummary() {
     })
 
     return log
-  }, [settings, getRecipients, setReportLogs, setLastGeneratedReport])
+  }, [settings, getRecipients, setReportLogs, setLastGeneratedReport, setHistoricalMetrics])
 
   const generateAndSend = useCallback(async () => {
     const report = generateReport(rooms || [])

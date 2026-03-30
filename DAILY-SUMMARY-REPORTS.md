@@ -98,6 +98,35 @@ Reports include contextual alerts based on configurable thresholds:
 - Combine roles + individuals
 - Must have active status and alert preferences enabled
 
+### 6. Weekly Performance Trends
+
+**Trend Analysis**
+- Automatic comparison of current week vs. previous week
+- 5 key performance indicators tracked:
+  - Readiness Score
+  - Clean Room Percentage
+  - Housekeeping Efficiency
+  - Maintenance Issues
+  - Occupancy Rate
+
+**Visual Indicators**
+- Trend arrows (up/down/stable)
+- Percentage change calculations
+- Color-coded performance (green = improving, red = declining)
+- Progress bars for each metric
+
+**Insights Generation**
+- Automated performance observations
+- Threshold-based recommendations
+- Pattern recognition (e.g., maintenance increasing, occupancy trends)
+- Actionable suggestions for improvement
+
+**Data Management**
+- Stores up to 90 days of historical metrics
+- Automatic recording with each daily report
+- Sample data seeding for demonstration
+- Manual data management in settings
+
 ---
 
 ## Configuration
@@ -159,6 +188,49 @@ Reports only send if at least one channel is enabled and has valid recipients.
 - Report date (full format)
 - Generation timestamp
 - Property name (from settings)
+
+### Weekly Trends Section (NEW)
+Displayed at the top of each daily report:
+
+**Trend Cards** (5 metrics):
+1. **Readiness Score**
+   - Current week average
+   - Previous week average
+   - Percentage change
+   - Trend indicator (↑/↓/−)
+   - Progress visualization
+
+2. **Clean Room Percentage**
+   - Weekly average comparison
+   - Trend direction
+   - Performance indicator
+
+3. **Housekeeping Efficiency**
+   - Completion rate trends
+   - Week-over-week change
+   - Performance status
+
+4. **Maintenance Issues**
+   - Average issue count
+   - Trend analysis
+   - Health indicator
+
+5. **Occupancy Rate**
+   - Booking trends
+   - Week comparison
+   - Growth indicator
+
+**Weekly Summary Panel**
+- Days tracked this week
+- Average arrivals per day
+- Average cleaning time
+- Quick statistics
+
+**Performance Insights**
+- Automated observations (e.g., "Readiness score improved by 6.2% this week")
+- Threshold-based alerts (e.g., "Housekeeping completion rate below target")
+- Trend warnings (e.g., "Maintenance issues increased - inspection recommended")
+- Positive reinforcement (e.g., "Operations stable - metrics within normal ranges")
 
 ### Metrics Dashboard
 Four key metrics displayed prominently:
@@ -324,6 +396,23 @@ readinessScore =
 **Last Report**: `last-daily-summary-report` (DailySummaryReport)
 Full report object for display in UI
 
+**Performance History**: `weekly-performance-history` (WeeklyPerformanceMetrics[])
+```typescript
+{
+  date: Date
+  readinessScore: number
+  cleanRoomPercentage: number
+  arrivalReadiness: number
+  housekeepingCompletionRate: number
+  maintenanceIssues: number
+  totalRooms: number
+  arrivals: number
+  departures: number
+  averageCleanTime: number
+}
+```
+Stores up to 90 days of daily metrics for trend analysis
+
 ### Automated Scheduling
 
 ```typescript
@@ -450,8 +539,17 @@ When staff updated (role, contact info):
 
 ## Future Enhancements
 
+### Recently Added Features
+- ✅ **Weekly Performance Trends**: Week-over-week comparison of key metrics
+  - Readiness score trending
+  - Clean room percentage changes
+  - Housekeeping efficiency tracking
+  - Maintenance issue patterns
+  - Occupancy rate analysis
+  - Automated insight generation
+  - Historical data retention (90 days)
+
 ### Planned Features
-- **Historical Trends**: Week-over-week readiness comparison
 - **Predictive Alerts**: Forecast issues before they occur
 - **Custom Metrics**: Property-specific KPIs
 - **Export Options**: PDF download, CSV data export
@@ -478,11 +576,37 @@ const {
   reportLogs,            // Recent report delivery logs
   lastGeneratedReport,   // Most recent full report
   generateReport,        // Generate report from room data
-  sendReport,            // Send report via channels
+  sendReport,            // Send report via channels (auto-records metrics)
   generateAndSend,       // Generate + send in one call
   getRecipients,         // Get current recipient list
   shouldGenerateToday,   // Check if should auto-generate
 } = useDailySummary()
+```
+
+### Hook: `useWeeklyTrends()`
+
+```typescript
+const {
+  weeklyTrends,          // Current vs previous week comparison + insights
+  recordDailyMetrics,    // Manually record metrics from report
+  historicalMetrics,     // Raw historical data (90 days max)
+} = useWeeklyTrends()
+```
+
+**WeeklyTrends Object**:
+```typescript
+{
+  currentWeek: WeeklyPerformanceMetrics[]    // This week's daily data
+  previousWeek: WeeklyPerformanceMetrics[]   // Last week's daily data
+  trends: {
+    readinessScore: { current, previous, change, trend }
+    cleanRoomPercentage: { current, previous, change, trend }
+    housekeepingEfficiency: { current, previous, change, trend }
+    maintenanceIssues: { current, previous, change, trend }
+    occupancyRate: { current, previous, change, trend }
+  }
+  insights: string[]    // Generated observations and recommendations
+}
 ```
 
 ### Types
@@ -492,8 +616,53 @@ const {
 **DailySummaryLog**: Delivery log entry
 **DailySummaryAlert**: Individual alert object
 **DailySummaryRoomDetail**: Per-room detail object
+**WeeklyPerformanceMetrics**: Daily performance snapshot
+**WeeklyTrends**: Trend analysis with insights
 
 See `src/types/daily-summary.ts` for complete type definitions.
+
+---
+
+## Usage Guide
+
+### Viewing Weekly Trends
+
+1. **Navigate to Daily Summary Report**
+   - Main menu → Reports or Settings → Daily Reports → View Last Report
+   
+2. **Weekly Trends Card**
+   - Appears at the top of every daily summary report
+   - Shows comparison of current week vs. previous week
+   - Displays 5 key metrics with trend indicators
+   
+3. **Understanding Trend Indicators**
+   - ↑ Green = Performance improving
+   - ↓ Red = Performance declining
+   - − Gray = Stable (within ±2% threshold)
+   
+4. **Reading Insights**
+   - Automated observations appear in the insights panel
+   - Focus on actionable items marked with specific recommendations
+   - Positive reinforcement for good performance
+
+### Managing Trend Data
+
+**Location**: Settings → Daily Reports → Trend Data Management
+
+**Seed Sample Data**
+- Generates 14 days of simulated data
+- Useful for testing and demonstration
+- Shows improvement pattern (previous week 82%, current week 88%)
+
+**Clear All Data**
+- Removes all historical metrics
+- Fresh start for production use
+- Cannot be undone
+
+**Data Collection**
+- Automatic: Metrics recorded each time a daily report is generated
+- Storage: Up to 90 days of history
+- Retention: Oldest data automatically pruned
 
 ---
 

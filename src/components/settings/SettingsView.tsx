@@ -6,6 +6,7 @@ import { LineSettings } from '@/components/settings/LineSettings'
 import { StaffAlertSettings } from '@/components/settings/StaffAlertSettings'
 import { RoomReadyNotificationSettings } from '@/components/settings/RoomReadyNotificationSettings'
 import { DailySummarySettings } from '@/components/settings/DailySummarySettings'
+import { TrendDataManager } from '@/components/settings/TrendDataManager'
 import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine } from '@phosphor-icons/react'
 
 export function SettingsView() {
@@ -82,6 +83,7 @@ export function SettingsView() {
 
           <TabsContent value="daily-summary" className="space-y-6">
             <DailySummarySettings />
+            <TrendDataManager />
           </TabsContent>
 
           <TabsContent value="property" className="space-y-6">

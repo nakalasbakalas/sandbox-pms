@@ -120,6 +120,57 @@ export interface DailySummaryLog {
   }
 }
 
+export interface WeeklyPerformanceMetrics {
+  date: Date
+  readinessScore: number
+  cleanRoomPercentage: number
+  arrivalReadiness: number
+  housekeepingCompletionRate: number
+  maintenanceIssues: number
+  totalRooms: number
+  arrivals: number
+  departures: number
+  averageCleanTime: number
+}
+
+export interface WeeklyTrends {
+  currentWeek: WeeklyPerformanceMetrics[]
+  previousWeek: WeeklyPerformanceMetrics[]
+  trends: {
+    readinessScore: {
+      current: number
+      previous: number
+      change: number
+      trend: 'up' | 'down' | 'stable'
+    }
+    cleanRoomPercentage: {
+      current: number
+      previous: number
+      change: number
+      trend: 'up' | 'down' | 'stable'
+    }
+    housekeepingEfficiency: {
+      current: number
+      previous: number
+      change: number
+      trend: 'up' | 'down' | 'stable'
+    }
+    maintenanceIssues: {
+      current: number
+      previous: number
+      change: number
+      trend: 'up' | 'down' | 'stable'
+    }
+    occupancyRate: {
+      current: number
+      previous: number
+      change: number
+      trend: 'up' | 'down' | 'stable'
+    }
+  }
+  insights: string[]
+}
+
 export const DEFAULT_DAILY_SUMMARY_SETTINGS: DailySummarySettings = {
   enabled: true,
   

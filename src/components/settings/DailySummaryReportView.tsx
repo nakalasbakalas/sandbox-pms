@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Progress } from '@/components/ui/progress'
 import { useDailySummary } from '@/hooks/use-daily-summary'
+import { useWeeklyTrends } from '@/hooks/use-weekly-trends'
+import { WeeklyTrendsCard } from './WeeklyTrendsCard'
 import { useKV } from '@github/spark/hooks'
 import type { BoardRoomCard } from '@/types/board'
 import {
@@ -22,6 +24,7 @@ import {
 
 export function DailySummaryReportView() {
   const { lastGeneratedReport, generateAndSend, settings } = useDailySummary()
+  const { weeklyTrends } = useWeeklyTrends()
   const [rooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
 
   if (!lastGeneratedReport) {
@@ -87,6 +90,8 @@ export function DailySummaryReportView() {
       </div>
 
       <div className="p-6 max-w-6xl mx-auto flex flex-col gap-6">
+        <WeeklyTrendsCard trends={weeklyTrends} />
+
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-3">
