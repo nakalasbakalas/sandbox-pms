@@ -34,6 +34,7 @@ import { useRoomSync, convertBoardRoomToHousekeepingRoom } from '@/hooks/use-roo
 import { generateMockBoardData } from '@/lib/mock-board-data'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
+import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -49,6 +50,7 @@ export function MobileHousekeepingView() {
   const [selectedRoom, setSelectedRoom] = useState<HousekeepingRoom | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
   const { addNotification } = useNotifications()
+  const { sendNotification, shouldNotify } = useRoomReadyNotifications()
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -93,6 +95,10 @@ export function MobileHousekeepingView() {
       const room = rooms?.find(r => r.roomId === roomId)
       if (room) {
         toast.success(`Room ${room.number} updated to ${newStatus}`)
+        
+        if ((newStatus === 'CLEAN' || newStatus === 'INSPECTED') && shouldNotify(newStatus)) {
+          sendNotification(room, newStatus)
+        }
       }
     }, 300)
   }

@@ -4,7 +4,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BrandingSettings } from '@/components/settings/BrandingSettings'
 import { LineSettings } from '@/components/settings/LineSettings'
 import { StaffAlertSettings } from '@/components/settings/StaffAlertSettings'
-import { Gear, Image, Buildings, Users, ChatCircle, Bell } from '@phosphor-icons/react'
+import { RoomReadyNotificationSettings } from '@/components/settings/RoomReadyNotificationSettings'
+import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging } from '@phosphor-icons/react'
 
 export function SettingsView() {
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
@@ -27,7 +28,7 @@ export function SettingsView() {
 
       <div className="p-6 max-w-5xl mx-auto">
         <Tabs defaultValue="branding" className="w-full">
-          <TabsList className="grid w-full grid-cols-6 mb-6">
+          <TabsList className="grid w-full grid-cols-7 mb-6">
             <TabsTrigger value="branding" className="gap-2">
               <Image size={18} weight="duotone" />
               Branding
@@ -39,6 +40,10 @@ export function SettingsView() {
             <TabsTrigger value="alerts" className="gap-2">
               <Bell size={18} weight="duotone" />
               Alerts
+            </TabsTrigger>
+            <TabsTrigger value="room-ready" className="gap-2">
+              <BellRinging size={18} weight="duotone" />
+              Room Ready
             </TabsTrigger>
             <TabsTrigger value="property" className="gap-2">
               <Buildings size={18} weight="duotone" />
@@ -64,6 +69,10 @@ export function SettingsView() {
 
           <TabsContent value="alerts" className="space-y-6">
             <StaffAlertSettings />
+          </TabsContent>
+
+          <TabsContent value="room-ready" className="space-y-6">
+            <RoomReadyNotificationSettings />
           </TabsContent>
 
           <TabsContent value="property" className="space-y-6">
