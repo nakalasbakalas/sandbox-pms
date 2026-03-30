@@ -13,7 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -26,6 +26,7 @@ import { addDays, format, isSameDay, isWeekend } from 'date-fns'
 import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { NewReservationDialog } from './NewReservationDialog'
+import { EditReservationDialog } from './EditReservationDialog'
 
 interface UnassignedReservation {
   id: string
@@ -75,6 +76,8 @@ export function Board() {
     roomType?: 'TWIN' | 'DOUBLE'
     checkIn?: Date
   } | null>(null)
+  const [showEditReservationDialog, setShowEditReservationDialog] = useState(false)
+  const [editingRoom, setEditingRoom] = useState<BoardRoomCard | null>(null)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -643,6 +646,61 @@ export function Board() {
     setSelectedRoom(null)
   }
 
+  const handleUpdateReservation = (roomId: string, updates: {
+    guestName?: string
+    checkIn?: Date
+    checkOut?: Date
+    guestCount?: number
+    depositStatus?: 'NONE' | 'PENDING' | 'PARTIAL' | 'PAID'
+    balanceDue?: number
+    isVIP?: boolean
+    specialRequests?: string
+  }) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => {
+        if (r.roomId === roomId) {
+          const updatedRoom = { ...r, ...updates }
+          
+          if (updates.checkIn || updates.checkOut) {
+            updatedRoom.nightsRemaining = updates.checkOut 
+              ? Math.ceil((updates.checkOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+              : r.nightsRemaining
+            updatedRoom.isArrivalToday = updates.checkIn ? isSameDay(updates.checkIn, new Date()) : r.isArrivalToday
+            updatedRoom.isDepartureToday = updates.checkOut ? isSameDay(updates.checkOut, new Date()) : r.isDepartureToday
+          }
+          
+          return updatedRoom
+        }
+        return r
+      })
+    )
+  }
+
+  const handleDeleteReservation = (roomId: string) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === roomId 
+          ? {
+              ...r,
+              status: 'VACANT_DIRTY',
+              cleanStatus: 'DIRTY',
+              guestName: undefined,
+              reservationId: undefined,
+              checkIn: undefined,
+              checkOut: undefined,
+              guestCount: undefined,
+              isArrivalToday: false,
+              isDepartureToday: false,
+              nightsRemaining: undefined,
+              depositStatus: 'NONE',
+              balanceDue: undefined,
+              isVIP: false
+            }
+          : r
+      )
+    )
+  }
+
   return (
     <div className="h-full flex gap-3 bg-background p-4">
       {showUnassigned && unassignedReservations.length > 0 && (
@@ -865,6 +923,10 @@ export function Board() {
                 isCollapsed={collapsedRoomTypes.has('TWIN')}
                 onToggleCollapse={() => toggleRoomType('TWIN')}
                 onRoomClick={handleRoomClick}
+                onReservationClick={(room) => {
+                  setEditingRoom(room)
+                  setShowEditReservationDialog(true)
+                }}
                 draggingRoom={draggingRoom}
                 draggingReservation={draggingReservation}
                 dropTarget={dropTarget}
@@ -896,6 +958,10 @@ export function Board() {
                 isCollapsed={collapsedRoomTypes.has('DOUBLE')}
                 onToggleCollapse={() => toggleRoomType('DOUBLE')}
                 onRoomClick={handleRoomClick}
+                onReservationClick={(room) => {
+                  setEditingRoom(room)
+                  setShowEditReservationDialog(true)
+                }}
                 draggingRoom={draggingRoom}
                 draggingReservation={draggingReservation}
                 dropTarget={dropTarget}
@@ -1061,6 +1127,19 @@ export function Board() {
                 <div className="space-y-2">
                   {selectedRoom.guestName && (
                     <>
+                      <Button 
+                        variant="outline"
+                        className="w-full gap-2" 
+                        size="lg"
+                        onClick={() => {
+                          setEditingRoom(selectedRoom)
+                          setShowEditReservationDialog(true)
+                          setSelectedRoom(null)
+                        }}
+                      >
+                        <Pencil className="w-4 h-4" />
+                        Edit Reservation
+                      </Button>
                       <Button 
                         className="w-full gap-2" 
                         size="lg"
@@ -1233,6 +1312,17 @@ export function Board() {
           setPrefilledReservation(null)
         }}
       />
+
+      <EditReservationDialog
+        open={showEditReservationDialog}
+        onClose={() => {
+          setShowEditReservationDialog(false)
+          setEditingRoom(null)
+        }}
+        room={editingRoom}
+        onUpdate={handleUpdateReservation}
+        onDelete={handleDeleteReservation}
+      />
     </div>
   )
 }
@@ -1245,6 +1335,7 @@ interface RoomTypeRowProps {
   isCollapsed: boolean
   onToggleCollapse: () => void
   onRoomClick: (room: BoardRoomCard) => void
+  onReservationClick: (room: BoardRoomCard) => void
   draggingRoom: string | null
   draggingReservation: string | null
   dropTarget: string | null
@@ -1273,6 +1364,7 @@ function RoomTypeRow({
   isCollapsed,
   onToggleCollapse,
   onRoomClick,
+  onReservationClick,
   draggingRoom,
   draggingReservation,
   dropTarget,
@@ -1330,6 +1422,7 @@ function RoomTypeRow({
               room={room}
               dateColumns={dateColumns}
               onClick={() => onRoomClick(room)}
+              onReservationClick={() => onReservationClick(room)}
               isDragging={draggingRoom === room.roomId}
               isDropTarget={dropTarget === room.roomId}
               draggingReservation={draggingReservation}
@@ -1355,6 +1448,7 @@ interface CalendarRoomRowProps {
   room: BoardRoomCard
   dateColumns: Date[]
   onClick: () => void
+  onReservationClick: () => void
   isDragging: boolean
   isDropTarget: boolean
   draggingReservation: string | null
@@ -1379,6 +1473,7 @@ function CalendarRoomRow({
   room,
   dateColumns,
   onClick,
+  onReservationClick,
   isDragging,
   isDropTarget,
   draggingReservation,
@@ -1552,16 +1647,21 @@ function CalendarRoomRow({
                     isDropTarget && !isDragging && "ring-2 ring-primary ring-offset-2",
                     isFirstDay && "rounded-l-lg",
                     isLastDay && "rounded-r-lg",
-                    isRoomOccupied && !isResizing && "cursor-move",
+                    isRoomOccupied && !isResizing && "cursor-move hover:ring-1 hover:ring-primary/40",
                     isResizing && "ring-2 ring-primary shadow-xl z-10"
                   )}
-                  onClick={onClick}
+                  onClick={(e) => {
+                    if (isResizing) return
+                    e.stopPropagation()
+                    onReservationClick()
+                  }}
                 >
                   <div className="px-2.5 py-2 h-full flex flex-col justify-between">
                     {isCheckIn && (
                       <div className="space-y-0.5">
-                        <div className="text-[11px] font-bold truncate text-foreground">
+                        <div className="text-[11px] font-bold truncate text-foreground flex items-center gap-1">
                           {room.guestName}
+                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
                         </div>
                         {room.guestCount && (
                           <div className="text-[9px] text-foreground/70 flex items-center gap-0.5">
