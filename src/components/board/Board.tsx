@@ -181,14 +181,14 @@ export function Board() {
     }
     
     result = result.filter(room => {
-      if (!filters.showOccupied && room.guestName) return false
-      if (!filters.showVacant && !room.guestName) return false
-      if (!filters.showArrivals && room.isArrivalToday) return false
-      if (!filters.showDepartures && room.isDepartureToday) return false
-      if (!filters.showDirty && room.cleanStatus === 'DIRTY') return false
-      if (!filters.showVIP && room.isVIP) return false
-      if (!filters.showIssues && room.hasIssue) return false
-      if (!filters.showDepositPending && room.depositStatus === 'PENDING') return false
+      if (filters.showOccupied === false && room.guestName) return false
+      if (filters.showVacant === false && !room.guestName) return false
+      if (filters.showArrivals === false && room.isArrivalToday) return false
+      if (filters.showDepartures === false && room.isDepartureToday) return false
+      if (filters.showDirty === false && room.cleanStatus === 'DIRTY') return false
+      if (filters.showVIP === false && room.isVIP) return false
+      if (filters.showIssues === false && room.hasIssue) return false
+      if (filters.showDepositPending === false && room.depositStatus === 'PENDING') return false
       
       return true
     })
@@ -470,10 +470,33 @@ export function Board() {
     setSelectedRoom(null)
   }
 
+  const checkReservationConflict = (roomId: string, newCheckIn: Date, newCheckOut: Date, currentReservationId?: string) => {
+    const roomData = rooms.find(r => r.roomId === roomId)
+    if (!roomData) return false
+
+    if (roomData.guestName && roomData.checkIn && roomData.checkOut && roomData.reservationId !== currentReservationId) {
+      const existingCheckIn = roomData.checkIn
+      const existingCheckOut = roomData.checkOut
+
+      const hasOverlap = newCheckIn < existingCheckOut && newCheckOut > existingCheckIn
+      
+      return hasOverlap
+    }
+
+    return false
+  }
+
   const handleExtendStay = (room: BoardRoomCard, nights: number) => {
-    if (!room.checkOut) return
+    if (!room.checkOut || !room.checkIn) return
     
     const newCheckOut = addDays(room.checkOut, nights)
+    
+    if (checkReservationConflict(room.roomId, room.checkIn, newCheckOut, room.reservationId)) {
+      toast.error('Cannot extend: conflicting reservation exists', {
+        description: 'Another reservation occupies this room during the extended period'
+      })
+      return
+    }
     
     setRooms((currentRooms) => 
       currentRooms.map(r => 
@@ -531,6 +554,18 @@ export function Board() {
       return
     }
 
+    const finalCheckIn = newCheckIn || room.checkIn
+    const finalCheckOut = newCheckOut || room.checkOut
+
+    if (!finalCheckIn || !finalCheckOut) return
+
+    if (checkReservationConflict(roomId, finalCheckIn, finalCheckOut, room.reservationId)) {
+      toast.error('Cannot extend: conflicting reservation exists', {
+        description: 'Another reservation occupies this room during the extended period'
+      })
+      return
+    }
+
     setRooms((currentRooms) =>
       currentRooms.map(r =>
         r.roomId === roomId
@@ -550,8 +585,6 @@ export function Board() {
 
     const oldCheckIn = room.checkIn
     const oldCheckOut = room.checkOut
-    const finalCheckIn = newCheckIn || oldCheckIn
-    const finalCheckOut = newCheckOut || oldCheckOut
 
     if (finalCheckIn && finalCheckOut && oldCheckIn && oldCheckOut) {
       const oldNights = Math.ceil((oldCheckOut.getTime() - oldCheckIn.getTime()) / (24 * 60 * 60 * 1000))
