@@ -54,6 +54,7 @@ export function PlaceholderView({ title, description, icon: Icon, features }: Pl
 }
 
 export { FrontDeskView } from '../front-desk/FrontDeskView'
+export { SettingsView } from '../settings/SettingsView'
 
 export function ReservationsView() {
   return (
@@ -176,24 +177,6 @@ export function ReportsView() {
         'Guest booking patterns',
         'Housekeeping efficiency',
         'Financial summaries',
-      ]}
-    />
-  )
-}
-
-export function SettingsView() {
-  return (
-    <PlaceholderView
-      title="Settings"
-      description="System configuration and property management"
-      icon={Gear}
-      features={[
-        'Property information',
-        'Room configuration',
-        'User management and permissions',
-        'Rate and tax settings',
-        'Channel credentials',
-        'System preferences',
       ]}
     />
   )

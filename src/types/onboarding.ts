@@ -23,6 +23,9 @@ export interface PropertySetup {
   currency: string
   defaultCheckIn: string
   defaultCheckOut: string
+  logoUrl?: string
+  brandColor?: string
+  receiptFooter?: string
 }
 
 export interface RoomTypeSetup {

@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
+import { useKV } from '@github/spark/hooks'
 import type { ReceiptData } from '@/types/receipt'
+import type { PropertySetup } from '@/types/onboarding'
 import {
   Dialog,
   DialogContent,
@@ -25,8 +27,13 @@ interface ReceiptDialogProps {
 export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType = 'RECEIPT' }: ReceiptDialogProps) {
   const printRef = useRef<HTMLDivElement>(null)
   const [activeTab, setActiveTab] = useState<'RECEIPT' | 'INVOICE'>(initialType)
+  const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
 
   if (!receipt) return null
+
+  const logoUrl = propertyData?.logoUrl
+  const brandColor = propertyData?.brandColor || '#000000'
+  const receiptFooter = propertyData?.receiptFooter || 'Thank you for staying with us!\nWe hope to see you again soon.'
 
   const documentTitle = activeTab === 'RECEIPT' ? 'Receipt' : 'Tax Invoice'
   const documentNumber = activeTab === 'RECEIPT' ? receipt.receiptNumber : receipt.invoiceNumber
@@ -109,12 +116,12 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
             .grand-total {
               font-size: 16px;
               font-weight: bold;
-              border-top: 2px solid #000;
+              border-top: 2px solid ${brandColor};
               padding-top: 8px !important;
             }
             .header-section {
               margin-bottom: 20px;
-              border-bottom: 2px solid #000;
+              border-bottom: 2px solid ${brandColor};
               padding-bottom: 16px;
             }
             .info-grid {
@@ -208,7 +215,15 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
           <div className="header-section">
             <div className="flex justify-between items-start mb-4">
               <div>
-                <h1 className="text-2xl font-bold">{receipt.companyInfo.name}</h1>
+                {logoUrl && (
+                  <img 
+                    src={logoUrl} 
+                    alt={receipt.companyInfo.name} 
+                    className="max-h-16 object-contain mb-3"
+                    onError={(e) => e.currentTarget.style.display = 'none'}
+                  />
+                )}
+                <h1 className="text-2xl font-bold" style={{ color: brandColor }}>{receipt.companyInfo.name}</h1>
                 <p className="text-sm text-muted-foreground mt-1">{receipt.companyInfo.address}</p>
                 <p className="text-sm text-muted-foreground">{receipt.companyInfo.phone} • {receipt.companyInfo.email}</p>
                 {receipt.companyInfo.taxId && (
@@ -216,7 +231,7 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
                 )}
               </div>
               <div className="text-right">
-                <h2 className="text-xl font-bold uppercase">{documentTitle}</h2>
+                <h2 className="text-xl font-bold uppercase" style={{ color: brandColor }}>{documentTitle}</h2>
                 <p className="text-lg font-mono font-semibold mt-1">{documentNumber}</p>
                 <p className="text-sm text-muted-foreground mt-2">
                   {receipt.date.toLocaleDateString('en-US', { 
@@ -396,8 +411,9 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
           )}
 
           <div className="footer">
-            <p>Thank you for staying with us!</p>
-            <p className="mt-1">We hope to see you again soon.</p>
+            {receiptFooter.split('\n').map((line, index) => (
+              <p key={index}>{line}</p>
+            ))}
             {activeTab === 'INVOICE' && (
               <p className="mt-2 text-xs">This is a computer-generated tax invoice. No signature required.</p>
             )}
