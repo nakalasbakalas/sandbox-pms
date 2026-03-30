@@ -27,7 +27,8 @@ import {
   Bed,
   Users,
   TrendUp,
-  Eye
+  Eye,
+  ArrowUp
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -35,6 +36,7 @@ import { cn } from '@/lib/utils'
 import { InventorySyncPanel } from './InventorySyncPanel'
 import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
 import { RateParityPanel } from './RateParityPanel'
+import { RatePushPanel } from '../rates/RatePushPanel'
 
 interface Channel {
   id: string
@@ -74,7 +76,7 @@ interface SyncLog {
   id: string
   channelId: string
   timestamp: string
-  type: 'INVENTORY' | 'RATES' | 'RESERVATIONS' | 'RESTRICTIONS'
+  type: 'INVENTORY' | 'RATES' | 'RESERVATIONS' | 'RESTRICTIONS' | 'RATE_PUSH'
   status: 'SUCCESS' | 'ERROR' | 'WARNING'
   message: string
   details?: string
@@ -343,6 +345,10 @@ export function ChannelsView() {
             <TabsTrigger value="channels">
               Channels ({connectedChannels.length}/{channels.length})
             </TabsTrigger>
+            <TabsTrigger value="rate-push">
+              <ArrowUp className="w-4 h-4 mr-2" />
+              Rate Push
+            </TabsTrigger>
             <TabsTrigger value="rate-parity">
               <CurrencyCircleDollar className="w-4 h-4 mr-2" />
               Rate Parity
@@ -458,6 +464,10 @@ export function ChannelsView() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="rate-push" className="flex-1 mt-6">
+            <RatePushPanel />
           </TabsContent>
 
           <TabsContent value="rate-parity" className="flex-1 mt-6">

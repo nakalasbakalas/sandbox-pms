@@ -25,11 +25,13 @@ import {
   Trash,
   Copy,
   Check,
-  X
+  X,
+  ArrowUp
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { format, addDays, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { RatePushPanel } from './RatePushPanel'
 
 interface RoomType {
   id: string
@@ -280,7 +282,18 @@ export function RatesView() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden grid grid-cols-3 gap-6 p-6">
+      <div className="flex-1 overflow-hidden p-6">
+        <Tabs defaultValue="rates" className="h-full flex flex-col">
+          <TabsList>
+            <TabsTrigger value="rates">Rate Calendar</TabsTrigger>
+            <TabsTrigger value="rate-push">
+              <ArrowUp className="w-4 h-4 mr-2" />
+              Channel Push
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="rates" className="flex-1 mt-6 overflow-hidden">
+            <div className="h-full grid grid-cols-3 gap-6">
         <div className="col-span-2 flex flex-col gap-4">
           <Card>
             <CardHeader>
@@ -509,6 +522,13 @@ export function RatesView() {
             </CardContent>
           </Card>
         </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="rate-push" className="flex-1 mt-6">
+            <RatePushPanel />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <Dialog open={showAddRuleDialog} onOpenChange={setShowAddRuleDialog}>
