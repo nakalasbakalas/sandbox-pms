@@ -13,7 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { addDays, format, isSameDay, isWeekend } from 'date-fns'
 import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { NewReservationDialog } from './NewReservationDialog'
 
 interface UnassignedReservation {
   id: string
@@ -67,6 +68,13 @@ export function Board() {
     showIssues: true,
     showDepositPending: true,
   })
+  const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
+  const [prefilledReservation, setPrefilledReservation] = useState<{
+    roomId?: string
+    roomNumber?: string
+    roomType?: 'TWIN' | 'DOUBLE'
+    checkIn?: Date
+  } | null>(null)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -726,6 +734,16 @@ export function Board() {
           </div>
           
           <div className="flex items-center gap-2.5">
+            <Button
+              onClick={() => {
+                setPrefilledReservation(null)
+                setShowNewReservationDialog(true)
+              }}
+              className="h-9 gap-2 font-semibold shadow-sm hover:shadow"
+            >
+              <Plus className="w-4 h-4" weight="bold" />
+              Add Reservation
+            </Button>
             {!showUnassigned && unassignedReservations.length > 0 && (
               <Button
                 variant="outline"
@@ -859,6 +877,15 @@ export function Board() {
                 onStayResize={handleStayResize}
                 onResizeStart={setResizingReservation}
                 onResizeEnd={() => setResizingReservation(null)}
+                onEmptyBlockClick={(room, date) => {
+                  setPrefilledReservation({
+                    roomId: room.roomId,
+                    roomNumber: room.number,
+                    roomType: room.type as 'TWIN' | 'DOUBLE',
+                    checkIn: date,
+                  })
+                  setShowNewReservationDialog(true)
+                }}
               />
 
               <RoomTypeRow
@@ -881,6 +908,15 @@ export function Board() {
                 onStayResize={handleStayResize}
                 onResizeStart={setResizingReservation}
                 onResizeEnd={() => setResizingReservation(null)}
+                onEmptyBlockClick={(room, date) => {
+                  setPrefilledReservation({
+                    roomId: room.roomId,
+                    roomNumber: room.number,
+                    roomType: room.type as 'TWIN' | 'DOUBLE',
+                    checkIn: date,
+                  })
+                  setShowNewReservationDialog(true)
+                }}
               />
             </div>
           </div>
@@ -1169,6 +1205,34 @@ export function Board() {
         onOpenChange={commandPalette.close}
         commands={commands}
       />
+
+      <NewReservationDialog
+        open={showNewReservationDialog}
+        onClose={() => {
+          setShowNewReservationDialog(false)
+          setPrefilledReservation(null)
+        }}
+        prefilledData={prefilledReservation}
+        onSubmit={(reservation) => {
+          setUnassignedReservations((current) => [
+            ...current,
+            {
+              id: reservation.id,
+              guestName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+              checkIn: reservation.checkIn,
+              checkOut: reservation.checkOut,
+              roomType: reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE',
+              guestCount: reservation.adults + reservation.children,
+              nights: Math.ceil((reservation.checkOut.getTime() - reservation.checkIn.getTime()) / (24 * 60 * 60 * 1000)),
+              source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source,
+              isVIP: false,
+            }
+          ])
+          toast.success('Reservation created and added to unassigned list')
+          setShowNewReservationDialog(false)
+          setPrefilledReservation(null)
+        }}
+      />
     </div>
   )
 }
@@ -1198,6 +1262,7 @@ interface RoomTypeRowProps {
   onStayResize: (roomId: string, newCheckIn?: Date, newCheckOut?: Date) => void
   onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
   onResizeEnd: () => void
+  onEmptyBlockClick: (room: BoardRoomCard, date: Date) => void
 }
 
 function RoomTypeRow({
@@ -1220,6 +1285,7 @@ function RoomTypeRow({
   onStayResize,
   onResizeStart,
   onResizeEnd,
+  onEmptyBlockClick,
 }: RoomTypeRowProps) {
   const occupiedCount = rooms.filter(r => r.status.includes('OCCUPIED')).length
   const cleanCount = rooms.filter(r => r.cleanStatus === 'CLEAN').length
@@ -1276,6 +1342,7 @@ function RoomTypeRow({
               onStayResize={onStayResize}
               onResizeStart={onResizeStart}
               onResizeEnd={onResizeEnd}
+              onEmptyBlockClick={(date) => onEmptyBlockClick(room, date)}
             />
           ))}
         </div>
@@ -1305,6 +1372,7 @@ interface CalendarRoomRowProps {
   onStayResize: (roomId: string, newCheckIn?: Date, newCheckOut?: Date) => void
   onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
   onResizeEnd: () => void
+  onEmptyBlockClick: (date: Date) => void
 }
 
 function CalendarRoomRow({
@@ -1323,6 +1391,7 @@ function CalendarRoomRow({
   onStayResize,
   onResizeStart,
   onResizeEnd,
+  onEmptyBlockClick,
 }: CalendarRoomRowProps) {
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
@@ -1568,6 +1637,18 @@ function CalendarRoomRow({
               {!isInStay && draggingReservation && isAvailableForAssignment && (
                 <div className="h-full rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center transition-all hover:bg-primary/10 hover:border-primary/60">
                   <span className="text-[9px] text-primary/70 font-medium">Drop to assign</span>
+                </div>
+              )}
+
+              {!isInStay && !draggingReservation && !isResizing && isAvailableForAssignment && (
+                <div 
+                  className="h-full rounded border border-dashed border-transparent hover:border-primary/30 hover:bg-primary/5 flex items-center justify-center transition-all cursor-pointer group/empty"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEmptyBlockClick(date)
+                  }}
+                >
+                  <Plus className="w-3 h-3 text-primary/0 group-hover/empty:text-primary/50 transition-colors" weight="bold" />
                 </div>
               )}
 
