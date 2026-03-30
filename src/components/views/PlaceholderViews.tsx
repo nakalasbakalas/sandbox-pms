@@ -53,23 +53,7 @@ export function PlaceholderView({ title, description, icon: Icon, features }: Pl
   )
 }
 
-export function FrontDeskView() {
-  return (
-    <PlaceholderView
-      title="Front Desk"
-      description="Manage arrivals, departures, and daily operations"
-      icon={Calendar}
-      features={[
-        'Today\'s arrivals and departures dashboard',
-        'Quick check-in and check-out workflows',
-        'Walk-in booking creation',
-        'Room assignment tools',
-        'Payment status tracking',
-        'Guest communication',
-      ]}
-    />
-  )
-}
+export { FrontDeskView } from '../front-desk/FrontDeskView'
 
 export function ReservationsView() {
   return (
