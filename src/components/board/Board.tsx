@@ -1357,6 +1357,12 @@ function CalendarRoomRow({
   const isResizing = resizingReservation?.roomId === room.roomId
   const [hoveredCell, setHoveredCell] = useState<number | null>(null)
 
+  const normalizeDate = (date: Date) => {
+    const normalized = new Date(date)
+    normalized.setHours(0, 0, 0, 0)
+    return normalized
+  }
+
   const handleResizeMouseDown = (direction: 'start' | 'end', date: Date) => (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1433,8 +1439,12 @@ function CalendarRoomRow({
       
       <div className="flex-1 flex overflow-x-auto">
         {dateColumns.map((date, i) => {
-          const isInStay = room.checkIn && room.checkOut &&
-            date >= room.checkIn && date < room.checkOut
+          const normalizedDate = normalizeDate(date)
+          const normalizedCheckIn = room.checkIn ? normalizeDate(room.checkIn) : null
+          const normalizedCheckOut = room.checkOut ? normalizeDate(room.checkOut) : null
+          
+          const isInStay = normalizedCheckIn && normalizedCheckOut &&
+            normalizedDate >= normalizedCheckIn && normalizedDate < normalizedCheckOut
 
           const isCheckIn = room.checkIn && isSameDay(date, room.checkIn)
           const isCheckOut = room.checkOut && isSameDay(date, room.checkOut)
