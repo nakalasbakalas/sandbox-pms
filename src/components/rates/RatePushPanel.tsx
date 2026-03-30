@@ -24,6 +24,7 @@ import { useRatePush } from '@/hooks/use-rate-push'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { useKV } from '@github/spark/hooks'
+import { ManualRatePushDialog } from './ManualRatePushDialog'
 
 interface Channel {
   id: string
@@ -49,6 +50,7 @@ export function RatePushPanel() {
   const [channels] = useKV<Channel[]>('channels', [])
   const [roomTypes] = useKV<RoomType[]>('room-types-config', [])
   const [showSettingsDialog, setShowSettingsDialog] = useState(false)
+  const [showManualPushDialog, setShowManualPushDialog] = useState(false)
   const [pushWindow, setPushWindow] = useState(settings.pushWindow.toString())
 
   const recentPushes = getRecentPushes(10)
@@ -171,6 +173,10 @@ export function RatePushPanel() {
                 <CardTitle>Recent Push Activity</CardTitle>
                 <CardDescription>Latest rate pushes to OTA channels</CardDescription>
               </div>
+              <Button onClick={() => setShowManualPushDialog(true)}>
+                <ArrowUp className="w-4 h-4 mr-2" />
+                Manual Push
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -410,6 +416,11 @@ export function RatePushPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ManualRatePushDialog 
+        open={showManualPushDialog} 
+        onOpenChange={setShowManualPushDialog} 
+      />
     </div>
   )
 }
