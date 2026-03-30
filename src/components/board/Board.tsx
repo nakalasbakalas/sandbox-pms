@@ -4,6 +4,8 @@ import { RoomCard } from './RoomCard'
 import { BoardStatsBar } from './BoardStatsBar'
 import { QuickActionsBar } from './QuickActionsBar'
 import { StatusLegend } from './StatusLegend'
+import { RoomContextMenu } from './RoomContextMenu'
+import { BoardFiltersPopover, type BoardFilters } from './BoardFiltersPopover'
 import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-data'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +51,16 @@ export function Board() {
   const [showUnassigned, setShowUnassigned] = useState(true)
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
+  const [filters, setFilters] = useState<BoardFilters>({
+    showArrivals: true,
+    showDepartures: true,
+    showVacant: true,
+    showOccupied: true,
+    showDirty: true,
+    showVIP: true,
+    showIssues: true,
+    showDepositPending: true,
+  })
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
@@ -151,15 +163,36 @@ export function Board() {
   }, [startDate, dayCount])
 
   const filteredRooms = useMemo(() => {
-    if (!searchQuery) return rooms
+    let result = rooms
     
-    const query = searchQuery.toLowerCase()
-    return rooms.filter(room => 
-      room.number.includes(query) ||
-      room.guestName?.toLowerCase().includes(query) ||
-      room.type.toLowerCase().includes(query)
-    )
-  }, [rooms, searchQuery])
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      result = result.filter(room => 
+        room.number.includes(query) ||
+        room.guestName?.toLowerCase().includes(query) ||
+        room.type.toLowerCase().includes(query)
+      )
+    }
+    
+    result = result.filter(room => {
+      if (!filters.showOccupied && room.guestName) return false
+      if (!filters.showVacant && !room.guestName) return false
+      if (!filters.showArrivals && room.isArrivalToday) return false
+      if (!filters.showDepartures && room.isDepartureToday) return false
+      if (!filters.showDirty && room.cleanStatus === 'DIRTY') return false
+      if (!filters.showVIP && room.isVIP) return false
+      if (!filters.showIssues && room.hasIssue) return false
+      if (!filters.showDepositPending && room.depositStatus === 'PENDING') return false
+      
+      return true
+    })
+    
+    return result
+  }, [rooms, searchQuery, filters])
+
+  const activeFilterCount = useMemo(() => {
+    return Object.values(filters).filter(v => v === false).length
+  }, [filters])
 
   const twinRooms = useMemo(() => 
     filteredRooms.filter(r => r.type === 'TWIN').sort((a, b) => Number(a.number) - Number(b.number)),
@@ -247,7 +280,47 @@ export function Board() {
         
         if (data.type === 'MOVE_GUEST') {
           const sourceRoom = rooms.find(r => r.roomId === data.sourceRoomId)
-          toast.success(`Guest ${data.guestName} moved from Room ${sourceRoom?.number} to Room ${targetRoom.number}`)
+          if (!sourceRoom) return
+          
+          setRooms((currentRooms) => 
+            currentRooms.map(r => {
+              if (r.roomId === data.sourceRoomId) {
+                return {
+                  ...r,
+                  status: 'VACANT_DIRTY',
+                  guestName: undefined,
+                  reservationId: undefined,
+                  checkIn: undefined,
+                  checkOut: undefined,
+                  guestCount: undefined,
+                  isArrivalToday: false,
+                  isDepartureToday: false,
+                  nightsRemaining: undefined,
+                  cleanStatus: 'DIRTY'
+                }
+              }
+              if (r.roomId === targetRoom.roomId) {
+                return {
+                  ...r,
+                  status: sourceRoom.cleanStatus === 'DIRTY' ? 'OCCUPIED_DIRTY' : 'OCCUPIED_CLEAN',
+                  guestName: data.guestName,
+                  reservationId: data.reservationId,
+                  checkIn: sourceRoom.checkIn,
+                  checkOut: sourceRoom.checkOut,
+                  guestCount: sourceRoom.guestCount,
+                  isArrivalToday: sourceRoom.isArrivalToday,
+                  isDepartureToday: sourceRoom.isDepartureToday,
+                  nightsRemaining: sourceRoom.nightsRemaining,
+                  isVIP: sourceRoom.isVIP,
+                  depositStatus: sourceRoom.depositStatus,
+                  balanceDue: sourceRoom.balanceDue
+                }
+              }
+              return r
+            })
+          )
+          
+          toast.success(`${data.guestName} moved from Room ${sourceRoom.number} to Room ${targetRoom.number}`)
         } else if (data.type === 'ASSIGN_ROOM') {
           if (targetRoom.type !== data.roomType) {
             toast.error(`Cannot assign ${data.roomType} reservation to ${targetRoom.type} room`)
@@ -293,6 +366,185 @@ export function Board() {
     setDraggingRoom(null)
     setDraggingReservation(null)
     setDropTarget(null)
+  }
+
+  const handleCheckOut = (room: BoardRoomCard) => {
+    if (!room.guestName || !room.reservationId) return
+    
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              status: 'VACANT_DIRTY',
+              cleanStatus: 'DIRTY',
+              guestName: undefined,
+              reservationId: undefined,
+              checkIn: undefined,
+              checkOut: undefined,
+              guestCount: undefined,
+              isArrivalToday: false,
+              isDepartureToday: false,
+              nightsRemaining: undefined,
+              depositStatus: 'NONE',
+              balanceDue: undefined,
+              isVIP: false
+            }
+          : r
+      )
+    )
+    
+    toast.success(`${room.guestName} checked out from Room ${room.number}`)
+    setSelectedRoom(null)
+  }
+
+  const handleMarkClean = (room: BoardRoomCard) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              status: r.guestName ? 'OCCUPIED_CLEAN' : 'VACANT_CLEAN',
+              cleanStatus: 'CLEAN',
+              lastCleaned: new Date()
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Room ${room.number} marked as clean`)
+    setSelectedRoom(null)
+  }
+
+  const handleMarkDirty = (room: BoardRoomCard) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              status: r.guestName ? 'OCCUPIED_DIRTY' : 'VACANT_DIRTY',
+              cleanStatus: 'DIRTY'
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Room ${room.number} marked as dirty`)
+  }
+
+  const handleBlockRoom = (room: BoardRoomCard) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              operationalStatus: 'BLOCKED'
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Room ${room.number} blocked`)
+    setSelectedRoom(null)
+  }
+
+  const handleUnblockRoom = (room: BoardRoomCard) => {
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              operationalStatus: 'AVAILABLE'
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Room ${room.number} is now available`)
+    setSelectedRoom(null)
+  }
+
+  const handleExtendStay = (room: BoardRoomCard, nights: number) => {
+    if (!room.checkOut) return
+    
+    const newCheckOut = addDays(room.checkOut, nights)
+    
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              checkOut: newCheckOut,
+              nightsRemaining: Math.ceil((newCheckOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+              isDepartureToday: isSameDay(newCheckOut, new Date())
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Stay extended by ${nights} night${nights !== 1 ? 's' : ''}`)
+  }
+
+  const handleShortenStay = (room: BoardRoomCard, nights: number) => {
+    if (!room.checkOut) return
+    
+    const newCheckOut = addDays(room.checkOut, -nights)
+    
+    if (newCheckOut <= new Date()) {
+      toast.error('Cannot shorten stay to past date')
+      return
+    }
+    
+    setRooms((currentRooms) => 
+      currentRooms.map(r => 
+        r.roomId === room.roomId 
+          ? {
+              ...r,
+              checkOut: newCheckOut,
+              nightsRemaining: Math.ceil((newCheckOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+              isDepartureToday: isSameDay(newCheckOut, new Date())
+            }
+          : r
+      )
+    )
+    
+    toast.success(`Stay shortened by ${nights} night${nights !== 1 ? 's' : ''}`)
+  }
+
+  const handleQuickCheckIn = (room: BoardRoomCard) => {
+    const mockReservation = unassignedReservations.find(r => r.roomType === room.type)
+    
+    if (mockReservation) {
+      setRooms((currentRooms) => 
+        currentRooms.map(r => 
+          r.roomId === room.roomId 
+            ? {
+                ...r,
+                status: 'OCCUPIED_CLEAN',
+                guestName: mockReservation.guestName,
+                reservationId: mockReservation.id,
+                checkIn: mockReservation.checkIn,
+                checkOut: mockReservation.checkOut,
+                guestCount: mockReservation.guestCount,
+                isArrivalToday: isSameDay(mockReservation.checkIn, new Date()),
+                isDepartureToday: isSameDay(mockReservation.checkOut, new Date()),
+                nightsRemaining: mockReservation.nights,
+                isVIP: mockReservation.isVIP || false
+              }
+            : r
+        )
+      )
+      
+      setUnassignedReservations((current) => 
+        current.filter(r => r.id !== mockReservation.id)
+      )
+      
+      toast.success(`${mockReservation.guestName} checked into Room ${room.number}`)
+    } else {
+      toast.error('No unassigned reservations for this room type')
+    }
+    
+    setSelectedRoom(null)
   }
 
   return (
@@ -426,9 +678,11 @@ export function Board() {
                 className="pl-8 h-8 text-xs"
               />
             </div>
-            <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-              <Funnel className="w-3.5 h-3.5" />
-            </Button>
+            <BoardFiltersPopover
+              filters={filters}
+              onFiltersChange={setFilters}
+              activeCount={activeFilterCount}
+            />
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8 w-8 p-0">
@@ -447,7 +701,7 @@ export function Board() {
         <QuickActionsBar 
           viewMode={viewMode}
           onViewModeChange={setViewMode}
-          filterCount={0}
+          filterCount={activeFilterCount}
         />
 
         <div className="flex-1 overflow-auto rounded-lg border border-border bg-card">
@@ -675,19 +929,80 @@ export function Board() {
                 <div className="space-y-2">
                   {selectedRoom.guestName && (
                     <>
-                      <Button className="w-full gap-2" size="lg">
+                      <Button 
+                        className="w-full gap-2" 
+                        size="lg"
+                        onClick={() => handleCheckOut(selectedRoom)}
+                      >
                         <SignOut className="w-4 h-4" />
                         Check Out Guest
                       </Button>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleExtendStay(selectedRoom, 1)}
+                        >
+                          +1 Night
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleExtendStay(selectedRoom, 2)}
+                        >
+                          +2 Nights
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleShortenStay(selectedRoom, 1)}
+                        >
+                          -1 Night
+                        </Button>
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => toast.info('Drag guest to another room to move')}
+                        >
                           Move Guest
                         </Button>
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => toast.info('Add Charge functionality coming soon')}
+                        >
                           Add Charge
                         </Button>
                       </div>
-                      <Button variant="outline" className="w-full" size="sm">
+                      {selectedRoom.cleanStatus === 'DIRTY' && (
+                        <Button 
+                          variant="secondary" 
+                          className="w-full gap-2" 
+                          size="sm"
+                          onClick={() => handleMarkClean(selectedRoom)}
+                        >
+                          <Broom className="w-4 h-4" />
+                          Mark as Clean
+                        </Button>
+                      )}
+                      {selectedRoom.cleanStatus === 'CLEAN' && (
+                        <Button 
+                          variant="outline" 
+                          className="w-full gap-2" 
+                          size="sm"
+                          onClick={() => handleMarkDirty(selectedRoom)}
+                        >
+                          Mark as Dirty
+                        </Button>
+                      )}
+                      <Button 
+                        variant="outline" 
+                        className="w-full" 
+                        size="sm"
+                        onClick={() => toast.info('View Folio functionality coming soon')}
+                      >
                         View Folio
                       </Button>
                     </>
@@ -696,25 +1011,53 @@ export function Board() {
                   {!selectedRoom.guestName && selectedRoom.operationalStatus === 'AVAILABLE' && (
                     <>
                       {selectedRoom.cleanStatus === 'DIRTY' && (
-                        <Button className="w-full gap-2" variant="secondary" size="lg">
+                        <Button 
+                          className="w-full gap-2" 
+                          variant="secondary" 
+                          size="lg"
+                          onClick={() => handleMarkClean(selectedRoom)}
+                        >
                           <Broom className="w-4 h-4" />
                           Mark as Clean
                         </Button>
                       )}
                       {selectedRoom.cleanStatus === 'CLEAN' && (
-                        <Button className="w-full gap-2" size="lg">
+                        <Button 
+                          className="w-full gap-2" 
+                          size="lg"
+                          onClick={() => handleQuickCheckIn(selectedRoom)}
+                        >
                           <Check className="w-4 h-4" />
                           Quick Check-In
                         </Button>
                       )}
-                      <Button variant="outline" className="w-full" size="sm">
+                      <Button 
+                        variant="outline" 
+                        className="w-full" 
+                        size="sm"
+                        onClick={() => handleBlockRoom(selectedRoom)}
+                      >
                         Block Room
                       </Button>
                     </>
                   )}
                   
+                  {selectedRoom.operationalStatus === 'BLOCKED' && (
+                    <Button 
+                      className="w-full" 
+                      variant="outline"
+                      onClick={() => handleUnblockRoom(selectedRoom)}
+                    >
+                      Unblock Room
+                    </Button>
+                  )}
+                  
                   {selectedRoom.operationalStatus === 'OUT_OF_SERVICE' && (
-                    <Button className="w-full" variant="outline">
+                    <Button 
+                      className="w-full" 
+                      variant="outline"
+                      onClick={() => handleUnblockRoom(selectedRoom)}
+                    >
                       Mark Available
                     </Button>
                   )}
