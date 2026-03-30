@@ -38,12 +38,15 @@ import {
   Receipt,
   SignIn,
   SignOut,
-  Info
+  Info,
+  PencilSimple,
+  SelectionAll
 } from '@phosphor-icons/react'
 import type { ReservationWithDetails, Reservation, Guest, BookingSource, ReservationStatus, Room, RoomWithDetails } from '@/types'
 import { toast } from 'sonner'
 import { format, addDays, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { BulkEditDialog, type BulkEditUpdates } from './BulkEditDialog'
 
 interface ReservationData extends Omit<Reservation, 'guest' | 'roomType'> {
   guest: Guest
@@ -60,6 +63,9 @@ export function ReservationsView() {
   const [showCheckInDialog, setShowCheckInDialog] = useState(false)
   const [showCheckOutDialog, setShowCheckOutDialog] = useState(false)
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | 'ALL'>('ALL')
+  const [selectedReservationIds, setSelectedReservationIds] = useState<Set<string>>(new Set())
+  const [showBulkEditDialog, setShowBulkEditDialog] = useState(false)
+  const [bulkSelectMode, setBulkSelectMode] = useState(false)
 
   const filteredReservations = useMemo(() => {
     let filtered = reservations || []
@@ -166,6 +172,115 @@ export function ReservationsView() {
     setSelectedReservation(null)
   }
 
+  const toggleReservationSelection = (reservationId: string) => {
+    setSelectedReservationIds(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(reservationId)) {
+        newSet.delete(reservationId)
+      } else {
+        newSet.add(reservationId)
+      }
+      return newSet
+    })
+  }
+
+  const selectAllInView = (reservationsList: ReservationData[]) => {
+    const allIds = new Set(reservationsList.map(r => r.id))
+    setSelectedReservationIds(allIds)
+  }
+
+  const clearSelection = () => {
+    setSelectedReservationIds(new Set())
+    setBulkSelectMode(false)
+  }
+
+  const handleBulkEdit = (updates: BulkEditUpdates) => {
+    const selectedReservations = (reservations || []).filter(r => selectedReservationIds.has(r.id))
+    
+    setReservations(current => 
+      (current || []).map(reservation => {
+        if (!selectedReservationIds.has(reservation.id)) {
+          return reservation
+        }
+
+        let updated = { ...reservation }
+
+        if (updates.status) {
+          updated.status = updates.status
+        }
+
+        if (updates.addDays) {
+          updated.checkOut = addDays(new Date(updated.checkOut), updates.addDays)
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.subtractDays) {
+          updated.checkOut = addDays(new Date(updated.checkOut), -updates.subtractDays)
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.newCheckIn) {
+          updated.checkIn = updates.newCheckIn
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.newCheckOut) {
+          updated.checkOut = updates.newCheckOut
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.rateAdjustmentPercent !== undefined && updates.rateAdjustmentPercent !== 0) {
+          const multiplier = 1 + (updates.rateAdjustmentPercent / 100)
+          updated.ratePerNight = Math.round(updated.ratePerNight * multiplier)
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.rateAdjustmentFixed !== undefined && updates.rateAdjustmentFixed !== 0) {
+          updated.ratePerNight = Math.round(updated.ratePerNight + updates.rateAdjustmentFixed)
+          const nights = differenceInDays(new Date(updated.checkOut), new Date(updated.checkIn))
+          updated.totalAmount = nights * updated.ratePerNight
+          updated.depositAmount = Math.floor(updated.totalAmount * 0.3)
+        }
+
+        if (updates.depositPaid !== undefined) {
+          updated.depositPaid = updates.depositPaid
+        }
+
+        if (updates.appendNotes) {
+          const timestamp = format(new Date(), 'yyyy-MM-dd HH:mm')
+          const newNote = `[${timestamp}] ${updates.appendNotes}`
+          updated.notes = updated.notes ? `${updated.notes}\n${newNote}` : newNote
+        }
+
+        if (updates.source) {
+          updated.source = updates.source
+        }
+
+        updated.updatedAt = new Date()
+
+        return updated
+      })
+    )
+
+    toast.success(`Updated ${selectedReservationIds.size} reservation${selectedReservationIds.size !== 1 ? 's' : ''}`)
+    clearSelection()
+  }
+
+  const selectedReservationsData = useMemo(() => 
+    (reservations || []).filter(r => selectedReservationIds.has(r.id)),
+    [reservations, selectedReservationIds]
+  )
+
   return (
     <div className="h-full flex flex-col bg-background p-6 gap-4">
       <div className="flex items-center justify-between">
@@ -177,10 +292,39 @@ export function ReservationsView() {
         </div>
         
         <div className="flex items-center gap-2">
-          <Button onClick={() => setShowNewReservationDialog(true)}>
-            <Plus className="w-4 h-4 mr-2" weight="bold" />
-            New Reservation
-          </Button>
+          {bulkSelectMode && selectedReservationIds.size > 0 && (
+            <>
+              <Badge variant="secondary" className="px-3 py-1.5">
+                {selectedReservationIds.size} selected
+              </Badge>
+              <Button 
+                variant="outline" 
+                onClick={clearSelection}
+              >
+                <X className="w-4 h-4 mr-2" weight="bold" />
+                Clear
+              </Button>
+              <Button onClick={() => setShowBulkEditDialog(true)}>
+                <PencilSimple className="w-4 h-4 mr-2" weight="bold" />
+                Bulk Edit
+              </Button>
+            </>
+          )}
+          {!bulkSelectMode && (
+            <>
+              <Button 
+                variant="outline"
+                onClick={() => setBulkSelectMode(true)}
+              >
+                <SelectionAll className="w-4 h-4 mr-2" />
+                Select Multiple
+              </Button>
+              <Button onClick={() => setShowNewReservationDialog(true)}>
+                <Plus className="w-4 h-4 mr-2" weight="bold" />
+                New Reservation
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -242,44 +386,133 @@ export function ReservationsView() {
         </TabsList>
 
         <TabsContent value="all" className="flex-1 mt-4">
+          {bulkSelectMode && filteredReservations.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(filteredReservations)}
+              >
+                Select All ({filteredReservations.length})
+              </Button>
+              {selectedReservationIds.size > 0 && (
+                <span className="text-sm text-muted-foreground">
+                  {selectedReservationIds.size} of {filteredReservations.length} selected
+                </span>
+              )}
+            </div>
+          )}
           <ReservationsList 
             reservations={filteredReservations} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
 
         <TabsContent value="arrivals" className="flex-1 mt-4">
+          {bulkSelectMode && todayArrivals.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(todayArrivals)}
+              >
+                Select All ({todayArrivals.length})
+              </Button>
+            </div>
+          )}
           <ReservationsList 
             reservations={todayArrivals} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
 
         <TabsContent value="departures" className="flex-1 mt-4">
+          {bulkSelectMode && todayDepartures.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(todayDepartures)}
+              >
+                Select All ({todayDepartures.length})
+              </Button>
+            </div>
+          )}
           <ReservationsList 
             reservations={todayDepartures} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
 
         <TabsContent value="active" className="flex-1 mt-4">
+          {bulkSelectMode && activeReservations.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(activeReservations)}
+              >
+                Select All ({activeReservations.length})
+              </Button>
+            </div>
+          )}
           <ReservationsList 
             reservations={activeReservations} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
 
         <TabsContent value="upcoming" className="flex-1 mt-4">
+          {bulkSelectMode && upcomingReservations.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(upcomingReservations)}
+              >
+                Select All ({upcomingReservations.length})
+              </Button>
+            </div>
+          )}
           <ReservationsList 
             reservations={upcomingReservations} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
 
         <TabsContent value="cancelled" className="flex-1 mt-4">
+          {bulkSelectMode && cancelledReservations.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => selectAllInView(cancelledReservations)}
+              >
+                Select All ({cancelledReservations.length})
+              </Button>
+            </div>
+          )}
           <ReservationsList 
             reservations={cancelledReservations} 
             onSelect={setSelectedReservation}
+            bulkSelectMode={bulkSelectMode}
+            selectedIds={selectedReservationIds}
+            onToggleSelect={toggleReservationSelection}
           />
         </TabsContent>
       </Tabs>
@@ -323,6 +556,13 @@ export function ReservationsView() {
           setShowNewReservationDialog(false)
         }}
       />
+
+      <BulkEditDialog
+        open={showBulkEditDialog}
+        onClose={() => setShowBulkEditDialog(false)}
+        reservations={selectedReservationsData}
+        onSave={handleBulkEdit}
+      />
     </div>
   )
 }
@@ -330,9 +570,12 @@ export function ReservationsView() {
 interface ReservationsListProps {
   reservations: ReservationData[]
   onSelect: (reservation: ReservationData) => void
+  bulkSelectMode: boolean
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
 }
 
-function ReservationsList({ reservations, onSelect }: ReservationsListProps) {
+function ReservationsList({ reservations, onSelect, bulkSelectMode, selectedIds, onToggleSelect }: ReservationsListProps) {
   if (reservations.length === 0) {
     return (
       <Card className="p-12">
@@ -351,7 +594,10 @@ function ReservationsList({ reservations, onSelect }: ReservationsListProps) {
           <ReservationCard 
             key={reservation.id} 
             reservation={reservation}
-            onClick={() => onSelect(reservation)}
+            onClick={() => !bulkSelectMode && onSelect(reservation)}
+            bulkSelectMode={bulkSelectMode}
+            isSelected={selectedIds.has(reservation.id)}
+            onToggleSelect={() => onToggleSelect(reservation.id)}
           />
         ))}
       </div>
@@ -362,17 +608,41 @@ function ReservationsList({ reservations, onSelect }: ReservationsListProps) {
 interface ReservationCardProps {
   reservation: ReservationData
   onClick: () => void
+  bulkSelectMode: boolean
+  isSelected: boolean
+  onToggleSelect: () => void
 }
 
-function ReservationCard({ reservation, onClick }: ReservationCardProps) {
+function ReservationCard({ reservation, onClick, bulkSelectMode, isSelected, onToggleSelect }: ReservationCardProps) {
   const nights = differenceInDays(new Date(reservation.checkOut), new Date(reservation.checkIn))
+  
+  const handleClick = () => {
+    if (bulkSelectMode) {
+      onToggleSelect()
+    } else {
+      onClick()
+    }
+  }
   
   return (
     <Card 
-      className="p-4 hover:bg-accent/50 cursor-pointer transition-colors"
-      onClick={onClick}
+      className={cn(
+        "p-4 cursor-pointer transition-all",
+        bulkSelectMode && isSelected && "ring-2 ring-primary bg-accent/30",
+        !bulkSelectMode && "hover:bg-accent/50"
+      )}
+      onClick={handleClick}
     >
       <div className="flex items-start justify-between gap-4">
+        {bulkSelectMode && (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-1"
+          />
+        )}
+        
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
             <h3 className="font-semibold text-lg">
@@ -425,7 +695,9 @@ function ReservationCard({ reservation, onClick }: ReservationCardProps) {
           )}
         </div>
 
-        <ArrowRight size={20} className="text-muted-foreground flex-shrink-0" />
+        {!bulkSelectMode && (
+          <ArrowRight size={20} className="text-muted-foreground flex-shrink-0" />
+        )}
       </div>
     </Card>
   )

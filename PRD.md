@@ -168,6 +168,19 @@ Click a room → see everything → take action → done. No drilling through ta
 - Split/merge reservations
 - Apply discounts or promotional rates
 - Add guest notes/preferences
+- **Bulk Edit Reservations:** ⭐ NEW
+  - Select multiple reservations via checkboxes
+  - Batch operations available:
+    - Status changes (confirm, cancel, no-show multiple bookings)
+    - Date adjustments (extend/shorten stays, shift to new dates)
+    - Rate adjustments (percentage or fixed amount changes)
+    - Payment status updates (mark deposits paid/pending)
+    - Append notes to all selected reservations
+    - Change booking source/channel
+  - Visual selection mode with "Select All" per filtered view
+  - Automatic recalculation of totals, deposits, and nights
+  - Preview selected reservations before applying changes
+  - Use cases: group bookings, event cancellations, seasonal rate adjustments
 
 **Business Logic:**
 - Block overbooking (hard constraint)
