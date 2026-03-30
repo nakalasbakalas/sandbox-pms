@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { BoardRoomCard, DragOperation } from '@/types/board'
 import { RoomCard } from './RoomCard'
 import { BoardStatsBar } from './BoardStatsBar'
+import { QuickActionsBar } from './QuickActionsBar'
 import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-data'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,12 +21,42 @@ export function Board() {
   const [selectedRoom, setSelectedRoom] = useState<BoardRoomCard | null>(null)
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'7day' | '14day' | '30day'>('7day')
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
   const commandPalette = useCommandPalette(commands)
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedRoom) {
+        setSelectedRoom(null)
+      }
+      
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault()
+        document.querySelector<HTMLInputElement>('input[type="text"]')?.focus()
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === '1') {
+        e.preventDefault()
+        setViewMode('7day')
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '2') {
+        e.preventDefault()
+        setViewMode('14day')
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '3') {
+        e.preventDefault()
+        setViewMode('30day')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
+  }, [selectedRoom])
 
   const filteredRooms = useMemo(() => {
     if (!searchQuery) return rooms
@@ -110,16 +141,17 @@ export function Board() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background p-6 gap-6">
+    <div className="h-screen flex flex-col bg-background p-3 gap-3">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Room Board</h1>
-          <p className="text-sm text-muted-foreground">Sandbox Hotel — 30 Rooms</p>
+          <h1 className="text-xl font-bold tracking-tight">Room Board</h1>
+          <p className="text-xs text-muted-foreground">Sandbox Hotel — 30 Rooms</p>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <Button 
             variant="outline" 
+            size="sm"
             onClick={commandPalette.open}
             className="gap-2"
           >
@@ -129,16 +161,16 @@ export function Board() {
               <span className="text-xs">⌘</span>K
             </kbd>
           </Button>
-          <div className="relative w-80">
-            <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <div className="relative w-64">
+            <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               placeholder="Search rooms, guests..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-9 h-9 text-sm"
             />
           </div>
-          <Button variant="outline" size="icon">
+          <Button variant="outline" size="sm" className="h-9 w-9 p-0">
             <Funnel className="w-4 h-4" />
           </Button>
         </div>
@@ -146,15 +178,21 @@ export function Board() {
 
       <BoardStatsBar stats={stats} />
 
+      <QuickActionsBar 
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        filterCount={0}
+      />
+
       <div className="flex-1 overflow-auto">
-        <div className="space-y-8">
+        <div className="space-y-4">
           <div>
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2 px-1">
               <span className="text-muted-foreground">Floor 2 •</span>
               <span>Twin Rooms</span>
-              <span className="text-sm text-muted-foreground">({twinRooms.length} rooms)</span>
+              <span className="text-xs text-muted-foreground">({twinRooms.length})</span>
             </h2>
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-6 gap-2">
               {twinRooms.map((room) => (
                 <RoomCard
                   key={room.roomId}
@@ -163,6 +201,8 @@ export function Board() {
                   onDragStart={handleDragStart(room)}
                   onDragOver={handleDragOver(room)}
                   onDrop={handleDrop(room)}
+                  onDragLeave={handleDragLeave}
+                  onDragEnd={handleDragEnd}
                   isDragging={draggingRoom === room.roomId}
                   isDropTarget={dropTarget === room.roomId}
                 />
@@ -171,12 +211,12 @@ export function Board() {
           </div>
 
           <div>
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+            <h2 className="text-sm font-semibold mb-2 flex items-center gap-2 px-1">
               <span className="text-muted-foreground">Floor 3 •</span>
               <span>Double Rooms</span>
-              <span className="text-sm text-muted-foreground">({doubleRooms.length} rooms)</span>
+              <span className="text-xs text-muted-foreground">({doubleRooms.length})</span>
             </h2>
-            <div className="grid grid-cols-5 gap-4">
+            <div className="grid grid-cols-6 gap-2">
               {doubleRooms.map((room) => (
                 <RoomCard
                   key={room.roomId}
@@ -185,6 +225,8 @@ export function Board() {
                   onDragStart={handleDragStart(room)}
                   onDragOver={handleDragOver(room)}
                   onDrop={handleDrop(room)}
+                  onDragLeave={handleDragLeave}
+                  onDragEnd={handleDragEnd}
                   isDragging={draggingRoom === room.roomId}
                   isDropTarget={dropTarget === room.roomId}
                 />

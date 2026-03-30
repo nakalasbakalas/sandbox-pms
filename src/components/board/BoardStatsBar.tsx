@@ -8,75 +8,75 @@ interface BoardStatsBarProps {
 
 export function BoardStatsBar({ stats }: BoardStatsBarProps) {
   return (
-    <div className="grid grid-cols-6 gap-3">
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-blue-500/10">
-            <Users weight="bold" className="w-5 h-5 text-blue-600" />
+    <div className="grid grid-cols-6 gap-2">
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-blue-500/10 flex-shrink-0">
+            <Users weight="bold" className="w-4 h-4 text-blue-600" />
           </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.occupied}</div>
-            <div className="text-xs text-muted-foreground">Occupied</div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-emerald-500/10">
-            <DoorOpen weight="bold" className="w-5 h-5 text-emerald-600" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.vacant}</div>
-            <div className="text-xs text-muted-foreground">Vacant</div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.occupied}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Occupied</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-green-500/10">
-            <TrendUp weight="bold" className="w-5 h-5 text-green-600" />
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-emerald-500/10 flex-shrink-0">
+            <DoorOpen weight="bold" className="w-4 h-4 text-emerald-600" />
           </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.arrivalsToday}</div>
-            <div className="text-xs text-muted-foreground">Arrivals</div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-red-500/10">
-            <TrendUp weight="bold" className="w-5 h-5 text-red-600 rotate-180" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.departuresToday}</div>
-            <div className="text-xs text-muted-foreground">Departures</div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.vacant}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Vacant</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-amber-500/10">
-            <Broom weight="bold" className="w-5 h-5 text-amber-600" />
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-green-500/10 flex-shrink-0">
+            <TrendUp weight="bold" className="w-4 h-4 text-green-600" />
           </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.dirty}</div>
-            <div className="text-xs text-muted-foreground">Dirty</div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.arrivalsToday}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Arrivals</div>
           </div>
         </div>
       </Card>
 
-      <Card className="p-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-purple-500/10">
-            <Wrench weight="bold" className="w-5 h-5 text-purple-600" />
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-red-500/10 flex-shrink-0">
+            <TrendUp weight="bold" className="w-4 h-4 text-red-600 rotate-180" />
           </div>
-          <div>
-            <div className="text-2xl font-bold">{stats.occupancyRate.toFixed(0)}%</div>
-            <div className="text-xs text-muted-foreground">Occupancy</div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.departuresToday}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Departures</div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-amber-500/10 flex-shrink-0">
+            <Broom weight="bold" className="w-4 h-4 text-amber-600" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.dirty}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Dirty</div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-2.5">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-md bg-purple-500/10 flex-shrink-0">
+            <TrendUp weight="bold" className="w-4 h-4 text-purple-600" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-none">{stats.occupancyRate.toFixed(0)}%</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Occupancy</div>
           </div>
         </div>
       </Card>
