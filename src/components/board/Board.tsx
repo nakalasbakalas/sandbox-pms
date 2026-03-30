@@ -160,7 +160,7 @@ export function Board() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background p-3 gap-3">
+    <div className="h-full flex flex-col bg-background p-4 gap-3">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold tracking-tight">Room Board</h1>
@@ -170,7 +170,7 @@ export function Board() {
         <div className="flex items-center gap-2">
           {lastUpdate && (
             <div className="text-xs text-muted-foreground flex items-center gap-1 mr-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               <span>Live sync active</span>
             </div>
           )}
