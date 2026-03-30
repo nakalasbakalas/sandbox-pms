@@ -121,6 +121,51 @@ export function ReservationsView() {
     setSelectedReservation(null)
   }
 
+  const handleStartCheckIn = (reservation: ReservationData) => {
+    setSelectedReservation(reservation)
+    setShowCheckInDialog(true)
+  }
+
+  const handleStartCheckOut = (reservation: ReservationData) => {
+    setSelectedReservation(reservation)
+    setShowCheckOutDialog(true)
+  }
+
+  const handleCompleteCheckIn = (reservationId: string, roomNumber: string) => {
+    setReservations(current => 
+      (current || []).map(r => 
+        r.id === reservationId 
+          ? { 
+              ...r, 
+              status: 'CHECKED_IN' as ReservationStatus,
+              actualCheckIn: new Date(),
+              roomNumber 
+            }
+          : r
+      )
+    )
+    toast.success(`Guest checked in to Room ${roomNumber}`)
+    setShowCheckInDialog(false)
+    setSelectedReservation(null)
+  }
+
+  const handleCompleteCheckOut = (reservationId: string) => {
+    setReservations(current => 
+      (current || []).map(r => 
+        r.id === reservationId 
+          ? { 
+              ...r, 
+              status: 'CHECKED_OUT' as ReservationStatus,
+              actualCheckOut: new Date()
+            }
+          : r
+      )
+    )
+    toast.success('Guest checked out successfully')
+    setShowCheckOutDialog(false)
+    setSelectedReservation(null)
+  }
+
   return (
     <div className="h-full flex flex-col bg-background p-6 gap-4">
       <div className="flex items-center justify-between">
@@ -241,9 +286,32 @@ export function ReservationsView() {
 
       <ReservationDetailDialog
         reservation={selectedReservation}
-        open={!!selectedReservation}
+        open={!!selectedReservation && !showCheckInDialog && !showCheckOutDialog}
         onClose={() => setSelectedReservation(null)}
         onCancel={handleCancelReservation}
+        onCheckIn={handleStartCheckIn}
+        onCheckOut={handleStartCheckOut}
+      />
+
+      <CheckInDialog
+        reservation={selectedReservation}
+        open={showCheckInDialog}
+        onClose={() => {
+          setShowCheckInDialog(false)
+          setSelectedReservation(null)
+        }}
+        onComplete={handleCompleteCheckIn}
+        availableRooms={rooms || []}
+      />
+
+      <CheckOutDialog
+        reservation={selectedReservation}
+        open={showCheckOutDialog}
+        onClose={() => {
+          setShowCheckOutDialog(false)
+          setSelectedReservation(null)
+        }}
+        onComplete={handleCompleteCheckOut}
       />
 
       <NewReservationDialog
@@ -391,9 +459,11 @@ interface ReservationDetailDialogProps {
   open: boolean
   onClose: () => void
   onCancel: (reservationId: string) => void
+  onCheckIn: (reservation: ReservationData) => void
+  onCheckOut: (reservation: ReservationData) => void
 }
 
-function ReservationDetailDialog({ reservation, open, onClose, onCancel }: ReservationDetailDialogProps) {
+function ReservationDetailDialog({ reservation, open, onClose, onCancel, onCheckIn, onCheckOut }: ReservationDetailDialogProps) {
   if (!reservation) return null
 
   const nights = differenceInDays(new Date(reservation.checkOut), new Date(reservation.checkIn))
@@ -555,8 +625,8 @@ function ReservationDetailDialog({ reservation, open, onClose, onCancel }: Reser
                 <X size={16} className="mr-2" weight="bold" />
                 Cancel Reservation
               </Button>
-              <Button>
-                <CheckCircle size={16} className="mr-2" weight="bold" />
+              <Button onClick={() => onCheckIn(reservation)}>
+                <SignIn size={16} className="mr-2" weight="bold" />
                 Check In
               </Button>
             </>
@@ -564,8 +634,8 @@ function ReservationDetailDialog({ reservation, open, onClose, onCancel }: Reser
           {reservation.status === 'CHECKED_IN' && (
             <>
               <Button variant="outline" onClick={onClose}>Close</Button>
-              <Button>
-                <CheckCircle size={16} className="mr-2" weight="bold" />
+              <Button onClick={() => onCheckOut(reservation)}>
+                <SignOut size={16} className="mr-2" weight="bold" />
                 Check Out
               </Button>
             </>
@@ -881,6 +951,446 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
           <Button onClick={handleSubmit}>
             <Plus className="w-4 h-4 mr-2" weight="bold" />
             Create Reservation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface CheckInDialogProps {
+  reservation: ReservationData | null
+  open: boolean
+  onClose: () => void
+  onComplete: (reservationId: string, roomNumber: string) => void
+  availableRooms: RoomWithDetails[]
+}
+
+function CheckInDialog({ reservation, open, onClose, onComplete }: CheckInDialogProps) {
+  const [selectedRoom, setSelectedRoom] = useState('')
+  const [idVerified, setIdVerified] = useState(false)
+  const [depositCollected, setDepositCollected] = useState(false)
+  const [keyHandedOver, setKeyHandedOver] = useState(false)
+  const [notes, setNotes] = useState('')
+
+  if (!reservation) return null
+
+  const canCheckIn = selectedRoom && idVerified && depositCollected && keyHandedOver
+
+  const handleCheckIn = () => {
+    if (!canCheckIn) {
+      toast.error('Please complete all check-in requirements')
+      return
+    }
+    onComplete(reservation.id, selectedRoom)
+  }
+
+  const nights = differenceInDays(new Date(reservation.checkOut), new Date(reservation.checkIn))
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <SignIn size={24} weight="bold" className="text-primary" />
+            Check-In Guest
+          </DialogTitle>
+          <DialogDescription>
+            Complete check-in process for {reservation.guest.firstName} {reservation.guest.lastName}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[60vh] pr-4">
+          <div className="space-y-6">
+            <Card className="p-4 bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+              <div className="flex items-start gap-3">
+                <Info size={20} weight="bold" className="text-blue-600 dark:text-blue-400 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">Reservation Summary</h4>
+                  <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                    <div>Guest: {reservation.guest.firstName} {reservation.guest.lastName}</div>
+                    <div>Check-in: {format(new Date(reservation.checkIn), 'PPP')}</div>
+                    <div>Check-out: {format(new Date(reservation.checkOut), 'PPP')}</div>
+                    <div>Duration: {nights} night{nights > 1 ? 's' : ''}</div>
+                    <div>Room Type: {reservation.roomTypeName}</div>
+                    <div>Guests: {reservation.adults} Adult{reservation.adults > 1 ? 's' : ''}{reservation.children > 0 && `, ${reservation.children} Child${reservation.children > 1 ? 'ren' : ''}`}</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <div>
+              <Label htmlFor="room-assignment" className="flex items-center gap-2 mb-2">
+                <DoorOpen size={18} />
+                Room Assignment *
+              </Label>
+              <Select value={selectedRoom} onValueChange={setSelectedRoom}>
+                <SelectTrigger id="room-assignment">
+                  <SelectValue placeholder="Select a room..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="101">Room 101 - {reservation.roomTypeName}</SelectItem>
+                  <SelectItem value="102">Room 102 - {reservation.roomTypeName}</SelectItem>
+                  <SelectItem value="103">Room 103 - {reservation.roomTypeName}</SelectItem>
+                  <SelectItem value="201">Room 201 - {reservation.roomTypeName}</SelectItem>
+                  <SelectItem value="202">Room 202 - {reservation.roomTypeName}</SelectItem>
+                  <SelectItem value="203">Room 203 - {reservation.roomTypeName}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <h4 className="font-semibold">Check-In Requirements</h4>
+              
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="id-verified"
+                  checked={idVerified}
+                  onCheckedChange={(checked) => setIdVerified(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="id-verified"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <IdentificationCard size={18} />
+                    ID Document Verified
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Verify and copy guest's identification document
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="deposit-collected"
+                  checked={depositCollected}
+                  onCheckedChange={(checked) => setDepositCollected(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="deposit-collected"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <CreditCard size={18} />
+                    Deposit Collected
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    ฿{reservation.depositAmount.toLocaleString()} security deposit {reservation.depositPaid ? '(Pre-paid)' : 'collected'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="key-handed"
+                  checked={keyHandedOver}
+                  onCheckedChange={(checked) => setKeyHandedOver(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="key-handed"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <Key size={18} />
+                    Room Key Handed Over
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Physical key or access card given to guest
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <Card className="p-4 bg-muted">
+              <h4 className="font-semibold mb-3 flex items-center gap-2">
+                <Receipt size={18} />
+                Payment Summary
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Amount:</span>
+                  <span className="font-medium">฿{reservation.totalAmount.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Deposit:</span>
+                  <span className="font-medium">฿{reservation.depositAmount.toLocaleString()}</span>
+                </div>
+                <Separator className="my-2" />
+                <div className="flex justify-between text-base font-semibold">
+                  <span>Balance Due at Check-out:</span>
+                  <span>฿{(reservation.totalAmount - reservation.depositAmount).toLocaleString()}</span>
+                </div>
+              </div>
+            </Card>
+
+            <div>
+              <Label htmlFor="checkin-notes">Check-In Notes (Optional)</Label>
+              <Textarea
+                id="checkin-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="mt-2"
+                rows={3}
+                placeholder="Any notes about the check-in process..."
+              />
+            </div>
+          </div>
+        </ScrollArea>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleCheckIn} disabled={!canCheckIn}>
+            <SignIn size={16} className="mr-2" weight="bold" />
+            Complete Check-In
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface CheckOutDialogProps {
+  reservation: ReservationData | null
+  open: boolean
+  onClose: () => void
+  onComplete: (reservationId: string) => void
+}
+
+function CheckOutDialog({ reservation, open, onClose, onComplete }: CheckOutDialogProps) {
+  const [roomInspected, setRoomInspected] = useState(false)
+  const [keyReturned, setKeyReturned] = useState(false)
+  const [damagesChecked, setDamagesChecked] = useState(false)
+  const [paymentSettled, setPaymentSettled] = useState(false)
+  const [minibarChecked, setMinibarChecked] = useState(false)
+  const [notes, setNotes] = useState('')
+  const [additionalCharges, setAdditionalCharges] = useState(0)
+
+  if (!reservation) return null
+
+  const canCheckOut = roomInspected && keyReturned && damagesChecked && paymentSettled && minibarChecked
+
+  const handleCheckOut = () => {
+    if (!canCheckOut) {
+      toast.error('Please complete all check-out requirements')
+      return
+    }
+    onComplete(reservation.id)
+  }
+
+  const nights = differenceInDays(new Date(reservation.checkOut), new Date(reservation.checkIn))
+  const balanceDue = reservation.totalAmount - reservation.depositAmount
+  const finalAmount = balanceDue + additionalCharges
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <SignOut size={24} weight="bold" className="text-primary" />
+            Check-Out Guest
+          </DialogTitle>
+          <DialogDescription>
+            Complete check-out process for {reservation.guest.firstName} {reservation.guest.lastName}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ScrollArea className="max-h-[60vh] pr-4">
+          <div className="space-y-6">
+            <Card className="p-4 bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+              <div className="flex items-start gap-3">
+                <Info size={20} weight="bold" className="text-blue-600 dark:text-blue-400 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-1">Stay Summary</h4>
+                  <div className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                    <div>Guest: {reservation.guest.firstName} {reservation.guest.lastName}</div>
+                    <div>Room: {reservation.roomNumber || 'N/A'}</div>
+                    <div>Check-in: {format(new Date(reservation.checkIn), 'PPP')}</div>
+                    <div>Check-out: {format(new Date(reservation.checkOut), 'PPP')}</div>
+                    <div>Total Stay: {nights} night{nights > 1 ? 's' : ''}</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            <div className="space-y-4">
+              <h4 className="font-semibold">Check-Out Requirements</h4>
+              
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="room-inspected"
+                  checked={roomInspected}
+                  onCheckedChange={(checked) => setRoomInspected(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="room-inspected"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <DoorOpen size={18} />
+                    Room Inspected
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Visual inspection of room completed
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="key-returned"
+                  checked={keyReturned}
+                  onCheckedChange={(checked) => setKeyReturned(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="key-returned"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <Key size={18} />
+                    Room Key Returned
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    All keys and access cards collected
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="damages-checked"
+                  checked={damagesChecked}
+                  onCheckedChange={(checked) => setDamagesChecked(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="damages-checked"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <Warning size={18} />
+                    Damages Assessed
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Room checked for damages or missing items
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="minibar-checked"
+                  checked={minibarChecked}
+                  onCheckedChange={(checked) => setMinibarChecked(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="minibar-checked"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <CurrencyCircleDollar size={18} />
+                    Minibar & Extras Checked
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Minibar consumption and extra services verified
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="payment-settled"
+                  checked={paymentSettled}
+                  onCheckedChange={(checked) => setPaymentSettled(checked as boolean)}
+                />
+                <div className="flex-1">
+                  <label
+                    htmlFor="payment-settled"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex items-center gap-2"
+                  >
+                    <Receipt size={18} />
+                    Final Payment Settled
+                  </label>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    All outstanding charges paid and receipt issued
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div>
+              <Label htmlFor="additional-charges">Additional Charges (฿)</Label>
+              <Input
+                id="additional-charges"
+                type="number"
+                min="0"
+                value={additionalCharges}
+                onChange={(e) => setAdditionalCharges(parseInt(e.target.value) || 0)}
+                className="mt-2"
+                placeholder="0"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Extra charges for minibar, damages, late checkout, etc.
+              </p>
+            </div>
+
+            <Card className="p-4 bg-muted">
+              <h4 className="font-semibold mb-3 flex items-center gap-2">
+                <Receipt size={18} />
+                Final Bill
+              </h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Room Charges:</span>
+                  <span className="font-medium">฿{reservation.totalAmount.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Deposit Paid:</span>
+                  <span className="font-medium text-green-600">-฿{reservation.depositAmount.toLocaleString()}</span>
+                </div>
+                {additionalCharges > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Additional Charges:</span>
+                    <span className="font-medium">฿{additionalCharges.toLocaleString()}</span>
+                  </div>
+                )}
+                <Separator className="my-2" />
+                <div className="flex justify-between text-base font-semibold">
+                  <span>Amount Due:</span>
+                  <span className={cn(
+                    finalAmount > 0 ? 'text-destructive' : 'text-green-600'
+                  )}>
+                    ฿{finalAmount.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            <div>
+              <Label htmlFor="checkout-notes">Check-Out Notes (Optional)</Label>
+              <Textarea
+                id="checkout-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="mt-2"
+                rows={3}
+                placeholder="Any notes about the check-out process..."
+              />
+            </div>
+          </div>
+        </ScrollArea>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleCheckOut} disabled={!canCheckOut}>
+            <SignOut size={16} className="mr-2" weight="bold" />
+            Complete Check-Out
           </Button>
         </DialogFooter>
       </DialogContent>
