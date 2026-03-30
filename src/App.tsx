@@ -12,6 +12,8 @@ import {
 } from './components/views/PlaceholderViews'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
+import { useOnboarding } from './hooks/use-onboarding'
+import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
@@ -43,6 +45,12 @@ function AppRouter() {
 }
 
 function App() {
+    const { completed } = useOnboarding()
+    
+    if (!completed) {
+      return <OnboardingWizard />
+    }
+    
     return (
         <NavigationProvider>
             <AppRouter />
