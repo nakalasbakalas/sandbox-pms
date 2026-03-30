@@ -32,6 +32,8 @@ import {
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { InventorySyncPanel } from './InventorySyncPanel'
+import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
 
 interface Channel {
   id: string
@@ -340,6 +342,14 @@ export function ChannelsView() {
             <TabsTrigger value="channels">
               Channels ({connectedChannels.length}/{channels.length})
             </TabsTrigger>
+            <TabsTrigger value="inventory-sync">
+              <Lightning className="w-4 h-4 mr-2" />
+              Real-Time Sync
+            </TabsTrigger>
+            <TabsTrigger value="inventory">
+              <Bed className="w-4 h-4 mr-2" />
+              Inventory
+            </TabsTrigger>
             <TabsTrigger value="reservations">
               Pending Reservations ({pendingReservations.length})
             </TabsTrigger>
@@ -442,6 +452,21 @@ export function ChannelsView() {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="inventory-sync" className="flex-1 mt-6">
+            <InventorySyncPanel connectedChannels={channels} />
+          </TabsContent>
+
+          <TabsContent value="inventory" className="flex-1 mt-6">
+            <div className="space-y-6">
+              <InventoryOverview />
+              <div className="grid grid-cols-3 gap-6">
+                <InventoryCalendar roomTypeId="deluxe" roomTypeName="Deluxe Room" />
+                <InventoryCalendar roomTypeId="superior" roomTypeName="Superior Room" />
+                <InventoryCalendar roomTypeId="suite" roomTypeName="Suite" />
+              </div>
             </div>
           </TabsContent>
 

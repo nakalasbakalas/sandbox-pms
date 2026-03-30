@@ -264,12 +264,85 @@ Click a room → see everything → take action → done. No drilling through ta
 - **Rate Management:** Seasonal rates, promotional rates, channel-specific rates
 - **Policies:** Check-in/check-out times, cancellation rules, child policies
 - **Users:** Staff accounts, role assignments, permissions
-- **Integrations:** Channel manager connectors (Booking.com, Agoda, etc.) — future
+- **Integrations:** Channel manager connectors (Booking.com, Agoda, etc.)
 - **Backup/Audit:** System logs, data export, restore points
 
 ---
 
-### **Module 8: CAFE MODULE** *(Optional, Shared Login)*
+### **Module 8: CHANNEL MANAGER & INVENTORY SYNC**
+*Real-time inventory synchronization with OTA channels.*
+
+**Core Features:**
+- **Channel Connections:**
+  - Booking.com, Agoda, Expedia, Airbnb integration
+  - Secure credential storage (encrypted)
+  - Connection health monitoring
+  - Enable/disable per channel
+
+- **Real-Time Inventory Sync:**
+  - Automatic sync within 30 seconds of any inventory change
+  - Triggered by: check-ins, check-outs, reservations, cancellations, room blocks
+  - Intelligent event batching for API efficiency
+  - Parallel channel updates
+  - Automatic retry on transient failures
+
+- **Inventory Visibility:**
+  - 30-day forward-looking availability calendar per room type
+  - Color-coded availability levels (Good/Limited/Low/Sold Out)
+  - Weekend date highlighting
+  - Reserved vs. blocked unit breakdown
+  - Real-time availability overview
+
+- **Sync Monitoring:**
+  - Live event stream showing all inventory changes
+  - Per-channel health indicators (Healthy/Degraded/Error)
+  - Success rate tracking
+  - Average sync duration metrics
+  - Complete operation history
+
+- **Manual Controls:**
+  - Auto-sync toggle (on/off)
+  - Force sync button for full reconciliation
+  - Per-channel enable/disable
+  - Date range selection for targeted sync
+
+- **Reservation Import:**
+  - Pull reservations from channels
+  - Conflict detection (duplicate, inventory unavailable)
+  - Manual review queue for conflicts
+  - Auto-accept for clean imports
+  - One-click import to PMS
+
+- **Rate Push:**
+  - Automatic rate synchronization (nightly)
+  - Dynamic pricing rule application
+  - Channel-specific markups
+  - Weekend/seasonal adjustments
+
+**Sync Architecture:**
+- Event-driven: Each PMS action creates sync event
+- Batching window: 30 seconds for efficiency
+- Sync latency: 1-35 seconds typical
+- Supports: 10+ simultaneous channels
+- Handles: 1000+ events/hour
+
+**Operational Benefits:**
+- Zero manual inventory updates
+- Eliminates overbooking risk
+- Maximizes revenue (always current availability)
+- Complete audit trail
+- Manager-friendly visibility
+
+**Integration Points:**
+- Check-in → auto-sync inventory decrease
+- Check-out + clean → auto-sync inventory increase
+- Reservation created → auto-sync availability update
+- Cancellation → auto-sync inventory release
+- Room blocked/unblocked → auto-sync status change
+
+---
+
+### **Module 9: CAFE MODULE** *(Optional, Shared Login)*
 *Guest charge-to-room interface for cafe staff.*
 
 **Simplified Interface:**
