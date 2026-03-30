@@ -636,27 +636,27 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-2 bg-background p-3">
+    <div className="h-full flex gap-3 bg-background p-4">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <Card className="w-72 flex-shrink-0 border-2 border-primary/20 flex flex-col">
-          <div className="p-3 border-b border-border bg-muted/30">
+        <Card className="w-80 flex-shrink-0 border shadow-sm flex flex-col">
+          <div className="p-4 border-b border-border bg-gradient-to-b from-muted/40 to-muted/20">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold">Unassigned</h3>
-                <p className="text-xs text-muted-foreground">Drag to assign room</p>
+                <h3 className="text-sm font-bold tracking-tight">Unassigned Reservations</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Drag to assign room</p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUnassigned(false)}
-                className="h-7 w-7 p-0"
+                className="h-7 w-7 p-0 hover:bg-background/80"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </Button>
             </div>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-2 space-y-2">
+            <div className="p-3 space-y-2.5">
               {unassignedReservations.map((reservation) => (
                 <Card
                   key={reservation.id}
@@ -664,10 +664,10 @@ export function Board() {
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "p-3 cursor-move hover:shadow-md transition-all border-2",
+                    "p-3.5 cursor-move hover:shadow-lg hover:scale-[1.02] transition-all border",
                     draggingReservation === reservation.id && "opacity-40 scale-95",
-                    reservation.isVIP && "border-amber-300 bg-amber-50/50",
-                    reservation.needsAttention && "border-destructive/30 bg-destructive/5"
+                    reservation.isVIP && "border-amber-400/60 bg-gradient-to-br from-amber-50 to-amber-50/30 shadow-amber-100/50",
+                    reservation.needsAttention && "border-destructive/40 bg-gradient-to-br from-destructive/5 to-destructive/[0.02]"
                   )}
                 >
                   <div className="space-y-2">
@@ -718,52 +718,52 @@ export function Board() {
         </Card>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-2">
+      <div className="flex-1 flex flex-col min-w-0 gap-3">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold tracking-tight">Room Board</h1>
-            <p className="text-[10px] text-muted-foreground">Sandbox Hotel — 30 Rooms</p>
+            <h1 className="text-2xl font-bold tracking-tight">Room Board</h1>
+            <p className="text-xs text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             {!showUnassigned && unassignedReservations.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setShowUnassigned(true)}
-                className="h-8 text-xs gap-1.5"
+                className="h-9 text-xs gap-2 font-semibold shadow-sm hover:shadow"
               >
-                <Badge variant="destructive" className="h-4 w-4 p-0 text-[9px] flex items-center justify-center">
+                <Badge variant="destructive" className="h-5 w-5 p-0 text-[10px] flex items-center justify-center font-bold">
                   {unassignedReservations.length}
                 </Badge>
-                Show Unassigned
+                Unassigned
               </Button>
             )}
             {lastUpdate && (
-              <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span>Live</span>
+              <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/5 border border-primary/20">
+                <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-sm shadow-primary/50" />
+                <span className="font-semibold">Live</span>
               </div>
             )}
             <Button 
               variant="outline" 
               size="sm"
               onClick={commandPalette.open}
-              className="gap-1.5 h-8"
+              className="gap-2 h-9 font-semibold shadow-sm hover:shadow"
             >
-              <Command className="w-3.5 h-3.5" />
+              <Command className="w-4 h-4" />
               <span className="hidden md:inline text-xs">Commands</span>
-              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[9px] font-medium text-muted-foreground md:inline-flex">
-                <span className="text-[10px]">⌘</span>K
+              <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-bold text-muted-foreground md:inline-flex">
+                <span className="text-[11px]">⌘</span>K
               </kbd>
             </Button>
-            <div className="relative w-48">
-              <MagnifyingGlass className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <div className="relative w-56">
+              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search..."
+                placeholder="Search rooms, guests..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs"
+                className="pl-9 h-9 text-xs font-medium shadow-sm"
               />
             </div>
             <BoardFiltersPopover
@@ -773,8 +773,8 @@ export function Board() {
             />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                  <Info className="w-3.5 h-3.5" />
+                <Button variant="outline" size="sm" className="h-9 w-9 p-0 shadow-sm hover:shadow">
+                  <Info className="w-4 h-4" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-[480px]">
@@ -792,12 +792,12 @@ export function Board() {
           filterCount={activeFilterCount}
         />
 
-        <div className="flex-1 overflow-auto rounded-lg border border-border bg-card">
+        <div className="flex-1 overflow-auto rounded-xl border border-border bg-card shadow-sm">
           <div className="calendar-board">
-            <div className="sticky top-0 z-20 bg-card border-b-2 border-border">
+            <div className="sticky top-0 z-20 bg-gradient-to-b from-muted/50 to-muted/30 border-b-2 border-border backdrop-blur-sm">
               <div className="flex">
-                <div className="w-28 flex-shrink-0 border-r border-border py-2 px-3 bg-muted/30">
-                  <div className="text-[10px] font-semibold text-foreground">Room</div>
+                <div className="w-32 flex-shrink-0 border-r border-border py-3 px-4">
+                  <div className="text-[11px] font-bold text-foreground uppercase tracking-wider">Room</div>
                 </div>
                 
                 <div className="flex-1 flex overflow-x-auto">
@@ -808,26 +808,26 @@ export function Board() {
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[90px] border-r border-border py-2 px-2 text-center transition-colors",
-                          isToday && "bg-primary/10 border-primary/30",
+                          "flex-1 min-w-[100px] border-r border-border py-2.5 px-3 text-center transition-all",
+                          isToday && "bg-primary/10 border-l-2 border-l-primary shadow-inner",
                           isWeekendDay && !isToday && "bg-accent/5"
                         )}
                       >
                         <div className={cn(
-                          "text-[9px] font-semibold uppercase tracking-wider mb-0.5",
+                          "text-[10px] font-bold uppercase tracking-widest mb-1",
                           isToday ? "text-primary" : isWeekendDay ? "text-accent-foreground/70" : "text-muted-foreground"
                         )}>
                           {format(date, 'EEE')}
                         </div>
                         <div className={cn(
-                          "text-base font-bold mb-0.5",
+                          "text-lg font-extrabold mb-0.5 leading-none",
                           isToday ? "text-primary" : "text-foreground"
                         )}>
                           {format(date, 'd')}
                         </div>
                         <div className={cn(
-                          "text-[9px]",
-                          isToday ? "text-primary/70" : "text-muted-foreground"
+                          "text-[10px] font-semibold",
+                          isToday ? "text-primary/80" : "text-muted-foreground"
                         )}>
                           {format(date, 'MMM')}
                         </div>
@@ -1229,26 +1229,26 @@ function RoomTypeRow({
     <div className="border-b border-border last:border-b-0">
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/30 hover:bg-muted/50 transition-colors"
+        className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-muted/50 to-muted/30 hover:from-muted/70 hover:to-muted/50 transition-all border-b border-border/50"
       >
         {isCollapsed ? (
-          <CaretRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <CaretRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
         ) : (
-          <CaretDown className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <CaretDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
         )}
-        <div className="flex items-center gap-2 text-xs font-semibold flex-1 min-w-0">
+        <div className="flex items-center gap-2.5 text-sm font-bold flex-1 min-w-0">
           <span className="text-muted-foreground">{subtitle}</span>
-          <span>•</span>
-          <span>{title}</span>
-          <div className="flex items-center gap-1.5 ml-auto">
-            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
-              {rooms.length}
+          <span className="text-muted-foreground/50">·</span>
+          <span className="text-foreground">{title}</span>
+          <div className="flex items-center gap-2 ml-auto">
+            <Badge variant="secondary" className="text-[10px] px-2 py-0.5 h-5 font-bold">
+              {rooms.length} total
             </Badge>
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">
+            <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5 font-bold bg-primary/5 text-primary border-primary/30">
               {occupiedCount} occ
             </Badge>
             {dirtyCount > 0 && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200">
+              <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5 font-bold bg-orange-50 text-orange-700 border-orange-200">
                 {dirtyCount} dirty
               </Badge>
             )}
@@ -1327,13 +1327,13 @@ function CalendarRoomRow({
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
       case 'OCCUPIED_CLEAN':
-        return 'bg-gradient-to-br from-primary/25 to-primary/15 border-primary/40 border-l-[3px] border-l-primary'
+        return 'bg-gradient-to-br from-primary/30 to-primary/10 border-primary/50 border-l-4 border-l-primary shadow-sm'
       case 'OCCUPIED_DIRTY':
-        return 'bg-gradient-to-br from-destructive/25 to-destructive/15 border-destructive/40 border-l-[3px] border-l-destructive'
+        return 'bg-gradient-to-br from-destructive/30 to-destructive/10 border-destructive/50 border-l-4 border-l-destructive shadow-sm'
       case 'VACANT_CLEAN':
-        return 'bg-gradient-to-br from-green-500/15 to-green-500/8 border-green-500/40 border-l-[3px] border-l-green-500'
+        return 'bg-gradient-to-br from-green-500/20 to-green-500/5 border-green-500/50 border-l-4 border-l-green-500 shadow-sm'
       case 'VACANT_DIRTY':
-        return 'bg-gradient-to-br from-orange-500/15 to-orange-500/8 border-orange-500/40 border-l-[3px] border-l-orange-500'
+        return 'bg-gradient-to-br from-orange-500/20 to-orange-500/5 border-orange-500/50 border-l-4 border-l-orange-500 shadow-sm'
       default:
         return 'bg-muted/30 border-border'
     }
@@ -1342,11 +1342,11 @@ function CalendarRoomRow({
   const getCleanStatusIndicator = (cleanStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED') => {
     switch (cleanStatus) {
       case 'CLEAN':
-        return 'bg-green-500 ring-2 ring-green-500/30'
+        return 'bg-green-500 ring-2 ring-green-500/30 shadow-sm shadow-green-500/20'
       case 'DIRTY':
-        return 'bg-orange-500 ring-2 ring-orange-500/30'
+        return 'bg-orange-500 ring-2 ring-orange-500/30 shadow-sm shadow-orange-500/20'
       case 'INSPECTED':
-        return 'bg-blue-500 ring-2 ring-blue-500/30'
+        return 'bg-blue-500 ring-2 ring-blue-500/30 shadow-sm shadow-blue-500/20'
     }
   }
 
@@ -1408,29 +1408,29 @@ function CalendarRoomRow({
 
   return (
     <div 
-      className="flex hover:bg-accent/10 transition-colors group"
+      className="flex hover:bg-accent/5 transition-all group border-b border-border/30 last:border-b-0"
       onMouseUp={handleResizeMouseUp}
       onMouseLeave={handleResizeMouseUp}
     >
       <div 
-        className="w-28 flex-shrink-0 border-r border-border py-1.5 px-3 flex items-center gap-2 cursor-pointer bg-muted/20 group-hover:bg-muted/40 transition-colors"
+        className="w-32 flex-shrink-0 border-r border-border py-2 px-4 flex items-center gap-2.5 cursor-pointer bg-muted/10 group-hover:bg-muted/30 transition-all"
         onClick={onClick}
       >
-        <div className={cn("w-1.5 h-1.5 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
-        <div className="text-xs font-bold">{room.number}</div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className={cn("w-2 h-2 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
+        <div className="text-sm font-extrabold tracking-tight">{room.number}</div>
+        <div className="ml-auto flex items-center gap-1.5">
           {room.operationalStatus === 'OUT_OF_SERVICE' && (
-            <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">
+            <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 font-bold">
               OOS
             </Badge>
           )}
           {room.operationalStatus === 'BLOCKED' && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 bg-orange-50 text-orange-700 border-orange-300">
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-orange-50 text-orange-700 border-orange-300">
               BLK
             </Badge>
           )}
           {room.isVIP && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 bg-amber-50 text-amber-700 border-amber-300">
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-amber-50 text-amber-700 border-amber-300">
               VIP
             </Badge>
           )}
@@ -1458,10 +1458,10 @@ function CalendarRoomRow({
             <div 
               key={i}
               className={cn(
-                "flex-1 min-w-[90px] border-r border-border py-1.5 px-1.5 relative transition-colors",
-                isToday && "bg-primary/10",
+                "flex-1 min-w-[100px] border-r border-border py-2 px-2 relative transition-all",
+                isToday && "bg-primary/10 shadow-inner",
                 isWeekendDay && !isToday && "bg-accent/5",
-                draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/30",
+                draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/40 bg-primary/5",
                 isResizing && "cursor-col-resize"
               )}
               draggable={!!(isRoomOccupied && isInStay && !isResizing)}
@@ -1477,18 +1477,18 @@ function CalendarRoomRow({
               {isInStay && (
                 <div 
                   className={cn(
-                    "h-full rounded border transition-all hover:shadow-sm relative overflow-hidden group/reservation",
+                    "h-full rounded-md border-2 transition-all hover:shadow-md relative overflow-hidden group/reservation",
                     getStatusColor(room.status),
                     isDragging && "opacity-40 scale-95",
-                    isDropTarget && !isDragging && "ring-2 ring-primary ring-offset-1",
-                    isFirstDay && "rounded-l-md",
-                    isLastDay && "rounded-r-md",
+                    isDropTarget && !isDragging && "ring-2 ring-primary ring-offset-2",
+                    isFirstDay && "rounded-l-lg",
+                    isLastDay && "rounded-r-lg",
                     isRoomOccupied && !isResizing && "cursor-move",
-                    isResizing && "ring-2 ring-primary shadow-lg z-10"
+                    isResizing && "ring-2 ring-primary shadow-xl z-10"
                   )}
                   onClick={onClick}
                 >
-                  <div className="px-2 py-1.5 h-full flex flex-col justify-between">
+                  <div className="px-2.5 py-2 h-full flex flex-col justify-between">
                     {isCheckIn && (
                       <div className="space-y-0.5">
                         <div className="text-[11px] font-bold truncate text-foreground">

@@ -16,9 +16,9 @@ interface QuickActionsBarProps {
 
 export function QuickActionsBar({ viewMode, onViewModeChange, filterCount }: QuickActionsBarProps) {
   return (
-    <div className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2 border border-border">
-      <div className="flex items-center gap-1.5">
-        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mr-1.5">
+    <div className="flex items-center justify-between bg-gradient-to-r from-muted/40 to-muted/20 rounded-xl px-4 py-3 border border-border shadow-sm">
+      <div className="flex items-center gap-2">
+        <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mr-2">
           View
         </div>
         <Button
@@ -26,53 +26,53 @@ export function QuickActionsBar({ viewMode, onViewModeChange, filterCount }: Qui
           size="sm"
           onClick={() => onViewModeChange('7day')}
           className={cn(
-            "h-7 text-xs font-semibold transition-all px-2.5",
-            viewMode === '7day' && "shadow-sm"
+            "h-8 text-xs font-bold transition-all px-3 shadow-sm",
+            viewMode === '7day' && "shadow-md"
           )}
         >
-          <CalendarBlank className="w-3 h-3 mr-1" />
-          7d
+          <CalendarBlank className="w-3.5 h-3.5 mr-1.5" />
+          7 Days
         </Button>
         <Button
           variant={viewMode === '14day' ? 'default' : 'outline'}
           size="sm"
           onClick={() => onViewModeChange('14day')}
           className={cn(
-            "h-7 text-xs font-semibold transition-all px-2.5",
-            viewMode === '14day' && "shadow-sm"
+            "h-8 text-xs font-bold transition-all px-3 shadow-sm",
+            viewMode === '14day' && "shadow-md"
           )}
         >
-          14d
+          14 Days
         </Button>
         <Button
           variant={viewMode === '30day' ? 'default' : 'outline'}
           size="sm"
           onClick={() => onViewModeChange('30day')}
           className={cn(
-            "h-7 text-xs font-semibold transition-all px-2.5",
-            viewMode === '30day' && "shadow-sm"
+            "h-8 text-xs font-bold transition-all px-3 shadow-sm",
+            viewMode === '30day' && "shadow-md"
           )}
         >
-          30d
+          30 Days
         </Button>
 
-        <div className="h-4 w-px bg-border mx-1.5" />
+        <div className="h-5 w-px bg-border mx-2" />
 
-        <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5 font-semibold hover:bg-accent px-2.5">
-          <FunnelSimple className="w-3 h-3" />
+        <Button variant="outline" size="sm" className="h-8 text-xs gap-2 font-bold hover:bg-accent px-3 shadow-sm">
+          <FunnelSimple className="w-3.5 h-3.5" />
           Filters
           {filterCount > 0 && (
-            <Badge variant="default" className="h-3.5 min-w-3.5 px-1 flex items-center justify-center text-[9px] ml-0">
+            <Badge variant="default" className="h-4 min-w-4 px-1.5 flex items-center justify-center text-[10px] ml-0 font-bold">
               {filterCount}
             </Badge>
           )}
         </Button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground bg-background/50 px-3 py-1.5 rounded-lg border border-border/50">
           <Clock className="w-3.5 h-3.5" />
-          <span className="font-medium text-[11px]">
+          <span className="font-bold text-[11px]">
             {new Date().toLocaleDateString('en-GB', { 
               day: '2-digit', 
               month: 'short',
@@ -81,13 +81,13 @@ export function QuickActionsBar({ viewMode, onViewModeChange, filterCount }: Qui
           </span>
         </div>
         
-        <div className="h-4 w-px bg-border" />
+        <div className="h-5 w-px bg-border" />
 
-        <div className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-          <kbd className="inline-flex items-center gap-0.5 rounded border bg-background px-1.5 py-0.5 font-mono text-[9px] font-semibold text-muted-foreground">
-            <span className="text-[10px]">⌘</span>1/2/3
+        <div className="text-xs font-semibold text-muted-foreground flex items-center gap-2">
+          <kbd className="inline-flex items-center gap-0.5 rounded border bg-background px-2 py-1 font-mono text-[10px] font-bold text-muted-foreground shadow-sm">
+            <span className="text-[11px]">⌘</span>1/2/3
           </kbd>
-          <span className="text-[10px]">Switch views</span>
+          <span className="text-[11px]">Switch views</span>
         </div>
       </div>
     </div>
