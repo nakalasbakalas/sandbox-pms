@@ -271,62 +271,64 @@ export function ReportsView() {
           )}
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="px-6">
-          <TabsList className="grid w-full grid-cols-6 h-auto">
-            <TabsTrigger value="operations" className="flex items-center gap-2 py-3">
-              <ChartBar className="h-4 w-4" />
-              <span className="hidden sm:inline">Operations</span>
-            </TabsTrigger>
-            <TabsTrigger value="revenue" className="flex items-center gap-2 py-3">
-              <CurrencyCircleDollar className="h-4 w-4" />
-              <span className="hidden sm:inline">Revenue</span>
-            </TabsTrigger>
-            <TabsTrigger value="reservations" className="flex items-center gap-2 py-3">
-              <CalendarBlank className="h-4 w-4" />
-              <span className="hidden sm:inline">Reservations</span>
-            </TabsTrigger>
-            <TabsTrigger value="housekeeping" className="flex items-center gap-2 py-3">
-              <Broom className="h-4 w-4" />
-              <span className="hidden sm:inline">Housekeeping</span>
-            </TabsTrigger>
-            <TabsTrigger value="channels" className="flex items-center gap-2 py-3">
-              <ArrowsClockwise className="h-4 w-4" />
-              <span className="hidden sm:inline">Channels</span>
-            </TabsTrigger>
-            <TabsTrigger value="guests" className="flex items-center gap-2 py-3">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Guests</span>
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+          <div className="px-6">
+            <TabsList className="grid w-full grid-cols-6 h-auto">
+              <TabsTrigger value="operations" className="flex items-center gap-2 py-3">
+                <ChartBar className="h-4 w-4" />
+                <span className="hidden sm:inline">Operations</span>
+              </TabsTrigger>
+              <TabsTrigger value="revenue" className="flex items-center gap-2 py-3">
+                <CurrencyCircleDollar className="h-4 w-4" />
+                <span className="hidden sm:inline">Revenue</span>
+              </TabsTrigger>
+              <TabsTrigger value="reservations" className="flex items-center gap-2 py-3">
+                <CalendarBlank className="h-4 w-4" />
+                <span className="hidden sm:inline">Reservations</span>
+              </TabsTrigger>
+              <TabsTrigger value="housekeeping" className="flex items-center gap-2 py-3">
+                <Broom className="h-4 w-4" />
+                <span className="hidden sm:inline">Housekeeping</span>
+              </TabsTrigger>
+              <TabsTrigger value="channels" className="flex items-center gap-2 py-3">
+                <ArrowsClockwise className="h-4 w-4" />
+                <span className="hidden sm:inline">Channels</span>
+              </TabsTrigger>
+              <TabsTrigger value="guests" className="flex items-center gap-2 py-3">
+                <Users className="h-4 w-4" />
+                <span className="hidden sm:inline">Guests</span>
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <div className="flex-1 overflow-auto">
+            <div className="p-6">
+              <TabsContent value="operations" className="mt-0">
+                <OperationsReportView dateRange={dateRange} />
+              </TabsContent>
+
+              <TabsContent value="revenue" className="mt-0">
+                <RevenueReportView dateRange={dateRange} />
+              </TabsContent>
+
+              <TabsContent value="reservations" className="mt-0">
+                <ReservationReportView dateRange={dateRange} />
+              </TabsContent>
+
+              <TabsContent value="housekeeping" className="mt-0">
+                <HousekeepingReportView dateRange={dateRange} />
+              </TabsContent>
+
+              <TabsContent value="channels" className="mt-0">
+                <ChannelReportView dateRange={dateRange} />
+              </TabsContent>
+
+              <TabsContent value="guests" className="mt-0">
+                <GuestReportView dateRange={dateRange} />
+              </TabsContent>
+            </div>
+          </div>
         </Tabs>
-      </div>
-
-      <div className="flex-1 overflow-auto">
-        <div className="p-6">
-          <TabsContent value="operations" className="mt-0">
-            <OperationsReportView dateRange={dateRange} />
-          </TabsContent>
-
-          <TabsContent value="revenue" className="mt-0">
-            <RevenueReportView dateRange={dateRange} />
-          </TabsContent>
-
-          <TabsContent value="reservations" className="mt-0">
-            <ReservationReportView dateRange={dateRange} />
-          </TabsContent>
-
-          <TabsContent value="housekeeping" className="mt-0">
-            <HousekeepingReportView dateRange={dateRange} />
-          </TabsContent>
-
-          <TabsContent value="channels" className="mt-0">
-            <ChannelReportView dateRange={dateRange} />
-          </TabsContent>
-
-          <TabsContent value="guests" className="mt-0">
-            <GuestReportView dateRange={dateRange} />
-          </TabsContent>
-        </div>
       </div>
     </div>
   )
