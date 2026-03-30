@@ -107,6 +107,39 @@ export function MobileHousekeepingView() {
     }, 300)
   }
 
+  const handleQuickUpdate = (roomId: string, newStatus: CleanStatus) => {
+    updateRoomStatus({
+      roomId,
+      cleanStatus: newStatus,
+      lastCleaned: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? new Date() : undefined,
+      cleanedBy: newStatus === 'CLEAN' || newStatus === 'INSPECTED' ? 'Current User' : undefined
+    })
+
+    setStatusHistory((current) => {
+      const currentHistory = current || {}
+      return {
+        ...currentHistory,
+        [roomId]: [
+          ...(currentHistory[roomId] || []),
+          {
+            timestamp: new Date(),
+            status: newStatus,
+            user: 'Current User'
+          }
+        ]
+      }
+    })
+
+    const room = rooms?.find(r => r.roomId === roomId)
+    if (room) {
+      toast.success(`Room ${room.number} marked as ${newStatus.toLowerCase()}`)
+      
+      if ((newStatus === 'CLEAN' || newStatus === 'INSPECTED') && shouldNotify(newStatus)) {
+        sendNotification(room, newStatus)
+      }
+    }
+  }
+
   const addMaintenanceIssue = (issue: Omit<MaintenanceIssue, 'id' | 'reportedAt'>) => {
     const newIssue: MaintenanceIssue = {
       ...issue,
@@ -203,6 +236,7 @@ export function MobileHousekeepingView() {
             expanded={expandedFloors['2']}
             onToggle={() => toggleFloor('2')}
             onSelectRoom={setSelectedRoom}
+            onQuickUpdate={handleQuickUpdate}
             maintenanceIssues={maintenanceIssues || []}
           />
           
@@ -213,6 +247,7 @@ export function MobileHousekeepingView() {
             expanded={expandedFloors['3']}
             onToggle={() => toggleFloor('3')}
             onSelectRoom={setSelectedRoom}
+            onQuickUpdate={handleQuickUpdate}
             maintenanceIssues={maintenanceIssues || []}
           />
         </div>
@@ -228,10 +263,11 @@ interface FloorSectionProps {
   expanded: boolean
   onToggle: () => void
   onSelectRoom: (room: HousekeepingRoom) => void
+  onQuickUpdate: (roomId: string, status: CleanStatus) => void
   maintenanceIssues: MaintenanceIssue[]
 }
 
-function FloorSection({ floor, title, rooms, expanded, onToggle, onSelectRoom, maintenanceIssues }: FloorSectionProps) {
+function FloorSection({ floor, title, rooms, expanded, onToggle, onSelectRoom, onQuickUpdate, maintenanceIssues }: FloorSectionProps) {
   const sortedRooms = [...rooms].sort((a, b) => a.number.localeCompare(b.number))
   
   const dirtyCount = rooms.filter(r => r.cleanStatus === 'DIRTY').length
@@ -263,6 +299,7 @@ function FloorSection({ floor, title, rooms, expanded, onToggle, onSelectRoom, m
               key={room.roomId} 
               room={room} 
               onSelect={onSelectRoom}
+              onQuickUpdate={onQuickUpdate}
               maintenanceIssues={maintenanceIssues.filter(i => i.roomId === room.roomId)}
             />
           ))}
@@ -275,50 +312,120 @@ function FloorSection({ floor, title, rooms, expanded, onToggle, onSelectRoom, m
 interface CompactRoomRowProps {
   room: HousekeepingRoom
   onSelect: (room: HousekeepingRoom) => void
+  onQuickUpdate: (roomId: string, status: CleanStatus) => void
   maintenanceIssues: MaintenanceIssue[]
 }
 
-function CompactRoomRow({ room, onSelect, maintenanceIssues }: CompactRoomRowProps) {
+function CompactRoomRow({ room, onSelect, onQuickUpdate, maintenanceIssues }: CompactRoomRowProps) {
+  const handleQuickAction = (e: React.MouseEvent, status: CleanStatus) => {
+    e.stopPropagation()
+    onQuickUpdate(room.roomId, status)
+  }
+
   return (
-    <button
-      onClick={() => onSelect(room)}
-      className="w-full px-4 py-2.5 hover:bg-muted/30 transition-colors text-left"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <div className="font-semibold text-base w-12 flex-shrink-0">{room.number}</div>
-          
-          <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
-            <StatusDot status={room.cleanStatus} />
-            
-            {room.isArrivalToday && (
-              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-green-600">
-                Arr {room.arrivalTime}
-              </Badge>
-            )}
-            
-            {room.isDepartureToday && (
-              <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-orange-600">
-                Dep {room.checkOutTime}
-              </Badge>
-            )}
-            
-            {maintenanceIssues.length > 0 && (
-              <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
-                <Wrench size={10} className="mr-0.5" weight="bold" />
-                {maintenanceIssues.length}
-              </Badge>
-            )}
-            
-            {room.guestName && (
-              <span className="text-xs text-muted-foreground truncate">{room.guestName}</span>
-            )}
-          </div>
-        </div>
+    <div className="w-full px-4 py-2.5 hover:bg-muted/30 transition-colors flex items-center justify-between gap-2">
+      <button
+        onClick={() => onSelect(room)}
+        className="flex items-center gap-3 flex-1 min-w-0 text-left"
+      >
+        <div className="font-semibold text-base w-12 flex-shrink-0">{room.number}</div>
         
-        <CaretRight size={16} className="text-muted-foreground flex-shrink-0" />
+        <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+          <StatusDot status={room.cleanStatus} />
+          
+          {room.isArrivalToday && (
+            <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-green-600">
+              Arr {room.arrivalTime}
+            </Badge>
+          )}
+          
+          {room.isDepartureToday && (
+            <Badge variant="default" className="text-[10px] px-1.5 py-0 h-5 bg-orange-600">
+              Dep {room.checkOutTime}
+            </Badge>
+          )}
+          
+          {maintenanceIssues.length > 0 && (
+            <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-5">
+              <Wrench size={10} className="mr-0.5" weight="bold" />
+              {maintenanceIssues.length}
+            </Badge>
+          )}
+          
+          {room.guestName && (
+            <span className="text-xs text-muted-foreground truncate">{room.guestName}</span>
+          )}
+        </div>
+      </button>
+      
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {room.cleanStatus === 'DIRTY' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+            onClick={(e) => handleQuickAction(e, 'CLEAN')}
+            title="Mark as Clean"
+          >
+            <CheckCircle size={16} weight="bold" />
+          </Button>
+        )}
+        
+        {room.cleanStatus === 'CLEAN' && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-2 bg-blue-50 hover:bg-blue-100 border-blue-200 text-blue-700"
+              onClick={(e) => handleQuickAction(e, 'INSPECTED')}
+              title="Mark as Inspected"
+            >
+              <CheckCircle size={16} weight="bold" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-2 bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700"
+              onClick={(e) => handleQuickAction(e, 'DIRTY')}
+              title="Mark as Dirty"
+            >
+              <Circle size={16} />
+            </Button>
+          </>
+        )}
+        
+        {room.cleanStatus === 'INSPECTED' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 px-2 bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700"
+            onClick={(e) => handleQuickAction(e, 'DIRTY')}
+            title="Mark as Dirty"
+          >
+            <Circle size={16} />
+          </Button>
+        )}
+        
+        {room.cleanStatus === 'CLEANING' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 px-2 bg-green-50 hover:bg-green-100 border-green-200 text-green-700"
+            onClick={(e) => handleQuickAction(e, 'CLEAN')}
+            title="Mark as Clean"
+          >
+            <CheckCircle size={16} weight="bold" />
+          </Button>
+        )}
+        
+        <button
+          onClick={() => onSelect(room)}
+          className="flex items-center justify-center h-8 w-8 hover:bg-muted rounded"
+        >
+          <CaretRight size={16} className="text-muted-foreground" />
+        </button>
       </div>
-    </button>
+    </div>
   )
 }
 
