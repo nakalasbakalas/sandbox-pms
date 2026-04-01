@@ -171,3 +171,5 @@ export function getTaxSummary(taxBreakdown: TaxBreakdown[]): string {
     .map(tax => `${tax.name} (${formatTaxRate(tax.rate)}): ฿${tax.taxAmount.toLocaleString()}`)
     .join(', ')
 }
+
+export { calculateTaxes as calculateTax }
