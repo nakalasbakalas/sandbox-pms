@@ -8,13 +8,23 @@ export function useDensity() {
   const [density, setDensity] = useKV<Density>('app-density', 'compact')
 
   useEffect(() => {
+    const root = document.documentElement
+    
+    root.classList.add('density-transitioning')
+    
     if (density === 'compact') {
-      document.documentElement.classList.add('density-compact')
-      document.documentElement.classList.remove('density-comfortable')
+      root.classList.add('density-compact')
+      root.classList.remove('density-comfortable')
     } else {
-      document.documentElement.classList.add('density-comfortable')
-      document.documentElement.classList.remove('density-compact')
+      root.classList.add('density-comfortable')
+      root.classList.remove('density-compact')
     }
+    
+    const timeout = setTimeout(() => {
+      root.classList.remove('density-transitioning')
+    }, 250)
+    
+    return () => clearTimeout(timeout)
   }, [density])
 
   const toggleDensity = () => {
