@@ -11,6 +11,9 @@ import {
   Gear,
   ChatCircle,
   ChatCenteredDots,
+  Envelope,
+  Moon,
+  ChartLine,
 } from '@phosphor-icons/react'
 import {
   Sidebar,
@@ -39,9 +42,15 @@ const primaryNavItems = [
   { id: 'settings', label: 'Settings', icon: Gear },
 ]
 
-const secondaryNavItems = [
+const communicationItems = [
   { id: 'messaging', label: 'Guest Messaging', icon: ChatCircle },
   { id: 'internal-comms', label: 'Staff Comms', icon: ChatCenteredDots },
+  { id: 'guest-communications', label: 'Guest Comms', icon: Envelope },
+]
+
+const operationsItems = [
+  { id: 'night-audit', label: 'Night Audit', icon: Moon },
+  { id: 'revenue-analytics', label: 'Revenue Analytics', icon: ChartLine },
 ]
 
 export function AppSidebar() {
@@ -88,7 +97,30 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {secondaryNavItems.map((item) => (
+              {communicationItems.map((item) => (
+                <SidebarMenuItem key={item.id}>
+                  <SidebarMenuButton
+                    isActive={currentRoute === item.id}
+                    onClick={() => navigate(item.id as any)}
+                    tooltip={item.label}
+                    className="h-8 text-xs"
+                  >
+                    <item.icon className="w-3.5 h-3.5" weight={currentRoute === item.id ? 'fill' : 'regular'} />
+                    <span>{item.label}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-[10px] text-sidebar-foreground/50">
+            Operations
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {operationsItems.map((item) => (
                 <SidebarMenuItem key={item.id}>
                   <SidebarMenuButton
                     isActive={currentRoute === item.id}

@@ -12,6 +12,9 @@ export type NavigationRoute =
   | 'messaging'
   | 'internal-comms'
   | 'daily-summary'
+  | 'guest-communications'
+  | 'night-audit'
+  | 'revenue-analytics'
 
 export interface NavigationState {
   currentRoute: NavigationRoute

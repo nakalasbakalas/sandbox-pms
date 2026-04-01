@@ -22,6 +22,8 @@ import {
   ChartLineUp,
   ListChecks,
   UserCirclePlus,
+  Moon,
+  Envelope,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
@@ -345,6 +347,39 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       icon: ChatCenteredDots,
       action: () => {
         navigate?.('internal-comms')
+      },
+    },
+    {
+      id: 'guest-communications',
+      label: 'Guest Communications',
+      description: 'Automated guest messaging and templates',
+      category: 'operations',
+      keywords: ['guest', 'communication', 'email', 'SMS', 'LINE', 'templates'],
+      icon: Envelope,
+      action: () => {
+        navigate?.('guest-communications')
+      },
+    },
+    {
+      id: 'night-audit',
+      label: 'Night Audit',
+      description: 'Run end-of-day processing and rollover',
+      category: 'operations',
+      keywords: ['night audit', 'end of day', 'rollover', 'closing'],
+      icon: Moon,
+      action: () => {
+        navigate?.('night-audit')
+      },
+    },
+    {
+      id: 'revenue-analytics',
+      label: 'Advanced Revenue Analytics',
+      description: 'Detailed revenue insights and forecasting',
+      category: 'reports',
+      keywords: ['revenue', 'analytics', 'forecast', 'ADR', 'RevPAR'],
+      icon: ChartLineUp,
+      action: () => {
+        navigate?.('revenue-analytics')
       },
     },
     {
