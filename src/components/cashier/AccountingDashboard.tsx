@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -287,11 +287,11 @@ export function AccountingDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(new Date())
   const [manualEntryOpen, setManualEntryOpen] = useState(false)
   
-  useState(() => {
+  useEffect(() => {
     if (entries.length === 0) {
       setEntries(generateSampleAccountingEntries())
     }
-  })
+  }, [])
 
   const handleManualEntrySubmit = (entry: Omit<AccountingEntry, 'id' | 'createdAt' | 'createdBy'>) => {
     const newEntry: AccountingEntry = {
