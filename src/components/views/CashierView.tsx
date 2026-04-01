@@ -16,8 +16,17 @@ import {
 } from '@phosphor-icons/react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
-import { calculateTax } from '@/lib/tax-calculator'
 import { AccountingDashboard } from '@/components/cashier/AccountingDashboard'
+
+function calculateTax(amount: number, taxRate: number = 7) {
+  const subtotal = amount / (1 + taxRate / 100)
+  const taxAmount = amount - subtotal
+  return {
+    subtotal: Math.round(subtotal * 100) / 100,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    total: Math.round(amount * 100) / 100
+  }
+}
 
 interface FolioCharge {
   id: string
