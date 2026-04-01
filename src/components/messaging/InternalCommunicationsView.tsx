@@ -51,9 +51,12 @@ import {
   Paperclip,
   X,
   BookOpen,
+  Lightning,
 } from '@phosphor-icons/react'
 import type { InternalMessage, InternalChannel, StaffMember, StaffDepartment, InternalMessagePriority } from '@/types/messaging'
+import type { StaffMessageTemplate } from '@/types/staff-templates'
 import { MessageTemplatesDialog } from './MessageTemplatesDialog'
+import { DEFAULT_STAFF_TEMPLATES, getTemplatesByDepartment, getMostUsedTemplates } from '@/lib/staff-message-templates'
 import { toast } from 'sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 
@@ -463,54 +466,61 @@ export function InternalCommunicationsView() {
 
           {(selectedChannel || selectedStaff) && (
             <div className="border-t bg-card p-4">
-              <div className="max-w-4xl flex gap-2">
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="shrink-0"
-                  onClick={() => setShowTemplates(true)}
-                  title="Use template"
-                >
-                  <BookOpen size={20} />
-                </Button>
-                <Button variant="ghost" size="icon" className="shrink-0">
-                  <Paperclip size={20} />
-                </Button>
-                <Input
-                  placeholder={`Message ${selectedChannel ? `#${selectedChannel.name}` : selectedStaff?.name}...`}
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSendMessage()
-                    }
-                  }}
-                  className="flex-1"
+              <div className="max-w-4xl">
+                <QuickTemplateBar
+                  onSelectTemplate={(template) => setMessageInput(template)}
+                  onOpenFullTemplates={() => setShowTemplates(true)}
+                  currentDepartment={currentUserDept}
                 />
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" className="shrink-0">
-                      <DotsThreeVertical size={20} weight="bold" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleSendMessage('NORMAL')}>
-                      Send Normal
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleSendMessage('HIGH')}>
-                      <Warning size={16} weight="bold" className="mr-2 text-orange-500" />
-                      Send High Priority
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleSendMessage('URGENT')}>
-                      <Warning size={16} weight="bold" className="mr-2 text-red-500" />
-                      Send Urgent
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Button onClick={() => handleSendMessage()} className="shrink-0">
-                  <PaperPlaneTilt size={20} weight="bold" />
-                </Button>
+                <div className="flex gap-2 mt-2">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="shrink-0"
+                    onClick={() => setShowTemplates(true)}
+                    title="Use template"
+                  >
+                    <BookOpen size={20} />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="shrink-0">
+                    <Paperclip size={20} />
+                  </Button>
+                  <Input
+                    placeholder={`Message ${selectedChannel ? `#${selectedChannel.name}` : selectedStaff?.name}...`}
+                    value={messageInput}
+                    onChange={(e) => setMessageInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage()
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" className="shrink-0">
+                        <DotsThreeVertical size={20} weight="bold" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleSendMessage('NORMAL')}>
+                        Send Normal
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleSendMessage('HIGH')}>
+                        <Warning size={16} weight="bold" className="mr-2 text-orange-500" />
+                        Send High Priority
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleSendMessage('URGENT')}>
+                        <Warning size={16} weight="bold" className="mr-2 text-red-500" />
+                        Send Urgent
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Button onClick={() => handleSendMessage()} className="shrink-0">
+                    <PaperPlaneTilt size={20} weight="bold" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}
@@ -921,3 +931,63 @@ function NewMessageDialog({ open, onOpenChange, staff, channels, onSendMessage }
     </Dialog>
   )
 }
+
+interface QuickTemplateBarProps {
+  onSelectTemplate: (body: string) => void
+  onOpenFullTemplates: () => void
+  currentDepartment: StaffDepartment
+}
+
+function QuickTemplateBar({ onSelectTemplate, onOpenFullTemplates, currentDepartment }: QuickTemplateBarProps) {
+  const [templates] = useKV<StaffMessageTemplate[]>('staff-message-templates', 
+    DEFAULT_STAFF_TEMPLATES.map((tmpl, idx) => ({
+      ...tmpl,
+      id: `tmpl-default-${idx}`,
+      usageCount: 0,
+      isFavorite: false,
+      isCustom: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }))
+  )
+
+  const quickTemplates = useMemo(() => {
+    const deptTemplates = getTemplatesByDepartment(templates || [], currentDepartment)
+    const mostUsed = getMostUsedTemplates(deptTemplates, 5)
+    return mostUsed.length > 0 ? mostUsed : deptTemplates.slice(0, 5)
+  }, [templates, currentDepartment])
+
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Lightning size={14} weight="fill" />
+        <span className="font-medium">Quick:</span>
+      </div>
+      <div className="flex-1 flex items-center gap-2 overflow-x-auto">
+        {quickTemplates.map((template) => (
+          <Button
+            key={template.id}
+            variant="outline"
+            size="sm"
+            onClick={() => onSelectTemplate(template.body)}
+            className="shrink-0 text-xs h-7"
+          >
+            {template.name}
+          </Button>
+        ))}
+        {quickTemplates.length === 0 && (
+          <span className="text-xs text-muted-foreground">No quick templates available</span>
+        )}
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onOpenFullTemplates}
+        className="shrink-0 text-xs h-7"
+      >
+        View All
+      </Button>
+    </div>
+  )
+}
+

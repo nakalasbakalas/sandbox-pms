@@ -45,6 +45,7 @@ import {
   PencilSimple,
   PlusCircle,
   Trash,
+  ChartBar,
 } from '@phosphor-icons/react'
 import type { StaffMessageTemplate, StaffTemplateCategory, TemplateVariable } from '@/types/staff-templates'
 import type { InternalMessage, InternalMessagePriority, StaffDepartment, StaffMember, InternalChannel } from '@/types/messaging'
@@ -58,6 +59,7 @@ import {
   TEMPLATE_CATEGORIES,
 } from '@/lib/staff-message-templates'
 import { TemplateBuilder } from './TemplateBuilder'
+import { TemplateAnalyticsView } from './TemplateAnalyticsView'
 import { toast } from 'sonner'
 
 interface MessageTemplatesDialogProps {
@@ -96,18 +98,26 @@ export function MessageTemplatesDialog({
   const [selectedTemplate, setSelectedTemplate] = useState<StaffMessageTemplate | null>(null)
   const [templateValues, setTemplateValues] = useState<Record<string, string>>({})
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState<StaffTemplateCategory | 'ALL'>('ALL')
+  const [selectedCategory, setSelectedCategory] = useState<StaffTemplateCategory | 'ALL' | 'FAVORITE' | 'POPULAR'>('ALL')
+  const [selectedDepartment, setSelectedDepartment] = useState<StaffDepartment | 'ALL'>('ALL')
   const [recipientType, setRecipientType] = useState<'STAFF' | 'CHANNEL' | 'DEPARTMENT'>('STAFF')
   const [recipientId, setRecipientId] = useState('')
   const [channelId, setChannelId] = useState('')
   const [department, setDepartment] = useState<StaffDepartment>('ALL')
   const [showBuilder, setShowBuilder] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
 
   const filteredTemplates = useMemo(() => {
     let filtered = templates || []
     
-    if (selectedCategory !== 'ALL') {
+    if (selectedCategory !== 'ALL' && selectedCategory !== 'FAVORITE' && selectedCategory !== 'POPULAR') {
       filtered = getTemplatesByCategory(filtered, selectedCategory)
+    }
+    
+    if (selectedDepartment !== 'ALL') {
+      filtered = filtered.filter(t => 
+        t.targetDepartment === selectedDepartment || t.targetDepartment === 'ALL'
+      )
     }
     
     if (searchQuery) {
@@ -120,7 +130,7 @@ export function MessageTemplatesDialog({
     }
     
     return filtered
-  }, [templates, selectedCategory, searchQuery])
+  }, [templates, selectedCategory, selectedDepartment, searchQuery])
 
   const favoriteTemplates = useMemo(() => getFavoriteTemplates(templates || []), [templates])
   const mostUsedTemplates = useMemo(() => getMostUsedTemplates(templates || [], 5), [templates])
@@ -270,6 +280,10 @@ export function MessageTemplatesDialog({
                 <PlusCircle size={16} className="mr-2" />
                 Create Template
               </Button>
+              <Button onClick={() => setShowAnalytics(true)} size="sm" variant="outline">
+                <ChartBar size={16} className="mr-2" />
+                Analytics
+              </Button>
             </div>
           </DialogHeader>
 
@@ -302,6 +316,23 @@ export function MessageTemplatesDialog({
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
+
+              <div>
+                <Label className="text-xs mb-1 block">Filter by Department</Label>
+                <Select value={selectedDepartment} onValueChange={(v: any) => setSelectedDepartment(v)}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All Departments</SelectItem>
+                    <SelectItem value="FRONT_DESK">Front Desk</SelectItem>
+                    <SelectItem value="HOUSEKEEPING">Housekeeping</SelectItem>
+                    <SelectItem value="MAINTENANCE">Maintenance</SelectItem>
+                    <SelectItem value="MANAGEMENT">Management</SelectItem>
+                    <SelectItem value="CASHIER">Cashier</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <ScrollArea className="flex-1 px-4">
@@ -522,6 +553,11 @@ export function MessageTemplatesDialog({
       open={showBuilder}
       onOpenChange={setShowBuilder}
       onSave={handleSaveCustomTemplate}
+    />
+
+    <TemplateAnalyticsView
+      open={showAnalytics}
+      onOpenChange={setShowAnalytics}
     />
     </>
   )
