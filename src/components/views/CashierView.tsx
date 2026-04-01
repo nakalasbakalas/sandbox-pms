@@ -196,11 +196,43 @@ function generateMockFolios(): Folio[] {
   return folios.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
 }
 
+function deserializeFolio(folio: Folio): Folio {
+  return {
+    ...folio,
+    checkIn: new Date(folio.checkIn),
+    checkOut: folio.checkOut ? new Date(folio.checkOut) : undefined,
+    createdAt: new Date(folio.createdAt),
+    updatedAt: new Date(folio.updatedAt),
+    closedAt: folio.closedAt ? new Date(folio.closedAt) : undefined,
+    charges: folio.charges.map(charge => ({
+      ...charge,
+      date: new Date(charge.date)
+    })),
+    payments: folio.payments.map(payment => ({
+      ...payment,
+      date: new Date(payment.date)
+    }))
+  }
+}
+
 export function CashierView() {
-  const [folios, setFolios] = useKV<Folio[]>('cashier-folios', [])
+  const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
   const [selectedTab, setSelectedTab] = useState<'open' | 'closed' | 'all' | 'accounting' | 'reconciliation'>('open')
+  
+  const folios = useMemo(() => 
+    (foliosRaw || []).map(deserializeFolio),
+    [foliosRaw]
+  )
+  
+  const setFolios = (updater: Folio[] | ((current: Folio[]) => Folio[])) => {
+    setFoliosRaw((current) => {
+      const deserialized = (current || []).map(deserializeFolio)
+      const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      return updated
+    })
+  }
   
   useState(() => {
     if (folios.length === 0) {

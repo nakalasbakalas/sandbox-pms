@@ -129,10 +129,33 @@ function generateMockReservations(): Reservation[] {
   return reservations.sort((a, b) => b.checkIn.getTime() - a.checkIn.getTime())
 }
 
+function deserializeReservation(res: Reservation): Reservation {
+  return {
+    ...res,
+    checkIn: new Date(res.checkIn),
+    checkOut: new Date(res.checkOut),
+    createdAt: new Date(res.createdAt),
+    updatedAt: new Date(res.updatedAt),
+  }
+}
+
 export function ReservationsView() {
-  const [reservations, setReservations] = useKV<Reservation[]>('reservations-data', [])
+  const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState<'all' | 'upcoming' | 'in-house' | 'past'>('upcoming')
+  
+  const reservations = useMemo(() => 
+    (reservationsRaw || []).map(deserializeReservation),
+    [reservationsRaw]
+  )
+  
+  const setReservations = (updater: Reservation[] | ((current: Reservation[]) => Reservation[])) => {
+    setReservationsRaw((current) => {
+      const deserialized = (current || []).map(deserializeReservation)
+      const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      return updated
+    })
+  }
   
   useState(() => {
     if (reservations.length === 0) {

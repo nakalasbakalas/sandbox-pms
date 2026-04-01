@@ -52,8 +52,26 @@ const AUDIT_STEPS = [
   { id: 'close-shift', name: 'Close Shift', description: 'Finalize shift and prepare for next day' },
 ]
 
+function deserializeAuditLog(log: NightAuditLog): NightAuditLog {
+  return {
+    ...log,
+    auditDate: new Date(log.auditDate),
+    startedAt: new Date(log.startedAt),
+    completedAt: log.completedAt ? new Date(log.completedAt) : undefined,
+    statistics: {
+      ...log.statistics,
+      date: new Date(log.statistics.date),
+    },
+    steps: log.steps.map(step => ({
+      ...step,
+      startedAt: step.startedAt ? new Date(step.startedAt) : undefined,
+      completedAt: step.completedAt ? new Date(step.completedAt) : undefined,
+    })),
+  }
+}
+
 export function NightAuditView() {
-  const [auditLogs, setAuditLogs] = useKV<NightAuditLog[]>('night-audit-logs', [])
+  const [auditLogsRaw, setAuditLogsRaw] = useKV<NightAuditLog[]>('night-audit-logs', [])
   const [config, setConfig] = useKV<NightAuditConfig>('night-audit-config', {
     autoRunTime: '03:00',
     autoRunEnabled: false,
@@ -82,6 +100,19 @@ export function NightAuditView() {
   const [isRunning, setIsRunning] = useState(false)
   const [currentAudit, setCurrentAudit] = useState<NightAuditLog | null>(null)
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
+
+  const auditLogs = useMemo(() => 
+    (auditLogsRaw || []).map(deserializeAuditLog),
+    [auditLogsRaw]
+  )
+  
+  const setAuditLogs = (updater: NightAuditLog[] | ((current: NightAuditLog[]) => NightAuditLog[])) => {
+    setAuditLogsRaw((current) => {
+      const deserialized = (current || []).map(deserializeAuditLog)
+      const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      return updated
+    })
+  }
 
   const latestAudit = auditLogs[0]
 

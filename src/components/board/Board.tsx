@@ -56,8 +56,29 @@ export function Board() {
   const [collapsedRoomTypes, setCollapsedRoomTypes] = useState<Set<string>>(new Set())
   const [startDate] = useState(new Date())
   const [showUnassigned, setShowUnassigned] = useState(true)
-  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [unassignedReservationsRaw, setUnassignedReservationsRaw] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
+  
+  const unassignedReservations = useMemo(() => 
+    (unassignedReservationsRaw || []).map(res => ({
+      ...res,
+      checkIn: res.checkIn ? new Date(res.checkIn) : new Date(),
+      checkOut: res.checkOut ? new Date(res.checkOut) : new Date(),
+    })),
+    [unassignedReservationsRaw]
+  )
+  
+  const setUnassignedReservations = useCallback((updater: UnassignedReservation[] | ((current: UnassignedReservation[]) => UnassignedReservation[])) => {
+    setUnassignedReservationsRaw((current) => {
+      const deserialized = (current || []).map(res => ({
+        ...res,
+        checkIn: res.checkIn ? new Date(res.checkIn) : new Date(),
+        checkOut: res.checkOut ? new Date(res.checkOut) : new Date(),
+      }))
+      const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      return updated
+    })
+  }, [setUnassignedReservationsRaw])
   const [resizingReservation, setResizingReservation] = useState<{
     roomId: string
     direction: 'start' | 'end'

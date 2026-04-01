@@ -11,9 +11,28 @@ export interface RoomStatusUpdate {
   timestamp: Date
 }
 
+function deserializeRoom(room: BoardRoomCard): BoardRoomCard {
+  return {
+    ...room,
+    checkIn: room.checkIn ? new Date(room.checkIn) : undefined,
+    checkOut: room.checkOut ? new Date(room.checkOut) : undefined,
+    lastCleaned: room.lastCleaned ? new Date(room.lastCleaned) : undefined,
+  }
+}
+
 export function useRoomSync() {
-  const [rooms, setRooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
+  const [roomsRaw, setRoomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [lastUpdate, setLastUpdate] = useKV<RoomStatusUpdate | null>('last-room-update', null)
+
+  const rooms = (roomsRaw || []).map(deserializeRoom)
+
+  const setRooms = useCallback((updater: BoardRoomCard[] | ((current: BoardRoomCard[]) => BoardRoomCard[])) => {
+    setRoomsRaw((current) => {
+      const deserialized = (current || []).map(deserializeRoom)
+      const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      return updated
+    })
+  }, [setRoomsRaw])
 
   const updateRoomStatus = useCallback((update: Omit<RoomStatusUpdate, 'timestamp'>) => {
     const timestampedUpdate: RoomStatusUpdate = {
