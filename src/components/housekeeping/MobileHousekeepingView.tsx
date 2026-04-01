@@ -32,7 +32,8 @@ import {
   Users,
   ArrowCounterClockwise,
   UserList,
-  Printer
+  Printer,
+  DeviceTablet
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
@@ -75,6 +76,7 @@ export function MobileHousekeepingView() {
   const [showStaffAssignment, setShowStaffAssignment] = useState(false)
   const [staffAssignments] = useKV<Record<string, string>>('room-staff-assignments', {})
   const [staff] = useKV<Array<{ id: string; name: string; color: string }>>('housekeeping-staff', [])
+  const [, setPreferredMode] = useKV<'tablet' | 'mobile' | null>('housekeeping-view-mode', 'mobile')
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -296,11 +298,18 @@ export function MobileHousekeepingView() {
             <Button
               size="sm"
               variant="secondary"
+              onClick={() => setPreferredMode(null)}
+              className="gap-2"
+            >
+              <DeviceTablet size={18} weight="bold" />
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={handlePrint}
               className="gap-2"
             >
               <Printer size={18} weight="bold" />
-              Print
             </Button>
             <Button
               size="sm"
@@ -309,7 +318,6 @@ export function MobileHousekeepingView() {
               className="gap-2"
             >
               <UserList size={18} weight="bold" />
-              Staff
             </Button>
             <NotificationBell />
           </div>

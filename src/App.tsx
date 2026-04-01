@@ -13,6 +13,8 @@ import { GuestsView } from './components/views/GuestsView'
 import { CashierView } from './components/views/CashierView'
 import { NightAuditView } from './components/views/NightAuditView'
 import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
+import { TabletHousekeepingApp } from './components/housekeeping/TabletHousekeepingApp'
+import { HousekeepingModeSwitcher } from './components/housekeeping/HousekeepingModeSwitcher'
 import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
 import { InternalCommunicationsView } from './components/messaging/InternalCommunicationsView'
 import { GuestCommunicationsView } from './components/messaging/GuestCommunicationsView'
@@ -48,7 +50,9 @@ function AppRouter() {
     case 'guests':
       return <GuestsView />
     case 'housekeeping':
-      return <MobileHousekeepingView />
+      return <HousekeepingModeSwitcher />
+    case 'tablet-housekeeping':
+      return <TabletHousekeepingApp />
     case 'cashier':
       return <CashierView />
     case 'rates':
