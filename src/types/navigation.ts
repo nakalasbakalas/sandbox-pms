@@ -15,6 +15,7 @@ export type NavigationRoute =
   | 'guest-communications'
   | 'night-audit'
   | 'revenue-analytics'
+  | 'system-status'
 
 export interface NavigationState {
   currentRoute: NavigationRoute
