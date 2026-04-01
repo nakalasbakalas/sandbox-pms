@@ -328,6 +328,26 @@ Administrators can access the User Management view to:
 - Deposit preparation
 - Transaction audit log
 
+**Payment Methods (Thailand-Optimized):**
+- **Cash:** Physical currency collection
+- **Card:** Credit/debit card processing (manual entry or terminal)
+- **Bank Transfer:** Direct bank-to-bank transfers
+- **PromptPay QR:** ⭐ NEW Thailand QR payment system
+  - Generate QR code with embedded amount
+  - 5-minute expiration timer
+  - Transaction reference tracking
+  - One-tap payment confirmation
+  - Instant validation
+- **Other:** Flexible catch-all for alternative methods
+
+**Streamlined Payment Workflow:**
+- One-click "Pay Full Amount" button auto-fills balance
+- Compact payment method selector (3-column grid)
+- PromptPay QR displays inline with auto-countdown
+- Quick payment confirmation with minimal clicks
+- Visual payment status indicators (paid/pending/partial)
+- Reference number capture for auditing
+
 ---
 
 ### **Module 6: REPORTS & ANALYTICS**
