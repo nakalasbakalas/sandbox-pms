@@ -47,6 +47,7 @@ import { toast } from 'sonner'
 import { format, addDays, differenceInDays } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { BulkEditDialog, type BulkEditUpdates } from './BulkEditDialog'
+import { BulkRoomAssignmentDialog } from './BulkRoomAssignmentDialog'
 
 interface ReservationData extends Omit<Reservation, 'guest' | 'roomType'> {
   guest: Guest
@@ -65,6 +66,7 @@ export function ReservationsView() {
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | 'ALL'>('ALL')
   const [selectedReservationIds, setSelectedReservationIds] = useState<Set<string>>(new Set())
   const [showBulkEditDialog, setShowBulkEditDialog] = useState(false)
+  const [showBulkRoomAssignmentDialog, setShowBulkRoomAssignmentDialog] = useState(false)
   const [bulkSelectMode, setBulkSelectMode] = useState(false)
 
   const filteredReservations = useMemo(() => {
@@ -281,6 +283,32 @@ export function ReservationsView() {
     [reservations, selectedReservationIds]
   )
 
+  const handleBulkRoomAssignment = (assignments: Map<string, string>) => {
+    setReservations(current => 
+      (current || []).map(reservation => {
+        const assignedRoomId = assignments.get(reservation.id)
+        if (!assignedRoomId) return reservation
+
+        const room = rooms?.find(r => r.id === assignedRoomId)
+        return {
+          ...reservation,
+          assignedRoomId,
+          roomNumber: room?.number,
+          updatedAt: new Date()
+        }
+      })
+    )
+
+    const count = assignments.size
+    toast.success(`Assigned ${count} room${count !== 1 ? 's' : ''} successfully`)
+    clearSelection()
+  }
+
+  const unassignedSelectedCount = useMemo(() => 
+    selectedReservationsData.filter(r => !r.assignedRoomId && (r.status === 'CONFIRMED' || r.status === 'CHECKED_IN')).length,
+    [selectedReservationsData]
+  )
+
   return (
     <div className="h-full flex flex-col bg-background p-6 gap-4">
       <div className="flex items-center justify-between">
@@ -304,6 +332,15 @@ export function ReservationsView() {
                 <X className="w-4 h-4 mr-2" weight="bold" />
                 Clear
               </Button>
+              {unassignedSelectedCount > 0 && (
+                <Button 
+                  variant="outline"
+                  onClick={() => setShowBulkRoomAssignmentDialog(true)}
+                >
+                  <Key className="w-4 h-4 mr-2" weight="bold" />
+                  Assign Rooms ({unassignedSelectedCount})
+                </Button>
+              )}
               <Button onClick={() => setShowBulkEditDialog(true)}>
                 <PencilSimple className="w-4 h-4 mr-2" weight="bold" />
                 Bulk Edit
@@ -562,6 +599,13 @@ export function ReservationsView() {
         onClose={() => setShowBulkEditDialog(false)}
         reservations={selectedReservationsData}
         onSave={handleBulkEdit}
+      />
+
+      <BulkRoomAssignmentDialog
+        open={showBulkRoomAssignmentDialog}
+        onOpenChange={setShowBulkRoomAssignmentDialog}
+        selectedReservations={selectedReservationsData}
+        onAssign={handleBulkRoomAssignment}
       />
     </div>
   )
