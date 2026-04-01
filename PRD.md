@@ -83,45 +83,124 @@ Click a room → see everything → take action → done. No drilling through ta
 
 ## User Roles & Permissions
 
+The system implements comprehensive role-based access control (RBAC) with five distinct user roles. Each role has specific permissions that control what features they can access and what actions they can perform.
+
+### Authentication System
+
+**Login Credentials:**
+- Admin: `Neeq` / `Neeq!1234`
+- Manager: `manager` / `manager123`
+- Front Desk: `frontdesk` / `frontdesk123`
+- Housekeeping: `housekeeping` / `housekeeping123`
+- Cashier: `cashier` / `cashier123`
+
+**Security Features:**
+- Persistent login sessions (stored in KV)
+- User profile display in header with role badge
+- Quick logout from user menu
+- Permission-based UI rendering (hide unauthorized features)
+- Route-level access control
+
+### Role Definitions
+
 **Admin** (Owner/Manager)
-- Full system access
-- Rate management, inventory control
-- Financial reports, occupancy analytics
-- User management, audit logs
-- System configuration
+- ✅ Full system access to all modules
+- ✅ User management (create, edit, delete users)
+- ✅ Rate management and inventory control
+- ✅ Financial reports and occupancy analytics
+- ✅ Channel management and rate parity monitoring
+- ✅ System configuration and settings
+- ✅ All check-in, check-out, and reservation operations
+- ✅ Refund processing and financial adjustments
+- ✅ Night audit operations
+- ✅ View and edit all data
 
 **Manager** (Duty Manager/Supervisor)
-- Reservation management (create, modify, cancel, adjust rates)
-- Check-in/check-out
-- Room moves, special requests
-- Daily reporting (occupancy, revenue)
-- Limited financial adjustments
+- ✅ Reservation management (create, modify, cancel, adjust rates)
+- ✅ Check-in/check-out operations
+- ✅ Room moves and special requests
+- ✅ Daily reporting (occupancy, revenue)
+- ✅ Rate editing and inventory management
+- ✅ Payment processing
+- ✅ Run night audit
+- ✅ Guest and staff messaging
+- ✅ Access to analytics and reports
+- ❌ Cannot manage users
+- ❌ Cannot process refunds
+- ❌ Cannot edit system settings
 
 **Front Desk** (Reception Staff)
-- Check-in/check-out
-- Reservation lookup/confirmation
-- Room assignments
-- Guest information management
-- Payment processing (view rates, cannot adjust)
+- ✅ Check-in/check-out operations
+- ✅ Reservation creation and editing
+- ✅ Room assignments and status updates
+- ✅ Guest information management
+- ✅ Payment processing
+- ✅ Guest and staff messaging
+- ✅ View board, reservations, and guests
+- ❌ Cannot adjust rates
+- ❌ Cannot cancel reservations
+- ❌ Cannot access financial reports
+- ❌ Cannot run night audit
+- ❌ Cannot access settings
 
 **Housekeeping** (Room Attendants)
-- View room board (simplified view)
-- Update room status (clean, inspected, maintenance needed)
-- View priority cleaning list (checkouts first, VIP arrivals)
-- Mark room issues (maintenance notes)
+- ✅ View room board
+- ✅ Update room status (clean, dirty, inspected, maintenance)
+- ✅ View housekeeping priorities
+- ✅ Send staff messages
+- ✅ Access housekeeping view
+- ❌ Cannot view guest details
+- ❌ Cannot access reservations
+- ❌ Cannot process payments
+- ❌ Cannot access reports
+- ❌ Minimal system access (housekeeping-focused)
 
 **Cashier** (Finance/Reception)
-- Payment processing
-- Invoice generation
-- Refund processing
-- Daily cash reconciliation
-- Transaction history
+- ✅ Payment processing
+- ✅ Post charges to guest accounts
+- ✅ View financial reports
+- ✅ Daily cash reconciliation
+- ✅ View board, reservations, and guests
+- ✅ Send staff messages
+- ❌ Cannot check-in or check-out guests
+- ❌ Cannot create or edit reservations
+- ❌ Cannot process refunds
+- ❌ Cannot edit rates
+- ❌ Cannot run night audit
 
-**Cafe Staff** (Optional Module)
-- Guest charge-to-room (requires room number + guest confirmation)
-- Transaction logging
-- Basic guest lookup by room
-- No access to reservations or sensitive guest data
+### Permission Matrix
+
+The system uses granular permissions to control access:
+
+**View Permissions:**
+- `view:board`, `view:reservations`, `view:guests`, `view:reports`, `view:settings`
+- `view:cashier`, `view:housekeeping`, `view:rates`, `view:channels`
+- `view:analytics`, `view:night-audit`, `view:messaging`
+
+**Action Permissions:**
+- `create:reservation`, `edit:reservation`, `cancel:reservation`
+- `check-in:guest`, `check-out:guest`
+- `edit:rates`, `edit:room-status`, `edit:inventory`
+- `post:charges`, `process:payment`, `refund:payment`
+- `run:night-audit`, `edit:settings`
+- `manage:users`, `manage:channels`
+- `send:guest-messages`, `send:staff-messages`
+
+**UI Behavior:**
+- Navigation items are hidden if user lacks permission
+- Action buttons are disabled or hidden based on permissions
+- Views adapt based on user role capabilities
+- Permission checks occur at component and route level
+
+### User Management (Admin Only)
+
+Administrators can access the User Management view to:
+- Create new user accounts with custom roles
+- View all system users
+- Delete user accounts (except their own)
+- See permission breakdown by role
+- View default system accounts
+- Assign roles: Admin, Manager, Front Desk, Housekeeping, Cashier
 
 ---
 

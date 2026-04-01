@@ -20,6 +20,7 @@ import { DailySummaryReportView } from './components/settings/DailySummaryReport
 import { AdvancedRevenueAnalyticsView } from './components/reports/AdvancedRevenueAnalyticsView'
 import { PredictiveAnalyticsDashboard } from './components/reports/PredictiveAnalyticsDashboard'
 import { SystemStatusView } from './components/views/SystemStatusView'
+import { UserManagementView } from './components/settings/UserManagementView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { useOnboarding } from './hooks/use-onboarding'
@@ -31,6 +32,8 @@ import { useKeyboardShortcuts, globalShortcuts } from './hooks/use-keyboard-shor
 import { useCommandPalette } from './hooks/use-command-palette'
 import { createPMSCommands } from './lib/pms-commands'
 import { useDensity } from './hooks/use-density'
+import { AuthProvider, useAuth } from './hooks/use-auth'
+import { LoginScreen } from './components/auth/LoginScreen'
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
@@ -72,6 +75,8 @@ function AppRouter() {
       return <PredictiveAnalyticsDashboard />
     case 'system-status':
       return <SystemStatusView />
+    case 'user-management':
+      return <UserManagementView />
     default:
       return <Board />
   }
@@ -82,6 +87,7 @@ function AppContent() {
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
     const { navigate } = useNavigation()
     const { toggleDensity } = useDensity()
+    const { isAuthenticated } = useAuth()
     const commands = useMemo(() => createPMSCommands(navigate), [navigate])
     const commandPalette = useCommandPalette(commands)
     
@@ -91,6 +97,10 @@ function AppContent() {
     )
     
     useKeyboardShortcuts(shortcuts, completed)
+    
+    if (!isAuthenticated) {
+        return <LoginScreen />
+    }
     
     return (
         <>
@@ -116,9 +126,11 @@ function AppContent() {
 
 function App() {
     return (
-        <NavigationProvider>
-            <AppContent />
-        </NavigationProvider>
+        <AuthProvider>
+            <NavigationProvider>
+                <AppContent />
+            </NavigationProvider>
+        </AuthProvider>
     )
 }
 

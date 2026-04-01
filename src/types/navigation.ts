@@ -17,6 +17,7 @@ export type NavigationRoute =
   | 'revenue-analytics'
   | 'predictive-analytics'
   | 'system-status'
+  | 'user-management'
 
 export interface NavigationState {
   currentRoute: NavigationRoute
