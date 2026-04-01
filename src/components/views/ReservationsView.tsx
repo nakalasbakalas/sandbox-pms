@@ -6,9 +6,11 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { MagnifyingGlass, Plus, FunnelSimple, Calendar, User, CreditCard, MapPin, Phone } from '@phosphor-icons/react'
+import { MagnifyingGlass, Plus, FunnelSimple, Calendar, User, CreditCard, MapPin, Phone, Printer } from '@phosphor-icons/react'
 import { format, addDays, differenceInDays, isBefore, isToday, isTomorrow } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { printReservationsList } from '@/lib/print-utils'
+import { toast } from 'sonner'
 
 export interface Reservation {
   id: string
@@ -238,6 +240,32 @@ export function ReservationsView() {
       case 'WALK_IN': return 'bg-slate-100 text-slate-800'
     }
   }
+
+  const handlePrint = () => {
+    const tabTitles = {
+      all: 'All Reservations',
+      upcoming: 'Upcoming Reservations',
+      'in-house': 'In-House Guests',
+      past: 'Past Reservations'
+    }
+    
+    const groupByOptions = {
+      all: 'status' as const,
+      upcoming: 'date' as const,
+      'in-house': 'none' as const,
+      past: 'status' as const
+    }
+    
+    printReservationsList(
+      filteredReservations,
+      `${tabTitles[selectedTab]} - ${format(new Date(), 'MMMM d, yyyy')}`,
+      {
+        groupBy: groupByOptions[selectedTab],
+        showFinancials: true
+      }
+    )
+    toast.success('Opening print preview...')
+  }
   
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -269,6 +297,10 @@ export function ReservationsView() {
             <Button variant="outline" className="gap-2">
               <FunnelSimple size={18} />
               Filters
+            </Button>
+            <Button variant="outline" className="gap-2" onClick={handlePrint}>
+              <Printer size={18} weight="bold" />
+              Print
             </Button>
           </div>
         </div>

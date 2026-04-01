@@ -31,7 +31,8 @@ import {
   CaretUp,
   Users,
   ArrowCounterClockwise,
-  UserList
+  UserList,
+  Printer
 } from '@phosphor-icons/react'
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
@@ -43,6 +44,7 @@ import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
 import { addDays, isToday, isTomorrow, format, startOfDay } from 'date-fns'
 import { motion, AnimatePresence } from 'framer-motion'
 import { StaffAssignmentView } from './StaffAssignmentView'
+import { printHousekeepingReport } from '@/lib/print-utils'
 
 interface StatusHistoryEntry {
   timestamp: Date
@@ -71,6 +73,8 @@ export function MobileHousekeepingView() {
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
   const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [showStaffAssignment, setShowStaffAssignment] = useState(false)
+  const [staffAssignments] = useKV<Record<string, string>>('room-staff-assignments', {})
+  const [staff] = useKV<Array<{ id: string; name: string; color: string }>>('housekeeping-staff', [])
 
   useEffect(() => {
     if (boardRooms.length === 0) {
@@ -250,6 +254,17 @@ export function MobileHousekeepingView() {
   const inspectedRooms = (rooms || []).filter(r => r.cleanStatus === 'INSPECTED')
   const maintenanceRooms = (rooms || []).filter(r => r.hasMaintenanceIssue)
 
+  const handlePrint = () => {
+    printHousekeepingReport(rooms || [], `Housekeeping Report - ${format(new Date(), 'MMMM d, yyyy')}`, {
+      groupByFloor: true,
+      includeStatus: true,
+      includeAssignments: true,
+      staffAssignments: staffAssignments || {},
+      staff: staff || []
+    })
+    toast.success('Opening print preview...')
+  }
+
   if (showStaffAssignment) {
     return (
       <StaffAssignmentView
@@ -278,6 +293,15 @@ export function MobileHousekeepingView() {
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-semibold">Housekeeping</h1>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handlePrint}
+              className="gap-2"
+            >
+              <Printer size={18} weight="bold" />
+              Print
+            </Button>
             <Button
               size="sm"
               variant="secondary"
