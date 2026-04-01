@@ -771,27 +771,27 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-1 bg-background p-1.5">
+    <div className="h-full flex gap-2 bg-background p-2">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <Card className="w-56 flex-shrink-0 border shadow-sm flex flex-col">
-          <div className="p-1.5 border-b border-border bg-muted/30">
+        <Card className="w-64 flex-shrink-0 border-2 shadow-md flex flex-col">
+          <div className="p-2 border-b-2 border-border bg-gradient-to-br from-primary/5 to-primary/10">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-[10px] font-semibold leading-tight">Unassigned</h3>
-                <p className="text-[8px] text-muted-foreground mt-0.5">Drag to room</p>
+                <h3 className="text-xs font-bold leading-tight">Unassigned Reservations</h3>
+                <p className="text-[9px] text-muted-foreground mt-1">Drag to assign room</p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUnassigned(false)}
-                className="h-4 w-4 p-0"
+                className="h-5 w-5 p-0 hover:bg-destructive/10"
               >
-                <X className="w-2.5 h-2.5" />
+                <X className="w-3 h-3" />
               </Button>
             </div>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-1 space-y-1">
+            <div className="p-2 space-y-2">
               {unassignedReservations.map((reservation) => (
                 <Card
                   key={reservation.id}
@@ -799,49 +799,50 @@ export function Board() {
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "p-1.5 cursor-move hover:shadow transition-all border",
-                    draggingReservation === reservation.id && "opacity-40",
-                    reservation.isVIP && "border-amber-400/60 bg-amber-50/50",
-                    reservation.needsAttention && "border-destructive/40 bg-destructive/5"
+                    "p-2 cursor-grab active:cursor-grabbing hover:shadow-lg transition-all border-2 group",
+                    draggingReservation === reservation.id && "opacity-40 scale-95 rotate-2",
+                    reservation.isVIP && "border-amber-400/60 bg-gradient-to-br from-amber-50 to-amber-100/50 hover:from-amber-100 hover:to-amber-50",
+                    reservation.needsAttention && "border-destructive/40 bg-gradient-to-br from-destructive/5 to-destructive/10 animate-pulse",
+                    !reservation.isVIP && !reservation.needsAttention && "hover:border-primary/40 hover:bg-primary/5"
                   )}
                 >
-                  <div className="space-y-0.5">
-                    <div className="flex items-start justify-between gap-1">
-                      <div className="font-medium text-[9px] truncate flex-1 leading-tight">
+                  <div className="space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-semibold text-[10px] truncate flex-1 leading-tight">
                         {reservation.guestName}
                       </div>
-                      <Badge variant="outline" className="text-[7px] px-0.5 py-0 h-2.5 flex-shrink-0">
+                      <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 flex-shrink-0 font-bold">
                         {reservation.roomType}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center gap-0.5 text-[8px] text-muted-foreground">
-                      <Clock className="w-2 h-2" />
+                    <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-medium">
+                      <Clock className="w-2.5 h-2.5" />
                       <span>{format(reservation.checkIn, 'MMM d')}</span>
                       <span>→</span>
                       <span>{format(reservation.checkOut, 'MMM d')}</span>
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-0.5 text-[8px] text-muted-foreground">
-                        <Users className="w-2 h-2" />
+                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-medium">
+                        <Users className="w-2.5 h-2.5" />
                         <span>{reservation.guestCount}</span>
-                        <span className="ml-0.5">• {reservation.nights}n</span>
+                        <span className="ml-1">• {reservation.nights}n</span>
                       </div>
-                      <Badge variant="secondary" className="text-[7px] px-0.5 py-0 h-2.5">
+                      <Badge variant="secondary" className="text-[8px] px-1 py-0 h-4 font-semibold">
                         {reservation.source}
                       </Badge>
                     </div>
                     
                     {reservation.isVIP && (
-                      <Badge className="text-[7px] px-0.5 py-0 h-2.5 bg-amber-500">
-                        VIP
+                      <Badge className="text-[8px] px-1 py-0 h-4 bg-amber-500 hover:bg-amber-600">
+                        ⭐ VIP
                       </Badge>
                     )}
                     
                     {reservation.needsAttention && (
-                      <div className="flex items-center gap-0.5 text-[8px] text-destructive">
-                        <Warning className="w-2 h-2" />
+                      <div className="flex items-center gap-1 text-[9px] text-destructive font-semibold">
+                        <Warning className="w-2.5 h-2.5" weight="fill" />
                         <span>Needs attention</span>
                       </div>
                     )}
@@ -853,62 +854,64 @@ export function Board() {
         </Card>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-1">
-        <div className="flex items-center justify-between">
+      <div className="flex-1 flex flex-col min-w-0 gap-2">
+        <div className="flex items-center justify-between gap-2">
           <div>
-            <h1 className="text-sm font-bold leading-tight">Room Board</h1>
-            <p className="text-[8px] text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
+            <h1 className="text-base font-bold leading-tight tracking-tight">Room Board</h1>
+            <p className="text-[9px] text-muted-foreground mt-1 font-medium">
+              Sandbox Hotel · 30 Rooms · {format(new Date(), 'EEEE, MMMM d, yyyy')}
+            </p>
           </div>
           
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <Button
               onClick={() => {
                 setPrefilledReservation(null)
                 setShowNewReservationDialog(true)
               }}
-              className="h-6 gap-0.5 text-[10px] font-medium px-2"
+              className="h-7 gap-1 text-[11px] font-semibold px-3 shadow-sm hover:shadow"
             >
-              <Plus className="w-2.5 h-2.5" weight="bold" />
-              Add
+              <Plus className="w-3 h-3" weight="bold" />
+              New Reservation
             </Button>
             {!showUnassigned && unassignedReservations.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setShowUnassigned(true)}
-                className="h-6 text-[10px] gap-0.5 font-medium px-2"
+                className="h-7 text-[11px] gap-1.5 font-semibold px-3 shadow-sm hover:shadow"
               >
-                <Badge variant="destructive" className="h-3 w-3 p-0 text-[7px] flex items-center justify-center font-semibold">
+                <Badge variant="destructive" className="h-4 w-4 p-0 text-[8px] flex items-center justify-center font-bold">
                   {unassignedReservations.length}
                 </Badge>
                 Unassigned
               </Button>
             )}
             {lastUpdate && (
-              <div className="text-[8px] text-muted-foreground flex items-center gap-0.5 px-1 py-0.5 rounded bg-primary/5 border border-primary/20">
-                <div className="w-1 h-1 rounded-full bg-primary animate-pulse" />
-                <span className="font-medium">Live</span>
+              <div className="text-[9px] text-muted-foreground flex items-center gap-1 px-2 py-1 rounded-md bg-primary/5 border border-primary/20">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                <span className="font-semibold">Live Sync</span>
               </div>
             )}
             <Button 
               variant="outline" 
               size="sm"
               onClick={commandPalette.open}
-              className="gap-0.5 h-6 font-medium text-[10px] px-1.5"
+              className="gap-1 h-7 font-semibold text-[11px] px-2 shadow-sm hover:shadow"
             >
-              <Command className="w-2.5 h-2.5" />
+              <Command className="w-3 h-3" />
               <span className="hidden md:inline">Commands</span>
-              <kbd className="pointer-events-none hidden h-3 select-none items-center gap-0.5 rounded border bg-muted px-0.5 font-mono text-[7px] font-medium text-muted-foreground md:inline-flex">
-                <span className="text-[8px]">⌘</span>K
+              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-1 rounded border bg-muted px-1 font-mono text-[8px] font-medium text-muted-foreground md:inline-flex">
+                <span className="text-[9px]">⌘</span>K
               </kbd>
             </Button>
-            <div className="relative w-32">
-              <MagnifyingGlass className="absolute left-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-muted-foreground" />
+            <div className="relative w-36">
+              <MagnifyingGlass className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
               <Input
-                placeholder="Search..."
+                placeholder="Search rooms..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-6 h-6 text-[10px]"
+                className="pl-7 h-7 text-[11px] font-medium shadow-sm"
               />
             </div>
             <BoardFiltersPopover
@@ -918,8 +921,8 @@ export function Board() {
             />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-6 w-6 p-0">
-                  <Info className="w-2.5 h-2.5" />
+                <Button variant="outline" size="sm" className="h-7 w-7 p-0 shadow-sm hover:shadow">
+                  <Info className="w-3 h-3" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-[320px]">
@@ -939,12 +942,12 @@ export function Board() {
           onOpenAutomation={() => setShowAutomationSettings(true)}
         />
 
-        <div className="flex-1 overflow-auto rounded border border-border bg-card">
+        <div className="flex-1 overflow-auto rounded-lg border-2 border-border bg-card shadow-sm">
           <div className="calendar-board">
-            <div className="sticky top-0 z-20 bg-muted/40 border-b border-border">
+            <div className="sticky top-0 z-20 bg-gradient-to-b from-muted via-muted/95 to-muted/80 border-b-2 border-border shadow-sm">
               <div className="flex">
-                <div className="w-20 flex-shrink-0 border-r border-border py-1 px-1.5">
-                  <div className="text-[8px] font-semibold text-foreground uppercase tracking-wide">Room</div>
+                <div className="w-24 flex-shrink-0 border-r-2 border-border py-2 px-2 bg-muted/50">
+                  <div className="text-[9px] font-bold text-foreground uppercase tracking-wider">Room #</div>
                 </div>
                 
                 <div className="flex-1 flex overflow-x-auto">
@@ -955,26 +958,26 @@ export function Board() {
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[70px] border-r border-border py-1 px-1 text-center",
-                          isToday && "bg-primary/5 border-l-2 border-l-primary",
-                          isWeekendDay && !isToday && "bg-muted/30"
+                          "flex-1 min-w-[80px] border-r border-border py-2 px-2 text-center transition-all",
+                          isToday && "bg-primary/10 border-l-4 border-l-primary shadow-inner",
+                          isWeekendDay && !isToday && "bg-muted/60"
                         )}
                       >
                         <div className={cn(
-                          "text-[7px] font-semibold uppercase tracking-wide mb-0.5",
+                          "text-[8px] font-bold uppercase tracking-wider mb-1",
                           isToday ? "text-primary" : "text-muted-foreground"
                         )}>
                           {format(date, 'EEE')}
                         </div>
                         <div className={cn(
-                          "text-xs font-bold leading-none mb-0.5",
+                          "text-sm font-extrabold leading-none mb-1",
                           isToday ? "text-primary" : "text-foreground"
                         )}>
                           {format(date, 'd')}
                         </div>
                         <div className={cn(
-                          "text-[7px] font-medium",
-                          isToday ? "text-primary/70" : "text-muted-foreground"
+                          "text-[8px] font-semibold",
+                          isToday ? "text-primary/80" : "text-muted-foreground"
                         )}>
                           {format(date, 'MMM')}
                         </div>
@@ -1468,29 +1471,29 @@ function RoomTypeRow({
   const dirtyCount = rooms.filter(r => r.cleanStatus === 'DIRTY').length
   
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="border-b-2 border-border last:border-b-0">
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center gap-1.5 px-2 py-1 bg-gradient-to-r from-muted/50 to-muted/30 hover:from-muted/70 hover:to-muted/50 transition-all border-b border-border/50"
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-muted/70 via-muted/50 to-muted/30 hover:from-muted hover:via-muted/80 hover:to-muted/60 transition-all border-b border-border/60 group"
       >
         {isCollapsed ? (
-          <CaretRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+          <CaretRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
         ) : (
-          <CaretDown className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+          <CaretDown className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
         )}
-        <div className="flex items-center gap-1.5 text-[10px] font-bold flex-1 min-w-0">
+        <div className="flex items-center gap-2 text-[11px] font-bold flex-1 min-w-0">
           <span className="text-muted-foreground">{subtitle}</span>
-          <span className="text-muted-foreground/50">·</span>
+          <span className="text-muted-foreground/40">·</span>
           <span className="text-foreground">{title}</span>
-          <div className="flex items-center gap-1 ml-auto">
-            <Badge variant="secondary" className="text-[8px] px-1 py-0 h-3.5 font-bold">
-              {rooms.length} total
+          <div className="flex items-center gap-1.5 ml-auto">
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0.5 h-5 font-bold shadow-sm">
+              {rooms.length} rooms
             </Badge>
-            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 font-bold bg-primary/5 text-primary border-primary/30">
-              {occupiedCount} occ
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-5 font-bold bg-primary/10 text-primary border-primary/40 shadow-sm">
+              {occupiedCount} occupied
             </Badge>
             {dirtyCount > 0 && (
-              <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 font-bold bg-orange-50 text-orange-700 border-orange-200">
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-5 font-bold bg-orange-50 text-orange-700 border-orange-300 shadow-sm">
                 {dirtyCount} dirty
               </Badge>
             )}
@@ -1499,7 +1502,7 @@ function RoomTypeRow({
       </button>
 
       {!isCollapsed && (
-        <div className="divide-y divide-border/30">
+        <div className="divide-y divide-border/40">
           {rooms.map((room) => (
             <CalendarRoomRow
               key={room.roomId}
@@ -1575,26 +1578,26 @@ function CalendarRoomRow({
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
       case 'OCCUPIED_CLEAN':
-        return 'bg-gradient-to-br from-primary/30 to-primary/10 border-primary/50 border-l-4 border-l-primary shadow-sm'
+        return 'bg-gradient-to-br from-primary/40 via-primary/20 to-primary/10 border-primary/60 border-l-[6px] border-l-primary shadow-md hover:shadow-lg'
       case 'OCCUPIED_DIRTY':
-        return 'bg-gradient-to-br from-destructive/30 to-destructive/10 border-destructive/50 border-l-4 border-l-destructive shadow-sm'
+        return 'bg-gradient-to-br from-destructive/40 via-destructive/20 to-destructive/10 border-destructive/60 border-l-[6px] border-l-destructive shadow-md hover:shadow-lg'
       case 'VACANT_CLEAN':
-        return 'bg-gradient-to-br from-green-500/20 to-green-500/5 border-green-500/50 border-l-4 border-l-green-500 shadow-sm'
+        return 'bg-gradient-to-br from-green-500/30 via-green-500/15 to-green-500/5 border-green-500/60 border-l-[6px] border-l-green-500 shadow-md hover:shadow-lg'
       case 'VACANT_DIRTY':
-        return 'bg-gradient-to-br from-orange-500/20 to-orange-500/5 border-orange-500/50 border-l-4 border-l-orange-500 shadow-sm'
+        return 'bg-gradient-to-br from-orange-500/30 via-orange-500/15 to-orange-500/5 border-orange-500/60 border-l-[6px] border-l-orange-500 shadow-md hover:shadow-lg'
       default:
-        return 'bg-muted/30 border-border'
+        return 'bg-muted/40 border-border'
     }
   }
 
   const getCleanStatusIndicator = (cleanStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED') => {
     switch (cleanStatus) {
       case 'CLEAN':
-        return 'bg-green-500 ring-2 ring-green-500/30 shadow-sm shadow-green-500/20'
+        return 'bg-green-500 ring-2 ring-green-500/40 shadow-md shadow-green-500/30 animate-pulse'
       case 'DIRTY':
-        return 'bg-orange-500 ring-2 ring-orange-500/30 shadow-sm shadow-orange-500/20'
+        return 'bg-orange-500 ring-2 ring-orange-500/40 shadow-md shadow-orange-500/30'
       case 'INSPECTED':
-        return 'bg-blue-500 ring-2 ring-blue-500/30 shadow-sm shadow-blue-500/20'
+        return 'bg-blue-500 ring-2 ring-blue-500/40 shadow-md shadow-blue-500/30'
     }
   }
 
@@ -1656,29 +1659,29 @@ function CalendarRoomRow({
 
   return (
     <div 
-      className="flex hover:bg-accent/5 transition-all group border-b border-border/30 last:border-b-0"
+      className="flex hover:bg-accent/10 transition-all group border-b border-border/40 last:border-b-0"
       onMouseUp={handleResizeMouseUp}
       onMouseLeave={handleResizeMouseUp}
     >
       <div 
-        className="w-20 flex-shrink-0 border-r border-border py-1 px-1.5 flex items-center gap-1 cursor-pointer bg-muted/10 group-hover:bg-muted/30 transition-all"
+        className="w-24 flex-shrink-0 border-r-2 border-border py-2 px-2 flex items-center gap-1.5 cursor-pointer bg-muted/20 group-hover:bg-muted/40 transition-all"
         onClick={onClick}
       >
-        <div className={cn("w-1 h-1 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
-        <div className="text-[11px] font-extrabold tracking-tight">{room.number}</div>
-        <div className="ml-auto flex items-center gap-0.5">
+        <div className={cn("w-2 h-2 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
+        <div className="text-xs font-extrabold tracking-tight">{room.number}</div>
+        <div className="ml-auto flex items-center gap-1">
           {room.operationalStatus === 'OUT_OF_SERVICE' && (
-            <Badge variant="destructive" className="text-[7px] px-0.5 py-0 h-2.5 font-bold">
+            <Badge variant="destructive" className="text-[8px] px-1 py-0 h-4 font-bold">
               OOS
             </Badge>
           )}
           {room.operationalStatus === 'BLOCKED' && (
-            <Badge variant="outline" className="text-[7px] px-0.5 py-0 h-2.5 font-bold bg-orange-50 text-orange-700 border-orange-300">
+            <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-bold bg-orange-50 text-orange-700 border-orange-300">
               BLK
             </Badge>
           )}
           {room.isVIP && (
-            <Badge variant="outline" className="text-[7px] px-0.5 py-0 h-2.5 font-bold bg-amber-50 text-amber-700 border-amber-300">
+            <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-bold bg-amber-50 text-amber-700 border-amber-300">
               VIP
             </Badge>
           )}
@@ -1706,10 +1709,10 @@ function CalendarRoomRow({
             <div 
               key={i}
               className={cn(
-                "flex-1 min-w-[70px] border-r border-border py-1 px-1 relative transition-all",
-                isToday && "bg-primary/10 shadow-inner",
-                isWeekendDay && !isToday && "bg-accent/5",
-                draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/40 bg-primary/5",
+                "flex-1 min-w-[80px] border-r border-border py-2 px-2 relative transition-all",
+                isToday && "bg-primary/10 shadow-inner border-l-2 border-l-primary",
+                isWeekendDay && !isToday && "bg-accent/10",
+                draggingReservation && isAvailableForAssignment && "ring-2 ring-inset ring-primary/50 bg-primary/10 animate-pulse",
                 isResizing && "cursor-col-resize"
               )}
               draggable={!!(isRoomOccupied && isInStay && !isResizing)}
@@ -1725,14 +1728,14 @@ function CalendarRoomRow({
               {isInStay && (
                 <div 
                   className={cn(
-                    "h-full rounded border-2 transition-all hover:shadow-md relative overflow-hidden group/reservation",
+                    "h-full rounded-md border-2 transition-all hover:scale-[1.02] relative overflow-hidden group/reservation",
                     getStatusColor(room.status),
-                    isDragging && "opacity-40 scale-95",
-                    isDropTarget && !isDragging && "ring-2 ring-primary ring-offset-2",
-                    isFirstDay && "rounded-l-lg",
-                    isLastDay && "rounded-r-lg",
-                    isRoomOccupied && !isResizing && "cursor-move hover:ring-1 hover:ring-primary/40",
-                    isResizing && "ring-2 ring-primary shadow-xl z-10"
+                    isDragging && "opacity-30 scale-90 rotate-1",
+                    isDropTarget && !isDragging && "ring-4 ring-primary ring-offset-2 scale-105",
+                    isFirstDay && "rounded-l-xl",
+                    isLastDay && "rounded-r-xl",
+                    isRoomOccupied && !isResizing && "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-primary/50",
+                    isResizing && "ring-4 ring-primary shadow-2xl z-10 scale-105"
                   )}
                   onClick={(e) => {
                     if (isResizing) return
@@ -1740,17 +1743,17 @@ function CalendarRoomRow({
                     onReservationClick()
                   }}
                 >
-                  <div className="px-1 py-1 h-full flex flex-col justify-between">
+                  <div className="px-2 py-1.5 h-full flex flex-col justify-between">
                     {isCheckIn && (
-                      <div className="space-y-0.5">
-                        <div className="text-[9px] font-bold truncate text-foreground flex items-center gap-0.5 leading-tight">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-bold truncate text-foreground flex items-center gap-1 leading-tight">
                           {room.guestName}
-                          <Pencil className="w-2 h-2 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
+                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
                         </div>
                         {room.guestCount && (
-                          <div className="text-[7px] text-foreground/70 flex items-center gap-0.5">
-                            <Users className="w-1.5 h-1.5" />
-                            <span>{room.guestCount}</span>
+                          <div className="text-[8px] text-foreground/70 flex items-center gap-1 font-medium">
+                            <Users className="w-2 h-2" />
+                            <span>{room.guestCount} guest{room.guestCount !== 1 ? 's' : ''}</span>
                           </div>
                         )}
                       </div>
@@ -1758,17 +1761,17 @@ function CalendarRoomRow({
                     
                     <div className="flex items-center justify-between mt-auto">
                       {room.isArrivalToday && isCheckIn && (
-                        <Badge className="text-[6px] px-0.5 py-0 h-2.5 bg-green-600 hover:bg-green-700">
-                          IN
+                        <Badge className="text-[7px] px-1 py-0 h-4 bg-green-600 hover:bg-green-700 font-bold">
+                          CHECK-IN
                         </Badge>
                       )}
                       {room.isDepartureToday && isCheckOut && (
-                        <Badge className="text-[6px] px-0.5 py-0 h-2.5 bg-destructive hover:bg-destructive/90 ml-auto">
-                          OUT
+                        <Badge className="text-[7px] px-1 py-0 h-4 bg-destructive hover:bg-destructive/90 ml-auto font-bold">
+                          CHECK-OUT
                         </Badge>
                       )}
                       {room.depositStatus === 'PENDING' && isCheckIn && (
-                        <div className="w-1 h-1 rounded-full bg-orange-500 ring-2 ring-orange-500/30 ml-auto" />
+                        <div className="w-2 h-2 rounded-full bg-orange-500 ring-2 ring-orange-500/40 ml-auto animate-pulse" />
                       )}
                     </div>
                   </div>
@@ -1776,39 +1779,39 @@ function CalendarRoomRow({
                   {isCheckIn && isRoomOccupied && (
                     <div
                       className={cn(
-                        "absolute left-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/40 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-primary/60"
+                        "absolute left-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-primary/50 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-primary/70"
                       )}
                       onMouseDown={handleResizeMouseDown('start', date)}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/80 rounded-full" />
+                      <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-10 bg-primary/90 rounded-full shadow-lg" />
                     </div>
                   )}
 
                   {isLastDay && isRoomOccupied && (
                     <div
                       className={cn(
-                        "absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-primary/40 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-primary/60"
+                        "absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-primary/50 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-primary/70"
                       )}
                       onMouseDown={handleResizeMouseDown('end', date)}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary/80 rounded-full" />
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-10 bg-primary/90 rounded-full shadow-lg" />
                     </div>
                   )}
                   
                   {isDropTarget && !isDragging && (
-                    <div className="absolute inset-0 bg-primary/30 backdrop-blur-[2px] flex items-center justify-center border-2 border-primary rounded">
-                      <Badge className="text-[9px] font-bold">
+                    <div className="absolute inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center border-4 border-primary rounded-md">
+                      <Badge className="text-[10px] font-bold shadow-lg">
                         Drop here
                       </Badge>
                     </div>
                   )}
 
                   {isResizing && resizingReservation && (
-                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-[10px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap z-20">
+                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-[11px] font-bold px-3 py-1.5 rounded-md shadow-2xl whitespace-nowrap z-20 border-2 border-primary-foreground/20">
                       {resizingReservation.direction === 'end' 
                         ? `Check-out: ${format(addDays(resizingReservation.currentDate, 1), 'MMM d, yyyy')}`
                         : `Check-in: ${format(resizingReservation.currentDate, 'MMM d, yyyy')}`
@@ -1819,28 +1822,28 @@ function CalendarRoomRow({
               )}
               
               {!isInStay && draggingReservation && isAvailableForAssignment && (
-                <div className="h-full rounded border-2 border-dashed border-primary/40 bg-primary/5 flex items-center justify-center transition-all hover:bg-primary/10 hover:border-primary/60">
-                  <span className="text-[9px] text-primary/70 font-medium">Drop to assign</span>
+                <div className="h-full rounded-md border-3 border-dashed border-primary/60 bg-primary/10 flex items-center justify-center transition-all hover:bg-primary/20 hover:border-primary/80 hover:scale-105">
+                  <span className="text-[10px] text-primary font-semibold">Drop to assign</span>
                 </div>
               )}
 
               {!isInStay && !draggingReservation && !isResizing && isAvailableForAssignment && (
                 <div 
-                  className="h-full rounded border border-dashed border-transparent hover:border-primary/30 hover:bg-primary/5 flex items-center justify-center transition-all cursor-pointer group/empty"
+                  className="h-full rounded-md border-2 border-dashed border-transparent hover:border-primary/40 hover:bg-primary/10 flex items-center justify-center transition-all cursor-pointer group/empty"
                   onClick={(e) => {
                     e.stopPropagation()
                     onEmptyBlockClick(date)
                   }}
                 >
-                  <Plus className="w-3 h-3 text-primary/0 group-hover/empty:text-primary/50 transition-colors" weight="bold" />
+                  <Plus className="w-4 h-4 text-primary/0 group-hover/empty:text-primary/60 transition-colors" weight="bold" />
                 </div>
               )}
 
               {!isInStay && isResizing && resizingReservation && hoveredCell === i && (
                 <div className={cn(
-                  "h-full rounded border-2 border-dashed transition-all",
-                  resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-primary/60 bg-primary/10",
-                  resizingReservation.direction === 'start' && date < (room.checkOut || new Date()) && "border-primary/60 bg-primary/10"
+                  "h-full rounded-md border-3 border-dashed transition-all",
+                  resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-primary/70 bg-primary/20",
+                  resizingReservation.direction === 'start' && date < (room.checkOut || new Date()) && "border-primary/70 bg-primary/20"
                 )} />
               )}
             </div>
