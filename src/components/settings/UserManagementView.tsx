@@ -8,11 +8,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useKV } from '@github/spark/hooks'
-import { Plus, Trash, UserCircle, Shield, Key } from '@phosphor-icons/react'
+import { Plus, Trash, UserCircle, Shield, Key, PencilSimple } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import type { User, UserRole } from '@/types/auth'
 import { ROLE_LABELS, ROLE_PERMISSIONS } from '@/types/auth'
 import { useAuth } from '@/hooks/use-auth'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface UserWithPassword extends User {
   password: string
@@ -21,6 +22,8 @@ interface UserWithPassword extends User {
 export function UserManagementView() {
   const [users, setUsers] = useKV<UserWithPassword[]>('system:users', [])
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<UserWithPassword | null>(null)
   const { user: currentUser } = useAuth()
 
@@ -31,6 +34,11 @@ export function UserManagementView() {
     role: 'front-desk' as UserRole,
   })
 
+  const [passwordForm, setPasswordForm] = useState({
+    newPassword: '',
+    confirmPassword: '',
+  })
+
   const resetForm = () => {
     setFormData({
       username: '',
@@ -39,6 +47,13 @@ export function UserManagementView() {
       role: 'front-desk',
     })
     setSelectedUser(null)
+  }
+
+  const resetPasswordForm = () => {
+    setPasswordForm({
+      newPassword: '',
+      confirmPassword: '',
+    })
   }
 
   const handleAddUser = () => {
@@ -65,6 +80,69 @@ export function UserManagementView() {
     toast.success(`User ${formData.username} created successfully`)
     setIsAddDialogOpen(false)
     resetForm()
+  }
+
+  const handleEditUser = () => {
+    if (!selectedUser) return
+
+    setUsers((current) =>
+      current.map((u) =>
+        u.id === selectedUser.id
+          ? { ...u, displayName: formData.displayName, role: formData.role }
+          : u
+      )
+    )
+    toast.success('User updated successfully')
+    setIsEditDialogOpen(false)
+    resetForm()
+  }
+
+  const handleChangePassword = () => {
+    if (!selectedUser) return
+
+    if (!passwordForm.newPassword || !passwordForm.confirmPassword) {
+      toast.error('Please fill in all fields')
+      return
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters')
+      return
+    }
+
+    setUsers((current) =>
+      current.map((u) =>
+        u.id === selectedUser.id
+          ? { ...u, password: passwordForm.newPassword }
+          : u
+      )
+    )
+    toast.success('Password changed successfully')
+    setIsPasswordDialogOpen(false)
+    resetPasswordForm()
+    setSelectedUser(null)
+  }
+
+  const openEditDialog = (user: UserWithPassword) => {
+    setSelectedUser(user)
+    setFormData({
+      username: user.username,
+      password: '',
+      displayName: user.displayName,
+      role: user.role,
+    })
+    setIsEditDialogOpen(true)
+  }
+
+  const openPasswordDialog = (user: UserWithPassword) => {
+    setSelectedUser(user)
+    resetPasswordForm()
+    setIsPasswordDialogOpen(true)
   }
 
   const handleDeleteUser = (userId: string) => {
@@ -187,6 +265,119 @@ export function UserManagementView() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit User</DialogTitle>
+              <DialogDescription>
+                Update user information and role
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-username">Username</Label>
+                <Input
+                  id="edit-username"
+                  value={formData.username}
+                  disabled
+                  className="bg-muted"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-displayName">Display Name</Label>
+                <Input
+                  id="edit-displayName"
+                  placeholder="Enter display name"
+                  value={formData.displayName}
+                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-role">Role</Label>
+                <Select
+                  value={formData.role}
+                  onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                      <SelectItem key={role} value={role}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleEditUser}>
+                Update User
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Change Password</DialogTitle>
+              <DialogDescription>
+                Set a new password for {selectedUser?.username}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="newPassword">New Password</Label>
+                <Input
+                  id="newPassword"
+                  type="password"
+                  placeholder="Enter new password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Input
+                  id="confirmPassword"
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                />
+              </div>
+
+              {passwordForm.newPassword && passwordForm.newPassword.length < 6 && (
+                <p className="text-sm text-destructive">Password must be at least 6 characters</p>
+              )}
+
+              {passwordForm.newPassword && passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
+                <p className="text-sm text-destructive">Passwords do not match</p>
+              )}
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setIsPasswordDialogOpen(false); resetPasswordForm(); }}>
+                Cancel
+              </Button>
+              <Button onClick={handleChangePassword}>
+                Change Password
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       <Card>
@@ -235,14 +426,30 @@ export function UserManagementView() {
                       {new Date(user.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteUser(user.id)}
-                        disabled={user.id === currentUser?.id}
-                      >
-                        <Trash className="text-destructive" />
-                      </Button>
+                      <div className="flex gap-1 justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditDialog(user)}
+                        >
+                          <PencilSimple size={16} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openPasswordDialog(user)}
+                        >
+                          <Key size={16} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteUser(user.id)}
+                          disabled={user.id === currentUser?.id}
+                        >
+                          <Trash size={16} className="text-destructive" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

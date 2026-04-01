@@ -11,7 +11,9 @@ import { StaffAlertSettings } from '@/components/settings/StaffAlertSettings'
 import { RoomReadyNotificationSettings } from '@/components/settings/RoomReadyNotificationSettings'
 import { DailySummarySettings } from '@/components/settings/DailySummarySettings'
 import { TrendDataManager } from '@/components/settings/TrendDataManager'
-import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine, Receipt, ArrowRight } from '@phosphor-icons/react'
+import { PropertySettings } from '@/components/settings/PropertySettings'
+import { RoomTypeManagement } from '@/components/settings/RoomTypeManagement'
+import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine, Receipt, ArrowRight, DoorOpen } from '@phosphor-icons/react'
 import { useNavigation } from '@/hooks/use-navigation'
 
 export function SettingsView() {
@@ -36,7 +38,7 @@ export function SettingsView() {
 
       <div className="p-6 max-w-5xl mx-auto">
         <Tabs defaultValue="branding" className="w-full">
-          <TabsList className="grid w-full grid-cols-9 mb-6">
+          <TabsList className="grid w-full grid-cols-10 mb-6">
             <TabsTrigger value="branding" className="gap-2">
               <Image size={18} weight="duotone" />
               Branding
@@ -64,6 +66,10 @@ export function SettingsView() {
             <TabsTrigger value="property" className="gap-2">
               <Buildings size={18} weight="duotone" />
               Property
+            </TabsTrigger>
+            <TabsTrigger value="room-types" className="gap-2">
+              <DoorOpen size={18} weight="duotone" />
+              Rooms
             </TabsTrigger>
             <TabsTrigger value="users" className="gap-2">
               <Users size={18} weight="duotone" />
@@ -102,18 +108,38 @@ export function SettingsView() {
           </TabsContent>
 
           <TabsContent value="property" className="space-y-6">
-            <div className="text-center py-12 text-muted-foreground">
-              Property settings coming soon
-            </div>
+            <PropertySettings />
+          </TabsContent>
+
+          <TabsContent value="room-types" className="space-y-6">
+            <RoomTypeManagement />
           </TabsContent>
 
           <TabsContent value="users" className="space-y-6">
             <div className="text-center py-12 text-muted-foreground">
-              User management coming soon
+              User management is available in the advanced settings
             </div>
           </TabsContent>
 
           <TabsContent value="advanced" className="space-y-6">
+            <Card className="p-6">
+              <h3 className="text-lg font-semibold mb-4">User Management</h3>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-4 border rounded-lg">
+                  <div>
+                    <div className="font-medium">User Accounts & Permissions</div>
+                    <div className="text-sm text-muted-foreground">
+                      Manage staff accounts, roles, and access permissions
+                    </div>
+                  </div>
+                  <Button onClick={() => navigate('user-management')}>
+                    Manage Users
+                    <ArrowRight className="ml-2" size={16} />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+
             <Card className="p-6">
               <h3 className="text-lg font-semibold mb-4">System Administration</h3>
               <div className="space-y-3">
