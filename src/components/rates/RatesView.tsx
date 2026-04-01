@@ -26,6 +26,7 @@ import {
   Copy,
   Check,
   X,
+  Upload,
   ArrowUp
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
@@ -37,6 +38,7 @@ import { TaxDiscountManager } from './TaxDiscountManager'
 import { YieldManagementPanel } from './YieldManagementPanel'
 import { CompetitiveRateAnalysis } from './CompetitiveRateAnalysis'
 import { SeasonalPackagesManager } from './SeasonalPackagesManager'
+import { BulkRateUpload } from './BulkRateUpload'
 
 interface RoomType {
   id: string
@@ -289,8 +291,12 @@ export function RatesView() {
 
       <div className="flex-1 overflow-hidden p-6">
         <Tabs defaultValue="rates" className="h-full flex flex-col">
-          <TabsList className="grid grid-cols-7 w-full">
+          <TabsList className="grid grid-cols-8 w-full">
             <TabsTrigger value="rates">Rate Calendar</TabsTrigger>
+            <TabsTrigger value="bulk-upload">
+              <Upload className="w-4 h-4 mr-2" />
+              Bulk Upload
+            </TabsTrigger>
             <TabsTrigger value="rate-plans">Rate Plans</TabsTrigger>
             <TabsTrigger value="packages">Packages</TabsTrigger>
             <TabsTrigger value="yield">Yield Mgmt</TabsTrigger>
@@ -533,6 +539,10 @@ export function RatesView() {
           </Card>
         </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="bulk-upload" className="flex-1 mt-6 overflow-auto">
+            <BulkRateUpload />
           </TabsContent>
 
           <TabsContent value="rate-plans" className="flex-1 mt-6 overflow-auto">
