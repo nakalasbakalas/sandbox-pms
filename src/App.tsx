@@ -1,15 +1,15 @@
 import { Board } from './components/board/Board'
 import { 
   FrontDeskView,
-  ReservationsView,
-  GuestsView,
   HousekeepingView,
-  CashierView,
   RatesView,
   ChannelsView,
   ReportsView,
   SettingsView,
 } from './components/views/PlaceholderViews'
+import { ReservationsView } from './components/views/ReservationsView'
+import { GuestsView } from './components/views/GuestsView'
+import { CashierView } from './components/views/CashierView'
 import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
 import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
 import { DailySummaryReportView } from './components/settings/DailySummaryReportView'

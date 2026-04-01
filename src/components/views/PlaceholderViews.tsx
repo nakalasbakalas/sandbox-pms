@@ -55,9 +55,6 @@ export function PlaceholderView({ title, description, icon: Icon, features }: Pl
 
 export { FrontDeskView } from '../front-desk/FrontDeskView'
 export { SettingsView } from '../settings/SettingsView'
-export { ReservationsView } from '../reservations/ReservationsView'
-export { GuestsView } from '../guests/GuestsView'
-export { CashierView } from '../cashier/CashierView'
 export { RatesView } from '../rates/RatesView'
 export { ChannelsView } from '../channels/ChannelsView'
 export { ReportsView } from '../reports/ReportsView'
