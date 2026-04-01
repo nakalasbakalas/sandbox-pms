@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react'
 import { Board } from './components/board/Board'
 import { 
   FrontDeskView,
@@ -18,6 +19,11 @@ import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { useOnboarding } from './hooks/use-onboarding'
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import { AppLayout } from './components/navigation/AppLayout'
+import { KeyboardShortcutsDialog } from './components/help/KeyboardShortcutsDialog'
+import { KeyboardShortcutsWelcome } from './components/help/KeyboardShortcutsWelcome'
+import { useKeyboardShortcuts, globalShortcuts } from './hooks/use-keyboard-shortcuts'
+import { useCommandPalette } from './hooks/use-command-palette'
+import { createPMSCommands } from './lib/pms-commands'
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
@@ -52,19 +58,46 @@ function AppRouter() {
   }
 }
 
-function App() {
+function AppContent() {
     const { completed } = useOnboarding()
+    const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
+    const { navigate } = useNavigation()
+    const commands = useMemo(() => createPMSCommands(navigate), [navigate])
+    const commandPalette = useCommandPalette(commands)
+    
+    const shortcuts = useMemo(
+        () => globalShortcuts(navigate, commandPalette.open, () => setShortcutsDialogOpen(true)),
+        [navigate, commandPalette.open]
+    )
+    
+    useKeyboardShortcuts(shortcuts, completed)
     
     return (
-        <NavigationProvider>
+        <>
             {!completed ? (
                 <OnboardingWizard />
             ) : (
-                <AppLayout>
-                    <AppRouter />
-                </AppLayout>
+                <>
+                    <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
+                        <AppRouter />
+                    </AppLayout>
+                    <KeyboardShortcutsDialog
+                        open={shortcutsDialogOpen}
+                        onOpenChange={setShortcutsDialogOpen}
+                        shortcuts={shortcuts}
+                    />
+                    <KeyboardShortcutsWelcome />
+                </>
             )}
             <Toaster />
+        </>
+    )
+}
+
+function App() {
+    return (
+        <NavigationProvider>
+            <AppContent />
         </NavigationProvider>
     )
 }

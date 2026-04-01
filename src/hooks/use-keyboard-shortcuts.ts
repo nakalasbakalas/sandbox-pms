@@ -49,7 +49,11 @@ export function getShortcutDisplay(shortcut: KeyboardShortcut): string {
   return parts.join(' ')
 }
 
-export const globalShortcuts = (navigate: (route: string) => void, openCommandPalette: () => void): KeyboardShortcut[] => [
+export const globalShortcuts = (
+  navigate: (route: string) => void,
+  openCommandPalette: () => void,
+  openShortcutsDialog?: () => void
+): KeyboardShortcut[] => [
   {
     key: 'k',
     ctrl: true,
@@ -58,8 +62,15 @@ export const globalShortcuts = (navigate: (route: string) => void, openCommandPa
     section: 'Global'
   },
   {
+    key: '?',
+    shift: true,
+    description: 'Show keyboard shortcuts',
+    action: () => openShortcutsDialog?.(),
+    section: 'Global'
+  },
+  {
     key: '/',
-    description: 'Search',
+    description: 'Focus search',
     action: () => {
       const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement
       searchInput?.focus()
@@ -109,18 +120,47 @@ export const globalShortcuts = (navigate: (route: string) => void, openCommandPa
     section: 'Navigation'
   },
   {
-    key: 'z',
+    key: '7',
     ctrl: true,
-    description: 'Undo last action',
-    action: () => toast.info('Undo triggered'),
+    description: 'Go to Rates',
+    action: () => navigate('rates'),
+    section: 'Navigation'
+  },
+  {
+    key: '8',
+    ctrl: true,
+    description: 'Go to Channels',
+    action: () => navigate('channels'),
+    section: 'Navigation'
+  },
+  {
+    key: '9',
+    ctrl: true,
+    description: 'Go to Reports',
+    action: () => navigate('reports'),
+    section: 'Navigation'
+  },
+  {
+    key: '0',
+    ctrl: true,
+    description: 'Go to Settings',
+    action: () => navigate('settings'),
+    section: 'Navigation'
+  },
+  {
+    key: 'n',
+    ctrl: true,
+    description: 'New reservation (from Board)',
+    action: () => toast.info('Create new reservation (available on Board)'),
     section: 'Actions'
   },
   {
-    key: 'z',
+    key: 'r',
     ctrl: true,
-    shift: true,
-    description: 'Redo last action',
-    action: () => toast.info('Redo triggered'),
+    description: 'Refresh data',
+    action: () => {
+      window.location.reload()
+    },
     section: 'Actions'
   },
   {

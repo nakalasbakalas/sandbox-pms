@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import type { BoardRoomCard, DragOperation } from '@/types/board'
 import { RoomCard } from './RoomCard'
 import { BoardStatsBar } from './BoardStatsBar'
@@ -27,6 +27,8 @@ import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { NewReservationDialog } from './NewReservationDialog'
 import { EditReservationDialog } from './EditReservationDialog'
+import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
+import { getBoardShortcuts } from '@/hooks/use-board-shortcuts'
 
 interface UnassignedReservation {
   id: string
@@ -84,6 +86,45 @@ export function Board() {
   const commandPalette = useCommandPalette(commands)
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
+
+  const cycleViewMode = useCallback(() => {
+    setViewMode(current => {
+      const modes: Array<'7day' | '14day' | '30day'> = ['7day', '14day', '30day']
+      const currentIndex = modes.indexOf(current)
+      const nextMode = modes[(currentIndex + 1) % modes.length]
+      toast.success(`View mode: ${nextMode.replace('day', ' days')}`)
+      return nextMode
+    })
+  }, [])
+
+  const clearAllFilters = useCallback(() => {
+    setFilters({
+      showArrivals: true,
+      showDepartures: true,
+      showVacant: true,
+      showOccupied: true,
+      showDirty: true,
+      showVIP: true,
+      showIssues: true,
+      showDepositPending: true,
+    })
+    toast.success('All filters cleared')
+  }, [])
+
+  const focusSearchInput = useCallback(() => {
+    const searchInput = document.querySelector('[placeholder="Search rooms..."]') as HTMLInputElement
+    searchInput?.focus()
+  }, [])
+
+  const boardShortcuts = useMemo(() => getBoardShortcuts({
+    openNewReservation: () => setShowNewReservationDialog(true),
+    toggleUnassigned: () => setShowUnassigned(prev => !prev),
+    cycleViewMode,
+    focusSearch: focusSearchInput,
+    clearFilters: clearAllFilters,
+  }), [cycleViewMode, focusSearchInput, clearAllFilters])
+
+  useKeyboardShortcuts(boardShortcuts, true)
 
   useEffect(() => {
     if (rooms.length === 0) {
@@ -702,27 +743,27 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-3 bg-background p-4">
+    <div className="h-full flex gap-2 bg-background p-3">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <Card className="w-80 flex-shrink-0 border shadow-sm flex flex-col">
-          <div className="p-4 border-b border-border bg-gradient-to-b from-muted/40 to-muted/20">
+        <Card className="w-72 flex-shrink-0 border shadow-sm flex flex-col">
+          <div className="p-3 border-b border-border bg-muted/30">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold tracking-tight">Unassigned Reservations</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Drag to assign room</p>
+                <h3 className="text-xs font-semibold">Unassigned Reservations</h3>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Drag to assign room</p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUnassigned(false)}
-                className="h-7 w-7 p-0 hover:bg-background/80"
+                className="h-6 w-6 p-0"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3 h-3" />
               </Button>
             </div>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-3 space-y-2.5">
+            <div className="p-2 space-y-2">
               {unassignedReservations.map((reservation) => (
                 <Card
                   key={reservation.id}
@@ -730,49 +771,49 @@ export function Board() {
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "p-3.5 cursor-move hover:shadow-lg hover:scale-[1.02] transition-all border",
-                    draggingReservation === reservation.id && "opacity-40 scale-95",
-                    reservation.isVIP && "border-amber-400/60 bg-gradient-to-br from-amber-50 to-amber-50/30 shadow-amber-100/50",
-                    reservation.needsAttention && "border-destructive/40 bg-gradient-to-br from-destructive/5 to-destructive/[0.02]"
+                    "p-2.5 cursor-move hover:shadow transition-all border",
+                    draggingReservation === reservation.id && "opacity-40",
+                    reservation.isVIP && "border-amber-400/60 bg-amber-50/50",
+                    reservation.needsAttention && "border-destructive/40 bg-destructive/5"
                   )}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-sm truncate flex-1">
+                      <div className="font-medium text-xs truncate flex-1">
                         {reservation.guestName}
                       </div>
-                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 flex-shrink-0">
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 flex-shrink-0">
                         {reservation.roomType}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="w-3 h-3" />
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <Clock className="w-2.5 h-2.5" />
                       <span>{format(reservation.checkIn, 'MMM d')}</span>
                       <span>→</span>
                       <span>{format(reservation.checkOut, 'MMM d')}</span>
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Users className="w-3 h-3" />
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Users className="w-2.5 h-2.5" />
                         <span>{reservation.guestCount}</span>
                         <span className="ml-1">• {reservation.nights}n</span>
                       </div>
-                      <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4">
+                      <Badge variant="secondary" className="text-[8px] px-1 py-0 h-3.5">
                         {reservation.source}
                       </Badge>
                     </div>
                     
                     {reservation.isVIP && (
-                      <Badge className="text-[9px] px-1.5 py-0 h-4 bg-amber-500">
+                      <Badge className="text-[8px] px-1 py-0 h-3.5 bg-amber-500">
                         VIP
                       </Badge>
                     )}
                     
                     {reservation.needsAttention && (
-                      <div className="flex items-center gap-1 text-xs text-destructive">
-                        <Warning className="w-3 h-3" />
+                      <div className="flex items-center gap-1 text-[10px] text-destructive">
+                        <Warning className="w-2.5 h-2.5" />
                         <span>Needs attention</span>
                       </div>
                     )}
@@ -784,62 +825,62 @@ export function Board() {
         </Card>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-3">
+      <div className="flex-1 flex flex-col min-w-0 gap-2">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Room Board</h1>
-            <p className="text-xs text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
+            <h1 className="text-xl font-bold">Room Board</h1>
+            <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
           </div>
           
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <Button
               onClick={() => {
                 setPrefilledReservation(null)
                 setShowNewReservationDialog(true)
               }}
-              className="h-9 gap-2 font-semibold shadow-sm hover:shadow"
+              className="h-8 gap-1.5 text-xs font-medium"
             >
-              <Plus className="w-4 h-4" weight="bold" />
-              Add Reservation
+              <Plus className="w-3.5 h-3.5" weight="bold" />
+              Add
             </Button>
             {!showUnassigned && unassignedReservations.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setShowUnassigned(true)}
-                className="h-9 text-xs gap-2 font-semibold shadow-sm hover:shadow"
+                className="h-8 text-xs gap-1.5 font-medium"
               >
-                <Badge variant="destructive" className="h-5 w-5 p-0 text-[10px] flex items-center justify-center font-bold">
+                <Badge variant="destructive" className="h-4 w-4 p-0 text-[9px] flex items-center justify-center font-semibold">
                   {unassignedReservations.length}
                 </Badge>
                 Unassigned
               </Button>
             )}
             {lastUpdate && (
-              <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary/5 border border-primary/20">
-                <div className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-sm shadow-primary/50" />
-                <span className="font-semibold">Live</span>
+              <div className="text-[10px] text-muted-foreground flex items-center gap-1 px-2 py-1 rounded bg-primary/5 border border-primary/20">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                <span className="font-medium">Live</span>
               </div>
             )}
             <Button 
               variant="outline" 
               size="sm"
               onClick={commandPalette.open}
-              className="gap-2 h-9 font-semibold shadow-sm hover:shadow"
+              className="gap-1.5 h-8 font-medium text-xs"
             >
-              <Command className="w-4 h-4" />
-              <span className="hidden md:inline text-xs">Commands</span>
-              <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-bold text-muted-foreground md:inline-flex">
-                <span className="text-[11px]">⌘</span>K
+              <Command className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Commands</span>
+              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[9px] font-medium text-muted-foreground md:inline-flex">
+                <span className="text-[10px]">⌘</span>K
               </kbd>
             </Button>
-            <div className="relative w-56">
-              <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <div className="relative w-48">
+              <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search rooms, guests..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 h-9 text-xs font-medium shadow-sm"
+                className="pl-8 h-8 text-xs"
               />
             </div>
             <BoardFiltersPopover
@@ -849,11 +890,11 @@ export function Board() {
             />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9 w-9 p-0 shadow-sm hover:shadow">
-                  <Info className="w-4 h-4" />
+                <Button variant="outline" size="sm" className="h-8 w-8 p-0">
+                  <Info className="w-3.5 h-3.5" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[480px]">
+              <PopoverContent align="end" className="w-[400px]">
                 <StatusLegend />
               </PopoverContent>
             </Popover>
@@ -868,12 +909,12 @@ export function Board() {
           filterCount={activeFilterCount}
         />
 
-        <div className="flex-1 overflow-auto rounded-xl border border-border bg-card shadow-sm">
+        <div className="flex-1 overflow-auto rounded border border-border bg-card">
           <div className="calendar-board">
-            <div className="sticky top-0 z-20 bg-gradient-to-b from-muted/50 to-muted/30 border-b-2 border-border backdrop-blur-sm">
+            <div className="sticky top-0 z-20 bg-muted/40 border-b border-border">
               <div className="flex">
-                <div className="w-32 flex-shrink-0 border-r border-border py-3 px-4">
-                  <div className="text-[11px] font-bold text-foreground uppercase tracking-wider">Room</div>
+                <div className="w-28 flex-shrink-0 border-r border-border py-2 px-3">
+                  <div className="text-[10px] font-semibold text-foreground uppercase tracking-wide">Room</div>
                 </div>
                 
                 <div className="flex-1 flex overflow-x-auto">
@@ -884,26 +925,26 @@ export function Board() {
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[100px] border-r border-border py-2.5 px-3 text-center transition-all",
-                          isToday && "bg-primary/10 border-l-2 border-l-primary shadow-inner",
-                          isWeekendDay && !isToday && "bg-accent/5"
+                          "flex-1 min-w-[90px] border-r border-border py-2 px-2 text-center",
+                          isToday && "bg-primary/5 border-l-2 border-l-primary",
+                          isWeekendDay && !isToday && "bg-muted/30"
                         )}
                       >
                         <div className={cn(
-                          "text-[10px] font-bold uppercase tracking-widest mb-1",
-                          isToday ? "text-primary" : isWeekendDay ? "text-accent-foreground/70" : "text-muted-foreground"
+                          "text-[9px] font-semibold uppercase tracking-wide mb-0.5",
+                          isToday ? "text-primary" : "text-muted-foreground"
                         )}>
                           {format(date, 'EEE')}
                         </div>
                         <div className={cn(
-                          "text-lg font-extrabold mb-0.5 leading-none",
+                          "text-base font-bold leading-none mb-0.5",
                           isToday ? "text-primary" : "text-foreground"
                         )}>
                           {format(date, 'd')}
                         </div>
                         <div className={cn(
-                          "text-[10px] font-semibold",
-                          isToday ? "text-primary/80" : "text-muted-foreground"
+                          "text-[9px] font-medium",
+                          isToday ? "text-primary/70" : "text-muted-foreground"
                         )}>
                           {format(date, 'MMM')}
                         </div>

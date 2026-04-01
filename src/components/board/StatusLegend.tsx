@@ -7,45 +7,23 @@ export function StatusLegend() {
   const legendItems = [
     {
       label: 'Occupied Clean',
-      color: 'bg-gradient-to-br from-primary/25 to-primary/15 border-primary/40 border-l-4 border-l-primary',
-      description: 'Guest checked in, room is clean',
-      icon: '🟦'
+      color: 'bg-blue-500/90',
+      description: 'Guest in, clean',
     },
     {
       label: 'Occupied Dirty',
-      color: 'bg-gradient-to-br from-destructive/25 to-destructive/15 border-destructive/40 border-l-4 border-l-destructive',
-      description: 'Guest checked in, needs cleaning',
-      icon: '🟥'
+      color: 'bg-blue-500/70 border-2 border-red-400',
+      description: 'Guest in, needs cleaning',
     },
     {
       label: 'Vacant Clean',
-      color: 'bg-gradient-to-br from-green-500/15 to-green-500/8 border-green-500/40 border-l-4 border-l-green-500',
+      color: 'bg-emerald-500/90',
       description: 'Ready to sell',
-      icon: '🟩'
     },
     {
       label: 'Vacant Dirty',
-      color: 'bg-gradient-to-br from-orange-500/15 to-orange-500/8 border-orange-500/40 border-l-4 border-l-orange-500',
-      description: 'Available but needs cleaning',
-      icon: '🟧'
-    },
-  ]
-
-  const statusIndicators = [
-    {
-      label: 'Clean',
-      color: 'bg-green-500 ring-2 ring-green-500/30',
-      type: 'dot'
-    },
-    {
-      label: 'Dirty',
-      color: 'bg-orange-500 ring-2 ring-orange-500/30',
-      type: 'dot'
-    },
-    {
-      label: 'Inspected',
-      color: 'bg-blue-500 ring-2 ring-blue-500/30',
-      type: 'dot'
+      color: 'bg-amber-500/90',
+      description: 'Needs cleaning',
     },
   ]
 
@@ -63,7 +41,7 @@ export function StatusLegend() {
     {
       label: 'BLK',
       variant: 'outline' as const,
-      className: 'bg-orange-50 text-orange-700 border-orange-300'
+      className: 'bg-gray-100 text-gray-700 border-gray-300'
     },
     {
       label: 'IN',
@@ -73,26 +51,26 @@ export function StatusLegend() {
     {
       label: 'OUT',
       variant: 'default' as const,
-      className: 'bg-destructive'
+      className: 'bg-red-600'
     },
   ]
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div>
-        <h3 className="text-sm font-bold mb-3 uppercase tracking-wide">Reservation Status</h3>
-        <div className="space-y-2.5">
+        <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-muted-foreground">Room Status</h3>
+        <div className="space-y-2">
           {legendItems.map((item) => (
-            <div key={item.label} className="flex items-start gap-3">
+            <div key={item.label} className="flex items-center gap-2">
               <div 
                 className={cn(
-                  "w-12 h-9 rounded-md border-2 flex-shrink-0",
+                  "w-10 h-7 rounded flex-shrink-0",
                   item.color
                 )}
               />
-              <div className="flex-1 min-w-0 pt-0.5">
-                <div className="text-sm font-semibold">{item.label}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">{item.description}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium">{item.label}</div>
+                <div className="text-[10px] text-muted-foreground">{item.description}</div>
               </div>
             </div>
           ))}
@@ -102,38 +80,24 @@ export function StatusLegend() {
       <Separator />
 
       <div>
-        <h3 className="text-sm font-bold mb-3 uppercase tracking-wide">Clean Status</h3>
-        <div className="space-y-2">
-          {statusIndicators.map((item) => (
-            <div key={item.label} className="flex items-center gap-3">
-              <div className={cn("w-2.5 h-2.5 rounded-full flex-shrink-0", item.color)} />
-              <div className="text-sm font-medium">{item.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <Separator />
-
-      <div>
-        <h3 className="text-sm font-bold mb-3 uppercase tracking-wide">Status Badges</h3>
-        <div className="flex flex-wrap gap-2">
+        <h3 className="text-xs font-semibold mb-2 uppercase tracking-wide text-muted-foreground">Badges</h3>
+        <div className="flex flex-wrap gap-1.5">
           {badges.map((item) => (
             <Badge 
               key={item.label} 
               variant={item.variant}
-              className={cn("text-xs font-semibold", item.className)}
+              className={cn("text-[10px] font-semibold h-5 px-1.5", item.className)}
             >
               {item.label}
             </Badge>
           ))}
         </div>
-        <div className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-          <div><span className="font-semibold">VIP</span> — VIP guest</div>
-          <div><span className="font-semibold">OOS</span> — Out of service</div>
-          <div><span className="font-semibold">BLK</span> — Blocked room</div>
-          <div><span className="font-semibold">IN</span> — Arriving today</div>
-          <div><span className="font-semibold">OUT</span> — Departing today</div>
+        <div className="mt-2 space-y-0.5 text-[10px] text-muted-foreground">
+          <div><span className="font-medium">VIP</span> — VIP guest</div>
+          <div><span className="font-medium">OOS</span> — Out of service</div>
+          <div><span className="font-medium">BLK</span> — Blocked</div>
+          <div><span className="font-medium">IN</span> — Arriving today</div>
+          <div><span className="font-medium">OUT</span> — Departing today</div>
         </div>
       </div>
     </div>

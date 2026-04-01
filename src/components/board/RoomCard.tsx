@@ -74,55 +74,46 @@ export function RoomCard({
   const draggable = room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ 
-        opacity: isDragging ? 0.4 : 1, 
-        scale: isDragging ? 0.98 : 1 
-      }}
-      whileHover={{ scale: isDropTarget ? 1 : 1.03, y: isDropTarget ? 0 : -2 }}
-      transition={{ duration: 0.15, ease: 'easeOut' }}
+    <div
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragLeave={onDragLeave}
+      onDragEnd={onDragEnd}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       className={cn(
-        'relative h-24 rounded-md overflow-hidden cursor-pointer transition-all',
+        'relative h-20 rounded overflow-hidden cursor-pointer transition-all',
         getStatusColor(),
         getBorderClass(),
         getRingClass(),
-        isDropTarget && 'ring-4 ring-primary ring-inset scale-105',
+        isDropTarget && 'ring-2 ring-primary ring-inset',
         draggable && 'active:cursor-grabbing',
-        'shadow hover:shadow-lg'
+        isDragging && 'opacity-50',
+        'hover:brightness-105'
       )}
     >
-      <div 
-        draggable={draggable}
-        onDragStart={onDragStart}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        onDragLeave={onDragLeave}
-        onDragEnd={onDragEnd}
-        onClick={onClick}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        className="relative h-full p-2 flex flex-col justify-between text-white"
-      >
+      <div className="relative h-full p-1.5 flex flex-col justify-between text-white">
         <div className="flex items-start justify-between gap-1">
           <div className="flex-1 min-w-0">
-            <div className="text-xl font-bold leading-none tracking-tight">{room.number}</div>
-            <div className="text-[10px] font-medium opacity-80 mt-0.5">{room.type}</div>
+            <div className="text-base font-bold leading-none">{room.number}</div>
+            <div className="text-[9px] font-medium opacity-75 mt-0.5 uppercase tracking-wide">{room.type}</div>
           </div>
           
-          <div className="flex gap-1 items-start flex-shrink-0">
-            {room.isVIP && <Star weight="fill" className="w-3.5 h-3.5 text-yellow-300" />}
-            {room.hasIssue && <Warning weight="fill" className="w-3.5 h-3.5 text-red-300" />}
-            {room.depositStatus === 'PENDING' && <CurrencyDollar weight="bold" className="w-3.5 h-3.5 text-orange-300" />}
+          <div className="flex gap-0.5 items-start flex-shrink-0">
+            {room.isVIP && <Star weight="fill" className="w-3 h-3 text-yellow-300" />}
+            {room.hasIssue && <Warning weight="fill" className="w-3 h-3 text-red-300" />}
+            {room.depositStatus === 'PENDING' && <CurrencyDollar weight="bold" className="w-3 h-3 text-orange-300" />}
           </div>
         </div>
 
         <div className="space-y-0.5 min-h-0">
           {room.guestName && (
             <>
-              <div className="text-xs font-semibold truncate leading-tight">{room.guestName}</div>
-              <div className="flex items-center gap-2 text-[10px] opacity-80">
+              <div className="text-[11px] font-semibold truncate leading-tight">{room.guestName}</div>
+              <div className="flex items-center gap-1.5 text-[9px] opacity-80">
                 {room.guestCount && (
                   <div className="flex items-center gap-0.5">
                     <Users weight="fill" className="w-2.5 h-2.5" />
@@ -133,51 +124,43 @@ export function RoomCard({
                   <span className="font-medium">{room.nightsRemaining}n</span>
                 )}
                 {getCleanIcon() && (
-                  <span className="ml-auto text-[9px]">{getCleanIcon()}</span>
+                  <span className="ml-auto text-[8px]">{getCleanIcon()}</span>
                 )}
               </div>
             </>
           )}
 
           {!room.guestName && room.operationalStatus === 'AVAILABLE' && (
-            <div className="text-[10px] font-medium opacity-75 uppercase tracking-wide">
-              {room.status === 'VACANT_CLEAN' ? 'Clean' : 'Dirty'}
+            <div className="text-[9px] font-medium opacity-70 uppercase tracking-wide">
+              {room.status === 'VACANT_CLEAN' ? 'Clean' : 'Needs Cleaning'}
             </div>
           )}
 
           {room.operationalStatus !== 'AVAILABLE' && (
-            <div className="text-[10px] font-bold uppercase tracking-wide opacity-90">
-              {room.operationalStatus === 'OUT_OF_SERVICE' ? 'OOS' : 'BLOCKED'}
+            <div className="text-[9px] font-semibold uppercase tracking-wide opacity-90">
+              {room.operationalStatus === 'OUT_OF_SERVICE' ? 'Out of Service' : 'Blocked'}
             </div>
           )}
         </div>
 
         {room.depositStatus === 'PENDING' && (
-          <div className="absolute top-0 left-0 w-full h-1 bg-orange-400/60" />
+          <div className="absolute top-0 left-0 w-full h-0.5 bg-orange-400" />
         )}
       </div>
 
       {isHovered && room.balanceDue && room.balanceDue > 0 && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="absolute bottom-0 right-0 bg-orange-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-tl-md"
-        >
+        <div className="absolute bottom-0 right-0 bg-orange-600 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-tl">
           ฿{room.balanceDue.toLocaleString()}
-        </motion.div>
+        </div>
       )}
 
       {isDropTarget && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center"
-        >
-          <div className="text-white text-xs font-bold bg-primary/80 px-3 py-1 rounded-full">
+        <div className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center">
+          <div className="text-white text-[10px] font-semibold bg-primary px-2 py-1 rounded">
             Drop here
           </div>
-        </motion.div>
+        </div>
       )}
-    </motion.div>
+    </div>
   )
 }

@@ -47,21 +47,20 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
+      <SidebarHeader className="border-b border-sidebar-border px-3 py-2.5">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <SquaresFour className="w-5 h-5 text-primary-foreground" weight="bold" />
+          <div className="w-7 h-7 rounded bg-primary flex items-center justify-center flex-shrink-0">
+            <SquaresFour className="w-4 h-4 text-primary-foreground" weight="bold" />
           </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-bold text-sidebar-foreground">Sandbox Hotel</span>
-            <span className="text-xs text-sidebar-foreground/60">Property Management</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-xs font-semibold text-sidebar-foreground truncate">Sandbox Hotel</span>
+            <span className="text-[10px] text-sidebar-foreground/50 truncate">PMS</span>
           </div>
         </div>
       </SidebarHeader>
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Primary</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {primaryNavItems.map((item) => (
@@ -70,8 +69,9 @@ export function AppSidebar() {
                     isActive={currentRoute === item.id}
                     onClick={() => navigate(item.id as any)}
                     tooltip={item.label}
+                    className="h-8 text-xs"
                   >
-                    <item.icon className="w-4 h-4" weight={currentRoute === item.id ? 'fill' : 'regular'} />
+                    <item.icon className="w-3.5 h-3.5" weight={currentRoute === item.id ? 'fill' : 'regular'} />
                     <span>{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -81,7 +81,6 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Communication</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {secondaryNavItems.map((item) => (
@@ -90,8 +89,9 @@ export function AppSidebar() {
                     isActive={currentRoute === item.id}
                     onClick={() => navigate(item.id as any)}
                     tooltip={item.label}
+                    className="h-8 text-xs"
                   >
-                    <item.icon className="w-4 h-4" weight={currentRoute === item.id ? 'fill' : 'regular'} />
+                    <item.icon className="w-3.5 h-3.5" weight={currentRoute === item.id ? 'fill' : 'regular'} />
                     <span>{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -102,7 +102,7 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border p-2">
-        <div className="text-xs text-sidebar-foreground/40 text-center">
+        <div className="text-[10px] text-sidebar-foreground/30 text-center font-medium">
           v1.0.0
         </div>
       </SidebarFooter>
