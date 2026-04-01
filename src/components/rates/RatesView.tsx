@@ -34,6 +34,9 @@ import { cn } from '@/lib/utils'
 import { RatePushPanel } from './RatePushPanel'
 import { RatePlanManager } from './RatePlanManager'
 import { TaxDiscountManager } from './TaxDiscountManager'
+import { YieldManagementPanel } from './YieldManagementPanel'
+import { CompetitiveRateAnalysis } from './CompetitiveRateAnalysis'
+import { SeasonalPackagesManager } from './SeasonalPackagesManager'
 
 interface RoomType {
   id: string
@@ -286,13 +289,16 @@ export function RatesView() {
 
       <div className="flex-1 overflow-hidden p-6">
         <Tabs defaultValue="rates" className="h-full flex flex-col">
-          <TabsList>
+          <TabsList className="grid grid-cols-7 w-full">
             <TabsTrigger value="rates">Rate Calendar</TabsTrigger>
             <TabsTrigger value="rate-plans">Rate Plans</TabsTrigger>
-            <TabsTrigger value="taxes-discounts">Taxes & Discounts</TabsTrigger>
+            <TabsTrigger value="packages">Packages</TabsTrigger>
+            <TabsTrigger value="yield">Yield Mgmt</TabsTrigger>
+            <TabsTrigger value="competitive">Competitive</TabsTrigger>
+            <TabsTrigger value="taxes-discounts">Taxes</TabsTrigger>
             <TabsTrigger value="rate-push">
               <ArrowUp className="w-4 h-4 mr-2" />
-              Channel Push
+              Push
             </TabsTrigger>
           </TabsList>
 
@@ -531,6 +537,18 @@ export function RatesView() {
 
           <TabsContent value="rate-plans" className="flex-1 mt-6 overflow-auto">
             <RatePlanManager />
+          </TabsContent>
+
+          <TabsContent value="packages" className="flex-1 mt-6 overflow-auto">
+            <SeasonalPackagesManager />
+          </TabsContent>
+
+          <TabsContent value="yield" className="flex-1 mt-6 overflow-auto">
+            <YieldManagementPanel />
+          </TabsContent>
+
+          <TabsContent value="competitive" className="flex-1 mt-6 overflow-auto">
+            <CompetitiveRateAnalysis />
           </TabsContent>
 
           <TabsContent value="taxes-discounts" className="flex-1 mt-6 overflow-auto">
