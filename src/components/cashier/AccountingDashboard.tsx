@@ -48,10 +48,247 @@ interface ExpenseCategory {
   glCode?: string
 }
 
+function generateSampleAccountingEntries(): AccountingEntry[] {
+  const entries: AccountingEntry[] = []
+  const now = new Date()
+  const currentMonth = now.getMonth()
+  const currentYear = now.getFullYear()
+  
+  const revenueCategories = [
+    { category: 'Room Revenue', subcategories: ['Rack Rate', 'Corporate Rate', 'Walk-in', 'OTA Bookings'] },
+    { category: 'Food & Beverage', subcategories: ['Restaurant', 'Room Service', 'Minibar', 'Bar'] },
+    { category: 'Other Revenue', subcategories: ['Extra Guest Fee', 'Child Fee', 'Late Checkout', 'Laundry'] },
+    { category: 'Service Charges', subcategories: ['Service Charge', 'Tourism Fee'] }
+  ]
+  
+  const expenseCategories = [
+    { category: 'Cost of Sales', subcategories: ['F&B Cost', 'Minibar Cost', 'Laundry Cost'] },
+    { category: 'Staff Costs', subcategories: ['Salaries', 'Benefits', 'Training'] },
+    { category: 'Operations', subcategories: ['Utilities', 'Maintenance', 'Supplies', 'Cleaning'] },
+    { category: 'Marketing & Sales', subcategories: ['OTA Commissions', 'Advertising', 'Photography'] },
+    { category: 'Administrative', subcategories: ['Office Supplies', 'Software', 'Bank Fees'] }
+  ]
+  
+  const paymentMethods = ['CASH', 'CREDIT_CARD', 'DEBIT_CARD', 'BANK_TRANSFER', 'MOBILE_PAYMENT']
+  const users = ['Sarah (Front Desk)', 'Michael (Manager)', 'Emma (Cashier)', 'Admin']
+  
+  let idCounter = 1
+  
+  for (let dayOffset = 0; dayOffset < 30; dayOffset++) {
+    const date = new Date(currentYear, currentMonth, dayOffset + 1)
+    const dateStr = date.toISOString()
+    
+    const roomRevenueCount = Math.floor(Math.random() * 8) + 5
+    for (let i = 0; i < roomRevenueCount; i++) {
+      const roomType = ['Standard Room', 'Deluxe Room', 'Suite'][Math.floor(Math.random() * 3)]
+      const basePrice = roomType === 'Suite' ? 4500 : roomType === 'Deluxe Room' ? 3200 : 2500
+      const amount = basePrice + Math.floor(Math.random() * 1000)
+      const taxAmount = amount * 0.07
+      const subcategory = revenueCategories[0].subcategories[Math.floor(Math.random() * 4)]
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'REVENUE',
+        category: 'Room Revenue',
+        subcategory,
+        amount: amount + taxAmount,
+        description: `${roomType} - ${subcategory}`,
+        referenceType: 'FOLIO',
+        referenceId: `FOLIO${Math.floor(Math.random() * 1000)}`,
+        paymentMethod: paymentMethods[Math.floor(Math.random() * paymentMethods.length)],
+        taxAmount,
+        createdBy: users[Math.floor(Math.random() * users.length)],
+        createdAt: dateStr
+      })
+    }
+    
+    if (Math.random() < 0.8) {
+      const fbItems = Math.floor(Math.random() * 5) + 1
+      for (let i = 0; i < fbItems; i++) {
+        const subcategory = revenueCategories[1].subcategories[Math.floor(Math.random() * 4)]
+        const baseAmount = Math.floor(Math.random() * 800) + 200
+        const taxAmount = baseAmount * 0.07
+        
+        entries.push({
+          id: `ACC${String(idCounter++).padStart(6, '0')}`,
+          date: dateStr,
+          type: 'REVENUE',
+          category: 'Food & Beverage',
+          subcategory,
+          amount: baseAmount + taxAmount,
+          description: subcategory === 'Restaurant' ? 'Breakfast/Lunch Service' : 
+                       subcategory === 'Room Service' ? 'In-Room Dining' :
+                       subcategory === 'Minibar' ? 'Minibar Consumption' : 'Bar Service',
+          referenceType: Math.random() < 0.7 ? 'FOLIO' : 'MANUAL',
+          referenceId: Math.random() < 0.7 ? `FOLIO${Math.floor(Math.random() * 1000)}` : undefined,
+          paymentMethod: paymentMethods[Math.floor(Math.random() * paymentMethods.length)],
+          taxAmount,
+          createdBy: users[Math.floor(Math.random() * users.length)],
+          createdAt: dateStr
+        })
+      }
+    }
+    
+    if (Math.random() < 0.4) {
+      const subcategory = revenueCategories[2].subcategories[Math.floor(Math.random() * 4)]
+      const amount = subcategory === 'Extra Guest Fee' ? 500 :
+                     subcategory === 'Child Fee' ? 300 :
+                     subcategory === 'Late Checkout' ? 800 : 250
+      const taxAmount = amount * 0.07
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'REVENUE',
+        category: 'Other Revenue',
+        subcategory,
+        amount: amount + taxAmount,
+        description: `${subcategory} Service`,
+        referenceType: 'FOLIO',
+        referenceId: `FOLIO${Math.floor(Math.random() * 1000)}`,
+        paymentMethod: paymentMethods[Math.floor(Math.random() * paymentMethods.length)],
+        taxAmount,
+        createdBy: users[Math.floor(Math.random() * users.length)],
+        createdAt: dateStr
+      })
+    }
+    
+    if (dayOffset % 3 === 0) {
+      const subcategory = expenseCategories[1].subcategories[Math.floor(Math.random() * 3)]
+      const amount = subcategory === 'Salaries' ? Math.floor(Math.random() * 50000) + 30000 :
+                     subcategory === 'Benefits' ? Math.floor(Math.random() * 10000) + 5000 :
+                     Math.floor(Math.random() * 3000) + 500
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'EXPENSE',
+        category: 'Staff Costs',
+        subcategory,
+        amount,
+        description: `${subcategory} - ${format(date, 'MMMM yyyy')}`,
+        referenceType: 'MANUAL',
+        paymentMethod: 'BANK_TRANSFER',
+        createdBy: 'Admin',
+        createdAt: dateStr
+      })
+    }
+    
+    if (dayOffset % 2 === 0) {
+      const subcategory = expenseCategories[2].subcategories[Math.floor(Math.random() * 4)]
+      const amount = subcategory === 'Utilities' ? Math.floor(Math.random() * 15000) + 5000 :
+                     subcategory === 'Maintenance' ? Math.floor(Math.random() * 8000) + 2000 :
+                     Math.floor(Math.random() * 3000) + 500
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'EXPENSE',
+        category: 'Operations',
+        subcategory,
+        amount,
+        description: `${subcategory} - Daily Operations`,
+        referenceType: 'MANUAL',
+        paymentMethod: Math.random() < 0.5 ? 'BANK_TRANSFER' : 'CASH',
+        createdBy: users[1],
+        createdAt: dateStr
+      })
+    }
+    
+    if (Math.random() < 0.3) {
+      const subcategory = expenseCategories[0].subcategories[Math.floor(Math.random() * 3)]
+      const amount = Math.floor(Math.random() * 5000) + 1000
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'EXPENSE',
+        category: 'Cost of Sales',
+        subcategory,
+        amount,
+        description: `${subcategory} - Inventory Purchase`,
+        referenceType: 'MANUAL',
+        paymentMethod: Math.random() < 0.7 ? 'BANK_TRANSFER' : 'CASH',
+        createdBy: users[1],
+        createdAt: dateStr
+      })
+    }
+    
+    if (dayOffset % 5 === 0) {
+      const subcategory = expenseCategories[3].subcategories[Math.floor(Math.random() * 3)]
+      const amount = subcategory === 'OTA Commissions' ? Math.floor(Math.random() * 12000) + 5000 :
+                     subcategory === 'Advertising' ? Math.floor(Math.random() * 8000) + 2000 :
+                     Math.floor(Math.random() * 4000) + 1000
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'EXPENSE',
+        category: 'Marketing & Sales',
+        subcategory,
+        amount,
+        description: `${subcategory} - ${format(date, 'MMM yyyy')}`,
+        referenceType: 'MANUAL',
+        paymentMethod: 'BANK_TRANSFER',
+        createdBy: users[1],
+        createdAt: dateStr
+      })
+    }
+    
+    if (Math.random() < 0.15) {
+      const subcategory = expenseCategories[4].subcategories[Math.floor(Math.random() * 3)]
+      const amount = subcategory === 'Software' ? Math.floor(Math.random() * 5000) + 1000 :
+                     Math.floor(Math.random() * 2000) + 300
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'EXPENSE',
+        category: 'Administrative',
+        subcategory,
+        amount,
+        description: `${subcategory} - Administrative Expenses`,
+        referenceType: 'MANUAL',
+        paymentMethod: Math.random() < 0.8 ? 'BANK_TRANSFER' : 'CREDIT_CARD',
+        createdBy: 'Admin',
+        createdAt: dateStr
+      })
+    }
+    
+    if (Math.random() < 0.05) {
+      const amount = Math.floor(Math.random() * 3000) + 500
+      
+      entries.push({
+        id: `ACC${String(idCounter++).padStart(6, '0')}`,
+        date: dateStr,
+        type: 'REFUND',
+        category: 'Room Revenue',
+        subcategory: 'Cancellation Refund',
+        amount,
+        description: 'Reservation Cancellation Refund',
+        referenceType: 'RESERVATION',
+        referenceId: `RES${Math.floor(Math.random() * 1000)}`,
+        paymentMethod: 'BANK_TRANSFER',
+        createdBy: users[Math.floor(Math.random() * 2)],
+        createdAt: dateStr
+      })
+    }
+  }
+  
+  return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+}
+
 export function AccountingDashboard() {
   const [entries, setEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
   const [folios] = useKV<any[]>('folios', [])
   const [selectedMonth, setSelectedMonth] = useState(new Date())
+  
+  useState(() => {
+    if (entries.length === 0) {
+      setEntries(generateSampleAccountingEntries())
+    }
+  })
   
   const revenueCategories: RevenueCategory[] = [
     {

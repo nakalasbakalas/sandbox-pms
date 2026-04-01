@@ -17,6 +17,7 @@ import {
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { calculateTax } from '@/lib/tax-calculator'
+import { AccountingDashboard } from '@/components/cashier/AccountingDashboard'
 
 interface FolioCharge {
   id: string
@@ -189,7 +190,7 @@ export function CashierView() {
   const [folios, setFolios] = useKV<Folio[]>('cashier-folios', [])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
-  const [selectedTab, setSelectedTab] = useState<'open' | 'closed' | 'all'>('open')
+  const [selectedTab, setSelectedTab] = useState<'open' | 'closed' | 'all' | 'accounting'>('open')
   
   useState(() => {
     if (folios.length === 0) {
@@ -314,8 +315,15 @@ export function CashierView() {
             <TabsTrigger value="open">Open Folios</TabsTrigger>
             <TabsTrigger value="closed">Closed Folios</TabsTrigger>
             <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="accounting">Accounting</TabsTrigger>
           </TabsList>
         </div>
+        
+        <TabsContent value="accounting" className="flex-1 m-0 p-6">
+          <ScrollArea className="h-full">
+            <AccountingDashboard />
+          </ScrollArea>
+        </TabsContent>
         
         <TabsContent value={selectedTab} className="flex-1 m-0 p-6">
           <ScrollArea className="h-full">
