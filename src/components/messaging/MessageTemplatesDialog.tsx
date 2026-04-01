@@ -43,6 +43,8 @@ import {
   Warning,
   CalendarBlank,
   PencilSimple,
+  PlusCircle,
+  Trash,
 } from '@phosphor-icons/react'
 import type { StaffMessageTemplate, StaffTemplateCategory, TemplateVariable } from '@/types/staff-templates'
 import type { InternalMessage, InternalMessagePriority, StaffDepartment, StaffMember, InternalChannel } from '@/types/messaging'
@@ -55,6 +57,7 @@ import {
   getMostUsedTemplates,
   TEMPLATE_CATEGORIES,
 } from '@/lib/staff-message-templates'
+import { TemplateBuilder } from './TemplateBuilder'
 import { toast } from 'sonner'
 
 interface MessageTemplatesDialogProps {
@@ -98,6 +101,7 @@ export function MessageTemplatesDialog({
   const [recipientId, setRecipientId] = useState('')
   const [channelId, setChannelId] = useState('')
   const [department, setDepartment] = useState<StaffDepartment>('ALL')
+  const [showBuilder, setShowBuilder] = useState(false)
 
   const filteredTemplates = useMemo(() => {
     let filtered = templates || []
@@ -145,6 +149,28 @@ export function MessageTemplatesDialog({
         t.id === templateId ? { ...t, isFavorite: !t.isFavorite } : t
       )
     )
+  }
+
+  const handleDeleteTemplate = (templateId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setTemplates(current => (current || []).filter(t => t.id !== templateId))
+    if (selectedTemplate?.id === templateId) {
+      setSelectedTemplate(null)
+    }
+    toast.success('Template deleted')
+  }
+
+  const handleSaveCustomTemplate = (template: Omit<StaffMessageTemplate, 'id' | 'usageCount' | 'isFavorite' | 'createdAt' | 'updatedAt'>) => {
+    const newTemplate: StaffMessageTemplate = {
+      ...template,
+      id: createTemplateId(),
+      usageCount: 0,
+      isFavorite: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    setTemplates(current => [...(current || []), newTemplate])
+    toast.success('Template created')
   }
 
   const handleSendFromTemplate = () => {
@@ -229,14 +255,23 @@ export function MessageTemplatesDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl h-[80vh] flex flex-col p-0">
-        <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle>Message Templates</DialogTitle>
-          <DialogDescription>
-            Select a template to quickly send common staff communications
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-5xl h-[80vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <DialogTitle>Message Templates</DialogTitle>
+                <DialogDescription>
+                  Select a template to quickly send common staff communications
+                </DialogDescription>
+              </div>
+              <Button onClick={() => setShowBuilder(true)} size="sm">
+                <PlusCircle size={16} className="mr-2" />
+                Create Template
+              </Button>
+            </div>
+          </DialogHeader>
 
         <div className="flex-1 flex overflow-hidden">
           <div className="w-2/5 border-r flex flex-col">
@@ -276,6 +311,7 @@ export function MessageTemplatesDialog({
                   selectedTemplate={selectedTemplate}
                   onSelect={handleSelectTemplate}
                   onToggleFavorite={handleToggleFavorite}
+                  onDelete={handleDeleteTemplate}
                   getCategoryIcon={getCategoryIcon}
                 />
               ) : selectedCategory === 'POPULAR' ? (
@@ -284,6 +320,7 @@ export function MessageTemplatesDialog({
                   selectedTemplate={selectedTemplate}
                   onSelect={handleSelectTemplate}
                   onToggleFavorite={handleToggleFavorite}
+                  onDelete={handleDeleteTemplate}
                   getCategoryIcon={getCategoryIcon}
                 />
               ) : (
@@ -302,6 +339,7 @@ export function MessageTemplatesDialog({
                           selectedTemplate={selectedTemplate}
                           onSelect={handleSelectTemplate}
                           onToggleFavorite={handleToggleFavorite}
+                          onDelete={handleDeleteTemplate}
                           getCategoryIcon={getCategoryIcon}
                         />
                       </div>
@@ -479,6 +517,13 @@ export function MessageTemplatesDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    <TemplateBuilder
+      open={showBuilder}
+      onOpenChange={setShowBuilder}
+      onSave={handleSaveCustomTemplate}
+    />
+    </>
   )
 }
 
@@ -487,10 +532,11 @@ interface TemplateListProps {
   selectedTemplate: StaffMessageTemplate | null
   onSelect: (template: StaffMessageTemplate) => void
   onToggleFavorite: (templateId: string, e: React.MouseEvent) => void
+  onDelete: (templateId: string, e: React.MouseEvent) => void
   getCategoryIcon: (category: StaffTemplateCategory) => React.ComponentType<any>
 }
 
-function TemplateList({ templates, selectedTemplate, onSelect, onToggleFavorite, getCategoryIcon }: TemplateListProps) {
+function TemplateList({ templates, selectedTemplate, onSelect, onToggleFavorite, onDelete, getCategoryIcon }: TemplateListProps) {
   if (templates.length === 0) {
     return (
       <div className="text-center py-8 text-sm text-muted-foreground">
@@ -504,40 +550,56 @@ function TemplateList({ templates, selectedTemplate, onSelect, onToggleFavorite,
       {templates.map(template => {
         const Icon = getCategoryIcon(template.category)
         return (
-          <button
+          <div
             key={template.id}
-            onClick={() => onSelect(template)}
-            className={`w-full text-left p-3 rounded-lg transition-colors border ${
+            className={`group relative rounded-lg transition-colors border ${
               selectedTemplate?.id === template.id
                 ? 'bg-primary/10 border-primary/20'
                 : 'hover:bg-muted border-transparent'
             }`}
           >
-            <div className="flex items-start justify-between gap-2 mb-1">
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <Icon size={16} className="text-muted-foreground shrink-0" />
-                <span className="font-medium text-sm truncate">{template.name}</span>
+            <button
+              onClick={() => onSelect(template)}
+              className="w-full text-left p-3"
+            >
+              <div className="flex items-start justify-between gap-2 mb-1">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Icon size={16} className="text-muted-foreground shrink-0" />
+                  <span className="font-medium text-sm truncate">{template.name}</span>
+                  {template.isCustom && (
+                    <Badge variant="outline" className="h-5 text-xs">Custom</Badge>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={(e) => onToggleFavorite(template.id, e)}
+                  >
+                    <Star
+                      size={16}
+                      weight={template.isFavorite ? 'fill' : 'regular'}
+                      className={template.isFavorite ? 'text-amber-500' : 'text-muted-foreground'}
+                    />
+                  </button>
+                  {template.isCustom && (
+                    <button
+                      onClick={(e) => onDelete(template.id, e)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={(e) => onToggleFavorite(template.id, e)}
-                className="shrink-0"
-              >
-                <Star
-                  size={16}
-                  weight={template.isFavorite ? 'fill' : 'regular'}
-                  className={template.isFavorite ? 'text-amber-500' : 'text-muted-foreground'}
-                />
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <PriorityBadge priority={template.priority} size="sm" />
-              {template.usageCount > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  Used {template.usageCount}x
-                </span>
-              )}
-            </div>
-          </button>
+              <div className="flex items-center gap-2">
+                <PriorityBadge priority={template.priority} size="sm" />
+                {template.usageCount > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    Used {template.usageCount}x
+                  </span>
+                )}
+              </div>
+            </button>
+          </div>
         )
       })}
     </div>
