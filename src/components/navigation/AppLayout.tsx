@@ -18,8 +18,8 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
     <SidebarProvider defaultOpen={true}>
       <AppSidebar />
       <SidebarInset className="flex flex-col">
-        <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-background px-3">
-          <SidebarTrigger className="-ml-1" />
+        <header className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-background px-2">
+          <SidebarTrigger className="-ml-1 h-6 w-6" />
           <div className="h-3 w-px bg-border/50" />
           <div className="flex-1" />
           {onOpenShortcuts && (
@@ -28,32 +28,33 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
                 >
-                  <Question size={18} weight="duotone" />
+                  <Question size={14} weight="duotone" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-80" align="end">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <h4 className="font-semibold flex items-center gap-2">
-                      <Info size={18} weight="duotone" className="text-primary" />
+              <PopoverContent className="w-72" align="end">
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-semibold flex items-center gap-1.5">
+                      <Info size={14} weight="duotone" className="text-primary" />
                       Quick Help
                     </h4>
-                    <p className="text-sm text-muted-foreground">
-                      Get help and learn keyboard shortcuts for faster navigation
+                    <p className="text-xs text-muted-foreground">
+                      Get help and learn keyboard shortcuts
                     </p>
                   </div>
                   <Button
                     variant="outline"
-                    className="w-full justify-between"
+                    size="sm"
+                    className="w-full justify-between h-8"
                     onClick={onOpenShortcuts}
                   >
-                    <span className="flex items-center gap-2">
-                      <Command size={16} weight="duotone" />
+                    <span className="flex items-center gap-1.5 text-xs">
+                      <Command size={14} weight="duotone" />
                       Keyboard Shortcuts
                     </span>
-                    <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-xs font-medium text-muted-foreground">
+                    <kbd className="pointer-events-none inline-flex h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[10px] font-medium text-muted-foreground">
                       ?
                     </kbd>
                   </Button>

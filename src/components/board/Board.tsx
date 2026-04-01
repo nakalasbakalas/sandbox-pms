@@ -743,27 +743,27 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-2 bg-background p-3">
+    <div className="h-full flex gap-1.5 bg-background p-2">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <Card className="w-72 flex-shrink-0 border shadow-sm flex flex-col">
-          <div className="p-3 border-b border-border bg-muted/30">
+        <Card className="w-60 flex-shrink-0 border shadow-sm flex flex-col">
+          <div className="p-2 border-b border-border bg-muted/30">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-xs font-semibold">Unassigned Reservations</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Drag to assign room</p>
+                <h3 className="text-[11px] font-semibold">Unassigned</h3>
+                <p className="text-[9px] text-muted-foreground mt-0.5">Drag to room</p>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUnassigned(false)}
-                className="h-6 w-6 p-0"
+                className="h-5 w-5 p-0"
               >
                 <X className="w-3 h-3" />
               </Button>
             </div>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-2 space-y-2">
+            <div className="p-1.5 space-y-1.5">
               {unassignedReservations.map((reservation) => (
                 <Card
                   key={reservation.id}
@@ -771,49 +771,49 @@ export function Board() {
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "p-2.5 cursor-move hover:shadow transition-all border",
+                    "p-1.5 cursor-move hover:shadow transition-all border",
                     draggingReservation === reservation.id && "opacity-40",
                     reservation.isVIP && "border-amber-400/60 bg-amber-50/50",
                     reservation.needsAttention && "border-destructive/40 bg-destructive/5"
                   )}
                 >
-                  <div className="space-y-1.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-medium text-xs truncate flex-1">
+                  <div className="space-y-1">
+                    <div className="flex items-start justify-between gap-1.5">
+                      <div className="font-medium text-[10px] truncate flex-1">
                         {reservation.guestName}
                       </div>
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 flex-shrink-0">
+                      <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 flex-shrink-0">
                         {reservation.roomType}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <Clock className="w-2.5 h-2.5" />
+                    <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                      <Clock className="w-2 h-2" />
                       <span>{format(reservation.checkIn, 'MMM d')}</span>
                       <span>→</span>
                       <span>{format(reservation.checkOut, 'MMM d')}</span>
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Users className="w-2.5 h-2.5" />
+                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground">
+                        <Users className="w-2 h-2" />
                         <span>{reservation.guestCount}</span>
-                        <span className="ml-1">• {reservation.nights}n</span>
+                        <span className="ml-0.5">• {reservation.nights}n</span>
                       </div>
-                      <Badge variant="secondary" className="text-[8px] px-1 py-0 h-3.5">
+                      <Badge variant="secondary" className="text-[7px] px-0.5 py-0 h-3">
                         {reservation.source}
                       </Badge>
                     </div>
                     
                     {reservation.isVIP && (
-                      <Badge className="text-[8px] px-1 py-0 h-3.5 bg-amber-500">
+                      <Badge className="text-[7px] px-1 py-0 h-3 bg-amber-500">
                         VIP
                       </Badge>
                     )}
                     
                     {reservation.needsAttention && (
-                      <div className="flex items-center gap-1 text-[10px] text-destructive">
-                        <Warning className="w-2.5 h-2.5" />
+                      <div className="flex items-center gap-0.5 text-[9px] text-destructive">
+                        <Warning className="w-2 h-2" />
                         <span>Needs attention</span>
                       </div>
                     )}
@@ -825,22 +825,22 @@ export function Board() {
         </Card>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-2">
+      <div className="flex-1 flex flex-col min-w-0 gap-1.5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold">Room Board</h1>
-            <p className="text-[10px] text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
+            <h1 className="text-base font-bold">Room Board</h1>
+            <p className="text-[9px] text-muted-foreground mt-0.5 font-medium">Sandbox Hotel · 30 Rooms</p>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <Button
               onClick={() => {
                 setPrefilledReservation(null)
                 setShowNewReservationDialog(true)
               }}
-              className="h-8 gap-1.5 text-xs font-medium"
+              className="h-7 gap-1 text-[11px] font-medium px-2.5"
             >
-              <Plus className="w-3.5 h-3.5" weight="bold" />
+              <Plus className="w-3 h-3" weight="bold" />
               Add
             </Button>
             {!showUnassigned && unassignedReservations.length > 0 && (
@@ -848,17 +848,17 @@ export function Board() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowUnassigned(true)}
-                className="h-8 text-xs gap-1.5 font-medium"
+                className="h-7 text-[11px] gap-1 font-medium px-2.5"
               >
-                <Badge variant="destructive" className="h-4 w-4 p-0 text-[9px] flex items-center justify-center font-semibold">
+                <Badge variant="destructive" className="h-3.5 w-3.5 p-0 text-[8px] flex items-center justify-center font-semibold">
                   {unassignedReservations.length}
                 </Badge>
                 Unassigned
               </Button>
             )}
             {lastUpdate && (
-              <div className="text-[10px] text-muted-foreground flex items-center gap-1 px-2 py-1 rounded bg-primary/5 border border-primary/20">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+              <div className="text-[9px] text-muted-foreground flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/5 border border-primary/20">
+                <div className="w-1 h-1 rounded-full bg-primary animate-pulse" />
                 <span className="font-medium">Live</span>
               </div>
             )}
@@ -866,21 +866,21 @@ export function Board() {
               variant="outline" 
               size="sm"
               onClick={commandPalette.open}
-              className="gap-1.5 h-8 font-medium text-xs"
+              className="gap-1 h-7 font-medium text-[11px] px-2"
             >
-              <Command className="w-3.5 h-3.5" />
+              <Command className="w-3 h-3" />
               <span className="hidden md:inline">Commands</span>
-              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[9px] font-medium text-muted-foreground md:inline-flex">
-                <span className="text-[10px]">⌘</span>K
+              <kbd className="pointer-events-none hidden h-3.5 select-none items-center gap-0.5 rounded border bg-muted px-0.5 font-mono text-[8px] font-medium text-muted-foreground md:inline-flex">
+                <span className="text-[9px]">⌘</span>K
               </kbd>
             </Button>
-            <div className="relative w-48">
-              <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <div className="relative w-40">
+              <MagnifyingGlass className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
               <Input
-                placeholder="Search rooms, guests..."
+                placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs"
+                className="pl-7 h-7 text-[11px]"
               />
             </div>
             <BoardFiltersPopover
@@ -890,11 +890,11 @@ export function Board() {
             />
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 w-8 p-0">
-                  <Info className="w-3.5 h-3.5" />
+                <Button variant="outline" size="sm" className="h-7 w-7 p-0">
+                  <Info className="w-3 h-3" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-[400px]">
+              <PopoverContent align="end" className="w-[360px]">
                 <StatusLegend />
               </PopoverContent>
             </Popover>
@@ -913,8 +913,8 @@ export function Board() {
           <div className="calendar-board">
             <div className="sticky top-0 z-20 bg-muted/40 border-b border-border">
               <div className="flex">
-                <div className="w-28 flex-shrink-0 border-r border-border py-2 px-3">
-                  <div className="text-[10px] font-semibold text-foreground uppercase tracking-wide">Room</div>
+                <div className="w-24 flex-shrink-0 border-r border-border py-1.5 px-2">
+                  <div className="text-[9px] font-semibold text-foreground uppercase tracking-wide">Room</div>
                 </div>
                 
                 <div className="flex-1 flex overflow-x-auto">
@@ -925,25 +925,25 @@ export function Board() {
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[90px] border-r border-border py-2 px-2 text-center",
+                          "flex-1 min-w-[80px] border-r border-border py-1.5 px-1.5 text-center",
                           isToday && "bg-primary/5 border-l-2 border-l-primary",
                           isWeekendDay && !isToday && "bg-muted/30"
                         )}
                       >
                         <div className={cn(
-                          "text-[9px] font-semibold uppercase tracking-wide mb-0.5",
+                          "text-[8px] font-semibold uppercase tracking-wide mb-0.5",
                           isToday ? "text-primary" : "text-muted-foreground"
                         )}>
                           {format(date, 'EEE')}
                         </div>
                         <div className={cn(
-                          "text-base font-bold leading-none mb-0.5",
+                          "text-sm font-bold leading-none mb-0.5",
                           isToday ? "text-primary" : "text-foreground"
                         )}>
                           {format(date, 'd')}
                         </div>
                         <div className={cn(
-                          "text-[9px] font-medium",
+                          "text-[8px] font-medium",
                           isToday ? "text-primary/70" : "text-muted-foreground"
                         )}>
                           {format(date, 'MMM')}
@@ -1428,26 +1428,26 @@ function RoomTypeRow({
     <div className="border-b border-border last:border-b-0">
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-muted/50 to-muted/30 hover:from-muted/70 hover:to-muted/50 transition-all border-b border-border/50"
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-muted/50 to-muted/30 hover:from-muted/70 hover:to-muted/50 transition-all border-b border-border/50"
       >
         {isCollapsed ? (
-          <CaretRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <CaretRight className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         ) : (
-          <CaretDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <CaretDown className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
         )}
-        <div className="flex items-center gap-2.5 text-sm font-bold flex-1 min-w-0">
+        <div className="flex items-center gap-2 text-xs font-bold flex-1 min-w-0">
           <span className="text-muted-foreground">{subtitle}</span>
           <span className="text-muted-foreground/50">·</span>
           <span className="text-foreground">{title}</span>
-          <div className="flex items-center gap-2 ml-auto">
-            <Badge variant="secondary" className="text-[10px] px-2 py-0.5 h-5 font-bold">
+          <div className="flex items-center gap-1.5 ml-auto">
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0.5 h-4 font-bold">
               {rooms.length} total
             </Badge>
-            <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5 font-bold bg-primary/5 text-primary border-primary/30">
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-4 font-bold bg-primary/5 text-primary border-primary/30">
               {occupiedCount} occ
             </Badge>
             {dirtyCount > 0 && (
-              <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5 font-bold bg-orange-50 text-orange-700 border-orange-200">
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-4 font-bold bg-orange-50 text-orange-700 border-orange-200">
                 {dirtyCount} dirty
               </Badge>
             )}
@@ -1618,24 +1618,24 @@ function CalendarRoomRow({
       onMouseLeave={handleResizeMouseUp}
     >
       <div 
-        className="w-32 flex-shrink-0 border-r border-border py-2 px-4 flex items-center gap-2.5 cursor-pointer bg-muted/10 group-hover:bg-muted/30 transition-all"
+        className="w-24 flex-shrink-0 border-r border-border py-1.5 px-2 flex items-center gap-1.5 cursor-pointer bg-muted/10 group-hover:bg-muted/30 transition-all"
         onClick={onClick}
       >
-        <div className={cn("w-2 h-2 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
-        <div className="text-sm font-extrabold tracking-tight">{room.number}</div>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className={cn("w-1.5 h-1.5 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
+        <div className="text-xs font-extrabold tracking-tight">{room.number}</div>
+        <div className="ml-auto flex items-center gap-1">
           {room.operationalStatus === 'OUT_OF_SERVICE' && (
-            <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 font-bold">
+            <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3 font-bold">
               OOS
             </Badge>
           )}
           {room.operationalStatus === 'BLOCKED' && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-orange-50 text-orange-700 border-orange-300">
+            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 font-bold bg-orange-50 text-orange-700 border-orange-300">
               BLK
             </Badge>
           )}
           {room.isVIP && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-bold bg-amber-50 text-amber-700 border-amber-300">
+            <Badge variant="outline" className="text-[8px] px-1 py-0 h-3 font-bold bg-amber-50 text-amber-700 border-amber-300">
               VIP
             </Badge>
           )}
@@ -1663,7 +1663,7 @@ function CalendarRoomRow({
             <div 
               key={i}
               className={cn(
-                "flex-1 min-w-[100px] border-r border-border py-2 px-2 relative transition-all",
+                "flex-1 min-w-[80px] border-r border-border py-1.5 px-1.5 relative transition-all",
                 isToday && "bg-primary/10 shadow-inner",
                 isWeekendDay && !isToday && "bg-accent/5",
                 draggingReservation && isAvailableForAssignment && "ring-1 ring-inset ring-primary/40 bg-primary/5",
@@ -1697,16 +1697,16 @@ function CalendarRoomRow({
                     onReservationClick()
                   }}
                 >
-                  <div className="px-2.5 py-2 h-full flex flex-col justify-between">
+                  <div className="px-1.5 py-1.5 h-full flex flex-col justify-between">
                     {isCheckIn && (
                       <div className="space-y-0.5">
-                        <div className="text-[11px] font-bold truncate text-foreground flex items-center gap-1">
+                        <div className="text-[10px] font-bold truncate text-foreground flex items-center gap-0.5">
                           {room.guestName}
-                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
+                          <Pencil className="w-2 h-2 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
                         </div>
                         {room.guestCount && (
-                          <div className="text-[9px] text-foreground/70 flex items-center gap-0.5">
-                            <Users className="w-2.5 h-2.5" />
+                          <div className="text-[8px] text-foreground/70 flex items-center gap-0.5">
+                            <Users className="w-2 h-2" />
                             <span>{room.guestCount}</span>
                           </div>
                         )}
@@ -1715,17 +1715,17 @@ function CalendarRoomRow({
                     
                     <div className="flex items-center justify-between mt-auto">
                       {room.isArrivalToday && isCheckIn && (
-                        <Badge className="text-[8px] px-1 py-0 h-3.5 bg-green-600 hover:bg-green-700">
+                        <Badge className="text-[7px] px-0.5 py-0 h-3 bg-green-600 hover:bg-green-700">
                           IN
                         </Badge>
                       )}
                       {room.isDepartureToday && isCheckOut && (
-                        <Badge className="text-[8px] px-1 py-0 h-3.5 bg-destructive hover:bg-destructive/90 ml-auto">
+                        <Badge className="text-[7px] px-0.5 py-0 h-3 bg-destructive hover:bg-destructive/90 ml-auto">
                           OUT
                         </Badge>
                       )}
                       {room.depositStatus === 'PENDING' && isCheckIn && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 ring-2 ring-orange-500/30 ml-auto" />
+                        <div className="w-1 h-1 rounded-full bg-orange-500 ring-2 ring-orange-500/30 ml-auto" />
                       )}
                     </div>
                   </div>

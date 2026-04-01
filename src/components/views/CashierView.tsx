@@ -272,84 +272,84 @@ export function CashierView() {
   return (
     <div className="h-screen flex flex-col bg-background">
       <div className="flex-none border-b border-border bg-card">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between mb-4">
+        <div className="px-4 py-2.5">
+          <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-2xl font-semibold text-foreground">Cashier</h1>
-              <p className="text-sm text-muted-foreground mt-1">
+              <h1 className="text-lg font-semibold text-foreground">Cashier</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Manage guest folios and payments
               </p>
             </div>
-            <Button className="gap-2">
-              <Plus size={18} weight="bold" />
+            <Button size="sm" className="gap-1.5 h-7 text-xs">
+              <Plus size={14} weight="bold" />
               Post Charge
             </Button>
           </div>
           
-          <div className="relative max-w-md">
-            <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+          <div className="relative max-w-sm">
+            <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={14} />
             <Input
-              placeholder="Search by guest, room, or folio number..."
+              placeholder="Search by guest, room, or folio..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-8 h-7 text-xs"
             />
           </div>
         </div>
         
-        <div className="px-6 pb-4">
-          <div className="grid grid-cols-4 gap-3">
-            <Card className="p-3">
-              <div className="text-xs font-medium text-muted-foreground mb-1">Open Folios</div>
-              <div className="text-2xl font-bold text-foreground">{stats.openFolios}</div>
+        <div className="px-4 pb-2.5">
+          <div className="grid grid-cols-4 gap-2">
+            <Card className="p-2">
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Open Folios</div>
+              <div className="text-lg font-bold text-foreground">{stats.openFolios}</div>
             </Card>
-            <Card className="p-3">
-              <div className="text-xs font-medium text-muted-foreground mb-1">Outstanding Balance</div>
-              <div className="text-2xl font-bold text-orange-600">฿{stats.totalOutstanding.toLocaleString()}</div>
+            <Card className="p-2">
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Outstanding</div>
+              <div className="text-lg font-bold text-orange-600">฿{stats.totalOutstanding.toLocaleString()}</div>
             </Card>
-            <Card className="p-3">
-              <div className="text-xs font-medium text-muted-foreground mb-1">Total Revenue</div>
-              <div className="text-2xl font-bold text-emerald-600">฿{stats.totalRevenue.toLocaleString()}</div>
+            <Card className="p-2">
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Revenue</div>
+              <div className="text-lg font-bold text-emerald-600">฿{stats.totalRevenue.toLocaleString()}</div>
             </Card>
-            <Card className="p-3">
-              <div className="text-xs font-medium text-muted-foreground mb-1">Collected</div>
-              <div className="text-2xl font-bold text-blue-600">฿{stats.totalCollected.toLocaleString()}</div>
+            <Card className="p-2">
+              <div className="text-[10px] font-medium text-muted-foreground mb-0.5">Collected</div>
+              <div className="text-lg font-bold text-blue-600">฿{stats.totalCollected.toLocaleString()}</div>
             </Card>
           </div>
         </div>
       </div>
       
       <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as any)} className="flex-1 flex flex-col">
-        <div className="flex-none border-b border-border bg-card px-6">
-          <TabsList className="bg-transparent">
-            <TabsTrigger value="open">Open Folios</TabsTrigger>
-            <TabsTrigger value="closed">Closed Folios</TabsTrigger>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="accounting">Accounting</TabsTrigger>
-            <TabsTrigger value="reconciliation">Cash Reconciliation</TabsTrigger>
+        <div className="flex-none border-b border-border bg-card px-4">
+          <TabsList className="bg-transparent h-8">
+            <TabsTrigger value="open" className="text-xs">Open</TabsTrigger>
+            <TabsTrigger value="closed" className="text-xs">Closed</TabsTrigger>
+            <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
+            <TabsTrigger value="accounting" className="text-xs">Accounting</TabsTrigger>
+            <TabsTrigger value="reconciliation" className="text-xs">Reconciliation</TabsTrigger>
           </TabsList>
         </div>
         
-        <TabsContent value="accounting" className="flex-1 m-0 p-6">
+        <TabsContent value="accounting" className="flex-1 m-0 p-4">
           <ScrollArea className="h-full">
             <AccountingDashboard />
           </ScrollArea>
         </TabsContent>
 
-        <TabsContent value="reconciliation" className="flex-1 m-0 p-6">
+        <TabsContent value="reconciliation" className="flex-1 m-0 p-4">
           <ScrollArea className="h-full">
             <CashReconciliation />
           </ScrollArea>
         </TabsContent>
         
-        <TabsContent value={selectedTab} className="flex-1 m-0 p-6">
+        <TabsContent value={selectedTab} className="flex-1 m-0 p-4">
           <ScrollArea className="h-full">
-            <div className="space-y-3">
+            <div className="space-y-2">
               {filteredFolios.length === 0 ? (
-                <Card className="p-12 text-center">
-                  <Receipt className="mx-auto mb-4 text-muted-foreground" size={48} weight="light" />
-                  <h3 className="text-lg font-medium text-foreground mb-2">No folios found</h3>
-                  <p className="text-sm text-muted-foreground">
+                <Card className="p-8 text-center">
+                  <Receipt className="mx-auto mb-3 text-muted-foreground" size={40} weight="light" />
+                  <h3 className="text-base font-medium text-foreground mb-1.5">No folios found</h3>
+                  <p className="text-xs text-muted-foreground">
                     {searchQuery ? 'Try adjusting your search terms' : 'No folios in this category'}
                   </p>
                 </Card>
@@ -357,19 +357,19 @@ export function CashierView() {
                 filteredFolios.map(folio => (
                   <Card 
                     key={folio.id}
-                    className="p-4 hover:border-primary/50 transition-colors cursor-pointer"
+                    className="p-3 hover:border-primary/50 transition-colors cursor-pointer"
                     onClick={() => setSelectedFolio(folio)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-base font-semibold text-foreground">{folio.guestName}</h3>
-                          <Badge variant="outline" className="text-xs">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <h3 className="text-sm font-semibold text-foreground">{folio.guestName}</h3>
+                          <Badge variant="outline" className="text-[10px] py-0 h-4">
                             Room {folio.roomNumber}
                           </Badge>
                           <Badge 
                             className={cn(
-                              'text-xs border',
+                              'text-[10px] border py-0 h-4',
                               folio.status === 'OPEN' && 'bg-blue-100 text-blue-800 border-blue-200',
                               folio.status === 'CLOSED' && 'bg-slate-100 text-slate-600 border-slate-200'
                             )}
@@ -377,20 +377,20 @@ export function CashierView() {
                             {folio.status}
                           </Badge>
                           {folio.balance > 0 && folio.status === 'OPEN' && (
-                            <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-xs">
-                              <Warning size={12} weight="fill" className="mr-1" />
-                              Balance Due
+                            <Badge className="bg-orange-100 text-orange-800 border-orange-200 text-[10px] py-0 h-4">
+                              <Warning size={10} weight="fill" className="mr-0.5" />
+                              Due
                             </Badge>
                           )}
                         </div>
                         
-                        <div className="grid grid-cols-4 gap-4 text-sm text-muted-foreground">
+                        <div className="grid grid-cols-4 gap-3 text-xs text-muted-foreground">
                           <div>
                             <span className="font-medium">Folio:</span> #{folio.id}
                           </div>
                           <div className="flex items-center gap-1">
-                            <CalendarBlank size={16} />
-                            {format(folio.checkIn, 'MMM d')} - {folio.checkOut ? format(folio.checkOut, 'MMM d, yyyy') : 'In-house'}
+                            <CalendarBlank size={12} />
+                            {format(folio.checkIn, 'MMM d')} - {folio.checkOut ? format(folio.checkOut, 'MMM d, yy') : 'In-house'}
                           </div>
                           <div>
                             <span className="font-medium">Charges:</span> {folio.charges.length}
@@ -401,8 +401,8 @@ export function CashierView() {
                         </div>
                       </div>
                       
-                      <div className="text-right ml-6 min-w-[200px]">
-                        <div className="space-y-1 text-sm mb-2">
+                      <div className="text-right ml-4 min-w-[160px]">
+                        <div className="space-y-0.5 text-xs mb-1.5">
                           <div className="flex justify-between text-muted-foreground">
                             <span>Subtotal:</span>
                             <span>฿{folio.subtotal.toLocaleString()}</span>
@@ -411,25 +411,25 @@ export function CashierView() {
                             <span>Tax (7%):</span>
                             <span>฿{folio.tax.toLocaleString()}</span>
                           </div>
-                          <Separator className="my-1" />
-                          <div className="flex justify-between font-semibold text-base text-foreground">
+                          <Separator className="my-0.5" />
+                          <div className="flex justify-between font-semibold text-sm text-foreground">
                             <span>Total:</span>
                             <span>฿{folio.total.toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between text-emerald-600">
+                          <div className="flex justify-between text-emerald-600 text-xs">
                             <span>Paid:</span>
                             <span>฿{folio.paid.toLocaleString()}</span>
                           </div>
                           {folio.balance > 0 && (
-                            <div className="flex justify-between font-bold text-orange-600">
+                            <div className="flex justify-between font-bold text-orange-600 text-xs">
                               <span>Balance:</span>
                               <span>฿{folio.balance.toLocaleString()}</span>
                             </div>
                           )}
                         </div>
                         {folio.balance === 0 && folio.status === 'CLOSED' && (
-                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-xs w-full justify-center">
-                            <CheckCircle size={12} weight="fill" className="mr-1" />
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] w-full justify-center py-0 h-4">
+                            <CheckCircle size={10} weight="fill" className="mr-0.5" />
                             Paid in Full
                           </Badge>
                         )}
