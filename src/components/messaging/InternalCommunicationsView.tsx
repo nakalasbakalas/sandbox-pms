@@ -50,8 +50,10 @@ import {
   MagnifyingGlass,
   Paperclip,
   X,
+  BookOpen,
 } from '@phosphor-icons/react'
 import type { InternalMessage, InternalChannel, StaffMember, StaffDepartment, InternalMessagePriority } from '@/types/messaging'
+import { MessageTemplatesDialog } from './MessageTemplatesDialog'
 import { toast } from 'sonner'
 import { format, formatDistanceToNow } from 'date-fns'
 
@@ -147,6 +149,7 @@ export function InternalCommunicationsView() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showNewChannel, setShowNewChannel] = useState(false)
   const [showNewMessage, setShowNewMessage] = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
 
   const currentUserId = 'current-user'
   const currentUserName = 'You'
@@ -281,6 +284,10 @@ export function InternalCommunicationsView() {
               {urgentMessages.length} urgent
             </Button>
           )}
+          <Button variant="outline" onClick={() => setShowTemplates(true)}>
+            <BookOpen size={16} weight="bold" className="mr-2" />
+            Templates
+          </Button>
           <Button variant="outline" onClick={() => setShowNewChannel(true)}>
             <Hash size={16} weight="bold" className="mr-2" />
             New Channel
@@ -457,6 +464,15 @@ export function InternalCommunicationsView() {
           {(selectedChannel || selectedStaff) && (
             <div className="border-t bg-card p-4">
               <div className="max-w-4xl flex gap-2">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="shrink-0"
+                  onClick={() => setShowTemplates(true)}
+                  title="Use template"
+                >
+                  <BookOpen size={20} />
+                </Button>
                 <Button variant="ghost" size="icon" className="shrink-0">
                   <Paperclip size={20} />
                 </Button>
@@ -518,6 +534,19 @@ export function InternalCommunicationsView() {
         onSendMessage={(message) => {
           setMessages((current) => [...(current || []), message])
           toast.success('Message sent')
+        }}
+      />
+
+      <MessageTemplatesDialog
+        open={showTemplates}
+        onOpenChange={setShowTemplates}
+        staff={staff || []}
+        channels={channels || []}
+        currentUserId={currentUserId}
+        currentUserName={currentUserName}
+        currentUserDept={currentUserDept}
+        onSendMessage={(message) => {
+          setMessages((current) => [...(current || []), message])
         }}
       />
     </div>
