@@ -117,6 +117,7 @@ export function AccountingDashboard() {
   const monthEnd = endOfMonth(selectedMonth)
   
   const monthEntries = useMemo(() => {
+    if (!Array.isArray(entries)) return []
     return entries.filter(entry => {
       const entryDate = new Date(entry.date)
       return entryDate >= monthStart && entryDate <= monthEnd
@@ -124,21 +125,18 @@ export function AccountingDashboard() {
   }, [entries, monthStart, monthEnd])
 
   const monthRevenue = useMemo(() => {
-    return monthEntries
-      .filter(e => e.type === 'REVENUE')
-      .reduce((sum, e) => sum + e.amount, 0)
+    const revenueEntries = monthEntries.filter(e => e.type === 'REVENUE')
+    return Array.isArray(revenueEntries) ? revenueEntries.reduce((sum, e) => sum + e.amount, 0) : 0
   }, [monthEntries])
 
   const monthExpenses = useMemo(() => {
-    return monthEntries
-      .filter(e => e.type === 'EXPENSE')
-      .reduce((sum, e) => sum + e.amount, 0)
+    const expenseEntries = monthEntries.filter(e => e.type === 'EXPENSE')
+    return Array.isArray(expenseEntries) ? expenseEntries.reduce((sum, e) => sum + e.amount, 0) : 0
   }, [monthEntries])
 
   const monthRefunds = useMemo(() => {
-    return monthEntries
-      .filter(e => e.type === 'REFUND')
-      .reduce((sum, e) => sum + e.amount, 0)
+    const refundEntries = monthEntries.filter(e => e.type === 'REFUND')
+    return Array.isArray(refundEntries) ? refundEntries.reduce((sum, e) => sum + e.amount, 0) : 0
   }, [monthEntries])
 
   const netIncome = monthRevenue - monthExpenses - monthRefunds
@@ -146,6 +144,8 @@ export function AccountingDashboard() {
   const revenueByCategoryData = useMemo(() => {
     const categoryTotals = new Map<string, number>()
     
+    if (!Array.isArray(monthEntries)) return []
+    
     monthEntries
       .filter(e => e.type === 'REVENUE')
       .forEach(entry => {
@@ -156,12 +156,14 @@ export function AccountingDashboard() {
     return Array.from(categoryTotals.entries()).map(([category, amount]) => ({
       category,
       amount,
-      percentage: (amount / monthRevenue) * 100
+      percentage: monthRevenue > 0 ? (amount / monthRevenue) * 100 : 0
     })).sort((a, b) => b.amount - a.amount)
   }, [monthEntries, monthRevenue])
 
   const expenseByCategoryData = useMemo(() => {
     const categoryTotals = new Map<string, number>()
+    
+    if (!Array.isArray(monthEntries)) return []
     
     monthEntries
       .filter(e => e.type === 'EXPENSE')
@@ -173,7 +175,7 @@ export function AccountingDashboard() {
     return Array.from(categoryTotals.entries()).map(([category, amount]) => ({
       category,
       amount,
-      percentage: (amount / monthExpenses) * 100
+      percentage: monthExpenses > 0 ? (amount / monthExpenses) * 100 : 0
     })).sort((a, b) => b.amount - a.amount)
   }, [monthEntries, monthExpenses])
 
@@ -184,12 +186,12 @@ export function AccountingDashboard() {
       const dayStart = startOfDay(day)
       const dayEnd = endOfDay(day)
       
-      const dayRevenue = entries
-        .filter(e => {
-          const entryDate = new Date(e.date)
-          return e.type === 'REVENUE' && entryDate >= dayStart && entryDate <= dayEnd
-        })
-        .reduce((sum, e) => sum + e.amount, 0)
+      const dayEntries = Array.isArray(entries) ? entries.filter(e => {
+        const entryDate = new Date(e.date)
+        return e.type === 'REVENUE' && entryDate >= dayStart && entryDate <= dayEnd
+      }) : []
+      
+      const dayRevenue = dayEntries.reduce((sum, e) => sum + e.amount, 0)
       
       return {
         date: format(day, 'MMM d'),
@@ -198,10 +200,14 @@ export function AccountingDashboard() {
     })
   }, [entries, monthStart, monthEnd])
 
-  const maxDailyRevenue = Math.max(...dailyRevenueData.map(d => d.revenue))
+  const maxDailyRevenue = dailyRevenueData.length > 0 
+    ? Math.max(...dailyRevenueData.map(d => d.revenue), 1) 
+    : 1
 
   const paymentMethodBreakdown = useMemo(() => {
     const methodTotals = new Map<string, number>()
+    
+    if (!Array.isArray(monthEntries)) return []
     
     monthEntries
       .filter(e => e.type === 'REVENUE' && e.paymentMethod)
@@ -215,7 +221,7 @@ export function AccountingDashboard() {
       .map(([method, amount]) => ({
         method,
         amount,
-        percentage: (amount / monthRevenue) * 100
+        percentage: monthRevenue > 0 ? (amount / monthRevenue) * 100 : 0
       }))
       .sort((a, b) => b.amount - a.amount)
   }, [monthEntries, monthRevenue])
