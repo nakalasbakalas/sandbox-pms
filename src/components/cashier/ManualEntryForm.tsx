@@ -181,65 +181,65 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Receipt size={24} />
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-4">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="flex items-center gap-1.5 text-base">
+            <Receipt size={20} />
             Post Manual Accounting Entry
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="entry-type">Transaction Type *</Label>
+        <div className="space-y-3 py-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="entry-type" className="text-xs">Transaction Type *</Label>
               <Select value={entryType} onValueChange={(v) => {
                 setEntryType(v as any)
                 setCategory('')
                 setSubcategory('')
               }}>
-                <SelectTrigger id="entry-type">
+                <SelectTrigger id="entry-type" className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="REVENUE">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-green-100 text-green-800">Revenue</Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge className="bg-green-100 text-green-800 text-[10px] px-1.5 py-0">Revenue</Badge>
                     </div>
                   </SelectItem>
                   <SelectItem value="EXPENSE">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-red-100 text-red-800">Expense</Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge className="bg-red-100 text-red-800 text-[10px] px-1.5 py-0">Expense</Badge>
                     </div>
                   </SelectItem>
                   <SelectItem value="REFUND">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-orange-100 text-orange-800">Refund</Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge className="bg-orange-100 text-orange-800 text-[10px] px-1.5 py-0">Refund</Badge>
                     </div>
                   </SelectItem>
                   <SelectItem value="ADJUSTMENT">
-                    <div className="flex items-center gap-2">
-                      <Badge className="bg-blue-100 text-blue-800">Adjustment</Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0">Adjustment</Badge>
                     </div>
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="date">Transaction Date *</Label>
+            <div className="space-y-1">
+              <Label htmlFor="date" className="text-xs">Transaction Date *</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     id="date"
                     variant="outline"
                     className={cn(
-                      "w-full justify-start text-left font-normal",
+                      "w-full justify-start text-left font-normal h-8 text-xs",
                       !date && "text-muted-foreground"
                     )}
                   >
-                    <CalendarBlank className="mr-2" size={16} />
-                    {date ? format(date, 'PPP') : <span>Pick a date</span>}
+                    <CalendarBlank className="mr-1.5" size={14} />
+                    {date ? format(date, 'MMM d, yyyy') : <span>Pick a date</span>}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
@@ -254,14 +254,14 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="category">Category *</Label>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="category" className="text-xs">Category *</Label>
               <Select value={category} onValueChange={(v) => {
                 setCategory(v)
                 setSubcategory('')
               }}>
-                <SelectTrigger id="category">
+                <SelectTrigger id="category" className="h-8 text-xs">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
@@ -274,14 +274,14 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="subcategory">Subcategory</Label>
+            <div className="space-y-1">
+              <Label htmlFor="subcategory" className="text-xs">Subcategory</Label>
               <Select 
                 value={subcategory} 
                 onValueChange={setSubcategory}
                 disabled={!category}
               >
-                <SelectTrigger id="subcategory">
+                <SelectTrigger id="subcategory" className="h-8 text-xs">
                   <SelectValue placeholder="Select subcategory" />
                 </SelectTrigger>
                 <SelectContent>
@@ -295,20 +295,21 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="description">Description *</Label>
+          <div className="space-y-1">
+            <Label htmlFor="description" className="text-xs">Description *</Label>
             <Textarea
               id="description"
               placeholder="Enter transaction description..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={3}
+              rows={2}
+              className="text-sm min-h-[60px]"
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="amount">Base Amount (฿) *</Label>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="amount" className="text-xs">Base Amount (฿) *</Label>
               <Input
                 id="amount"
                 type="number"
@@ -317,12 +318,13 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
                 onChange={(e) => setAmount(e.target.value)}
                 min="0"
                 step="0.01"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="tax-rate">Tax Rate (%)</Label>
-              <div className="flex gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="tax-rate" className="text-xs">Tax Rate (%)</Label>
+              <div className="flex gap-1.5">
                 <Input
                   id="tax-rate"
                   type="number"
@@ -332,33 +334,35 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
                   disabled={!includeTax}
                   min="0"
                   step="0.01"
+                  className="h-8 text-sm"
                 />
                 <Button
                   type="button"
                   variant={includeTax ? "default" : "outline"}
                   size="sm"
                   onClick={() => setIncludeTax(!includeTax)}
-                  className="px-3"
+                  className="px-2 h-8 text-xs"
                 >
                   {includeTax ? 'On' : 'Off'}
                 </Button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Tax Amount (฿)</Label>
-              <div className="h-10 px-3 py-2 border rounded-md bg-muted flex items-center">
-                <span className="text-sm font-medium">
+            <div className="space-y-1">
+              <Label className="text-xs">Tax Amount (฿)</Label>
+              <div className="h-8 px-2 py-1.5 border rounded-md bg-muted flex items-center">
+                <span className="text-xs font-medium">
                   {calculateTaxAmount().toFixed(2)}
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="p-4 bg-muted rounded-lg border-2 border-primary/20">
-            <div className="flex items-center justify-between text-lg font-bold">
-              <span>Total Amount:</span>
+          <div className="p-2.5 bg-muted rounded-lg border-2 border-primary/20">
+            <div className="flex items-center justify-between text-base font-bold">
+              <span className="text-xs">Total Amount:</span>
               <span className={cn(
+                "text-sm",
                 entryType === 'REVENUE' ? 'text-green-600' : 'text-red-600'
               )}>
                 ฿{calculateTotal().toFixed(2)}
@@ -366,11 +370,11 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="reference-type">Reference Type</Label>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="reference-type" className="text-xs">Reference Type</Label>
               <Select value={referenceType} onValueChange={(v) => setReferenceType(v as any)}>
-                <SelectTrigger id="reference-type">
+                <SelectTrigger id="reference-type" className="h-8 text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -381,35 +385,36 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="reference-id">Reference ID</Label>
+            <div className="space-y-1">
+              <Label htmlFor="reference-id" className="text-xs">Reference ID</Label>
               <Input
                 id="reference-id"
                 placeholder={referenceType === 'FOLIO' ? 'FOLIO1001' : referenceType === 'RESERVATION' ? 'RES1001' : 'Optional'}
                 value={referenceId}
                 onChange={(e) => setReferenceId(e.target.value)}
                 disabled={referenceType === 'MANUAL'}
+                className="h-8 text-sm"
               />
             </div>
           </div>
 
           {(entryType === 'REVENUE' || entryType === 'REFUND') && (
-            <div className="space-y-2">
-              <Label htmlFor="payment-method">Payment Method</Label>
+            <div className="space-y-1">
+              <Label htmlFor="payment-method" className="text-xs">Payment Method</Label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger id="payment-method">
+                <SelectTrigger id="payment-method" className="h-8 text-xs">
                   <SelectValue placeholder="Select payment method" />
                 </SelectTrigger>
                 <SelectContent>
                   {paymentMethods.map((method) => (
                     <SelectItem key={method} value={method}>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         {method === 'CASH' ? (
-                          <Money size={16} />
+                          <Money size={14} />
                         ) : (
-                          <CreditCard size={16} />
+                          <CreditCard size={14} />
                         )}
-                        {method.replace(/_/g, ' ')}
+                        <span className="text-xs">{method.replace(/_/g, ' ')}</span>
                       </div>
                     </SelectItem>
                   ))}
@@ -419,13 +424,13 @@ export function ManualEntryForm({ open, onOpenChange, onSubmit }: ManualEntryFor
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleCancel}>
-            <X size={16} className="mr-2" />
+        <DialogFooter className="pt-3">
+          <Button variant="outline" onClick={handleCancel} className="h-8 text-xs">
+            <X size={14} className="mr-1.5" />
             Cancel
           </Button>
-          <Button onClick={handleSubmit}>
-            <Plus size={16} className="mr-2" />
+          <Button onClick={handleSubmit} className="h-8 text-xs">
+            <Plus size={14} className="mr-1.5" />
             Post Transaction
           </Button>
         </DialogFooter>

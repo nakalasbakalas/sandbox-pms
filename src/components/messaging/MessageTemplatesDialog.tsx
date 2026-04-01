@@ -268,20 +268,20 @@ export function MessageTemplatesDialog({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-5xl h-[80vh] flex flex-col p-0">
-          <DialogHeader className="px-6 pt-6 pb-4">
+          <DialogHeader className="px-4 pt-4 pb-2">
             <div className="flex items-start justify-between">
               <div>
-                <DialogTitle>Message Templates</DialogTitle>
-                <DialogDescription>
+                <DialogTitle className="text-base">Message Templates</DialogTitle>
+                <DialogDescription className="text-xs">
                   Select a template to quickly send common staff communications
                 </DialogDescription>
               </div>
-              <Button onClick={() => setShowBuilder(true)} size="sm">
-                <PlusCircle size={16} className="mr-2" />
+              <Button onClick={() => setShowBuilder(true)} size="sm" className="h-7 text-xs">
+                <PlusCircle size={14} className="mr-1.5" />
                 Create Template
               </Button>
-              <Button onClick={() => setShowAnalytics(true)} size="sm" variant="outline">
-                <ChartBar size={16} className="mr-2" />
+              <Button onClick={() => setShowAnalytics(true)} size="sm" variant="outline" className="h-7 text-xs">
+                <ChartBar size={14} className="mr-1.5" />
                 Analytics
               </Button>
             </div>
@@ -289,38 +289,38 @@ export function MessageTemplatesDialog({
 
         <div className="flex-1 flex overflow-hidden">
           <div className="w-2/5 border-r flex flex-col">
-            <div className="px-4 pb-4 space-y-3">
+            <div className="px-3 pb-3 space-y-2">
               <div className="relative">
                 <MagnifyingGlass 
-                  size={16} 
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  size={14} 
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                 />
                 <Input
                   placeholder="Search templates..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-9"
+                  className="pl-8 h-7 text-xs"
                 />
               </div>
               
               <Tabs value={selectedCategory} onValueChange={(v) => setSelectedCategory(v as any)}>
-                <TabsList className="w-full grid grid-cols-3">
-                  <TabsTrigger value="ALL">All</TabsTrigger>
-                  <TabsTrigger value="FAVORITE">
-                    <Star size={14} weight="fill" className="mr-1" />
+                <TabsList className="w-full grid grid-cols-3 h-7">
+                  <TabsTrigger value="ALL" className="text-xs">All</TabsTrigger>
+                  <TabsTrigger value="FAVORITE" className="text-xs">
+                    <Star size={12} weight="fill" className="mr-1" />
                     Favorites
                   </TabsTrigger>
-                  <TabsTrigger value="POPULAR">
-                    <TrendUp size={14} className="mr-1" />
+                  <TabsTrigger value="POPULAR" className="text-xs">
+                    <TrendUp size={12} className="mr-1" />
                     Popular
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
 
               <div>
-                <Label className="text-xs mb-1 block">Filter by Department</Label>
+                <Label className="text-[10px] mb-0.5 block">Filter by Department</Label>
                 <Select value={selectedDepartment} onValueChange={(v: any) => setSelectedDepartment(v)}>
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-7 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -335,7 +335,7 @@ export function MessageTemplatesDialog({
               </div>
             </div>
 
-            <ScrollArea className="flex-1 px-4">
+            <ScrollArea className="flex-1 px-3">
               {selectedCategory === 'FAVORITE' ? (
                 <TemplateList
                   templates={favoriteTemplates}

@@ -52,68 +52,68 @@ export function KeyboardShortcutsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[80vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Command size={24} weight="duotone" className="text-primary" />
+      <DialogContent className="sm:max-w-2xl max-h-[80vh] p-4">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="flex items-center gap-1.5 text-base">
+            <Command size={20} weight="duotone" className="text-primary" />
             Keyboard Shortcuts
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs">
             Master these shortcuts to work faster and more efficiently
           </DialogDescription>
         </DialogHeader>
 
-        <div className="relative mb-4">
-          <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+        <div className="relative mb-2">
+          <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={14} />
           <Input
             placeholder="Search shortcuts..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10"
+            className="pl-8 h-7 text-xs"
           />
         </div>
 
-        <ScrollArea className="h-[400px] pr-4">
-          <div className="space-y-6">
+        <ScrollArea className="h-[400px] pr-3">
+          <div className="space-y-3">
             {sectionOrder.map(sectionName => {
               const sectionShortcuts = filteredSections[sectionName]
               if (!sectionShortcuts) return null
 
               return (
                 <div key={sectionName}>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
+                  <h3 className="text-xs font-semibold text-muted-foreground mb-1.5 uppercase tracking-wide">
                     {sectionName}
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     {sectionShortcuts.map((shortcut, index) => (
                       <div
                         key={index}
-                        className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-muted/50 transition-colors"
                       >
-                        <span className="text-sm">{shortcut.description}</span>
+                        <span className="text-xs">{shortcut.description}</span>
                         <KeyboardBadge shortcut={shortcut} />
                       </div>
                     ))}
                   </div>
                   {sectionName !== sectionOrder[sectionOrder.length - 1] && (
-                    <Separator className="mt-4" />
+                    <Separator className="mt-2" />
                   )}
                 </div>
               )
             })}
 
             {Object.keys(filteredSections).length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
+              <div className="text-center py-6 text-muted-foreground text-xs">
                 No shortcuts found matching "{searchQuery}"
               </div>
             )}
           </div>
         </ScrollArea>
 
-        <div className="mt-4 p-4 rounded-lg bg-muted/30 border border-border">
-          <p className="text-xs text-muted-foreground">
+        <div className="mt-2 p-2.5 rounded-lg bg-muted/30 border border-border">
+          <p className="text-[10px] text-muted-foreground">
             <span className="font-semibold">Tip:</span> Press{' '}
-            <kbd className="px-1.5 py-0.5 text-xs font-semibold bg-background border border-border rounded">
+            <kbd className="px-1 py-0.5 text-[10px] font-semibold bg-background border border-border rounded">
               ?
             </kbd>{' '}
             from anywhere to open this dialog
@@ -143,13 +143,13 @@ function KeyboardBadge({ shortcut }: { shortcut: KeyboardShortcut }) {
   parts.push({ key: keyDisplay })
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       {parts.map((part, index) => (
         <kbd
           key={index}
           className={cn(
-            'inline-flex items-center justify-center min-w-[28px] h-7 px-2',
-            'text-xs font-semibold',
+            'inline-flex items-center justify-center min-w-[22px] h-5 px-1.5',
+            'text-[10px] font-semibold',
             'bg-background border border-border rounded',
             'shadow-sm'
           )}

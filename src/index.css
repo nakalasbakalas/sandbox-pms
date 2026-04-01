@@ -52,3 +52,11 @@ button {
 .ultra-compact {
   line-height: 1.1;
 }
+
+[data-radix-dialog-content] {
+  max-height: 92vh !important;
+}
+
+[data-radix-dialog-content] [data-radix-scroll-area-viewport] {
+  max-height: calc(92vh - 12rem) !important;
+}

@@ -123,37 +123,37 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
+      <DialogContent className="max-w-2xl max-h-[90vh] p-4">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="flex items-center justify-between text-base">
             <span>Edit Reservation - Room {room.number}</span>
             <Button
               variant="ghost"
               size="sm"
               onClick={onClose}
-              className="h-8 w-8 p-0"
+              className="h-6 w-6 p-0"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </Button>
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="text-xs">
             Update reservation details for Room {room.number} ({room.type})
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[60vh] pr-4">
-          <div className="space-y-6 py-2">
-            <Card className="p-4 bg-muted/30">
+        <ScrollArea className="max-h-[65vh] pr-3">
+          <div className="space-y-3 py-1">
+            <Card className="p-2.5 bg-muted/30">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-semibold">Reservation ID</div>
-                  <div className="text-xs font-mono text-muted-foreground mt-1">
+                  <div className="text-xs font-semibold">Reservation ID</div>
+                  <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
                     {room.reservationId}
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-sm font-semibold">Room Status</div>
-                  <div className="text-xs text-muted-foreground mt-1">
+                  <div className="text-xs font-semibold">Room Status</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
                     {room.status.replace('_', ' ')}
                   </div>
                 </div>
@@ -161,69 +161,69 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
             </Card>
 
             <div>
-              <h3 className="text-sm font-semibold mb-3">Guest Information</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <h3 className="text-xs font-semibold mb-2">Guest Information</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label htmlFor="firstName">First Name *</Label>
+                  <Label htmlFor="firstName" className="text-xs">First Name *</Label>
                   <Input
                     id="firstName"
                     value={formData.firstName}
                     onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
                     placeholder="John"
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="lastName">Last Name *</Label>
+                  <Label htmlFor="lastName" className="text-xs">Last Name *</Label>
                   <Input
                     id="lastName"
                     value={formData.lastName}
                     onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
                     placeholder="Doe"
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email" className="text-xs">Email</Label>
                   <Input
                     id="email"
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                     placeholder="john.doe@example.com"
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="phone">Phone</Label>
+                  <Label htmlFor="phone" className="text-xs">Phone</Label>
                   <Input
                     id="phone"
                     value={formData.phone}
                     onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                     placeholder="+66 123 456 789"
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
               </div>
             </div>
 
-            <Separator />
+            <Separator className="my-2" />
 
             <div>
-              <h3 className="text-sm font-semibold mb-3">Stay Details</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <h3 className="text-xs font-semibold mb-2">Stay Details</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label>Check-in Date *</Label>
+                  <Label className="text-xs">Check-in Date *</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
                         className={cn(
-                          "w-full justify-start text-left font-normal mt-1.5",
+                          "w-full justify-start text-left font-normal mt-1 h-8 text-xs",
                           !checkIn && "text-muted-foreground"
                         )}
                       >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
                         {checkIn ? format(checkIn, "MMM d, yyyy") : "Select date"}
                       </Button>
                     </PopoverTrigger>
@@ -239,17 +239,17 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                 </div>
 
                 <div>
-                  <Label>Check-out Date *</Label>
+                  <Label className="text-xs">Check-out Date *</Label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
                         className={cn(
-                          "w-full justify-start text-left font-normal mt-1.5",
+                          "w-full justify-start text-left font-normal mt-1 h-8 text-xs",
                           !checkOut && "text-muted-foreground"
                         )}
                       >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
                         {checkOut ? format(checkOut, "MMM d, yyyy") : "Select date"}
                       </Button>
                     </PopoverTrigger>
@@ -265,12 +265,12 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                 </div>
 
                 <div>
-                  <Label htmlFor="guestCount">Number of Guests</Label>
+                  <Label htmlFor="guestCount" className="text-xs">Number of Guests</Label>
                   <Select
                     value={formData.guestCount.toString()}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, guestCount: parseInt(value) }))}
                   >
-                    <SelectTrigger className="mt-1.5">
+                    <SelectTrigger className="mt-1 h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -284,27 +284,27 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                 </div>
 
                 <div>
-                  <Label htmlFor="ratePerNight">Rate per Night (฿)</Label>
+                  <Label htmlFor="ratePerNight" className="text-xs">Rate per Night (฿)</Label>
                   <Input
                     id="ratePerNight"
                     type="number"
                     value={formData.ratePerNight}
                     onChange={(e) => setFormData(prev => ({ ...prev, ratePerNight: parseFloat(e.target.value) || 0 }))}
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
               </div>
 
               {nights > 0 && (
-                <Card className="mt-4 p-4 bg-primary/5 border-primary/20">
+                <Card className="mt-2.5 p-2.5 bg-primary/5 border-primary/20">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-sm font-semibold text-primary">Total Amount</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-xs font-semibold text-primary">Total Amount</div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
                         {nights} {nights === 1 ? 'night' : 'nights'} × ฿{formData.ratePerNight.toLocaleString()}
                       </div>
                     </div>
-                    <div className="text-2xl font-bold text-primary">
+                    <div className="text-lg font-bold text-primary">
                       ฿{totalAmount.toLocaleString()}
                     </div>
                   </div>
@@ -312,18 +312,18 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
               )}
             </div>
 
-            <Separator />
+            <Separator className="my-2" />
 
             <div>
-              <h3 className="text-sm font-semibold mb-3">Payment Details</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <h3 className="text-xs font-semibold mb-2">Payment Details</h3>
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <Label htmlFor="depositStatus">Deposit Status</Label>
+                  <Label htmlFor="depositStatus" className="text-xs">Deposit Status</Label>
                   <Select
                     value={formData.depositStatus}
                     onValueChange={(value: any) => setFormData(prev => ({ ...prev, depositStatus: value }))}
                   >
-                    <SelectTrigger className="mt-1.5">
+                    <SelectTrigger className="mt-1 h-8 text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -336,45 +336,46 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                 </div>
 
                 <div>
-                  <Label htmlFor="balanceDue">Balance Due (฿)</Label>
+                  <Label htmlFor="balanceDue" className="text-xs">Balance Due (฿)</Label>
                   <Input
                     id="balanceDue"
                     type="number"
                     value={formData.balanceDue}
                     onChange={(e) => setFormData(prev => ({ ...prev, balanceDue: parseFloat(e.target.value) || 0 }))}
-                    className="mt-1.5"
+                    className="mt-1 h-8 text-sm"
                   />
                 </div>
               </div>
             </div>
 
-            <Separator />
+            <Separator className="my-2" />
 
             <div>
-              <h3 className="text-sm font-semibold mb-3">Additional Options</h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+              <h3 className="text-xs font-semibold mb-2">Additional Options</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-2 rounded-lg border bg-card">
                   <div>
-                    <div className="text-sm font-medium">VIP Guest</div>
-                    <div className="text-xs text-muted-foreground">Mark this guest as VIP</div>
+                    <div className="text-xs font-medium">VIP Guest</div>
+                    <div className="text-[10px] text-muted-foreground">Mark this guest as VIP</div>
                   </div>
                   <Button
                     variant={formData.isVIP ? "default" : "outline"}
                     size="sm"
                     onClick={() => setFormData(prev => ({ ...prev, isVIP: !prev.isVIP }))}
+                    className="h-7 text-xs"
                   >
                     {formData.isVIP ? 'VIP' : 'Standard'}
                   </Button>
                 </div>
 
                 <div>
-                  <Label htmlFor="specialRequests">Special Requests</Label>
+                  <Label htmlFor="specialRequests" className="text-xs">Special Requests</Label>
                   <Textarea
                     id="specialRequests"
                     value={formData.specialRequests}
                     onChange={(e) => setFormData(prev => ({ ...prev, specialRequests: e.target.value }))}
                     placeholder="Any special requirements or notes..."
-                    className="mt-1.5 min-h-[80px]"
+                    className="mt-1 min-h-[60px] text-sm"
                   />
                 </div>
               </div>
@@ -382,25 +383,25 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
           </div>
         </ScrollArea>
 
-        <DialogFooter className="flex items-center justify-between">
+        <DialogFooter className="flex items-center justify-between pt-3">
           <div>
             {onDelete && (
               <Button
                 variant="destructive"
                 onClick={handleDelete}
-                className="gap-2"
+                className="gap-1.5 h-8 text-xs"
               >
-                <Trash className="w-4 h-4" />
+                <Trash className="w-3.5 h-3.5" />
                 Delete Reservation
               </Button>
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose}>
+            <Button variant="outline" onClick={onClose} className="h-8 text-xs">
               Cancel
             </Button>
-            <Button onClick={handleUpdate} className="gap-2">
-              <FloppyDisk className="w-4 h-4" />
+            <Button onClick={handleUpdate} className="gap-1.5 h-8 text-xs">
+              <FloppyDisk className="w-3.5 h-3.5" />
               Save Changes
             </Button>
           </div>

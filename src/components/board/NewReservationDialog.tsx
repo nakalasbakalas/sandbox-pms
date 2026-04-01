@@ -183,68 +183,68 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>New Reservation</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="max-w-2xl p-4">
+        <DialogHeader className="pb-2">
+          <DialogTitle className="text-base">New Reservation</DialogTitle>
+          <DialogDescription className="text-xs">
             Create a new booking
             {prefilledData?.roomNumber && ` for Room ${prefilledData.roomNumber}`}
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[60vh] pr-4">
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+        <ScrollArea className="max-h-[65vh] pr-3">
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="firstName">First Name *</Label>
+                <Label htmlFor="firstName" className="text-xs">First Name *</Label>
                 <Input
                   id="firstName"
                   value={formData.firstName}
                   onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
               <div>
-                <Label htmlFor="lastName">Last Name *</Label>
+                <Label htmlFor="lastName" className="text-xs">Last Name *</Label>
                 <Input
                   id="lastName"
                   value={formData.lastName}
                   onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className="text-xs">Email</Label>
                 <Input
                   id="email"
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
               <div>
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone" className="text-xs">Phone</Label>
                 <Input
                   id="phone"
                   value={formData.phone}
                   onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Check-in Date</Label>
+                <Label className="text-xs">Check-in Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full mt-2 justify-start">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(checkIn, 'PPP')}
+                    <Button variant="outline" className="w-full mt-1 h-8 justify-start text-xs">
+                      <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {format(checkIn, 'MMM d, yyyy')}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -258,12 +258,12 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                 </Popover>
               </div>
               <div>
-                <Label>Check-out Date</Label>
+                <Label className="text-xs">Check-out Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full mt-2 justify-start">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(checkOut, 'PPP')}
+                    <Button variant="outline" className="w-full mt-1 h-8 justify-start text-xs">
+                      <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {format(checkOut, 'MMM d, yyyy')}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0">
@@ -278,11 +278,11 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div>
-                <Label htmlFor="roomType">Room Type</Label>
+                <Label htmlFor="roomType" className="text-xs">Room Type</Label>
                 <Select value={formData.roomType} onValueChange={(v) => setFormData(prev => ({ ...prev, roomType: v as 'TWIN' | 'DOUBLE' }))}>
-                  <SelectTrigger id="roomType" className="mt-2">
+                  <SelectTrigger id="roomType" className="mt-1 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -292,45 +292,45 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                 </Select>
               </div>
               <div>
-                <Label htmlFor="adults">Adults</Label>
+                <Label htmlFor="adults" className="text-xs">Adults</Label>
                 <Input
                   id="adults"
                   type="number"
                   min="1"
                   value={formData.adults}
                   onChange={(e) => setFormData(prev => ({ ...prev, adults: parseInt(e.target.value) || 1 }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
               <div>
-                <Label htmlFor="children">Children</Label>
+                <Label htmlFor="children" className="text-xs">Children</Label>
                 <Input
                   id="children"
                   type="number"
                   min="0"
                   value={formData.children}
                   onChange={(e) => setFormData(prev => ({ ...prev, children: parseInt(e.target.value) || 0 }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="ratePerNight">Rate per Night (฿)</Label>
+                <Label htmlFor="ratePerNight" className="text-xs">Rate per Night (฿)</Label>
                 <Input
                   id="ratePerNight"
                   type="number"
                   min="0"
                   value={formData.ratePerNight}
                   onChange={(e) => setFormData(prev => ({ ...prev, ratePerNight: parseInt(e.target.value) || 0 }))}
-                  className="mt-2"
+                  className="mt-1 h-8 text-sm"
                 />
               </div>
               <div>
-                <Label htmlFor="source">Booking Source</Label>
+                <Label htmlFor="source" className="text-xs">Booking Source</Label>
                 <Select value={formData.source} onValueChange={(v) => setFormData(prev => ({ ...prev, source: v as BookingSource }))}>
-                  <SelectTrigger id="source" className="mt-2">
+                  <SelectTrigger id="source" className="mt-1 h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -347,20 +347,20 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
             </div>
 
             <div>
-              <Label htmlFor="specialRequests">Special Requests</Label>
+              <Label htmlFor="specialRequests" className="text-xs">Special Requests</Label>
               <Textarea
                 id="specialRequests"
                 value={formData.specialRequests}
                 onChange={(e) => setFormData(prev => ({ ...prev, specialRequests: e.target.value }))}
-                className="mt-2"
-                rows={3}
+                className="mt-1 text-sm min-h-[60px]"
+                rows={2}
                 placeholder="Any special requests from the guest..."
               />
             </div>
 
-            <Card className="p-4 bg-muted">
-              <h4 className="font-semibold mb-2">Booking Summary</h4>
-              <div className="space-y-1 text-sm">
+            <Card className="p-2.5 bg-muted">
+              <h4 className="font-semibold mb-1.5 text-xs">Booking Summary</h4>
+              <div className="space-y-0.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Nights:</span>
                   <span className="font-medium">{nights}</span>
@@ -369,7 +369,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                   <span className="text-muted-foreground">Rate per Night:</span>
                   <span className="font-medium">฿{formData.ratePerNight.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between text-base font-semibold pt-2 border-t">
+                <div className="flex justify-between text-sm font-semibold pt-1 border-t">
                   <span>Total Amount:</span>
                   <span>฿{totalAmount.toLocaleString()}</span>
                 </div>
@@ -382,10 +382,10 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
           </div>
         </ScrollArea>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit}>
-            <Plus className="w-4 h-4 mr-2" weight="bold" />
+        <DialogFooter className="pt-3">
+          <Button variant="outline" onClick={onClose} className="h-8 text-xs">Cancel</Button>
+          <Button onClick={handleSubmit} className="h-8 text-xs">
+            <Plus className="w-3.5 h-3.5 mr-1.5" weight="bold" />
             Create Reservation
           </Button>
         </DialogFooter>
