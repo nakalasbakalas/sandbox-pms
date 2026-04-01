@@ -10,6 +10,7 @@ import {
   ChartBar, 
   Gear,
   ChatCircle,
+  ChatCenteredDots,
 } from '@phosphor-icons/react'
 import {
   Sidebar,
@@ -39,7 +40,8 @@ const primaryNavItems = [
 ]
 
 const secondaryNavItems = [
-  { id: 'messaging', label: 'Messaging', icon: ChatCircle },
+  { id: 'messaging', label: 'Guest Messaging', icon: ChatCircle },
+  { id: 'internal-comms', label: 'Staff Comms', icon: ChatCenteredDots },
 ]
 
 export function AppSidebar() {
@@ -81,6 +83,9 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
+          <SidebarGroupLabel className="text-[10px] text-sidebar-foreground/50">
+            Communications
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {secondaryNavItems.map((item) => (

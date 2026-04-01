@@ -13,6 +13,7 @@ import { GuestsView } from './components/views/GuestsView'
 import { CashierView } from './components/views/CashierView'
 import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
 import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
+import { InternalCommunicationsView } from './components/messaging/InternalCommunicationsView'
 import { DailySummaryReportView } from './components/settings/DailySummaryReportView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
@@ -51,6 +52,8 @@ function AppRouter() {
       return <SettingsView />
     case 'messaging':
       return <CommunicationCenterView />
+    case 'internal-comms':
+      return <InternalCommunicationsView />
     case 'daily-summary':
       return <DailySummaryReportView />
     default:

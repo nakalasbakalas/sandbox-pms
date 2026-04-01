@@ -100,3 +100,98 @@ export interface CommunicationPreferences {
   allowInStay: boolean
   allowPostStay: boolean
 }
+
+export type InternalMessageType = 'DIRECT' | 'CHANNEL' | 'BROADCAST' | 'URGENT' | 'HANDOVER'
+export type InternalMessagePriority = 'NORMAL' | 'HIGH' | 'URGENT'
+export type StaffDepartment = 'FRONT_DESK' | 'HOUSEKEEPING' | 'MAINTENANCE' | 'MANAGEMENT' | 'CASHIER' | 'ALL'
+
+export interface StaffMember {
+  id: string
+  name: string
+  department: StaffDepartment
+  role: string
+  avatar?: string
+  isOnline: boolean
+  lastSeen?: Date
+}
+
+export interface InternalMessage {
+  id: string
+  type: InternalMessageType
+  priority: InternalMessagePriority
+  senderId: string
+  senderName: string
+  senderDepartment: StaffDepartment
+  
+  recipientId?: string
+  recipientName?: string
+  channelId?: string
+  channelName?: string
+  department?: StaffDepartment
+  
+  subject?: string
+  body: string
+  attachments?: MessageAttachment[]
+  
+  threadId?: string
+  parentMessageId?: string
+  
+  isRead: boolean
+  readBy: string[]
+  readAt?: Record<string, Date>
+  
+  isPinned: boolean
+  isUrgent: boolean
+  requiresAcknowledgment: boolean
+  acknowledgedBy: string[]
+  
+  mentions: string[]
+  tags: string[]
+  
+  createdAt: Date
+  updatedAt: Date
+  expiresAt?: Date
+}
+
+export interface MessageAttachment {
+  id: string
+  name: string
+  type: 'IMAGE' | 'DOCUMENT' | 'AUDIO' | 'VIDEO'
+  url: string
+  size: number
+  uploadedAt: Date
+}
+
+export interface InternalChannel {
+  id: string
+  name: string
+  description: string
+  department?: StaffDepartment
+  type: 'DEPARTMENT' | 'TEAM' | 'ANNOUNCEMENT'
+  members: string[]
+  admins: string[]
+  isPinned: boolean
+  isArchived: boolean
+  lastMessageAt?: Date
+  unreadCount: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface MessageThread {
+  id: string
+  originalMessageId: string
+  participants: string[]
+  messageCount: number
+  lastMessageAt: Date
+  isResolved: boolean
+}
+
+export interface InternalMessageStats {
+  totalSent: number
+  totalReceived: number
+  unreadCount: number
+  byDepartment: Record<StaffDepartment, number>
+  byPriority: Record<InternalMessagePriority, number>
+  averageResponseTime: number
+}

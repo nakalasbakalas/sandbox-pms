@@ -10,6 +10,7 @@ export type NavigationRoute =
   | 'reports'
   | 'settings'
   | 'messaging'
+  | 'internal-comms'
   | 'daily-summary'
 
 export interface NavigationState {

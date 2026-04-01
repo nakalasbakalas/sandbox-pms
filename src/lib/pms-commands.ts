@@ -17,6 +17,7 @@ import {
   Gear,
   Database,
   ChatCircle,
+  ChatCenteredDots,
   EnvelopeSimple,
   ChartLineUp,
   ListChecks,
@@ -331,9 +332,20 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['messages', 'communication', 'LINE', 'email'],
       icon: ChatCircle,
       action: () => {
-        toast.info('View messages')
+        navigate?.('messaging')
       },
-      disabled: true,
+    },
+    {
+      id: 'internal-comms',
+      label: 'Staff Communications',
+      description: 'Internal staff messaging and channels',
+      category: 'operations',
+      keywords: ['staff', 'communication', 'team', 'internal', 'chat'],
+      shortcut: 'cmd+shift+m',
+      icon: ChatCenteredDots,
+      action: () => {
+        navigate?.('internal-comms')
+      },
     },
     {
       id: 'send-email',
