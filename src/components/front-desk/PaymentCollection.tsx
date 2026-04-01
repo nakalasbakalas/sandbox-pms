@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { CurrencyDollar, CheckCircle, Warning, QrCode } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { PromptPayQR } from './PromptPayQR'
+import { useKV } from '@github/spark/hooks'
 
 export interface PaymentData {
   method: 'CASH' | 'CARD' | 'TRANSFER' | 'PROMPTPAY' | 'OTHER'
@@ -32,6 +33,7 @@ export function PaymentCollection({
   required = true 
 }: PaymentCollectionProps) {
   const [showQR, setShowQR] = useState(false)
+  const [promptPayId] = useKV('hotel-promptpay-id', '0812345678')
 
   const updateField = (field: keyof PaymentData, value: string | number | boolean) => {
     onChange({ ...data, [field]: value })
@@ -115,6 +117,7 @@ export function PaymentCollection({
           {data.method === 'PROMPTPAY' && showQR && (
             <PromptPayQR 
               amount={amountDue}
+              promptPayId={promptPayId}
               onConfirm={(ref) => {
                 updateField('reference', ref)
                 updateField('confirmed', true)

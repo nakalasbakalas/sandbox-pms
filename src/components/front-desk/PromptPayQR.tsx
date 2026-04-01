@@ -3,41 +3,46 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { QrCode, CheckCircle, X, Copy, Check } from '@phosphor-icons/react'
+import { QrCode, CheckCircle, X, Copy, Check, Warning } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { generatePromptPayQR, formatPromptPayPhone } from '@/lib/promptpay'
 
 interface PromptPayQRProps {
   amount: number
   onConfirm: (reference: string) => void
   onCancel: () => void
+  promptPayId?: string
 }
 
-function generatePromptPayQR(phoneNumber: string, amount: number): string {
-  const payload = `00020101021129370016A000000677010111${phoneNumber.padStart(13, '0')}5802TH5303764${String(amount).padStart(13, '0')}`
-  return `data:image/svg+xml,${encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
-      <rect width="200" height="200" fill="white"/>
-      <text x="100" y="100" text-anchor="middle" font-family="monospace" font-size="8" fill="black">
-        ${payload}
-      </text>
-      <text x="100" y="120" text-anchor="middle" font-family="sans-serif" font-size="10" fill="black">
-        Scan with Banking App
-      </text>
-      <text x="100" y="135" text-anchor="middle" font-family="sans-serif" font-size="12" font-weight="bold" fill="black">
-        ฿${amount.toLocaleString()}
-      </text>
-    </svg>
-  `)}`
-}
-
-export function PromptPayQR({ amount, onConfirm, onCancel }: PromptPayQRProps) {
+export function PromptPayQR({ amount, onConfirm, onCancel, promptPayId = '0812345678' }: PromptPayQRProps) {
   const [reference, setReference] = useState('')
   const [copied, setCopied] = useState(false)
   const [countdown, setCountdown] = useState(300)
+  const [qrDataURL, setQrDataURL] = useState<string>('')
+  const [isGenerating, setIsGenerating] = useState(true)
   
-  const promptPayNumber = '0812345678'
-  const qrData = generatePromptPayQR(promptPayNumber, amount)
+  const formattedPromptPayId = formatPromptPayPhone(promptPayId)
+  
+  useEffect(() => {
+    const generateQR = async () => {
+      try {
+        setIsGenerating(true)
+        const qr = await generatePromptPayQR({
+          identifier: formattedPromptPayId,
+          amount: amount
+        })
+        setQrDataURL(qr)
+      } catch (error) {
+        console.error('Failed to generate QR code:', error)
+        toast.error('Failed to generate QR code')
+      } finally {
+        setIsGenerating(false)
+      }
+    }
+    
+    generateQR()
+  }, [amount, formattedPromptPayId])
   
   useEffect(() => {
     const timer = setInterval(() => {
@@ -58,9 +63,9 @@ export function PromptPayQR({ amount, onConfirm, onCancel }: PromptPayQRProps) {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(promptPayNumber)
+      await navigator.clipboard.writeText(formattedPromptPayId)
       setCopied(true)
-      toast.success('Phone number copied')
+      toast.success('PromptPay ID copied')
       setTimeout(() => setCopied(false), 2000)
     } catch {
       toast.error('Failed to copy')
@@ -93,16 +98,28 @@ export function PromptPayQR({ amount, onConfirm, onCancel }: PromptPayQRProps) {
       </div>
 
       <div className="bg-white rounded-lg p-4 mb-3">
-        <div className="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-3 overflow-hidden">
-          <img 
-            src={qrData} 
-            alt="PromptPay QR Code" 
-            className="w-full h-full object-contain"
-          />
+        <div className="aspect-square bg-slate-100 rounded-lg flex items-center justify-center mb-3 overflow-hidden relative">
+          {isGenerating ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs text-muted-foreground">Generating QR...</span>
+            </div>
+          ) : qrDataURL ? (
+            <img 
+              src={qrDataURL} 
+              alt="PromptPay QR Code" 
+              className="w-full h-full object-contain p-4"
+            />
+          ) : (
+            <div className="flex flex-col items-center gap-2 text-center p-4">
+              <Warning size={32} className="text-amber-500" weight="bold" />
+              <span className="text-xs text-muted-foreground">Failed to generate QR code</span>
+            </div>
+          )}
         </div>
         
         <div className="text-center space-y-1 mb-3">
-          <div className="text-2xl font-bold text-blue-900">฿{amount.toLocaleString()}</div>
+          <div className="text-2xl font-bold text-blue-900">฿{amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           <div className="text-xs text-muted-foreground">Amount to Pay</div>
         </div>
 
@@ -110,7 +127,7 @@ export function PromptPayQR({ amount, onConfirm, onCancel }: PromptPayQRProps) {
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1">
               <div className="text-xs text-muted-foreground">PromptPay ID</div>
-              <div className="font-mono font-semibold text-sm">{promptPayNumber}</div>
+              <div className="font-mono font-semibold text-sm">{formattedPromptPayId}</div>
             </div>
             <Button
               variant="ghost"
@@ -168,7 +185,7 @@ export function PromptPayQR({ amount, onConfirm, onCancel }: PromptPayQRProps) {
 
       <div className="mt-3 p-2 bg-blue-100 rounded-md">
         <p className="text-xs text-blue-800">
-          <strong>Instructions:</strong> Open your Thai banking app, scan the QR code above, verify the amount, and complete the payment. Then enter the transaction reference to confirm.
+          <strong>Instructions:</strong> Open your Thai banking app (e.g., SCB Easy, Krungthai NEXT, Bangkok Bank Mobile), select PromptPay/QR Payment, scan the QR code above, verify the amount (฿{amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}), complete the payment, and enter the transaction reference below.
         </p>
       </div>
     </Card>

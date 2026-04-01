@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { BrandingSettings } from '@/components/settings/BrandingSettings'
 import { TaxSettings } from '@/components/settings/TaxSettings'
+import { PromptPaySettings } from '@/components/settings/PromptPaySettings'
 import { LineSettings } from '@/components/settings/LineSettings'
 import { StaffAlertSettings } from '@/components/settings/StaffAlertSettings'
 import { RoomReadyNotificationSettings } from '@/components/settings/RoomReadyNotificationSettings'
@@ -42,7 +43,7 @@ export function SettingsView() {
             </TabsTrigger>
             <TabsTrigger value="tax" className="gap-2">
               <Receipt size={18} weight="duotone" />
-              Tax
+              Tax & Payments
             </TabsTrigger>
             <TabsTrigger value="line" className="gap-2">
               <ChatCircle size={18} weight="duotone" />
@@ -80,6 +81,7 @@ export function SettingsView() {
 
           <TabsContent value="tax" className="space-y-6">
             <TaxSettings />
+            <PromptPaySettings />
           </TabsContent>
 
           <TabsContent value="line" className="space-y-6">
