@@ -52,6 +52,7 @@ import {
   X,
   BookOpen,
   Lightning,
+  Robot,
 } from '@phosphor-icons/react'
 import type { InternalMessage, InternalChannel, StaffMember, StaffDepartment, InternalMessagePriority } from '@/types/messaging'
 import type { StaffMessageTemplate } from '@/types/staff-templates'
@@ -572,16 +573,24 @@ interface MessageItemProps {
 }
 
 function MessageItem({ message, isCurrentUser, onMarkRead, onPin, onAcknowledge }: MessageItemProps) {
+  const isAutomated = message.senderId === 'system'
+  
   return (
-    <div className={`flex gap-3 group ${message.isPinned ? 'bg-amber-50 dark:bg-amber-950/20 -mx-4 px-4 py-2 rounded-lg' : ''}`}>
+    <div className={`flex gap-3 group ${message.isPinned ? 'bg-amber-50 dark:bg-amber-950/20 -mx-4 px-4 py-2 rounded-lg' : ''} ${isAutomated ? 'bg-blue-50/50 dark:bg-blue-950/20 -mx-4 px-4 py-2 rounded-lg border-l-2 border-blue-500' : ''}`}>
       <Avatar className="w-9 h-9 shrink-0">
-        <AvatarFallback className="text-xs">
-          {message.senderName.split(' ').map(n => n[0]).join('')}
+        <AvatarFallback className={`text-xs ${isAutomated ? 'bg-blue-500 text-white' : ''}`}>
+          {isAutomated ? '🤖' : message.senderName.split(' ').map(n => n[0]).join('')}
         </AvatarFallback>
       </Avatar>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-semibold text-sm">{message.senderName}</span>
+          {isAutomated && (
+            <Badge variant="secondary" className="h-5 bg-blue-100 text-blue-700">
+              <Robot size={12} weight="bold" className="mr-1" />
+              Automated
+            </Badge>
+          )}
           <DepartmentBadge department={message.senderDepartment} />
           <span className="text-xs text-muted-foreground">
             {format(new Date(message.createdAt), 'h:mm a')}

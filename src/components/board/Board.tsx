@@ -13,7 +13,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil, Robot } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -29,6 +29,9 @@ import { NewReservationDialog } from './NewReservationDialog'
 import { EditReservationDialog } from './EditReservationDialog'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 import { getBoardShortcuts } from '@/hooks/use-board-shortcuts'
+import { useAutomaticHousekeepingMessaging } from '@/hooks/use-automatic-housekeeping-messaging'
+import { AutomatedMessagingSettings } from '@/components/settings/AutomatedMessagingSettings'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface UnassignedReservation {
   id: string
@@ -80,10 +83,13 @@ export function Board() {
   } | null>(null)
   const [showEditReservationDialog, setShowEditReservationDialog] = useState(false)
   const [editingRoom, setEditingRoom] = useState<BoardRoomCard | null>(null)
+  const [showAutomationSettings, setShowAutomationSettings] = useState(false)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
   const commandPalette = useCommandPalette(commands)
+  
+  const automation = useAutomaticHousekeepingMessaging(rooms)
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
 
@@ -452,6 +458,7 @@ export function Board() {
       )
     )
     
+    automation.triggerManualCheckOut(room)
     toast.success(`${room.guestName} checked out from Room ${room.number}`)
     setSelectedRoom(null)
   }
@@ -907,6 +914,8 @@ export function Board() {
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           filterCount={activeFilterCount}
+          automationEnabled={automation.config.enabled}
+          onOpenAutomation={() => setShowAutomationSettings(true)}
         />
 
         <div className="flex-1 overflow-auto rounded border border-border bg-card">
@@ -1364,6 +1373,19 @@ export function Board() {
         onUpdate={handleUpdateReservation}
         onDelete={handleDeleteReservation}
       />
+
+      <Dialog open={showAutomationSettings} onOpenChange={setShowAutomationSettings}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Automated Housekeeping Messaging</DialogTitle>
+          </DialogHeader>
+          <AutomatedMessagingSettings
+            config={automation.config}
+            onConfigChange={automation.setConfig}
+            messageLog={automation.messageLog}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

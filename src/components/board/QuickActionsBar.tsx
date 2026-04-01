@@ -4,7 +4,8 @@ import {
   FunnelSimple, 
   CalendarBlank,
   Clock,
-  Info
+  Info,
+  Robot
 } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 
@@ -12,9 +13,17 @@ interface QuickActionsBarProps {
   viewMode: '7day' | '14day' | '30day'
   onViewModeChange: (mode: '7day' | '14day' | '30day') => void
   filterCount: number
+  automationEnabled?: boolean
+  onOpenAutomation?: () => void
 }
 
-export function QuickActionsBar({ viewMode, onViewModeChange, filterCount }: QuickActionsBarProps) {
+export function QuickActionsBar({ 
+  viewMode, 
+  onViewModeChange, 
+  filterCount,
+  automationEnabled,
+  onOpenAutomation 
+}: QuickActionsBarProps) {
   return (
     <div className="flex items-center justify-between bg-card rounded px-2 py-1.5 border border-border">
       <div className="flex items-center gap-1">
@@ -58,6 +67,24 @@ export function QuickActionsBar({ viewMode, onViewModeChange, filterCount }: Qui
             </Badge>
           )}
         </Button>
+
+        {onOpenAutomation && (
+          <>
+            <div className="h-3 w-px bg-border mx-0.5" />
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 text-[11px] gap-1 font-medium px-2"
+              onClick={onOpenAutomation}
+            >
+              <Robot className="w-2.5 h-2.5" />
+              Auto
+              {automationEnabled && (
+                <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              )}
+            </Button>
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-1.5">
