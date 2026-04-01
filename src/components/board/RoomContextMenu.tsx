@@ -8,8 +8,33 @@ import {
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
+  ContextMenuLabel,
 } from '@/components/ui/context-menu'
-import { SignOut, Broom, ArrowsClockwise, Prohibit, CheckCircle, Plus, Minus, CurrencyDollar } from '@phosphor-icons/react'
+import { 
+  SignOut, 
+  Broom, 
+  ArrowsClockwise, 
+  Prohibit, 
+  CheckCircle, 
+  Plus, 
+  Minus, 
+  CurrencyDollar,
+  Receipt,
+  Users,
+  Pencil,
+  Warning,
+  Star,
+  Copy,
+  Wrench,
+  BellRinging,
+  Note,
+  Printer,
+  Key,
+  CalendarBlank,
+  UserSwitch,
+  ListChecks,
+  Info
+} from '@phosphor-icons/react'
 import { ReactNode } from 'react'
 
 interface RoomContextMenuProps {
@@ -24,6 +49,17 @@ interface RoomContextMenuProps {
   onShorten: (nights: number) => void
   onQuickCheckIn: () => void
   onViewDetails: () => void
+  onEditReservation?: () => void
+  onPostCharge?: () => void
+  onViewFolio?: () => void
+  onToggleVIP?: () => void
+  onAddNote?: () => void
+  onPrintRegistration?: () => void
+  onTransferRoom?: () => void
+  onMarkOutOfService?: () => void
+  onRequestHousekeeping?: () => void
+  onCopyReservation?: () => void
+  onViewCalendar?: () => void
 }
 
 export function RoomContextMenu({
@@ -38,25 +74,92 @@ export function RoomContextMenu({
   onShorten,
   onQuickCheckIn,
   onViewDetails,
+  onEditReservation,
+  onPostCharge,
+  onViewFolio,
+  onToggleVIP,
+  onAddNote,
+  onPrintRegistration,
+  onTransferRoom,
+  onMarkOutOfService,
+  onRequestHousekeeping,
+  onCopyReservation,
+  onViewCalendar,
 }: RoomContextMenuProps) {
+  const hasGuest = !!room.guestName
+  const isVacant = !hasGuest
+  const isAvailable = room.operationalStatus === 'AVAILABLE'
+  const isBlocked = room.operationalStatus === 'BLOCKED' || room.operationalStatus === 'OUT_OF_SERVICE'
+  const isDirty = room.cleanStatus === 'DIRTY'
+  const isClean = room.cleanStatus === 'CLEAN'
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-56">
+      <ContextMenuContent className="w-64">
+        <ContextMenuLabel className="text-xs font-bold flex items-center gap-2">
+          <Info className="w-3.5 h-3.5" />
+          Room {room.number} ({room.type})
+        </ContextMenuLabel>
+        
         <ContextMenuItem onClick={onViewDetails}>
+          <ListChecks className="w-4 h-4 mr-2" />
           View Room Details
         </ContextMenuItem>
-        
-        {room.guestName && (
+
+        {hasGuest && (
           <>
             <ContextMenuSeparator />
-            <ContextMenuItem onClick={onCheckOut} className="text-destructive">
-              <SignOut className="w-4 h-4 mr-2" />
-              Check Out Guest
-            </ContextMenuItem>
+            <ContextMenuLabel className="text-xs font-semibold text-muted-foreground">
+              Guest Operations
+            </ContextMenuLabel>
             
+            {onEditReservation && (
+              <ContextMenuItem onClick={onEditReservation}>
+                <Pencil className="w-4 h-4 mr-2" />
+                Edit Reservation
+              </ContextMenuItem>
+            )}
+
+            {onViewFolio && (
+              <ContextMenuItem onClick={onViewFolio}>
+                <Receipt className="w-4 h-4 mr-2" />
+                View Folio
+              </ContextMenuItem>
+            )}
+
+            {onPostCharge && (
+              <ContextMenuItem onClick={onPostCharge}>
+                <CurrencyDollar className="w-4 h-4 mr-2" />
+                Post Charge
+              </ContextMenuItem>
+            )}
+
+            {onTransferRoom && (
+              <ContextMenuItem onClick={onTransferRoom}>
+                <UserSwitch className="w-4 h-4 mr-2" />
+                Transfer to Another Room
+              </ContextMenuItem>
+            )}
+
+            {onToggleVIP && (
+              <ContextMenuItem onClick={onToggleVIP}>
+                <Star className="w-4 h-4 mr-2" weight={room.isVIP ? 'fill' : 'regular'} />
+                {room.isVIP ? 'Remove VIP Status' : 'Mark as VIP'}
+              </ContextMenuItem>
+            )}
+
+            {onAddNote && (
+              <ContextMenuItem onClick={onAddNote}>
+                <Note className="w-4 h-4 mr-2" />
+                Add Note
+              </ContextMenuItem>
+            )}
+
+            <ContextMenuSeparator />
+
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Plus className="w-4 h-4 mr-2" />
@@ -95,45 +198,101 @@ export function RoomContextMenu({
                 </ContextMenuItem>
               </ContextMenuSubContent>
             </ContextMenuSub>
+
+            <ContextMenuSeparator />
+
+            {onPrintRegistration && (
+              <ContextMenuItem onClick={onPrintRegistration}>
+                <Printer className="w-4 h-4 mr-2" />
+                Print Registration
+              </ContextMenuItem>
+            )}
+
+            {onCopyReservation && (
+              <ContextMenuItem onClick={onCopyReservation}>
+                <Copy className="w-4 h-4 mr-2" />
+                Copy Reservation Info
+              </ContextMenuItem>
+            )}
+
+            <ContextMenuSeparator />
+            
+            <ContextMenuItem onClick={onCheckOut} className="text-destructive">
+              <SignOut className="w-4 h-4 mr-2" />
+              Check Out Guest
+            </ContextMenuItem>
           </>
         )}
         
-        {!room.guestName && room.operationalStatus === 'AVAILABLE' && (
+        {isVacant && isAvailable && (
           <>
             <ContextMenuSeparator />
-            {room.cleanStatus === 'CLEAN' && (
+            <ContextMenuLabel className="text-xs font-semibold text-muted-foreground">
+              Vacant Room Actions
+            </ContextMenuLabel>
+            
+            {isClean && (
               <ContextMenuItem onClick={onQuickCheckIn}>
                 <CheckCircle className="w-4 h-4 mr-2" />
                 Quick Check-In
+              </ContextMenuItem>
+            )}
+
+            {onViewCalendar && (
+              <ContextMenuItem onClick={onViewCalendar}>
+                <CalendarBlank className="w-4 h-4 mr-2" />
+                View Availability Calendar
               </ContextMenuItem>
             )}
           </>
         )}
         
         <ContextMenuSeparator />
+        <ContextMenuLabel className="text-xs font-semibold text-muted-foreground">
+          Housekeeping
+        </ContextMenuLabel>
         
-        {room.cleanStatus === 'DIRTY' && (
+        {isDirty && (
           <ContextMenuItem onClick={onMarkClean}>
             <Broom className="w-4 h-4 mr-2" />
             Mark as Clean
           </ContextMenuItem>
         )}
         
-        {room.cleanStatus === 'CLEAN' && !room.guestName && (
+        {isClean && isVacant && (
           <ContextMenuItem onClick={onMarkDirty}>
             <ArrowsClockwise className="w-4 h-4 mr-2" />
             Mark as Dirty
           </ContextMenuItem>
         )}
+
+        {onRequestHousekeeping && (
+          <ContextMenuItem onClick={onRequestHousekeeping}>
+            <BellRinging className="w-4 h-4 mr-2" />
+            Request Housekeeping
+          </ContextMenuItem>
+        )}
         
-        {room.operationalStatus === 'AVAILABLE' && !room.guestName && (
+        <ContextMenuSeparator />
+        <ContextMenuLabel className="text-xs font-semibold text-muted-foreground">
+          Room Status
+        </ContextMenuLabel>
+        
+        {isAvailable && isVacant && (
           <ContextMenuItem onClick={onBlock}>
             <Prohibit className="w-4 h-4 mr-2" />
             Block Room
           </ContextMenuItem>
         )}
+
+        {isAvailable && isVacant && onMarkOutOfService && (
+          <ContextMenuItem onClick={onMarkOutOfService}>
+            <Wrench className="w-4 h-4 mr-2" />
+            Mark Out of Service
+          </ContextMenuItem>
+        )}
         
-        {(room.operationalStatus === 'BLOCKED' || room.operationalStatus === 'OUT_OF_SERVICE') && (
+        {isBlocked && (
           <ContextMenuItem onClick={onUnblock}>
             <CheckCircle className="w-4 h-4 mr-2" />
             Make Available

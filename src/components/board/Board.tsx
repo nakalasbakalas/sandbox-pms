@@ -679,6 +679,76 @@ export function Board() {
     }
   }
 
+  const handleToggleVIP = (room: BoardRoomCard) => {
+    setRooms((currentRooms) =>
+      currentRooms.map(r =>
+        r.roomId === room.roomId
+          ? { ...r, isVIP: !r.isVIP }
+          : r
+      )
+    )
+    toast.success(`Room ${room.number} ${room.isVIP ? 'removed from' : 'added to'} VIP status`)
+  }
+
+  const handlePostCharge = (room: BoardRoomCard) => {
+    toast.info('Post Charge dialog would open here', {
+      description: `Add charges for Room ${room.number} - ${room.guestName}`
+    })
+  }
+
+  const handleViewFolio = (room: BoardRoomCard) => {
+    toast.info('Guest Folio would open here', {
+      description: `View detailed billing for ${room.guestName}`
+    })
+  }
+
+  const handleAddNote = (room: BoardRoomCard) => {
+    toast.info('Add Note dialog would open here', {
+      description: `Add notes for Room ${room.number}`
+    })
+  }
+
+  const handlePrintRegistration = (room: BoardRoomCard) => {
+    toast.success('Printing registration card', {
+      description: `Guest: ${room.guestName}, Room: ${room.number}`
+    })
+  }
+
+  const handleTransferRoom = (room: BoardRoomCard) => {
+    toast.info('Transfer Room mode activated', {
+      description: 'Drag the guest to another room or select a room'
+    })
+  }
+
+  const handleMarkOutOfService = (room: BoardRoomCard) => {
+    setRooms((currentRooms) =>
+      currentRooms.map(r =>
+        r.roomId === room.roomId
+          ? { ...r, operationalStatus: 'OUT_OF_SERVICE' }
+          : r
+      )
+    )
+    toast.warning(`Room ${room.number} marked as Out of Service`)
+  }
+
+  const handleRequestHousekeeping = (room: BoardRoomCard) => {
+    toast.success('Housekeeping request sent', {
+      description: `Priority cleaning for Room ${room.number}`
+    })
+  }
+
+  const handleCopyReservation = (room: BoardRoomCard) => {
+    const reservationText = `Room ${room.number}: ${room.guestName}\nCheck-in: ${room.checkIn ? format(room.checkIn, 'MMM d, yyyy') : 'N/A'}\nCheck-out: ${room.checkOut ? format(room.checkOut, 'MMM d, yyyy') : 'N/A'}\nGuests: ${room.guestCount || 'N/A'}`
+    navigator.clipboard.writeText(reservationText)
+    toast.success('Reservation info copied to clipboard')
+  }
+
+  const handleViewCalendar = (room: BoardRoomCard) => {
+    toast.info('Room availability calendar would open here', {
+      description: `View booking calendar for Room ${room.number}`
+    })
+  }
+
   const handleQuickCheckIn = (room: BoardRoomCard) => {
     const mockReservation = unassignedReservations.find(r => r.roomType === room.type)
     
@@ -1022,6 +1092,26 @@ export function Board() {
                   })
                   setShowNewReservationDialog(true)
                 }}
+                contextMenuHandlers={{
+                  onCheckOut: handleCheckOut,
+                  onMarkClean: handleMarkClean,
+                  onMarkDirty: handleMarkDirty,
+                  onBlock: handleBlockRoom,
+                  onUnblock: handleUnblockRoom,
+                  onExtend: handleExtendStay,
+                  onShorten: handleShortenStay,
+                  onQuickCheckIn: handleQuickCheckIn,
+                  onToggleVIP: handleToggleVIP,
+                  onPostCharge: handlePostCharge,
+                  onViewFolio: handleViewFolio,
+                  onAddNote: handleAddNote,
+                  onPrintRegistration: handlePrintRegistration,
+                  onTransferRoom: handleTransferRoom,
+                  onMarkOutOfService: handleMarkOutOfService,
+                  onRequestHousekeeping: handleRequestHousekeeping,
+                  onCopyReservation: handleCopyReservation,
+                  onViewCalendar: handleViewCalendar,
+                }}
               />
 
               <RoomTypeRow
@@ -1056,6 +1146,26 @@ export function Board() {
                     checkIn: date,
                   })
                   setShowNewReservationDialog(true)
+                }}
+                contextMenuHandlers={{
+                  onCheckOut: handleCheckOut,
+                  onMarkClean: handleMarkClean,
+                  onMarkDirty: handleMarkDirty,
+                  onBlock: handleBlockRoom,
+                  onUnblock: handleUnblockRoom,
+                  onExtend: handleExtendStay,
+                  onShorten: handleShortenStay,
+                  onQuickCheckIn: handleQuickCheckIn,
+                  onToggleVIP: handleToggleVIP,
+                  onPostCharge: handlePostCharge,
+                  onViewFolio: handleViewFolio,
+                  onAddNote: handleAddNote,
+                  onPrintRegistration: handlePrintRegistration,
+                  onTransferRoom: handleTransferRoom,
+                  onMarkOutOfService: handleMarkOutOfService,
+                  onRequestHousekeeping: handleRequestHousekeeping,
+                  onCopyReservation: handleCopyReservation,
+                  onViewCalendar: handleViewCalendar,
                 }}
               />
             </div>
@@ -1441,6 +1551,26 @@ interface RoomTypeRowProps {
   onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
   onResizeEnd: () => void
   onEmptyBlockClick: (room: BoardRoomCard, date: Date) => void
+  contextMenuHandlers: {
+    onCheckOut: (room: BoardRoomCard) => void
+    onMarkClean: (room: BoardRoomCard) => void
+    onMarkDirty: (room: BoardRoomCard) => void
+    onBlock: (room: BoardRoomCard) => void
+    onUnblock: (room: BoardRoomCard) => void
+    onExtend: (room: BoardRoomCard, nights: number) => void
+    onShorten: (room: BoardRoomCard, nights: number) => void
+    onQuickCheckIn: (room: BoardRoomCard) => void
+    onToggleVIP: (room: BoardRoomCard) => void
+    onPostCharge: (room: BoardRoomCard) => void
+    onViewFolio: (room: BoardRoomCard) => void
+    onAddNote: (room: BoardRoomCard) => void
+    onPrintRegistration: (room: BoardRoomCard) => void
+    onTransferRoom: (room: BoardRoomCard) => void
+    onMarkOutOfService: (room: BoardRoomCard) => void
+    onRequestHousekeeping: (room: BoardRoomCard) => void
+    onCopyReservation: (room: BoardRoomCard) => void
+    onViewCalendar: (room: BoardRoomCard) => void
+  }
 }
 
 function RoomTypeRow({
@@ -1465,6 +1595,7 @@ function RoomTypeRow({
   onResizeStart,
   onResizeEnd,
   onEmptyBlockClick,
+  contextMenuHandlers,
 }: RoomTypeRowProps) {
   const occupiedCount = rooms.filter(r => r.status.includes('OCCUPIED')).length
   const cleanCount = rooms.filter(r => r.cleanStatus === 'CLEAN').length
@@ -1523,6 +1654,7 @@ function RoomTypeRow({
               onResizeStart={onResizeStart}
               onResizeEnd={onResizeEnd}
               onEmptyBlockClick={(date) => onEmptyBlockClick(room, date)}
+              contextMenuHandlers={contextMenuHandlers}
             />
           ))}
         </div>
@@ -1554,6 +1686,26 @@ interface CalendarRoomRowProps {
   onResizeStart: (state: { roomId: string; direction: 'start' | 'end'; initialDate: Date; currentDate: Date }) => void
   onResizeEnd: () => void
   onEmptyBlockClick: (date: Date) => void
+  contextMenuHandlers: {
+    onCheckOut: (room: BoardRoomCard) => void
+    onMarkClean: (room: BoardRoomCard) => void
+    onMarkDirty: (room: BoardRoomCard) => void
+    onBlock: (room: BoardRoomCard) => void
+    onUnblock: (room: BoardRoomCard) => void
+    onExtend: (room: BoardRoomCard, nights: number) => void
+    onShorten: (room: BoardRoomCard, nights: number) => void
+    onQuickCheckIn: (room: BoardRoomCard) => void
+    onToggleVIP: (room: BoardRoomCard) => void
+    onPostCharge: (room: BoardRoomCard) => void
+    onViewFolio: (room: BoardRoomCard) => void
+    onAddNote: (room: BoardRoomCard) => void
+    onPrintRegistration: (room: BoardRoomCard) => void
+    onTransferRoom: (room: BoardRoomCard) => void
+    onMarkOutOfService: (room: BoardRoomCard) => void
+    onRequestHousekeeping: (room: BoardRoomCard) => void
+    onCopyReservation: (room: BoardRoomCard) => void
+    onViewCalendar: (room: BoardRoomCard) => void
+  }
 }
 
 function CalendarRoomRow({
@@ -1574,6 +1726,7 @@ function CalendarRoomRow({
   onResizeStart,
   onResizeEnd,
   onEmptyBlockClick,
+  contextMenuHandlers,
 }: CalendarRoomRowProps) {
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
@@ -1658,11 +1811,34 @@ function CalendarRoomRow({
   }
 
   return (
-    <div 
-      className="flex hover:bg-accent/10 transition-all group border-b border-border/40 last:border-b-0"
-      onMouseUp={handleResizeMouseUp}
-      onMouseLeave={handleResizeMouseUp}
+    <RoomContextMenu
+      room={room}
+      onCheckOut={() => contextMenuHandlers.onCheckOut(room)}
+      onMarkClean={() => contextMenuHandlers.onMarkClean(room)}
+      onMarkDirty={() => contextMenuHandlers.onMarkDirty(room)}
+      onBlock={() => contextMenuHandlers.onBlock(room)}
+      onUnblock={() => contextMenuHandlers.onUnblock(room)}
+      onExtend={(nights) => contextMenuHandlers.onExtend(room, nights)}
+      onShorten={(nights) => contextMenuHandlers.onShorten(room, nights)}
+      onQuickCheckIn={() => contextMenuHandlers.onQuickCheckIn(room)}
+      onViewDetails={onClick}
+      onEditReservation={onReservationClick}
+      onToggleVIP={() => contextMenuHandlers.onToggleVIP(room)}
+      onPostCharge={() => contextMenuHandlers.onPostCharge(room)}
+      onViewFolio={() => contextMenuHandlers.onViewFolio(room)}
+      onAddNote={() => contextMenuHandlers.onAddNote(room)}
+      onPrintRegistration={() => contextMenuHandlers.onPrintRegistration(room)}
+      onTransferRoom={() => contextMenuHandlers.onTransferRoom(room)}
+      onMarkOutOfService={() => contextMenuHandlers.onMarkOutOfService(room)}
+      onRequestHousekeeping={() => contextMenuHandlers.onRequestHousekeeping(room)}
+      onCopyReservation={() => contextMenuHandlers.onCopyReservation(room)}
+      onViewCalendar={() => contextMenuHandlers.onViewCalendar(room)}
     >
+      <div 
+        className="flex hover:bg-accent/10 transition-all group border-b border-border/40 last:border-b-0"
+        onMouseUp={handleResizeMouseUp}
+        onMouseLeave={handleResizeMouseUp}
+      >
       <div 
         className="w-24 flex-shrink-0 border-r-2 border-border py-2 px-2 flex items-center gap-1.5 cursor-pointer bg-muted/20 group-hover:bg-muted/40 transition-all"
         onClick={onClick}
@@ -1851,5 +2027,6 @@ function CalendarRoomRow({
         })}
       </div>
     </div>
+    </RoomContextMenu>
   )
 }
