@@ -13,10 +13,12 @@ import {
   Receipt,
   ChartLine,
   Download,
-  FileText
+  FileText,
+  Plus
 } from '@phosphor-icons/react'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, startOfDay, endOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { ManualEntryForm } from './ManualEntryForm'
 
 interface AccountingEntry {
   id: string
@@ -283,12 +285,24 @@ export function AccountingDashboard() {
   const [entries, setEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
   const [folios] = useKV<any[]>('folios', [])
   const [selectedMonth, setSelectedMonth] = useState(new Date())
+  const [manualEntryOpen, setManualEntryOpen] = useState(false)
   
   useState(() => {
     if (entries.length === 0) {
       setEntries(generateSampleAccountingEntries())
     }
   })
+
+  const handleManualEntrySubmit = (entry: Omit<AccountingEntry, 'id' | 'createdAt' | 'createdBy'>) => {
+    const newEntry: AccountingEntry = {
+      ...entry,
+      id: `ACC${String(Date.now()).slice(-6)}`,
+      createdBy: 'Current User',
+      createdAt: new Date().toISOString()
+    }
+    
+    setEntries((currentEntries) => [newEntry, ...currentEntries])
+  }
   
   const revenueCategories: RevenueCategory[] = [
     {
@@ -471,6 +485,13 @@ export function AccountingDashboard() {
           <p className="text-muted-foreground">{format(selectedMonth, 'MMMM yyyy')}</p>
         </div>
         <div className="flex gap-2">
+          <Button
+            onClick={() => setManualEntryOpen(true)}
+            className="gap-2"
+          >
+            <Plus size={18} weight="bold" />
+            Post Entry
+          </Button>
           <Button
             variant="outline"
             onClick={() => setSelectedMonth(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
@@ -733,6 +754,12 @@ export function AccountingDashboard() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ManualEntryForm 
+        open={manualEntryOpen}
+        onOpenChange={setManualEntryOpen}
+        onSubmit={handleManualEntrySubmit}
+      />
     </div>
   )
 }
