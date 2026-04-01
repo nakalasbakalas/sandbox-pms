@@ -28,6 +28,7 @@ import { KeyboardShortcutsWelcome } from './components/help/KeyboardShortcutsWel
 import { useKeyboardShortcuts, globalShortcuts } from './hooks/use-keyboard-shortcuts'
 import { useCommandPalette } from './hooks/use-command-palette'
 import { createPMSCommands } from './lib/pms-commands'
+import { useDensity } from './hooks/use-density'
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
@@ -74,12 +75,13 @@ function AppContent() {
     const { completed } = useOnboarding()
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
     const { navigate } = useNavigation()
+    const { toggleDensity } = useDensity()
     const commands = useMemo(() => createPMSCommands(navigate), [navigate])
     const commandPalette = useCommandPalette(commands)
     
     const shortcuts = useMemo(
-        () => globalShortcuts(navigate, commandPalette.open, () => setShortcutsDialogOpen(true)),
-        [navigate, commandPalette.open]
+        () => globalShortcuts(navigate, commandPalette.open, () => setShortcutsDialogOpen(true), toggleDensity),
+        [navigate, commandPalette.open, toggleDensity]
     )
     
     useKeyboardShortcuts(shortcuts, completed)

@@ -7,6 +7,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Question, Command, Info } from '@phosphor-icons/react'
+import { DensityToggle } from './DensityToggle'
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -22,6 +23,8 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
           <SidebarTrigger className="-ml-0.5 h-5 w-5" />
           <div className="h-3 w-px bg-border/50" />
           <div className="flex-1" />
+          <DensityToggle />
+          <div className="h-3 w-px bg-border/50" />
           {onOpenShortcuts && (
             <Popover>
               <PopoverTrigger asChild>

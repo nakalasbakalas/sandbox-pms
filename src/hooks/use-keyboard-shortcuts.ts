@@ -52,7 +52,8 @@ export function getShortcutDisplay(shortcut: KeyboardShortcut): string {
 export const globalShortcuts = (
   navigate: (route: string) => void,
   openCommandPalette: () => void,
-  openShortcutsDialog?: () => void
+  openShortcutsDialog?: () => void,
+  toggleDensity?: () => void
 ): KeyboardShortcut[] => [
   {
     key: 'k',
@@ -66,6 +67,14 @@ export const globalShortcuts = (
     shift: true,
     description: 'Show keyboard shortcuts',
     action: () => openShortcutsDialog?.(),
+    section: 'Global'
+  },
+  {
+    key: 'd',
+    ctrl: true,
+    shift: true,
+    description: 'Toggle visual density',
+    action: () => toggleDensity?.(),
     section: 'Global'
   },
   {

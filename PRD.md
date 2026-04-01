@@ -658,6 +658,12 @@ Think: **Luxury hotel lobby meets Swiss design meets modern Japanese efficiency.
 - **Standard spacing** (forms, panels): `gap-4` (16px), `p-6` (24px)
 - **Generous spacing** (module headers, section breaks): `gap-8` (32px), `p-12` (48px)
 - **Grid gutters:** `gap-3` for room board (12px between cards)
+- **Visual Density Toggle:** Users can switch between compact and comfortable views system-wide
+  - Compact mode: Optimized for information density, smaller padding/gaps, condensed text sizes
+  - Comfortable mode: Spacious layout with larger touch targets and more breathing room
+  - Toggle accessible via header icon and keyboard shortcut (⌘⇧D)
+  - Preference persists across sessions using `useKV` hook
+  - Applies to: cards, tables, forms, dialogs, buttons, and all spacing utilities
 
 **Mobile Adaptations:**
 - **Board View:** Switches to single-column scrolling list on mobile (<768px), card size increases for touch
