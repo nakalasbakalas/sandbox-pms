@@ -18,6 +18,7 @@ import { InternalCommunicationsView } from './components/messaging/InternalCommu
 import { GuestCommunicationsView } from './components/messaging/GuestCommunicationsView'
 import { DailySummaryReportView } from './components/settings/DailySummaryReportView'
 import { AdvancedRevenueAnalyticsView } from './components/reports/AdvancedRevenueAnalyticsView'
+import { PredictiveAnalyticsDashboard } from './components/reports/PredictiveAnalyticsDashboard'
 import { SystemStatusView } from './components/views/SystemStatusView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
@@ -67,6 +68,8 @@ function AppRouter() {
       return <NightAuditView />
     case 'revenue-analytics':
       return <AdvancedRevenueAnalyticsView />
+    case 'predictive-analytics':
+      return <PredictiveAnalyticsDashboard />
     case 'system-status':
       return <SystemStatusView />
     default:

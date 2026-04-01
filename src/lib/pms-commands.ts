@@ -24,6 +24,7 @@ import {
   UserCirclePlus,
   Moon,
   Envelope,
+  Brain,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
@@ -380,6 +381,18 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       icon: ChartLineUp,
       action: () => {
         navigate?.('revenue-analytics')
+      },
+    },
+    {
+      id: 'predictive-analytics',
+      label: 'Predictive Analytics',
+      description: 'AI-powered insights and revenue predictions',
+      category: 'reports',
+      keywords: ['predictive', 'AI', 'insights', 'forecast', 'machine learning'],
+      shortcut: 'cmd+shift+p',
+      icon: Brain,
+      action: () => {
+        navigate?.('predictive-analytics')
       },
     },
     {

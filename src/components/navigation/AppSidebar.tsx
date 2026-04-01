@@ -14,6 +14,7 @@ import {
   Envelope,
   Moon,
   ChartLine,
+  Brain,
 } from '@phosphor-icons/react'
 import {
   Sidebar,
@@ -51,6 +52,7 @@ const communicationItems = [
 const operationsItems = [
   { id: 'night-audit', label: 'Night Audit', icon: Moon },
   { id: 'revenue-analytics', label: 'Revenue Analytics', icon: ChartLine },
+  { id: 'predictive-analytics', label: 'Predictive Analytics', icon: Brain },
 ]
 
 export function AppSidebar() {
