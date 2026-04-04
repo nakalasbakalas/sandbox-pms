@@ -6,9 +6,8 @@ export type InventoryStatus = 'AVAILABLE' | 'RESERVED' | 'BLOCKED'
 export type HoldStatus = 'ACTIVE' | 'RELEASED' | 'CONVERTED'
 export type FolioStatus = 'OPEN' | 'CLOSED' | 'VOIDED'
 export type ChargeCategory = 'ROOM' | 'FOOD' | 'BEVERAGE' | 'EXTRA_GUEST' | 'CHILD_FEE' | 'DAMAGE' | 'OTHER'
-export type PaymentMethod = 'CASH' | 'CREDIT_CARD' | 'BANK_TRANSFER' | 'OTHER'
+export type PaymentMethod = 'CASH' | 'CREDIT_CARD' | 'BANK_TRANSFER' | 'PROMPTPAY' | 'OTHER'
 export type ReservationAction = 'CREATED' | 'MODIFIED' | 'CANCELLED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'NO_SHOW'
-export type UserRole = 'ADMIN' | 'MANAGER' | 'FRONT_DESK' | 'HOUSEKEEPING' | 'CASHIER' | 'CAFE_STAFF'
 export type RateAdjustmentType = 'PERCENTAGE' | 'FIXED_DELTA' | 'LONG_STAY_DISCOUNT'
 export type ChannelProvider = 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
 export type ChannelSyncType = 'RESERVATION_PULL' | 'INVENTORY_PUSH' | 'RATE_PUSH' | 'RESTRICTION_PUSH'
@@ -272,6 +271,7 @@ export interface DashboardStats {
   pendingDeposits: number
 }
 
+export * from './auth'
 export * from './board'
 export * from './command-palette'
 export * from './daily-summary'
