@@ -13,6 +13,7 @@ import { DailySummarySettings } from '@/components/settings/DailySummarySettings
 import { TrendDataManager } from '@/components/settings/TrendDataManager'
 import { PropertySettings } from '@/components/settings/PropertySettings'
 import { RoomTypeManagement } from '@/components/settings/RoomTypeManagement'
+import { DataBackupExport } from '@/components/settings/DataBackupExport'
 import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine, Receipt, ArrowRight, DoorOpen } from '@phosphor-icons/react'
 import { useNavigation } from '@/hooks/use-navigation'
 
@@ -157,15 +158,6 @@ export function SettingsView() {
                 </div>
                 <div className="flex items-center justify-between p-4 border rounded-lg opacity-50">
                   <div>
-                    <div className="font-medium">Data Backup & Export</div>
-                    <div className="text-sm text-muted-foreground">
-                      Export all system data for backup or migration
-                    </div>
-                  </div>
-                  <Button disabled>Coming Soon</Button>
-                </div>
-                <div className="flex items-center justify-between p-4 border rounded-lg opacity-50">
-                  <div>
                     <div className="font-medium">Audit Logs</div>
                     <div className="text-sm text-muted-foreground">
                       View complete system activity and change history
@@ -175,6 +167,8 @@ export function SettingsView() {
                 </div>
               </div>
             </Card>
+
+            <DataBackupExport />
           </TabsContent>
         </Tabs>
       </div>

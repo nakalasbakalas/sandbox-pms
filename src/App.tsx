@@ -23,6 +23,7 @@ import { AdvancedRevenueAnalyticsView } from './components/reports/AdvancedReven
 import { PredictiveAnalyticsDashboard } from './components/reports/PredictiveAnalyticsDashboard'
 import { SystemStatusView } from './components/views/SystemStatusView'
 import { UserManagementView } from './components/settings/UserManagementView'
+import { DataBackupView } from './components/views/DataBackupView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { useOnboarding } from './hooks/use-onboarding'
@@ -81,6 +82,8 @@ function AppRouter() {
       return <SystemStatusView />
     case 'user-management':
       return <UserManagementView />
+    case 'data-backup':
+      return <DataBackupView />
     default:
       return <Board />
   }

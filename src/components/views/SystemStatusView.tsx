@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { CheckCircle, XCircle, Warning, ArrowsClockwise } from '@phosphor-icons/react'
+import { CheckCircle, XCircle, Warning, ArrowsClockwise, Database } from '@phosphor-icons/react'
+import { useNavigation } from '@/hooks/use-navigation'
 
 interface DataStoreStatus {
   key: string
@@ -46,6 +47,7 @@ export function SystemStatusView() {
   const [dataStoreStatuses, setDataStoreStatuses] = useState<DataStoreStatus[]>([])
   const [integrationStatuses, setIntegrationStatuses] = useState<IntegrationStatus[]>([])
   const [isChecking, setIsChecking] = useState(false)
+  const { navigate } = useNavigation()
 
   const checkDataStores = async () => {
     setIsChecking(true)
@@ -180,10 +182,16 @@ export function SystemStatusView() {
             Complete integration status for all modules and operations
           </p>
         </div>
-        <Button onClick={checkDataStores} disabled={isChecking}>
-          <ArrowsClockwise className={isChecking ? 'animate-spin' : ''} />
-          Refresh Status
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate('data-backup')}>
+            <Database className="mr-2" />
+            Backup Data
+          </Button>
+          <Button onClick={checkDataStores} disabled={isChecking}>
+            <ArrowsClockwise className={isChecking ? 'animate-spin' : ''} />
+            Refresh Status
+          </Button>
+        </div>
       </div>
 
       <Card>

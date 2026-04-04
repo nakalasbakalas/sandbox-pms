@@ -433,15 +433,14 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
     },
     {
       id: 'backup-data',
-      label: 'Backup Data',
-      description: 'Export system data backup',
+      label: 'Data Backup & Export',
+      description: 'Export and import system data backups',
       category: 'settings',
-      keywords: ['backup', 'export', 'data'],
+      keywords: ['backup', 'export', 'data', 'import', 'restore'],
       icon: Database,
       action: () => {
-        toast.info('Export data backup')
+        navigate?.('data-backup')
       },
-      disabled: true,
     },
   ]
 }

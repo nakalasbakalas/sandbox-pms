@@ -4,6 +4,7 @@ export type NavigationRoute =
   | 'reservations'
   | 'guests'
   | 'housekeeping'
+  | 'tablet-housekeeping'
   | 'cashier'
   | 'rates'
   | 'channels'
@@ -18,6 +19,7 @@ export type NavigationRoute =
   | 'predictive-analytics'
   | 'system-status'
   | 'user-management'
+  | 'data-backup'
 
 export interface NavigationState {
   currentRoute: NavigationRoute
