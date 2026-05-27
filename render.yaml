@@ -3,7 +3,7 @@ services:
     name: sandbox-hotel-pms
     runtime: node
     plan: starter
-    buildCommand: npm ci && npm run db:generate && npm run build
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build
     preDeployCommand: npm run db:migrate
     startCommand: npm run start
     healthCheckPath: /healthz
