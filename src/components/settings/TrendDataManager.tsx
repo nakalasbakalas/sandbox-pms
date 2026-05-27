@@ -11,9 +11,9 @@ export function TrendDataManager() {
     []
   )
 
-  const seedSampleData = () => {
+  const seedBaselineData = () => {
     const now = new Date()
-    const sampleData: WeeklyPerformanceMetrics[] = []
+    const baselineData: WeeklyPerformanceMetrics[] = []
 
     for (let i = 13; i >= 0; i--) {
       const date = new Date(now)
@@ -29,7 +29,7 @@ export function TrendDataManager() {
 
       const randomVariation = () => (Math.random() - 0.5) * 6
 
-      sampleData.push({
+      baselineData.push({
         date,
         readinessScore: Math.max(70, Math.min(98, baseReadiness + randomVariation())),
         cleanRoomPercentage: Math.max(75, Math.min(98, baseClean + randomVariation())),
@@ -43,7 +43,7 @@ export function TrendDataManager() {
       })
     }
 
-    setHistoricalMetrics(sampleData)
+    setHistoricalMetrics(baselineData)
   }
 
   const clearData = () => {
@@ -75,9 +75,9 @@ export function TrendDataManager() {
         </div>
 
         <div className="flex gap-2">
-          <Button onClick={seedSampleData} variant="outline" className="flex-1">
+          <Button onClick={seedBaselineData} variant="outline" className="flex-1">
             <Database />
-            Seed Sample Data
+            Seed Baseline Data
           </Button>
           <Button 
             onClick={clearData} 
@@ -90,8 +90,7 @@ export function TrendDataManager() {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Sample data seeds 14 days of simulated metrics showing improvement from last week to this week.
-          Actual reports will automatically record data over time.
+          Use baseline data only when no historical daily reports exist. Actual reports will automatically record data over time.
         </p>
       </CardContent>
     </Card>

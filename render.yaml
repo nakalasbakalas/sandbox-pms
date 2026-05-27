@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: sandbox-hotel-pms
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run db:generate && npm run build
+    preDeployCommand: npm run db:migrate
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-db
+          property: connectionString
+      - key: SESSION_SECRET
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+
+databases:
+  - name: sandbox-hotel-pms-db
+    plan: basic-256mb

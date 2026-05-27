@@ -39,5 +39,5 @@ export interface TemplateVariable {
 export interface TemplatePreset {
   name: string
   category: StaffTemplateCategory
-  templates: Omit<StaffMessageTemplate, 'id' | 'usageCount' | 'isFavorite' | 'isCustom' | 'createdAt' | 'updatedAt'>[]
+  templates: Omit<StaffMessageTemplate, 'id' | 'usageCount' | 'isFavorite' | 'isCustom' | 'createdAt'>[]
 }

@@ -33,7 +33,7 @@ export function PaymentCollection({
   required = true 
 }: PaymentCollectionProps) {
   const [showQR, setShowQR] = useState(false)
-  const [promptPayId] = useKV('hotel-promptpay-id', '0812345678')
+  const [promptPayId] = useKV('hotel-promptpay-id', '')
 
   const updateField = (field: keyof PaymentData, value: string | number | boolean) => {
     onChange({ ...data, [field]: value })
@@ -76,7 +76,7 @@ export function PaymentCollection({
               value={data.method} 
               onValueChange={(v) => {
                 updateField('method', v as typeof data.method)
-                if (v === 'PROMPTPAY') {
+                if (v === 'PROMPTPAY' && promptPayId) {
                   setShowQR(true)
                   updateField('amount', amountDue)
                 } else {
@@ -114,7 +114,16 @@ export function PaymentCollection({
             </RadioGroup>
           </div>
 
-          {data.method === 'PROMPTPAY' && showQR && (
+          {data.method === 'PROMPTPAY' && !promptPayId && (
+            <div className="flex items-start gap-1.5 p-2 bg-amber-50 border border-amber-200 rounded-md">
+              <Warning className="text-amber-600 flex-shrink-0 mt-0.5" size={14} weight="bold" />
+              <p className="text-xs text-amber-800">
+                PromptPay is not configured. Add a PromptPay ID in Settings before collecting QR payments.
+              </p>
+            </div>
+          )}
+
+          {data.method === 'PROMPTPAY' && showQR && promptPayId && (
             <PromptPayQR 
               amount={amountDue}
               promptPayId={promptPayId}

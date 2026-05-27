@@ -19,7 +19,8 @@ export function DensityToggle() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground relative overflow-hidden"
+            aria-label={density === 'compact' ? 'Switch to comfortable density' : 'Switch to compact density'}
+            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground relative overflow-hidden"
             onClick={toggleDensity}
           >
             <AnimatePresence mode="wait" initial={false}>
@@ -31,7 +32,7 @@ export function DensityToggle() {
                   exit={{ scale: 0.5, opacity: 0, rotate: 90 }}
                   transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
                 >
-                  <ListBullets size={12} weight="duotone" />
+                  <ListBullets size={16} weight="duotone" />
                 </motion.div>
               ) : (
                 <motion.div
@@ -41,13 +42,13 @@ export function DensityToggle() {
                   exit={{ scale: 0.5, opacity: 0, rotate: 90 }}
                   transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
                 >
-                  <SquaresFour size={12} weight="duotone" />
+                  <SquaresFour size={16} weight="duotone" />
                 </motion.div>
               )}
             </AnimatePresence>
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-[10px] px-1.5 py-0.5">
+        <TooltipContent side="bottom" className="text-xs px-2 py-1">
           {density === 'compact' ? 'Switch to Comfortable' : 'Switch to Compact'}
         </TooltipContent>
       </Tooltip>

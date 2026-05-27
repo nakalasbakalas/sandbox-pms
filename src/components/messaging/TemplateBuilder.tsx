@@ -129,7 +129,6 @@ export function TemplateBuilder({ open, onOpenChange, onSave, editTemplate }: Te
       requiresAcknowledgment,
       tags,
       isCustom: true,
-      updatedAt: new Date(),
     }
 
     onSave(template)

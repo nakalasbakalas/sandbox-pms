@@ -3,7 +3,7 @@
 @layer base {
   :root {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    font-size: 14px;
+    font-size: 16px;
   }
 }
 
@@ -123,9 +123,9 @@ button {
   --spacing-form: 0.75rem;
   --height-button: 1.75rem;
   --height-input: 1.75rem;
-  --text-sm: 0.6875rem;
-  --text-base: 0.75rem;
-  --text-lg: 0.875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
 }
 
 .density-comfortable {
@@ -135,9 +135,9 @@ button {
   --spacing-form: 1.25rem;
   --height-button: 2.25rem;
   --height-input: 2.25rem;
-  --text-sm: 0.75rem;
-  --text-base: 0.875rem;
-  --text-lg: 1rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
 }
 
 .density-compact [data-slot="card"] {

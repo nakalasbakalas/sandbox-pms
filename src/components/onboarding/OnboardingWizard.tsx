@@ -140,7 +140,7 @@ export function OnboardingWizard() {
         </div>
 
         <div className="text-center mt-6 text-sm text-muted-foreground">
-          Need help? Contact support at support@sandboxhotel.com
+          Need help? Contact your system administrator.
         </div>
       </div>
     </div>

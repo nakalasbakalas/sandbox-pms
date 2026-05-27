@@ -12,7 +12,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { 
   Plus,
-  Edit,
   Trash,
   Copy,
   Tag,
@@ -261,7 +260,7 @@ export function RatePlanManager() {
                                 <p className="text-xs text-primary mt-1">
                                   {plan.derivationType === 'MARKUP' && `+${plan.derivationValue}%`}
                                   {plan.derivationType === 'MARKDOWN' && `-${plan.derivationValue}%`}
-                                  {plan.derivationType === 'FIXED_DELTA' && `${plan.derivationValue >= 0 ? '+' : ''}฿${plan.derivationValue}`}
+                                  {plan.derivationType === 'FIXED_DELTA' && `${(plan.derivationValue ?? 0) >= 0 ? '+' : ''}฿${plan.derivationValue ?? 0}`}
                                 </p>
                               )}
                             </div>

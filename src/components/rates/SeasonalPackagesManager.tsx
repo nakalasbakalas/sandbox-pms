@@ -15,7 +15,6 @@ import { Switch } from '@/components/ui/switch'
 import {
   Plus,
   Trash,
-  Edit,
   Copy,
   Package,
   CalendarBlank,

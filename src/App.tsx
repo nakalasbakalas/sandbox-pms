@@ -2,12 +2,13 @@ import { useState, useMemo } from 'react'
 import { Board } from './components/board/Board'
 import { 
   FrontDeskView,
-  HousekeepingView,
   RatesView,
   ChannelsView,
   ReportsView,
   SettingsView,
-} from './components/views/PlaceholderViews'
+} from './components/views/ProductViews'
+import { TodayView } from './components/today/TodayView'
+import { RoomsView } from './components/rooms/RoomsView'
 import { ReservationsView } from './components/views/ReservationsView'
 import { GuestsView } from './components/views/GuestsView'
 import { CashierView } from './components/views/CashierView'
@@ -15,9 +16,11 @@ import { NightAuditView } from './components/views/NightAuditView'
 import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
 import { TabletHousekeepingApp } from './components/housekeeping/TabletHousekeepingApp'
 import { HousekeepingModeSwitcher } from './components/housekeeping/HousekeepingModeSwitcher'
+import { HousekeepingBoardView } from './components/housekeeping/HousekeepingBoardView'
 import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
 import { InternalCommunicationsView } from './components/messaging/InternalCommunicationsView'
 import { GuestCommunicationsView } from './components/messaging/GuestCommunicationsView'
+import { GrowthSuiteView } from './components/growth/GrowthSuiteView'
 import { DailySummaryReportView } from './components/settings/DailySummaryReportView'
 import { AdvancedRevenueAnalyticsView } from './components/reports/AdvancedRevenueAnalyticsView'
 import { PredictiveAnalyticsDashboard } from './components/reports/PredictiveAnalyticsDashboard'
@@ -26,8 +29,6 @@ import { UserManagementView } from './components/settings/UserManagementView'
 import { DataBackupView } from './components/views/DataBackupView'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
-import { useOnboarding } from './hooks/use-onboarding'
-import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import { AppLayout } from './components/navigation/AppLayout'
 import { KeyboardShortcutsDialog } from './components/help/KeyboardShortcutsDialog'
 import { KeyboardShortcutsWelcome } from './components/help/KeyboardShortcutsWelcome'
@@ -37,13 +38,18 @@ import { createPMSCommands } from './lib/pms-commands'
 import { useDensity } from './hooks/use-density'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import { LoginScreen } from './components/auth/LoginScreen'
+import { LanguageProvider } from './lib/i18n'
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
 
   switch (currentRoute) {
+    case 'today':
+      return <TodayView />
     case 'board':
       return <Board />
+    case 'rooms':
+      return <RoomsView />
     case 'front-desk':
       return <FrontDeskView />
     case 'reservations':
@@ -51,7 +57,7 @@ function AppRouter() {
     case 'guests':
       return <GuestsView />
     case 'housekeeping':
-      return <HousekeepingModeSwitcher />
+      return <HousekeepingBoardView />
     case 'tablet-housekeeping':
       return <TabletHousekeepingApp />
     case 'cashier':
@@ -60,6 +66,8 @@ function AppRouter() {
       return <RatesView />
     case 'channels':
       return <ChannelsView />
+    case 'growth-suite':
+      return <GrowthSuiteView />
     case 'reports':
       return <ReportsView />
     case 'settings':
@@ -85,16 +93,24 @@ function AppRouter() {
     case 'data-backup':
       return <DataBackupView />
     default:
-      return <Board />
+      return <TodayView />
   }
 }
 
 function AppContent() {
-    const { completed } = useOnboarding()
+    const { isAuthenticated } = useAuth()
+
+    if (!isAuthenticated) {
+        return <LoginScreen />
+    }
+
+    return <AuthenticatedAppContent />
+}
+
+function AuthenticatedAppContent() {
     const [shortcutsDialogOpen, setShortcutsDialogOpen] = useState(false)
     const { navigate } = useNavigation()
     const { toggleDensity } = useDensity()
-    const { isAuthenticated } = useAuth()
     const commands = useMemo(() => createPMSCommands(navigate), [navigate])
     const commandPalette = useCommandPalette(commands)
     
@@ -103,29 +119,19 @@ function AppContent() {
         [navigate, commandPalette.open, toggleDensity]
     )
     
-    useKeyboardShortcuts(shortcuts, completed)
-    
-    if (!isAuthenticated) {
-        return <LoginScreen />
-    }
+    useKeyboardShortcuts(shortcuts, true)
     
     return (
         <>
-            {!completed ? (
-                <OnboardingWizard />
-            ) : (
-                <>
-                    <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
-                        <AppRouter />
-                    </AppLayout>
-                    <KeyboardShortcutsDialog
-                        open={shortcutsDialogOpen}
-                        onOpenChange={setShortcutsDialogOpen}
-                        shortcuts={shortcuts}
-                    />
-                    <KeyboardShortcutsWelcome />
-                </>
-            )}
+        <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
+          <AppRouter />
+        </AppLayout>
+        <KeyboardShortcutsDialog
+          open={shortcutsDialogOpen}
+          onOpenChange={setShortcutsDialogOpen}
+          shortcuts={shortcuts}
+        />
+        <KeyboardShortcutsWelcome />
             <Toaster />
         </>
     )
@@ -134,9 +140,11 @@ function AppContent() {
 function App() {
     return (
         <AuthProvider>
+          <LanguageProvider>
             <NavigationProvider>
                 <AppContent />
             </NavigationProvider>
+          </LanguageProvider>
         </AuthProvider>
     )
 }

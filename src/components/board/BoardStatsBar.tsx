@@ -1,5 +1,4 @@
 import type { BoardStats } from '@/types/board'
-import { Card } from '@/components/ui/card'
 import { TrendUp, TrendDown, Users, DoorOpen, Broom, ChartBar } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 
@@ -9,96 +8,52 @@ interface BoardStatsBarProps {
 
 export function BoardStatsBar({ stats }: BoardStatsBarProps) {
   const occupancyColor = 
-    stats.occupancyRate >= 80 ? 'text-green-700' :
-    stats.occupancyRate >= 60 ? 'text-blue-700' :
-    stats.occupancyRate >= 40 ? 'text-orange-700' :
+    stats.occupancyRate >= 80 ? 'text-emerald-600' :
+    stats.occupancyRate >= 60 ? 'text-blue-600' :
+    stats.occupancyRate >= 40 ? 'text-amber-600' :
     'text-muted-foreground'
 
+  const kpis = [
+    { label: 'Occupied', value: stats.occupied, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { label: 'Available', value: stats.vacant, icon: DoorOpen, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { label: 'Arrivals', value: stats.arrivalsToday, icon: TrendUp, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { label: 'Departures', value: stats.departuresToday, icon: TrendDown, color: 'text-rose-600', bg: 'bg-rose-50' },
+    { label: 'Dirty', value: stats.dirty, icon: Broom, color: 'text-orange-600', bg: 'bg-orange-50' },
+  ]
+
   return (
-    <div className="grid grid-cols-6 gap-2">
-      <Card className="p-2 border-l-4 border-l-primary shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-lg bg-primary/10 flex-shrink-0">
-            <Users weight="bold" className="w-3.5 h-3.5 text-primary" />
+    <div className="flex items-stretch gap-3">
+      {kpis.map((kpi) => (
+        <div
+          key={kpi.label}
+          className="flex-1 flex items-center gap-2.5 rounded-lg bg-card border border-border/50 px-3 py-2 transition-colors hover:border-border"
+        >
+          <div className={cn('flex items-center justify-center w-8 h-8 rounded-lg', kpi.bg)}>
+            <kpi.icon weight="duotone" className={cn('w-4 h-4', kpi.color)} />
           </div>
           <div className="min-w-0">
-            <div className="text-lg font-extrabold leading-none">{stats.occupied}</div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Occupied</div>
+            <div className={cn('text-xl font-semibold leading-none tracking-tight', kpi.color)}>{kpi.value}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5 font-medium">{kpi.label}</div>
           </div>
         </div>
-      </Card>
+      ))}
 
-      <Card className="p-2 border-l-4 border-l-green-600 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-lg bg-green-600/10 flex-shrink-0">
-            <DoorOpen weight="bold" className="w-3.5 h-3.5 text-green-700" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-lg font-extrabold leading-none">{stats.vacant}</div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Vacant</div>
-          </div>
+      <div className="flex-1 flex items-center gap-2.5 rounded-lg bg-card border border-border/50 px-3 py-2 transition-colors hover:border-border">
+        <div className={cn(
+          'flex items-center justify-center w-8 h-8 rounded-lg',
+          stats.occupancyRate >= 80 ? 'bg-emerald-50' :
+          stats.occupancyRate >= 60 ? 'bg-blue-50' :
+          'bg-amber-50'
+        )}>
+          <ChartBar weight="duotone" className={cn('w-4 h-4', occupancyColor)} />
         </div>
-      </Card>
-
-      <Card className="p-2 border-l-4 border-l-emerald-600 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-lg bg-emerald-600/10 flex-shrink-0">
-            <TrendUp weight="bold" className="w-3.5 h-3.5 text-emerald-700" />
+        <div className="min-w-0">
+          <div className={cn('text-xl font-semibold leading-none tracking-tight', occupancyColor)}>
+            {stats.occupancyRate.toFixed(0)}%
           </div>
-          <div className="min-w-0">
-            <div className="text-lg font-extrabold leading-none">{stats.arrivalsToday}</div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Arrivals</div>
-          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5 font-medium">Occupancy</div>
         </div>
-      </Card>
-
-      <Card className="p-2 border-l-4 border-l-red-600 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-lg bg-red-600/10 flex-shrink-0">
-            <TrendDown weight="bold" className="w-3.5 h-3.5 text-red-700" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-lg font-extrabold leading-none">{stats.departuresToday}</div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Departures</div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-2 border-l-4 border-l-orange-600 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]">
-        <div className="flex items-center gap-2">
-          <div className="p-1 rounded-lg bg-orange-600/10 flex-shrink-0">
-            <Broom weight="bold" className="w-3.5 h-3.5 text-orange-700" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-lg font-extrabold leading-none">{stats.dirty}</div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Dirty</div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className={cn(
-        "p-2 border-l-4 shadow-sm hover:shadow-md transition-all hover:scale-[1.02]",
-        stats.occupancyRate >= 80 ? "border-l-green-600" :
-        stats.occupancyRate >= 60 ? "border-l-blue-600" :
-        "border-l-orange-600"
-      )}>
-        <div className="flex items-center gap-2">
-          <div className={cn(
-            "p-1 rounded-lg flex-shrink-0",
-            stats.occupancyRate >= 80 ? "bg-green-600/10" :
-            stats.occupancyRate >= 60 ? "bg-blue-600/10" :
-            "bg-orange-600/10"
-          )}>
-            <ChartBar weight="bold" className={cn("w-3.5 h-3.5", occupancyColor)} />
-          </div>
-          <div className="min-w-0">
-            <div className={cn("text-lg font-extrabold leading-none", occupancyColor)}>
-              {stats.occupancyRate.toFixed(0)}%
-            </div>
-            <div className="text-[8px] font-bold text-muted-foreground mt-1 uppercase tracking-wider">Occupancy</div>
-          </div>
-        </div>
-      </Card>
+      </div>
     </div>
   )
 }

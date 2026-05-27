@@ -21,7 +21,7 @@ import {
   TrendUp,
   TrendDown,
   Lightning,
-  Edit,
+  PencilSimple,
   Trash,
   Copy,
   Check,
@@ -322,7 +322,7 @@ export function RatesView() {
                   setNewBaseRate(selectedRoom?.baseRate.toString() || '')
                   setShowEditBaseRateDialog(true)
                 }}>
-                  <Edit className="w-4 h-4 mr-2" />
+                  <PencilSimple className="w-4 h-4 mr-2" />
                   Edit
                 </Button>
               </div>

@@ -156,14 +156,17 @@ export function SettingsView() {
                     <ArrowRight className="ml-2" size={16} />
                   </Button>
                 </div>
-                <div className="flex items-center justify-between p-4 border rounded-lg opacity-50">
+                <div className="flex items-center justify-between p-4 border rounded-lg">
                   <div>
-                    <div className="font-medium">Audit Logs</div>
+                    <div className="font-medium">Operational Audit Trail</div>
                     <div className="text-sm text-muted-foreground">
-                      View complete system activity and change history
+                      Review system health, integration wiring, and backup exports for operational follow-up
                     </div>
                   </div>
-                  <Button disabled>Coming Soon</Button>
+                  <Button variant="outline" onClick={() => navigate('system-status')}>
+                    Review Activity
+                    <ArrowRight className="ml-2" size={16} />
+                  </Button>
                 </div>
               </div>
             </Card>

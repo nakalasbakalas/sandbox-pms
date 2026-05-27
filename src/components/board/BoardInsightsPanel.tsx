@@ -36,11 +36,11 @@ export function BoardInsightsPanel({ rooms, viewMode }: BoardInsightsPanelProps)
   const availableRooms = vacantClean
 
   const arrivalsToday = rooms.filter(r => 
-    r.reservation && new Date(r.reservation.checkIn).toDateString() === today.toDateString()
+    r.reservation?.checkIn && new Date(r.reservation.checkIn).toDateString() === today.toDateString()
   ).length
 
   const departuresToday = rooms.filter(r => 
-    r.reservation && new Date(r.reservation.checkOut).toDateString() === today.toDateString()
+    r.reservation?.checkOut && new Date(r.reservation.checkOut).toDateString() === today.toDateString()
   ).length
 
   const vipGuests = rooms.filter(r => r.reservation?.isVIP).length
@@ -55,12 +55,12 @@ export function BoardInsightsPanel({ rooms, viewMode }: BoardInsightsPanelProps)
   const lowAvailability = availableRooms <= 3
 
   const futureReservations = rooms.filter(r => 
-    r.reservation && new Date(r.reservation.checkIn) > today
+    r.reservation?.checkIn && new Date(r.reservation.checkIn) > today
   ).length
 
   const stayoverRooms = rooms.filter(r => 
     r.status === 'OCCUPIED' && 
-    r.reservation && 
+    r.reservation?.checkOut && 
     new Date(r.reservation.checkOut) > today
   ).length
 

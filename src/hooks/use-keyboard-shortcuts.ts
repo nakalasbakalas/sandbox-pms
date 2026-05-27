@@ -41,9 +41,9 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[], enabled: boo
 export function getShortcutDisplay(shortcut: KeyboardShortcut): string {
   const parts: string[] = []
   
-  if (shortcut.ctrl) parts.push('⌘')
-  if (shortcut.shift) parts.push('⇧')
-  if (shortcut.alt) parts.push('⌥')
+  if (shortcut.ctrl) parts.push('Cmd/Ctrl')
+  if (shortcut.shift) parts.push('Shift')
+  if (shortcut.alt) parts.push('Alt')
   parts.push(shortcut.key.toUpperCase())
   
   return parts.join(' ')
@@ -89,29 +89,29 @@ export const globalShortcuts = (
   {
     key: '1',
     ctrl: true,
-    description: 'Go to Board',
-    action: () => navigate('board'),
+    description: 'Go to Today',
+    action: () => navigate('today'),
     section: 'Navigation'
   },
   {
     key: '2',
-    ctrl: true,
-    description: 'Go to Front Desk',
-    action: () => navigate('front-desk'),
-    section: 'Navigation'
-  },
-  {
-    key: '3',
     ctrl: true,
     description: 'Go to Reservations',
     action: () => navigate('reservations'),
     section: 'Navigation'
   },
   {
+    key: '3',
+    ctrl: true,
+    description: 'Go to Front Desk Board',
+    action: () => navigate('board'),
+    section: 'Navigation'
+  },
+  {
     key: '4',
     ctrl: true,
-    description: 'Go to Guests',
-    action: () => navigate('guests'),
+    description: 'Go to Rooms',
+    action: () => navigate('rooms'),
     section: 'Navigation'
   },
   {
@@ -124,29 +124,29 @@ export const globalShortcuts = (
   {
     key: '6',
     ctrl: true,
-    description: 'Go to Cashier',
-    action: () => navigate('cashier'),
+    description: 'Go to Guests',
+    action: () => navigate('guests'),
     section: 'Navigation'
   },
   {
     key: '7',
     ctrl: true,
-    description: 'Go to Rates',
-    action: () => navigate('rates'),
+    description: 'Go to Payments',
+    action: () => navigate('cashier'),
     section: 'Navigation'
   },
   {
     key: '8',
     ctrl: true,
-    description: 'Go to Channels',
-    action: () => navigate('channels'),
+    description: 'Go to Reports',
+    action: () => navigate('reports'),
     section: 'Navigation'
   },
   {
     key: '9',
     ctrl: true,
-    description: 'Go to Reports',
-    action: () => navigate('reports'),
+    description: 'Go to Settings',
+    action: () => navigate('settings'),
     section: 'Navigation'
   },
   {
@@ -159,8 +159,8 @@ export const globalShortcuts = (
   {
     key: 'n',
     ctrl: true,
-    description: 'New reservation (from Board)',
-    action: () => toast.info('Create new reservation (available on Board)'),
+    description: 'New reservation from Calendar',
+    action: () => toast.info('Create new reservation from Calendar'),
     section: 'Actions'
   },
   {

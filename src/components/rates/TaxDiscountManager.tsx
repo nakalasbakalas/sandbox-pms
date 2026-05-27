@@ -15,7 +15,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { 
   Plus,
   Trash,
-  Edit,
   Percent,
   Tag,
   CalendarBlank,

@@ -107,7 +107,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
           `Next status: ${room.nextReservation ? 'Occupied' : 'Vacant'}`
 
         sendAutomatedMessage(
-          room.roomNumber,
+          room.roomNumber ?? room.number,
           'CHECK_OUT',
           message,
           room.isVIP ? 'HIGH' : 'NORMAL',
@@ -145,7 +145,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
             `⚡ Please clean and prepare ASAP for early arrival.`
 
           sendAutomatedMessage(
-            room.roomNumber,
+            room.roomNumber ?? room.number,
             'EARLY_CHECK_IN',
             message,
             'HIGH',
@@ -178,7 +178,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
           `⚠️ Please coordinate with maintenance team and update room status once resolved.`
 
         sendAutomatedMessage(
-          room.roomNumber,
+          room.roomNumber ?? room.number,
           'MAINTENANCE',
           message,
           'HIGH'
@@ -208,7 +208,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
           `👑 Please ensure exceptional cleaning standards and amenities.`
 
         sendAutomatedMessage(
-          room.roomNumber,
+          room.roomNumber ?? room.number,
           'PRIORITY',
           message,
           'HIGH',
@@ -247,7 +247,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
             `Please check with front desk before cleaning this room.`
 
           sendAutomatedMessage(
-            room.roomNumber,
+            room.roomNumber ?? room.number,
             'NO_SHOW',
             message,
             'NORMAL',
@@ -279,7 +279,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
           `Please adjust cleaning schedule accordingly.`
 
         sendAutomatedMessage(
-          room.roomNumber,
+          room.roomNumber ?? room.number,
           'EXTENDED_STAY',
           message,
           'NORMAL',
@@ -336,7 +336,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
       `✅ Please clean and prepare this room immediately.`
 
     sendAutomatedMessage(
-      room.roomNumber,
+      room.roomNumber ?? room.number,
       'CHECK_OUT',
       message,
       room.isVIP ? 'HIGH' : 'NORMAL',
@@ -359,7 +359,7 @@ export function useAutomaticHousekeepingMessaging(rooms: BoardRoomCard[]) {
       `⚠️ Please coordinate with maintenance and update status.`
 
     sendAutomatedMessage(
-      room.roomNumber,
+      room.roomNumber ?? room.number,
       'MAINTENANCE',
       message,
       'URGENT'

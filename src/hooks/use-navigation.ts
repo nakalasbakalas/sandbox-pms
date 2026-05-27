@@ -13,7 +13,7 @@ interface NavigationProviderProps {
 }
 
 export function NavigationProvider(props: NavigationProviderProps) {
-  const [currentRoute, setCurrentRoute] = useState<NavigationRoute>('board')
+  const [currentRoute, setCurrentRoute] = useState<NavigationRoute>('today')
 
   const navigate = (route: NavigationRoute) => {
     setCurrentRoute(route)

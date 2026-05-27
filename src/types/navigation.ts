@@ -1,5 +1,7 @@
 export type NavigationRoute = 
+  | 'today'
   | 'board'
+  | 'rooms'
   | 'front-desk'
   | 'reservations'
   | 'guests'
@@ -8,6 +10,7 @@ export type NavigationRoute =
   | 'cashier'
   | 'rates'
   | 'channels'
+  | 'growth-suite'
   | 'reports'
   | 'settings'
   | 'messaging'

@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { BoardRoomCard } from '@/types/board'
 import { cn } from '@/lib/utils'
 import { Users, Warning, Star, CurrencyDollar } from '@phosphor-icons/react'
-import { motion } from 'framer-motion'
 
 interface RoomCardProps {
   room: BoardRoomCard
@@ -29,46 +28,32 @@ export function RoomCard({
 }: RoomCardProps) {
   const [isHovered, setIsHovered] = useState(false)
 
-  const getStatusColor = () => {
-    if (room.operationalStatus === 'OUT_OF_SERVICE') return 'bg-gray-400/90'
-    if (room.operationalStatus === 'BLOCKED') return 'bg-gray-500/90'
+  const getStatusClasses = () => {
+    if (room.operationalStatus === 'OUT_OF_SERVICE') return 'bg-gray-100 border-gray-300 text-gray-700'
+    if (room.operationalStatus === 'BLOCKED') return 'bg-gray-50 border-gray-300 text-gray-600'
     
     switch (room.status) {
       case 'OCCUPIED_CLEAN':
       case 'OCCUPIED_DIRTY':
-        return 'bg-blue-500/90'
+        return 'bg-blue-50 border-blue-200 text-blue-900'
       case 'VACANT_CLEAN':
-        return 'bg-emerald-500/90'
+        return 'bg-emerald-50 border-emerald-200 text-emerald-900'
       case 'VACANT_DIRTY':
-        return 'bg-amber-500/90'
+        return 'bg-orange-50 border-orange-200 text-orange-900'
       default:
-        return 'bg-gray-300/90'
+        return 'bg-muted border-border text-muted-foreground'
     }
   }
 
-  const getCleanIcon = () => {
-    if (room.status === 'OCCUPIED_DIRTY' || room.status === 'VACANT_DIRTY') {
-      return '🔴'
+  const getAccentColor = () => {
+    if (room.operationalStatus !== 'AVAILABLE') return 'bg-gray-400'
+    switch (room.status) {
+      case 'OCCUPIED_CLEAN': return 'bg-blue-500'
+      case 'OCCUPIED_DIRTY': return 'bg-orange-500'
+      case 'VACANT_CLEAN': return 'bg-emerald-500'
+      case 'VACANT_DIRTY': return 'bg-orange-500'
+      default: return 'bg-gray-300'
     }
-    if (room.status === 'OCCUPIED_CLEAN' || room.status === 'VACANT_CLEAN') {
-      return '✓'
-    }
-    return null
-  }
-
-  const getBorderClass = () => {
-    const borders: string[] = []
-    
-    if (room.isArrivalToday) borders.push('border-l-4 border-l-green-400')
-    if (room.isDepartureToday) borders.push('border-r-4 border-r-red-400')
-    
-    return borders.join(' ')
-  }
-
-  const getRingClass = () => {
-    if (room.hasIssue) return 'ring-2 ring-red-500 ring-inset'
-    if (room.isVIP) return 'ring-2 ring-yellow-400 ring-inset'
-    return ''
   }
 
   const draggable = room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
@@ -85,80 +70,77 @@ export function RoomCard({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       className={cn(
-        'relative h-20 rounded overflow-hidden cursor-pointer transition-all',
-        getStatusColor(),
-        getBorderClass(),
-        getRingClass(),
-        isDropTarget && 'ring-2 ring-primary ring-inset',
+        'relative h-20 rounded-lg border overflow-hidden cursor-pointer transition-all',
+        getStatusClasses(),
+        isDropTarget && 'ring-2 ring-blue-500 ring-offset-1',
         draggable && 'active:cursor-grabbing',
-        isDragging && 'opacity-50',
-        'hover:brightness-105'
+        isDragging && 'opacity-40 scale-95',
+        room.hasIssue && 'ring-1 ring-rose-400',
+        'hover:shadow-sm'
       )}
     >
-      <div className="relative h-full p-1.5 flex flex-col justify-between text-white">
+      {/* Accent strip */}
+      <div className={cn('absolute left-0 top-0 bottom-0 w-[3px]', getAccentColor())} />
+
+      <div className="relative h-full pl-2.5 pr-2 py-1.5 flex flex-col justify-between">
         <div className="flex items-start justify-between gap-1">
           <div className="flex-1 min-w-0">
-            <div className="text-base font-bold leading-none">{room.number}</div>
-            <div className="text-[9px] font-medium opacity-75 mt-0.5 uppercase tracking-wide">{room.type}</div>
+            <div className="text-sm font-semibold leading-none">{room.number}</div>
+            <div className="text-[9px] font-normal opacity-60 mt-0.5 uppercase tracking-wide">{room.type}</div>
           </div>
           
           <div className="flex gap-0.5 items-start flex-shrink-0">
-            {room.isVIP && <Star weight="fill" className="w-3 h-3 text-yellow-300" />}
-            {room.hasIssue && <Warning weight="fill" className="w-3 h-3 text-red-300" />}
-            {room.depositStatus === 'PENDING' && <CurrencyDollar weight="bold" className="w-3 h-3 text-orange-300" />}
+            {room.isVIP && <Star weight="fill" className="w-3 h-3 text-amber-500" />}
+            {room.hasIssue && <Warning weight="fill" className="w-3 h-3 text-rose-500" />}
           </div>
         </div>
 
         <div className="space-y-0.5 min-h-0">
           {room.guestName && (
             <>
-              <div className="text-[11px] font-semibold truncate leading-tight">{room.guestName}</div>
-              <div className="flex items-center gap-1.5 text-[9px] opacity-80">
+              <div className="text-[11px] font-medium truncate leading-tight">{room.guestName}</div>
+              <div className="flex items-center gap-1.5 text-[9px] opacity-60">
                 {room.guestCount && (
                   <div className="flex items-center gap-0.5">
-                    <Users weight="fill" className="w-2.5 h-2.5" />
+                    <Users weight="regular" className="w-2.5 h-2.5" />
                     <span>{room.guestCount}</span>
                   </div>
                 )}
                 {room.nightsRemaining !== undefined && (
-                  <span className="font-medium">{room.nightsRemaining}n</span>
+                  <span>{room.nightsRemaining}n</span>
                 )}
-                {getCleanIcon() && (
-                  <span className="ml-auto text-[8px]">{getCleanIcon()}</span>
+                {room.cleanStatus === 'DIRTY' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-500 ml-auto" />
                 )}
               </div>
             </>
           )}
 
           {!room.guestName && room.operationalStatus === 'AVAILABLE' && (
-            <div className="text-[9px] font-medium opacity-70 uppercase tracking-wide">
-              {room.status === 'VACANT_CLEAN' ? 'Clean' : 'Needs Cleaning'}
+            <div className="text-[9px] opacity-50 uppercase tracking-wide">
+              {room.status === 'VACANT_CLEAN' ? 'Ready' : 'Needs cleaning'}
             </div>
           )}
 
           {room.operationalStatus !== 'AVAILABLE' && (
-            <div className="text-[9px] font-semibold uppercase tracking-wide opacity-90">
+            <div className="text-[9px] font-medium uppercase tracking-wide opacity-70">
               {room.operationalStatus === 'OUT_OF_SERVICE' ? 'Out of Service' : 'Blocked'}
             </div>
           )}
         </div>
-
-        {room.depositStatus === 'PENDING' && (
-          <div className="absolute top-0 left-0 w-full h-0.5 bg-orange-400" />
-        )}
       </div>
 
       {isHovered && room.balanceDue && room.balanceDue > 0 && (
-        <div className="absolute bottom-0 right-0 bg-orange-600 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-tl">
+        <div className="absolute bottom-0 right-0 bg-orange-100 text-orange-700 text-[9px] font-medium px-1.5 py-0.5 rounded-tl border-t border-l border-orange-200">
           ฿{room.balanceDue.toLocaleString()}
         </div>
       )}
 
       {isDropTarget && (
-        <div className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center">
-          <div className="text-white text-[10px] font-semibold bg-primary px-2 py-1 rounded">
+        <div className="absolute inset-0 bg-blue-500/10 backdrop-blur-[1px] flex items-center justify-center">
+          <span className="text-[10px] text-blue-600 font-medium bg-white/80 px-2 py-0.5 rounded shadow-sm">
             Drop here
-          </div>
+          </span>
         </div>
       )}
     </div>

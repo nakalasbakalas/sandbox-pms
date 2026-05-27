@@ -9,7 +9,7 @@ import { DepartureList } from './DepartureList'
 import { CheckInDialog } from './CheckInDialog'
 import { CheckOutDialog } from './CheckOutDialog'
 import { ReceiptDialog } from './ReceiptDialog'
-import { generateMockArrivals, generateMockDepartures, calculateFrontDeskStats } from '@/lib/mock-front-desk-data'
+import { calculateFrontDeskStats } from '@/lib/front-desk-data'
 import { generateReceiptFromCheckOut } from '@/lib/receipt-generator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card } from '@/components/ui/card'
@@ -24,8 +24,8 @@ import { CommandPalette } from '@/components/CommandPalette'
 import { useRoomSync } from '@/hooks/use-room-sync'
 
 export function FrontDeskView() {
-  const [arrivals, setArrivals] = useState<ArrivalItem[]>(() => generateMockArrivals())
-  const [departures, setDepartures] = useState<DepartureItem[]>(() => generateMockDepartures())
+  const [arrivals, setArrivals] = useState<ArrivalItem[]>([])
+  const [departures, setDepartures] = useState<DepartureItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArrival, setSelectedArrival] = useState<ArrivalItem | null>(null)
   const [selectedDeparture, setDepartureItem] = useState<DepartureItem | null>(null)

@@ -453,9 +453,15 @@ export async function sendStaffAlert(
   context: AlertContext
 ): Promise<AlertInstance | null> {
   try {
-    const routingRules = await window.spark.kv.get<AlertRoutingRule[]>('alert-routing-rules')
-    const staffMembers = await window.spark.kv.get<StaffMember[]>('staff-members')
-    const lineConfig = await window.spark.kv.get<LineConfig>('line-config')
+    const sparkRuntime = window.spark
+    if (!sparkRuntime) {
+      console.error('Spark runtime is not available for alert routing')
+      return null
+    }
+
+    const routingRules = await sparkRuntime.kv.get<AlertRoutingRule[]>('alert-routing-rules')
+    const staffMembers = await sparkRuntime.kv.get<StaffMember[]>('staff-members')
+    const lineConfig = await sparkRuntime.kv.get<LineConfig>('line-config')
     
     if (!routingRules || !staffMembers || !lineConfig) {
       console.error('Missing required configuration for alert routing')
@@ -477,7 +483,13 @@ export async function sendStaffAlert(
 
 export async function logAlertInstance(alert: AlertInstance): Promise<void> {
   try {
-    const alertLog = await window.spark.kv.get<AlertInstance[]>('alert-log') || []
+    const sparkRuntime = window.spark
+    if (!sparkRuntime) {
+      console.error('Spark runtime is not available for alert logging')
+      return
+    }
+
+    const alertLog = await sparkRuntime.kv.get<AlertInstance[]>('alert-log') || []
     alertLog.unshift(alert)
     
     const maxLogSize = 1000
@@ -485,7 +497,7 @@ export async function logAlertInstance(alert: AlertInstance): Promise<void> {
       alertLog.splice(maxLogSize)
     }
     
-    await window.spark.kv.set('alert-log', alertLog)
+    await sparkRuntime.kv.set('alert-log', alertLog)
   } catch (error) {
     console.error('Failed to log alert instance:', error)
   }

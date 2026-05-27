@@ -97,7 +97,7 @@ export class DataSyncService {
         reservationId: reservation.id,
         checkIn: reservation.checkIn,
         checkOut: reservation.checkOut,
-        roomType: reservation.roomType,
+        roomType: (reservation as Reservation & { roomType?: string }).roomType ?? reservation.roomTypeId,
       },
     })
   }

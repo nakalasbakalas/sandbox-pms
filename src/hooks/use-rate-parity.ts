@@ -71,7 +71,7 @@ export function useRateParity() {
   const [parityChecks, setParityChecks] = useKV<RateParityCheck[]>('parity-checks', [])
   const [settings, setSettings] = useKV<RateParitySettings>('rate-parity-settings', DEFAULT_SETTINGS)
   
-  const checkIntervalRef = useRef<NodeJS.Timeout>()
+  const checkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const calculateSeverity = (variancePercent: number): ParityViolation['severity'] => {
     const absVariance = Math.abs(variancePercent)

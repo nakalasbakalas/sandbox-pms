@@ -380,7 +380,7 @@ export function printReservationsList(
   const totalDeposits = reservations.reduce((sum, r) => sum + r.depositPaid, 0)
   const totalBalance = reservations.reduce((sum, r) => sum + r.balanceDue, 0)
 
-  let groupedReservations: Record<string, Reservation[]> = {}
+  const groupedReservations: Record<string, Reservation[]> = {}
   
   if (groupBy === 'date') {
     reservations.forEach(res => {

@@ -51,65 +51,7 @@ export interface Guest {
 }
 
 function generateMockGuests(): Guest[] {
-  const firstNames = ['Sarah', 'Michael', 'Emma', 'James', 'Lisa', 'David', 'Sophie', 'Alex', 'Maria', 'John', 'Anna', 'Tom', 'Julia', 'Chris', 'Nina']
-  const lastNames = ['Johnson', 'Chen', 'Williams', 'Brown', 'Anderson', 'Martinez', 'Taylor', 'Kumar', 'Garcia', 'Smith', 'Kowalski', 'Wilson', 'Roberts', 'Evans', 'Patel']
-  const nationalities = ['Thai', 'American', 'British', 'German', 'French', 'Japanese', 'Australian', 'Chinese', 'Korean', 'Singapore']
-  
-  const guests: Guest[] = []
-  
-  for (let i = 0; i < 100; i++) {
-    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)]
-    const lastName = lastNames[Math.floor(Math.random() * lastNames.length)]
-    const fullName = `${firstName} ${lastName}`
-    
-    const totalStays = Math.floor(Math.random() * 10) + 1
-    const totalNights = totalStays * (Math.floor(Math.random() * 5) + 1)
-    const avgRate = 2000 + Math.floor(Math.random() * 1500)
-    const totalSpent = totalNights * avgRate
-    
-    const firstStayDate = new Date(Date.now() - Math.floor(Math.random() * 365 * 2) * 24 * 60 * 60 * 1000)
-    const lastStayDate = totalStays > 1 ? new Date(Date.now() - Math.floor(Math.random() * 90) * 24 * 60 * 60 * 1000) : firstStayDate
-    
-    const isVIP = totalStays >= 5 || Math.random() < 0.1
-    const hasWarning = Math.random() < 0.05
-    
-    const tags: string[] = []
-    if (totalStays >= 5) tags.push('Frequent Guest')
-    if (isVIP) tags.push('VIP')
-    if (Math.random() < 0.3) tags.push('Corporate')
-    if (Math.random() < 0.2) tags.push('Extended Stay')
-    if (hasWarning) tags.push('Caution')
-    
-    guests.push({
-      id: `GUEST${1000 + i}`,
-      firstName,
-      lastName,
-      fullName,
-      email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
-      phone: `+66-${Math.floor(Math.random() * 900000000) + 100000000}`,
-      nationality: nationalities[Math.floor(Math.random() * nationalities.length)],
-      dateOfBirth: new Date(1960 + Math.floor(Math.random() * 40), Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1),
-      passportNumber: Math.random() < 0.8 ? `P${Math.floor(Math.random() * 10000000)}` : undefined,
-      idNumber: Math.random() < 0.5 ? `ID${Math.floor(Math.random() * 100000000000000)}` : undefined,
-      address: Math.random() < 0.7 ? `${Math.floor(Math.random() * 999) + 1} ${['Main St', 'Oak Ave', 'Park Rd', 'Beach Blvd'][Math.floor(Math.random() * 4)]}` : undefined,
-      isVIP,
-      tags,
-      preferences: Math.random() < 0.4 ? ['High floor', 'Quiet room', 'Extra towels', 'Early check-in'][Math.floor(Math.random() * 4)] : undefined,
-      notes: Math.random() < 0.3 ? 'Excellent guest, always courteous' : undefined,
-      warnings: hasWarning ? 'Late checkout without notice on previous stay' : undefined,
-      totalStays,
-      totalNights,
-      totalSpent,
-      lastStayDate,
-      firstStayDate,
-      preferredRoomType: Math.random() < 0.5 ? 'TWIN' : 'DOUBLE',
-      preferredContact: ['EMAIL', 'PHONE', 'LINE'][Math.floor(Math.random() * 3)] as any,
-      createdAt: firstStayDate,
-      updatedAt: new Date()
-    })
-  }
-  
-  return guests.sort((a, b) => (b.lastStayDate?.getTime() || 0) - (a.lastStayDate?.getTime() || 0))
+  return []
 }
 
 export function GuestsView() {
@@ -134,10 +76,11 @@ export function GuestsView() {
       case 'frequent':
         result = result.filter(g => g.totalStays >= 3)
         break
-      case 'recent':
+      case 'recent': {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
         result = result.filter(g => g.lastStayDate && g.lastStayDate >= thirtyDaysAgo)
         break
+      }
     }
     
     if (searchQuery) {

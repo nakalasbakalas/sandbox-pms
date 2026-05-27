@@ -13,18 +13,16 @@ import { toast } from 'sonner'
 import type { User, UserRole } from '@/types/auth'
 import { ROLE_LABELS, ROLE_PERMISSIONS } from '@/types/auth'
 import { useAuth } from '@/hooks/use-auth'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { createPasswordSalt, hashPassword, type PasswordCredential } from '@/lib/auth-passwords'
 
-interface UserWithPassword extends User {
-  password: string
-}
+interface ManagedUser extends User, PasswordCredential {}
 
 export function UserManagementView() {
-  const [users, setUsers] = useKV<UserWithPassword[]>('system:users', [])
+  const [users, setUsers] = useKV<ManagedUser[]>('system:users', [])
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<UserWithPassword | null>(null)
+  const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null)
   const { user: currentUser } = useAuth()
 
   const [formData, setFormData] = useState({
@@ -56,7 +54,7 @@ export function UserManagementView() {
     })
   }
 
-  const handleAddUser = () => {
+  const handleAddUser = async () => {
     if (!formData.username || !formData.password || !formData.displayName) {
       toast.error('Please fill in all fields')
       return
@@ -67,10 +65,13 @@ export function UserManagementView() {
       return
     }
 
-    const newUser: UserWithPassword = {
+    const passwordSalt = createPasswordSalt()
+    const passwordHash = await hashPassword(formData.password, passwordSalt)
+    const newUser: ManagedUser = {
       id: `user-${Date.now()}`,
       username: formData.username,
-      password: formData.password,
+      passwordHash,
+      passwordSalt,
       displayName: formData.displayName,
       role: formData.role,
       createdAt: new Date().toISOString(),
@@ -97,7 +98,7 @@ export function UserManagementView() {
     resetForm()
   }
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     if (!selectedUser) return
 
     if (!passwordForm.newPassword || !passwordForm.confirmPassword) {
@@ -115,10 +116,13 @@ export function UserManagementView() {
       return
     }
 
+    const passwordSalt = createPasswordSalt()
+    const passwordHash = await hashPassword(passwordForm.newPassword, passwordSalt)
+
     setUsers((current) =>
       current.map((u) =>
         u.id === selectedUser.id
-          ? { ...u, password: passwordForm.newPassword }
+          ? { ...u, passwordHash, passwordSalt }
           : u
       )
     )
@@ -128,7 +132,7 @@ export function UserManagementView() {
     setSelectedUser(null)
   }
 
-  const openEditDialog = (user: UserWithPassword) => {
+  const openEditDialog = (user: ManagedUser) => {
     setSelectedUser(user)
     setFormData({
       username: user.username,
@@ -139,7 +143,7 @@ export function UserManagementView() {
     setIsEditDialogOpen(true)
   }
 
-  const openPasswordDialog = (user: UserWithPassword) => {
+  const openPasswordDialog = (user: ManagedUser) => {
     setSelectedUser(user)
     resetPasswordForm()
     setIsPasswordDialogOpen(true)
@@ -463,7 +467,7 @@ export function UserManagementView() {
         <CardHeader>
           <CardTitle>Default System Accounts</CardTitle>
           <CardDescription>
-            Built-in accounts for testing and initial setup
+            Built-in accounts available for initial setup; passwords are not displayed in the application
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -471,7 +475,6 @@ export function UserManagementView() {
             <TableHeader>
               <TableRow>
                 <TableHead>Username</TableHead>
-                <TableHead>Password</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Permissions</TableHead>
               </TableRow>
@@ -479,31 +482,26 @@ export function UserManagementView() {
             <TableBody>
               <TableRow>
                 <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">Neeq</code></TableCell>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">Neeq!1234</code></TableCell>
                 <TableCell><Badge variant="default">Administrator</Badge></TableCell>
                 <TableCell className="text-sm text-muted-foreground">Full system access</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">manager</code></TableCell>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">manager123</code></TableCell>
                 <TableCell><Badge variant="secondary">Manager</Badge></TableCell>
                 <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.manager.length} permissions</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">frontdesk</code></TableCell>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">frontdesk123</code></TableCell>
                 <TableCell><Badge variant="outline">Front Desk</Badge></TableCell>
                 <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS['front-desk'].length} permissions</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">housekeeping</code></TableCell>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">housekeeping123</code></TableCell>
                 <TableCell><Badge variant="outline">Housekeeping</Badge></TableCell>
                 <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.housekeeping.length} permissions</TableCell>
               </TableRow>
               <TableRow>
                 <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">cashier</code></TableCell>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">cashier123</code></TableCell>
                 <TableCell><Badge variant="outline">Cashier</Badge></TableCell>
                 <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.cashier.length} permissions</TableCell>
               </TableRow>

@@ -34,7 +34,7 @@ export interface ReceiptData {
   total: number
   paid: number
   balance: number
-  paymentMethod?: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
+  paymentMethod?: 'CASH' | 'CARD' | 'TRANSFER' | 'PROMPTPAY' | 'OTHER'
   paymentReference?: string
   notes?: string
   companyInfo: {

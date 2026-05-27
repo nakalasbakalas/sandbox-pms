@@ -1,8 +1,6 @@
 import { useState, useMemo } from 'react'
-import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -27,15 +25,13 @@ import {
 import {
   ChartLine,
   TrendUp,
-  TrendDown,
   CurrencyDollar,
-  CalendarBlank,
   Users,
   Bed,
   ArrowUp,
   ArrowDown,
 } from '@phosphor-icons/react'
-import { format, subDays, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns'
+import { addDays, format, subDays } from 'date-fns'
 
 interface RevenueData {
   date: string
@@ -122,6 +118,43 @@ export function AdvancedRevenueAnalyticsView() {
       revpar: ((currentTotals.avgRevpar - previousTotals.avgRevpar) / previousTotals.avgRevpar) * 100,
     }
   }, [currentTotals, previousTotals])
+
+  const trendSummary = useMemo(() => {
+    const sampleSize = Math.min(7, currentData.length)
+    const opening = currentData.slice(0, sampleSize)
+    const closing = currentData.slice(-sampleSize)
+    const average = (data: RevenueData[], key: keyof RevenueData) =>
+      data.reduce((sum, day) => sum + Number(day[key]), 0) / Math.max(data.length, 1)
+
+    return {
+      revenueMomentum: ((average(closing, 'totalRevenue') - average(opening, 'totalRevenue')) / average(opening, 'totalRevenue')) * 100,
+      occupancyMomentum: average(closing, 'occupancyRate') - average(opening, 'occupancyRate'),
+      adrMomentum: ((average(closing, 'adr') - average(opening, 'adr')) / average(opening, 'adr')) * 100,
+      bestDay: [...currentData].sort((a, b) => b.totalRevenue - a.totalRevenue)[0],
+      softestDay: [...currentData].sort((a, b) => a.totalRevenue - b.totalRevenue)[0],
+    }
+  }, [currentData])
+
+  const forecastRows = useMemo(() => {
+    const recent = currentData.slice(-7)
+    const recentRevenue = recent.reduce((sum, day) => sum + day.totalRevenue, 0) / Math.max(recent.length, 1)
+    const recentOccupancy = recent.reduce((sum, day) => sum + day.occupancyRate, 0) / Math.max(recent.length, 1)
+    const dailyMomentum = Math.max(-0.03, Math.min(0.03, trendSummary.revenueMomentum / 100 / 7))
+    const lastDate = new Date(currentData[currentData.length - 1].date)
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const factor = 1 + dailyMomentum * (index + 1)
+      const projectedRevenue = recentRevenue * factor
+      const projectedOccupancy = Math.max(0, Math.min(100, recentOccupancy + trendSummary.occupancyMomentum * ((index + 1) / 7)))
+
+      return {
+        date: addDays(lastDate, index + 1),
+        projectedRevenue,
+        projectedOccupancy,
+        projectedAdr: projectedRevenue / Math.max(1, 30 * (projectedOccupancy / 100)),
+      }
+    })
+  }, [currentData, trendSummary])
 
   const MetricCard = ({ 
     title, 
@@ -373,16 +406,75 @@ export function AdvancedRevenueAnalyticsView() {
         </TabsContent>
 
         <TabsContent value="trends" className="flex-1 p-6 mt-0">
-          <Card className="p-6">
-            <h3 className="font-semibold mb-4">Coming Soon</h3>
-            <p className="text-muted-foreground">Advanced trend analysis with predictive insights</p>
-          </Card>
+          <div className="grid grid-cols-3 gap-6">
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4">Momentum</h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Revenue trend</span>
+                  <span className={trendSummary.revenueMomentum >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                    {trendSummary.revenueMomentum >= 0 ? '+' : ''}{trendSummary.revenueMomentum.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Occupancy trend</span>
+                  <span className={trendSummary.occupancyMomentum >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                    {trendSummary.occupancyMomentum >= 0 ? '+' : ''}{trendSummary.occupancyMomentum.toFixed(1)} pts
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">ADR trend</span>
+                  <span className={trendSummary.adrMomentum >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                    {trendSummary.adrMomentum >= 0 ? '+' : ''}{trendSummary.adrMomentum.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4">Peak Revenue Day</h3>
+              <div className="text-2xl font-bold mb-2">
+                {format(new Date(trendSummary.bestDay.date), 'MMM dd')}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                THB {trendSummary.bestDay.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} at {trendSummary.bestDay.occupancyRate.toFixed(1)}% occupancy
+              </p>
+            </Card>
+
+            <Card className="p-6">
+              <h3 className="font-semibold mb-4">Softest Revenue Day</h3>
+              <div className="text-2xl font-bold mb-2">
+                {format(new Date(trendSummary.softestDay.date), 'MMM dd')}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                THB {trendSummary.softestDay.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })} at {trendSummary.softestDay.occupancyRate.toFixed(1)}% occupancy
+              </p>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="forecast" className="flex-1 p-6 mt-0">
-          <Card className="p-6">
-            <h3 className="font-semibold mb-4">Coming Soon</h3>
-            <p className="text-muted-foreground">Revenue forecasting based on historical data and booking patterns</p>
+          <Card>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Projected Revenue</TableHead>
+                  <TableHead className="text-right">Projected Occupancy</TableHead>
+                  <TableHead className="text-right">Projected ADR</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {forecastRows.map(day => (
+                  <TableRow key={day.date.toISOString()}>
+                    <TableCell className="font-medium">{format(day.date, 'MMM dd, yyyy')}</TableCell>
+                    <TableCell className="text-right">THB {day.projectedRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</TableCell>
+                    <TableCell className="text-right">{day.projectedOccupancy.toFixed(1)}%</TableCell>
+                    <TableCell className="text-right">THB {day.projectedAdr.toFixed(0)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </Card>
         </TabsContent>
       </Tabs>

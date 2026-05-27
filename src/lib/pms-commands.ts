@@ -25,18 +25,31 @@ import {
   Moon,
   Envelope,
   Brain,
+  Storefront,
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
 export function createPMSCommands(navigate?: (route: NavigationRoute) => void): Command[] {
   return [
     {
-      id: 'nav-board',
-      label: 'Go to Room Board',
-      description: 'View the 30-room operations board',
+      id: 'nav-today',
+      label: 'Go to Today',
+      description: 'Open daily operations control',
       category: 'navigation',
-      keywords: ['board', 'rooms', 'home', 'overview'],
+      keywords: ['today', 'mission control', 'daily', 'operations'],
       shortcut: 'cmd+1',
+      icon: ListChecks,
+      action: () => {
+        navigate?.('today')
+      },
+    },
+    {
+      id: 'nav-board',
+      label: 'Go to Front Desk Board',
+      description: 'View the compact room board',
+      category: 'navigation',
+      keywords: ['board', 'rooms', 'home', 'overview', 'calendar'],
+      shortcut: 'cmd+2',
       icon: HouseLine,
       action: () => {
         navigate?.('board')
@@ -48,7 +61,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Access arrivals, departures, and check-ins',
       category: 'navigation',
       keywords: ['front desk', 'reception', 'arrivals', 'departures'],
-      shortcut: 'cmd+2',
+      shortcut: 'cmd+3',
       icon: Calendar,
       action: () => {
         navigate?.('front-desk')
@@ -60,10 +73,21 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Manage bookings and reservation pipeline',
       category: 'navigation',
       keywords: ['reservations', 'bookings', 'schedule'],
-      shortcut: 'cmd+3',
+      shortcut: 'cmd+4',
       icon: Calendar,
       action: () => {
         navigate?.('reservations')
+      },
+    },
+    {
+      id: 'nav-rooms',
+      label: 'Go to Rooms',
+      description: 'Review all 30 sellable rooms and room readiness',
+      category: 'navigation',
+      keywords: ['rooms', 'inventory', 'readiness', 'status'],
+      icon: Bed,
+      action: () => {
+        navigate?.('rooms')
       },
     },
     {
@@ -92,7 +116,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
     },
     {
       id: 'nav-cashier',
-      label: 'Go to Cashier',
+      label: 'Go to Payments',
       description: 'Payments, folios, and invoices',
       category: 'navigation',
       keywords: ['cashier', 'payments', 'billing', 'folio'],
@@ -112,11 +136,10 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       action: () => {
         navigate?.('rates')
       },
-      disabled: true,
     },
     {
       id: 'nav-channels',
-      label: 'Go to Channels',
+      label: 'Go to Channel Manager',
       description: 'OTA integrations and channel manager',
       category: 'navigation',
       keywords: ['channels', 'ota', 'booking.com', 'agoda'],
@@ -124,11 +147,21 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       action: () => {
         navigate?.('channels')
       },
-      disabled: true,
+    },
+    {
+      id: 'nav-growth-suite',
+      label: 'Go to Direct Booking',
+      description: 'Manage booking engine, website, metasearch, mobile, and marketplace tools',
+      category: 'navigation',
+      keywords: ['direct booking', 'booking engine', 'website', 'metasearch', 'mobile', 'marketplace'],
+      icon: Storefront,
+      action: () => {
+        navigate?.('growth-suite')
+      },
     },
     {
       id: 'nav-reports',
-      label: 'Go to Reports',
+      label: 'Go to Insights',
       description: 'Analytics and operational reports',
       category: 'navigation',
       keywords: ['reports', 'analytics', 'metrics'],
@@ -137,7 +170,6 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       action: () => {
         navigate?.('reports')
       },
-      disabled: true,
     },
     {
       id: 'nav-settings',
@@ -149,7 +181,6 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       action: () => {
         navigate?.('settings')
       },
-      disabled: true,
     },
     {
       id: 'search-room',
@@ -323,9 +354,8 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['notifications', 'alerts', 'messages'],
       icon: Bell,
       action: () => {
-        toast.info('View notifications')
+        navigate?.('system-status')
       },
-      disabled: true,
     },
     {
       id: 'messages',
@@ -403,9 +433,8 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['email', 'send', 'communication'],
       icon: EnvelopeSimple,
       action: () => {
-        toast.info('Send email')
+        navigate?.('guest-communications')
       },
-      disabled: true,
     },
     {
       id: 'report-occupancy',
@@ -415,9 +444,8 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['occupancy', 'metrics', 'report'],
       icon: ChartBar,
       action: () => {
-        toast.info('View occupancy report')
+        navigate?.('reports')
       },
-      disabled: true,
     },
     {
       id: 'report-revenue',
@@ -427,9 +455,8 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['revenue', 'financial', 'report'],
       icon: ChartLineUp,
       action: () => {
-        toast.info('View revenue report')
+        navigate?.('revenue-analytics')
       },
-      disabled: true,
     },
     {
       id: 'backup-data',

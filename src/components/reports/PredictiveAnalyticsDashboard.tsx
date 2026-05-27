@@ -68,6 +68,16 @@ interface AnomalyDetection {
   actualValue: number
 }
 
+interface ForecastPoint {
+  date: string
+  fullDate: string
+  occupancy: number
+  adr: number
+  revenue: number
+  revpar: number
+  isWeekend: boolean
+}
+
 export function PredictiveAnalyticsDashboard() {
   const [timeHorizon, setTimeHorizon] = useState<'7d' | '14d' | '30d' | '90d'>('30d')
   const [selectedMetric, setSelectedMetric] = useState<'revenue' | 'occupancy' | 'adr' | 'revpar'>('revenue')
@@ -236,7 +246,7 @@ Return as a JSON object with a single "insights" property containing an array of
 
   const forecastData = useMemo(() => {
     const days = parseInt(timeHorizon)
-    const data = []
+    const data: ForecastPoint[] = []
     
     for (let i = 0; i < days; i++) {
       const date = addDays(new Date(), i)

@@ -124,9 +124,10 @@ export function ReportsView() {
     }
   }
 
-  const handleExport = (format: 'csv' | 'pdf' | 'excel') => {
-    if (format !== 'csv') {
-      toast.info(`${format.toUpperCase()} export coming soon`)
+  const handleExport = (format: 'csv' | 'pdf') => {
+    if (format === 'pdf') {
+      window.print()
+      toast.success('Print dialog opened for PDF export')
       return
     }
 
@@ -248,10 +249,7 @@ export function ReportsView() {
                     Export as CSV
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleExport('pdf')}>
-                    Export as PDF
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport('excel')}>
-                    Export as Excel
+                    Print / Save as PDF
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

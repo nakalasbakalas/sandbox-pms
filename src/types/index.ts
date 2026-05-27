@@ -1,5 +1,13 @@
 export type RoomOpStatus = 'AVAILABLE' | 'BLOCKED' | 'OUT_OF_SERVICE' | 'OUT_OF_ORDER'
-export type RoomStatus = 'VACANT_CLEAN' | 'VACANT_DIRTY' | 'OCCUPIED_CLEAN' | 'OCCUPIED_DIRTY'
+export type RoomStatus =
+  | 'VACANT_CLEAN'
+  | 'VACANT_DIRTY'
+  | 'OCCUPIED_CLEAN'
+  | 'OCCUPIED_DIRTY'
+  | 'OCCUPIED'
+  | 'ARRIVING'
+  | 'DEPARTING'
+  | 'OUT_OF_SERVICE'
 export type ReservationStatus = 'PENDING' | 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'CANCELLED' | 'NO_SHOW'
 export type BookingSource = 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN' | 'PHONE' | 'OTHER'
 export type InventoryStatus = 'AVAILABLE' | 'RESERVED' | 'BLOCKED'
@@ -85,6 +93,10 @@ export interface Reservation {
   guestId: string
   roomTypeId: string
   assignedRoomId?: string | null
+  roomId?: string | null
+  roomNumber?: string | null
+  guestName?: string
+  isVIP?: boolean
   status: ReservationStatus
   source: BookingSource
   channelRef?: string | null

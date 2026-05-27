@@ -15,7 +15,7 @@ interface PromptPayQRProps {
   promptPayId?: string
 }
 
-export function PromptPayQR({ amount, onConfirm, onCancel, promptPayId = '0812345678' }: PromptPayQRProps) {
+export function PromptPayQR({ amount, onConfirm, onCancel, promptPayId = '' }: PromptPayQRProps) {
   const [reference, setReference] = useState('')
   const [copied, setCopied] = useState(false)
   const [countdown, setCountdown] = useState(300)

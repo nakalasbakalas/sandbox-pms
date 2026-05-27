@@ -19,7 +19,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      '@github/spark/hooks': resolve(projectRoot, 'src/lib/spark-hooks.ts'),
       '@': resolve(projectRoot, 'src')
     }
+  },
+  build: {
+    chunkSizeWarningLimit: 3000,
   },
 });

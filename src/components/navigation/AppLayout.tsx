@@ -9,6 +9,7 @@ import {
 import { Question, Command, Info } from '@phosphor-icons/react'
 import { DensityToggle } from './DensityToggle'
 import { UserProfileMenu } from './UserProfileMenu'
+import { LanguageSwitcher } from './LanguageSwitcher'
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -20,47 +21,50 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
     <SidebarProvider defaultOpen={true}>
       <AppSidebar />
       <SidebarInset className="flex flex-col">
-        <header className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border bg-background px-1.5">
-          <SidebarTrigger className="-ml-0.5 h-5 w-5" />
-          <div className="h-3 w-px bg-border/50" />
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/40 bg-background px-3">
+          <SidebarTrigger className="-ml-1 h-8 w-8" />
+          <div className="h-5 w-px bg-border/40" />
           <div className="flex-1" />
           <UserProfileMenu />
-          <div className="h-3 w-px bg-border/50" />
+          <div className="h-5 w-px bg-border/40" />
+          <LanguageSwitcher />
+          <div className="h-5 w-px bg-border/40" />
           <DensityToggle />
-          <div className="h-3 w-px bg-border/50" />
+          <div className="h-5 w-px bg-border/40" />
           {onOpenShortcuts && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Open help"
+                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                 >
-                  <Question size={12} weight="duotone" />
+                  <Question size={16} weight="duotone" />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-64 p-2.5" align="end">
-                <div className="space-y-2">
-                  <div className="space-y-1">
-                    <h4 className="text-xs font-semibold flex items-center gap-1">
-                      <Info size={12} weight="duotone" className="text-primary" />
+              <PopoverContent className="w-72 p-3" align="end">
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-semibold flex items-center gap-2">
+                      <Info size={16} weight="duotone" className="text-primary" />
                       Quick Help
                     </h4>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       Learn keyboard shortcuts
                     </p>
                   </div>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="w-full justify-between h-6 text-[10px]"
+                    className="w-full justify-between h-8 text-xs"
                     onClick={onOpenShortcuts}
                   >
-                    <span className="flex items-center gap-1">
-                      <Command size={11} weight="duotone" />
+                    <span className="flex items-center gap-2">
+                      <Command size={14} weight="duotone" />
                       Keyboard Shortcuts
                     </span>
-                    <kbd className="pointer-events-none inline-flex h-3.5 select-none items-center gap-0.5 rounded border bg-muted px-0.5 font-mono text-[9px] font-medium text-muted-foreground">
+                    <kbd className="pointer-events-none inline-flex h-5 select-none items-center rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
                       ?
                     </kbd>
                   </Button>
@@ -69,7 +73,7 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
             </Popover>
           )}
         </header>
-        <main className="flex-1 overflow-auto bg-muted/30">
+        <main className="flex-1 overflow-auto bg-muted/20">
           {children}
         </main>
       </SidebarInset>

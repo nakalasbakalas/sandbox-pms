@@ -2,6 +2,7 @@ import type { ArrivalItem } from '@/types/front-desk'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { MoneyDisplay } from '@/components/ui/money-display'
 import { 
   SignIn, 
   CheckCircle, 
@@ -12,6 +13,7 @@ import {
   Bed
 } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
+import type { Icon } from '@phosphor-icons/react'
 
 interface ArrivalListProps {
   arrivals: ArrivalItem[]
@@ -34,7 +36,7 @@ export function ArrivalList({ arrivals, onCheckIn, onViewDetails }: ArrivalListP
   }
 
   const getReadinessIndicators = (arrival: ArrivalItem) => {
-    const indicators = []
+    const indicators: Array<{ icon: Icon; label: string; color: string }> = []
     
     if (!arrival.roomReady) {
       indicators.push({ icon: Bed, label: 'Room not ready', color: 'text-rose-600' })
@@ -145,7 +147,7 @@ export function ArrivalList({ arrivals, onCheckIn, onViewDetails }: ArrivalListP
               <div className="flex flex-col gap-2 flex-shrink-0">
                 <div className="text-right mb-2">
                   <div className="text-xs text-muted-foreground">Total</div>
-                  <div className="text-lg font-bold">฿{arrival.totalAmount.toLocaleString()}</div>
+                  <div className="text-lg font-bold"><MoneyDisplay amount={arrival.totalAmount} /></div>
                 </div>
                 
                 {arrival.status !== 'CHECKED_IN' && arrival.status !== 'NO_SHOW' && (

@@ -2,6 +2,7 @@ import type { DepartureItem } from '@/types/front-desk'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { MoneyDisplay } from '@/components/ui/money-display'
 import { SignOut, CheckCircle, Warning, Clock } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
 
@@ -92,12 +93,12 @@ export function DepartureList({ departures, onCheckOut, onViewDetails }: Departu
                 <div className="flex items-center gap-4 text-sm">
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">Folio:</span>
-                    <span className="font-semibold">฿{departure.folioTotal.toLocaleString()}</span>
+                    <MoneyDisplay amount={departure.folioTotal} className="font-semibold" />
                   </div>
                   {hasUnpaidBalance && (
                     <div className="flex items-center gap-2 text-rose-600">
                       <Warning size={16} weight="bold" />
-                      <span className="font-semibold">฿{departure.balanceDue.toLocaleString()} due</span>
+                      <span className="font-semibold"><MoneyDisplay amount={departure.balanceDue} /> due</span>
                     </div>
                   )}
                   <div className="ml-auto flex items-center gap-2">

@@ -27,6 +27,36 @@ interface BackupData {
 }
 
 const BACKUP_VERSION = '1.0.0'
+const SENSITIVE_BACKUP_FIELDS = new Set([
+  'password',
+  'passwordHash',
+  'passwordSalt',
+  'apiKey',
+  'accessToken',
+  'channelAccessToken',
+  'channelSecret',
+  'clientSecret',
+  'secret',
+  'token',
+])
+
+function sanitizeBackupValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeBackupValue(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, nestedValue]) =>
+        SENSITIVE_BACKUP_FIELDS.has(key)
+          ? []
+          : [[key, sanitizeBackupValue(nestedValue)]]
+      )
+    )
+  }
+
+  return value
+}
 
 const DATA_CATEGORIES = [
   {
@@ -161,14 +191,7 @@ export function DataBackupExport() {
       for (const key of keysToExport) {
         const value = await spark.kv.get(key)
         if (value !== undefined) {
-          if (key.includes('user') && typeof value === 'object' && value !== null) {
-            const sanitized = { ...value }
-            delete sanitized.password
-            delete sanitized.passwordHash
-            backupData.data[key] = sanitized
-          } else {
-            backupData.data[key] = value
-          }
+          backupData.data[key] = sanitizeBackupValue(value)
         }
         processed++
         setExportProgress(Math.round((processed / totalKeys) * 100))
@@ -245,7 +268,7 @@ export function DataBackupExport() {
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
-      if (confirm('⚠️ WARNING: Importing will overwrite ALL existing data. Are you sure you want to continue?')) {
+      if (window.confirm('WARNING: Importing will overwrite ALL existing data. Are you sure you want to continue?')) {
         importData(file)
       }
     }
@@ -422,54 +445,35 @@ export function DataBackupExport() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Automated Backups</CardTitle>
+          <CardTitle>External Backup Readiness</CardTitle>
           <CardDescription>
-            Schedule automatic backups to ensure data safety
+            Provider-backed scheduling requires a configured storage integration
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Alert>
             <CheckCircle weight="duotone" className="h-4 w-4" />
             <AlertDescription>
-              For enterprise customers: Contact support to enable automated cloud backups 
-              with point-in-time recovery and geo-redundant storage.
+              Local JSON export and import are available now. Automated off-site backups are not enabled until a storage provider and retention policy are configured.
             </AlertDescription>
           </Alert>
 
           <div className="grid gap-3">
-            <div className="flex items-center justify-between p-3 border rounded-lg opacity-50">
-              <div>
-                <div className="font-medium text-sm">Daily Automated Backups</div>
-                <div className="text-xs text-muted-foreground">
-                  Automatic backup every day at midnight
+            {[
+              ['Schedule', 'No automated backup schedule is configured'],
+              ['Storage Provider', 'No off-site storage destination is connected'],
+              ['Recovery Policy', 'No point-in-time recovery policy is configured'],
+            ].map(([label, description]) => (
+              <div key={label} className="flex items-center justify-between p-3 border rounded-lg">
+                <div>
+                  <div className="font-medium text-sm">{label}</div>
+                  <div className="text-xs text-muted-foreground">{description}</div>
                 </div>
+                <span className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  Not configured
+                </span>
               </div>
-              <Button disabled size="sm">
-                Enterprise Only
-              </Button>
-            </div>
-            <div className="flex items-center justify-between p-3 border rounded-lg opacity-50">
-              <div>
-                <div className="font-medium text-sm">Cloud Storage</div>
-                <div className="text-xs text-muted-foreground">
-                  Secure off-site backup storage
-                </div>
-              </div>
-              <Button disabled size="sm">
-                Enterprise Only
-              </Button>
-            </div>
-            <div className="flex items-center justify-between p-3 border rounded-lg opacity-50">
-              <div>
-                <div className="font-medium text-sm">Point-in-Time Recovery</div>
-                <div className="text-xs text-muted-foreground">
-                  Restore to any point in the last 30 days
-                </div>
-              </div>
-              <Button disabled size="sm">
-                Enterprise Only
-              </Button>
-            </div>
+            ))}
           </div>
         </CardContent>
       </Card>

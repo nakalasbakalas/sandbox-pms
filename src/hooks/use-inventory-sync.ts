@@ -51,7 +51,7 @@ export function useInventorySync() {
   const [channelStates, setChannelStates] = useKV<ChannelInventoryState[]>('channel-inventory-states', [])
   const [autoSyncEnabled, setAutoSyncEnabled] = useKV<boolean>('auto-sync-enabled', true)
   
-  const syncIntervalRef = useRef<NodeJS.Timeout>()
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pendingEventsRef = useRef<InventorySyncEvent[]>([])
 
   const calculateInventoryForDate = useCallback((roomTypeId: string, date: string): InventorySnapshot => {

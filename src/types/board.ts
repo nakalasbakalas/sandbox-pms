@@ -1,15 +1,32 @@
 import type { RoomStatus, RoomOpStatus, ReservationStatus } from './index'
 
+export interface BoardReservationSummary {
+  id?: string
+  guestName?: string
+  checkIn?: Date | string
+  checkOut?: Date | string
+  status?: ReservationStatus
+  isVIP?: boolean
+  totalAmount?: number
+  balanceDue?: number
+  depositStatus?: 'PAID' | 'PENDING' | 'PARTIAL' | 'NONE'
+}
+
 export interface BoardRoomCard {
   roomId: string
   number: string
+  roomNumber?: string
   floor: number
   type: 'TWIN' | 'DOUBLE'
+  roomType?: 'TWIN' | 'DOUBLE'
   status: RoomStatus
   operationalStatus: RoomOpStatus
   
   guestName?: string
   reservationId?: string
+  currentReservationId?: string
+  reservation?: BoardReservationSummary
+  nextReservation?: BoardReservationSummary
   checkIn?: Date
   checkOut?: Date
   nightsRemaining?: number
@@ -19,12 +36,19 @@ export interface BoardRoomCard {
   isDepartureToday: boolean
   isVIP: boolean
   hasIssue: boolean
+  hasIssues?: boolean
   needsAttention: boolean
   
-  cleanStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED'
+  cleanStatus: 'CLEAN' | 'DIRTY' | 'CLEANING' | 'INSPECTED'
+  housekeepingStatus?: 'CLEAN' | 'DIRTY' | 'CLEANING' | 'INSPECTED' | 'MAINTENANCE'
   lastCleaned?: Date
+  lastUpdatedAt?: string
+  lastUpdatedBy?: string
+  notes?: string
+  extendedStay?: boolean
+  maintenanceIssue?: string
   
-  depositStatus: 'PAID' | 'PENDING' | 'NONE'
+  depositStatus: 'PAID' | 'PENDING' | 'PARTIAL' | 'NONE'
   balanceDue?: number
 }
 

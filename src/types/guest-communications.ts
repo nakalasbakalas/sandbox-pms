@@ -32,7 +32,7 @@ export interface GuestMessageTemplate {
 export interface GuestMessage {
   id: string
   guestId: string
-  reservationId: string
+  reservationId?: string
   templateId?: string
   type: GuestMessageType
   channel: CommunicationChannel

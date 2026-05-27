@@ -38,7 +38,7 @@ function categorizeTaxApplicability(
   taxAppliesTo: TaxRate['appliesTo']
 ): boolean {
   if (taxAppliesTo === 'ALL') return true
-  if (!category) return taxAppliesTo === 'ALL'
+  if (!category) return false
   
   switch (taxAppliesTo) {
     case 'ROOM':

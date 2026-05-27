@@ -2,7 +2,7 @@ import { useKV } from '@github/spark/hooks'
 import { useCallback, useMemo } from 'react'
 import type { Reservation, Guest } from '@/types'
 import type { BoardRoomCard } from '@/types/board'
-import { dataSyncService } from './data-sync'
+import { dataSyncService } from '@/lib/data-sync'
 
 interface Folio {
   id: string
@@ -43,6 +43,12 @@ export function useUnifiedData() {
 
     const reservation = reservations.find((r) => r.id === reservationId)
     if (!reservation) return
+    const guestName = reservation.guestName ?? 'Unknown Guest'
+    const depositPaidAmount = typeof reservation.depositPaid === 'number'
+      ? reservation.depositPaid
+      : reservation.depositPaid
+        ? reservation.depositAmount
+        : 0
 
     setRooms((current) =>
       current.map((room) =>
@@ -51,11 +57,11 @@ export function useUnifiedData() {
               ...room,
               status: 'OCCUPIED_CLEAN' as const,
               currentReservationId: reservationId,
-              guestName: reservation.guestName,
+              guestName,
               checkIn: reservation.checkIn,
               checkOut: reservation.checkOut,
               guestCount: reservation.adults + reservation.children,
-              isVIP: reservation.isVIP,
+              isVIP: reservation.isVIP ?? false,
             }
           : room
       )
@@ -67,16 +73,16 @@ export function useUnifiedData() {
         id: `FOL${Date.now()}`,
         reservationId,
         guestId: reservation.guestId,
-        guestName: reservation.guestName,
+        guestName,
         roomNumber,
         checkIn: reservation.checkIn.toISOString(),
         checkOut: reservation.checkOut.toISOString(),
         status: 'OPEN',
         depositRequired: reservation.depositAmount,
-        depositPaid: reservation.depositPaid,
+        depositPaid: depositPaidAmount,
         charges: [],
         payments: [],
-        balance: reservation.totalAmount - reservation.depositPaid,
+        balance: reservation.totalAmount - depositPaidAmount,
         createdAt: new Date().toISOString(),
       }
 

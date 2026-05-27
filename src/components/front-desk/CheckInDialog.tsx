@@ -16,7 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CheckCircle, Warning, Bed, IdentificationCard } from '@phosphor-icons/react'
 import { toast } from 'sonner'
-import { getAvailableRoomsForWalkIn } from '@/lib/mock-front-desk-data'
+import { getAvailableRoomsForWalkIn } from '@/lib/front-desk-data'
 import { PaymentCollection, type PaymentData } from './PaymentCollection'
 import { Separator } from '@/components/ui/separator'
 

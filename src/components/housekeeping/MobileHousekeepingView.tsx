@@ -38,7 +38,7 @@ import {
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue, MaintenanceCategory, MaintenancePriority, CleaningChecklistItem } from '@/types/housekeeping'
 import { toast } from 'sonner'
 import { useRoomSync, convertBoardRoomToHousekeepingRoom } from '@/hooks/use-room-sync'
-import { generateMockBoardData } from '@/lib/mock-board-data'
+import { createInitialBoardRooms } from '@/lib/board-data'
 import { useNotifications } from '@/hooks/use-notifications'
 import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { useRoomReadyNotifications } from '@/hooks/use-room-ready-notifications'
@@ -72,7 +72,7 @@ export function MobileHousekeepingView() {
   const { addNotification } = useNotifications()
   const { sendNotification, shouldNotify } = useRoomReadyNotifications()
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
-  const undoTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showStaffAssignment, setShowStaffAssignment] = useState(false)
   const [staffAssignments] = useKV<Record<string, string>>('room-staff-assignments', {})
   const [staff] = useKV<Array<{ id: string; name: string; color: string }>>('housekeeping-staff', [])
@@ -80,7 +80,7 @@ export function MobileHousekeepingView() {
 
   useEffect(() => {
     if (boardRooms.length === 0) {
-      initializeRooms(generateMockBoardData())
+      initializeRooms(createInitialBoardRooms())
     }
   }, [boardRooms.length, initializeRooms])
 

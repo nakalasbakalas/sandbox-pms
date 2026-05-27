@@ -213,29 +213,14 @@ export function ChannelsView() {
     
     await new Promise(resolve => setTimeout(resolve, 2000))
 
-    const mockReservation: ChannelReservation = {
-      id: `res_${Date.now()}`,
-      channelId,
-      channelRef: `${channel.provider}_${Math.random().toString(36).substr(2, 9)}`,
-      guestName: 'John Smith',
-      checkIn: new Date().toISOString(),
-      checkOut: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-      roomType: 'Deluxe Room',
-      nights: 3,
-      totalAmount: 7500,
-      status: 'PENDING'
-    }
-
-    setReservations(current => [mockReservation, ...current])
-
     const log: SyncLog = {
       id: `log_${Date.now()}`,
       channelId,
       timestamp: new Date().toISOString(),
       type: 'RESERVATIONS',
-      status: 'SUCCESS',
-      message: `Pulled 1 new reservation from ${channel.name}`,
-      details: `Reservation ${mockReservation.channelRef} for ${mockReservation.guestName}`
+      status: 'WARNING',
+      message: `Manual sync checked ${channel.name}`,
+      details: 'No live channel connector is configured, so no reservations were imported.'
     }
     setSyncLogs(current => [log, ...current])
 
@@ -248,7 +233,9 @@ export function ChannelsView() {
     )
 
     setSyncing(false)
-    toast.success(`Synced with ${channel.name}`)
+    toast.info(`Checked ${channel.name}`, {
+      description: 'No live channel connector is configured.'
+    })
   }
 
   const handleSyncAll = async () => {

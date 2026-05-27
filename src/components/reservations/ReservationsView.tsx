@@ -205,7 +205,7 @@ export function ReservationsView() {
           return reservation
         }
 
-        let updated = { ...reservation }
+        const updated = { ...reservation }
 
         if (updates.status) {
           updated.status = updates.status

@@ -47,9 +47,12 @@ export function useRoomSync() {
           const newStatus = calculateBoardStatus(room.status, update.cleanStatus)
           return {
             ...room,
+            housekeepingStatus: update.cleanStatus,
             cleanStatus: update.cleanStatus === 'CLEANING' ? 'DIRTY' : update.cleanStatus,
             status: newStatus,
-            lastCleaned: update.lastCleaned || room.lastCleaned
+            lastCleaned: update.lastCleaned || room.lastCleaned,
+            lastUpdatedAt: timestampedUpdate.timestamp.toISOString(),
+            lastUpdatedBy: update.cleanedBy || room.lastUpdatedBy || 'Staff',
           }
         }
         return room

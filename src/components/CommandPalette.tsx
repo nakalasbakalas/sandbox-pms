@@ -40,23 +40,23 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
   const formatShortcut = (shortcut: string): string[] => {
     return shortcut.split('+').map(key => {
       const keyMap: Record<string, string> = {
-        'cmd': '⌘',
-        'ctrl': '⌃',
-        'shift': '⇧',
-        'alt': '⌥',
-        'option': '⌥',
-        'enter': '↵',
-        'return': '↵',
-        'backspace': '⌫',
-        'delete': '⌦',
-        'escape': '⎋',
-        'esc': '⎋',
-        'tab': '⇥',
-        'space': '␣',
-        'up': '↑',
-        'down': '↓',
-        'left': '←',
-        'right': '→',
+        cmd: 'Cmd',
+        ctrl: 'Ctrl',
+        shift: 'Shift',
+        alt: 'Alt',
+        option: 'Alt',
+        enter: 'Enter',
+        return: 'Enter',
+        backspace: 'Backspace',
+        delete: 'Del',
+        escape: 'Esc',
+        esc: 'Esc',
+        tab: 'Tab',
+        space: 'Space',
+        up: 'Up',
+        down: 'Down',
+        left: 'Left',
+        right: 'Right',
       }
       return keyMap[key.toLowerCase()] || key.toUpperCase()
     })
@@ -94,7 +94,7 @@ export function CommandPalette({ open, onOpenChange, commands }: CommandPaletteP
                         <div className="flex items-center gap-2">
                           <span className="font-medium truncate">{command.label}</span>
                           {command.disabled && (
-                            <Badge variant="secondary" className="text-xs">Coming Soon</Badge>
+                            <Badge variant="secondary" className="text-xs">Unavailable</Badge>
                           )}
                         </div>
                         {command.description && (

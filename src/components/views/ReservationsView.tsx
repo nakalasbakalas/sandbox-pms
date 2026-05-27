@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MagnifyingGlass, Plus, FunnelSimple, Calendar, User, CreditCard, MapPin, Phone, Printer } from '@phosphor-icons/react'
-import { format, addDays, differenceInDays, isBefore, isToday, isTomorrow } from 'date-fns'
+import { format, isBefore, isToday } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { printReservationsList } from '@/lib/print-utils'
 import { toast } from 'sonner'
@@ -55,80 +55,7 @@ export interface Reservation {
 }
 
 function generateMockReservations(): Reservation[] {
-  const sources: Reservation['source'][] = ['DIRECT', 'BOOKING_COM', 'AGODA', 'EXPEDIA', 'AIRBNB']
-  const statuses: Reservation['status'][] = ['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'PENDING']
-  const names = [
-    'Sarah Johnson', 'Michael Chen', 'Emma Williams', 'James Brown', 'Lisa Anderson',
-    'David Martinez', 'Sophie Taylor', 'Alex Kumar', 'Maria Garcia', 'John Smith',
-    'Anna Kowalski', 'Tom Wilson', 'Julia Roberts', 'Chris Evans', 'Nina Patel'
-  ]
-  
-  const reservations: Reservation[] = []
-  const today = new Date()
-  
-  for (let i = 0; i < 50; i++) {
-    const checkInOffset = Math.floor(Math.random() * 60) - 30
-    const checkIn = addDays(today, checkInOffset)
-    const nights = Math.floor(Math.random() * 7) + 1
-    const checkOut = addDays(checkIn, nights)
-    
-    const adults = Math.floor(Math.random() * 3) + 1
-    const children = Math.random() < 0.3 ? Math.floor(Math.random() * 2) : 0
-    
-    const ratePerNight = Math.floor(Math.random() * 2000) + 1500
-    const totalAmount = ratePerNight * nights
-    const depositAmount = totalAmount * 0.3
-    
-    let status: Reservation['status'] = 'CONFIRMED'
-    if (isBefore(checkOut, today)) {
-      status = Math.random() < 0.9 ? 'CHECKED_OUT' : 'NO_SHOW'
-    } else if (isBefore(checkIn, today) && !isBefore(checkOut, today)) {
-      status = 'CHECKED_IN'
-    } else if (Math.random() < 0.05) {
-      status = 'CANCELLED'
-    } else if (Math.random() < 0.1) {
-      status = 'PENDING'
-    }
-    
-    const depositPaid = status === 'PENDING' ? 0 : Math.random() < 0.8 ? depositAmount : 0
-    const depositStatus: Reservation['depositStatus'] = 
-      depositPaid >= depositAmount ? 'PAID' : depositPaid > 0 ? 'PENDING' : 'NONE'
-    
-    const balanceDue = totalAmount - depositPaid
-    
-    reservations.push({
-      id: `RES${1000 + i}`,
-      confirmationNumber: `SB${today.getFullYear()}${String(1000 + i).padStart(4, '0')}`,
-      status,
-      guestId: `GUEST${100 + i}`,
-      guestName: names[i % names.length],
-      guestEmail: `${names[i % names.length].toLowerCase().replace(' ', '.')}@example.com`,
-      guestPhone: `+66-${Math.floor(Math.random() * 900000000) + 100000000}`,
-      roomNumber: status === 'CHECKED_IN' ? `${Math.random() < 0.5 ? '2' : '3'}${String(Math.floor(Math.random() * 15) + 1).padStart(2, '0')}` : undefined,
-      roomType: Math.random() < 0.5 ? 'TWIN' : 'DOUBLE',
-      checkIn,
-      checkOut,
-      nights,
-      adults,
-      children,
-      ratePerNight,
-      totalAmount,
-      depositAmount,
-      depositPaid,
-      depositStatus,
-      balanceDue,
-      source: sources[Math.floor(Math.random() * sources.length)],
-      channelConfirmation: Math.random() < 0.6 ? `CH${Math.floor(Math.random() * 1000000)}` : undefined,
-      isVIP: Math.random() < 0.1,
-      specialRequests: Math.random() < 0.3 ? 'High floor, quiet room' : undefined,
-      notes: Math.random() < 0.2 ? 'Returning guest' : undefined,
-      createdAt: addDays(checkIn, -Math.floor(Math.random() * 30)),
-      updatedAt: new Date(),
-      createdBy: 'system'
-    })
-  }
-  
-  return reservations.sort((a, b) => b.checkIn.getTime() - a.checkIn.getTime())
+  return []
 }
 
 function deserializeReservation(res: Reservation): Reservation {

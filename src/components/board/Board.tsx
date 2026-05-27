@@ -6,13 +6,17 @@ import { QuickActionsBar } from './QuickActionsBar'
 import { StatusLegend } from './StatusLegend'
 import { RoomContextMenu } from './RoomContextMenu'
 import { BoardFiltersPopover, type BoardFilters } from './BoardFiltersPopover'
-import { generateMockBoardData, calculateBoardStats } from '@/lib/mock-board-data'
+import { calculateBoardStats } from '@/lib/board-data'
+import { createSandboxRooms } from '@/lib/hotel/rooms'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Textarea } from '@/components/ui/textarea'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { MoneyDisplay } from '@/components/ui/money-display'
+import { StatusPill } from '@/components/ui/status-pill'
 import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil, Robot } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
@@ -32,6 +36,9 @@ import { getBoardShortcuts } from '@/hooks/use-board-shortcuts'
 import { useAutomaticHousekeepingMessaging } from '@/hooks/use-automatic-housekeeping-messaging'
 import { AutomatedMessagingSettings } from '@/components/settings/AutomatedMessagingSettings'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { createAuditRecord, type AuditRecord } from '@/lib/hotel/operations'
+import { getRoomAssignmentDecision } from '@/lib/hotel/business-rules'
+import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 
 interface UnassignedReservation {
   id: string
@@ -48,8 +55,10 @@ interface UnassignedReservation {
 
 export function Board() {
   const { rooms, lastUpdate, initializeRooms, setRooms } = useRoomSync()
+  const { t, language } = useI18n()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedRoom, setSelectedRoom] = useState<BoardRoomCard | null>(null)
+  const [noteDraft, setNoteDraft] = useState('')
   const [draggingRoom, setDraggingRoom] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<'7day' | '14day' | '30day'>('7day')
@@ -57,6 +66,7 @@ export function Board() {
   const [startDate] = useState(new Date())
   const [showUnassigned, setShowUnassigned] = useState(true)
   const [unassignedReservationsRaw, setUnassignedReservationsRaw] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
   
   const unassignedReservations = useMemo(() => 
@@ -114,6 +124,21 @@ export function Board() {
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
 
+  const roomAuditRecords = useMemo(() => {
+    if (!selectedRoom) return []
+    return (auditRecords || []).filter((record) =>
+      record.entityId === selectedRoom.roomId || record.entityId === selectedRoom.reservationId
+    ).slice(0, 5)
+  }, [auditRecords, selectedRoom])
+
+  const addAudit = useCallback((record: AuditRecord) => {
+    setAuditRecords((current) => [record, ...(current || [])].slice(0, 200))
+  }, [setAuditRecords])
+
+  useEffect(() => {
+    setNoteDraft(selectedRoom?.notes || '')
+  }, [selectedRoom])
+
   const cycleViewMode = useCallback(() => {
     setViewMode(current => {
       const modes: Array<'7day' | '14day' | '30day'> = ['7day', '14day', '30day']
@@ -155,50 +180,9 @@ export function Board() {
 
   useEffect(() => {
     if (rooms.length === 0) {
-      initializeRooms(generateMockBoardData())
+      initializeRooms(createSandboxRooms())
     }
   }, [rooms.length, initializeRooms])
-
-  useEffect(() => {
-    if (unassignedReservations.length === 0) {
-      const mockUnassigned: UnassignedReservation[] = [
-        {
-          id: 'UA001',
-          guestName: 'Sarah Johnson',
-          checkIn: new Date(),
-          checkOut: addDays(new Date(), 3),
-          roomType: 'TWIN',
-          guestCount: 2,
-          nights: 3,
-          source: 'Booking.com',
-          isVIP: false
-        },
-        {
-          id: 'UA002',
-          guestName: 'Michael Chen',
-          checkIn: addDays(new Date(), 1),
-          checkOut: addDays(new Date(), 5),
-          roomType: 'DOUBLE',
-          guestCount: 2,
-          nights: 4,
-          source: 'Direct',
-          isVIP: true
-        },
-        {
-          id: 'UA003',
-          guestName: 'Emma Williams',
-          checkIn: new Date(),
-          checkOut: addDays(new Date(), 2),
-          roomType: 'TWIN',
-          guestCount: 1,
-          nights: 2,
-          source: 'Agoda',
-          needsAttention: true
-        }
-      ]
-      setUnassignedReservations(mockUnassigned)
-    }
-  }, [unassignedReservations.length, setUnassignedReservations])
 
   useEffect(() => {
     if (lastUpdate) {
@@ -338,8 +322,12 @@ export function Board() {
     if (!draggingRoom && !draggingReservation) return
     if (room.roomId === draggingRoom) return
     
-    if (room.operationalStatus === 'AVAILABLE' && 
-        (room.status === 'VACANT_CLEAN' || room.status === 'VACANT_DIRTY')) {
+    const decision = getRoomAssignmentDecision(room, {
+      checkIn: new Date(),
+      checkOut: addDays(new Date(), 1),
+    })
+    
+    if (decision.assignable) {
       e.preventDefault()
       setDropTarget(room.roomId)
     }
@@ -360,6 +348,20 @@ export function Board() {
       
       const data = JSON.parse(dataStr)
       
+      const assignmentDecision = getRoomAssignmentDecision(targetRoom, {
+        checkIn: data.checkIn ? new Date(data.checkIn) : new Date(),
+        checkOut: data.checkOut ? new Date(data.checkOut) : addDays(new Date(), 1),
+        excludeReservationId: data.reservationId,
+      })
+
+      if (!assignmentDecision.assignable) {
+        const reason = assignmentDecision.reason === 'occupied'
+          ? 'This room is occupied and cannot be assigned to another reservation.'
+          : `Room ${targetRoom.number} cannot be assigned because it is ${assignmentDecision.reason.replaceAll('_', ' ')}.`
+        toast.error(reason)
+        return
+      }
+
       if (targetRoom.operationalStatus === 'AVAILABLE' && 
           (targetRoom.status === 'VACANT_CLEAN' || targetRoom.status === 'VACANT_DIRTY')) {
         
@@ -405,6 +407,7 @@ export function Board() {
             })
           )
           
+          addAudit(createAuditRecord('room', targetRoom.roomId, 'MOVE_ROOM', `${data.guestName} moved from Room ${sourceRoom.number} to Room ${targetRoom.number}.`, 'Front desk'))
           toast.success(`${data.guestName} moved from Room ${sourceRoom.number} to Room ${targetRoom.number}`)
         } else if (data.type === 'ASSIGN_ROOM') {
           if (targetRoom.type !== data.roomType) {
@@ -435,6 +438,7 @@ export function Board() {
             current.filter(r => r.id !== data.reservationId)
           )
           
+          addAudit(createAuditRecord('reservation', data.reservationId, 'ASSIGN_ROOM', `${data.guestName} assigned to Room ${targetRoom.number}.`, 'Front desk'))
           toast.success(`${data.guestName} assigned to Room ${targetRoom.number}`)
         }
       }
@@ -455,6 +459,12 @@ export function Board() {
 
   const handleCheckOut = (room: BoardRoomCard) => {
     if (!room.guestName || !room.reservationId) return
+    if (room.balanceDue && room.balanceDue > 0) {
+      toast.error('Collect the remaining balance before checkout.', {
+        description: `Room ${room.number} has an unpaid balance.`
+      })
+      return
+    }
     
     setRooms((currentRooms) => 
       currentRooms.map(r => 
@@ -473,12 +483,16 @@ export function Board() {
               nightsRemaining: undefined,
               depositStatus: 'NONE',
               balanceDue: undefined,
-              isVIP: false
+              isVIP: false,
+              housekeepingStatus: 'DIRTY',
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Front desk',
             }
           : r
       )
     )
     
+    addAudit(createAuditRecord('reservation', room.reservationId, 'CHECKED_OUT', `${room.guestName} checked out from Room ${room.number}. Room marked dirty.`, 'Front desk'))
     automation.triggerManualCheckOut(room)
     toast.success(`${room.guestName} checked out from Room ${room.number}`)
     setSelectedRoom(null)
@@ -492,13 +506,44 @@ export function Board() {
               ...r,
               status: r.guestName ? 'OCCUPIED_CLEAN' : 'VACANT_CLEAN',
               cleanStatus: 'CLEAN',
-              lastCleaned: new Date()
+              housekeepingStatus: 'CLEAN',
+              lastCleaned: new Date(),
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Housekeeping',
             }
           : r
       )
     )
     
+    addAudit(createAuditRecord('housekeeping', room.roomId, 'CLEAN', `Room ${room.number} marked clean.`, 'Housekeeping'))
     toast.success(`Room ${room.number} marked as clean`)
+    setSelectedRoom(null)
+  }
+
+  const handleMarkInspected = (room: BoardRoomCard) => {
+    if (room.cleanStatus === 'DIRTY') {
+      toast.error(`Room ${room.number} must be cleaned before inspection.`)
+      return
+    }
+
+    setRooms((currentRooms) =>
+      currentRooms.map(r =>
+        r.roomId === room.roomId
+          ? {
+              ...r,
+              status: r.guestName ? 'OCCUPIED_CLEAN' : 'VACANT_CLEAN',
+              cleanStatus: 'INSPECTED',
+              housekeepingStatus: 'INSPECTED',
+              lastCleaned: new Date(),
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Supervisor',
+            }
+          : r
+      )
+    )
+
+    addAudit(createAuditRecord('housekeeping', room.roomId, 'INSPECTED', `Room ${room.number} marked inspected.`, 'Supervisor'))
+    toast.success(`Room ${room.number} marked inspected.`)
     setSelectedRoom(null)
   }
 
@@ -509,27 +554,39 @@ export function Board() {
           ? {
               ...r,
               status: r.guestName ? 'OCCUPIED_DIRTY' : 'VACANT_DIRTY',
-              cleanStatus: 'DIRTY'
+              cleanStatus: 'DIRTY',
+              housekeepingStatus: 'DIRTY',
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Staff',
             }
           : r
       )
     )
     
+    addAudit(createAuditRecord('housekeeping', room.roomId, 'DIRTY', `Room ${room.number} marked dirty.`, 'Staff'))
     toast.success(`Room ${room.number} marked as dirty`)
   }
 
   const handleBlockRoom = (room: BoardRoomCard) => {
+    if (room.guestName) {
+      toast.error(`Room ${room.number} is occupied and cannot be blocked.`)
+      return
+    }
+
     setRooms((currentRooms) => 
       currentRooms.map(r => 
         r.roomId === room.roomId 
           ? {
               ...r,
-              operationalStatus: 'BLOCKED'
+              operationalStatus: 'BLOCKED',
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Manager',
             }
           : r
       )
     )
     
+    addAudit(createAuditRecord('room', room.roomId, 'BLOCKED', `Room ${room.number} blocked.`, 'Manager'))
     toast.success(`Room ${room.number} blocked`)
     setSelectedRoom(null)
   }
@@ -540,12 +597,17 @@ export function Board() {
         r.roomId === room.roomId 
           ? {
               ...r,
-              operationalStatus: 'AVAILABLE'
+              operationalStatus: 'AVAILABLE',
+              hasIssue: false,
+              housekeepingStatus: r.cleanStatus,
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Manager',
             }
           : r
       )
     )
     
+    addAudit(createAuditRecord('room', room.roomId, 'AVAILABLE', `Room ${room.number} marked available.`, 'Manager'))
     toast.success(`Room ${room.number} is now available`)
     setSelectedRoom(null)
   }
@@ -691,21 +753,24 @@ export function Board() {
   }
 
   const handlePostCharge = (room: BoardRoomCard) => {
-    toast.info('Post Charge dialog would open here', {
-      description: `Add charges for Room ${room.number} - ${room.guestName}`
+    navigate('cashier')
+    setSelectedRoom(null)
+    toast.info('Cashier opened for posting charges.', {
+      description: `Room ${room.number}${room.guestName ? ` - ${room.guestName}` : ''}`
     })
   }
 
   const handleViewFolio = (room: BoardRoomCard) => {
-    toast.info('Guest Folio would open here', {
-      description: `View detailed billing for ${room.guestName}`
+    navigate('cashier')
+    setSelectedRoom(null)
+    toast.info('Cashier opened for folio review.', {
+      description: room.guestName ? `Review billing for ${room.guestName}.` : `Room ${room.number}`
     })
   }
 
   const handleAddNote = (room: BoardRoomCard) => {
-    toast.info('Add Note dialog would open here', {
-      description: `Add notes for Room ${room.number}`
-    })
+    setSelectedRoom(room)
+    setNoteDraft(room.notes || '')
   }
 
   const handlePrintRegistration = (room: BoardRoomCard) => {
@@ -721,20 +786,45 @@ export function Board() {
   }
 
   const handleMarkOutOfService = (room: BoardRoomCard) => {
+    if (room.guestName) {
+      toast.error(`Move or check out the guest before marking Room ${room.number} out of order.`)
+      return
+    }
+
     setRooms((currentRooms) =>
       currentRooms.map(r =>
         r.roomId === room.roomId
-          ? { ...r, operationalStatus: 'OUT_OF_SERVICE' }
+          ? {
+              ...r,
+              operationalStatus: 'OUT_OF_SERVICE',
+              housekeepingStatus: 'MAINTENANCE',
+              hasIssue: true,
+              lastUpdatedAt: new Date().toISOString(),
+              lastUpdatedBy: 'Manager',
+            }
           : r
       )
     )
+    addAudit(createAuditRecord('room', room.roomId, 'OUT_OF_SERVICE', `Room ${room.number} marked out of service.`, 'Manager'))
     toast.warning(`Room ${room.number} marked as Out of Service`)
   }
 
   const handleRequestHousekeeping = (room: BoardRoomCard) => {
-    toast.success('Housekeeping request sent', {
-      description: `Priority cleaning for Room ${room.number}`
-    })
+    setRooms((currentRooms) =>
+      currentRooms.map(r => r.roomId === room.roomId
+        ? {
+            ...r,
+            housekeepingStatus: 'DIRTY',
+            cleanStatus: 'DIRTY',
+            status: r.guestName ? 'OCCUPIED_DIRTY' : 'VACANT_DIRTY',
+            lastUpdatedAt: new Date().toISOString(),
+            lastUpdatedBy: 'Front desk',
+          }
+        : r
+      )
+    )
+    addAudit(createAuditRecord('housekeeping', room.roomId, 'REQUESTED', `Priority housekeeping requested for Room ${room.number}.`, 'Front desk'))
+    toast.success(`Room ${room.number} sent to housekeeping priority queue.`)
   }
 
   const handleCopyReservation = (room: BoardRoomCard) => {
@@ -750,36 +840,55 @@ export function Board() {
   }
 
   const handleQuickCheckIn = (room: BoardRoomCard) => {
-    const mockReservation = unassignedReservations.find(r => r.roomType === room.type)
+    const pendingReservation = unassignedReservations.find(r => r.roomType === room.type)
     
-    if (mockReservation) {
+    if (pendingReservation) {
+      const decision = getRoomAssignmentDecision(room, {
+        checkIn: pendingReservation.checkIn,
+        checkOut: pendingReservation.checkOut,
+        excludeReservationId: pendingReservation.id,
+      })
+
+      if (!decision.assignable) {
+        toast.error(`Room ${room.number} cannot be checked in because it is ${decision.reason.replaceAll('_', ' ')}.`)
+        return
+      }
+
+      if (room.cleanStatus !== 'CLEAN' && room.cleanStatus !== 'INSPECTED') {
+        toast.error(`Room ${room.number} must be clean or inspected before check-in.`)
+        return
+      }
+
       setRooms((currentRooms) => 
         currentRooms.map(r => 
           r.roomId === room.roomId 
             ? {
                 ...r,
                 status: 'OCCUPIED_CLEAN',
-                guestName: mockReservation.guestName,
-                reservationId: mockReservation.id,
-                checkIn: mockReservation.checkIn,
-                checkOut: mockReservation.checkOut,
-                guestCount: mockReservation.guestCount,
-                isArrivalToday: isSameDay(mockReservation.checkIn, new Date()),
-                isDepartureToday: isSameDay(mockReservation.checkOut, new Date()),
-                nightsRemaining: mockReservation.nights,
-                isVIP: mockReservation.isVIP || false
+                guestName: pendingReservation.guestName,
+                reservationId: pendingReservation.id,
+                checkIn: pendingReservation.checkIn,
+                checkOut: pendingReservation.checkOut,
+                guestCount: pendingReservation.guestCount,
+                isArrivalToday: isSameDay(pendingReservation.checkIn, new Date()),
+                isDepartureToday: isSameDay(pendingReservation.checkOut, new Date()),
+                nightsRemaining: pendingReservation.nights,
+                isVIP: pendingReservation.isVIP || false,
+                lastUpdatedAt: new Date().toISOString(),
+                lastUpdatedBy: 'Front desk',
               }
             : r
         )
       )
       
       setUnassignedReservations((current) => 
-        current.filter(r => r.id !== mockReservation.id)
+        current.filter(r => r.id !== pendingReservation.id)
       )
       
-      toast.success(`${mockReservation.guestName} checked into Room ${room.number}`)
+      addAudit(createAuditRecord('reservation', pendingReservation.id, 'CHECKED_IN', `${pendingReservation.guestName} checked in to Room ${room.number}.`, 'Front desk'))
+      toast.success(`${pendingReservation.guestName} checked into Room ${room.number}`)
     } else {
-      toast.error('No unassigned reservations for this room type')
+      toast.error(`No unassigned ${room.type} reservation is ready for check-in.`)
     }
     
     setSelectedRoom(null)
@@ -841,147 +950,140 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-2 bg-background p-2">
+    <div className="h-full flex gap-3 bg-background p-3">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <Card className="w-64 flex-shrink-0 border-2 shadow-md flex flex-col">
-          <div className="p-2 border-b-2 border-border bg-gradient-to-br from-primary/5 to-primary/10">
+        <div className="w-60 flex-shrink-0 rounded-xl bg-card border border-border/50 flex flex-col overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-border/40">
             <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xs font-bold leading-tight">Unassigned Reservations</h3>
-                <p className="text-[9px] text-muted-foreground mt-1">Drag to assign room</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-semibold text-foreground">Unassigned</h3>
+                <span className="inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-rose-100 text-rose-700 text-[10px] font-semibold px-1.5">
+                  {unassignedReservations.length}
+                </span>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowUnassigned(false)}
-                className="h-5 w-5 p-0 hover:bg-destructive/10"
+                className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground"
               >
                 <X className="w-3 h-3" />
               </Button>
             </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Drag to assign a room</p>
           </div>
           <ScrollArea className="flex-1">
-            <div className="p-2 space-y-2">
+            <div className="p-2 space-y-1.5">
               {unassignedReservations.map((reservation) => (
-                <Card
+                <div
                   key={reservation.id}
                   draggable
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
-                    "p-2 cursor-grab active:cursor-grabbing hover:shadow-lg transition-all border-2 group",
-                    draggingReservation === reservation.id && "opacity-40 scale-95 rotate-2",
-                    reservation.isVIP && "border-amber-400/60 bg-gradient-to-br from-amber-50 to-amber-100/50 hover:from-amber-100 hover:to-amber-50",
-                    reservation.needsAttention && "border-destructive/40 bg-gradient-to-br from-destructive/5 to-destructive/10 animate-pulse",
-                    !reservation.isVIP && !reservation.needsAttention && "hover:border-primary/40 hover:bg-primary/5"
+                    "rounded-lg border px-2.5 py-2 cursor-grab active:cursor-grabbing transition-all",
+                    draggingReservation === reservation.id && "opacity-30 scale-95",
+                    reservation.isVIP && "border-amber-300 bg-amber-50/60",
+                    reservation.needsAttention && "border-rose-300 bg-rose-50/60",
+                    !reservation.isVIP && !reservation.needsAttention && "border-border/60 bg-background hover:border-border hover:bg-muted/30"
                   )}
                 >
                   <div className="space-y-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="font-semibold text-[10px] truncate flex-1 leading-tight">
+                    <div className="flex items-start justify-between gap-1.5">
+                      <span className="text-[11px] font-semibold text-foreground truncate flex-1 leading-snug">
                         {reservation.guestName}
-                      </div>
-                      <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 flex-shrink-0 font-bold">
+                      </span>
+                      <span className="text-[9px] text-muted-foreground font-medium flex-shrink-0 bg-muted/60 px-1 py-0.5 rounded">
                         {reservation.roomType}
-                      </Badge>
+                      </span>
                     </div>
                     
-                    <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-medium">
-                      <Clock className="w-2.5 h-2.5" />
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                       <span>{format(reservation.checkIn, 'MMM d')}</span>
-                      <span>→</span>
+                      <span className="text-muted-foreground/40">–</span>
                       <span>{format(reservation.checkOut, 'MMM d')}</span>
+                      <span className="text-muted-foreground/40 mx-0.5">·</span>
+                      <span>{reservation.nights}n</span>
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-medium">
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         <Users className="w-2.5 h-2.5" />
                         <span>{reservation.guestCount}</span>
-                        <span className="ml-1">• {reservation.nights}n</span>
                       </div>
-                      <Badge variant="secondary" className="text-[8px] px-1 py-0 h-4 font-semibold">
-                        {reservation.source}
-                      </Badge>
+                      <span className="text-[9px] text-muted-foreground/70">{reservation.source}</span>
                     </div>
                     
                     {reservation.isVIP && (
-                      <Badge className="text-[8px] px-1 py-0 h-4 bg-amber-500 hover:bg-amber-600">
-                        ⭐ VIP
-                      </Badge>
+                      <span className="inline-flex items-center text-[9px] font-medium text-amber-700">★ VIP</span>
                     )}
                     
                     {reservation.needsAttention && (
-                      <div className="flex items-center gap-1 text-[9px] text-destructive font-semibold">
+                      <div className="flex items-center gap-1 text-[9px] text-rose-600 font-medium">
                         <Warning className="w-2.5 h-2.5" weight="fill" />
-                        <span>Needs attention</span>
+                        Needs attention
                       </div>
                     )}
                   </div>
-                </Card>
+                </div>
               ))}
             </div>
           </ScrollArea>
-        </Card>
+        </div>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h1 className="text-base font-bold leading-tight tracking-tight">Room Board</h1>
-            <p className="text-[9px] text-muted-foreground mt-1 font-medium">
-              Sandbox Hotel · 30 Rooms · {format(new Date(), 'EEEE, MMMM d, yyyy')}
+      <div className="flex-1 flex flex-col min-w-0 gap-3">
+        {/* Top Bar: Title + Actions */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold leading-tight tracking-tight text-foreground">Room Board</h1>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {format(new Date(), 'EEEE, MMMM d, yyyy')} · 30 rooms
             </p>
           </div>
           
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
+            {/* Primary CTA */}
             <Button
               onClick={() => {
                 setPrefilledReservation(null)
                 setShowNewReservationDialog(true)
               }}
-              className="h-7 gap-1 text-[11px] font-semibold px-3 shadow-sm hover:shadow"
+              className="h-8 gap-1.5 text-xs font-medium px-3.5"
             >
-              <Plus className="w-3 h-3" weight="bold" />
+              <Plus className="w-3.5 h-3.5" weight="bold" />
               New Reservation
             </Button>
+
+            {/* Alert: Unassigned */}
             {!showUnassigned && unassignedReservations.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
+              <button
                 onClick={() => setShowUnassigned(true)}
-                className="h-7 text-[11px] gap-1.5 font-semibold px-3 shadow-sm hover:shadow"
+                className="inline-flex items-center gap-1.5 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
               >
-                <Badge variant="destructive" className="h-4 w-4 p-0 text-[8px] flex items-center justify-center font-bold">
+                <span className="inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-amber-600 text-white text-[10px] font-semibold px-1">
                   {unassignedReservations.length}
-                </Badge>
+                </span>
                 Unassigned
-              </Button>
+              </button>
             )}
+
+            <div className="h-5 w-px bg-border/50" />
+
+            {/* Utilities */}
             {lastUpdate && (
-              <div className="text-[9px] text-muted-foreground flex items-center gap-1 px-2 py-1 rounded-md bg-primary/5 border border-primary/20">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                <span className="font-semibold">Live Sync</span>
+              <div className="hidden lg:flex items-center gap-1.5 text-[10px] text-emerald-600">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-medium">Live</span>
               </div>
             )}
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={commandPalette.open}
-              className="gap-1 h-7 font-semibold text-[11px] px-2 shadow-sm hover:shadow"
-            >
-              <Command className="w-3 h-3" />
-              <span className="hidden md:inline">Commands</span>
-              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-1 rounded border bg-muted px-1 font-mono text-[8px] font-medium text-muted-foreground md:inline-flex">
-                <span className="text-[9px]">⌘</span>K
-              </kbd>
-            </Button>
-            <div className="relative w-36">
-              <MagnifyingGlass className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+            <div className="relative w-40">
+              <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search rooms..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-7 h-7 text-[11px] font-medium shadow-sm"
+                className="pl-8 h-8 text-xs border-border/50 bg-muted/30 focus:bg-background"
               />
             </div>
             <BoardFiltersPopover
@@ -989,10 +1091,21 @@ export function Board() {
               onFiltersChange={setFilters}
               activeCount={activeFilterCount}
             />
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={commandPalette.open}
+              className="h-8 text-xs font-medium text-muted-foreground hover:text-foreground px-2"
+            >
+              <Command className="w-3.5 h-3.5" />
+              <kbd className="pointer-events-none hidden h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[9px] text-muted-foreground ml-1.5 md:inline-flex">
+                ⌘K
+              </kbd>
+            </Button>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 w-7 p-0 shadow-sm hover:shadow">
-                  <Info className="w-3 h-3" />
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground">
+                  <Info className="w-3.5 h-3.5" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-[320px]">
@@ -1012,12 +1125,12 @@ export function Board() {
           onOpenAutomation={() => setShowAutomationSettings(true)}
         />
 
-        <div className="flex-1 overflow-auto rounded-lg border-2 border-border bg-card shadow-sm">
+        <div className="flex-1 overflow-auto rounded-xl border border-border/40 bg-card">
           <div className="calendar-board">
-            <div className="sticky top-0 z-20 bg-gradient-to-b from-muted via-muted/95 to-muted/80 border-b-2 border-border shadow-sm">
+            <div className="sticky top-0 z-20 bg-muted/80 backdrop-blur-sm border-b border-border/40">
               <div className="flex">
-                <div className="w-24 flex-shrink-0 border-r-2 border-border py-2 px-2 bg-muted/50">
-                  <div className="text-[9px] font-bold text-foreground uppercase tracking-wider">Room #</div>
+                <div className="w-28 flex-shrink-0 border-r border-border/30 py-2.5 px-3">
+                  <div className="text-[10px] font-medium text-muted-foreground tracking-wide">Room</div>
                 </div>
                 
                 <div className="flex-1 flex overflow-x-auto">
@@ -1028,29 +1141,32 @@ export function Board() {
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[80px] border-r border-border py-2 px-2 text-center transition-all",
-                          isToday && "bg-primary/10 border-l-4 border-l-primary shadow-inner",
-                          isWeekendDay && !isToday && "bg-muted/60"
+                          "flex-1 min-w-[80px] border-r border-border/20 py-2 px-2 text-center transition-colors",
+                          isToday && "bg-blue-50 border-x border-x-blue-200",
+                          isWeekendDay && !isToday && "bg-muted/40"
                         )}
                       >
                         <div className={cn(
-                          "text-[8px] font-bold uppercase tracking-wider mb-1",
-                          isToday ? "text-primary" : "text-muted-foreground"
+                          "text-[9px] font-medium uppercase tracking-wide",
+                          isToday ? "text-blue-600" : "text-muted-foreground/70"
                         )}>
                           {format(date, 'EEE')}
                         </div>
                         <div className={cn(
-                          "text-sm font-extrabold leading-none mb-1",
-                          isToday ? "text-primary" : "text-foreground"
+                          "text-sm font-semibold leading-none my-0.5",
+                          isToday ? "text-blue-600" : "text-foreground"
                         )}>
                           {format(date, 'd')}
                         </div>
                         <div className={cn(
-                          "text-[8px] font-semibold",
-                          isToday ? "text-primary/80" : "text-muted-foreground"
+                          "text-[9px] font-normal",
+                          isToday ? "text-blue-500" : "text-muted-foreground/60"
                         )}>
                           {format(date, 'MMM')}
                         </div>
+                        {isToday && (
+                          <div className="mx-auto mt-1 w-1 h-1 rounded-full bg-blue-500" />
+                        )}
                       </div>
                     )
                   })}
@@ -1366,7 +1482,11 @@ export function Board() {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => toast.info('Add Charge functionality coming soon')}
+                          onClick={() => {
+                            navigate('cashier')
+                            setSelectedRoom(null)
+                            toast.info(`Opened cashier for Room ${selectedRoom.number}`)
+                          }}
                         >
                           Add Charge
                         </Button>
@@ -1396,7 +1516,11 @@ export function Board() {
                         variant="outline" 
                         className="w-full" 
                         size="sm"
-                        onClick={() => toast.info('View Folio functionality coming soon')}
+                        onClick={() => {
+                          navigate('cashier')
+                          setSelectedRoom(null)
+                          toast.info(`Opened folio tools for Room ${selectedRoom.number}`)
+                        }}
                       >
                         View Folio
                       </Button>
@@ -1602,38 +1726,36 @@ function RoomTypeRow({
   const dirtyCount = rooms.filter(r => r.cleanStatus === 'DIRTY').length
   
   return (
-    <div className="border-b-2 border-border last:border-b-0">
+    <div className="border-b border-border/30 last:border-b-0">
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-muted/70 via-muted/50 to-muted/30 hover:from-muted hover:via-muted/80 hover:to-muted/60 transition-all border-b border-border/60 group"
+        className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/30 hover:bg-muted/50 transition-colors border-b border-border/20 group"
       >
         {isCollapsed ? (
-          <CaretRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
+          <CaretRight className="w-3 h-3 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
         ) : (
-          <CaretDown className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
+          <CaretDown className="w-3 h-3 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
         )}
-        <div className="flex items-center gap-2 text-[11px] font-bold flex-1 min-w-0">
-          <span className="text-muted-foreground">{subtitle}</span>
+        <div className="flex items-center gap-2 text-[11px] flex-1 min-w-0">
+          <span className="font-medium text-foreground">{title}</span>
           <span className="text-muted-foreground/40">·</span>
-          <span className="text-foreground">{title}</span>
+          <span className="text-muted-foreground font-normal">{subtitle}</span>
           <div className="flex items-center gap-1.5 ml-auto">
-            <Badge variant="secondary" className="text-[9px] px-1.5 py-0.5 h-5 font-bold shadow-sm">
-              {rooms.length} rooms
-            </Badge>
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-5 font-bold bg-primary/10 text-primary border-primary/40 shadow-sm">
-              {occupiedCount} occupied
-            </Badge>
+            <span className="text-[10px] text-muted-foreground">{rooms.length} rooms</span>
+            <span className="text-muted-foreground/30">·</span>
+            <span className="text-[10px] text-blue-600 font-medium">{occupiedCount} occ</span>
             {dirtyCount > 0 && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 h-5 font-bold bg-orange-50 text-orange-700 border-orange-300 shadow-sm">
-                {dirtyCount} dirty
-              </Badge>
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="text-[10px] text-orange-600 font-medium">{dirtyCount} dirty</span>
+              </>
             )}
           </div>
         </div>
       </button>
 
       {!isCollapsed && (
-        <div className="divide-y divide-border/40">
+        <div className="divide-y divide-border/20">
           {rooms.map((room) => (
             <CalendarRoomRow
               key={room.roomId}
@@ -1731,26 +1853,28 @@ function CalendarRoomRow({
   const getStatusColor = (status: BoardRoomCard['status']) => {
     switch (status) {
       case 'OCCUPIED_CLEAN':
-        return 'bg-gradient-to-br from-primary/40 via-primary/20 to-primary/10 border-primary/60 border-l-[6px] border-l-primary shadow-md hover:shadow-lg'
+        return 'bg-blue-100/80 border-blue-300/60 border-l-[3px] border-l-blue-500'
       case 'OCCUPIED_DIRTY':
-        return 'bg-gradient-to-br from-destructive/40 via-destructive/20 to-destructive/10 border-destructive/60 border-l-[6px] border-l-destructive shadow-md hover:shadow-lg'
+        return 'bg-blue-100/60 border-blue-200/60 border-l-[3px] border-l-orange-500'
       case 'VACANT_CLEAN':
-        return 'bg-gradient-to-br from-green-500/30 via-green-500/15 to-green-500/5 border-green-500/60 border-l-[6px] border-l-green-500 shadow-md hover:shadow-lg'
+        return 'bg-emerald-50/80 border-emerald-200/60 border-l-[3px] border-l-emerald-500'
       case 'VACANT_DIRTY':
-        return 'bg-gradient-to-br from-orange-500/30 via-orange-500/15 to-orange-500/5 border-orange-500/60 border-l-[6px] border-l-orange-500 shadow-md hover:shadow-lg'
+        return 'bg-orange-50/80 border-orange-200/60 border-l-[3px] border-l-orange-500'
       default:
-        return 'bg-muted/40 border-border'
+        return 'bg-muted/30 border-border/40'
     }
   }
 
-  const getCleanStatusIndicator = (cleanStatus: 'CLEAN' | 'DIRTY' | 'INSPECTED') => {
+  const getCleanStatusIndicator = (cleanStatus: BoardRoomCard['cleanStatus']) => {
     switch (cleanStatus) {
       case 'CLEAN':
-        return 'bg-green-500 ring-2 ring-green-500/40 shadow-md shadow-green-500/30 animate-pulse'
+        return 'bg-emerald-500'
       case 'DIRTY':
-        return 'bg-orange-500 ring-2 ring-orange-500/40 shadow-md shadow-orange-500/30'
+        return 'bg-orange-500'
+      case 'CLEANING':
+        return 'bg-sky-500'
       case 'INSPECTED':
-        return 'bg-blue-500 ring-2 ring-blue-500/40 shadow-md shadow-blue-500/30'
+        return 'bg-blue-500'
     }
   }
 
@@ -1835,31 +1959,25 @@ function CalendarRoomRow({
       onViewCalendar={() => contextMenuHandlers.onViewCalendar(room)}
     >
       <div 
-        className="flex hover:bg-accent/10 transition-all group border-b border-border/40 last:border-b-0"
+        className="flex hover:bg-muted/20 transition-colors group"
         onMouseUp={handleResizeMouseUp}
         onMouseLeave={handleResizeMouseUp}
       >
       <div 
-        className="w-24 flex-shrink-0 border-r-2 border-border py-2 px-2 flex items-center gap-1.5 cursor-pointer bg-muted/20 group-hover:bg-muted/40 transition-all"
+        className="w-28 flex-shrink-0 border-r border-border/30 py-2 px-3 flex items-center gap-2 cursor-pointer transition-colors"
         onClick={onClick}
       >
-        <div className={cn("w-2 h-2 rounded-full transition-all", getCleanStatusIndicator(room.cleanStatus))} />
-        <div className="text-xs font-extrabold tracking-tight">{room.number}</div>
+        <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", getCleanStatusIndicator(room.cleanStatus))} />
+        <div className="text-xs font-semibold tracking-tight text-foreground">{room.number}</div>
         <div className="ml-auto flex items-center gap-1">
           {room.operationalStatus === 'OUT_OF_SERVICE' && (
-            <Badge variant="destructive" className="text-[8px] px-1 py-0 h-4 font-bold">
-              OOS
-            </Badge>
+            <span className="text-[8px] font-medium text-rose-600 bg-rose-50 px-1 py-0.5 rounded">OOS</span>
           )}
           {room.operationalStatus === 'BLOCKED' && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-bold bg-orange-50 text-orange-700 border-orange-300">
-              BLK
-            </Badge>
+            <span className="text-[8px] font-medium text-gray-600 bg-gray-100 px-1 py-0.5 rounded">BLK</span>
           )}
           {room.isVIP && (
-            <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-bold bg-amber-50 text-amber-700 border-amber-300">
-              VIP
-            </Badge>
+            <span className="text-[8px] font-medium text-amber-700 bg-amber-50 px-1 py-0.5 rounded">VIP</span>
           )}
         </div>
       </div>
@@ -1885,10 +2003,10 @@ function CalendarRoomRow({
             <div 
               key={i}
               className={cn(
-                "flex-1 min-w-[80px] border-r border-border py-2 px-2 relative transition-all",
-                isToday && "bg-primary/10 shadow-inner border-l-2 border-l-primary",
-                isWeekendDay && !isToday && "bg-accent/10",
-                draggingReservation && isAvailableForAssignment && "ring-2 ring-inset ring-primary/50 bg-primary/10 animate-pulse",
+                "flex-1 min-w-[80px] border-r border-border/15 py-1.5 px-1.5 relative transition-colors",
+                isToday && "bg-blue-50/50 border-x border-x-blue-100",
+                isWeekendDay && !isToday && "bg-muted/20",
+                draggingReservation && isAvailableForAssignment && "bg-blue-50/40",
                 isResizing && "cursor-col-resize"
               )}
               draggable={!!(isRoomOccupied && isInStay && !isResizing)}
@@ -1904,14 +2022,14 @@ function CalendarRoomRow({
               {isInStay && (
                 <div 
                   className={cn(
-                    "h-full rounded-md border-2 transition-all hover:scale-[1.02] relative overflow-hidden group/reservation",
+                    "h-full rounded-md border transition-all relative overflow-hidden group/reservation",
                     getStatusColor(room.status),
-                    isDragging && "opacity-30 scale-90 rotate-1",
-                    isDropTarget && !isDragging && "ring-4 ring-primary ring-offset-2 scale-105",
-                    isFirstDay && "rounded-l-xl",
-                    isLastDay && "rounded-r-xl",
-                    isRoomOccupied && !isResizing && "cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-primary/50",
-                    isResizing && "ring-4 ring-primary shadow-2xl z-10 scale-105"
+                    isDragging && "opacity-30 scale-95",
+                    isDropTarget && !isDragging && "ring-2 ring-blue-500 ring-offset-1 scale-[1.02]",
+                    isFirstDay && "rounded-l-lg",
+                    isLastDay && "rounded-r-lg",
+                    isRoomOccupied && !isResizing && "cursor-grab active:cursor-grabbing hover:shadow-sm",
+                    isResizing && "ring-2 ring-blue-500 shadow-lg z-10"
                   )}
                   onClick={(e) => {
                     if (isResizing) return
@@ -1919,17 +2037,16 @@ function CalendarRoomRow({
                     onReservationClick()
                   }}
                 >
-                  <div className="px-2 py-1.5 h-full flex flex-col justify-between">
+                  <div className="px-2 py-1 h-full flex flex-col justify-between">
                     {isCheckIn && (
-                      <div className="space-y-1">
-                        <div className="text-[10px] font-bold truncate text-foreground flex items-center gap-1 leading-tight">
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] font-medium truncate text-foreground leading-snug">
                           {room.guestName}
-                          <Pencil className="w-2.5 h-2.5 opacity-0 group-hover/reservation:opacity-100 transition-opacity" />
                         </div>
                         {room.guestCount && (
-                          <div className="text-[8px] text-foreground/70 flex items-center gap-1 font-medium">
+                          <div className="text-[9px] text-foreground/50 flex items-center gap-1">
                             <Users className="w-2 h-2" />
-                            <span>{room.guestCount} guest{room.guestCount !== 1 ? 's' : ''}</span>
+                            <span>{room.guestCount}</span>
                           </div>
                         )}
                       </div>
@@ -1937,17 +2054,17 @@ function CalendarRoomRow({
                     
                     <div className="flex items-center justify-between mt-auto">
                       {room.isArrivalToday && isCheckIn && (
-                        <Badge className="text-[7px] px-1 py-0 h-4 bg-green-600 hover:bg-green-700 font-bold">
-                          CHECK-IN
-                        </Badge>
+                        <span className="text-[8px] font-medium text-amber-700 bg-amber-100 px-1 py-0.5 rounded">
+                          IN
+                        </span>
                       )}
                       {room.isDepartureToday && isCheckOut && (
-                        <Badge className="text-[7px] px-1 py-0 h-4 bg-destructive hover:bg-destructive/90 ml-auto font-bold">
-                          CHECK-OUT
-                        </Badge>
+                        <span className="text-[8px] font-medium text-rose-700 bg-rose-100 px-1 py-0.5 rounded ml-auto">
+                          OUT
+                        </span>
                       )}
                       {room.depositStatus === 'PENDING' && isCheckIn && (
-                        <div className="w-2 h-2 rounded-full bg-orange-500 ring-2 ring-orange-500/40 ml-auto animate-pulse" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 ml-auto" />
                       )}
                     </div>
                   </div>
@@ -1955,42 +2072,42 @@ function CalendarRoomRow({
                   {isCheckIn && isRoomOccupied && (
                     <div
                       className={cn(
-                        "absolute left-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-primary/50 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-primary/70"
+                        "absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-blue-500/30 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-blue-500/40"
                       )}
                       onMouseDown={handleResizeMouseDown('start', date)}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="absolute left-1 top-1/2 -translate-y-1/2 w-1.5 h-10 bg-primary/90 rounded-full shadow-lg" />
+                      <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-500/70 rounded-full" />
                     </div>
                   )}
 
                   {isLastDay && isRoomOccupied && (
                     <div
                       className={cn(
-                        "absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-primary/50 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-primary/70"
+                        "absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-blue-500/30 transition-colors opacity-0 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-blue-500/40"
                       )}
                       onMouseDown={handleResizeMouseDown('end', date)}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 w-1.5 h-10 bg-primary/90 rounded-full shadow-lg" />
+                      <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-500/70 rounded-full" />
                     </div>
                   )}
                   
                   {isDropTarget && !isDragging && (
-                    <div className="absolute inset-0 bg-primary/40 backdrop-blur-sm flex items-center justify-center border-4 border-primary rounded-md">
-                      <Badge className="text-[10px] font-bold shadow-lg">
+                    <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-[1px] flex items-center justify-center rounded-md">
+                      <span className="text-[10px] font-medium text-blue-700 bg-white/80 px-2 py-0.5 rounded shadow-sm">
                         Drop here
-                      </Badge>
+                      </span>
                     </div>
                   )}
 
                   {isResizing && resizingReservation && (
-                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-[11px] font-bold px-3 py-1.5 rounded-md shadow-2xl whitespace-nowrap z-20 border-2 border-primary-foreground/20">
+                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-foreground text-background text-[10px] font-medium px-2 py-1 rounded-md shadow-lg whitespace-nowrap z-20">
                       {resizingReservation.direction === 'end' 
-                        ? `Check-out: ${format(addDays(resizingReservation.currentDate, 1), 'MMM d, yyyy')}`
-                        : `Check-in: ${format(resizingReservation.currentDate, 'MMM d, yyyy')}`
+                        ? `Out: ${format(addDays(resizingReservation.currentDate, 1), 'MMM d')}`
+                        : `In: ${format(resizingReservation.currentDate, 'MMM d')}`
                       }
                     </div>
                   )}
@@ -1998,28 +2115,28 @@ function CalendarRoomRow({
               )}
               
               {!isInStay && draggingReservation && isAvailableForAssignment && (
-                <div className="h-full rounded-md border-3 border-dashed border-primary/60 bg-primary/10 flex items-center justify-center transition-all hover:bg-primary/20 hover:border-primary/80 hover:scale-105">
-                  <span className="text-[10px] text-primary font-semibold">Drop to assign</span>
+                <div className="h-full rounded-md border border-dashed border-blue-300 bg-blue-50/50 flex items-center justify-center transition-colors">
+                  <span className="text-[9px] text-blue-500 font-medium">Assign</span>
                 </div>
               )}
 
               {!isInStay && !draggingReservation && !isResizing && isAvailableForAssignment && (
                 <div 
-                  className="h-full rounded-md border-2 border-dashed border-transparent hover:border-primary/40 hover:bg-primary/10 flex items-center justify-center transition-all cursor-pointer group/empty"
+                  className="h-full rounded-md hover:bg-muted/30 flex items-center justify-center transition-colors cursor-pointer group/empty"
                   onClick={(e) => {
                     e.stopPropagation()
                     onEmptyBlockClick(date)
                   }}
                 >
-                  <Plus className="w-4 h-4 text-primary/0 group-hover/empty:text-primary/60 transition-colors" weight="bold" />
+                  <Plus className="w-3 h-3 text-transparent group-hover/empty:text-muted-foreground/40 transition-colors" weight="bold" />
                 </div>
               )}
 
               {!isInStay && isResizing && resizingReservation && hoveredCell === i && (
                 <div className={cn(
-                  "h-full rounded-md border-3 border-dashed transition-all",
-                  resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-primary/70 bg-primary/20",
-                  resizingReservation.direction === 'start' && date < (room.checkOut || new Date()) && "border-primary/70 bg-primary/20"
+                  "h-full rounded-md border border-dashed transition-colors",
+                  resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-blue-400 bg-blue-50/50",
+                  resizingReservation.direction === 'start' && date < (room.checkOut || new Date()) && "border-blue-400 bg-blue-50/50"
                 )} />
               )}
             </div>

@@ -84,7 +84,7 @@ export interface CheckOutData {
     description: string
     amount: number
   }>
-  paymentMethod?: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
+  paymentMethod?: 'CASH' | 'CARD' | 'TRANSFER' | 'PROMPTPAY' | 'OTHER'
   balanceSettled: boolean
   keyReturned: boolean
   roomConditionCheck: 'GOOD' | 'MINOR_DAMAGE' | 'MAJOR_DAMAGE'

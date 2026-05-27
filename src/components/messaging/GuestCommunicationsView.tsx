@@ -92,6 +92,11 @@ export function GuestCommunicationsView() {
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
   const [composerOpen, setComposerOpen] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<GuestMessageTemplate | null>(null)
+  const [composeRecipient, setComposeRecipient] = useState('')
+  const [composeSubject, setComposeSubject] = useState('')
+  const [composeBody, setComposeBody] = useState('')
+  const [composeType, setComposeType] = useState<GuestMessageType>('CUSTOM')
+  const [composeChannel, setComposeChannel] = useState<CommunicationChannel>('EMAIL')
 
   const filteredMessages = useMemo(() => {
     return messages.filter(msg => {
@@ -116,48 +121,69 @@ export function GuestCommunicationsView() {
     }
   }, [messages])
 
-  const sendTestMessage = (template: GuestMessageTemplate) => {
-    const testMessage: GuestMessage = {
+  const resetComposer = () => {
+    setComposeRecipient('')
+    setComposeSubject('')
+    setComposeBody('')
+    setComposeType('CUSTOM')
+    setComposeChannel('EMAIL')
+  }
+
+  const sendMessage = () => {
+    if (!composeRecipient.trim() || !composeBody.trim()) {
+      toast.error('Recipient and message body are required')
+      return
+    }
+
+    const message: GuestMessage = {
       id: `msg-${Date.now()}`,
-      guestId: 'test-guest',
-      reservationId: 'test-reservation',
-      templateId: template.id,
-      type: template.type,
-      channel: template.channels[0],
-      recipient: 'test@example.com',
-      subject: template.subject,
-      body: replaceTemplateVariables(template.body, {
-        hotelName: 'Sandbox Hotel',
-        guestName: 'Test Guest',
-        confirmationNumber: 'TEST123',
-        checkInDate: '2024-03-15',
-        checkInTime: '14:00',
-        checkOutDate: '2024-03-17',
-        checkOutTime: '11:00',
-        roomType: 'Deluxe Double',
-        roomNumber: '305',
-        guestCount: '2',
-        totalAmount: '5000',
-        totalPaid: '5000',
-        hotelPhone: '+66 XX XXX XXXX',
-        hotelAddress: 'Test Address',
-        wifiNetwork: 'Sandbox-WiFi',
-        wifiPassword: 'welcome123',
-        serviceTime: '10:00-12:00',
-        offerDetails: 'Test Offer',
-        promoCode: 'TEST10',
-        expiryDate: '2024-12-31',
-      }),
+      guestId: `manual-${Date.now()}`,
+      type: composeType,
+      channel: composeChannel,
+      recipient: composeRecipient.trim(),
+      subject: composeSubject.trim() || undefined,
+      body: composeBody.trim(),
       status: 'SENT',
       sentAt: new Date(),
-      metadata: { test: true },
+      metadata: { manual: true },
       createdAt: new Date(),
       updatedAt: new Date(),
     }
 
-    setMessages(current => [testMessage, ...current])
-    toast.success('Test message sent')
+    setMessages(current => [message, ...current])
+    resetComposer()
+    setComposerOpen(false)
+    toast.success('Message recorded')
   }
+
+  const previewTemplate = (template: GuestMessageTemplate) => {
+    setSelectedTemplate(template)
+  }
+
+  const previewBody = selectedTemplate
+    ? replaceTemplateVariables(selectedTemplate.body, {
+        hotelName: 'Sandbox Hotel',
+        guestName: 'Guest Name',
+        confirmationNumber: 'CONFIRMATION',
+        checkInDate: 'Check-in date',
+        checkInTime: 'Check-in time',
+        checkOutDate: 'Check-out date',
+        checkOutTime: 'Check-out time',
+        roomType: 'Room type',
+        roomNumber: 'Room number',
+        guestCount: 'Guest count',
+        totalAmount: 'Total amount',
+        totalPaid: 'Total paid',
+        hotelPhone: 'Hotel phone',
+        hotelAddress: 'Hotel address',
+        wifiNetwork: 'WiFi network',
+        wifiPassword: 'WiFi password',
+        serviceTime: 'Service time',
+        offerDetails: 'Offer details',
+        promoCode: 'Promo code',
+        expiryDate: 'Expiry date',
+      })
+    : ''
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -327,9 +353,9 @@ export function GuestCommunicationsView() {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1" onClick={() => sendTestMessage(template)}>
+                  <Button size="sm" variant="outline" className="flex-1" onClick={() => previewTemplate(template)}>
                     <PaperPlaneTilt className="w-3 h-3 mr-1" />
-                    Send Test
+                    Preview
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setSelectedTemplate(template)}>
                     <Copy className="w-3 h-3" />
@@ -382,6 +408,107 @@ export function GuestCommunicationsView() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={composerOpen} onOpenChange={setComposerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Compose Message</DialogTitle>
+            <DialogDescription>
+              Create a manual guest message and record it in the communication log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Message Type</Label>
+                <Select value={composeType} onValueChange={(value) => setComposeType(value as GuestMessageType)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MESSAGE_TYPES.map(type => (
+                      <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Channel</Label>
+                <Select value={composeChannel} onValueChange={(value) => setComposeChannel(value as CommunicationChannel)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EMAIL">Email</SelectItem>
+                    <SelectItem value="SMS">SMS</SelectItem>
+                    <SelectItem value="LINE">LINE</SelectItem>
+                    <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Recipient</Label>
+              <Input
+                value={composeRecipient}
+                onChange={(event) => setComposeRecipient(event.target.value)}
+                placeholder="Email address, phone number, or channel ID"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Subject</Label>
+              <Input
+                value={composeSubject}
+                onChange={(event) => setComposeSubject(event.target.value)}
+                placeholder="Optional subject"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={composeBody}
+                onChange={(event) => setComposeBody(event.target.value)}
+                placeholder="Write the guest message"
+                className="min-h-32"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setComposerOpen(false)}>Cancel</Button>
+            <Button onClick={sendMessage}>Record Message</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!selectedTemplate} onOpenChange={(open) => !open && setSelectedTemplate(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedTemplate?.name}</DialogTitle>
+            <DialogDescription>
+              Template preview using neutral placeholder values.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {selectedTemplate?.subject && (
+              <div className="space-y-1">
+                <Label>Subject</Label>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                  {selectedTemplate.subject}
+                </div>
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label>Message</Label>
+              <div className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {previewBody}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setSelectedTemplate(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

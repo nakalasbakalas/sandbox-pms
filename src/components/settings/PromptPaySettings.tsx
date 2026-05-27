@@ -13,9 +13,9 @@ export function PromptPaySettings() {
   const [promptPayId, setPromptPayId] = useKV('hotel-promptpay-id', '')
   const [inputValue, setInputValue] = useState('')
   const [isValid, setIsValid] = useState(false)
-  const [testAmount] = useState(100)
-  const [testQR, setTestQR] = useState<string>('')
-  const [isTesting, setIsTesting] = useState(false)
+  const [previewAmount] = useState(100)
+  const [previewQR, setPreviewQR] = useState<string>('')
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false)
 
   useEffect(() => {
     setInputValue(promptPayId)
@@ -41,25 +41,25 @@ export function PromptPaySettings() {
     toast.success('PromptPay ID saved successfully')
   }
 
-  const handleTestQR = async () => {
+  const handlePreviewQR = async () => {
     if (!promptPayId) {
       toast.error('Please save a PromptPay ID first')
       return
     }
 
     try {
-      setIsTesting(true)
+      setIsGeneratingPreview(true)
       const qr = await generatePromptPayQR({
         identifier: promptPayId,
-        amount: testAmount
+        amount: previewAmount,
       })
-      setTestQR(qr)
-      toast.success('Test QR code generated')
+      setPreviewQR(qr)
+      toast.success('Payment QR preview generated')
     } catch (error) {
-      console.error('Failed to generate test QR:', error)
-      toast.error('Failed to generate test QR code')
+      console.error('Failed to generate payment QR preview:', error)
+      toast.error('Failed to generate payment QR preview')
     } finally {
-      setIsTesting(false)
+      setIsGeneratingPreview(false)
     }
   }
 
@@ -81,7 +81,7 @@ export function PromptPaySettings() {
             <div className="flex-1">
               <Input
                 id="promptpay-id"
-                placeholder="0812345678 or +66812345678"
+                placeholder="Registered Thai mobile number"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 className={inputValue && !isValid ? 'border-rose-500' : ''}
@@ -95,12 +95,12 @@ export function PromptPaySettings() {
               Save
             </Button>
           </div>
-          
+
           {inputValue && !isValid && (
             <Alert variant="destructive" className="py-2">
               <Warning size={16} weight="bold" />
               <AlertDescription className="text-xs">
-                Invalid phone number. Must be a Thai mobile number (e.g., 081-234-5678 or +66 81 234 5678)
+                Invalid phone number. Enter a registered Thai mobile number before enabling PromptPay.
               </AlertDescription>
             </Alert>
           )}
@@ -118,34 +118,34 @@ export function PromptPaySettings() {
         <Alert className="bg-blue-50 border-blue-200">
           <Info size={16} weight="bold" className="text-blue-600" />
           <AlertDescription className="text-xs text-blue-800">
-            <strong>About PromptPay:</strong> PromptPay is Thailand's national QR payment system. 
-            Customers can scan the QR code with any Thai banking app and pay instantly. 
-            Enter your registered PromptPay phone number (must be registered with a Thai bank).
+            <strong>About PromptPay:</strong> PromptPay is Thailand's national QR payment system.
+            Customers can scan the QR code with any Thai banking app and pay instantly.
+            Enter your registered PromptPay phone number after it is registered with a Thai bank.
           </AlertDescription>
         </Alert>
 
         {promptPayId && (
           <div className="pt-4 border-t space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="text-sm font-semibold">Test QR Code</h4>
+              <h4 className="text-sm font-semibold">Payment QR Preview</h4>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleTestQR}
-                disabled={isTesting}
+                onClick={handlePreviewQR}
+                disabled={isGeneratingPreview}
               >
-                {isTesting ? 'Generating...' : 'Generate Test QR'}
+                {isGeneratingPreview ? 'Generating...' : 'Generate Preview QR'}
               </Button>
             </div>
 
-            {testQR && (
+            {previewQR && (
               <div className="bg-slate-50 rounded-lg p-4">
                 <div className="max-w-[200px] mx-auto mb-2">
-                  <img src={testQR} alt="Test QR Code" className="w-full h-auto" />
+                  <img src={previewQR} alt="PromptPay QR preview" className="w-full h-auto" />
                 </div>
                 <div className="text-center">
-                  <div className="text-sm text-muted-foreground">Test Amount</div>
-                  <div className="text-xl font-bold">฿{testAmount.toFixed(2)}</div>
+                  <div className="text-sm text-muted-foreground">Preview Amount</div>
+                  <div className="text-xl font-bold">THB {previewAmount.toFixed(2)}</div>
                   <div className="text-xs text-muted-foreground mt-1">
                     Scan with your banking app to verify
                   </div>
@@ -158,13 +158,13 @@ export function PromptPaySettings() {
         <div className="pt-4 border-t">
           <h4 className="text-sm font-semibold mb-2">Supported Banks</h4>
           <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-            <div>• Siam Commercial Bank (SCB)</div>
-            <div>• Krungthai Bank (KTB)</div>
-            <div>• Bangkok Bank (BBL)</div>
-            <div>• Kasikorn Bank (KBANK)</div>
-            <div>• Krungsri Bank (BAY)</div>
-            <div>• TMB Thanachart Bank</div>
-            <div>• All Thai banks with PromptPay</div>
+            <div>Siam Commercial Bank (SCB)</div>
+            <div>Krungthai Bank (KTB)</div>
+            <div>Bangkok Bank (BBL)</div>
+            <div>Kasikorn Bank (KBANK)</div>
+            <div>Krungsri Bank (BAY)</div>
+            <div>TMB Thanachart Bank</div>
+            <div>All Thai banks with PromptPay</div>
           </div>
         </div>
       </CardContent>

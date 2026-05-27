@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { useKV } from '@github/spark/hooks'
-import { Plus, Trash, DoorOpen, Bed, Users, CurrencyDollar, Edit } from '@phosphor-icons/react'
+import { Plus, Trash, DoorOpen, Bed, Users, CurrencyDollar, PencilSimple } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import type { RoomTypeSetup, RoomSetup } from '@/types/onboarding'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -308,7 +308,7 @@ export function RoomTypeManagement() {
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
                         <Button variant="ghost" size="sm" onClick={() => handleEditRoomType(type)}>
-                          <Edit size={16} />
+                          <PencilSimple size={16} />
                         </Button>
                         <Button
                           variant="ghost"

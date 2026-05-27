@@ -24,7 +24,7 @@ import {
 import type { HousekeepingRoom, CleanStatus, MaintenanceIssue } from '@/types/housekeeping'
 import { toast } from 'sonner'
 import { useRoomSync, convertBoardRoomToHousekeepingRoom } from '@/hooks/use-room-sync'
-import { generateMockBoardData } from '@/lib/mock-board-data'
+import { createInitialBoardRooms } from '@/lib/board-data'
 import { format } from 'date-fns'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
@@ -55,7 +55,7 @@ export function TabletHousekeepingApp() {
 
   useEffect(() => {
     if (boardRooms.length === 0) {
-      initializeRooms(generateMockBoardData())
+      initializeRooms(createInitialBoardRooms())
     }
   }, [boardRooms.length, initializeRooms])
 

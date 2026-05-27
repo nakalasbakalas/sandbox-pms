@@ -23,10 +23,10 @@ export function UserProfileMenu() {
         <Button
           variant="ghost"
           size="sm"
-          className="h-5 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
+          className="h-8 gap-2 px-2 text-muted-foreground hover:text-foreground"
         >
-          <UserCircle size={12} weight="duotone" />
-          <span className="text-[10px] font-medium">{user.displayName}</span>
+          <UserCircle size={18} weight="duotone" />
+          <span className="text-sm font-medium">{user.displayName}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

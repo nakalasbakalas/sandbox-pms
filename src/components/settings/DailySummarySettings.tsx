@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { useDailySummary } from '@/hooks/use-daily-summary'
 import { useNavigation } from '@/hooks/use-navigation'
-import { Calendar, Clock, Mail, MessengerLogo, Bell, CheckCircle, WarningCircle, XCircle, Eye } from '@phosphor-icons/react'
+import { Calendar, Clock, EnvelopeSimple, MessengerLogo, Bell, CheckCircle, WarningCircle, XCircle, Eye } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
 const DAYS_OF_WEEK = [
@@ -43,13 +43,13 @@ export function DailySummarySettings() {
 
   const recipients = getRecipients()
 
-  const handleTestReport = async () => {
-    toast.loading('Generating test report...', { id: 'test-report' })
+  const handleSendReportNow = async () => {
+    toast.loading('Generating report...', { id: 'daily-summary-report' })
     try {
       await generateAndSend()
-      toast.success('Test report sent successfully', { id: 'test-report' })
+      toast.success('Report sent successfully', { id: 'daily-summary-report' })
     } catch (error) {
-      toast.error('Failed to send test report', { id: 'test-report' })
+      toast.error('Failed to send report', { id: 'daily-summary-report' })
     }
   }
 
@@ -229,7 +229,7 @@ export function DailySummarySettings() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Mail className="size-4 text-muted-foreground" />
+                  <EnvelopeSimple className="size-4 text-muted-foreground" />
                   <Label className="text-sm">Email</Label>
                 </div>
                 <Switch
@@ -406,9 +406,9 @@ export function DailySummarySettings() {
           <Separator />
 
           <div className="flex items-center gap-3">
-            <Button onClick={handleTestReport} disabled={!settings.enabled || recipients.length === 0}>
+            <Button onClick={handleSendReportNow} disabled={!settings.enabled || recipients.length === 0}>
               <Bell />
-              Generate Test Report
+              Send Report Now
             </Button>
             {lastGeneratedReport && (
               <Button onClick={() => navigate('daily-summary')} variant="outline">
@@ -417,7 +417,7 @@ export function DailySummarySettings() {
               </Button>
             )}
             <p className="text-xs text-muted-foreground">
-              Send a test report now to verify settings
+              Generate and deliver the current daily summary with the selected settings
             </p>
           </div>
         </CardContent>

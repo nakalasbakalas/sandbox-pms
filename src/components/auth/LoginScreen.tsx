@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/hooks/use-auth'
-import { KeyIcon, UserCircle } from '@phosphor-icons/react'
+import { Key, UserCircle } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 
 export function LoginScreen() {
@@ -78,7 +78,7 @@ export function LoginScreen() {
                     disabled={isLoading}
                     required
                   />
-                  <KeyIcon className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
+                  <Key className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
                 </div>
               </div>
 
@@ -87,31 +87,6 @@ export function LoginScreen() {
               </Button>
             </form>
 
-            <div className="mt-6 pt-6 border-t space-y-3">
-              <p className="text-xs text-muted-foreground font-semibold">Demo Accounts:</p>
-              <div className="grid gap-2 text-xs text-muted-foreground">
-                <div className="flex justify-between items-center bg-muted/30 p-2 rounded">
-                  <span className="font-medium">Admin:</span>
-                  <span className="font-mono">Neeq / Neeq!1234</span>
-                </div>
-                <div className="flex justify-between items-center bg-muted/30 p-2 rounded">
-                  <span className="font-medium">Manager:</span>
-                  <span className="font-mono">manager / manager123</span>
-                </div>
-                <div className="flex justify-between items-center bg-muted/30 p-2 rounded">
-                  <span className="font-medium">Front Desk:</span>
-                  <span className="font-mono">frontdesk / frontdesk123</span>
-                </div>
-                <div className="flex justify-between items-center bg-muted/30 p-2 rounded">
-                  <span className="font-medium">Housekeeping:</span>
-                  <span className="font-mono">housekeeping / housekeeping123</span>
-                </div>
-                <div className="flex justify-between items-center bg-muted/30 p-2 rounded">
-                  <span className="font-medium">Cashier:</span>
-                  <span className="font-mono">cashier / cashier123</span>
-                </div>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
