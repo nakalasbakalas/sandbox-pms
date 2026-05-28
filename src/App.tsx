@@ -14,6 +14,7 @@ import { LoginScreen } from './components/auth/LoginScreen'
 import { LanguageProvider } from './lib/i18n'
 import type { NavigationRoute } from './types/navigation'
 import type { Permission } from './types/auth'
+import { Button } from './components/ui/button'
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
@@ -50,6 +51,46 @@ function RouteLoading() {
   )
 }
 
+function RouteAccessDenied() {
+  const { navigate } = useNavigation()
+
+  return (
+    <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+      <div className="max-w-md rounded-lg border bg-background p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold">Access restricted</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your role does not have permission to open this PMS area.
+        </p>
+        <div className="mt-4 flex justify-center">
+          <Button onClick={() => navigate('today')}>
+            Go to Today
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RouteNotFound({ path }: { path: string }) {
+  const { navigate } = useNavigation()
+
+  return (
+    <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+      <div className="max-w-md rounded-lg border bg-background p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold">Page not found</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The path <span className="font-mono text-foreground">{path}</span> does not match a known PMS route.
+        </p>
+        <div className="mt-4 flex justify-center">
+          <Button onClick={() => navigate('today')}>
+            Go to Today
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
@@ -78,21 +119,17 @@ const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
 }
 
 function AppRouter() {
-  const { currentRoute } = useNavigation()
+  const { currentRoute, isKnownRoute, requestedPath } = useNavigation()
   const { hasAnyPermission } = useAuth()
+
+  if (!isKnownRoute) {
+    return <RouteNotFound path={`/${requestedPath || ''}`} />
+  }
+
   const requiredPermissions = routePermissions[currentRoute]
 
   if (requiredPermissions && !hasAnyPermission(requiredPermissions)) {
-    return (
-      <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
-        <div className="max-w-md rounded-lg border bg-background p-6 text-center shadow-sm">
-          <h1 className="text-lg font-semibold">Access restricted</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Your role does not have permission to open this PMS area.
-          </p>
-        </div>
-      </div>
-    )
+    return <RouteAccessDenied />
   }
 
   switch (currentRoute) {
@@ -151,6 +188,11 @@ function AppRouter() {
 
 function AppContent() {
     const { isAuthenticated } = useAuth()
+    const { isKnownRoute } = useNavigation()
+
+    if (!isKnownRoute) {
+      return <RouteNotFound path={window.location.pathname} />
+    }
 
     if (!isAuthenticated) {
         return <LoginScreen />

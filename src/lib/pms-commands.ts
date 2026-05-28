@@ -27,8 +27,6 @@ import {
   Brain,
   Storefront,
 } from '@phosphor-icons/react'
-import { toast } from 'sonner'
-
 export function createPMSCommands(navigate?: (route: NavigationRoute) => void): Command[] {
   return [
     {
@@ -336,14 +334,14 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
     },
     {
       id: 'refresh-board',
-      label: 'Refresh Board',
-      description: 'Reload room board data',
+      label: 'Refresh Current View',
+      description: 'Reload the current PMS page',
       category: 'operations',
       keywords: ['refresh', 'reload', 'sync'],
       shortcut: 'cmd+shift+r',
       icon: ArrowsClockwise,
       action: () => {
-        toast.success('Board refreshed')
+        window.location.reload()
       },
     },
     {

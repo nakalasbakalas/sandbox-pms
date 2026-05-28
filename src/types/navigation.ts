@@ -26,5 +26,7 @@ export type NavigationRoute =
 
 export interface NavigationState {
   currentRoute: NavigationRoute
+  requestedPath: string | null
+  isKnownRoute: boolean
   navigate: (route: NavigationRoute) => void
 }
