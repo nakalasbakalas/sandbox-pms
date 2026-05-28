@@ -31,6 +31,8 @@ export type Permission =
   | 'cancel:reservation'
   | 'check-in:guest'
   | 'check-out:guest'
+  | 'override:check-in'
+  | 'override:check-out'
   | 'edit:rates'
   | 'edit:room-status'
   | 'post:charges'
@@ -64,6 +66,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cancel:reservation',
     'check-in:guest',
     'check-out:guest',
+    'override:check-in',
+    'override:check-out',
     'edit:rates',
     'edit:room-status',
     'post:charges',
@@ -95,6 +99,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'cancel:reservation',
     'check-in:guest',
     'check-out:guest',
+    'override:check-in',
+    'override:check-out',
     'edit:rates',
     'edit:room-status',
     'post:charges',

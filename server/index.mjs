@@ -14,6 +14,7 @@ import {
   createGuest,
   createPayment,
   createReservation,
+  createWalkInCheckIn,
   getAuthenticatedUser,
   getFrontDeskBoard,
   getTodayData,
@@ -302,6 +303,14 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  if (url.pathname === '/api/front-desk/walk-in' && request.method === 'POST') {
+    requirePermission(user, 'create:reservation')
+    requirePermission(user, 'check-in:guest')
+    const reservation = await createWalkInCheckIn(db, await readJson(request), user)
+    sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
+    return true
+  }
+
   if (url.pathname === '/api/rooms' && request.method === 'GET') {
     requirePermission(user, 'view:board')
     sendJson(response, 200, { ok: true, data: await listRooms(db) })
@@ -341,7 +350,7 @@ async function handleApi(request, response, url) {
   params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/check-in$/)
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-in:guest')
-    const reservation = await checkInReservation(db, params.id, user)
+    const reservation = await checkInReservation(db, params.id, user, await readJson(request))
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
     return true
   }
@@ -350,7 +359,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-out:guest')
     const body = await readJson(request)
-    const reservation = await checkOutReservation(db, params.id, user, { allowUnpaidOverride: Boolean(body.allowUnpaidOverride) })
+    const reservation = await checkOutReservation(db, params.id, user, body)
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }

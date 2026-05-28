@@ -17,6 +17,8 @@ const housekeeping = { id: 'e2e-housekeeping', role: 'HOUSEKEEPING', email: 'hou
 assert.equal(canViewRoute(admin, 'user-management'), true, 'admin can view user management')
 assert.equal(canViewRoute(frontDesk, 'user-management'), false, 'front desk cannot view user management')
 assert.equal(canPerformAction(frontDesk, 'check-in:guest'), true, 'front desk can check in guests')
+assert.equal(canPerformAction(frontDesk, 'override:check-in'), false, 'front desk cannot override check-in blockers')
+assert.equal(canPerformAction(admin, 'override:check-out'), true, 'admin can override checkout blockers')
 assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekeeping cannot process payments')
 assert.equal(isSellableRoomNumber('201'), true, 'room 201 is sellable')
 assert.equal(isSellableRoomNumber('216'), false, 'room 216 is non-sellable')
@@ -49,7 +51,6 @@ const {
   cancelReservation,
   checkInReservation,
   checkOutReservation,
-  createPayment,
   createReservation,
 } = await import('../server/pms-service.mjs')
 
@@ -86,15 +87,21 @@ try {
   const assigned = await assignRoom(prisma, reservation.id, twinRoom.id, frontDesk)
   assert.equal(assigned.assignedRoomId, twinRoom.id, 'room assignment persists')
 
-  const checkedIn = await checkInReservation(prisma, reservation.id, frontDesk)
+  const checkedIn = await checkInReservation(prisma, reservation.id, admin, {
+    allowDateOverride: true,
+    overrideReason: 'Disposable database workflow test uses future stay dates.',
+    guest: {
+      nationality: 'Thai',
+      idNumber: 'E2E-ID',
+      idType: 'ID',
+    },
+    payment: {
+      amount: assigned.folio.balance,
+      method: 'CASH',
+    },
+  })
   assert.equal(checkedIn.status, 'CHECKED_IN', 'check-in persists')
-
-  const payment = await createPayment(prisma, {
-    folioId: checkedIn.folio.id,
-    amount: checkedIn.folio.balance,
-    method: 'CASH',
-  }, frontDesk)
-  assert.equal(payment.folio.balance, 0, 'payment settles folio')
+  assert.equal(checkedIn.folio.balance, 0, 'check-in payment settles folio')
 
   const checkedOut = await checkOutReservation(prisma, reservation.id, frontDesk)
   assert.equal(checkedOut.status, 'CHECKED_OUT', 'check-out persists')

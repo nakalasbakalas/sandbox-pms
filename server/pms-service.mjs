@@ -13,6 +13,7 @@ import {
   validateStayInput,
   PmsValidationError,
 } from './pms-domain.mjs'
+import { canPerformAction } from './rbac.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -28,6 +29,48 @@ const reservationInclude = {
 
 function actorName(actor) {
   return actor?.name || actor?.email || actor?.id || 'System'
+}
+
+function normalizeNullableString(value) {
+  const trimmed = String(value || '').trim()
+  return trimmed || null
+}
+
+function canUseOverride(actor, permission) {
+  return canPerformAction(actor, permission)
+}
+
+function requireOverride(actor, permission, reason, label) {
+  if (!canUseOverride(actor, permission)) {
+    throw new PmsValidationError(`${label} requires manager or admin permission.`, 403)
+  }
+  if (!normalizeNullableString(reason)) {
+    throw new PmsValidationError(`${label} requires a reason.`)
+  }
+}
+
+function isReadyRoomStatus(status) {
+  return status === 'VACANT_CLEAN' || status === 'INSPECTED'
+}
+
+function isOccupiedRoomStatus(status) {
+  return status === 'OCCUPIED' || status === 'OCCUPIED_CLEAN' || status === 'OCCUPIED_DIRTY'
+}
+
+function hasGuestIdentity(guest) {
+  return Boolean(normalizeNullableString(guest?.nationality) && normalizeNullableString(guest?.idNumber))
+}
+
+function validateReservationDateForCheckIn(reservation, options) {
+  const todayKey = getBangkokDateKey(new Date())
+  const checkInKey = getBangkokDateKey(reservation.checkIn)
+  const checkOutKey = getBangkokDateKey(reservation.checkOut)
+  if (todayKey >= checkInKey && todayKey < checkOutKey) return
+  if (options.allowDateOverride) {
+    requireOverride(options.actor, 'override:check-in', options.overrideReason, 'Date override')
+    return
+  }
+  throw new PmsValidationError('This reservation is not within the allowed check-in date range.')
 }
 
 function nextDateKey(key) {
@@ -257,6 +300,33 @@ async function recomputeFolio(tx, folioId) {
       },
     },
   })
+}
+
+async function recordPaymentInTransaction(tx, folioId, input, actor) {
+  const amount = Number(input?.amount)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new PmsValidationError('Payment amount must be greater than zero.')
+  }
+  const method = normalizePaymentMethod(input.method)
+  const folio = await tx.folio.findUnique({ where: { id: folioId } })
+  if (!folio) throw new PmsValidationError('Folio was not found.', 404)
+  if (amount > folio.balance && !input.allowOverpayment) {
+    throw new PmsValidationError('Payment cannot exceed the remaining balance.')
+  }
+
+  const payment = await tx.payment.create({
+    data: {
+      folioId: folio.id,
+      amount: roundMoney(amount),
+      method,
+      reference: normalizeNullableString(input.reference),
+      notes: normalizeNullableString(input.notes),
+      processedBy: actorName(actor),
+    },
+  })
+  const updatedFolio = await recomputeFolio(tx, folio.id)
+  await createAudit(tx, actor, 'PAYMENT_CREATED', 'payment', payment.id, { folioId: folio.id, amount: payment.amount, method })
+  return { payment, folio: updatedFolio }
 }
 
 export async function authenticateUser(prisma, email, password) {
@@ -497,6 +567,168 @@ export async function createReservation(prisma, input, actor) {
   })
 }
 
+export async function createWalkInCheckIn(prisma, input, actor) {
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const { checkInKey, checkOutKey } = validateStayInput(input)
+    const pricing = calculateStayPricing(input)
+    const roomType = await tx.roomType.findFirst({
+      where: {
+        propertyId: property.id,
+        code: input.roomTypeCode || input.roomType || 'TWIN',
+      },
+    })
+    if (!roomType) throw new PmsValidationError('Selected room type was not found.')
+
+    await ensureRoomTypeCapacity(tx, property.id, roomType.id, checkInKey, checkOutKey)
+
+    const guestData = validateGuestInput(input.guest)
+    if (!hasGuestIdentity(guestData)) {
+      if (input.recordIdentityLater) {
+        requireOverride(actor, 'override:check-in', input.recordIdentityLaterReason || input.overrideReason, 'Record-later identity override')
+      } else {
+        throw new PmsValidationError('Record guest nationality and ID/passport number before walk-in check-in.')
+      }
+    }
+    const guest = await tx.guest.create({ data: guestData })
+
+    const reservation = await tx.reservation.create({
+      data: {
+        propertyId: property.id,
+        confirmationCode: input.confirmationCode || `SBX-WI-${Date.now()}`,
+        guestId: guest.id,
+        roomTypeId: roomType.id,
+        checkIn: dateFromKey(checkInKey),
+        checkOut: dateFromKey(checkOutKey),
+        status: 'CONFIRMED',
+        adults: Number(input.adults),
+        children: Number(input.children || 0),
+        childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
+        ratePerNight: Number(input.ratePerNight),
+        totalAmount: pricing.total,
+        depositAmount: roundMoney(pricing.total * 0.3),
+        depositPaid: false,
+        source: 'WALK_IN',
+        channelRef: null,
+        notes: input.notes || null,
+        specialRequests: input.specialRequests || null,
+      },
+      include: reservationInclude,
+    })
+
+    const candidateRoom = input.assignedRoomId
+      ? await tx.room.findUnique({ where: { id: input.assignedRoomId }, include: { roomType: true } })
+      : await tx.room.findFirst({
+          where: {
+            propertyId: property.id,
+            roomTypeId: roomType.id,
+            operationalStatus: 'AVAILABLE',
+            currentReservation: null,
+            currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
+            number: { notIn: SANDBOX_RULES.nonSellableRooms },
+          },
+          include: { roomType: true },
+          orderBy: [{ floor: 'asc' }, { number: 'asc' }],
+        })
+
+    if (!candidateRoom) throw new PmsValidationError('No clean available room is ready for this walk-in.')
+    const room = await validateRoomAssignable(tx, reservation, candidateRoom.id)
+    if (!isReadyRoomStatus(room.currentStatus)) {
+      throw new PmsValidationError(`Room ${room.number} must be clean or inspected before walk-in check-in.`)
+    }
+
+    await reserveRoomDates(tx, property.id, reservation.id, room.id, checkInKey, checkOutKey)
+    await tx.reservation.update({
+      where: { id: reservation.id },
+      data: { assignedRoomId: room.id },
+    })
+
+    const folio = await tx.folio.create({
+      data: {
+        reservationId: reservation.id,
+        subtotal: pricing.total,
+        tax: 0,
+        total: pricing.total,
+        paid: 0,
+        balance: pricing.total,
+      },
+    })
+
+    await tx.charge.create({
+      data: {
+        folioId: folio.id,
+        date: dateFromKey(checkInKey),
+        description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
+        category: 'ROOM',
+        amount: Number(input.ratePerNight),
+        quantity: pricing.nights,
+        total: pricing.total,
+        createdBy: actorName(actor),
+      },
+    })
+    await recomputeFolio(tx, folio.id)
+
+    if (input.payment?.amount) {
+      await recordPaymentInTransaction(tx, folio.id, input.payment, actor)
+    }
+    const settledFolio = await tx.folio.findUnique({ where: { id: folio.id } })
+    const remainingBalance = roundMoney(settledFolio?.balance || 0)
+    if (remainingBalance > 0) {
+      if (input.allowPayLater) {
+        requireOverride(actor, 'override:check-in', input.payLaterReason || input.overrideReason, 'Pay-later walk-in check-in')
+      } else {
+        throw new PmsValidationError('Collect or override the amount due before walk-in check-in.')
+      }
+    }
+
+    const toStatus = checkedInRoomStatus(room.currentStatus)
+    const roomUpdate = await tx.room.updateMany({
+      where: {
+        id: room.id,
+        currentReservation: null,
+        currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
+      },
+      data: {
+        currentStatus: toStatus,
+        currentReservation: reservation.id,
+      },
+    })
+    if (roomUpdate.count !== 1) {
+      throw new PmsValidationError(`Room ${room.number} changed state before walk-in could complete. Refresh and try again.`, 409)
+    }
+
+    await tx.reservation.update({
+      where: { id: reservation.id },
+      data: {
+        status: 'CHECKED_IN',
+        actualCheckIn: new Date(),
+      },
+    })
+
+    await createRoomStatusLog(tx, room, toStatus, actor, 'Walk-in check-in completed')
+    await createReservationLog(tx, reservation.id, 'CREATED', actor, { toStatus: 'CONFIRMED', changes: { source: 'WALK_IN' } })
+    await createReservationLog(tx, reservation.id, 'ASSIGNED_ROOM', actor, { changes: { roomNumber: room.number } })
+    await createReservationLog(tx, reservation.id, 'CHECKED_IN', actor, {
+      fromStatus: 'CONFIRMED',
+      toStatus: 'CHECKED_IN',
+      notes: input.overrideReason || input.additionalNotes || undefined,
+      changes: { roomId: room.id, roomNumber: room.number, source: 'WALK_IN' },
+    })
+    await createAudit(tx, actor, 'WALK_IN_CHECKED_IN', 'reservation', reservation.id, {
+      roomId: room.id,
+      roomNumber: room.number,
+      previousState: { reservationStatus: 'NEW', roomStatus: room.currentStatus },
+      newState: { reservationStatus: 'CHECKED_IN', roomStatus: toStatus },
+      overrideReason: input.overrideReason || input.payLaterReason || input.recordIdentityLaterReason || null,
+    })
+
+    return tx.reservation.findUnique({
+      where: { id: reservation.id },
+      include: reservationInclude,
+    })
+  })
+}
+
 export async function assignRoom(prisma, reservationId, roomId, actor) {
   return prisma.$transaction(async (tx) => {
     const reservation = await tx.reservation.findUnique({ where: { id: reservationId } })
@@ -520,9 +752,9 @@ export async function assignRoom(prisma, reservationId, roomId, actor) {
   })
 }
 
-export async function checkInReservation(prisma, reservationId, actor) {
+export async function checkInReservation(prisma, reservationId, actor, options = {}) {
   return prisma.$transaction(async (tx) => {
-    const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
+    let reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     if (!['CONFIRMED', 'PENDING'].includes(reservation.status)) {
       throw new PmsValidationError('Only confirmed or pending reservations can be checked in.')
@@ -531,39 +763,133 @@ export async function checkInReservation(prisma, reservationId, actor) {
       throw new PmsValidationError('Assign a room before checking in this reservation.')
     }
 
+    validateReservationDateForCheckIn(reservation, { ...options, actor })
+
+    const totalGuests = Number(reservation.adults || 0) + Number(reservation.children || 0)
+    if (totalGuests > SANDBOX_RULES.maxOccupancy) {
+      throw new PmsValidationError(`Maximum occupancy is ${SANDBOX_RULES.maxOccupancy} guests per room.`)
+    }
+
+    const guestUpdates = {}
+    if (options.guest?.nationality !== undefined) guestUpdates.nationality = normalizeNullableString(options.guest.nationality)
+    if (options.guest?.idType !== undefined) guestUpdates.idType = normalizeNullableString(options.guest.idType)
+    if (options.guest?.idNumber !== undefined) guestUpdates.idNumber = normalizeNullableString(options.guest.idNumber)
+    if (options.guest?.phone !== undefined) guestUpdates.phone = normalizeNullableString(options.guest.phone)
+    if (options.guest?.email !== undefined) guestUpdates.email = normalizeNullableString(options.guest.email)
+    if (Object.keys(guestUpdates).length > 0) {
+      const guest = await tx.guest.update({
+        where: { id: reservation.guestId },
+        data: guestUpdates,
+      })
+      reservation = { ...reservation, guest }
+      await createAudit(tx, actor, 'MODIFIED', 'guest', reservation.guestId, guestUpdates)
+    }
+
+    if (!hasGuestIdentity(reservation.guest)) {
+      if (options.recordIdentityLater) {
+        requireOverride(actor, 'override:check-in', options.recordIdentityLaterReason || options.overrideReason, 'Record-later identity override')
+      } else {
+        throw new PmsValidationError('Record guest nationality and ID/passport number before check-in.')
+      }
+    }
+
+    if (options.payment?.amount) {
+      if (!reservation.folio?.id) throw new PmsValidationError('Reservation folio was not found.')
+      await recordPaymentInTransaction(tx, reservation.folio.id, options.payment, actor)
+      reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
+    }
+
+    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
+    if (remainingBalance > 0) {
+      if (options.allowPayLater) {
+        requireOverride(actor, 'override:check-in', options.payLaterReason || options.overrideReason, 'Pay-later check-in')
+      } else {
+        throw new PmsValidationError('Collect or override the amount due before check-in.')
+      }
+    }
+
     const room = await validateRoomAssignable(tx, reservation, reservation.assignedRoomId)
+    if (isOccupiedRoomStatus(room.currentStatus)) {
+      throw new PmsValidationError(`Room ${room.number} is occupied and cannot be checked in.`)
+    }
+    if (!isReadyRoomStatus(room.currentStatus)) {
+      if (options.allowRoomReadinessOverride) {
+        requireOverride(actor, 'override:check-in', options.overrideReason, 'Room readiness override')
+      } else {
+        throw new PmsValidationError(`Room ${room.number} must be clean or inspected before check-in.`)
+      }
+    }
+
     const toStatus = checkedInRoomStatus(room.currentStatus)
     await createRoomStatusLog(tx, room, toStatus, actor, 'Check-in completed')
 
-    await tx.room.update({
-      where: { id: room.id },
+    const roomWhere = {
+      id: room.id,
+      currentReservation: null,
+      currentStatus: options.allowRoomReadinessOverride
+        ? { notIn: ['OCCUPIED', 'OCCUPIED_CLEAN', 'OCCUPIED_DIRTY'] }
+        : { in: ['VACANT_CLEAN', 'INSPECTED'] },
+    }
+    const roomUpdate = await tx.room.updateMany({
+      where: roomWhere,
       data: {
         currentStatus: toStatus,
         currentReservation: reservation.id,
       },
     })
+    if (roomUpdate.count !== 1) {
+      throw new PmsValidationError(`Room ${room.number} changed state before check-in could complete. Refresh and try again.`, 409)
+    }
 
-    const updated = await tx.reservation.update({
-      where: { id: reservation.id },
+    const reservationUpdate = await tx.reservation.updateMany({
+      where: { id: reservation.id, status: { in: ['CONFIRMED', 'PENDING'] } },
       data: {
         status: 'CHECKED_IN',
         actualCheckIn: new Date(),
       },
-      include: reservationInclude,
     })
+    if (reservationUpdate.count !== 1) {
+      throw new PmsValidationError('Reservation changed state before check-in could complete. Refresh and try again.', 409)
+    }
 
     await createReservationLog(tx, reservation.id, 'CHECKED_IN', actor, {
       fromStatus: reservation.status,
       toStatus: 'CHECKED_IN',
+      notes: options.overrideReason || options.additionalNotes || undefined,
+      changes: {
+        roomId: room.id,
+        roomNumber: room.number,
+        overrides: {
+          roomReadiness: Boolean(options.allowRoomReadinessOverride),
+          date: Boolean(options.allowDateOverride),
+          payLater: Boolean(options.allowPayLater),
+          recordIdentityLater: Boolean(options.recordIdentityLater),
+        },
+      },
     })
-    await createAudit(tx, actor, 'CHECKED_IN', 'reservation', reservation.id, { roomId: room.id, roomNumber: room.number })
-    return updated
+    await createAudit(tx, actor, 'CHECKED_IN', 'reservation', reservation.id, {
+      roomId: room.id,
+      roomNumber: room.number,
+      previousState: { reservationStatus: reservation.status, roomStatus: room.currentStatus },
+      newState: { reservationStatus: 'CHECKED_IN', roomStatus: toStatus },
+      overrideReason: options.overrideReason || options.payLaterReason || options.recordIdentityLaterReason || null,
+      overrides: {
+        roomReadiness: Boolean(options.allowRoomReadinessOverride),
+        date: Boolean(options.allowDateOverride),
+        payLater: Boolean(options.allowPayLater),
+        recordIdentityLater: Boolean(options.recordIdentityLater),
+      },
+    })
+    return tx.reservation.findUnique({
+      where: { id: reservation.id },
+      include: reservationInclude,
+    })
   })
 }
 
 export async function checkOutReservation(prisma, reservationId, actor, options = {}) {
   return prisma.$transaction(async (tx) => {
-    const reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
+    let reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     if (reservation.status !== 'CHECKED_IN') {
       throw new PmsValidationError('Only checked-in reservations can be checked out.')
@@ -571,36 +897,93 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
     if (!reservation.assignedRoomId || !reservation.assignedRoom) {
       throw new PmsValidationError('Checked-in reservation is missing its assigned room.')
     }
-    if ((reservation.folio?.balance || 0) > 0 && !options.allowUnpaidOverride) {
-      throw new PmsValidationError('Collect or override the remaining balance before checkout.')
+
+    if (options.payment?.amount) {
+      if (!reservation.folio?.id) throw new PmsValidationError('Reservation folio was not found.')
+      await recordPaymentInTransaction(tx, reservation.folio.id, options.payment, actor)
+      reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
+    }
+
+    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
+    if (remainingBalance > 0) {
+      if (options.allowUnpaidOverride) {
+        requireOverride(actor, 'override:check-out', options.overrideReason, 'Unpaid checkout override')
+      } else {
+        throw new PmsValidationError('Collect or override the remaining balance before checkout.')
+      }
     }
 
     const room = reservation.assignedRoom
     await createRoomStatusLog(tx, room, 'VACANT_DIRTY', actor, 'Checkout completed; room sent to housekeeping')
 
-    await tx.room.update({
-      where: { id: room.id },
+    const roomUpdate = await tx.room.updateMany({
+      where: {
+        id: room.id,
+        OR: [
+          { currentReservation: reservation.id },
+          { currentReservation: null },
+        ],
+      },
       data: {
         currentStatus: 'VACANT_DIRTY',
         currentReservation: null,
       },
     })
+    if (roomUpdate.count !== 1) {
+      throw new PmsValidationError(`Room ${room.number} changed state before checkout could complete. Refresh and try again.`, 409)
+    }
 
-    const updated = await tx.reservation.update({
-      where: { id: reservation.id },
+    const reservationUpdate = await tx.reservation.updateMany({
+      where: { id: reservation.id, status: 'CHECKED_IN' },
       data: {
         status: 'CHECKED_OUT',
         actualCheckOut: new Date(),
       },
-      include: reservationInclude,
     })
+    if (reservationUpdate.count !== 1) {
+      throw new PmsValidationError('Reservation has already been checked out or changed state. Refresh and try again.', 409)
+    }
+
+    if (reservation.folio?.id) {
+      await tx.folio.update({
+        where: { id: reservation.folio.id },
+        data: { status: 'CLOSED' },
+      })
+    }
 
     await createReservationLog(tx, reservation.id, 'CHECKED_OUT', actor, {
       fromStatus: reservation.status,
       toStatus: 'CHECKED_OUT',
+      notes: options.overrideReason || options.additionalNotes || undefined,
+      changes: {
+        roomId: room.id,
+        roomNumber: room.number,
+        markedRoomStatus: 'VACANT_DIRTY',
+        folioClosed: Boolean(reservation.folio?.id),
+        overrides: {
+          unpaidBalance: Boolean(options.allowUnpaidOverride),
+        },
+      },
     })
-    await createAudit(tx, actor, 'CHECKED_OUT', 'reservation', reservation.id, { roomId: room.id, roomNumber: room.number })
-    return updated
+    await createAudit(tx, actor, 'CHECKED_OUT', 'reservation', reservation.id, {
+      roomId: room.id,
+      roomNumber: room.number,
+      previousState: { reservationStatus: reservation.status, roomStatus: room.currentStatus, balance: remainingBalance },
+      newState: { reservationStatus: 'CHECKED_OUT', roomStatus: 'VACANT_DIRTY' },
+      overrideReason: options.overrideReason || null,
+      overrides: {
+        unpaidBalance: Boolean(options.allowUnpaidOverride),
+      },
+      housekeepingHandoff: {
+        roomId: room.id,
+        status: 'VACANT_DIRTY',
+        priorityTurnover: false,
+      },
+    })
+    return tx.reservation.findUnique({
+      where: { id: reservation.id },
+      include: reservationInclude,
+    })
   })
 }
 
@@ -661,11 +1044,6 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
 
 export async function createPayment(prisma, input, actor) {
   return prisma.$transaction(async (tx) => {
-    const amount = Number(input.amount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new PmsValidationError('Payment amount must be greater than zero.')
-    }
-    const method = normalizePaymentMethod(input.method)
     const folio = await tx.folio.findUnique({
       where: { id: input.folioId },
       include: {
@@ -673,23 +1051,7 @@ export async function createPayment(prisma, input, actor) {
       },
     })
     if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-    if (amount > folio.balance && !input.allowOverpayment) {
-      throw new PmsValidationError('Payment cannot exceed the remaining balance.')
-    }
-
-    const payment = await tx.payment.create({
-      data: {
-        folioId: folio.id,
-        amount: roundMoney(amount),
-        method,
-        reference: input.reference || null,
-        notes: input.notes || null,
-        processedBy: actorName(actor),
-      },
-    })
-    const updatedFolio = await recomputeFolio(tx, folio.id)
-    await createAudit(tx, actor, 'PAYMENT_CREATED', 'payment', payment.id, { folioId: folio.id, amount: payment.amount, method })
-    return { payment, folio: updatedFolio }
+    return recordPaymentInTransaction(tx, folio.id, input, actor)
   })
 }
 

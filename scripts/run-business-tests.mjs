@@ -14,7 +14,10 @@ async function importTypeScriptModule(path) {
       isolatedModules: true,
     },
   }).outputText
-  const output = transpiled.replaceAll("from './business-rules'", "from './business-rules.mjs'")
+  const output = transpiled
+    .replaceAll("from './business-rules'", "from './business-rules.mjs'")
+    .replaceAll("from '@/lib/hotel/business-rules'", "from './business-rules.mjs'")
+    .replaceAll("from '@/lib/hotel/rooms'", "from './rooms.mjs'")
   const tempDir = resolve('node_modules/.tmp/business-tests')
   await mkdir(tempDir, { recursive: true })
   const outputPath = resolve(tempDir, basename(path).replace(/\.(ts|tsx)$/, '.mjs'))
@@ -24,7 +27,9 @@ async function importTypeScriptModule(path) {
 
 const rules = await importTypeScriptModule(resolve('src/lib/hotel/business-rules.ts'))
 const status = await importTypeScriptModule(resolve('src/lib/hotel/status.ts'))
+await importTypeScriptModule(resolve('src/lib/hotel/rooms.ts'))
 const operations = await importTypeScriptModule(resolve('src/lib/hotel/operations.ts'))
+const workflow = await importTypeScriptModule(resolve('src/lib/front-desk-workflow.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-26'), 0, 'rejects zero-night stays')
@@ -178,6 +183,123 @@ assert.equal(paymentSummary.total, 1000.3)
 assert.equal(paymentSummary.paid, 1000.3)
 assert.equal(paymentSummary.status, 'paid')
 assert.equal(operations.validatePaymentAmount(1200, 1000).message, 'Payment cannot exceed the remaining balance.')
+
+const readyArrival = {
+  id: 'arrival-ready',
+  reservationId: 'res-ready',
+  confirmationCode: 'SBX-READY',
+  guestName: 'Ready Guest',
+  roomNumber: '201',
+  assignedRoomId: 'room-201',
+  roomType: 'TWIN',
+  checkInTime: '14:00',
+  arrivalTime: '14:00',
+  checkInDate: '2026-05-26',
+  checkOutDate: '2026-05-28',
+  nights: 2,
+  adults: 2,
+  children: 0,
+  status: 'READY',
+  reservationStatus: 'CONFIRMED',
+  roomReady: true,
+  depositPaid: true,
+  documentVerified: true,
+  guestNationality: 'Thai',
+  guestIdNumber: '123456789',
+  source: 'DIRECT',
+  bookedRate: 1500,
+  totalAmount: 3000,
+  paidAmount: 3000,
+  balanceDue: 0,
+  paymentStatus: 'PAID',
+}
+
+const readyRoom = {
+  roomId: 'room-201',
+  number: '201',
+  floor: 2,
+  type: 'TWIN',
+  status: 'VACANT_CLEAN',
+  operationalStatus: 'AVAILABLE',
+  isArrivalToday: true,
+  isDepartureToday: false,
+  isVIP: false,
+  hasIssue: false,
+  needsAttention: false,
+  cleanStatus: 'INSPECTED',
+  depositStatus: 'PAID',
+}
+
+const expressCheckIn = workflow.buildCheckInGuards(readyArrival, readyRoom, { hotelDateKey: '2026-05-26', role: 'front-desk' })
+assert.equal(expressCheckIn.isExpressReady, true, 'prepared arrival is express check-in ready')
+assert.equal(workflow.getArrivalPrimaryAction(expressCheckIn, readyArrival).label, 'Express Check-In')
+
+const noRoomArrival = { ...readyArrival, assignedRoomId: undefined, roomNumber: undefined }
+const noRoomCheckIn = workflow.buildCheckInGuards(noRoomArrival, undefined, { hotelDateKey: '2026-05-26' })
+assert.equal(noRoomCheckIn.blockers.some((item) => item.id === 'no_room_assigned'), true, 'check-in is blocked without assigned room')
+assert.equal(workflow.getArrivalPrimaryAction(noRoomCheckIn, noRoomArrival).label, 'Assign Room')
+
+const dirtyCheckIn = workflow.buildCheckInGuards({ ...readyArrival, roomReady: false }, { ...readyRoom, status: 'VACANT_DIRTY', cleanStatus: 'DIRTY' }, { hotelDateKey: '2026-05-26' })
+assert.equal(dirtyCheckIn.blockers.some((item) => item.id === 'room_not_ready'), true, 'dirty room blocks check-in')
+
+const occupiedCheckIn = workflow.buildCheckInGuards(readyArrival, { ...readyRoom, status: 'OCCUPIED_CLEAN', currentReservationId: 'other-res' }, { hotelDateKey: '2026-05-26' })
+assert.equal(occupiedCheckIn.blockers.some((item) => item.id === 'room_occupied'), true, 'occupied room blocks check-in')
+
+const overCapacityCheckIn = workflow.buildCheckInGuards({ ...readyArrival, adults: 3, children: 1 }, readyRoom, { hotelDateKey: '2026-05-26' })
+assert.equal(overCapacityCheckIn.blockers.some((item) => item.id === 'occupancy_exceeds_max'), true, 'over-capacity arrivals are blocked')
+
+const paymentDueArrival = { ...readyArrival, balanceDue: 1000, paidAmount: 2000, paymentStatus: 'PARTIAL' }
+const paymentDueCheckIn = workflow.buildCheckInGuards(paymentDueArrival, readyRoom, { hotelDateKey: '2026-05-26' })
+assert.equal(paymentDueCheckIn.blockers.some((item) => item.id === 'payment_due'), true, 'payment due blocks express check-in')
+assert.equal(workflow.getArrivalPrimaryAction(paymentDueCheckIn, paymentDueArrival).label, 'Collect Payment')
+
+const nonSellableCheckIn = workflow.buildCheckInGuards({ ...readyArrival, roomNumber: '216', assignedRoomId: 'room-216' }, { ...readyRoom, roomId: 'room-216', number: '216' }, { hotelDateKey: '2026-05-26' })
+assert.equal(nonSellableCheckIn.blockers.some((item) => item.id === 'room_non_sellable'), true, 'non-sellable rooms are blocked')
+
+const departure = {
+  id: 'dep-ready',
+  reservationId: 'res-ready',
+  confirmationCode: 'SBX-READY',
+  guestName: 'Ready Guest',
+  roomNumber: '201',
+  assignedRoomId: 'room-201',
+  roomType: 'TWIN',
+  checkOutTime: '11:00',
+  checkInDate: '2026-05-26',
+  checkOutDate: '2026-05-28',
+  nights: 2,
+  status: 'IN_HOUSE',
+  reservationStatus: 'CHECKED_IN',
+  balanceDue: 0,
+  paidAmount: 3000,
+  folioTotal: 3000,
+  folioStatus: 'CLOSED',
+  paymentStatus: 'PAID',
+  roomStatus: 'CLEAN',
+}
+
+const expressCheckOut = workflow.buildCheckOutGuards(departure, { hotelDateKey: '2026-05-28', now: new Date('2026-05-28T03:00:00.000Z') })
+assert.equal(expressCheckOut.isExpressReady, true, 'settled departure is express checkout ready before standard checkout time')
+assert.equal(workflow.getDeparturePrimaryAction(expressCheckOut, departure).label, 'Express Check-Out')
+
+const balanceDeparture = { ...departure, balanceDue: 750, paymentStatus: 'PARTIAL' }
+const balanceCheckout = workflow.buildCheckOutGuards(balanceDeparture, { hotelDateKey: '2026-05-28', now: new Date('2026-05-28T03:00:00.000Z') })
+assert.equal(balanceCheckout.blockers.some((item) => item.id === 'unsettled_balance'), true, 'checkout is blocked by outstanding balance')
+assert.equal(workflow.getDeparturePrimaryAction(balanceCheckout, balanceDeparture).label, 'Settle Balance')
+
+const duplicateCheckout = workflow.buildCheckOutGuards({ ...departure, status: 'CHECKED_OUT', reservationStatus: 'CHECKED_OUT' }, { hotelDateKey: '2026-05-28' })
+assert.equal(duplicateCheckout.blockers.some((item) => item.id === 'already_checked_out'), true, 'duplicate checkout is blocked')
+
+const readinessSummary = workflow.buildRoomReadinessSummary([
+  readyRoom,
+  { ...readyRoom, roomId: 'room-202', number: '202', cleanStatus: 'DIRTY', status: 'VACANT_DIRTY' },
+  { ...readyRoom, roomId: 'room-203', number: '203', status: 'OCCUPIED_CLEAN', currentReservationId: 'res-203' },
+  { ...readyRoom, roomId: 'room-216', number: '216', operationalStatus: 'OUT_OF_SERVICE' },
+])
+assert.equal(readinessSummary.cleanInspected, 1, 'readiness strip counts ready rooms')
+assert.equal(readinessSummary.dirty, 1, 'readiness strip counts dirty rooms')
+assert.equal(readinessSummary.occupied, 1, 'readiness strip counts occupied rooms')
+assert.equal(readinessSummary.outOfOrder, 1, 'readiness strip counts non-sellable/out-of-service rooms')
 
 assert.equal(status.getStatusDefinition('room', 'VACANT_DIRTY').label.th, 'รอทำความสะอาด')
 assert.equal(status.getStatusDefinition('payment', 'PAID').label.en, 'Paid')
