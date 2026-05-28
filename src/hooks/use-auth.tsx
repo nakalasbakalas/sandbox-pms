@@ -3,10 +3,11 @@ import { useKV } from '@github/spark/hooks'
 import type { User, AuthState, UserRole, Permission } from '@/types/auth'
 import { ROLE_PERMISSIONS } from '@/types/auth'
 import { hashPassword, type PasswordCredential } from '@/lib/auth-passwords'
-import { isServerAuthEnabled, serverLogin, serverLogout, serverMe } from '@/lib/server-auth-client'
+import { LOCAL_AUTH_FALLBACK_ENABLED, SERVER_AUTH_ENABLED, normalizeAuthEmail } from '@/lib/auth-mode'
+import { serverLogin, serverLogout, serverMe } from '@/lib/server-auth-client'
 
 interface AuthContextType extends AuthState {
-  login: (username: string, password: string) => Promise<boolean>
+  login: (email: string, password: string) => Promise<boolean>
   logout: () => void
   hasPermission: (permission: Permission) => boolean
   hasAnyPermission: (permissions: Permission[]) => boolean
@@ -41,36 +42,41 @@ function removeBrowserStorage(key: string) {
   window.localStorage.removeItem(key)
 }
 
-const DEFAULT_USERS: Record<string, PasswordCredential & { role: UserRole; displayName: string }> = {
-  'Neeq': {
+const DEFAULT_USERS: Record<string, PasswordCredential & { role: UserRole; displayName: string; email: string }> = {
+  'admin@sandboxhotel.local': {
     passwordSalt: 'sandbox-default-admin',
     passwordHash: '2c9e6839772858382ba81216d3d0e477f0a7d1e08be2349826d1d0a7a2e4bee2',
     role: 'admin',
     displayName: 'Admin User',
+    email: 'admin@sandboxhotel.local',
   },
-  'manager': {
+  'manager@sandboxhotel.local': {
     passwordSalt: 'sandbox-default-manager',
     passwordHash: '07caa33ad436e4a0b1ca91e97cb790cb7183cb3c5fd5ade1faa63b0945d17204',
     role: 'manager',
     displayName: 'Hotel Manager',
+    email: 'manager@sandboxhotel.local',
   },
-  'frontdesk': {
+  'frontdesk@sandboxhotel.local': {
     passwordSalt: 'sandbox-default-frontdesk',
     passwordHash: 'b5df4309e1896f858e499ee4d9b71cf52c6e10d66c13312e8da3accba91700b5',
     role: 'front-desk',
     displayName: 'Front Desk Staff',
+    email: 'frontdesk@sandboxhotel.local',
   },
-  'housekeeping': {
+  'housekeeping@sandboxhotel.local': {
     passwordSalt: 'sandbox-default-housekeeping',
     passwordHash: '9ca00784f1fd0d513b027804737de213d212e605b81d6d5541cb88bba6d0f63c',
     role: 'housekeeping',
     displayName: 'Housekeeping Staff',
+    email: 'housekeeping@sandboxhotel.local',
   },
-  'cashier': {
+  'cashier@sandboxhotel.local': {
     passwordSalt: 'sandbox-default-cashier',
     passwordHash: 'b04e781e99a088cc7c6f4f48a7a444b9136952717cabd0f99e0d6993dcdda28b',
     role: 'cashier',
     displayName: 'Cashier',
+    email: 'cashier@sandboxhotel.local',
   },
 }
 
@@ -78,11 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser, deleteCurrentUser] = useKV<User | null>('auth:current-user', null)
   const [authToken, setAuthToken, deleteAuthToken] = useKV<string | null>('auth:pms-token', null)
   const [customUsers] = useKV<StoredUser[]>('system:users', [])
-  const isAuthenticated = Boolean(currentUser)
+  const isAuthenticated = Boolean(currentUser && (!SERVER_AUTH_ENABLED || authToken))
 
-  const login = async (username: string, password: string): Promise<boolean> => {
-    if (isServerAuthEnabled()) {
-      const result = await serverLogin(username, password)
+  const login = async (email: string, password: string): Promise<boolean> => {
+    const normalizedEmail = normalizeAuthEmail(email)
+
+    if (SERVER_AUTH_ENABLED) {
+      const result = await serverLogin(normalizedEmail, password)
       setCurrentUser(result.user)
       setAuthToken(result.token)
       writeBrowserStorage(AUTH_USER_STORAGE_KEY, result.user)
@@ -90,12 +98,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true
     }
 
-    const defaultUser = DEFAULT_USERS[username]
+    if (!LOCAL_AUTH_FALLBACK_ENABLED) {
+      return false
+    }
+
+    const defaultUser = DEFAULT_USERS[normalizedEmail]
     
     if (defaultUser && await hashPassword(password, defaultUser.passwordSalt) === defaultUser.passwordHash) {
       const user: User = {
         id: `user-${Date.now()}`,
-        username,
+        email: defaultUser.email,
+        username: defaultUser.email,
         role: defaultUser.role,
         displayName: defaultUser.displayName,
         createdAt: new Date().toISOString(),
@@ -105,7 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true
     }
 
-    const matchingUser = customUsers.find(u => u.username === username)
+    const matchingUser = customUsers.find((u) => normalizeAuthEmail(u.email || u.username) === normalizedEmail)
     const customUser = matchingUser && await hashPassword(password, matchingUser.passwordSalt) === matchingUser.passwordHash
       ? matchingUser
       : null
@@ -113,7 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (customUser) {
       const user: User = {
         id: customUser.id,
-        username: customUser.username,
+        email: normalizeAuthEmail(customUser.email || customUser.username),
+        username: normalizeAuthEmail(customUser.email || customUser.username),
         role: customUser.role,
         displayName: customUser.displayName,
         createdAt: customUser.createdAt,
@@ -128,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     const token = authToken || undefined
-    if (isServerAuthEnabled()) {
+    if (SERVER_AUTH_ENABLED) {
       void serverLogout(token)
     }
     deleteAuthToken()
@@ -138,48 +152,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   useEffect(() => {
-    if (currentUser || authToken) return
+    if (SERVER_AUTH_ENABLED) {
+      if (!authToken && !currentUser) {
+        const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
+        const storedToken = readBrowserStorage<string>(AUTH_TOKEN_STORAGE_KEY)
+
+        if (storedUser) {
+          setCurrentUser(storedUser)
+        }
+        if (storedToken) {
+          setAuthToken(storedToken)
+        }
+
+        if (storedUser || storedToken) {
+          return
+        }
+      }
+
+      if (!authToken) {
+        if (currentUser) {
+          deleteCurrentUser()
+          removeBrowserStorage(AUTH_USER_STORAGE_KEY)
+        }
+        return
+      }
+
+      let cancelled = false
+      serverMe(authToken)
+        .then((user) => {
+          if (!cancelled) setCurrentUser(user)
+        })
+        .catch(() => {
+          if (!cancelled) {
+            deleteAuthToken()
+            deleteCurrentUser()
+          }
+        })
+
+      return () => {
+        cancelled = true
+      }
+    }
+
+    if (currentUser) return
 
     const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
-    const storedToken = readBrowserStorage<string>(AUTH_TOKEN_STORAGE_KEY)
 
     if (storedUser) {
       setCurrentUser(storedUser)
     }
-    if (storedToken) {
-      setAuthToken(storedToken)
-    }
-  }, [authToken, currentUser, setAuthToken, setCurrentUser])
+  }, [authToken, currentUser, deleteAuthToken, deleteCurrentUser, setCurrentUser])
 
   useEffect(() => {
     if (!currentUser) return
+    if (SERVER_AUTH_ENABLED && !authToken) return
     writeBrowserStorage(AUTH_USER_STORAGE_KEY, currentUser)
-  }, [currentUser])
+  }, [authToken, currentUser])
 
   useEffect(() => {
     if (!authToken) return
     writeBrowserStorage(AUTH_TOKEN_STORAGE_KEY, authToken)
   }, [authToken])
-
-  useEffect(() => {
-    if (!isServerAuthEnabled() || !authToken) return
-
-    let cancelled = false
-    serverMe(authToken)
-      .then((user) => {
-        if (!cancelled) setCurrentUser(user)
-      })
-      .catch(() => {
-        if (!cancelled) {
-          deleteAuthToken()
-          deleteCurrentUser()
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [authToken, deleteAuthToken, deleteCurrentUser, setCurrentUser])
 
   const hasPermission = (permission: Permission): boolean => {
     if (!currentUser) return false

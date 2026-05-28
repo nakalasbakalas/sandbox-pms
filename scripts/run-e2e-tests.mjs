@@ -62,6 +62,7 @@ try {
       number: { notIn: ['216', '316'] },
       roomType: { code: 'TWIN' },
       operationalStatus: 'AVAILABLE',
+      currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
     },
     include: { roomType: true },
     orderBy: { number: 'asc' },
