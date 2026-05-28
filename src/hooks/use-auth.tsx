@@ -17,6 +17,30 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 type StoredUser = User & PasswordCredential
 
+const AUTH_USER_STORAGE_KEY = 'auth:current-user'
+const AUTH_TOKEN_STORAGE_KEY = 'auth:pms-token'
+
+function readBrowserStorage<T>(key: string): T | null {
+  if (typeof window === 'undefined') return null
+  const raw = window.localStorage.getItem(key)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return null
+  }
+}
+
+function writeBrowserStorage(key: string, value: unknown) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(key, JSON.stringify(value))
+}
+
+function removeBrowserStorage(key: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(key)
+}
+
 const DEFAULT_USERS: Record<string, PasswordCredential & { role: UserRole; displayName: string }> = {
   'Neeq': {
     passwordSalt: 'sandbox-default-admin',
@@ -61,6 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await serverLogin(username, password)
       setCurrentUser(result.user)
       setAuthToken(result.token)
+      writeBrowserStorage(AUTH_USER_STORAGE_KEY, result.user)
+      writeBrowserStorage(AUTH_TOKEN_STORAGE_KEY, result.token)
       return true
     }
 
@@ -75,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createdAt: new Date().toISOString(),
       }
       setCurrentUser(user)
+      writeBrowserStorage(AUTH_USER_STORAGE_KEY, user)
       return true
     }
 
@@ -92,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         createdAt: customUser.createdAt,
       }
       setCurrentUser(user)
+      writeBrowserStorage(AUTH_USER_STORAGE_KEY, user)
       return true
     }
 
@@ -105,7 +133,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     deleteAuthToken()
     deleteCurrentUser()
+    removeBrowserStorage(AUTH_USER_STORAGE_KEY)
+    removeBrowserStorage(AUTH_TOKEN_STORAGE_KEY)
   }
+
+  useEffect(() => {
+    if (currentUser || authToken) return
+
+    const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
+    const storedToken = readBrowserStorage<string>(AUTH_TOKEN_STORAGE_KEY)
+
+    if (storedUser) {
+      setCurrentUser(storedUser)
+    }
+    if (storedToken) {
+      setAuthToken(storedToken)
+    }
+  }, [authToken, currentUser, setAuthToken, setCurrentUser])
+
+  useEffect(() => {
+    if (!currentUser) return
+    writeBrowserStorage(AUTH_USER_STORAGE_KEY, currentUser)
+  }, [currentUser])
+
+  useEffect(() => {
+    if (!authToken) return
+    writeBrowserStorage(AUTH_TOKEN_STORAGE_KEY, authToken)
+  }, [authToken])
 
   useEffect(() => {
     if (!isServerAuthEnabled() || !authToken) return
