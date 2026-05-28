@@ -1,5 +1,4 @@
 import { useEffect, useCallback } from 'react'
-import { toast } from 'sonner'
 
 export interface KeyboardShortcut {
   key: string
@@ -159,8 +158,8 @@ export const globalShortcuts = (
   {
     key: 'n',
     ctrl: true,
-    description: 'New reservation from Calendar',
-    action: () => toast.info('Create new reservation from Calendar'),
+    description: 'Open Reservations',
+    action: () => navigate('reservations'),
     section: 'Actions'
   },
   {

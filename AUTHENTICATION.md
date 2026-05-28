@@ -21,7 +21,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 3. **Login Screen** (`/src/components/auth/LoginScreen.tsx`)
    - Beautiful branded login interface
-   - Displays demo account credentials
+   - Accepts staff credentials without displaying shared account passwords
    - Form validation and error handling
 
 4. **Permission Gate** (`/src/components/auth/PermissionGate.tsx`)
@@ -43,7 +43,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 ### Admin
 **Username:** `Neeq`  
-**Password:** `Neeq!1234`
+**Password:** Managed outside the application UI
 
 **Permissions:** All 27 system permissions
 - Complete system access
@@ -54,7 +54,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 ### Manager
 **Username:** `manager`  
-**Password:** `manager123`
+**Password:** Managed outside the application UI
 
 **Permissions:** 23 permissions
 - Reservation management
@@ -66,7 +66,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 ### Front Desk
 **Username:** `frontdesk`  
-**Password:** `frontdesk123`
+**Password:** Managed outside the application UI
 
 **Permissions:** 13 permissions
 - Guest check-in/check-out
@@ -78,7 +78,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 ### Housekeeping
 **Username:** `housekeeping`  
-**Password:** `housekeeping123`
+**Password:** Managed outside the application UI
 
 **Permissions:** 5 permissions (minimal access)
 - View board
@@ -89,7 +89,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 
 ### Cashier
 **Username:** `cashier`  
-**Password:** `cashier123`
+**Password:** Managed outside the application UI
 
 **Permissions:** 11 permissions
 - Payment processing
@@ -266,7 +266,7 @@ These accounts are hardcoded in `use-auth.tsx` and serve as fallback accounts fo
 
 ### Logout Flow
 
-1. User clicks their profile menu → Sign Out
+1. User clicks their profile menu -> Sign Out
 2. Current user is removed from KV storage
 3. Authentication state is cleared
 4. User is redirected to login screen
@@ -283,7 +283,7 @@ User sessions are stored using the Spark KV API:
 
 ### Current Implementation
 
-✅ **Implemented:**
+- **Implemented:**
 - Role-based access control
 - Permission-based UI rendering
 - Session persistence
@@ -291,22 +291,23 @@ User sessions are stored using the Spark KV API:
 - Granular permission system
 - Password-protected accounts
 
-⚠️ **Limitations (Demo System):**
-- Passwords stored in plaintext (acceptable for demo/local use)
-- No password hashing (not needed for local PMS)
-- No session expiration (appropriate for PMS workstation)
-- No 2FA/MFA (overkill for local hotel system)
+- **Limitations:**
+- Authentication and RBAC run in the client/local KV layer unless a backend is connected
+- Built-in bootstrap accounts should be replaced or disabled for any live deployment
+- No session expiration is currently enforced
+- No 2FA/MFA is currently enforced
 - No password reset flow (admin can recreate users)
 
 ### Production Considerations
 
 For a production deployment, consider:
-1. **Password Security:** Hash passwords using bcrypt or similar
-2. **Session Timeout:** Implement inactivity timeout (e.g., 8 hours)
-3. **Audit Logging:** Track user actions for compliance
-4. **Password Policy:** Enforce minimum password requirements
-5. **Account Lockout:** Prevent brute force attacks
-6. **Two-Factor Auth:** Optional for admin accounts
+1. **Server-Side Authorization:** Enforce every permission check on API routes/services
+2. **Password Security:** Store backend passwords with a slow adaptive hash such as Argon2id or bcrypt
+3. **Session Timeout:** Implement inactivity timeout (e.g., 8 hours)
+4. **Audit Logging:** Track user actions for compliance
+5. **Password Policy:** Enforce minimum password requirements
+6. **Account Lockout:** Prevent brute force attacks
+7. **Two-Factor Auth:** Optional for admin accounts
 
 ## UI Adaptation by Role
 
@@ -345,23 +346,23 @@ For a production deployment, consider:
 ### Test Each Role
 
 1. **Login as Admin:**
-   - Username: `Neeq`, Password: `Neeq!1234`
+   - Use the configured admin credentials
    - Verify: All menus visible, User Management accessible
 
 2. **Login as Manager:**
-   - Username: `manager`, Password: `manager123`
+   - Use the configured manager credentials
    - Verify: No User Management, can edit rates, can run night audit
 
 3. **Login as Front Desk:**
-   - Username: `frontdesk`, Password: `frontdesk123`
+   - Use the configured front desk credentials
    - Verify: Limited menus, can check-in/out, cannot edit rates
 
 4. **Login as Housekeeping:**
-   - Username: `housekeeping`, Password: `housekeeping123`
+   - Use the configured housekeeping credentials
    - Verify: Minimal UI, only board and housekeeping visible
 
 5. **Login as Cashier:**
-   - Username: `cashier`, Password: `cashier123`
+   - Use the configured cashier credentials
    - Verify: Can view reports, process payments, cannot check-in guests
 
 ### Test User Management

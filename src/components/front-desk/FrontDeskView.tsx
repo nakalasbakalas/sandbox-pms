@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ArrivalItem, DepartureItem, CheckInData, CheckOutData } from '@/types/front-desk'
 import type { ReceiptData } from '@/types/receipt'
 import type { PropertySetup } from '@/types/onboarding'
+import type { BoardRoomCard } from '@/types/board'
 import { useKV } from '@github/spark/hooks'
 import { FrontDeskStatsBar } from './FrontDeskStatsBar'
 import { ArrivalList } from './ArrivalList'
@@ -22,10 +23,95 @@ import { createPMSCommands } from '@/lib/pms-commands'
 import { useNavigation } from '@/hooks/use-navigation'
 import { CommandPalette } from '@/components/CommandPalette'
 import { useRoomSync } from '@/hooks/use-room-sync'
+import { createSandboxRooms, isRoomReadyForArrival } from '@/lib/hotel/rooms'
+import { getBangkokDateKey, getRoomAssignmentDecision, nightsBetween } from '@/lib/hotel/business-rules'
+import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+
+interface UnassignedReservation {
+  id: string
+  guestName: string
+  checkIn: Date | string
+  checkOut: Date | string
+  roomType: 'TWIN' | 'DOUBLE'
+  guestCount: number
+  nights: number
+  source: string
+  isVIP?: boolean
+  needsAttention?: boolean
+}
+
+function isOccupied(room: BoardRoomCard) {
+  return room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
+}
+
+function isSameHotelDate(value: Date | string | undefined, hotelDateKey: string) {
+  return Boolean(value) && getBangkokDateKey(value as Date | string) === hotelDateKey
+}
+
+function roomToArrival(room: BoardRoomCard): ArrivalItem {
+  const roomReady = isRoomReadyForArrival(room)
+  const checkedIn = isOccupied(room)
+
+  return {
+    id: room.roomId,
+    reservationId: room.reservationId || room.currentReservationId || `room-${room.number}`,
+    guestName: room.guestName || 'Guest name required',
+    roomNumber: room.number,
+    roomType: room.type,
+    checkInTime: '14:00',
+    nights: room.checkIn && room.checkOut ? nightsBetween(room.checkIn, room.checkOut) : 1,
+    adults: Math.max(1, room.guestCount || 1),
+    children: 0,
+    status: checkedIn ? 'CHECKED_IN' : roomReady ? 'READY' : 'DUE_IN',
+    roomReady,
+    depositPaid: room.depositStatus === 'PAID',
+    documentVerified: false,
+    source: 'Direct',
+    bookedRate: 0,
+    totalAmount: room.balanceDue || 0,
+  }
+}
+
+function roomToDeparture(room: BoardRoomCard): DepartureItem {
+  const balanceDue = room.balanceDue || 0
+
+  return {
+    id: room.roomId,
+    reservationId: room.reservationId || room.currentReservationId || `room-${room.number}`,
+    guestName: room.guestName || 'Guest name required',
+    roomNumber: room.number,
+    roomType: room.type,
+    checkOutTime: '11:00',
+    nights: room.checkIn && room.checkOut ? nightsBetween(room.checkIn, room.checkOut) : 1,
+    status: 'IN_HOUSE',
+    balanceDue,
+    folioTotal: balanceDue,
+    paymentStatus: balanceDue > 0 ? 'UNPAID' : 'PAID',
+    roomStatus: room.cleanStatus === 'INSPECTED' ? 'INSPECTED' : room.cleanStatus === 'CLEAN' ? 'CLEAN' : 'DIRTY',
+  }
+}
+
+function unassignedToArrival(reservation: UnassignedReservation): ArrivalItem {
+  return {
+    id: reservation.id,
+    reservationId: reservation.id,
+    guestName: reservation.guestName,
+    roomType: reservation.roomType,
+    checkInTime: '14:00',
+    nights: reservation.nights || nightsBetween(reservation.checkIn, reservation.checkOut),
+    adults: Math.max(1, reservation.guestCount || 1),
+    children: Math.max(0, (reservation.guestCount || 1) - 1),
+    status: 'DUE_IN',
+    roomReady: false,
+    depositPaid: false,
+    documentVerified: false,
+    source: reservation.source || 'Direct',
+    bookedRate: 0,
+    totalAmount: 0,
+  }
+}
 
 export function FrontDeskView() {
-  const [arrivals, setArrivals] = useState<ArrivalItem[]>([])
-  const [departures, setDepartures] = useState<DepartureItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedArrival, setSelectedArrival] = useState<ArrivalItem | null>(null)
   const [selectedDeparture, setDepartureItem] = useState<DepartureItem | null>(null)
@@ -35,11 +121,56 @@ export function FrontDeskView() {
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false)
   const [currentReceipt, setCurrentReceipt] = useState<ReceiptData | null>(null)
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
+  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
   
   const { navigate } = useNavigation()
   const commands = useMemo(() => createPMSCommands(navigate), [navigate])
   const commandPalette = useCommandPalette(commands)
-  const { updateRoomStatus, getRoomByNumber } = useRoomSync()
+  const { rooms, initializeRooms, setRooms, getRoomById, getRoomByNumber } = useRoomSync()
+
+  useEffect(() => {
+    if (rooms.length === 0) {
+      initializeRooms(createSandboxRooms())
+    }
+  }, [initializeRooms, rooms.length])
+
+  const todayKey = getBangkokDateKey(new Date())
+
+  const arrivals = useMemo(() => {
+    const roomArrivals = rooms
+      .filter((room) => room.guestName && isSameHotelDate(room.checkIn, todayKey))
+      .map(roomToArrival)
+    const unassignedArrivals = (unassignedReservations || [])
+      .filter((reservation) => isSameHotelDate(reservation.checkIn, todayKey))
+      .map(unassignedToArrival)
+
+    return [...roomArrivals, ...unassignedArrivals]
+  }, [rooms, todayKey, unassignedReservations])
+
+  const departures = useMemo(() => rooms
+    .filter((room) => room.guestName && isSameHotelDate(room.checkOut, todayKey))
+    .map(roomToDeparture),
+    [rooms, todayKey],
+  )
+
+  const availableRoomsForSelectedArrival = useMemo(() => {
+    if (!selectedArrival) return []
+
+    return rooms
+      .filter((room) => {
+        const decision = getRoomAssignmentDecision(room, {
+          checkIn: new Date(),
+          checkOut: new Date(Date.now() + 24 * 60 * 60 * 1000),
+          excludeReservationId: selectedArrival.reservationId,
+        })
+        return decision.assignable &&
+          room.type === selectedArrival.roomType &&
+          !room.guestName &&
+          isRoomReadyForArrival(room)
+      })
+      .map((room) => ({ id: room.roomId, number: room.number }))
+  }, [rooms, selectedArrival])
 
   const stats = useMemo(() => calculateFrontDeskStats(arrivals, departures), [arrivals, departures])
 
@@ -85,54 +216,135 @@ export function FrontDeskView() {
     setDetailsDialogOpen(true)
   }
 
-  const confirmCheckIn = (data: CheckInData) => {
+  const refreshServerBoard = async () => {
+    if (!SERVER_API_ENABLED || !authToken) return
+    const board = await pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
+    setRooms(mapServerBoardRooms(board.data))
+  }
+
+  const confirmCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
 
-    setArrivals(prev => 
-      prev.map(a => 
-        a.id === selectedArrival.id 
-          ? { ...a, status: 'CHECKED_IN' as const }
-          : a
-      )
-    )
+    const assignedRoom = selectedArrival.roomNumber
+      ? getRoomByNumber(selectedArrival.roomNumber)
+      : getRoomById(data.roomId)
 
-    if (selectedArrival.roomNumber) {
-      const room = getRoomByNumber(selectedArrival.roomNumber)
-      if (room) {
-        updateRoomStatus({
-          roomId: room.roomId,
-          cleanStatus: 'CLEAN',
-          lastCleaned: new Date()
+    if (!assignedRoom) {
+      toast.error('Assign a valid room before checking in this reservation.')
+      return
+    }
+
+    if (!isRoomReadyForArrival(assignedRoom)) {
+      toast.error(`Room ${assignedRoom.number} must be clean or inspected before check-in.`)
+      return
+    }
+
+    if (SERVER_API_ENABLED && authToken) {
+      try {
+        if (!selectedArrival.roomNumber) {
+          await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
+            method: 'POST',
+            body: JSON.stringify({ roomId: assignedRoom.roomId }),
+          })
+        }
+        const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
+          method: 'POST',
         })
+        await refreshServerBoard()
+        toast.success(payload.message || `Check-in complete. Room ${assignedRoom.number} is now occupied.`)
+        setCheckInDialogOpen(false)
+        setSelectedArrival(null)
+        return
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Check-in failed.')
+        return
       }
     }
 
+    setRooms((current) => current.map((room) => room.roomId === assignedRoom.roomId
+      ? {
+          ...room,
+          status: 'OCCUPIED_CLEAN',
+          cleanStatus: room.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
+          housekeepingStatus: room.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
+          reservationId: selectedArrival.reservationId,
+          currentReservationId: selectedArrival.reservationId,
+          guestName: selectedArrival.guestName,
+          checkIn: room.checkIn || new Date(),
+          checkOut: room.checkOut || new Date(Date.now() + Math.max(1, selectedArrival.nights) * 24 * 60 * 60 * 1000),
+          guestCount: selectedArrival.adults + selectedArrival.children,
+          isArrivalToday: true,
+          isDepartureToday: false,
+          balanceDue: selectedArrival.totalAmount,
+          depositStatus: selectedArrival.depositPaid ? 'PAID' : 'PENDING',
+          lastUpdatedAt: new Date().toISOString(),
+          lastUpdatedBy: 'Front desk',
+        }
+      : room))
+
+    setUnassignedReservations((current) => (current || []).filter((reservation) => reservation.id !== selectedArrival.reservationId))
+
     toast.success(`${selectedArrival.guestName} checked in successfully`, {
-      description: `Room ${selectedArrival.roomNumber || 'assigned'} at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+      description: `Room ${assignedRoom.number} at ${new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`,
     })
 
     setCheckInDialogOpen(false)
     setSelectedArrival(null)
   }
 
-  const confirmCheckOut = (data: CheckOutData) => {
+  const confirmCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
 
-    setDepartures(prev => 
-      prev.map(d => 
-        d.id === selectedDeparture.id 
-          ? { ...d, status: 'CHECKED_OUT' as const, roomStatus: 'DIRTY' as const }
-          : d
-      )
-    )
-
     const room = getRoomByNumber(selectedDeparture.roomNumber)
-    if (room) {
-      updateRoomStatus({
-        roomId: room.roomId,
-        cleanStatus: 'DIRTY'
-      })
+
+    if (!room) {
+      toast.error(`Room ${selectedDeparture.roomNumber} was not found.`)
+      return
     }
+
+    if (selectedDeparture.balanceDue > 0 && !data.balanceSettled) {
+      toast.error(`Collect the remaining balance before checking out Room ${selectedDeparture.roomNumber}.`)
+      return
+    }
+
+    if (SERVER_API_ENABLED && authToken) {
+      try {
+        const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
+          method: 'POST',
+          body: JSON.stringify({ allowUnpaidOverride: false }),
+        })
+        await refreshServerBoard()
+        toast.success(payload.message || `Check-out complete. Room ${selectedDeparture.roomNumber} has been sent to housekeeping.`)
+        setCheckOutDialogOpen(false)
+        setDepartureItem(null)
+        return
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Check-out failed.')
+        return
+      }
+    }
+
+    setRooms((current) => current.map((currentRoom) => currentRoom.roomId === room.roomId
+      ? {
+          ...currentRoom,
+          status: 'VACANT_DIRTY',
+          cleanStatus: 'DIRTY',
+          housekeepingStatus: 'DIRTY',
+          reservationId: undefined,
+          currentReservationId: undefined,
+          guestName: undefined,
+          checkIn: undefined,
+          checkOut: undefined,
+          guestCount: 0,
+          isVIP: false,
+          isArrivalToday: false,
+          isDepartureToday: false,
+          balanceDue: undefined,
+          depositStatus: 'NONE',
+          lastUpdatedAt: new Date().toISOString(),
+          lastUpdatedBy: 'Front desk',
+        }
+      : currentRoom))
 
     const receipt = generateReceiptFromCheckOut(selectedDeparture, data, propertyData)
     setCurrentReceipt(receipt)
@@ -228,6 +440,7 @@ export function FrontDeskView() {
         open={checkInDialogOpen}
         onOpenChange={setCheckInDialogOpen}
         onConfirm={confirmCheckIn}
+        availableRooms={availableRoomsForSelectedArrival}
       />
 
       <CheckOutDialog

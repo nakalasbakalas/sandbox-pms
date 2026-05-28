@@ -1,8 +1,9 @@
-import { createContext, useContext, ReactNode } from 'react'
+import { createContext, useContext, ReactNode, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
 import type { User, AuthState, UserRole, Permission } from '@/types/auth'
 import { ROLE_PERMISSIONS } from '@/types/auth'
 import { hashPassword, type PasswordCredential } from '@/lib/auth-passwords'
+import { isServerAuthEnabled, serverLogin, serverLogout, serverMe } from '@/lib/server-auth-client'
 
 interface AuthContextType extends AuthState {
   login: (username: string, password: string) => Promise<boolean>
@@ -51,10 +52,18 @@ const DEFAULT_USERS: Record<string, PasswordCredential & { role: UserRole; displ
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser, deleteCurrentUser] = useKV<User | null>('auth:current-user', null)
+  const [authToken, setAuthToken, deleteAuthToken] = useKV<string | null>('auth:pms-token', null)
   const [customUsers] = useKV<StoredUser[]>('system:users', [])
   const isAuthenticated = Boolean(currentUser)
 
   const login = async (username: string, password: string): Promise<boolean> => {
+    if (isServerAuthEnabled()) {
+      const result = await serverLogin(username, password)
+      setCurrentUser(result.user)
+      setAuthToken(result.token)
+      return true
+    }
+
     const defaultUser = DEFAULT_USERS[username]
     
     if (defaultUser && await hashPassword(password, defaultUser.passwordSalt) === defaultUser.passwordHash) {
@@ -90,8 +99,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = () => {
+    const token = authToken || undefined
+    if (isServerAuthEnabled()) {
+      void serverLogout(token)
+    }
+    deleteAuthToken()
     deleteCurrentUser()
   }
+
+  useEffect(() => {
+    if (!isServerAuthEnabled() || !authToken) return
+
+    let cancelled = false
+    serverMe(authToken)
+      .then((user) => {
+        if (!cancelled) setCurrentUser(user)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          deleteAuthToken()
+          deleteCurrentUser()
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken, deleteAuthToken, deleteCurrentUser, setCurrentUser])
 
   const hasPermission = (permission: Permission): boolean => {
     if (!currentUser) return false

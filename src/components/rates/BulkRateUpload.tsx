@@ -264,14 +264,14 @@ export function BulkRateUpload() {
     toast.success('Template downloaded')
   }
 
-  const downloadExample = (type: 'sample' | 'seasonal' | 'weekend') => {
+  const downloadExample = (type: 'starter' | 'seasonal' | 'weekend') => {
     let csv = ''
     let filename = ''
 
     switch (type) {
-      case 'sample':
+      case 'starter':
         csv = generateSampleRateCSV()
-        filename = 'sample-rates.csv'
+        filename = 'starter-rates.csv'
         break
       case 'seasonal':
         csv = generateSeasonalRatesCSV()
@@ -313,14 +313,14 @@ export function BulkRateUpload() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm">
-                  Example Data
+                  Rate Templates
                   <CaretDown className="w-4 h-4 ml-2" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => downloadExample('sample')}>
+                <DropdownMenuItem onClick={() => downloadExample('starter')}>
                   <FileArrowDown className="w-4 h-4 mr-2" />
-                  Sample Rates (12 rows)
+                  Starter Rates (12 rows)
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => downloadExample('seasonal')}>
                   <FileArrowDown className="w-4 h-4 mr-2" />

@@ -507,7 +507,7 @@ function AddStaffDialog({ open, onClose, onSubmit, editingStaff }: AddStaffDialo
             <Input
               id="staff-email"
               type="email"
-              placeholder="staff@example.com"
+              placeholder="staff@sandboxhotel.co.th"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-2"

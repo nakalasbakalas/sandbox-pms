@@ -25,9 +25,10 @@ interface CheckInDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: (data: CheckInData) => void
+  availableRooms?: Array<{ id: string; number: string }>
 }
 
-export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckInDialogProps) {
+export function CheckInDialog({ arrival, open, onOpenChange, onConfirm, availableRooms: availableRoomsFromBoard }: CheckInDialogProps) {
   const [selectedRoomId, setSelectedRoomId] = useState('')
   const [idNumber, setIdNumber] = useState('')
   const [nationality, setNationality] = useState('')
@@ -59,7 +60,9 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
 
   const availableRooms = arrival.roomNumber 
     ? [{ id: 'assigned', number: arrival.roomNumber }]
-    : getAvailableRoomsForWalkIn(arrival.roomType)
+    : availableRoomsFromBoard
+      ? availableRoomsFromBoard
+      : getAvailableRoomsForWalkIn(arrival.roomType)
 
   const depositDue = arrival.depositPaid ? 0 : (arrival.totalAmount * 0.3)
   
@@ -68,7 +71,7 @@ export function CheckInDialog({ arrival, open, onOpenChange, onConfirm }: CheckI
   const allChecksComplete = hasIdInfo && depositComplete && autoChecklist.documents && autoChecklist.welcomePack && autoChecklist.roomReady
 
   const handleSubmit = () => {
-    const roomId = arrival.roomNumber ? 'assigned-room-id' : selectedRoomId
+    const roomId = arrival.roomNumber ? arrival.id : selectedRoomId
     if (!roomId && !arrival.roomNumber) {
       toast.error('Please select a room')
       return

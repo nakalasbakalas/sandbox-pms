@@ -169,7 +169,7 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                     id="firstName"
                     value={formData.firstName}
                     onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
-                    placeholder="John"
+                    placeholder="Suda"
                     className="mt-1 h-8 text-sm"
                   />
                 </div>
@@ -179,7 +179,7 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                     id="lastName"
                     value={formData.lastName}
                     onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
-                    placeholder="Doe"
+                    placeholder="Prasert"
                     className="mt-1 h-8 text-sm"
                   />
                 </div>
@@ -190,7 +190,7 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                    placeholder="john.doe@example.com"
+                    placeholder="guest@sandboxhotel.co.th"
                     className="mt-1 h-8 text-sm"
                   />
                 </div>

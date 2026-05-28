@@ -131,7 +131,7 @@ export function CashierView() {
           id: `folio_${Date.now()}_${reservation.id}`,
           reservationId: reservation.id,
           guestId: reservation.guestId,
-          guestName: guest ? `${guest.firstName} ${guest.lastName}` : 'Unknown Guest',
+          guestName: guest ? `${guest.firstName} ${guest.lastName}` : 'Guest name required',
           roomNumber: reservation.assignedRoomId || 'TBD',
           checkIn: new Date(reservation.checkIn).toISOString(),
           checkOut: new Date(reservation.checkOut).toISOString(),

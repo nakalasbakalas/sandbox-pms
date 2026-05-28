@@ -428,7 +428,7 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
           <Input 
             placeholder={
               channel === 'LINE' ? '@lineid' : 
-              channel === 'EMAIL' ? 'guest@example.com' : 
+              channel === 'EMAIL' ? 'guest@sandboxhotel.co.th' : 
               '+66 XX XXX XXXX'
             }
             value={recipientContact}

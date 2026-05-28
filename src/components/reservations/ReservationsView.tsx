@@ -1282,7 +1282,7 @@ interface CheckInDialogProps {
   availableRooms: RoomWithDetails[]
 }
 
-function CheckInDialog({ reservation, open, onClose, onComplete }: CheckInDialogProps) {
+function CheckInDialog({ reservation, open, onClose, onComplete, availableRooms }: CheckInDialogProps) {
   const [selectedRoom, setSelectedRoom] = useState('')
   const [idVerified, setIdVerified] = useState(false)
   const [depositCollected, setDepositCollected] = useState(false)
@@ -1292,6 +1292,11 @@ function CheckInDialog({ reservation, open, onClose, onComplete }: CheckInDialog
   if (!reservation) return null
 
   const canCheckIn = selectedRoom && idVerified && depositCollected && keyHandedOver
+  const roomsForReservation = availableRooms.filter((room) =>
+    room.operationalStatus === 'AVAILABLE' &&
+    room.cleanStatus === 'VACANT_CLEAN' &&
+    room.roomType.name === reservation.roomTypeName
+  )
 
   const handleCheckIn = () => {
     if (!canCheckIn) {
@@ -1345,12 +1350,13 @@ function CheckInDialog({ reservation, open, onClose, onComplete }: CheckInDialog
                   <SelectValue placeholder="Select a room..." />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="101">Room 101 - {reservation.roomTypeName}</SelectItem>
-                  <SelectItem value="102">Room 102 - {reservation.roomTypeName}</SelectItem>
-                  <SelectItem value="103">Room 103 - {reservation.roomTypeName}</SelectItem>
-                  <SelectItem value="201">Room 201 - {reservation.roomTypeName}</SelectItem>
-                  <SelectItem value="202">Room 202 - {reservation.roomTypeName}</SelectItem>
-                  <SelectItem value="203">Room 203 - {reservation.roomTypeName}</SelectItem>
+                  {roomsForReservation.length === 0 ? (
+                    <SelectItem value="none" disabled>No clean available rooms</SelectItem>
+                  ) : roomsForReservation.map((room) => (
+                    <SelectItem key={room.id} value={room.number}>
+                      Room {room.number} - {room.roomType.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils'
 import { addDays, format, isSameDay, isWeekend } from 'date-fns'
 import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { NewReservationDialog } from './NewReservationDialog'
+import { NewReservationDialog, type NewReservationData } from './NewReservationDialog'
 import { EditReservationDialog } from './EditReservationDialog'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
 import { getBoardShortcuts } from '@/hooks/use-board-shortcuts'
@@ -53,6 +53,119 @@ interface UnassignedReservation {
   needsAttention?: boolean
 }
 
+interface ReservationListRecord {
+  id: string
+  confirmationNumber: string
+  status: 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'CANCELLED' | 'NO_SHOW' | 'PENDING'
+  guestId: string
+  guestName: string
+  guestEmail?: string
+  guestPhone?: string
+  roomId?: string
+  roomNumber?: string
+  roomType: 'TWIN' | 'DOUBLE'
+  checkIn: Date
+  checkOut: Date
+  nights: number
+  adults: number
+  children: number
+  ratePerNight: number
+  totalAmount: number
+  depositAmount: number
+  depositPaid: number
+  depositStatus: 'PAID' | 'PENDING' | 'NONE'
+  balanceDue: number
+  source: 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN' | 'PHONE'
+  isVIP: boolean
+  specialRequests?: string
+  notes?: string
+  createdAt: Date
+  updatedAt: Date
+  createdBy: string
+}
+
+interface GuestDirectoryRecord {
+  id: string
+  firstName: string
+  lastName: string
+  fullName: string
+  email?: string
+  phone?: string
+  nationality?: string
+  isVIP: boolean
+  tags: string[]
+  totalStays: number
+  totalNights: number
+  totalSpent: number
+  firstStayDate: Date
+  lastStayDate?: Date
+  preferredRoomType?: 'TWIN' | 'DOUBLE'
+  preferredContact?: 'EMAIL' | 'PHONE' | 'LINE'
+  createdAt: Date
+  updatedAt: Date
+}
+
+function toReservationListRecord(reservation: NewReservationData): ReservationListRecord {
+  const nights = Math.ceil((reservation.checkOut.getTime() - reservation.checkIn.getTime()) / (24 * 60 * 60 * 1000))
+
+  return {
+    id: reservation.id,
+    confirmationNumber: reservation.id.replace(/^RES-/, 'SH-'),
+    status: reservation.status,
+    guestId: reservation.guestId,
+    guestName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+    guestEmail: reservation.guest.email ?? undefined,
+    guestPhone: reservation.guest.phone ?? undefined,
+    roomId: reservation.assignedRoomId ?? undefined,
+    roomNumber: reservation.roomNumber,
+    roomType: reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE',
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    nights,
+    adults: reservation.adults,
+    children: reservation.children,
+    ratePerNight: reservation.ratePerNight,
+    totalAmount: reservation.totalAmount,
+    depositAmount: reservation.depositAmount,
+    depositPaid: reservation.depositPaid ? reservation.depositAmount : 0,
+    depositStatus: reservation.depositAmount > 0 ? 'PENDING' : 'NONE',
+    balanceDue: reservation.totalAmount,
+    source: reservation.source as ReservationListRecord['source'],
+    isVIP: reservation.guest.vipStatus,
+    specialRequests: reservation.specialRequests ?? undefined,
+    notes: reservation.notes ?? undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+    createdBy: 'Front desk',
+  }
+}
+
+function toGuestDirectoryRecord(reservation: NewReservationData): GuestDirectoryRecord {
+  const roomType = reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE'
+  const nights = Math.ceil((reservation.checkOut.getTime() - reservation.checkIn.getTime()) / (24 * 60 * 60 * 1000))
+
+  return {
+    id: reservation.guest.id,
+    firstName: reservation.guest.firstName,
+    lastName: reservation.guest.lastName,
+    fullName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+    email: reservation.guest.email ?? undefined,
+    phone: reservation.guest.phone ?? undefined,
+    nationality: reservation.guest.nationality ?? undefined,
+    isVIP: reservation.guest.vipStatus,
+    tags: reservation.guest.vipStatus ? ['VIP'] : [],
+    totalStays: 0,
+    totalNights: nights,
+    totalSpent: reservation.totalAmount,
+    firstStayDate: reservation.checkIn,
+    lastStayDate: undefined,
+    preferredRoomType: roomType,
+    preferredContact: reservation.guest.email ? 'EMAIL' : reservation.guest.phone ? 'PHONE' : undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+  }
+}
+
 export function Board() {
   const { rooms, lastUpdate, initializeRooms, setRooms } = useRoomSync()
   const { t, language } = useI18n()
@@ -67,6 +180,8 @@ export function Board() {
   const [showUnassigned, setShowUnassigned] = useState(true)
   const [unassignedReservationsRaw, setUnassignedReservationsRaw] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
+  const [, setReservationRecords] = useKV<ReservationListRecord[]>('reservations-data', [])
+  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
   
   const unassignedReservations = useMemo(() => 
@@ -1601,6 +1716,19 @@ export function Board() {
         }}
         prefilledData={prefilledReservation}
         onSubmit={(reservation) => {
+          const reservationRecord = toReservationListRecord(reservation)
+          const guestRecord = toGuestDirectoryRecord(reservation)
+
+          setReservationRecords((current) => {
+            const existing = current || []
+            if (existing.some((item) => item.id === reservationRecord.id)) return existing
+            return [...existing, reservationRecord]
+          })
+          setGuestDirectory((current) => {
+            const existing = current || []
+            if (existing.some((guest) => guest.id === guestRecord.id)) return existing
+            return [...existing, guestRecord]
+          })
           setUnassignedReservations((current) => [
             ...current,
             {

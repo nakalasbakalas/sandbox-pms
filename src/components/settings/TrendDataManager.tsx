@@ -27,19 +27,20 @@ export function TrendDataManager() {
       const baseMaintenance = isCurrentWeek ? 2 : 4
       const baseOccupancy = isCurrentWeek ? 78 : 72
 
-      const randomVariation = () => (Math.random() - 0.5) * 6
+      const deterministicVariation = (offset: number) => Math.sin((i + 1) * offset) * 3
+      const occupiedRoomEstimate = Math.round(30 * (baseOccupancy / 100))
 
       baselineData.push({
         date,
-        readinessScore: Math.max(70, Math.min(98, baseReadiness + randomVariation())),
-        cleanRoomPercentage: Math.max(75, Math.min(98, baseClean + randomVariation())),
-        arrivalReadiness: Math.max(80, Math.min(100, baseReadiness + randomVariation())),
-        housekeepingCompletionRate: Math.max(75, Math.min(100, baseHousekeeping + randomVariation())),
-        maintenanceIssues: Math.max(0, Math.round(baseMaintenance + (Math.random() - 0.5) * 2)),
-        totalRooms: 24,
-        arrivals: Math.round(24 * (baseOccupancy / 100) * (0.8 + Math.random() * 0.4)),
-        departures: Math.round(24 * (baseOccupancy / 100) * (0.8 + Math.random() * 0.4)),
-        averageCleanTime: Math.round(40 + (Math.random() - 0.5) * 20),
+        readinessScore: Math.max(70, Math.min(98, baseReadiness + deterministicVariation(0.7))),
+        cleanRoomPercentage: Math.max(75, Math.min(98, baseClean + deterministicVariation(0.9))),
+        arrivalReadiness: Math.max(80, Math.min(100, baseReadiness + deterministicVariation(1.1))),
+        housekeepingCompletionRate: Math.max(75, Math.min(100, baseHousekeeping + deterministicVariation(1.3))),
+        maintenanceIssues: Math.max(0, Math.round(baseMaintenance + ((i % 3) - 1))),
+        totalRooms: 30,
+        arrivals: Math.max(0, occupiedRoomEstimate - (i % 4)),
+        departures: Math.max(0, occupiedRoomEstimate - ((i + 2) % 4)),
+        averageCleanTime: 38 + ((i % 5) - 2) * 3,
       })
     }
 
@@ -77,7 +78,7 @@ export function TrendDataManager() {
         <div className="flex gap-2">
           <Button onClick={seedBaselineData} variant="outline" className="flex-1">
             <Database />
-            Seed Baseline Data
+            Create Baseline Data
           </Button>
           <Button 
             onClick={clearData} 
@@ -90,7 +91,7 @@ export function TrendDataManager() {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Use baseline data only when no historical daily reports exist. Actual reports will automatically record data over time.
+          Use deterministic baseline data only when no historical daily reports exist. Actual reports will automatically record data over time.
         </p>
       </CardContent>
     </Card>

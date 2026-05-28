@@ -21,7 +21,7 @@ import {
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { format, addDays } from 'date-fns'
+import { format } from 'date-fns'
 
 interface Competitor {
   id: string
@@ -86,45 +86,8 @@ export function CompetitiveRateAnalysis() {
     )
   }
 
-  const simulateRateFetch = (competitorId: string) => {
-    const dates = Array.from({ length: 7 }, (_, i) => addDays(new Date(), i))
-    const newRates: CompetitorRate[] = []
-
-    roomTypes.forEach(rt => {
-      dates.forEach(date => {
-        const baseRate = rt.baseRate || 2500
-        const variance = (Math.random() - 0.5) * 1000
-        const rate = Math.round(baseRate + variance)
-        
-        const availabilities: ('HIGH' | 'MEDIUM' | 'LOW' | 'SOLD_OUT')[] = ['HIGH', 'MEDIUM', 'LOW']
-        const availability = availabilities[Math.floor(Math.random() * availabilities.length)]
-
-        newRates.push({
-          id: `rate_${Date.now()}_${Math.random()}`,
-          competitorId,
-          roomType: rt.id,
-          date: format(date, 'yyyy-MM-dd'),
-          rate,
-          availability,
-          timestamp: new Date().toISOString()
-        })
-      })
-    })
-
-    setCompetitorRates(current => [
-      ...current.filter(r => r.competitorId !== competitorId),
-      ...newRates
-    ])
-
-    setCompetitors(current =>
-      current.map(c => 
-        c.id === competitorId 
-          ? { ...c, lastChecked: new Date().toISOString() }
-          : c
-      )
-    )
-
-    toast.success('Rates fetched successfully')
+  const handleRateImportNotConfigured = () => {
+    toast.info('Live competitor rate import is not enabled. Connect a rate source before importing competitor prices.')
   }
 
   const resetForm = () => {
@@ -155,6 +118,16 @@ export function CompetitiveRateAnalysis() {
   }, [competitorRates])
 
   const activeCompetitors = competitors.filter(c => c.enabled)
+  const averagePriceGap = useMemo(() => {
+    const gaps = competitorRates
+      .map((rate) => {
+        const ourRate = getOurRate(rate.roomType, rate.date)
+        return rate.rate > 0 ? ((ourRate - rate.rate) / rate.rate) * 100 : null
+      })
+      .filter((gap): gap is number => gap !== null)
+    return gaps.length ? gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length : null
+  }, [competitorRates, roomTypes])
+  const competitiveIndex = averagePriceGap === null ? null : Math.max(0, Math.round(100 - Math.abs(averagePriceGap)))
 
   return (
     <div className="space-y-6">
@@ -177,8 +150,14 @@ export function CompetitiveRateAnalysis() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center justify-between">
-              <span className="text-3xl font-bold text-green-600">-8%</span>
-              <TrendDown className="w-6 h-6 text-green-600" />
+              <span className={`text-3xl font-bold ${averagePriceGap !== null && averagePriceGap > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                {averagePriceGap === null ? '--' : `${averagePriceGap > 0 ? '+' : ''}${averagePriceGap.toFixed(1)}%`}
+              </span>
+              {averagePriceGap !== null && averagePriceGap > 0 ? (
+                <TrendUp className="w-6 h-6 text-red-600" />
+              ) : (
+                <TrendDown className="w-6 h-6 text-green-600" />
+              )}
             </div>
           </CardContent>
         </Card>
@@ -189,7 +168,7 @@ export function CompetitiveRateAnalysis() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center justify-between">
-              <span className="text-3xl font-bold">92</span>
+              <span className="text-3xl font-bold">{competitiveIndex === null ? '--' : competitiveIndex}</span>
               <ChartBar className="w-6 h-6 text-primary" />
             </div>
           </CardContent>
@@ -221,11 +200,9 @@ export function CompetitiveRateAnalysis() {
                 <CardTitle>Rate Comparison</CardTitle>
                 <CardDescription>Compare your rates against competitors</CardDescription>
               </div>
-              <Button variant="outline" size="sm" onClick={() => {
-                activeCompetitors.forEach(c => simulateRateFetch(c.id))
-              }}>
+              <Button variant="outline" size="sm" onClick={handleRateImportNotConfigured}>
                 <ArrowClockwise className="w-4 h-4 mr-2" />
-                Refresh All
+                Import Rates
               </Button>
             </div>
           </CardHeader>
@@ -235,7 +212,7 @@ export function CompetitiveRateAnalysis() {
                 <div className="text-center py-12">
                   <ChartBar className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
                   <p className="text-muted-foreground mb-2">No competitor data available</p>
-                  <p className="text-sm text-muted-foreground">Add competitors and fetch rates to start analysis</p>
+                  <p className="text-sm text-muted-foreground">Add competitors and import verified rates to start analysis</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -336,11 +313,11 @@ export function CompetitiveRateAnalysis() {
                           variant="outline" 
                           size="sm" 
                           className="h-7 text-xs flex-1"
-                          onClick={() => simulateRateFetch(comp.id)}
+                          onClick={handleRateImportNotConfigured}
                           disabled={!comp.enabled}
                         >
                           <ArrowClockwise className="w-3 h-3 mr-1" />
-                          Fetch
+                          Import
                         </Button>
                         <Button 
                           variant="ghost" 

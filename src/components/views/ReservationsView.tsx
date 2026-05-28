@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,11 @@ import { format, isBefore, isToday } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { printReservationsList } from '@/lib/print-utils'
 import { toast } from 'sonner'
+import { NewReservationDialog, type NewReservationData } from '@/components/board/NewReservationDialog'
+import { useRoomSync } from '@/hooks/use-room-sync'
+import { getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import type { BoardRoomCard } from '@/types/board'
 
 export interface Reservation {
   id: string
@@ -42,7 +47,7 @@ export interface Reservation {
   
   balanceDue: number
   
-  source: 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN'
+  source: 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN' | 'PHONE'
   channelConfirmation?: string
   
   isVIP: boolean
@@ -58,6 +63,177 @@ function generateMockReservations(): Reservation[] {
   return []
 }
 
+interface UnassignedReservation {
+  id: string
+  guestName: string
+  checkIn: Date | string
+  checkOut: Date | string
+  roomType: 'TWIN' | 'DOUBLE'
+  guestCount: number
+  nights: number
+  source: string
+  isVIP?: boolean
+  needsAttention?: boolean
+}
+
+interface GuestDirectoryRecord {
+  id: string
+  firstName: string
+  lastName: string
+  fullName: string
+  email?: string
+  phone?: string
+  nationality?: string
+  isVIP: boolean
+  tags: string[]
+  totalStays: number
+  totalNights: number
+  totalSpent: number
+  firstStayDate: Date
+  lastStayDate?: Date
+  preferredRoomType?: 'TWIN' | 'DOUBLE'
+  preferredContact?: 'EMAIL' | 'PHONE' | 'LINE'
+  createdAt: Date
+  updatedAt: Date
+}
+
+function isOccupied(room: BoardRoomCard) {
+  return room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
+}
+
+function reservationFromRoom(room: BoardRoomCard): Reservation | null {
+  if (!room.guestName || !room.checkIn || !room.checkOut) return null
+  const nights = Math.max(1, nightsBetween(room.checkIn, room.checkOut))
+  const totalAmount = room.reservation?.totalAmount ?? room.balanceDue ?? 0
+  const depositPaid = room.depositStatus === 'PAID' ? Math.min(totalAmount, Math.floor(totalAmount * 0.3)) : 0
+
+  return {
+    id: room.reservationId || room.currentReservationId || `room-${room.number}-${getBangkokDateKey(room.checkIn)}`,
+    confirmationNumber: (room.reservationId || room.currentReservationId || `ROOM-${room.number}`).replace(/^RES-/, 'SH-'),
+    status: isOccupied(room) ? 'CHECKED_IN' : 'CONFIRMED',
+    guestId: `guest-${room.reservationId || room.number}`,
+    guestName: room.guestName,
+    roomId: room.roomId,
+    roomNumber: room.number,
+    roomType: room.type,
+    checkIn: new Date(room.checkIn),
+    checkOut: new Date(room.checkOut),
+    nights,
+    adults: Math.max(1, room.guestCount || 1),
+    children: 0,
+    ratePerNight: nights > 0 ? Math.round(totalAmount / nights) : 0,
+    totalAmount,
+    depositAmount: Math.floor(totalAmount * 0.3),
+    depositPaid,
+    depositStatus: room.depositStatus === 'PAID' ? 'PAID' : totalAmount > 0 ? 'PENDING' : 'NONE',
+    balanceDue: room.balanceDue || 0,
+    source: 'DIRECT',
+    isVIP: room.isVIP,
+    createdAt: new Date(room.checkIn),
+    updatedAt: room.lastUpdatedAt ? new Date(room.lastUpdatedAt) : new Date(),
+    createdBy: 'Front desk board',
+  }
+}
+
+function reservationFromUnassigned(reservation: UnassignedReservation): Reservation {
+  const checkIn = new Date(reservation.checkIn)
+  const checkOut = new Date(reservation.checkOut)
+  const nights = reservation.nights || Math.max(1, nightsBetween(checkIn, checkOut))
+  const source = reservation.source === 'Booking.com'
+    ? 'BOOKING_COM'
+    : reservation.source === 'Walk-in'
+      ? 'WALK_IN'
+      : reservation.source === 'Phone'
+        ? 'PHONE'
+        : 'DIRECT'
+
+  return {
+    id: reservation.id,
+    confirmationNumber: reservation.id.replace(/^RES-/, 'SH-'),
+    status: reservation.needsAttention ? 'PENDING' : 'CONFIRMED',
+    guestId: `guest-${reservation.id}`,
+    guestName: reservation.guestName,
+    roomType: reservation.roomType,
+    checkIn,
+    checkOut,
+    nights,
+    adults: Math.max(1, reservation.guestCount || 1),
+    children: Math.max(0, (reservation.guestCount || 1) - 1),
+    ratePerNight: 0,
+    totalAmount: 0,
+    depositAmount: 0,
+    depositPaid: 0,
+    depositStatus: 'NONE',
+    balanceDue: 0,
+    source,
+    isVIP: reservation.isVIP || false,
+    createdAt: checkIn,
+    updatedAt: new Date(),
+    createdBy: 'Front desk board',
+  }
+}
+
+function toReservationRecord(reservation: NewReservationData): Reservation {
+  const nights = Math.max(1, nightsBetween(reservation.checkIn, reservation.checkOut))
+  const roomType = reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE'
+
+  return {
+    id: reservation.id,
+    confirmationNumber: reservation.id.replace(/^RES-/, 'SH-'),
+    status: reservation.status,
+    guestId: reservation.guestId,
+    guestName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+    guestEmail: reservation.guest.email ?? undefined,
+    guestPhone: reservation.guest.phone ?? undefined,
+    roomId: reservation.assignedRoomId ?? undefined,
+    roomNumber: reservation.roomNumber,
+    roomType,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    nights,
+    adults: reservation.adults,
+    children: reservation.children,
+    ratePerNight: reservation.ratePerNight,
+    totalAmount: reservation.totalAmount,
+    depositAmount: reservation.depositAmount,
+    depositPaid: reservation.depositPaid ? reservation.depositAmount : 0,
+    depositStatus: reservation.depositAmount > 0 ? 'PENDING' : 'NONE',
+    balanceDue: reservation.totalAmount,
+    source: reservation.source as Reservation['source'],
+    isVIP: reservation.guest.vipStatus,
+    specialRequests: reservation.specialRequests ?? undefined,
+    notes: reservation.notes ?? undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+    createdBy: 'Reservations',
+  }
+}
+
+function toGuestRecord(reservation: NewReservationData): GuestDirectoryRecord {
+  const nights = Math.max(1, nightsBetween(reservation.checkIn, reservation.checkOut))
+  const roomType = reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE'
+
+  return {
+    id: reservation.guest.id,
+    firstName: reservation.guest.firstName,
+    lastName: reservation.guest.lastName,
+    fullName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+    email: reservation.guest.email ?? undefined,
+    phone: reservation.guest.phone ?? undefined,
+    nationality: reservation.guest.nationality ?? undefined,
+    isVIP: reservation.guest.vipStatus,
+    tags: reservation.guest.vipStatus ? ['VIP'] : [],
+    totalStays: 0,
+    totalNights: nights,
+    totalSpent: reservation.totalAmount,
+    firstStayDate: reservation.checkIn,
+    preferredRoomType: roomType,
+    preferredContact: reservation.guest.email ? 'EMAIL' : reservation.guest.phone ? 'PHONE' : undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+  }
+}
+
 function deserializeReservation(res: Reservation): Reservation {
   return {
     ...res,
@@ -68,15 +244,75 @@ function deserializeReservation(res: Reservation): Reservation {
   }
 }
 
+function sourceFromServer(source: string): Reservation['source'] {
+  return ['DIRECT', 'BOOKING_COM', 'AGODA', 'EXPEDIA', 'AIRBNB', 'WALK_IN', 'PHONE'].includes(source)
+    ? source as Reservation['source']
+    : 'DIRECT'
+}
+
+function reservationFromServer(record: any): Reservation {
+  const checkIn = new Date(record.checkIn)
+  const checkOut = new Date(record.checkOut)
+  const guestName = record.guest
+    ? `${record.guest.firstName} ${record.guest.lastName}`.trim()
+    : 'Guest name required'
+
+  return {
+    id: record.id,
+    confirmationNumber: record.confirmationCode,
+    status: record.status,
+    guestId: record.guestId,
+    guestName,
+    guestEmail: record.guest?.email ?? undefined,
+    guestPhone: record.guest?.phone ?? undefined,
+    roomId: record.assignedRoomId ?? undefined,
+    roomNumber: record.assignedRoom?.number,
+    roomType: record.roomType?.code === 'DOUBLE' ? 'DOUBLE' : 'TWIN',
+    checkIn,
+    checkOut,
+    nights: Math.max(1, nightsBetween(checkIn, checkOut)),
+    adults: record.adults,
+    children: record.children,
+    ratePerNight: record.ratePerNight,
+    totalAmount: record.totalAmount,
+    depositAmount: record.depositAmount,
+    depositPaid: record.depositPaid ? record.depositAmount : 0,
+    depositStatus: record.depositPaid ? 'PAID' : record.depositAmount > 0 ? 'PENDING' : 'NONE',
+    balanceDue: record.folio?.balance ?? record.totalAmount,
+    source: sourceFromServer(record.source),
+    channelConfirmation: record.channelRef ?? undefined,
+    isVIP: Boolean(record.guest?.vipStatus),
+    specialRequests: record.specialRequests ?? undefined,
+    notes: record.notes ?? undefined,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+    createdBy: 'PMS API',
+  }
+}
+
 export function ReservationsView() {
   const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
+  const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
+  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const { rooms } = useRoomSync()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState<'all' | 'upcoming' | 'in-house' | 'past'>('upcoming')
+  const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
   
-  const reservations = useMemo(() => 
-    (reservationsRaw || []).map(deserializeReservation),
-    [reservationsRaw]
-  )
+  const reservations = useMemo(() => {
+    const merged = new Map<string, Reservation>()
+    ;(reservationsRaw || []).map(deserializeReservation).forEach((reservation) => {
+      merged.set(reservation.id, reservation)
+    })
+    rooms.map(reservationFromRoom).filter(Boolean).forEach((reservation) => {
+      if (reservation && !merged.has(reservation.id)) merged.set(reservation.id, reservation)
+    })
+    ;(unassignedReservations || []).map(reservationFromUnassigned).forEach((reservation) => {
+      if (!merged.has(reservation.id)) merged.set(reservation.id, reservation)
+    })
+    return [...merged.values()]
+  }, [reservationsRaw, rooms, unassignedReservations])
   
   const setReservations = (updater: Reservation[] | ((current: Reservation[]) => Reservation[])) => {
     setReservationsRaw((current) => {
@@ -85,12 +321,85 @@ export function ReservationsView() {
       return updated
     })
   }
-  
-  useState(() => {
-    if (reservations.length === 0) {
-      setReservations(generateMockReservations())
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED || !authToken) return
+
+    let cancelled = false
+    pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
+      .then((payload) => {
+        if (!cancelled) setReservationsRaw(payload.data.map(reservationFromServer))
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Could not load reservations from the PMS API.')
+      })
+
+    return () => {
+      cancelled = true
     }
-  })
+  }, [authToken, setReservationsRaw])
+  
+  const handleCreateReservation = async (reservation: NewReservationData) => {
+    if (SERVER_API_ENABLED && authToken) {
+      const payload = await pmsApi<{ ok: true; data: any; message?: string }>('/api/reservations', authToken, {
+        method: 'POST',
+        body: JSON.stringify({
+          guest: {
+            firstName: reservation.guest.firstName,
+            lastName: reservation.guest.lastName,
+            email: reservation.guest.email,
+            phone: reservation.guest.phone,
+            nationality: reservation.guest.nationality,
+            vipStatus: reservation.guest.vipStatus,
+          },
+          roomTypeCode: reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE',
+          checkIn: getBangkokDateKey(reservation.checkIn),
+          checkOut: getBangkokDateKey(reservation.checkOut),
+          adults: reservation.adults,
+          children: reservation.children,
+          childAges: reservation.childAges ?? [],
+          ratePerNight: reservation.ratePerNight,
+          source: reservation.source,
+          specialRequests: reservation.specialRequests,
+          notes: reservation.notes,
+        }),
+      })
+      const serverReservation = reservationFromServer(payload.data)
+      setReservations((current) => [...current.filter((item) => item.id !== serverReservation.id), serverReservation])
+      toast.success(payload.message || `Reservation ${serverReservation.confirmationNumber} created.`)
+      setShowNewReservationDialog(false)
+      return
+    }
+
+    const reservationRecord = toReservationRecord(reservation)
+    const guestRecord = toGuestRecord(reservation)
+
+    setReservations((current) => {
+      if (current.some((item) => item.id === reservationRecord.id)) return current
+      return [...current, reservationRecord]
+    })
+    setGuestDirectory((current) => {
+      const existing = current || []
+      if (existing.some((guest) => guest.id === guestRecord.id)) return existing
+      return [...existing, guestRecord]
+    })
+    setUnassignedReservations((current) => [
+      ...(current || []),
+      {
+        id: reservation.id,
+        guestName: `${reservation.guest.firstName} ${reservation.guest.lastName}`,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        roomType: reservation.roomTypeName === 'Twin Room' ? 'TWIN' : 'DOUBLE',
+        guestCount: reservation.adults + reservation.children,
+        nights: reservationRecord.nights,
+        source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source,
+        isVIP: reservation.guest.vipStatus,
+      },
+    ])
+    toast.success('Reservation created and added to the assignment queue.')
+    setShowNewReservationDialog(false)
+  }
   
   const filteredReservations = useMemo(() => {
     let result = reservations
@@ -165,6 +474,7 @@ export function ReservationsView() {
       case 'EXPEDIA': return 'bg-cyan-100 text-cyan-800'
       case 'AIRBNB': return 'bg-rose-100 text-rose-800'
       case 'WALK_IN': return 'bg-slate-100 text-slate-800'
+      case 'PHONE': return 'bg-amber-100 text-amber-800'
     }
   }
 
@@ -205,7 +515,7 @@ export function ReservationsView() {
                 Manage all guest reservations and bookings
               </p>
             </div>
-            <Button className="gap-2">
+            <Button className="gap-2" onClick={() => setShowNewReservationDialog(true)}>
               <Plus size={18} weight="bold" />
               New Reservation
             </Button>
@@ -360,6 +670,11 @@ export function ReservationsView() {
           </ScrollArea>
         </TabsContent>
       </Tabs>
+      <NewReservationDialog
+        open={showNewReservationDialog}
+        onClose={() => setShowNewReservationDialog(false)}
+        onSubmit={handleCreateReservation}
+      />
     </div>
   )
 }

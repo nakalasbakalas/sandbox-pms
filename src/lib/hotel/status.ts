@@ -130,7 +130,7 @@ export const statusCatalog = {
       dotClassName: 'bg-red-500',
     },
     blocked: {
-      label: { en: 'Blocked', th: 'บล็อกห้อง' },
+      label: { en: 'Blocked', th: 'ปิดใช้งาน' },
       className: 'border-slate-300 bg-slate-100 text-slate-800',
       dotClassName: 'bg-slate-500',
     },

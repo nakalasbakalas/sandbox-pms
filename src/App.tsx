@@ -1,32 +1,4 @@
-import { useState, useMemo } from 'react'
-import { Board } from './components/board/Board'
-import { 
-  FrontDeskView,
-  RatesView,
-  ChannelsView,
-  ReportsView,
-  SettingsView,
-} from './components/views/ProductViews'
-import { TodayView } from './components/today/TodayView'
-import { RoomsView } from './components/rooms/RoomsView'
-import { ReservationsView } from './components/views/ReservationsView'
-import { GuestsView } from './components/views/GuestsView'
-import { CashierView } from './components/views/CashierView'
-import { NightAuditView } from './components/views/NightAuditView'
-import { MobileHousekeepingView } from './components/housekeeping/MobileHousekeepingView'
-import { TabletHousekeepingApp } from './components/housekeeping/TabletHousekeepingApp'
-import { HousekeepingModeSwitcher } from './components/housekeeping/HousekeepingModeSwitcher'
-import { HousekeepingBoardView } from './components/housekeeping/HousekeepingBoardView'
-import { CommunicationCenterView } from './components/messaging/CommunicationCenterView'
-import { InternalCommunicationsView } from './components/messaging/InternalCommunicationsView'
-import { GuestCommunicationsView } from './components/messaging/GuestCommunicationsView'
-import { GrowthSuiteView } from './components/growth/GrowthSuiteView'
-import { DailySummaryReportView } from './components/settings/DailySummaryReportView'
-import { AdvancedRevenueAnalyticsView } from './components/reports/AdvancedRevenueAnalyticsView'
-import { PredictiveAnalyticsDashboard } from './components/reports/PredictiveAnalyticsDashboard'
-import { SystemStatusView } from './components/views/SystemStatusView'
-import { UserManagementView } from './components/settings/UserManagementView'
-import { DataBackupView } from './components/views/DataBackupView'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { AppLayout } from './components/navigation/AppLayout'
@@ -34,14 +6,94 @@ import { KeyboardShortcutsDialog } from './components/help/KeyboardShortcutsDial
 import { KeyboardShortcutsWelcome } from './components/help/KeyboardShortcutsWelcome'
 import { useKeyboardShortcuts, globalShortcuts } from './hooks/use-keyboard-shortcuts'
 import { useCommandPalette } from './hooks/use-command-palette'
+import { CommandPalette } from './components/CommandPalette'
 import { createPMSCommands } from './lib/pms-commands'
 import { useDensity } from './hooks/use-density'
 import { AuthProvider, useAuth } from './hooks/use-auth'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { LanguageProvider } from './lib/i18n'
+import type { NavigationRoute } from './types/navigation'
+import type { Permission } from './types/auth'
+
+const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
+const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
+const RoomsView = lazy(() => import('./components/rooms/RoomsView').then((module) => ({ default: module.RoomsView })))
+const FrontDeskView = lazy(() => import('./components/front-desk/FrontDeskView').then((module) => ({ default: module.FrontDeskView })))
+const ReservationsView = lazy(() => import('./components/views/ReservationsView').then((module) => ({ default: module.ReservationsView })))
+const GuestsView = lazy(() => import('./components/views/GuestsView').then((module) => ({ default: module.GuestsView })))
+const HousekeepingBoardView = lazy(() => import('./components/housekeeping/HousekeepingBoardView').then((module) => ({ default: module.HousekeepingBoardView })))
+const TabletHousekeepingApp = lazy(() => import('./components/housekeeping/TabletHousekeepingApp').then((module) => ({ default: module.TabletHousekeepingApp })))
+const CashierView = lazy(() => import('./components/views/CashierView').then((module) => ({ default: module.CashierView })))
+const RatesView = lazy(() => import('./components/rates/RatesView').then((module) => ({ default: module.RatesView })))
+const ChannelsView = lazy(() => import('./components/channels/ChannelsView').then((module) => ({ default: module.ChannelsView })))
+const GrowthSuiteView = lazy(() => import('./components/growth/GrowthSuiteView').then((module) => ({ default: module.GrowthSuiteView })))
+const ReportsView = lazy(() => import('./components/reports/ReportsView').then((module) => ({ default: module.ReportsView })))
+const SettingsView = lazy(() => import('./components/settings/SettingsView').then((module) => ({ default: module.SettingsView })))
+const CommunicationCenterView = lazy(() => import('./components/messaging/CommunicationCenterView').then((module) => ({ default: module.CommunicationCenterView })))
+const InternalCommunicationsView = lazy(() => import('./components/messaging/InternalCommunicationsView').then((module) => ({ default: module.InternalCommunicationsView })))
+const GuestCommunicationsView = lazy(() => import('./components/messaging/GuestCommunicationsView').then((module) => ({ default: module.GuestCommunicationsView })))
+const DailySummaryReportView = lazy(() => import('./components/settings/DailySummaryReportView').then((module) => ({ default: module.DailySummaryReportView })))
+const NightAuditView = lazy(() => import('./components/views/NightAuditView').then((module) => ({ default: module.NightAuditView })))
+const AdvancedRevenueAnalyticsView = lazy(() => import('./components/reports/AdvancedRevenueAnalyticsView').then((module) => ({ default: module.AdvancedRevenueAnalyticsView })))
+const PredictiveAnalyticsDashboard = lazy(() => import('./components/reports/PredictiveAnalyticsDashboard').then((module) => ({ default: module.PredictiveAnalyticsDashboard })))
+const SystemStatusView = lazy(() => import('./components/views/SystemStatusView').then((module) => ({ default: module.SystemStatusView })))
+const UserManagementView = lazy(() => import('./components/settings/UserManagementView').then((module) => ({ default: module.UserManagementView })))
+const DataBackupView = lazy(() => import('./components/views/DataBackupView').then((module) => ({ default: module.DataBackupView })))
+
+function RouteLoading() {
+  return (
+    <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+      <div className="rounded-lg border bg-background px-4 py-3 text-sm text-muted-foreground shadow-sm">
+        Loading PMS workspace...
+      </div>
+    </div>
+  )
+}
+
+const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
+  today: ['view:board', 'create:reservation', 'view:housekeeping'],
+  board: ['view:board'],
+  rooms: ['view:board', 'view:housekeeping'],
+  'front-desk': ['view:board', 'check-in:guest', 'check-out:guest'],
+  reservations: ['view:reservations'],
+  guests: ['view:guests'],
+  housekeeping: ['view:housekeeping'],
+  'tablet-housekeeping': ['view:housekeeping'],
+  cashier: ['view:cashier'],
+  rates: ['view:rates'],
+  channels: ['view:channels'],
+  'growth-suite': ['view:channels', 'view:rates', 'view:analytics'],
+  reports: ['view:reports'],
+  settings: ['view:settings'],
+  messaging: ['view:messaging'],
+  'internal-comms': ['view:messaging'],
+  'guest-communications': ['view:messaging'],
+  'daily-summary': ['view:reports', 'view:settings'],
+  'night-audit': ['view:night-audit'],
+  'revenue-analytics': ['view:analytics'],
+  'predictive-analytics': ['view:analytics'],
+  'system-status': ['view:settings'],
+  'user-management': ['manage:users'],
+  'data-backup': ['view:settings'],
+}
 
 function AppRouter() {
   const { currentRoute } = useNavigation()
+  const { hasAnyPermission } = useAuth()
+  const requiredPermissions = routePermissions[currentRoute]
+
+  if (requiredPermissions && !hasAnyPermission(requiredPermissions)) {
+    return (
+      <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+        <div className="max-w-md rounded-lg border bg-background p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold">Access restricted</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your role does not have permission to open this PMS area.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   switch (currentRoute) {
     case 'today':
@@ -124,12 +176,19 @@ function AuthenticatedAppContent() {
     return (
         <>
         <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
-          <AppRouter />
+          <Suspense fallback={<RouteLoading />}>
+            <AppRouter />
+          </Suspense>
         </AppLayout>
         <KeyboardShortcutsDialog
           open={shortcutsDialogOpen}
           onOpenChange={setShortcutsDialogOpen}
           shortcuts={shortcuts}
+        />
+        <CommandPalette
+          open={commandPalette.isOpen}
+          onOpenChange={(open) => open ? commandPalette.open() : commandPalette.close()}
+          commands={commands}
         />
         <KeyboardShortcutsWelcome />
             <Toaster />

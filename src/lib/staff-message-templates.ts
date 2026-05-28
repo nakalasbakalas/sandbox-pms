@@ -108,7 +108,7 @@ export const DEFAULT_STAFF_TEMPLATES: Omit<StaffMessageTemplate, 'id' | 'usageCo
     priority: 'HIGH',
     body: '⭐ VIP Guest arriving today: {{guestName}}, Room {{roomNumber}}. Check-in at {{checkInTime}}. Special requests: {{requests}}. Please ensure exceptional service.',
     variables: [
-      { key: 'guestName', label: 'Guest Name', type: 'guest', required: true, placeholder: 'e.g. Jane Doe' },
+      { key: 'guestName', label: 'Guest Name', type: 'guest', required: true, placeholder: 'e.g. Suda Prasert' },
       { key: 'roomNumber', label: 'Room Number', type: 'room', required: true, placeholder: 'e.g. 501' },
       { key: 'checkInTime', label: 'Check-in Time', type: 'time', required: true, placeholder: 'e.g. 2:00 PM' },
       { key: 'requests', label: 'Special Requests', type: 'text', required: false, defaultValue: 'None' },

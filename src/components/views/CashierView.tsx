@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,11 @@ import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { AccountingDashboard } from '@/components/cashier/AccountingDashboard'
 import { CashReconciliation } from '@/components/cashier/CashReconciliation'
+import { useRoomSync } from '@/hooks/use-room-sync'
+import { nightsBetween } from '@/lib/hotel/business-rules'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { toast } from 'sonner'
+import type { BoardRoomCard } from '@/types/board'
 
 function calculateTax(amount: number, taxRate: number = 7) {
   const subtotal = amount / (1 + taxRate / 100)
@@ -32,7 +37,7 @@ function calculateTax(amount: number, taxRate: number = 7) {
 interface FolioCharge {
   id: string
   date: Date
-  category: 'ROOM' | 'FOOD' | 'BEVERAGE' | 'LAUNDRY' | 'MINIBAR' | 'PHONE' | 'SPA' | 'OTHER'
+  category: 'ROOM' | 'EXTRA_GUEST' | 'CHILD' | 'CAFE' | 'LAUNDRY' | 'MINIBAR' | 'DAMAGE' | 'OTHER'
   description: string
   quantity: number
   unitPrice: number
@@ -45,7 +50,7 @@ interface FolioCharge {
 interface FolioPayment {
   id: string
   date: Date
-  method: 'CASH' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'BANK_TRANSFER' | 'MOBILE_PAYMENT'
+  method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'OTHER'
   amount: number
   reference?: string
   receivedBy: string
@@ -78,6 +83,122 @@ function generateMockFolios(): Folio[] {
   return []
 }
 
+function folioFromRoom(room: BoardRoomCard): Folio | null {
+  if (!room.guestName || !room.checkIn) return null
+
+  const balance = room.balanceDue || 0
+  const total = room.reservation?.totalAmount ?? balance
+  const nights = room.checkOut ? Math.max(1, nightsBetween(room.checkIn, room.checkOut)) : 1
+  const paid = Math.max(0, total - balance)
+  const roomRate = nights > 0 ? Math.round(total / nights) : total
+  const checkIn = new Date(room.checkIn)
+  const updatedAt = room.lastUpdatedAt ? new Date(room.lastUpdatedAt) : new Date()
+
+  return {
+    id: `folio-${room.reservationId || room.currentReservationId || room.roomId}`,
+    reservationId: room.reservationId || room.currentReservationId || room.roomId,
+    guestName: room.guestName,
+    roomNumber: room.number,
+    checkIn,
+    checkOut: room.checkOut ? new Date(room.checkOut) : undefined,
+    status: room.status === 'VACANT_DIRTY' ? 'CLOSED' : 'OPEN',
+    charges: total > 0 ? [{
+      id: `charge-${room.roomId}`,
+      date: checkIn,
+      category: 'ROOM',
+      description: `Room ${room.number} - ${nights} night${nights === 1 ? '' : 's'}`,
+      quantity: nights,
+      unitPrice: roomRate,
+      subtotal: total,
+      tax: 0,
+      total,
+      postedBy: 'Front desk',
+    }] : [],
+    payments: paid > 0 ? [{
+      id: `payment-${room.roomId}`,
+      date: updatedAt,
+      method: room.depositStatus === 'PAID' ? 'CASH' : 'BANK_TRANSFER',
+      amount: paid,
+      reference: room.depositStatus === 'PAID' ? 'Deposit recorded' : undefined,
+      receivedBy: 'Front desk',
+    }] : [],
+    subtotal: total,
+    tax: 0,
+    total,
+    paid,
+    balance,
+    createdAt: checkIn,
+    updatedAt,
+    closedAt: room.status === 'VACANT_DIRTY' ? updatedAt : undefined,
+  }
+}
+
+function normalizeChargeCategory(category: string): FolioCharge['category'] {
+  if (['ROOM', 'EXTRA_GUEST', 'CHILD', 'CAFE', 'LAUNDRY', 'MINIBAR', 'DAMAGE'].includes(category)) {
+    return category as FolioCharge['category']
+  }
+  return 'OTHER'
+}
+
+function normalizePaymentMethod(method: string): FolioPayment['method'] {
+  if (['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE'].includes(method)) {
+    return method as FolioPayment['method']
+  }
+  return 'OTHER'
+}
+
+function folioFromServerReservation(record: any): Folio | null {
+  if (!record?.folio) return null
+
+  const guestName = record.guest
+    ? `${record.guest.firstName || ''} ${record.guest.lastName || ''}`.trim()
+    : 'Guest'
+  const roomNumber = record.assignedRoom?.number || 'Unassigned'
+  const charges = (record.folio.charges || []).map((charge: any): FolioCharge => ({
+    id: charge.id,
+    date: new Date(charge.date || charge.createdAt || record.checkIn),
+    category: normalizeChargeCategory(charge.category),
+    description: charge.description || 'Folio charge',
+    quantity: Number(charge.quantity || 1),
+    unitPrice: Number(charge.amount || charge.total || 0),
+    subtotal: Number(charge.total || 0),
+    tax: 0,
+    total: Number(charge.total || 0),
+    postedBy: charge.createdBy || 'System',
+  }))
+  const payments = (record.folio.payments || []).map((payment: any): FolioPayment => ({
+    id: payment.id,
+    date: new Date(payment.createdAt || payment.date || record.updatedAt || new Date()),
+    method: normalizePaymentMethod(payment.method),
+    amount: Number(payment.amount || 0),
+    reference: payment.reference || undefined,
+    receivedBy: payment.processedBy || 'Cashier',
+  }))
+  const status = record.folio.status === 'CLOSED' || record.status === 'CHECKED_OUT' && Number(record.folio.balance || 0) <= 0
+    ? 'CLOSED'
+    : 'OPEN'
+
+  return {
+    id: record.folio.id,
+    reservationId: record.id,
+    guestName,
+    roomNumber,
+    checkIn: new Date(record.checkIn),
+    checkOut: record.checkOut ? new Date(record.checkOut) : undefined,
+    status,
+    charges,
+    payments,
+    subtotal: Number(record.folio.subtotal || 0),
+    tax: Number(record.folio.tax || 0),
+    total: Number(record.folio.total || 0),
+    paid: Number(record.folio.paid || 0),
+    balance: Number(record.folio.balance || 0),
+    createdAt: new Date(record.folio.createdAt || record.createdAt || record.checkIn),
+    updatedAt: new Date(record.folio.updatedAt || record.updatedAt || new Date()),
+    closedAt: status === 'CLOSED' ? new Date(record.actualCheckOut || record.folio.updatedAt || new Date()) : undefined,
+  }
+}
+
 function deserializeFolio(folio: Folio): Folio {
   return {
     ...folio,
@@ -99,14 +220,55 @@ function deserializeFolio(folio: Folio): Folio {
 
 export function CashierView() {
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const { rooms } = useRoomSync()
+  const [serverFolios, setServerFolios] = useState<Folio[]>([])
+  const [isLoadingFolios, setIsLoadingFolios] = useState(false)
+  const [folioError, setFolioError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFolio, setSelectedFolio] = useState<Folio | null>(null)
   const [selectedTab, setSelectedTab] = useState<'open' | 'closed' | 'all' | 'accounting' | 'reconciliation'>('open')
+  const [paymentFolio, setPaymentFolio] = useState<Folio | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<FolioPayment['method']>('CASH')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false)
+
+  const refreshServerFolios = useCallback(async () => {
+    if (!SERVER_API_ENABLED || !authToken) return []
+    setIsLoadingFolios(true)
+    setFolioError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
+      const nextFolios = payload.data.map(folioFromServerReservation).filter(Boolean) as Folio[]
+      setServerFolios(nextFolios)
+      return nextFolios
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load cashier folios.'
+      setFolioError(message)
+      return []
+    } finally {
+      setIsLoadingFolios(false)
+    }
+  }, [authToken])
+
+  useEffect(() => {
+    void refreshServerFolios()
+  }, [refreshServerFolios])
   
-  const folios = useMemo(() => 
-    (foliosRaw || []).map(deserializeFolio),
-    [foliosRaw]
-  )
+  const folios = useMemo(() => {
+    if (SERVER_API_ENABLED && authToken) return serverFolios
+
+    const merged = new Map<string, Folio>()
+    ;(foliosRaw || []).map(deserializeFolio).forEach((folio) => {
+      merged.set(folio.id, folio)
+    })
+    rooms.map(folioFromRoom).filter(Boolean).forEach((folio) => {
+      if (folio && !merged.has(folio.id)) merged.set(folio.id, folio)
+    })
+    return [...merged.values()]
+  }, [authToken, foliosRaw, rooms, serverFolios])
   
   const setFolios = (updater: Folio[] | ((current: Folio[]) => Folio[])) => {
     setFoliosRaw((current) => {
@@ -115,12 +277,6 @@ export function CashierView() {
       return updated
     })
   }
-  
-  useState(() => {
-    if (folios.length === 0) {
-      setFolios(generateMockFolios())
-    }
-  })
   
   const filteredFolios = useMemo(() => {
     let result = folios
@@ -163,12 +319,12 @@ export function CashierView() {
   const getCategoryColor = (category: FolioCharge['category']) => {
     switch (category) {
       case 'ROOM': return 'bg-blue-100 text-blue-800'
-      case 'FOOD': return 'bg-green-100 text-green-800'
-      case 'BEVERAGE': return 'bg-purple-100 text-purple-800'
+      case 'EXTRA_GUEST': return 'bg-green-100 text-green-800'
+      case 'CHILD': return 'bg-amber-100 text-amber-800'
+      case 'CAFE': return 'bg-purple-100 text-purple-800'
       case 'LAUNDRY': return 'bg-cyan-100 text-cyan-800'
       case 'MINIBAR': return 'bg-pink-100 text-pink-800'
-      case 'PHONE': return 'bg-orange-100 text-orange-800'
-      case 'SPA': return 'bg-violet-100 text-violet-800'
+      case 'DAMAGE': return 'bg-red-100 text-red-800'
       default: return 'bg-slate-100 text-slate-800'
     }
   }
@@ -176,10 +332,81 @@ export function CashierView() {
   const getPaymentMethodColor = (method: FolioPayment['method']) => {
     switch (method) {
       case 'CASH': return 'bg-emerald-100 text-emerald-800'
-      case 'CREDIT_CARD': return 'bg-blue-100 text-blue-800'
-      case 'DEBIT_CARD': return 'bg-cyan-100 text-cyan-800'
+      case 'CARD': return 'bg-blue-100 text-blue-800'
       case 'BANK_TRANSFER': return 'bg-violet-100 text-violet-800'
-      case 'MOBILE_PAYMENT': return 'bg-pink-100 text-pink-800'
+      case 'ONLINE': return 'bg-pink-100 text-pink-800'
+      case 'OTHER': return 'bg-slate-100 text-slate-800'
+    }
+  }
+
+  const openPaymentDialog = (folio: Folio) => {
+    setPaymentFolio(folio)
+    setPaymentAmount(folio.balance > 0 ? String(folio.balance.toFixed(2)) : '')
+    setPaymentMethod('CASH')
+    setPaymentReference('')
+    setPaymentError(null)
+  }
+
+  const handleSubmitPayment = async () => {
+    if (!paymentFolio) return
+    const amount = Number(paymentAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError('Payment amount must be greater than zero.')
+      return
+    }
+    if (amount > paymentFolio.balance) {
+      setPaymentError('Payment cannot exceed the remaining balance.')
+      return
+    }
+
+    setIsSubmittingPayment(true)
+    setPaymentError(null)
+    try {
+      if (SERVER_API_ENABLED && authToken) {
+        await pmsApi('/api/payments', authToken, {
+          method: 'POST',
+          body: JSON.stringify({
+            folioId: paymentFolio.id,
+            amount,
+            method: paymentMethod,
+            reference: paymentReference.trim() || undefined,
+          }),
+        })
+        const nextFolios = await refreshServerFolios()
+        const updated = nextFolios.find((folio) => folio.id === paymentFolio.id)
+        if (updated) setSelectedFolio(updated)
+      } else {
+        const payment: FolioPayment = {
+          id: `payment-${Date.now()}`,
+          date: new Date(),
+          method: paymentMethod,
+          amount,
+          reference: paymentReference.trim() || undefined,
+          receivedBy: 'Cashier',
+        }
+        setFolios((current) => current.map((folio) => {
+          if (folio.id !== paymentFolio.id) return folio
+          const paid = Math.round((folio.paid + amount) * 100) / 100
+          const balance = Math.round(Math.max(0, folio.total - paid) * 100) / 100
+          const updated = {
+            ...folio,
+            payments: [...folio.payments, payment],
+            paid,
+            balance,
+            status: balance <= 0 ? 'CLOSED' as const : 'OPEN' as const,
+            updatedAt: new Date(),
+            closedAt: balance <= 0 ? new Date() : folio.closedAt,
+          }
+          setSelectedFolio(updated)
+          return updated
+        }))
+      }
+      toast.success(`Payment recorded for folio ${paymentFolio.id}.`)
+      setPaymentFolio(null)
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : 'Payment could not be recorded.')
+    } finally {
+      setIsSubmittingPayment(false)
     }
   }
   
@@ -209,6 +436,11 @@ export function CashierView() {
               className="pl-8 h-7 text-xs"
             />
           </div>
+          {folioError && (
+            <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {folioError}
+            </div>
+          )}
         </div>
         
         <div className="px-4 pb-2.5">
@@ -262,9 +494,11 @@ export function CashierView() {
               {filteredFolios.length === 0 ? (
                 <Card className="p-8 text-center">
                   <Receipt className="mx-auto mb-3 text-muted-foreground" size={40} weight="light" />
-                  <h3 className="text-base font-medium text-foreground mb-1.5">No folios found</h3>
+                  <h3 className="text-base font-medium text-foreground mb-1.5">
+                    {isLoadingFolios ? 'Loading folios...' : 'No folios found'}
+                  </h3>
                   <p className="text-xs text-muted-foreground">
-                    {searchQuery ? 'Try adjusting your search terms' : 'No folios in this category'}
+                    {isLoadingFolios ? 'Checking persistent cashier records.' : searchQuery ? 'Try adjusting your search terms' : 'No folios in this category'}
                   </p>
                 </Card>
               ) : (
@@ -322,7 +556,7 @@ export function CashierView() {
                             <span>฿{folio.subtotal.toLocaleString()}</span>
                           </div>
                           <div className="flex justify-between text-muted-foreground">
-                            <span>Tax (7%):</span>
+                            <span>Included tax:</span>
                             <span>฿{folio.tax.toLocaleString()}</span>
                           </div>
                           <Separator className="my-0.5" />
@@ -476,7 +710,7 @@ export function CashierView() {
                     <span>฿{selectedFolio.subtotal.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between text-muted-foreground">
-                    <span>Tax (7%):</span>
+                    <span>Included tax:</span>
                     <span>฿{selectedFolio.tax.toLocaleString()}</span>
                   </div>
                   <Separator className="my-2" />
@@ -501,7 +735,7 @@ export function CashierView() {
               
               {selectedFolio.status === 'OPEN' && selectedFolio.balance > 0 && (
                 <div className="flex gap-3">
-                  <Button className="flex-1 gap-2">
+                  <Button className="flex-1 gap-2" onClick={() => openPaymentDialog(selectedFolio)}>
                     <Money size={18} />
                     Collect Payment
                   </Button>
@@ -511,6 +745,78 @@ export function CashierView() {
                   </Button>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {paymentFolio && (
+        <Dialog open={!!paymentFolio} onOpenChange={(open) => !open && setPaymentFolio(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Collect payment</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="font-medium">{paymentFolio.guestName}</div>
+                <div className="text-muted-foreground">Folio #{paymentFolio.id} · Room {paymentFolio.roomNumber}</div>
+                <div className="mt-2 font-semibold text-orange-600">
+                  Balance due: ฿{paymentFolio.balance.toLocaleString()}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="payment-amount">Payment amount</Label>
+                <Input
+                  id="payment-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={paymentAmount}
+                  onChange={(event) => setPaymentAmount(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Payment method</Label>
+                <Select value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as FolioPayment['method'])}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="CARD">Card</SelectItem>
+                    <SelectItem value="BANK_TRANSFER">Bank transfer</SelectItem>
+                    <SelectItem value="ONLINE">Online / PromptPay</SelectItem>
+                    <SelectItem value="OTHER">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="payment-reference">Reference</Label>
+                <Input
+                  id="payment-reference"
+                  value={paymentReference}
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  placeholder="Receipt, transfer, or card reference"
+                />
+              </div>
+
+              {paymentError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {paymentError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPaymentFolio(null)} disabled={isSubmittingPayment}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSubmitPayment} disabled={isSubmittingPayment}>
+                  {isSubmittingPayment ? 'Recording...' : 'Record payment'}
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

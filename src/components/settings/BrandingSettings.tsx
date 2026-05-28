@@ -56,7 +56,7 @@ export function BrandingSettings() {
             <Input
               id="logo-url"
               type="url"
-              placeholder="https://example.com/logo.png"
+              placeholder="https://sandboxhotel.co.th/logo.png"
               value={logoUrl}
               onChange={(e) => setLogoUrl(e.target.value)}
             />

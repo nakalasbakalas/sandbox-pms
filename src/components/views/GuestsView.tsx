@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,9 @@ import {
 } from '@phosphor-icons/react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { nightsBetween } from '@/lib/hotel/business-rules'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { toast } from 'sonner'
 
 export interface Guest {
   id: string
@@ -50,21 +53,215 @@ export interface Guest {
   updatedAt: Date
 }
 
-function generateMockGuests(): Guest[] {
-  return []
+type NewGuestForm = {
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  nationality: string
+  idNumber: string
+  notes: string
+  vipStatus: boolean
+}
+
+const emptyNewGuest: NewGuestForm = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  nationality: '',
+  idNumber: '',
+  notes: '',
+  vipStatus: false,
+}
+
+function deserializeGuest(guest: Guest): Guest {
+  return {
+    ...guest,
+    dateOfBirth: guest.dateOfBirth ? new Date(guest.dateOfBirth) : undefined,
+    lastStayDate: guest.lastStayDate ? new Date(guest.lastStayDate) : undefined,
+    firstStayDate: new Date(guest.firstStayDate),
+    createdAt: new Date(guest.createdAt),
+    updatedAt: new Date(guest.updatedAt),
+  }
+}
+
+function preferencesToText(preferences: unknown): string | undefined {
+  if (!preferences) return undefined
+  if (typeof preferences === 'string') return preferences
+  if (Array.isArray(preferences)) return preferences.join(', ')
+  if (typeof preferences === 'object') return Object.entries(preferences as Record<string, unknown>)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join(', ')
+  return undefined
+}
+
+function guestFromServer(record: any): Guest {
+  const reservations = record.reservations || []
+  const activeReservations = reservations.filter((reservation: any) => reservation.status !== 'CANCELLED' && reservation.status !== 'NO_SHOW')
+  const stays = reservations.filter((reservation: any) => reservation.status === 'CHECKED_OUT')
+  const stayDates = activeReservations
+    .flatMap((reservation: any) => [reservation.checkIn, reservation.checkOut])
+    .filter(Boolean)
+    .map((value: string) => new Date(value))
+    .filter((value: Date) => !Number.isNaN(value.getTime()))
+  const firstStayDate = stayDates.length
+    ? new Date(Math.min(...stayDates.map((date: Date) => date.getTime())))
+    : new Date(record.createdAt || new Date())
+  const lastStayDate = stayDates.length
+    ? new Date(Math.max(...stayDates.map((date: Date) => date.getTime())))
+    : undefined
+  const totalNights = activeReservations.reduce((sum: number, reservation: any) => (
+    sum + nightsBetween(reservation.checkIn, reservation.checkOut)
+  ), 0)
+  const totalSpent = reservations.reduce((sum: number, reservation: any) => (
+    sum + Number(reservation.folio?.total || reservation.totalAmount || 0)
+  ), 0)
+  const tags = [
+    record.vipStatus ? 'VIP' : undefined,
+    stays.length >= 3 ? 'Frequent Guest' : undefined,
+    record.blacklisted ? 'Caution' : undefined,
+  ].filter(Boolean) as string[]
+
+  return {
+    id: record.id,
+    firstName: record.firstName,
+    lastName: record.lastName,
+    fullName: `${record.firstName || ''} ${record.lastName || ''}`.trim(),
+    email: record.email || undefined,
+    phone: record.phone || undefined,
+    nationality: record.nationality || undefined,
+    dateOfBirth: record.dateOfBirth ? new Date(record.dateOfBirth) : undefined,
+    passportNumber: record.idType === 'PASSPORT' ? record.idNumber || undefined : undefined,
+    idNumber: record.idNumber || undefined,
+    isVIP: Boolean(record.vipStatus),
+    tags,
+    preferences: preferencesToText(record.preferences),
+    notes: record.notes || undefined,
+    warnings: record.blacklisted ? 'Guest is marked for manager review.' : undefined,
+    totalStays: stays.length,
+    totalNights,
+    totalSpent,
+    lastStayDate,
+    firstStayDate,
+    preferredRoomType: reservations[0]?.roomType?.code === 'DOUBLE' ? 'DOUBLE' : reservations[0]?.roomType?.code === 'TWIN' ? 'TWIN' : undefined,
+    createdAt: new Date(record.createdAt || new Date()),
+    updatedAt: new Date(record.updatedAt || new Date()),
+  }
+}
+
+function localGuestFromForm(form: NewGuestForm): Guest {
+  const now = new Date()
+  return {
+    id: `guest-${Date.now()}`,
+    firstName: form.firstName.trim(),
+    lastName: form.lastName.trim(),
+    fullName: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
+    email: form.email.trim() || undefined,
+    phone: form.phone.trim() || undefined,
+    nationality: form.nationality.trim() || undefined,
+    idNumber: form.idNumber.trim() || undefined,
+    isVIP: form.vipStatus,
+    tags: form.vipStatus ? ['VIP'] : [],
+    notes: form.notes.trim() || undefined,
+    totalStays: 0,
+    totalNights: 0,
+    totalSpent: 0,
+    firstStayDate: now,
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 export function GuestsView() {
-  const [guests, setGuests] = useKV<Guest[]>('guests-data', [])
+  const [guestsRaw, setGuests] = useKV<Guest[]>('guests-data', [])
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const [serverGuests, setServerGuests] = useState<Guest[]>([])
+  const [isLoadingGuests, setIsLoadingGuests] = useState(false)
+  const [guestError, setGuestError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null)
   const [selectedTab, setSelectedTab] = useState<'all' | 'vip' | 'frequent' | 'recent'>('all')
-  
-  useState(() => {
-    if (guests.length === 0) {
-      setGuests(generateMockGuests())
+  const [isNewGuestOpen, setIsNewGuestOpen] = useState(false)
+  const [newGuest, setNewGuest] = useState<NewGuestForm>(emptyNewGuest)
+  const [newGuestError, setNewGuestError] = useState<string | null>(null)
+  const [isSavingGuest, setIsSavingGuest] = useState(false)
+
+  const refreshServerGuests = useCallback(async () => {
+    if (!SERVER_API_ENABLED || !authToken) return []
+    setIsLoadingGuests(true)
+    setGuestError(null)
+    try {
+      const payload = await pmsApi<{ ok: true; data: any[] }>('/api/guests', authToken)
+      const nextGuests = payload.data.map(guestFromServer)
+      setServerGuests(nextGuests)
+      return nextGuests
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load guest profiles.'
+      setGuestError(message)
+      return []
+    } finally {
+      setIsLoadingGuests(false)
     }
-  })
+  }, [authToken])
+  
+  useEffect(() => {
+    if (SERVER_API_ENABLED && authToken) {
+      void refreshServerGuests()
+    }
+  }, [authToken, refreshServerGuests])
+
+  const guests = useMemo(() => (
+    SERVER_API_ENABLED && authToken ? serverGuests : (guestsRaw || []).map(deserializeGuest)
+  ), [authToken, guestsRaw, serverGuests])
+
+  const updateNewGuest = (field: keyof NewGuestForm, value: string | boolean) => {
+    setNewGuest((current) => ({ ...current, [field]: value }))
+  }
+
+  const handleCreateGuest = async () => {
+    if (!newGuest.firstName.trim() || !newGuest.lastName.trim()) {
+      setNewGuestError('Guest first and last name are required.')
+      return
+    }
+    if (newGuest.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newGuest.email.trim())) {
+      setNewGuestError('Enter a valid guest email address.')
+      return
+    }
+
+    setIsSavingGuest(true)
+    setNewGuestError(null)
+    try {
+      if (SERVER_API_ENABLED && authToken) {
+        const payload = await pmsApi<{ ok: true; data: any }>('/api/guests', authToken, {
+          method: 'POST',
+          body: JSON.stringify({
+            firstName: newGuest.firstName,
+            lastName: newGuest.lastName,
+            email: newGuest.email || undefined,
+            phone: newGuest.phone || undefined,
+            nationality: newGuest.nationality || undefined,
+            idNumber: newGuest.idNumber || undefined,
+            notes: newGuest.notes || undefined,
+            vipStatus: newGuest.vipStatus,
+          }),
+        })
+        await refreshServerGuests()
+        setSelectedGuest(guestFromServer({ ...payload.data, reservations: [] }))
+      } else {
+        const createdGuest = localGuestFromForm(newGuest)
+        setGuests((current) => [createdGuest, ...(current || [])])
+        setSelectedGuest(createdGuest)
+      }
+      toast.success(`Guest profile created for ${newGuest.firstName.trim()} ${newGuest.lastName.trim()}.`)
+      setNewGuest(emptyNewGuest)
+      setIsNewGuestOpen(false)
+    } catch (error) {
+      setNewGuestError(error instanceof Error ? error.message : 'Guest profile could not be created.')
+    } finally {
+      setIsSavingGuest(false)
+    }
+  }
   
   const filteredGuests = useMemo(() => {
     let result = guests
@@ -120,7 +317,11 @@ export function GuestsView() {
                 Manage guest profiles and preferences
               </p>
             </div>
-            <Button className="gap-2">
+            <Button aria-label="New Guest" className="gap-2" onClick={() => {
+              setNewGuest(emptyNewGuest)
+              setNewGuestError(null)
+              setIsNewGuestOpen(true)
+            }}>
               <Plus size={18} weight="bold" />
               New Guest
             </Button>
@@ -135,6 +336,11 @@ export function GuestsView() {
               className="pl-10"
             />
           </div>
+          {guestError && (
+            <div className="mt-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {guestError}
+            </div>
+          )}
         </div>
         
         <div className="px-6 pb-4">
@@ -175,9 +381,11 @@ export function GuestsView() {
               {filteredGuests.length === 0 ? (
                 <Card className="p-12 text-center">
                   <User className="mx-auto mb-4 text-muted-foreground" size={48} weight="light" />
-                  <h3 className="text-lg font-medium text-foreground mb-2">No guests found</h3>
+                  <h3 className="text-lg font-medium text-foreground mb-2">
+                    {isLoadingGuests ? 'Loading guest profiles...' : 'No guests found'}
+                  </h3>
                   <p className="text-sm text-muted-foreground">
-                    {searchQuery ? 'Try adjusting your search terms' : 'No guests in this category'}
+                    {isLoadingGuests ? 'Checking persistent guest records.' : searchQuery ? 'Try adjusting your search terms' : 'No guests in this category'}
                   </p>
                 </Card>
               ) : (
@@ -399,6 +607,95 @@ export function GuestsView() {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={isNewGuestOpen} onOpenChange={setIsNewGuestOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New guest profile</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="guest-first-name">First name</Label>
+              <Input
+                id="guest-first-name"
+                value={newGuest.firstName}
+                onChange={(event) => updateNewGuest('firstName', event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-last-name">Last name</Label>
+              <Input
+                id="guest-last-name"
+                value={newGuest.lastName}
+                onChange={(event) => updateNewGuest('lastName', event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-email">Email</Label>
+              <Input
+                id="guest-email"
+                type="email"
+                value={newGuest.email}
+                onChange={(event) => updateNewGuest('email', event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-phone">Phone</Label>
+              <Input
+                id="guest-phone"
+                value={newGuest.phone}
+                onChange={(event) => updateNewGuest('phone', event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-nationality">Nationality</Label>
+              <Input
+                id="guest-nationality"
+                value={newGuest.nationality}
+                onChange={(event) => updateNewGuest('nationality', event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="guest-id-number">ID / passport number</Label>
+              <Input
+                id="guest-id-number"
+                value={newGuest.idNumber}
+                onChange={(event) => updateNewGuest('idNumber', event.target.value)}
+              />
+            </div>
+            <div className="col-span-2 space-y-2">
+              <Label htmlFor="guest-notes">Notes</Label>
+              <Textarea
+                id="guest-notes"
+                value={newGuest.notes}
+                onChange={(event) => updateNewGuest('notes', event.target.value)}
+                placeholder="Operational notes visible to hotel staff"
+              />
+            </div>
+            <label className="col-span-2 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={newGuest.vipStatus}
+                onChange={(event) => updateNewGuest('vipStatus', event.target.checked)}
+              />
+              Mark as VIP
+            </label>
+          </div>
+          {newGuestError && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {newGuestError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setIsNewGuestOpen(false)} disabled={isSavingGuest}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateGuest} disabled={isSavingGuest}>
+              {isSavingGuest ? 'Creating...' : 'Create guest'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

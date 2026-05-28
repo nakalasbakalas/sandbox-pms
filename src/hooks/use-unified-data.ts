@@ -43,7 +43,7 @@ export function useUnifiedData() {
 
     const reservation = reservations.find((r) => r.id === reservationId)
     if (!reservation) return
-    const guestName = reservation.guestName ?? 'Unknown Guest'
+    const guestName = reservation.guestName ?? 'Guest name required'
     const depositPaidAmount = typeof reservation.depositPaid === 'number'
       ? reservation.depositPaid
       : reservation.depositPaid

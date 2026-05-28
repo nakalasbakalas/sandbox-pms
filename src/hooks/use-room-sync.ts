@@ -1,7 +1,8 @@
 import { useKV } from '@github/spark/hooks'
-import { useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import type { BoardRoomCard } from '@/types/board'
 import type { HousekeepingRoom, CleanStatus } from '@/types/housekeeping'
+import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
 export interface RoomStatusUpdate {
   roomId: string
@@ -23,8 +24,9 @@ function deserializeRoom(room: BoardRoomCard): BoardRoomCard {
 export function useRoomSync() {
   const [roomsRaw, setRoomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [lastUpdate, setLastUpdate] = useKV<RoomStatusUpdate | null>('last-room-update', null)
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
 
-  const rooms = (roomsRaw || []).map(deserializeRoom)
+  const rooms = useMemo(() => (roomsRaw || []).map(deserializeRoom), [roomsRaw])
 
   const setRooms = useCallback((updater: BoardRoomCard[] | ((current: BoardRoomCard[]) => BoardRoomCard[])) => {
     setRoomsRaw((current) => {
@@ -60,7 +62,20 @@ export function useRoomSync() {
     })
 
     setLastUpdate(timestampedUpdate)
-  }, [setRooms, setLastUpdate])
+
+    if (SERVER_API_ENABLED && authToken) {
+      void pmsApi(`/api/housekeeping/rooms/${update.roomId}/status`, authToken, {
+        method: 'POST',
+        body: JSON.stringify({
+          status: update.cleanStatus,
+          notes: update.cleanedBy ? `Updated by ${update.cleanedBy}` : undefined,
+        }),
+      }).then(async () => {
+        const board = await pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
+        setRoomsRaw(mapServerBoardRooms(board.data))
+      }).catch(() => undefined)
+    }
+  }, [authToken, setRooms, setLastUpdate, setRoomsRaw])
 
   const getRoomById = useCallback((roomId: string): BoardRoomCard | undefined => {
     return rooms?.find(r => r.roomId === roomId)
@@ -78,6 +93,21 @@ export function useRoomSync() {
       return current
     })
   }, [setRooms])
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED || !authToken) return
+
+    let cancelled = false
+    pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
+      .then((payload) => {
+        if (!cancelled) setRoomsRaw(mapServerBoardRooms(payload.data))
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken, setRoomsRaw])
 
   return {
     rooms: rooms || [],

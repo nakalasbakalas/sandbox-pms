@@ -267,7 +267,7 @@ export function YieldManagementPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Demand Forecast</CardTitle>
-                <CardDescription>AI-powered occupancy predictions for next 30 days</CardDescription>
+                <CardDescription>Occupancy forecast for the next 30 days</CardDescription>
               </div>
               <Button variant="outline" size="sm">
                 <Target className="w-4 h-4 mr-2" />

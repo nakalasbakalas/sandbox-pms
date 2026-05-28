@@ -1,4 +1,5 @@
 import {
+  getBangkokDateKey,
   getRoomAssignmentDecision,
   nightsBetween,
   reservationsOverlap,
@@ -53,11 +54,11 @@ export interface PaymentSummary {
   total: number
   paid: number
   balance: number
-  status: 'paid' | 'partial' | 'unpaid' | 'overpaid'
+  status: 'paid' | 'partial' | 'unpaid' | 'refunded' | 'overdue'
 }
 
 function todayKey(now: Date | string): string {
-  return (now instanceof Date ? now : new Date(now)).toISOString().slice(0, 10)
+  return getBangkokDateKey(now)
 }
 
 function reservationDateAllowsCheckIn(reservation: OperationalReservation, now: Date | string) {
@@ -248,7 +249,7 @@ export function transitionHousekeepingStatus<TRoom extends OperationalRoom>(
   return {
     room: {
       ...room,
-      cleanStatus: toStatus === 'CLEANING' ? 'DIRTY' : toStatus,
+      cleanStatus: toStatus,
       status: boardStatus,
       operationalStatus: toStatus === 'MAINTENANCE' ? 'OUT_OF_ORDER' : room.operationalStatus,
     },
@@ -269,7 +270,7 @@ export function summarizePayments(totalAmount: number, payments: number[]): Paym
     total,
     paid,
     balance,
-    status: balance < 0 ? 'overpaid' : balance === 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
+    status: balance <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid',
   }
 }
 

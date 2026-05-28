@@ -191,7 +191,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+f',
       icon: MagnifyingGlass,
       action: () => {
-        toast.info('Search rooms')
+        navigate?.('board')
       },
     },
     {
@@ -203,7 +203,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+shift+f',
       icon: MagnifyingGlass,
       action: () => {
-        toast.info('Search guests')
+        navigate?.('guests')
       },
     },
     {
@@ -215,7 +215,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+i',
       icon: SignOut,
       action: () => {
-        toast.info('Open check-in workflow')
+        navigate?.('front-desk')
       },
     },
     {
@@ -227,7 +227,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+o',
       icon: SignOut,
       action: () => {
-        toast.info('Open check-out workflow')
+        navigate?.('front-desk')
       },
     },
     {
@@ -239,7 +239,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+n',
       icon: Plus,
       action: () => {
-        toast.info('Create new reservation')
+        navigate?.('reservations')
       },
     },
     {
@@ -250,7 +250,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['new', 'guest', 'profile', 'customer'],
       icon: UserCirclePlus,
       action: () => {
-        toast.info('Create new guest profile')
+        navigate?.('guests')
       },
     },
     {
@@ -262,7 +262,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+m',
       icon: ArrowsClockwise,
       action: () => {
-        toast.info('Move guest to another room')
+        navigate?.('board')
       },
     },
     {
@@ -274,7 +274,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+shift+c',
       icon: Receipt,
       action: () => {
-        toast.info('Add charge to folio')
+        navigate?.('cashier')
       },
     },
     {
@@ -285,7 +285,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['clean', 'ready', 'housekeeping'],
       icon: Bed,
       action: () => {
-        toast.info('Mark room as clean')
+        navigate?.('housekeeping')
       },
     },
     {
@@ -296,7 +296,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['dirty', 'needs cleaning', 'housekeeping'],
       icon: Bed,
       action: () => {
-        toast.info('Mark room as dirty')
+        navigate?.('housekeeping')
       },
     },
     {
@@ -307,7 +307,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       keywords: ['maintenance', 'out of service', 'blocked'],
       icon: Gear,
       action: () => {
-        toast.info('Mark room for maintenance')
+        navigate?.('housekeeping')
       },
     },
     {
@@ -319,7 +319,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+a',
       icon: ListChecks,
       action: () => {
-        toast.info('View arrivals')
+        navigate?.('front-desk')
       },
     },
     {
@@ -331,7 +331,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+d',
       icon: ListChecks,
       action: () => {
-        toast.info('View departures')
+        navigate?.('front-desk')
       },
     },
     {
@@ -415,10 +415,10 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
     },
     {
       id: 'predictive-analytics',
-      label: 'Predictive Analytics',
-      description: 'AI-powered insights and revenue predictions',
+      label: 'Demand Forecast',
+      description: 'Forecast occupancy, revenue risk, and operational demand',
       category: 'reports',
-      keywords: ['predictive', 'AI', 'insights', 'forecast', 'machine learning'],
+      keywords: ['predictive', 'insights', 'forecast', 'demand'],
       shortcut: 'cmd+shift+p',
       icon: Brain,
       action: () => {

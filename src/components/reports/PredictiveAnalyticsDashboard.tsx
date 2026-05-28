@@ -1,6 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
-import { useKV } from '@github/spark/hooks'
-import { Button } from '@/components/ui/button'
+import { useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -16,33 +14,26 @@ import {
 import {
   TrendUp,
   TrendDown,
-  Lightning,
   ChartLine,
   Brain,
   Target,
   Warning,
   CheckCircle,
   CurrencyDollar,
-  Users,
   Bed,
-  CalendarBlank,
   ArrowUp,
   ArrowDown,
   Sparkle,
-  Fire,
-  CloudArrowDown,
   Lightbulb,
-  Crown,
   ChartBar,
-  ArrowsClockwise,
 } from '@phosphor-icons/react'
-import { format, addDays, subDays, startOfDay, differenceInDays } from 'date-fns'
+import { addDays, format, subDays } from 'date-fns'
+import { useReportsData } from '@/hooks/use-reports-data'
 
 interface PredictiveMetric {
   label: string
   current: number
-  predicted: number
-  confidence: number
+  forward: number
   trend: 'up' | 'down' | 'stable'
   change: number
   unit?: string
@@ -56,7 +47,6 @@ interface Insight {
   description: string
   recommendation: string
   impact: string
-  confidence: number
 }
 
 interface AnomalyDetection {
@@ -78,290 +68,271 @@ interface ForecastPoint {
   isWeekend: boolean
 }
 
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat('th-TH', {
+    style: 'currency',
+    currency: 'THB',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount)
+}
+
+function percentChange(current: number, previous: number): number {
+  if (!previous) return current > 0 ? 100 : 0
+  return ((current - previous) / previous) * 100
+}
+
+function trendFromChange(change: number): PredictiveMetric['trend'] {
+  if (Math.abs(change) < 0.5) return 'stable'
+  return change > 0 ? 'up' : 'down'
+}
+
 export function PredictiveAnalyticsDashboard() {
   const [timeHorizon, setTimeHorizon] = useState<'7d' | '14d' | '30d' | '90d'>('30d')
   const [selectedMetric, setSelectedMetric] = useState<'revenue' | 'occupancy' | 'adr' | 'revpar'>('revenue')
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [insights, setInsights] = useKV<Insight[]>('predictive-insights', [])
-  const [lastGenerated, setLastGenerated] = useKV<string>('insights-last-generated', '')
+  const today = useMemo(() => new Date(), [])
+  const horizonDays = Number.parseInt(timeHorizon, 10)
+  const currentRange = useMemo(() => ({ from: subDays(today, 29), to: today }), [today])
+  const forwardRange = useMemo(() => ({ from: today, to: addDays(today, horizonDays - 1) }), [today, horizonDays])
+  const currentReports = useReportsData(currentRange)
+  const forwardReports = useReportsData(forwardRange)
+
+  const currentRevenue = currentReports.revenueData.summary
+  const forwardRevenue = forwardReports.revenueData.summary
+  const currentReservations = currentReports.reservationData.summary
+  const forwardReservations = forwardReports.reservationData.summary
 
   const predictiveMetrics = useMemo<PredictiveMetric[]>(() => {
-    const horizonDays = parseInt(timeHorizon)
-    
-    return [
+    const metrics = [
       {
-        label: 'Revenue',
-        current: 1245000,
-        predicted: 1345000,
-        confidence: 87,
-        trend: 'up',
-        change: 8.03,
-        unit: '฿'
+        label: 'On-the-books Revenue',
+        current: currentRevenue.totalRevenue,
+        forward: forwardRevenue.totalRevenue,
+        unit: 'THB',
       },
       {
         label: 'Occupancy Rate',
-        current: 78.5,
-        predicted: 82.3,
-        confidence: 91,
-        trend: 'up',
-        change: 4.84,
-        unit: '%'
+        current: currentRevenue.avgOccupancy * 100,
+        forward: forwardRevenue.avgOccupancy * 100,
+        unit: '%',
       },
       {
         label: 'ADR',
-        current: 3250,
-        predicted: 3420,
-        confidence: 84,
-        trend: 'up',
-        change: 5.23,
-        unit: '฿'
+        current: currentRevenue.avgADR,
+        forward: forwardRevenue.avgADR,
+        unit: 'THB',
       },
       {
         label: 'RevPAR',
-        current: 2551,
-        predicted: 2815,
-        confidence: 89,
-        trend: 'up',
-        change: 10.35,
-        unit: '฿'
+        current: currentRevenue.avgRevPAR,
+        forward: forwardRevenue.avgRevPAR,
+        unit: 'THB',
       },
       {
-        label: 'Booking Pace',
-        current: 42,
-        predicted: 38,
-        confidence: 76,
-        trend: 'down',
-        change: -9.52,
-        unit: 'bookings'
+        label: 'Room Nights',
+        current: currentRevenue.totalRoomNights,
+        forward: forwardRevenue.totalRoomNights,
+        unit: 'nights',
       },
       {
         label: 'Cancellation Rate',
-        current: 8.2,
-        predicted: 6.5,
-        confidence: 82,
-        trend: 'down',
-        change: -20.73,
-        unit: '%'
+        current: currentReservations.cancellationRate * 100,
+        forward: forwardReservations.cancellationRate * 100,
+        unit: '%',
       },
-      {
-        label: 'Length of Stay',
-        current: 2.8,
-        predicted: 3.2,
-        confidence: 79,
-        trend: 'up',
-        change: 14.29,
-        unit: 'nights'
-      },
-      {
-        label: 'Guest Satisfaction',
-        current: 4.6,
-        predicted: 4.8,
-        confidence: 73,
-        trend: 'up',
-        change: 4.35,
-        unit: '/5'
-      }
     ]
-  }, [timeHorizon])
+
+    return metrics.map((metric) => {
+      const change = percentChange(metric.forward, metric.current)
+      return {
+        ...metric,
+        change,
+        trend: trendFromChange(change),
+      }
+    })
+  }, [currentRevenue, forwardRevenue, currentReservations, forwardReservations])
 
   const anomalies = useMemo<AnomalyDetection[]>(() => {
+    const forwardOccupancy = forwardRevenue.avgOccupancy * 100
+    const cancellationRate = forwardReservations.cancellationRate * 100
+    const outstandingBalance = currentRevenue.outstandingBalance
+
     return [
       {
-        metric: 'Weekend Occupancy',
-        detected: true,
-        severity: 'high',
-        description: 'Last 3 weekends showed 15% lower occupancy than seasonal average',
-        expectedRange: [85, 95],
-        actualValue: 72
-      },
-      {
-        metric: 'Midweek ADR',
-        detected: true,
+        metric: 'Forward Occupancy',
+        detected: forwardRevenue.totalRoomNights > 0 && forwardOccupancy < 35,
         severity: 'medium',
-        description: 'Tuesday-Wednesday rates dropping below optimal pricing threshold',
-        expectedRange: [3200, 3600],
-        actualValue: 2890
+        description: 'Future on-the-books occupancy is below the launch review threshold.',
+        expectedRange: [35, 100],
+        actualValue: Number(forwardOccupancy.toFixed(1)),
       },
       {
-        metric: 'Cancellation Spike',
-        detected: true,
-        severity: 'low',
-        description: 'Slight increase in cancellations for future dates (within normal variance)',
-        expectedRange: [5, 8],
-        actualValue: 9.2
-      }
+        metric: 'Outstanding Balance',
+        detected: outstandingBalance > 0,
+        severity: outstandingBalance > currentRevenue.totalRevenue * 0.15 ? 'high' : 'low',
+        description: 'Recorded folios still have unpaid balances that cashier should review.',
+        expectedRange: [0, 0],
+        actualValue: Math.round(outstandingBalance),
+      },
+      {
+        metric: 'Cancellation Rate',
+        detected: cancellationRate > 10,
+        severity: cancellationRate > 20 ? 'high' : 'medium',
+        description: 'Cancellation rate is above the operational review threshold for this window.',
+        expectedRange: [0, 10],
+        actualValue: Number(cancellationRate.toFixed(1)),
+      },
     ]
-  }, [])
+  }, [currentRevenue, forwardRevenue, forwardReservations])
 
-  const generateInsights = async () => {
-    setIsGenerating(true)
-    
-    try {
-      const prompt = spark.llmPrompt`You are an expert hotel revenue management analyst. Based on the following metrics and trends, generate 6 actionable insights for a boutique hotel in Thailand:
+  const insights = useMemo<Insight[]>(() => {
+    const items: Insight[] = []
+    const forwardOccupancy = forwardRevenue.avgOccupancy * 100
 
-Current Performance:
-- Revenue: ฿1,245,000 (trending +8% next 30 days)
-- Occupancy: 78.5% (trending +4.8% next 30 days)
-- ADR: ฿3,250 (trending +5.2% next 30 days)
-- RevPAR: ฿2,551 (trending +10.4% next 30 days)
-
-Anomalies Detected:
-- Weekend occupancy down 15% vs. seasonal average (72% vs 85-95% expected)
-- Midweek ADR below optimal (฿2,890 vs ฿3,200-3,600 expected)
-- Cancellation rate slightly elevated (9.2% vs 5-8% normal)
-
-Generate insights in the following categories:
-1. One HIGH priority revenue opportunity
-2. One HIGH priority operational warning
-3. One MEDIUM priority pricing optimization
-4. One MEDIUM priority demand forecast insight
-5. One LOW priority guest satisfaction opportunity
-6. One LOW priority operational efficiency tip
-
-For each insight, provide:
-- A clear, specific title (max 8 words)
-- A detailed description (2 sentences max)
-- An actionable recommendation (1 sentence)
-- The expected impact (1 sentence, include estimated financial or operational benefit)
-- A confidence score (60-95)
-
-Return as a JSON object with a single "insights" property containing an array of insight objects with properties: type (opportunity/warning/info/success), priority (high/medium/low), title, description, recommendation, impact, confidence.`
-
-      const response = await spark.llm(prompt, 'gpt-4o', true)
-      const parsed = JSON.parse(response)
-      
-      const insightsWithIds = parsed.insights.map((insight: Omit<Insight, 'id'>, index: number) => ({
-        ...insight,
-        id: `insight-${Date.now()}-${index}`
-      }))
-      
-      setInsights(insightsWithIds)
-      setLastGenerated(new Date().toISOString())
-    } catch (error) {
-      console.error('Failed to generate insights:', error)
-    } finally {
-      setIsGenerating(false)
-    }
-  }
-
-  const forecastData = useMemo(() => {
-    const days = parseInt(timeHorizon)
-    const data: ForecastPoint[] = []
-    
-    for (let i = 0; i < days; i++) {
-      const date = addDays(new Date(), i)
-      const dayOfWeek = date.getDay()
-      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
-      
-      const baseOccupancy = isWeekend ? 85 : 72
-      const variance = (Math.sin(i / 7) * 8) + (Math.random() * 10 - 5)
-      const occupancy = Math.max(40, Math.min(100, baseOccupancy + variance))
-      
-      const baseADR = isWeekend ? 3600 : 3200
-      const adrVariance = (Math.random() * 400 - 200)
-      const adr = baseADR + adrVariance
-      
-      const revenue = (occupancy / 100) * adr * 30
-      
-      data.push({
-        date: format(date, 'MMM dd'),
-        fullDate: format(date, 'yyyy-MM-dd'),
-        occupancy: Math.round(occupancy * 10) / 10,
-        adr: Math.round(adr),
-        revenue: Math.round(revenue),
-        revpar: Math.round((occupancy / 100) * adr),
-        isWeekend
+    if (forwardRevenue.totalRoomNights === 0) {
+      items.push({
+        id: 'pickup-required',
+        type: 'warning',
+        priority: 'high',
+        title: 'No Future Pickup Recorded',
+        description: `No room nights are currently on the books for the next ${horizonDays} days.`,
+        recommendation: 'Review availability, direct booking visibility, and OTA connectivity before launch.',
+        impact: 'Prevents staff from relying on an empty forecast as actual demand.',
+      })
+    } else if (forwardOccupancy < 50) {
+      items.push({
+        id: 'occupancy-soft',
+        type: 'opportunity',
+        priority: 'medium',
+        title: 'Forward Occupancy Is Soft',
+        description: `Forward occupancy is ${forwardOccupancy.toFixed(1)}% for the selected horizon.`,
+        recommendation: 'Check open room types and confirm rates are loaded on the active sales channels.',
+        impact: 'Improves pickup using real inventory instead of speculative forecasts.',
+      })
+    } else {
+      items.push({
+        id: 'occupancy-healthy',
+        type: 'success',
+        priority: 'low',
+        title: 'Forward Pickup Looks Healthy',
+        description: `Forward occupancy is ${forwardOccupancy.toFixed(1)}% for the selected horizon.`,
+        recommendation: 'Keep checking unpaid balances and room readiness as arrivals approach.',
+        impact: 'Keeps front desk, cashier, and housekeeping aligned on confirmed demand.',
       })
     }
-    
-    return data
-  }, [timeHorizon])
+
+    if (currentRevenue.outstandingBalance > 0) {
+      items.push({
+        id: 'cashier-balance',
+        type: 'warning',
+        priority: 'high',
+        title: 'Unpaid Folios Need Review',
+        description: `${formatCurrency(currentRevenue.outstandingBalance)} is still outstanding in the selected period.`,
+        recommendation: 'Cashier should review unpaid and partial folios before night audit.',
+        impact: 'Reduces settlement surprises at checkout.',
+      })
+    }
+
+    if (forwardReservations.totalReservations > 0) {
+      items.push({
+        id: 'arrival-planning',
+        type: 'info',
+        priority: 'medium',
+        title: 'Plan Staffing From Arrivals',
+        description: `${forwardReservations.totalReservations} future reservations are in the selected horizon.`,
+        recommendation: 'Use arrivals, departures, and dirty-room counts together when assigning housekeeping work.',
+        impact: 'Helps reception and housekeeping prepare from recorded reservations.',
+      })
+    }
+
+    return items
+  }, [currentRevenue, forwardRevenue, forwardReservations, horizonDays])
+
+  const forecastData = useMemo<ForecastPoint[]>(() => forwardReports.revenueData.dailyStats.map((day) => ({
+    date: format(day.date, 'MMM dd'),
+    fullDate: format(day.date, 'yyyy-MM-dd'),
+    occupancy: Number((day.occupancyRate * 100).toFixed(1)),
+    adr: Math.round(day.adr),
+    revenue: Math.round(day.totalRevenue),
+    revpar: Math.round(day.revpar),
+    isWeekend: [0, 6].includes(day.date.getDay()),
+  })), [forwardReports])
 
   const kpiCards = [
     {
-      title: 'Predicted Revenue Growth',
-      value: '+8.03%',
-      subValue: '฿100,000 increase',
+      title: 'On-the-books Revenue',
+      value: formatCurrency(forwardRevenue.totalRevenue),
+      subValue: `${forwardRevenue.totalRoomNights} room nights`,
       icon: TrendUp,
       color: 'text-green-600',
       bgColor: 'bg-green-50',
-      confidence: 87
     },
     {
-      title: 'Occupancy Forecast',
-      value: '82.3%',
-      subValue: '+3.8% vs current',
+      title: 'Forward Occupancy',
+      value: `${(forwardRevenue.avgOccupancy * 100).toFixed(1)}%`,
+      subValue: `Next ${horizonDays} days`,
       icon: Bed,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
-      confidence: 91
     },
     {
-      title: 'ADR Trajectory',
-      value: '฿3,420',
-      subValue: '+5.2% improvement',
+      title: 'Forward ADR',
+      value: formatCurrency(forwardRevenue.avgADR),
+      subValue: 'From recorded reservations',
       icon: CurrencyDollar,
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
-      confidence: 84
     },
     {
-      title: 'Anomalies Detected',
-      value: anomalies.filter(a => a.detected).length.toString(),
-      subValue: 'Require attention',
+      title: 'Detected Review Items',
+      value: anomalies.filter((item) => item.detected).length.toString(),
+      subValue: 'From actual PMS data',
       icon: Warning,
       color: 'text-orange-600',
       bgColor: 'bg-orange-50',
-      confidence: null
-    }
+    },
   ]
 
-  const timeHorizonDays = parseInt(timeHorizon)
-
   return (
-    <div className="flex flex-col gap-3 p-4 h-full overflow-auto">
-      <div className="flex items-center justify-between">
+    <div className="flex h-full flex-col gap-3 overflow-auto p-4">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Brain className="text-purple-600" weight="fill" />
             Predictive Analytics
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            AI-powered insights and forecasting for revenue optimization
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            On-the-books forward view from confirmed PMS reservations
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={timeHorizon} onValueChange={(v: any) => setTimeHorizon(v)}>
-            <SelectTrigger className="w-32 h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="7d">7 Days</SelectItem>
-              <SelectItem value="14d">14 Days</SelectItem>
-              <SelectItem value="30d">30 Days</SelectItem>
-              <SelectItem value="90d">90 Days</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <Select value={timeHorizon} onValueChange={(value) => setTimeHorizon(value as typeof timeHorizon)}>
+          <SelectTrigger className="h-8 w-32 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="7d">7 Days</SelectItem>
+            <SelectItem value="14d">14 Days</SelectItem>
+            <SelectItem value="30d">30 Days</SelectItem>
+            <SelectItem value="90d">90 Days</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {kpiCards.map((kpi) => (
           <Card key={kpi.title} className="professional-card">
             <CardContent className="p-3">
-              <div className="flex items-start justify-between mb-2">
-                <div className={`p-1.5 rounded ${kpi.bgColor}`}>
-                  <kpi.icon className={`${kpi.color} w-4 h-4`} weight="fill" />
+              <div className="mb-2 flex items-start justify-between">
+                <div className={`rounded p-1.5 ${kpi.bgColor}`}>
+                  <kpi.icon className={`${kpi.color} size-4`} weight="fill" />
                 </div>
-                {kpi.confidence && (
-                  <Badge variant="outline" className="text-xs px-1.5 py-0 h-5">
-                    {kpi.confidence}% confidence
-                  </Badge>
-                )}
+                <Badge variant="outline" className="h-5 px-1.5 py-0 text-xs">
+                  live data
+                </Badge>
               </div>
               <div className="text-2xl font-bold">{kpi.value}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{kpi.subValue}</div>
-              <div className="text-xs font-medium text-muted-foreground mt-1">{kpi.title}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{kpi.subValue}</div>
+              <div className="mt-1 text-xs font-medium text-muted-foreground">{kpi.title}</div>
             </CardContent>
           </Card>
         ))}
@@ -369,74 +340,72 @@ Return as a JSON object with a single "insights" property containing an array of
 
       <Tabs defaultValue="predictions" className="flex-1">
         <TabsList className="h-8">
-          <TabsTrigger value="predictions" className="text-xs h-7">
-            <ChartLine className="w-3.5 h-3.5 mr-1.5" />
-            Predictions
+          <TabsTrigger value="predictions" className="h-7 text-xs">
+            <ChartLine className="mr-1.5 size-3.5" />
+            Forward View
           </TabsTrigger>
-          <TabsTrigger value="insights" className="text-xs h-7">
-            <Sparkle className="w-3.5 h-3.5 mr-1.5" />
-            AI Insights
+          <TabsTrigger value="insights" className="h-7 text-xs">
+            <Sparkle className="mr-1.5 size-3.5" />
+            Data Insights
             {insights.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-xs">
                 {insights.length}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="anomalies" className="text-xs h-7">
-            <Warning className="w-3.5 h-3.5 mr-1.5" />
-            Anomalies
-            {anomalies.filter(a => a.detected).length > 0 && (
+          <TabsTrigger value="anomalies" className="h-7 text-xs">
+            <Warning className="mr-1.5 size-3.5" />
+            Review Items
+            {anomalies.filter((item) => item.detected).length > 0 && (
               <Badge variant="destructive" className="ml-1.5 h-4 px-1 text-xs">
-                {anomalies.filter(a => a.detected).length}
+                {anomalies.filter((item) => item.detected).length}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="forecasts" className="text-xs h-7">
-            <Target className="w-3.5 h-3.5 mr-1.5" />
-            Detailed Forecast
+          <TabsTrigger value="forecasts" className="h-7 text-xs">
+            <Target className="mr-1.5 size-3.5" />
+            Daily Breakdown
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="predictions" className="mt-3 space-y-3">
           <Card className="professional-card">
             <CardHeader className="p-3 pb-2">
-              <CardTitle className="text-sm font-semibold">Key Performance Predictions</CardTitle>
+              <CardTitle className="text-sm font-semibold">Current vs Forward On-the-books</CardTitle>
               <CardDescription className="text-xs">
-                Next {timeHorizonDays} days forecast based on historical trends and market patterns
+                Future values are based only on reservations already recorded in the PMS
               </CardDescription>
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 {predictiveMetrics.map((metric) => (
-                  <div key={metric.label} className="border rounded-lg p-3">
-                    <div className="flex items-start justify-between mb-2">
+                  <div key={metric.label} className="rounded-lg border p-3">
+                    <div className="mb-2 flex items-start justify-between">
                       <div>
-                        <div className="text-xs font-medium text-muted-foreground mb-1">
-                          {metric.label}
-                        </div>
+                        <div className="mb-1 text-xs font-medium text-muted-foreground">{metric.label}</div>
                         <div className="flex items-baseline gap-2">
                           <span className="text-sm text-muted-foreground">
-                            {metric.unit}{metric.current.toLocaleString()}
+                            {metric.unit === 'THB' ? formatCurrency(metric.current) : `${metric.current.toLocaleString()}${metric.unit === '%' ? '%' : ''}`}
                           </span>
                           <span className="text-base font-bold">
-                            {metric.unit}{metric.predicted.toLocaleString()}
+                            {metric.unit === 'THB' ? formatCurrency(metric.forward) : `${metric.forward.toLocaleString()}${metric.unit === '%' ? '%' : ''}`}
                           </span>
                         </div>
                       </div>
                       <Badge
                         variant={metric.trend === 'up' ? 'default' : metric.trend === 'down' ? 'destructive' : 'secondary'}
-                        className="text-xs px-1.5 h-5"
+                        className="h-5 px-1.5 text-xs"
                       >
-                        {metric.trend === 'up' ? <ArrowUp className="w-3 h-3" /> : metric.trend === 'down' ? <ArrowDown className="w-3 h-3" /> : null}
+                        {metric.trend === 'up' ? <ArrowUp className="size-3" /> : metric.trend === 'down' ? <ArrowDown className="size-3" /> : null}
                         {Math.abs(metric.change).toFixed(1)}%
                       </Badge>
                     </div>
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Confidence</span>
-                        <span className="font-medium">{metric.confidence}%</span>
+                        <span className="text-muted-foreground">Forward share</span>
+                        <span className="font-medium">{Math.min(100, Math.abs(metric.change)).toFixed(0)}%</span>
                       </div>
-                      <Progress value={metric.confidence} className="h-1" />
+                      <Progress value={Math.min(100, Math.abs(metric.change))} className="h-1" />
                     </div>
                   </div>
                 ))}
@@ -448,13 +417,11 @@ Return as a JSON object with a single "insights" property containing an array of
             <CardHeader className="p-3 pb-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-sm font-semibold">Revenue Trajectory</CardTitle>
-                  <CardDescription className="text-xs">
-                    Projected revenue and occupancy trends
-                  </CardDescription>
+                  <CardTitle className="text-sm font-semibold">Forward Pickup</CardTitle>
+                  <CardDescription className="text-xs">Recorded revenue, occupancy, ADR, and RevPAR by arrival horizon</CardDescription>
                 </div>
-                <Select value={selectedMetric} onValueChange={(v: any) => setSelectedMetric(v)}>
-                  <SelectTrigger className="w-32 h-7 text-xs">
+                <Select value={selectedMetric} onValueChange={(value) => setSelectedMetric(value as typeof selectedMetric)}>
+                  <SelectTrigger className="h-7 w-32 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -467,30 +434,25 @@ Return as a JSON object with a single "insights" property containing an array of
               </div>
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <div className="h-48 flex items-end gap-0.5">
-                {forecastData.map((day, idx) => {
-                  const maxValue = Math.max(...forecastData.map(d => d[selectedMetric]))
+              <div className="flex h-48 items-end gap-0.5">
+                {forecastData.map((day) => {
+                  const maxValue = Math.max(1, ...forecastData.map((item) => item[selectedMetric]))
                   const height = (day[selectedMetric] / maxValue) * 100
-                  
+
                   return (
-                    <div
-                      key={day.fullDate}
-                      className="flex-1 group relative"
-                    >
+                    <div key={day.fullDate} className="group relative flex-1">
                       <div
-                        className={`w-full transition-all ${
-                          day.isWeekend ? 'bg-blue-500' : 'bg-purple-500'
-                        } hover:opacity-80 rounded-t`}
-                        style={{ height: `${height}%` }}
+                        className={`w-full rounded-t transition-all hover:opacity-80 ${day.isWeekend ? 'bg-blue-500' : 'bg-purple-500'}`}
+                        style={{ height: `${Math.max(2, height)}%` }}
                       />
-                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                        <div className="bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
+                      <div className="pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100">
+                        <div className="whitespace-nowrap rounded bg-gray-900 px-2 py-1 text-xs text-white">
                           <div className="font-medium">{day.date}</div>
                           <div>
-                            {selectedMetric === 'revenue' && `฿${day.revenue.toLocaleString()}`}
+                            {selectedMetric === 'revenue' && formatCurrency(day.revenue)}
                             {selectedMetric === 'occupancy' && `${day.occupancy}%`}
-                            {selectedMetric === 'adr' && `฿${day.adr.toLocaleString()}`}
-                            {selectedMetric === 'revpar' && `฿${day.revpar.toLocaleString()}`}
+                            {selectedMetric === 'adr' && formatCurrency(day.adr)}
+                            {selectedMetric === 'revpar' && formatCurrency(day.revpar)}
                           </div>
                         </div>
                       </div>
@@ -498,13 +460,13 @@ Return as a JSON object with a single "insights" property containing an array of
                   )
                 })}
               </div>
-              <div className="flex items-center justify-center gap-4 mt-3 text-xs">
+              <div className="mt-3 flex items-center justify-center gap-4 text-xs">
                 <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-3 bg-purple-500 rounded" />
+                  <div className="size-3 rounded bg-purple-500" />
                   <span>Weekday</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <div className="w-3 h-3 bg-blue-500 rounded" />
+                  <div className="size-3 rounded bg-blue-500" />
                   <span>Weekend</span>
                 </div>
               </div>
@@ -513,173 +475,100 @@ Return as a JSON object with a single "insights" property containing an array of
         </TabsContent>
 
         <TabsContent value="insights" className="mt-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-muted-foreground">
-              {lastGenerated && `Last updated: ${format(new Date(lastGenerated), 'MMM dd, yyyy HH:mm')}`}
-            </div>
-            <Button
-              size="sm"
-              onClick={generateInsights}
-              disabled={isGenerating}
-              className="h-7 text-xs"
-            >
-              {isGenerating ? (
-                <>
-                  <ArrowsClockwise className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkle className="w-3.5 h-3.5 mr-1.5" />
-                  Generate AI Insights
-                </>
-              )}
-            </Button>
-          </div>
+          <div className="grid gap-3">
+            {insights.map((insight) => {
+              const iconMap = {
+                opportunity: Lightbulb,
+                warning: Warning,
+                info: ChartBar,
+                success: CheckCircle,
+              }
+              const Icon = iconMap[insight.type]
+              const colorMap = {
+                opportunity: 'text-blue-600 bg-blue-50 border-blue-200',
+                warning: 'text-orange-600 bg-orange-50 border-orange-200',
+                info: 'text-purple-600 bg-purple-50 border-purple-200',
+                success: 'text-green-600 bg-green-50 border-green-200',
+              }
 
-          {insights.length === 0 ? (
-            <Card className="professional-card">
-              <CardContent className="p-8 text-center">
-                <Brain className="w-12 h-12 mx-auto mb-3 text-muted-foreground" weight="duotone" />
-                <h3 className="font-semibold mb-1">No Insights Generated</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Click "Generate AI Insights" to analyze your data and receive actionable recommendations
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3">
-              {insights
-                .sort((a, b) => {
-                  const priorityOrder = { high: 0, medium: 1, low: 2 }
-                  return priorityOrder[a.priority] - priorityOrder[b.priority]
-                })
-                .map((insight) => {
-                  const iconMap = {
-                    opportunity: Lightbulb,
-                    warning: Warning,
-                    info: ChartBar,
-                    success: CheckCircle
-                  }
-                  const Icon = iconMap[insight.type]
-                  
-                  const colorMap = {
-                    opportunity: 'text-blue-600 bg-blue-50 border-blue-200',
-                    warning: 'text-orange-600 bg-orange-50 border-orange-200',
-                    info: 'text-purple-600 bg-purple-50 border-purple-200',
-                    success: 'text-green-600 bg-green-50 border-green-200'
-                  }
-                  
-                  return (
-                    <Card key={insight.id} className={`professional-card border-l-4 ${colorMap[insight.type]}`}>
-                      <CardContent className="p-3">
-                        <div className="flex items-start gap-3">
-                          <div className={`p-1.5 rounded ${colorMap[insight.type]}`}>
-                            <Icon className="w-4 h-4" weight="fill" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <h4 className="font-semibold text-sm">{insight.title}</h4>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <Badge
-                                  variant={
-                                    insight.priority === 'high' ? 'destructive' :
-                                    insight.priority === 'medium' ? 'default' : 'secondary'
-                                  }
-                                  className="text-xs px-1.5 h-5"
-                                >
-                                  {insight.priority}
-                                </Badge>
-                                <Badge variant="outline" className="text-xs px-1.5 h-5">
-                                  {insight.confidence}% confidence
-                                </Badge>
-                              </div>
-                            </div>
-                            <p className="text-xs text-muted-foreground mb-2">
-                              {insight.description}
-                            </p>
-                            <div className="bg-background/60 rounded p-2 mb-2">
-                              <div className="text-xs font-medium mb-0.5 flex items-center gap-1">
-                                <Target className="w-3 h-3" />
-                                Recommendation
-                              </div>
-                              <div className="text-xs">{insight.recommendation}</div>
-                            </div>
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Fire className="w-3 h-3" />
-                              <span className="font-medium">Expected Impact:</span>
-                              <span>{insight.impact}</span>
-                            </div>
-                          </div>
+              return (
+                <Card key={insight.id} className={`professional-card border-l-4 ${colorMap[insight.type]}`}>
+                  <CardContent className="p-3">
+                    <div className="flex items-start gap-3">
+                      <div className={`rounded p-1.5 ${colorMap[insight.type]}`}>
+                        <Icon className="size-4" weight="fill" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <h4 className="text-sm font-semibold">{insight.title}</h4>
+                          <Badge
+                            variant={insight.priority === 'high' ? 'destructive' : insight.priority === 'medium' ? 'default' : 'secondary'}
+                            className="h-5 shrink-0 px-1.5 text-xs"
+                          >
+                            {insight.priority}
+                          </Badge>
                         </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-            </div>
-          )}
+                        <p className="mb-2 text-xs text-muted-foreground">{insight.description}</p>
+                        <div className="mb-2 rounded bg-background/60 p-2">
+                          <div className="mb-0.5 flex items-center gap-1 text-xs font-medium">
+                            <Target className="size-3" />
+                            Recommendation
+                          </div>
+                          <div className="text-xs">{insight.recommendation}</div>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <span className="font-medium">Expected Impact:</span>
+                          <span>{insight.impact}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+          </div>
         </TabsContent>
 
         <TabsContent value="anomalies" className="mt-3 space-y-3">
           <Card className="professional-card">
             <CardHeader className="p-3 pb-2">
-              <CardTitle className="text-sm font-semibold">Anomaly Detection</CardTitle>
+              <CardTitle className="text-sm font-semibold">Operational Review Items</CardTitle>
               <CardDescription className="text-xs">
-                Unusual patterns detected in your performance metrics
+                Threshold checks from recorded reservations and folios
               </CardDescription>
             </CardHeader>
             <CardContent className="p-3 pt-0">
               <div className="space-y-2">
-                {anomalies.map((anomaly, idx) => (
-                  <div key={idx}>
-                    {idx > 0 && <Separator className="my-2" />}
+                {anomalies.map((anomaly, index) => (
+                  <div key={anomaly.metric}>
+                    {index > 0 && <Separator className="my-2" />}
                     <div className="flex items-start gap-3">
-                      <div className={`p-1.5 rounded shrink-0 ${
-                        anomaly.severity === 'high' ? 'bg-red-50' :
-                        anomaly.severity === 'medium' ? 'bg-orange-50' : 'bg-yellow-50'
-                      }`}>
-                        <Warning
-                          className={`w-4 h-4 ${
-                            anomaly.severity === 'high' ? 'text-red-600' :
-                            anomaly.severity === 'medium' ? 'text-orange-600' : 'text-yellow-600'
-                          }`}
-                          weight="fill"
-                        />
+                      <div className={`shrink-0 rounded p-1.5 ${anomaly.detected ? 'bg-orange-50' : 'bg-green-50'}`}>
+                        {anomaly.detected ? (
+                          <Warning className="size-4 text-orange-600" weight="fill" />
+                        ) : (
+                          <CheckCircle className="size-4 text-green-600" weight="fill" />
+                        )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <h4 className="font-semibold text-sm">{anomaly.metric}</h4>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <h4 className="text-sm font-semibold">{anomaly.metric}</h4>
                           <Badge
-                            variant={
-                              anomaly.severity === 'high' ? 'destructive' :
-                              anomaly.severity === 'medium' ? 'default' : 'secondary'
-                            }
-                            className="text-xs px-1.5 h-5 shrink-0"
+                            variant={anomaly.detected ? (anomaly.severity === 'high' ? 'destructive' : 'default') : 'secondary'}
+                            className="h-5 shrink-0 px-1.5 text-xs"
                           >
-                            {anomaly.severity} severity
+                            {anomaly.detected ? `${anomaly.severity} severity` : 'ok'}
                           </Badge>
                         </div>
-                        <p className="text-xs text-muted-foreground mb-2">
-                          {anomaly.description}
-                        </p>
+                        <p className="mb-2 text-xs text-muted-foreground">{anomaly.description}</p>
                         <div className="flex items-center gap-4 text-xs">
                           <div>
                             <span className="text-muted-foreground">Expected:</span>
-                            <span className="font-medium ml-1">
-                              {anomaly.expectedRange[0]} - {anomaly.expectedRange[1]}
-                              {anomaly.metric.includes('Occupancy') || anomaly.metric.includes('Rate') ? '%' : ''}
-                            </span>
+                            <span className="ml-1 font-medium">{anomaly.expectedRange[0]} - {anomaly.expectedRange[1]}</span>
                           </div>
                           <div>
                             <span className="text-muted-foreground">Actual:</span>
-                            <span className={`font-medium ml-1 ${
-                              anomaly.actualValue < anomaly.expectedRange[0] || anomaly.actualValue > anomaly.expectedRange[1]
-                                ? 'text-red-600'
-                                : ''
-                            }`}>
-                              {anomaly.actualValue}
-                              {anomaly.metric.includes('Occupancy') || anomaly.metric.includes('Rate') ? '%' : ''}
-                            </span>
+                            <span className={`ml-1 font-medium ${anomaly.detected ? 'text-red-600' : ''}`}>{anomaly.actualValue}</span>
                           </div>
                         </div>
                       </div>
@@ -689,47 +578,28 @@ Return as a JSON object with a single "insights" property containing an array of
               </div>
             </CardContent>
           </Card>
-
-          <Card className="professional-card border-l-4 border-blue-500">
-            <CardContent className="p-3">
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded bg-blue-50 shrink-0">
-                  <Lightbulb className="w-4 h-4 text-blue-600" weight="fill" />
-                </div>
-                <div>
-                  <h4 className="font-semibold text-sm mb-1">Anomaly Investigation Tips</h4>
-                  <ul className="text-xs text-muted-foreground space-y-1">
-                    <li>• Check for seasonal patterns or local events affecting demand</li>
-                    <li>• Review competitor pricing and availability in the area</li>
-                    <li>• Analyze channel performance for unusual booking patterns</li>
-                    <li>• Consider implementing dynamic pricing adjustments</li>
-                  </ul>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         <TabsContent value="forecasts" className="mt-3 space-y-3">
           <Card className="professional-card">
             <CardHeader className="p-3 pb-2">
-              <CardTitle className="text-sm font-semibold">Daily Forecast Breakdown</CardTitle>
+              <CardTitle className="text-sm font-semibold">Daily On-the-books Breakdown</CardTitle>
               <CardDescription className="text-xs">
-                Detailed predictions for the next {timeHorizonDays} days
+                Recorded reservations for the next {horizonDays} days
               </CardDescription>
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <div className="border rounded-lg overflow-hidden">
+              <div className="overflow-hidden rounded-lg border">
                 <div className="max-h-96 overflow-auto">
-                  <table className="w-full text-xs compact-table">
+                  <table className="compact-table w-full text-xs">
                     <thead className="sticky top-0 bg-muted">
                       <tr>
-                        <th className="text-left font-semibold p-2">Date</th>
-                        <th className="text-right font-semibold p-2">Occupancy</th>
-                        <th className="text-right font-semibold p-2">ADR</th>
-                        <th className="text-right font-semibold p-2">RevPAR</th>
-                        <th className="text-right font-semibold p-2">Revenue</th>
-                        <th className="text-center font-semibold p-2">Day Type</th>
+                        <th className="p-2 text-left font-semibold">Date</th>
+                        <th className="p-2 text-right font-semibold">Occupancy</th>
+                        <th className="p-2 text-right font-semibold">ADR</th>
+                        <th className="p-2 text-right font-semibold">RevPAR</th>
+                        <th className="p-2 text-right font-semibold">Revenue</th>
+                        <th className="p-2 text-center font-semibold">Day Type</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -738,17 +608,17 @@ Return as a JSON object with a single "insights" property containing an array of
                           <td className="p-2 font-medium">{day.date}</td>
                           <td className="p-2 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              <div className="flex-1 max-w-[60px]">
+                              <div className="max-w-[60px] flex-1">
                                 <Progress value={day.occupancy} className="h-1" />
                               </div>
                               <span>{day.occupancy}%</span>
                             </div>
                           </td>
-                          <td className="p-2 text-right font-medium">฿{day.adr.toLocaleString()}</td>
-                          <td className="p-2 text-right">฿{day.revpar.toLocaleString()}</td>
-                          <td className="p-2 text-right font-semibold">฿{day.revenue.toLocaleString()}</td>
+                          <td className="p-2 text-right font-medium">{formatCurrency(day.adr)}</td>
+                          <td className="p-2 text-right">{formatCurrency(day.revpar)}</td>
+                          <td className="p-2 text-right font-semibold">{formatCurrency(day.revenue)}</td>
                           <td className="p-2 text-center">
-                            <Badge variant={day.isWeekend ? 'default' : 'secondary'} className="text-xs px-1.5 h-5">
+                            <Badge variant={day.isWeekend ? 'default' : 'secondary'} className="h-5 px-1.5 text-xs">
                               {day.isWeekend ? 'Weekend' : 'Weekday'}
                             </Badge>
                           </td>
@@ -761,42 +631,34 @@ Return as a JSON object with a single "insights" property containing an array of
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Card className="professional-card">
               <CardContent className="p-3">
-                <div className="text-xs text-muted-foreground mb-1">Average Occupancy</div>
-                <div className="text-2xl font-bold mb-1">
-                  {(forecastData.reduce((sum, d) => sum + d.occupancy, 0) / forecastData.length).toFixed(1)}%
-                </div>
-                <div className="text-xs text-green-600 flex items-center gap-1">
-                  <TrendUp className="w-3 h-3" />
-                  +3.2% vs last period
+                <div className="mb-1 text-xs text-muted-foreground">Average Occupancy</div>
+                <div className="mb-1 text-2xl font-bold">{(forwardRevenue.avgOccupancy * 100).toFixed(1)}%</div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <TrendUp className="size-3" />
+                  On-the-books only
                 </div>
               </CardContent>
             </Card>
-            
             <Card className="professional-card">
               <CardContent className="p-3">
-                <div className="text-xs text-muted-foreground mb-1">Average ADR</div>
-                <div className="text-2xl font-bold mb-1">
-                  ฿{Math.round(forecastData.reduce((sum, d) => sum + d.adr, 0) / forecastData.length).toLocaleString()}
-                </div>
-                <div className="text-xs text-green-600 flex items-center gap-1">
-                  <TrendUp className="w-3 h-3" />
-                  +4.8% vs last period
+                <div className="mb-1 text-xs text-muted-foreground">Average ADR</div>
+                <div className="mb-1 text-2xl font-bold">{formatCurrency(forwardRevenue.avgADR)}</div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <TrendDown className="size-3" />
+                  Recorded rates
                 </div>
               </CardContent>
             </Card>
-            
             <Card className="professional-card">
               <CardContent className="p-3">
-                <div className="text-xs text-muted-foreground mb-1">Total Revenue</div>
-                <div className="text-2xl font-bold mb-1">
-                  ฿{Math.round(forecastData.reduce((sum, d) => sum + d.revenue, 0)).toLocaleString()}
-                </div>
-                <div className="text-xs text-green-600 flex items-center gap-1">
-                  <TrendUp className="w-3 h-3" />
-                  +8.1% vs last period
+                <div className="mb-1 text-xs text-muted-foreground">Total Revenue</div>
+                <div className="mb-1 text-2xl font-bold">{formatCurrency(forwardRevenue.totalRevenue)}</div>
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <ChartBar className="size-3" />
+                  Posted reservations
                 </div>
               </CardContent>
             </Card>

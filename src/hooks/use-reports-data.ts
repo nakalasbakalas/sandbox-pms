@@ -1,5 +1,8 @@
-import { useMemo } from 'react'
-import { eachDayOfInterval, differenceInDays, format, subDays } from 'date-fns'
+import { useEffect, useMemo, useState } from 'react'
+import { useKV } from '@github/spark/hooks'
+import { eachDayOfInterval, format } from 'date-fns'
+import type { BoardRoomCard } from '@/types/board'
+import type { Guest, Reservation } from '@/types'
 import type {
   OperationsReport,
   RevenueReport,
@@ -14,419 +17,719 @@ import type {
   ChannelPerformance,
   ChannelSyncHealth,
   NationalityBreakdown,
-  RepeatGuestStat
+  RepeatGuestStat,
 } from '@/types/reports'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
 interface DateRange {
   from: Date
   to: Date
 }
 
-function generateMockOperationsData(dateRange: DateRange): OperationsReport {
-  const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to })
-  
-  const dailyStats: DailyOperationsStat[] = days.map(date => {
-    const dayOfWeek = date.getDay()
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
-    const baseOccupancy = isWeekend ? 0.75 : 0.65
-    const randomFactor = Math.random() * 0.2 - 0.1
-    const occupancyRate = Math.max(0.3, Math.min(0.95, baseOccupancy + randomFactor))
-    
-    const totalRooms = 30
-    const roomsOccupied = Math.round(totalRooms * occupancyRate)
-    const availableRooms = totalRooms - roomsOccupied
-    
-    const arrivals = Math.floor(Math.random() * 8) + 2
-    const departures = Math.floor(Math.random() * 8) + 2
-    const inHouse = roomsOccupied
-    const turnoverCount = Math.min(arrivals, departures, Math.floor(Math.random() * 5))
-    
+type ReportReservation = Partial<Reservation> & {
+  id: string
+  guestId?: string | null
+  guest?: { firstName?: string; lastName?: string; nationality?: string | null; vipStatus?: boolean; blacklisted?: boolean }
+  roomType?: { id?: string; code?: string; name?: string }
+  assignedRoom?: { id?: string; number?: string }
+  folio?: ReportFolio | null
+}
+
+type ReportGuest = Partial<Guest> & {
+  id: string
+  firstName?: string
+  lastName?: string
+  reservations?: ReportReservation[]
+}
+
+type ReportRoom = Partial<BoardRoomCard> & {
+  id?: string
+  roomId?: string
+  number?: string
+  operationalStatus?: string
+  currentStatus?: string
+  roomType?: { id?: string; code?: string; name?: string }
+}
+
+type ReportFolio = {
+  reservationId?: string
+  total?: number
+  paid?: number
+  balance?: number
+  charges?: Array<{ category?: string; date?: string; createdAt?: string; amount?: number; total?: number }>
+  payments?: Array<{ amount?: number; createdAt?: string; receivedAt?: string }>
+}
+
+type ServerSnapshot = {
+  rooms: ReportRoom[]
+  reservations: ReportReservation[]
+  guests: ReportGuest[]
+}
+
+const SELLABLE_ROOM_COUNT = 30
+const ACTIVE_RESERVATION_STATUSES = new Set(['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'HOLD'])
+const SOLD_RESERVATION_STATUSES = new Set(['CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'])
+const ARRIVAL_DEPARTURE_STATUSES = new Set(['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT'])
+
+function toDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function dateKey(value: Date | string | null | undefined): string {
+  const date = toDate(value)
+  return date ? format(date, 'yyyy-MM-dd') : ''
+}
+
+function normalizeRange(dateRange: DateRange): DateRange {
+  const from = startOfLocalDay(toDate(dateRange.from) ?? new Date())
+  const to = startOfLocalDay(toDate(dateRange.to) ?? from)
+  return from <= to ? { from, to } : { from: to, to: from }
+}
+
+function periodForRange(dateRange: DateRange) {
+  const range = normalizeRange(dateRange)
+  return { start: range.from, end: range.to }
+}
+
+function daysForRange(dateRange: DateRange): Date[] {
+  const range = normalizeRange(dateRange)
+  return eachDayOfInterval({ start: range.from, end: range.to })
+}
+
+function safeDivide(numerator: number, denominator: number): number {
+  return denominator > 0 ? numerator / denominator : 0
+}
+
+function roundMoney(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+function normalizeStatus(status: unknown): string {
+  return String(status || '').toUpperCase()
+}
+
+function isNonSellableRoomNumber(number: string | undefined): boolean {
+  return number === '216' || number === '316'
+}
+
+function isConfiguredSellableRoomNumber(number: string | undefined): boolean {
+  const numeric = Number(number)
+  return (numeric >= 201 && numeric <= 215) || (numeric >= 301 && numeric <= 315)
+}
+
+function isRoomSellable(room: ReportRoom): boolean {
+  const number = room.number
+  const operationalStatus = normalizeStatus(room.operationalStatus)
+  return isConfiguredSellableRoomNumber(number) && !isNonSellableRoomNumber(number) && !['BLOCKED', 'OUT_OF_SERVICE', 'OUT_OF_ORDER'].includes(operationalStatus)
+}
+
+function roomStatus(room: ReportRoom): string {
+  return normalizeStatus(room.currentStatus || room.cleanStatus || room.status)
+}
+
+function reservationStatus(reservation: ReportReservation): string {
+  return normalizeStatus(reservation.status)
+}
+
+function reservationNights(reservation: ReportReservation): number {
+  const checkIn = toDate(reservation.checkIn)
+  const checkOut = toDate(reservation.checkOut)
+  if (!checkIn || !checkOut) return 0
+  const milliseconds = startOfLocalDay(checkOut).getTime() - startOfLocalDay(checkIn).getTime()
+  return Math.max(0, Math.round(milliseconds / 86_400_000))
+}
+
+function reservationCoversNight(reservation: ReportReservation, day: Date): boolean {
+  const checkInKey = dateKey(reservation.checkIn)
+  const checkOutKey = dateKey(reservation.checkOut)
+  const dayKey = dateKey(day)
+  return Boolean(checkInKey && checkOutKey && dayKey >= checkInKey && dayKey < checkOutKey)
+}
+
+function reservationStartsOn(reservation: ReportReservation, day: Date): boolean {
+  return dateKey(reservation.checkIn) === dateKey(day)
+}
+
+function reservationEndsOn(reservation: ReportReservation, day: Date): boolean {
+  return dateKey(reservation.checkOut) === dateKey(day)
+}
+
+function reservationsInRange(reservations: ReportReservation[], dateRange: DateRange): ReportReservation[] {
+  const range = normalizeRange(dateRange)
+  const startKey = dateKey(range.from)
+  const endKey = dateKey(range.to)
+  return reservations.filter((reservation) => {
+    const checkInKey = dateKey(reservation.checkIn)
+    const checkOutKey = dateKey(reservation.checkOut)
+    return checkInKey <= endKey && checkOutKey >= startKey
+  })
+}
+
+function sourceLabel(source: unknown): string {
+  const value = String(source || 'DIRECT').toUpperCase()
+  const labels: Record<string, string> = {
+    DIRECT: 'Direct',
+    WALK_IN: 'Walk-in',
+    PHONE: 'Phone',
+    EMAIL: 'Email',
+    WEBSITE: 'Website',
+    BOOKING_COM: 'Booking.com',
+    AGODA: 'Agoda',
+    EXPEDIA: 'Expedia',
+    AIRBNB: 'Airbnb',
+    OTHER: 'Other',
+  }
+  return labels[value] || value.replaceAll('_', ' ')
+}
+
+function roomTypeId(reservation: ReportReservation): string {
+  return reservation.roomType?.id || reservation.roomTypeId || 'unassigned'
+}
+
+function roomTypeName(reservation: ReportReservation): string {
+  return reservation.roomType?.name || reservation.roomType?.code || String(reservation.roomTypeId || 'Unassigned room type')
+}
+
+function guestNameFromReservation(reservation: ReportReservation): string {
+  if (reservation.guestName) return String(reservation.guestName)
+  const firstName = reservation.guest?.firstName || ''
+  const lastName = reservation.guest?.lastName || ''
+  return `${firstName} ${lastName}`.trim() || 'Guest record'
+}
+
+function reservationTotal(reservation: ReportReservation): number {
+  return Number(reservation.totalAmount || reservation.folio?.total || 0)
+}
+
+function reservationPaid(reservation: ReportReservation): number {
+  const payments = reservation.folio?.payments || []
+  if (typeof reservation.folio?.paid === 'number') return reservation.folio.paid
+  return payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+}
+
+function reservationBalance(reservation: ReportReservation): number {
+  if (typeof reservation.folio?.balance === 'number') return reservation.folio.balance
+  return Math.max(0, reservationTotal(reservation) - reservationPaid(reservation))
+}
+
+function realRoomCount(rooms: ReportRoom[]): number {
+  const sellableRooms = rooms.filter(isRoomSellable).length
+  return sellableRooms || SELLABLE_ROOM_COUNT
+}
+
+function realRoomStatusCounts(rooms: ReportRoom[]) {
+  const configuredRooms = rooms.length ? rooms : []
+  return {
+    dirty: configuredRooms.filter((room) => ['VACANT_DIRTY', 'OCCUPIED_DIRTY', 'DIRTY'].includes(roomStatus(room))).length,
+    clean: configuredRooms.filter((room) => ['VACANT_CLEAN', 'OCCUPIED_CLEAN', 'CLEAN'].includes(roomStatus(room))).length,
+    inspected: configuredRooms.filter((room) => roomStatus(room) === 'INSPECTED').length,
+    maintenance: configuredRooms.filter((room) => ['OUT_OF_SERVICE', 'OUT_OF_ORDER'].includes(normalizeStatus(room.operationalStatus))).length,
+    blocked: configuredRooms.filter((room) => normalizeStatus(room.operationalStatus) === 'BLOCKED' || isNonSellableRoomNumber(room.number)).length,
+  }
+}
+
+function generateOperationsData(dateRange: DateRange, rooms: ReportRoom[], reservations: ReportReservation[]): OperationsReport {
+  const days = daysForRange(dateRange)
+  const roomCount = realRoomCount(rooms)
+  const statusCounts = realRoomStatusCounts(rooms)
+  const todayKey = dateKey(new Date())
+
+  const dailyStats: DailyOperationsStat[] = days.map((date) => {
+    const key = dateKey(date)
+    const arrivals = reservations.filter((reservation) =>
+      ARRIVAL_DEPARTURE_STATUSES.has(reservationStatus(reservation)) && reservationStartsOn(reservation, date)
+    ).length
+    const departures = reservations.filter((reservation) =>
+      ARRIVAL_DEPARTURE_STATUSES.has(reservationStatus(reservation)) && reservationEndsOn(reservation, date)
+    ).length
+    const occupiedReservations = reservations.filter((reservation) =>
+      SOLD_RESERVATION_STATUSES.has(reservationStatus(reservation)) && reservationCoversNight(reservation, date)
+    )
+    const roomsOccupied = Math.min(roomCount, occupiedReservations.length)
+    const currentRoomStatusAvailable = key === todayKey
+
     return {
       date,
       arrivals,
       departures,
-      inHouse,
-      occupancyRate,
-      availableRooms,
+      inHouse: roomsOccupied,
+      occupancyRate: safeDivide(roomsOccupied, roomCount),
+      availableRooms: Math.max(0, roomCount - roomsOccupied),
       roomsOccupied,
-      roomsDirty: Math.floor(Math.random() * 5) + 1,
-      roomsClean: Math.floor(Math.random() * 8) + 15,
-      roomsInspected: Math.floor(Math.random() * 6) + 18,
-      roomsMaintenance: Math.floor(Math.random() * 2),
-      roomsBlocked: 2,
-      turnoverCount,
+      roomsDirty: currentRoomStatusAvailable ? statusCounts.dirty : 0,
+      roomsClean: currentRoomStatusAvailable ? statusCounts.clean : 0,
+      roomsInspected: currentRoomStatusAvailable ? statusCounts.inspected : 0,
+      roomsMaintenance: currentRoomStatusAvailable ? statusCounts.maintenance : 0,
+      roomsBlocked: currentRoomStatusAvailable ? statusCounts.blocked : 0,
+      turnoverCount: Math.min(arrivals, departures),
     }
   })
 
-  const totalArrivals = dailyStats.reduce((sum, s) => sum + s.arrivals, 0)
-  const totalDepartures = dailyStats.reduce((sum, s) => sum + s.departures, 0)
-  const avgOccupancyRate = dailyStats.reduce((sum, s) => sum + s.occupancyRate, 0) / dailyStats.length
-  
-  const peakDay = dailyStats.reduce((max, s) => s.occupancyRate > max.occupancyRate ? s : max)
-  const lowestDay = dailyStats.reduce((min, s) => s.occupancyRate < min.occupancyRate ? s : min)
+  const totalArrivals = dailyStats.reduce((sum, stat) => sum + stat.arrivals, 0)
+  const totalDepartures = dailyStats.reduce((sum, stat) => sum + stat.departures, 0)
+  const avgOccupancyRate = safeDivide(dailyStats.reduce((sum, stat) => sum + stat.occupancyRate, 0), dailyStats.length)
+  const peakDay = dailyStats.reduce((max, stat) => (stat.occupancyRate > max.occupancyRate ? stat : max), dailyStats[0])
+  const lowestDay = dailyStats.reduce((min, stat) => (stat.occupancyRate < min.occupancyRate ? stat : min), dailyStats[0])
+  const scopedReservations = reservationsInRange(reservations, dateRange)
+  const totalNoShows = scopedReservations.filter((reservation) => reservationStatus(reservation) === 'NO_SHOW').length
+  const totalCancellations = scopedReservations.filter((reservation) => reservationStatus(reservation) === 'CANCELLED').length
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     dailyStats,
     summary: {
       totalArrivals,
       totalDepartures,
       avgOccupancyRate,
-      peakOccupancyDate: peakDay.date,
-      peakOccupancyRate: peakDay.occupancyRate,
-      lowestOccupancyDate: lowestDay.date,
-      lowestOccupancyRate: lowestDay.occupancyRate,
-      totalNoShows: Math.floor(totalArrivals * 0.02),
-      totalCancellations: Math.floor(totalArrivals * 0.08),
-      cancellationRate: 0.08,
+      peakOccupancyDate: peakDay?.date ?? normalizeRange(dateRange).from,
+      peakOccupancyRate: peakDay?.occupancyRate ?? 0,
+      lowestOccupancyDate: lowestDay?.date ?? normalizeRange(dateRange).from,
+      lowestOccupancyRate: lowestDay?.occupancyRate ?? 0,
+      totalNoShows,
+      totalCancellations,
+      cancellationRate: safeDivide(totalCancellations, scopedReservations.length),
     },
   }
 }
 
-function generateMockRevenueData(dateRange: DateRange): RevenueReport {
-  const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to })
-  
-  const dailyStats: DailyRevenueStat[] = days.map(date => {
-    const dayOfWeek = date.getDay()
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
-    const baseOccupancy = isWeekend ? 0.75 : 0.65
-    const occupancyRate = Math.max(0.3, Math.min(0.95, baseOccupancy + (Math.random() * 0.2 - 0.1)))
-    
-    const totalRooms = 30
-    const roomsSold = Math.round(totalRooms * occupancyRate)
-    const adr = Math.round(1800 + (Math.random() * 400))
-    const roomRevenue = roomsSold * adr
-    const extrasRevenue = Math.round(roomRevenue * (0.1 + Math.random() * 0.15))
-    const revpar = Math.round((roomRevenue / totalRooms))
-    
+function generateRevenueData(dateRange: DateRange, rooms: ReportRoom[], reservations: ReportReservation[]): RevenueReport {
+  const days = daysForRange(dateRange)
+  const roomCount = realRoomCount(rooms)
+  const revenueReservations = reservations.filter((reservation) => SOLD_RESERVATION_STATUSES.has(reservationStatus(reservation)))
+
+  const dailyStats: DailyRevenueStat[] = days.map((date) => {
+    const reservationsForNight = revenueReservations.filter((reservation) => reservationCoversNight(reservation, date))
+    const roomRevenue = reservationsForNight.reduce((sum, reservation) => {
+      const nights = reservationNights(reservation)
+      return sum + safeDivide(reservationTotal(reservation), nights)
+    }, 0)
+    const extrasRevenue = revenueReservations.reduce((sum, reservation) => {
+      const charges = reservation.folio?.charges || []
+      return sum + charges
+        .filter((charge) => normalizeStatus(charge.category) !== 'ROOM' && dateKey(charge.date || charge.createdAt) === dateKey(date))
+        .reduce((chargeSum, charge) => chargeSum + Number(charge.total ?? charge.amount ?? 0), 0)
+    }, 0)
+    const roomsSold = reservationsForNight.length
+    const totalRevenue = roomRevenue + extrasRevenue
+
     return {
       date,
-      roomRevenue,
-      extrasRevenue,
-      totalRevenue: roomRevenue + extrasRevenue,
+      roomRevenue: roundMoney(roomRevenue),
+      extrasRevenue: roundMoney(extrasRevenue),
+      totalRevenue: roundMoney(totalRevenue),
       roomsSold,
-      roomsAvailable: totalRooms,
-      adr,
-      revpar,
-      occupancyRate,
+      roomsAvailable: roomCount,
+      adr: roundMoney(safeDivide(roomRevenue, roomsSold)),
+      revpar: roundMoney(safeDivide(roomRevenue, roomCount)),
+      occupancyRate: safeDivide(roomsSold, roomCount),
     }
   })
 
-  const totalRevenue = dailyStats.reduce((sum, s) => sum + s.totalRevenue, 0)
-  const roomRevenue = dailyStats.reduce((sum, s) => sum + s.roomRevenue, 0)
-  const extrasRevenue = dailyStats.reduce((sum, s) => sum + s.extrasRevenue, 0)
-  const totalRoomNights = dailyStats.reduce((sum, s) => sum + s.roomsSold, 0)
-  const avgADR = roomRevenue / totalRoomNights
-  const avgRevPAR = totalRevenue / (dailyStats.length * 30)
-  const avgOccupancy = dailyStats.reduce((sum, s) => sum + s.occupancyRate, 0) / dailyStats.length
+  const totalRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.totalRevenue, 0))
+  const roomRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.roomRevenue, 0))
+  const extrasRevenue = roundMoney(dailyStats.reduce((sum, stat) => sum + stat.extrasRevenue, 0))
+  const totalRoomNights = dailyStats.reduce((sum, stat) => sum + stat.roomsSold, 0)
+  const avgOccupancy = safeDivide(dailyStats.reduce((sum, stat) => sum + stat.occupancyRate, 0), dailyStats.length)
+
+  const roomTypeBuckets = new Map<string, { roomTypeName: string; roomsSold: number; revenue: number }>()
+  const channelBuckets = new Map<string, { reservations: number; revenue: number }>()
+
+  for (const reservation of revenueReservations.filter((item) => reservationsInRange([item], dateRange).length > 0)) {
+    const nights = reservationNights(reservation)
+    const total = reservationTotal(reservation)
+    const roomTypeKey = roomTypeId(reservation)
+    const roomTypeBucket = roomTypeBuckets.get(roomTypeKey) || { roomTypeName: roomTypeName(reservation), roomsSold: 0, revenue: 0 }
+    roomTypeBucket.roomsSold += nights
+    roomTypeBucket.revenue += total
+    roomTypeBuckets.set(roomTypeKey, roomTypeBucket)
+
+    const channel = sourceLabel(reservation.source)
+    const channelBucket = channelBuckets.get(channel) || { reservations: 0, revenue: 0 }
+    channelBucket.reservations += 1
+    channelBucket.revenue += total
+    channelBuckets.set(channel, channelBucket)
+  }
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     dailyStats,
     summary: {
       totalRevenue,
       roomRevenue,
       extrasRevenue,
-      avgADR,
-      avgRevPAR,
+      avgADR: roundMoney(safeDivide(roomRevenue, totalRoomNights)),
+      avgRevPAR: roundMoney(safeDivide(totalRevenue, days.length * roomCount)),
       avgOccupancy,
       totalRoomNights,
-      outstandingBalance: Math.round(totalRevenue * 0.05),
-      depositsCollected: Math.round(totalRevenue * 0.25),
-      depositsPending: Math.round(totalRevenue * 0.08),
-      refundsIssued: Math.round(totalRevenue * 0.02),
+      outstandingBalance: roundMoney(revenueReservations.reduce((sum, reservation) => sum + reservationBalance(reservation), 0)),
+      depositsCollected: roundMoney(revenueReservations.reduce((sum, reservation) => sum + (reservation.depositPaid ? Number(reservation.depositAmount || 0) : 0), 0)),
+      depositsPending: roundMoney(revenueReservations.reduce((sum, reservation) => sum + (!reservation.depositPaid ? Number(reservation.depositAmount || 0) : 0), 0)),
+      refundsIssued: roundMoney(Math.abs(revenueReservations.reduce((sum, reservation) => {
+        const payments = reservation.folio?.payments || []
+        return sum + payments.filter((payment) => Number(payment.amount || 0) < 0).reduce((paymentSum, payment) => paymentSum + Number(payment.amount || 0), 0)
+      }, 0))),
     },
-    byRoomType: [
-      {
-        roomTypeId: '1',
-        roomTypeName: 'Twin Room',
-        roomsSold: Math.floor(totalRoomNights * 0.5),
-        revenue: Math.round(roomRevenue * 0.45),
-        adr: 1750,
-        occupancyRate: avgOccupancy * 0.95,
-      },
-      {
-        roomTypeId: '2',
-        roomTypeName: 'Double Room',
-        roomsSold: Math.floor(totalRoomNights * 0.5),
-        revenue: Math.round(roomRevenue * 0.55),
-        adr: 2050,
-        occupancyRate: avgOccupancy * 1.05,
-      },
-    ],
-    byChannel: [
-      {
-        channel: 'Direct',
-        reservations: Math.floor(totalRoomNights * 0.25 / 3),
-        revenue: Math.round(totalRevenue * 0.25),
-        adr: avgADR * 1.15,
-        percentage: 25,
-      },
-      {
-        channel: 'Booking.com',
-        reservations: Math.floor(totalRoomNights * 0.35 / 3),
-        revenue: Math.round(totalRevenue * 0.35),
-        adr: avgADR * 0.95,
-        percentage: 35,
-      },
-      {
-        channel: 'Agoda',
-        reservations: Math.floor(totalRoomNights * 0.25 / 3),
-        revenue: Math.round(totalRevenue * 0.25),
-        adr: avgADR * 0.92,
-        percentage: 25,
-      },
-      {
-        channel: 'Airbnb',
-        reservations: Math.floor(totalRoomNights * 0.15 / 3),
-        revenue: Math.round(totalRevenue * 0.15),
-        adr: avgADR * 1.05,
-        percentage: 15,
-      },
-    ],
+    byRoomType: Array.from(roomTypeBuckets.entries()).map(([id, bucket]) => ({
+      roomTypeId: id,
+      roomTypeName: bucket.roomTypeName,
+      roomsSold: bucket.roomsSold,
+      revenue: roundMoney(bucket.revenue),
+      adr: roundMoney(safeDivide(bucket.revenue, bucket.roomsSold)),
+      occupancyRate: safeDivide(bucket.roomsSold, days.length * Math.max(1, rooms.filter((room) => room.roomType?.id === id || room.roomType?.code === id).length || 1)),
+    })),
+    byChannel: Array.from(channelBuckets.entries()).map(([channel, bucket]) => ({
+      channel,
+      reservations: bucket.reservations,
+      revenue: roundMoney(bucket.revenue),
+      adr: roundMoney(safeDivide(bucket.revenue, bucket.reservations)),
+      percentage: safeDivide(bucket.revenue, totalRevenue) * 100,
+    })),
   }
 }
 
-function generateMockReservationData(dateRange: DateRange): ReservationReport {
-  const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to })
-  
-  const bookingPace: BookingPaceStat[] = days.map(date => ({
-    bookingDate: date,
-    reservationsBooked: Math.floor(Math.random() * 8) + 3,
-    roomNightsBooked: Math.floor(Math.random() * 25) + 10,
-    totalValue: Math.round((Math.random() * 40000) + 20000),
-  }))
+function generateReservationData(dateRange: DateRange, reservations: ReportReservation[]): ReservationReport {
+  const days = daysForRange(dateRange)
+  const scopedReservations = reservations.filter((reservation) =>
+    ACTIVE_RESERVATION_STATUSES.has(reservationStatus(reservation)) && reservationsInRange([reservation], dateRange).length > 0
+  )
+  const bookingPace: BookingPaceStat[] = days.map((date) => {
+    const reservationsBooked = reservations.filter((reservation) => dateKey(reservation.createdAt) === dateKey(date))
+    return {
+      bookingDate: date,
+      reservationsBooked: reservationsBooked.length,
+      roomNightsBooked: reservationsBooked.reduce((sum, reservation) => sum + reservationNights(reservation), 0),
+      totalValue: roundMoney(reservationsBooked.reduce((sum, reservation) => sum + reservationTotal(reservation), 0)),
+    }
+  })
 
-  const totalReservations = bookingPace.reduce((sum, bp) => sum + bp.reservationsBooked, 0)
-  const totalRoomNights = bookingPace.reduce((sum, bp) => sum + bp.roomNightsBooked, 0)
+  const sourceBuckets = new Map<string, { reservations: number; roomNights: number; revenue: number; cancellations: number }>()
+  for (const reservation of reservationsInRange(reservations, dateRange)) {
+    const source = sourceLabel(reservation.source)
+    const bucket = sourceBuckets.get(source) || { reservations: 0, roomNights: 0, revenue: 0, cancellations: 0 }
+    bucket.reservations += 1
+    bucket.roomNights += reservationNights(reservation)
+    bucket.revenue += reservationTotal(reservation)
+    bucket.cancellations += reservationStatus(reservation) === 'CANCELLED' ? 1 : 0
+    sourceBuckets.set(source, bucket)
+  }
+
+  const totalReservations = scopedReservations.length
+  const totalRoomNights = scopedReservations.reduce((sum, reservation) => sum + reservationNights(reservation), 0)
+  const totalCancellations = reservationsInRange(reservations, dateRange).filter((reservation) => reservationStatus(reservation) === 'CANCELLED').length
+  const leadTimes = scopedReservations.map((reservation) => {
+    const createdAt = toDate(reservation.createdAt)
+    const checkIn = toDate(reservation.checkIn)
+    if (!createdAt || !checkIn) return 0
+    return Math.max(0, Math.round((startOfLocalDay(checkIn).getTime() - startOfLocalDay(createdAt).getTime()) / 86_400_000))
+  })
+
+  const stayLengths = scopedReservations.map(reservationNights)
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     bookingPace,
     leadTime: {
-      sameDay: Math.floor(totalReservations * 0.05),
-      days1to3: Math.floor(totalReservations * 0.12),
-      days4to7: Math.floor(totalReservations * 0.18),
-      days8to14: Math.floor(totalReservations * 0.22),
-      days15to30: Math.floor(totalReservations * 0.25),
-      days31to60: Math.floor(totalReservations * 0.12),
-      days61to90: Math.floor(totalReservations * 0.04),
-      over90Days: Math.floor(totalReservations * 0.02),
+      sameDay: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival === 0).length,
+      days1to3: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 1 && daysBeforeArrival <= 3).length,
+      days4to7: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 4 && daysBeforeArrival <= 7).length,
+      days8to14: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 8 && daysBeforeArrival <= 14).length,
+      days15to30: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 15 && daysBeforeArrival <= 30).length,
+      days31to60: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 31 && daysBeforeArrival <= 60).length,
+      days61to90: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival >= 61 && daysBeforeArrival <= 90).length,
+      over90Days: leadTimes.filter((daysBeforeArrival) => daysBeforeArrival > 90).length,
     },
     stayLength: {
-      oneNight: Math.floor(totalReservations * 0.15),
-      twoNights: Math.floor(totalReservations * 0.25),
-      threeFourNights: Math.floor(totalReservations * 0.35),
-      fiveSixNights: Math.floor(totalReservations * 0.15),
-      oneWeek: Math.floor(totalReservations * 0.07),
-      twoWeeks: Math.floor(totalReservations * 0.02),
-      overTwoWeeks: Math.floor(totalReservations * 0.01),
+      oneNight: stayLengths.filter((nights) => nights === 1).length,
+      twoNights: stayLengths.filter((nights) => nights === 2).length,
+      threeFourNights: stayLengths.filter((nights) => nights >= 3 && nights <= 4).length,
+      fiveSixNights: stayLengths.filter((nights) => nights >= 5 && nights <= 6).length,
+      oneWeek: stayLengths.filter((nights) => nights === 7).length,
+      twoWeeks: stayLengths.filter((nights) => nights > 7 && nights <= 14).length,
+      overTwoWeeks: stayLengths.filter((nights) => nights > 14).length,
     },
-    sourceBreakdown: [
-      {
-        source: 'Direct',
-        reservations: Math.floor(totalReservations * 0.25),
-        roomNights: Math.floor(totalRoomNights * 0.25),
-        revenue: 450000,
-        adr: 1950,
-        cancellations: Math.floor(totalReservations * 0.25 * 0.05),
-        cancellationRate: 0.05,
-      },
-      {
-        source: 'Booking.com',
-        reservations: Math.floor(totalReservations * 0.35),
-        roomNights: Math.floor(totalRoomNights * 0.35),
-        revenue: 620000,
-        adr: 1850,
-        cancellations: Math.floor(totalReservations * 0.35 * 0.12),
-        cancellationRate: 0.12,
-      },
-      {
-        source: 'Agoda',
-        reservations: Math.floor(totalReservations * 0.25),
-        roomNights: Math.floor(totalRoomNights * 0.25),
-        revenue: 440000,
-        adr: 1800,
-        cancellations: Math.floor(totalReservations * 0.25 * 0.10),
-        cancellationRate: 0.10,
-      },
-      {
-        source: 'Airbnb',
-        reservations: Math.floor(totalReservations * 0.15),
-        roomNights: Math.floor(totalRoomNights * 0.15),
-        revenue: 280000,
-        adr: 1900,
-        cancellations: Math.floor(totalReservations * 0.15 * 0.08),
-        cancellationRate: 0.08,
-      },
-    ],
+    sourceBreakdown: Array.from(sourceBuckets.entries()).map(([source, bucket]) => ({
+      source,
+      reservations: bucket.reservations,
+      roomNights: bucket.roomNights,
+      revenue: roundMoney(bucket.revenue),
+      adr: roundMoney(safeDivide(bucket.revenue, bucket.roomNights)),
+      cancellations: bucket.cancellations,
+      cancellationRate: safeDivide(bucket.cancellations, bucket.reservations),
+    })),
     summary: {
       totalReservations,
       totalRoomNights,
-      avgStayLength: totalRoomNights / totalReservations,
-      avgLeadTime: 18.5,
-      totalCancellations: Math.floor(totalReservations * 0.09),
-      cancellationRate: 0.09,
-      totalModifications: Math.floor(totalReservations * 0.15),
-      modificationRate: 0.15,
-      directBookingRate: 0.25,
+      avgStayLength: safeDivide(totalRoomNights, totalReservations),
+      avgLeadTime: safeDivide(leadTimes.reduce((sum, value) => sum + value, 0), leadTimes.length),
+      totalCancellations,
+      cancellationRate: safeDivide(totalCancellations, totalReservations + totalCancellations),
+      totalModifications: 0,
+      modificationRate: 0,
+      directBookingRate: safeDivide(scopedReservations.filter((reservation) => sourceLabel(reservation.source) === 'Direct').length, totalReservations),
     },
   }
 }
 
-function generateMockHousekeepingData(dateRange: DateRange): HousekeepingReport {
-  const days = eachDayOfInterval({ start: dateRange.from, end: dateRange.to })
-  
-  const dailyStats: DailyHousekeepingStat[] = days.map(date => {
-    const checkouts = Math.floor(Math.random() * 8) + 2
-    const turnovers = Math.min(checkouts, Math.floor(Math.random() * 7) + 2)
-    const sameDayTurnovers = Math.floor(turnovers * 0.7)
-    
+function generateHousekeepingData(dateRange: DateRange, rooms: ReportRoom[], reservations: ReportReservation[]): HousekeepingReport {
+  const days = daysForRange(dateRange)
+  const statusCounts = realRoomStatusCounts(rooms)
+  const todayKey = dateKey(new Date())
+
+  const dailyStats: DailyHousekeepingStat[] = days.map((date) => {
+    const key = dateKey(date)
+    const checkouts = reservations.filter((reservation) =>
+      ARRIVAL_DEPARTURE_STATUSES.has(reservationStatus(reservation)) && reservationEndsOn(reservation, date)
+    ).length
+    const hasCurrentRoomStatus = key === todayKey
+
     return {
       date,
       checkouts,
-      turnovers,
-      cleanedRooms: Math.floor(Math.random() * 12) + 8,
-      inspectedRooms: Math.floor(Math.random() * 10) + 6,
-      avgCleanTime: Math.floor(Math.random() * 15) + 25,
-      sameDayTurnovers,
-      delayedReadiness: Math.floor(Math.random() * 3),
-    }
-  })
-
-  const rooms = Array.from({ length: 30 }, (_, i) => {
-    const floor = i < 15 ? 2 : 3
-    const roomNum = i < 15 ? 201 + i : 301 + (i - 15)
-    return {
-      roomNumber: roomNum.toString(),
-      cleanings: Math.floor(Math.random() * 15) + 10,
-      avgCleanTime: Math.floor(Math.random() * 10) + 28,
-      maintenanceDays: Math.floor(Math.random() * 3),
-      blockedDays: roomNum === 216 || roomNum === 316 ? days.length : 0,
+      turnovers: checkouts,
+      cleanedRooms: hasCurrentRoomStatus ? statusCounts.clean : 0,
+      inspectedRooms: hasCurrentRoomStatus ? statusCounts.inspected : 0,
+      avgCleanTime: 0,
+      sameDayTurnovers: 0,
+      delayedReadiness: hasCurrentRoomStatus ? statusCounts.dirty : 0,
     }
   })
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     dailyStats,
     summary: {
-      totalCleanings: dailyStats.reduce((sum, s) => sum + s.cleanedRooms, 0),
-      totalInspections: dailyStats.reduce((sum, s) => sum + s.inspectedRooms, 0),
-      avgCleaningTime: Math.round(dailyStats.reduce((sum, s) => sum + s.avgCleanTime, 0) / dailyStats.length),
-      onTimeReadinessRate: 0.92,
-      maintenanceRoomDays: rooms.reduce((sum, r) => sum + r.maintenanceDays, 0),
-      blockedRoomDays: rooms.reduce((sum, r) => sum + r.blockedDays, 0),
+      totalCleanings: dailyStats.reduce((sum, stat) => sum + stat.cleanedRooms, 0),
+      totalInspections: dailyStats.reduce((sum, stat) => sum + stat.inspectedRooms, 0),
+      avgCleaningTime: 0,
+      onTimeReadinessRate: 0,
+      maintenanceRoomDays: rooms.filter((room) => ['OUT_OF_SERVICE', 'OUT_OF_ORDER'].includes(normalizeStatus(room.operationalStatus))).length * days.length,
+      blockedRoomDays: rooms.filter((room) => normalizeStatus(room.operationalStatus) === 'BLOCKED' || isNonSellableRoomNumber(room.number)).length * days.length,
     },
-    byRoom: rooms,
+    byRoom: rooms.map((room) => ({
+      roomNumber: room.number || 'Unnumbered',
+      cleanings: 0,
+      avgCleanTime: 0,
+      maintenanceDays: ['OUT_OF_SERVICE', 'OUT_OF_ORDER'].includes(normalizeStatus(room.operationalStatus)) ? days.length : 0,
+      blockedDays: normalizeStatus(room.operationalStatus) === 'BLOCKED' || isNonSellableRoomNumber(room.number) ? days.length : 0,
+    })),
   }
 }
 
-function generateMockChannelData(dateRange: DateRange): ChannelReport {
-  const channels = ['Direct', 'Booking.com', 'Agoda', 'Airbnb']
-  
-  const byChannel: ChannelPerformance[] = channels.map(channel => ({
-    channel,
-    reservations: Math.floor(Math.random() * 80) + 40,
-    roomNights: Math.floor(Math.random() * 250) + 150,
-    revenue: Math.round((Math.random() * 400000) + 300000),
-    adr: Math.round(1700 + Math.random() * 500),
-    cancellations: Math.floor(Math.random() * 15) + 2,
-    modifications: Math.floor(Math.random() * 20) + 5,
-    avgLeadTime: Math.round(10 + Math.random() * 20),
-  }))
+function generateChannelData(dateRange: DateRange, reservations: ReportReservation[]): ChannelReport {
+  const scopedReservations = reservationsInRange(reservations, dateRange).filter((reservation) =>
+    ACTIVE_RESERVATION_STATUSES.has(reservationStatus(reservation))
+  )
+  const channelBuckets = new Map<string, ChannelPerformance>()
 
-  const syncHealth: ChannelSyncHealth[] = channels.map(channel => {
-    const totalSyncs = Math.floor(Math.random() * 100) + 200
-    const successRate = 0.88 + Math.random() * 0.11
-    
-    return {
+  for (const reservation of scopedReservations) {
+    const channel = sourceLabel(reservation.source)
+    const current = channelBuckets.get(channel) || {
       channel,
-      lastSyncTime: subDays(new Date(), Math.floor(Math.random() * 2)),
-      totalSyncs,
-      successfulSyncs: Math.floor(totalSyncs * successRate),
-      failedSyncs: Math.floor(totalSyncs * (1 - successRate)),
-      successRate,
-      conflicts: Math.floor(Math.random() * 3),
-      unmappedRooms: Math.floor(Math.random() * 2),
+      reservations: 0,
+      roomNights: 0,
+      revenue: 0,
+      adr: 0,
+      cancellations: 0,
+      modifications: 0,
+      avgLeadTime: 0,
     }
-  })
+    current.reservations += 1
+    current.roomNights += reservationNights(reservation)
+    current.revenue += reservationTotal(reservation)
+    channelBuckets.set(channel, current)
+  }
 
-  const totalChannelReservations = byChannel.reduce((sum, ch) => sum + ch.reservations, 0)
-  const totalChannelRevenue = byChannel.reduce((sum, ch) => sum + ch.revenue, 0)
-  const directChannel = byChannel.find(ch => ch.channel === 'Direct')
-  const otaChannels = byChannel.filter(ch => ch.channel !== 'Direct')
-  const otaRevenue = otaChannels.reduce((sum, ch) => sum + ch.revenue, 0)
-  const mostPerforming = byChannel.reduce((max, ch) => ch.revenue > max.revenue ? ch : max)
+  const byChannel = Array.from(channelBuckets.values()).map((channel) => ({
+    ...channel,
+    revenue: roundMoney(channel.revenue),
+    adr: roundMoney(safeDivide(channel.revenue, channel.roomNights)),
+  }))
+  const totalChannelRevenue = byChannel.reduce((sum, channel) => sum + channel.revenue, 0)
+  const directRevenue = byChannel.find((channel) => channel.channel === 'Direct')?.revenue || 0
+  const syncHealth: ChannelSyncHealth[] = byChannel.map((channel) => ({
+    channel: channel.channel,
+    lastSyncTime: normalizeRange(dateRange).to,
+    totalSyncs: 0,
+    successfulSyncs: 0,
+    failedSyncs: 0,
+    successRate: 0,
+    conflicts: 0,
+    unmappedRooms: 0,
+  }))
+  const mostPerforming = byChannel.reduce<ChannelPerformance | null>((best, channel) => {
+    if (!best || channel.revenue > best.revenue) return channel
+    return best
+  }, null)
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     byChannel,
     syncHealth,
     summary: {
-      totalChannelReservations,
-      totalChannelRevenue,
-      directBookingPercentage: directChannel ? (directChannel.revenue / totalChannelRevenue) * 100 : 0,
-      otaBookingPercentage: (otaRevenue / totalChannelRevenue) * 100,
-      avgChannelADR: totalChannelRevenue / byChannel.reduce((sum, ch) => sum + ch.roomNights, 0),
-      avgDirectADR: directChannel?.adr || 0,
-      mostPerformingChannel: mostPerforming.channel,
+      totalChannelReservations: byChannel.reduce((sum, channel) => sum + channel.reservations, 0),
+      totalChannelRevenue: roundMoney(totalChannelRevenue),
+      directBookingPercentage: safeDivide(directRevenue, totalChannelRevenue) * 100,
+      otaBookingPercentage: safeDivide(totalChannelRevenue - directRevenue, totalChannelRevenue) * 100,
+      avgChannelADR: roundMoney(safeDivide(totalChannelRevenue, byChannel.reduce((sum, channel) => sum + channel.roomNights, 0))),
+      avgDirectADR: roundMoney(safeDivide(directRevenue, byChannel.find((channel) => channel.channel === 'Direct')?.roomNights || 0)),
+      mostPerformingChannel: mostPerforming?.channel || 'No channel data',
     },
   }
 }
 
-function generateMockGuestData(dateRange: DateRange): GuestReport {
-  const nationalities = [
-    'Thailand', 'United States', 'United Kingdom', 'Australia', 'Germany',
-    'France', 'Japan', 'China', 'Singapore', 'South Korea', 'Canada', 'Italy'
-  ]
+function guestName(guest: ReportGuest): string {
+  return `${guest.firstName || ''} ${guest.lastName || ''}`.trim() || 'Guest record'
+}
 
-  const totalGuests = Math.floor(Math.random() * 200) + 300
-  
-  const nationalityBreakdown: NationalityBreakdown[] = nationalities.map(nat => {
-    const guestCount = Math.floor(Math.random() * totalGuests * 0.2) + 10
-    return {
-      nationality: nat,
-      guestCount,
-      reservations: Math.floor(guestCount * 0.8),
-      percentage: (guestCount / totalGuests) * 100,
+function guestsFromReservations(reservations: ReportReservation[]): ReportGuest[] {
+  const guests = new Map<string, ReportGuest>()
+  for (const reservation of reservations) {
+    const id = reservation.guestId || reservation.guest?.firstName || reservation.id
+    const current = guests.get(id) || {
+      id,
+      firstName: reservation.guest?.firstName || guestNameFromReservation(reservation),
+      lastName: reservation.guest?.lastName || '',
+      nationality: reservation.guest?.nationality || null,
+      vipStatus: Boolean(reservation.guest?.vipStatus),
+      blacklisted: Boolean(reservation.guest?.blacklisted),
+      reservations: [],
     }
-  }).sort((a, b) => b.guestCount - a.guestCount)
+    current.reservations = [...(current.reservations || []), reservation]
+    guests.set(id, current)
+  }
+  return Array.from(guests.values())
+}
 
-  const repeatGuests: RepeatGuestStat[] = Array.from({ length: 25 }, (_, i) => ({
-    guestId: `guest-${i}`,
-    guestName: `Guest ${i + 1}`,
-    totalStays: Math.floor(Math.random() * 8) + 2,
-    totalNights: Math.floor(Math.random() * 30) + 10,
-    totalRevenue: Math.round((Math.random() * 80000) + 20000),
-    lastStayDate: subDays(new Date(), Math.floor(Math.random() * 90)),
-  })).sort((a, b) => b.totalStays - a.totalStays)
+function generateGuestData(dateRange: DateRange, guests: ReportGuest[], reservations: ReportReservation[]): GuestReport {
+  const reportGuests = guests.length ? guests : guestsFromReservations(reservations)
+  const scopedReservations = reservationsInRange(reservations, dateRange)
+  const scopedGuestIds = new Set(scopedReservations.map((reservation) => reservation.guestId).filter(Boolean))
+  const guestsInScope = reportGuests.filter((guest) => scopedGuestIds.size === 0 || scopedGuestIds.has(guest.id))
+  const nationalityBuckets = new Map<string, { guestCount: number; reservations: number }>()
 
-  const newGuests = Math.floor(totalGuests * 0.65)
-  const returningGuests = totalGuests - newGuests
+  for (const guest of guestsInScope) {
+    const nationality = guest.nationality || 'Not recorded'
+    const current = nationalityBuckets.get(nationality) || { guestCount: 0, reservations: 0 }
+    current.guestCount += 1
+    current.reservations += scopedReservations.filter((reservation) => reservation.guestId === guest.id).length
+    nationalityBuckets.set(nationality, current)
+  }
+
+  const nationalityBreakdown: NationalityBreakdown[] = Array.from(nationalityBuckets.entries())
+    .map(([nationality, bucket]) => ({
+      nationality,
+      guestCount: bucket.guestCount,
+      reservations: bucket.reservations,
+      percentage: safeDivide(bucket.guestCount, guestsInScope.length) * 100,
+    }))
+    .sort((a, b) => b.guestCount - a.guestCount)
+
+  const reservationsByGuest = new Map<string, ReportReservation[]>()
+  for (const reservation of reservations) {
+    const guestId = reservation.guestId || reservation.guest?.firstName || reservation.id
+    reservationsByGuest.set(guestId, [...(reservationsByGuest.get(guestId) || []), reservation])
+  }
+
+  const repeatGuests: RepeatGuestStat[] = Array.from(reservationsByGuest.entries())
+    .filter(([, guestReservations]) => guestReservations.length > 1)
+    .map(([guestId, guestReservations]) => {
+      const guest = reportGuests.find((item) => item.id === guestId)
+      const sortedReservations = [...guestReservations].sort((a, b) => dateKey(b.checkOut).localeCompare(dateKey(a.checkOut)))
+      return {
+        guestId,
+        guestName: guest ? guestName(guest) : guestNameFromReservation(guestReservations[0]),
+        totalStays: guestReservations.length,
+        totalNights: guestReservations.reduce((sum, reservation) => sum + reservationNights(reservation), 0),
+        totalRevenue: roundMoney(guestReservations.reduce((sum, reservation) => sum + reservationTotal(reservation), 0)),
+        lastStayDate: toDate(sortedReservations[0]?.checkOut) || normalizeRange(dateRange).to,
+      }
+    })
+    .sort((a, b) => b.totalStays - a.totalStays)
 
   return {
-    period: { start: dateRange.from, end: dateRange.to },
+    period: periodForRange(dateRange),
     summary: {
-      totalUniqueGuests: totalGuests,
-      newGuests,
-      returningGuests,
-      repeatGuestRate: returningGuests / totalGuests,
-      vipGuests: Math.floor(totalGuests * 0.08),
-      cautionFlagGuests: Math.floor(totalGuests * 0.02),
-      avgGuestsPerReservation: 2.1,
+      totalUniqueGuests: guestsInScope.length,
+      newGuests: guestsInScope.filter((guest) => (reservationsByGuest.get(guest.id) || []).length <= 1).length,
+      returningGuests: guestsInScope.filter((guest) => (reservationsByGuest.get(guest.id) || []).length > 1).length,
+      repeatGuestRate: safeDivide(guestsInScope.filter((guest) => (reservationsByGuest.get(guest.id) || []).length > 1).length, guestsInScope.length),
+      vipGuests: guestsInScope.filter((guest) => guest.vipStatus).length,
+      cautionFlagGuests: guestsInScope.filter((guest) => guest.blacklisted || guest.cautionFlag).length,
+      avgGuestsPerReservation: safeDivide(
+        scopedReservations.reduce((sum, reservation) => sum + Number(reservation.adults || 0) + Number(reservation.children || 0), 0),
+        scopedReservations.length,
+      ),
     },
     nationalityBreakdown,
     repeatGuests,
   }
 }
 
+function attachLocalFolios(reservations: ReportReservation[], folios: ReportFolio[]): ReportReservation[] {
+  const foliosByReservation = new Map(folios.map((folio) => [folio.reservationId, folio]))
+  return reservations.map((reservation) => ({
+    ...reservation,
+    folio: reservation.folio || foliosByReservation.get(reservation.id) || null,
+  }))
+}
+
 export function useReportsData(dateRange: DateRange) {
-  const operationsData = useMemo(() => generateMockOperationsData(dateRange), [dateRange.from, dateRange.to])
-  const revenueData = useMemo(() => generateMockRevenueData(dateRange), [dateRange.from, dateRange.to])
-  const reservationData = useMemo(() => generateMockReservationData(dateRange), [dateRange.from, dateRange.to])
-  const housekeepingData = useMemo(() => generateMockHousekeepingData(dateRange), [dateRange.from, dateRange.to])
-  const channelData = useMemo(() => generateMockChannelData(dateRange), [dateRange.from, dateRange.to])
-  const guestData = useMemo(() => generateMockGuestData(dateRange), [dateRange.from, dateRange.to])
+  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const [localRooms] = useKV<ReportRoom[]>('pms-rooms', [])
+  const [localReservations] = useKV<ReportReservation[]>('reservations', [])
+  const [localGuests] = useKV<ReportGuest[]>('guests', [])
+  const [localFolios] = useKV<ReportFolio[]>('folios', [])
+  const [serverSnapshot, setServerSnapshot] = useState<ServerSnapshot | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED || !authToken) {
+      setServerSnapshot(null)
+      setError(null)
+      return
+    }
+
+    let cancelled = false
+    Promise.all([
+      pmsApi<{ ok: true; data: { rooms?: ReportRoom[]; reservations?: ReportReservation[] } }>('/api/front-desk/board', authToken),
+      pmsApi<{ ok: true; data: ReportReservation[] }>('/api/reservations', authToken),
+      pmsApi<{ ok: true; data: ReportGuest[] }>('/api/guests', authToken),
+    ])
+      .then(([boardPayload, reservationsPayload, guestsPayload]) => {
+        if (cancelled) return
+        setServerSnapshot({
+          rooms: boardPayload.data.rooms || [],
+          reservations: reservationsPayload.data || boardPayload.data.reservations || [],
+          guests: guestsPayload.data || [],
+        })
+        setError(null)
+      })
+      .catch((requestError) => {
+        if (cancelled) return
+        setError(requestError instanceof Error ? requestError.message : 'Reports data could not be loaded.')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken])
+
+  const rooms = serverSnapshot?.rooms || localRooms || []
+  const reservations = serverSnapshot?.reservations || attachLocalFolios(localReservations || [], localFolios || [])
+  const guests = serverSnapshot?.guests || localGuests || []
+
+  const operationsData = useMemo(() => generateOperationsData(dateRange, rooms, reservations), [dateRange.from, dateRange.to, rooms, reservations])
+  const revenueData = useMemo(() => generateRevenueData(dateRange, rooms, reservations), [dateRange.from, dateRange.to, rooms, reservations])
+  const reservationData = useMemo(() => generateReservationData(dateRange, reservations), [dateRange.from, dateRange.to, reservations])
+  const housekeepingData = useMemo(() => generateHousekeepingData(dateRange, rooms, reservations), [dateRange.from, dateRange.to, rooms, reservations])
+  const channelData = useMemo(() => generateChannelData(dateRange, reservations), [dateRange.from, dateRange.to, reservations])
+  const guestData = useMemo(() => generateGuestData(dateRange, guests, reservations), [dateRange.from, dateRange.to, guests, reservations])
 
   return {
     operationsData,
@@ -435,5 +738,7 @@ export function useReportsData(dateRange: DateRange) {
     housekeepingData,
     channelData,
     guestData,
+    isLoading: SERVER_API_ENABLED && Boolean(authToken) && !serverSnapshot && !error,
+    error,
   }
 }

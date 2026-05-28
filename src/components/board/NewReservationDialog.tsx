@@ -14,8 +14,9 @@ import { Calendar as CalendarIcon, Plus } from '@phosphor-icons/react'
 import { format, addDays, differenceInDays } from 'date-fns'
 import { toast } from 'sonner'
 import type { BookingSource } from '@/types'
+import { calculateStayPricing, SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
 
-interface Guest {
+export interface NewReservationGuest {
   id: string
   propertyId: string
   firstName: string
@@ -35,7 +36,7 @@ interface Guest {
   updatedAt: Date
 }
 
-interface ReservationData {
+export interface NewReservationData {
   id: string
   propertyId: string
   guestId: string
@@ -59,7 +60,7 @@ interface ReservationData {
   notes: string | null
   createdAt: Date
   updatedAt: Date
-  guest: Guest
+  guest: NewReservationGuest
   roomTypeName: string
   roomNumber?: string
 }
@@ -67,7 +68,7 @@ interface ReservationData {
 interface NewReservationDialogProps {
   open: boolean
   onClose: () => void
-  onSubmit: (reservation: ReservationData) => void
+  onSubmit: (reservation: NewReservationData) => void | Promise<void>
   prefilledData?: {
     roomId?: string
     roomNumber?: string
@@ -105,22 +106,65 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
   }, [prefilledData])
 
   const nights = differenceInDays(checkOut, checkIn)
-  const totalAmount = nights * formData.ratePerNight
+  const pricing = calculateStayPricing({
+    checkIn,
+    checkOut,
+    ratePerNight: formData.ratePerNight,
+    adults: formData.adults,
+    childAges: Array.from({ length: formData.children }, () => 0),
+  })
+  const totalAmount = pricing.total
   const depositAmount = Math.floor(totalAmount * 0.3)
 
-  const handleSubmit = () => {
-    if (!formData.firstName || !formData.lastName) {
-      toast.error('Please fill in guest name')
+  const handleSubmit = async () => {
+    const firstName = formData.firstName.trim()
+    const lastName = formData.lastName.trim()
+    const email = formData.email.trim()
+    const phone = formData.phone.trim()
+    const guestCount = formData.adults + formData.children
+
+    if (!firstName || !lastName) {
+      toast.error('Enter the guest first and last name.')
       return
     }
 
-    const guest: Guest = {
+    if (nights <= 0) {
+      toast.error('Check-out date must be after check-in date.')
+      return
+    }
+
+    if (formData.adults < 1) {
+      toast.error('At least one adult is required.')
+      return
+    }
+
+    if (guestCount > SANDBOX_HOTEL_RULES.maxOccupancy) {
+      toast.error(`Maximum occupancy is ${SANDBOX_HOTEL_RULES.maxOccupancy} guests per room.`)
+      return
+    }
+
+    if (formData.ratePerNight <= 0) {
+      toast.error('Enter a valid tax-inclusive room rate.')
+      return
+    }
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error('Enter a valid guest email address.')
+      return
+    }
+
+    if (phone && phone.replace(/\D/g, '').length < 7) {
+      toast.error('Enter a valid guest phone number.')
+      return
+    }
+
+    const guest: NewReservationGuest = {
       id: `guest-${Date.now()}`,
       propertyId: 'prop-1',
-      firstName: formData.firstName,
-      lastName: formData.lastName,
-      email: formData.email || null,
-      phone: formData.phone || null,
+      firstName,
+      lastName,
+      email: email || null,
+      phone: phone || null,
       nationality: null,
       idType: null,
       idNumber: null,
@@ -134,7 +178,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       updatedAt: new Date(),
     }
 
-    const reservation: ReservationData = {
+    const reservation: NewReservationData = {
       id: `RES-${Date.now()}`,
       propertyId: 'prop-1',
       guestId: guest.id,
@@ -154,7 +198,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       totalAmount,
       depositAmount,
       depositPaid: false,
-      specialRequests: formData.specialRequests || null,
+      specialRequests: formData.specialRequests.trim() || null,
       notes: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -163,7 +207,12 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       roomNumber: prefilledData?.roomNumber,
     }
 
-    onSubmit(reservation)
+    try {
+      await onSubmit(reservation)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Reservation could not be created.')
+      return
+    }
     
     setFormData({
       firstName: '',

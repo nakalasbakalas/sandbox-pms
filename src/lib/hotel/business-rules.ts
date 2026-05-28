@@ -65,8 +65,8 @@ const DATE_KEY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
   day: '2-digit',
 })
 
-function getBangkokDateKey(value: Date | string): string {
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+export function getBangkokDateKey(value: Date | string): string {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return value.slice(0, 10)
   }
 
@@ -108,21 +108,35 @@ export function calculateStayPricing(input: PricingInput): PricingResult {
   const nights = nightsBetween(input.checkIn, input.checkOut)
   const childAges = input.childAges ?? []
   const warnings: string[] = []
-  const adultExtraGuests = Math.max(0, input.adults - SANDBOX_HOTEL_RULES.standardOccupancy)
+  const adults = Math.max(0, input.adults)
+  const ratePerNight = Math.max(0, input.ratePerNight)
+  const adultExtraGuests = Math.max(0, adults - SANDBOX_HOTEL_RULES.standardOccupancy)
   const chargedChildren = childAges.filter(
     (age) => age >= SANDBOX_HOTEL_RULES.childFreeMaxAge + 1 && age <= SANDBOX_HOTEL_RULES.childSharingMaxAge,
   ).length
-  const totalGuests = input.adults + childAges.length
+  const totalGuests = adults + childAges.length
 
   if (nights === 0) {
     warnings.push('Check-out must be after check-in.')
+  }
+
+  if (input.adults < 1) {
+    warnings.push('At least one adult is required.')
+  }
+
+  if (input.ratePerNight < 0) {
+    warnings.push('Rate per night cannot be negative.')
+  }
+
+  if (childAges.some((age) => age < 0 || !Number.isFinite(age))) {
+    warnings.push('Child ages must be valid non-negative numbers.')
   }
 
   if (totalGuests > SANDBOX_HOTEL_RULES.maxOccupancy) {
     warnings.push(`Maximum occupancy is ${SANDBOX_HOTEL_RULES.maxOccupancy} guests per room.`)
   }
 
-  const roomSubtotal = input.ratePerNight * nights
+  const roomSubtotal = ratePerNight * nights
   const extraGuestFee = adultExtraGuests * SANDBOX_HOTEL_RULES.extraGuestFeePerNight * nights
   const childFee = chargedChildren * SANDBOX_HOTEL_RULES.childSharingFeePerNight * nights
 

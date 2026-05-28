@@ -35,7 +35,7 @@ export function AdminUserStep() {
             id="userName"
             value={user.name}
             onChange={(e) => handleChange('name', e.target.value)}
-            placeholder="John Doe"
+            placeholder="Suda Prasert"
           />
         </div>
 

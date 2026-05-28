@@ -60,6 +60,7 @@ model Room {
   notes              String?
   inventory          RoomDateInventory[]
   statusHistory      RoomStatusLog[]
+  assignedReservations Reservation[]     @relation("AssignedRoom")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   
@@ -78,6 +79,9 @@ enum RoomOpStatus {
 enum RoomStatus {
   VACANT_CLEAN
   VACANT_DIRTY
+  CLEANING
+  INSPECTED
+  OCCUPIED_CLEAN
   OCCUPIED
   OCCUPIED_DIRTY
 }
@@ -115,6 +119,7 @@ model Reservation {
   roomTypeId        String
   roomType          RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
   assignedRoomId    String?
+  assignedRoom      Room?               @relation("AssignedRoom", fields: [assignedRoomId], references: [id], onDelete: SetNull)
   
   checkIn           DateTime            @db.Date
   checkOut          DateTime            @db.Date
@@ -152,7 +157,9 @@ model Reservation {
 }
 
 enum ReservationStatus {
+  PENDING
   CONFIRMED
+  HOLD
   CHECKED_IN
   CHECKED_OUT
   CANCELLED
