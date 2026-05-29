@@ -6,9 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useAuth } from '@/hooks/use-auth'
 import { Key, UserCircle } from '@phosphor-icons/react'
 import { toast } from 'sonner'
+import { LOCAL_AUTH_FALLBACK_ENABLED, SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 
 export function LoginScreen() {
-  const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const { login } = useAuth()
@@ -18,12 +19,12 @@ export function LoginScreen() {
     setIsLoading(true)
 
     try {
-      const success = await login(username, password)
+      const success = await login(email, password)
       
       if (success) {
         toast.success('Login successful')
       } else {
-        toast.error('Invalid username or password')
+        toast.error('Invalid email or password')
       }
     } catch (error) {
       toast.error('An error occurred during login')
@@ -47,19 +48,23 @@ export function LoginScreen() {
               Sign In
             </CardTitle>
             <CardDescription>
-              Enter your credentials to access the system
+              {SERVER_AUTH_ENABLED
+                ? 'Enter your staff email address and password to access the system'
+                : 'Enter your staff email address and password to access the system'
+              }
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username or email</Label>
+                <Label htmlFor="email">Email address</Label>
                 <Input
-                  id="username"
-                  type="text"
-                  placeholder="Enter username or email"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  id="email"
+                  type="email"
+                  inputMode="email"
+                  placeholder="name@sandboxhotel.co.th"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}
                   autoFocus
                   required
@@ -86,6 +91,12 @@ export function LoginScreen() {
                 {isLoading ? 'Signing in...' : 'Sign In'}
               </Button>
             </form>
+
+            {LOCAL_AUTH_FALLBACK_ENABLED && (
+              <p className="mt-4 text-xs text-muted-foreground">
+                Local development fallback is available only in development. Demo accounts use email addresses such as `admin@sandboxhotel.local`.
+              </p>
+            )}
 
           </CardContent>
         </Card>

@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import { useKV } from '@github/spark/hooks'
+import { Plus, Trash, UserCircle, Shield, Key, PencilSimple } from '@phosphor-icons/react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,15 +10,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { useKV } from '@github/spark/hooks'
-import { Plus, Trash, UserCircle, Shield, Key, PencilSimple } from '@phosphor-icons/react'
-import { toast } from 'sonner'
 import type { User, UserRole } from '@/types/auth'
 import { ROLE_LABELS, ROLE_PERMISSIONS } from '@/types/auth'
 import { useAuth } from '@/hooks/use-auth'
 import { createPasswordSalt, hashPassword, type PasswordCredential } from '@/lib/auth-passwords'
+import { LOCAL_AUTH_FALLBACK_ENABLED, SERVER_AUTH_ENABLED, normalizeAuthEmail } from '@/lib/auth-mode'
 
 interface ManagedUser extends User, PasswordCredential {}
+
+const DEFAULT_DEMO_USERS = [
+  { email: 'admin@sandboxhotel.local', role: 'Administrator', permissions: ROLE_PERMISSIONS.admin.length },
+  { email: 'manager@sandboxhotel.local', role: 'Manager', permissions: ROLE_PERMISSIONS.manager.length },
+  { email: 'frontdesk@sandboxhotel.local', role: 'Front Desk', permissions: ROLE_PERMISSIONS['front-desk'].length },
+  { email: 'housekeeping@sandboxhotel.local', role: 'Housekeeping', permissions: ROLE_PERMISSIONS.housekeeping.length },
+  { email: 'cashier@sandboxhotel.local', role: 'Cashier', permissions: ROLE_PERMISSIONS.cashier.length },
+]
 
 export function UserManagementView() {
   const [users, setUsers] = useKV<ManagedUser[]>('system:users', [])
@@ -26,7 +35,7 @@ export function UserManagementView() {
   const { user: currentUser } = useAuth()
 
   const [formData, setFormData] = useState({
-    username: '',
+    email: '',
     password: '',
     displayName: '',
     role: 'front-desk' as UserRole,
@@ -39,7 +48,7 @@ export function UserManagementView() {
 
   const resetForm = () => {
     setFormData({
-      username: '',
+      email: '',
       password: '',
       displayName: '',
       role: 'front-desk',
@@ -55,13 +64,15 @@ export function UserManagementView() {
   }
 
   const handleAddUser = async () => {
-    if (!formData.username || !formData.password || !formData.displayName) {
+    const email = normalizeAuthEmail(formData.email)
+
+    if (!email || !formData.password || !formData.displayName) {
       toast.error('Please fill in all fields')
       return
     }
 
-    if (users.some(u => u.username === formData.username)) {
-      toast.error('Username already exists')
+    if (users.some((u) => normalizeAuthEmail(u.email || u.username) === email)) {
+      toast.error('Email already exists')
       return
     }
 
@@ -69,7 +80,8 @@ export function UserManagementView() {
     const passwordHash = await hashPassword(formData.password, passwordSalt)
     const newUser: ManagedUser = {
       id: `user-${Date.now()}`,
-      username: formData.username,
+      email,
+      username: email,
       passwordHash,
       passwordSalt,
       displayName: formData.displayName,
@@ -78,7 +90,7 @@ export function UserManagementView() {
     }
 
     setUsers((current) => [...current, newUser])
-    toast.success(`User ${formData.username} created successfully`)
+    toast.success(`User ${email} created successfully`)
     setIsAddDialogOpen(false)
     resetForm()
   }
@@ -135,7 +147,7 @@ export function UserManagementView() {
   const openEditDialog = (user: ManagedUser) => {
     setSelectedUser(user)
     setFormData({
-      username: user.username,
+      email: normalizeAuthEmail(user.email || user.username),
       password: '',
       displayName: user.displayName,
       role: user.role,
@@ -150,7 +162,7 @@ export function UserManagementView() {
   }
 
   const handleDeleteUser = (userId: string) => {
-    const user = users.find(u => u.id === userId)
+    const user = users.find((u) => u.id === userId)
     if (!user) return
 
     if (user.id === currentUser?.id) {
@@ -158,8 +170,8 @@ export function UserManagementView() {
       return
     }
 
-    setUsers((current) => current.filter(u => u.id !== userId))
-    toast.success(`User ${user.username} deleted`)
+    setUsers((current) => current.filter((u) => u.id !== userId))
+    toast.success(`User ${normalizeAuthEmail(user.email || user.username)} deleted`)
   }
 
   const getRoleBadgeVariant = (role: UserRole) => {
@@ -168,15 +180,30 @@ export function UserManagementView() {
         return 'default'
       case 'manager':
         return 'secondary'
-      case 'front-desk':
-        return 'outline'
-      case 'housekeeping':
-        return 'outline'
-      case 'cashier':
-        return 'outline'
       default:
         return 'outline'
     }
+  }
+
+  if (SERVER_AUTH_ENABLED) {
+    return (
+      <Card className="m-6">
+        <CardHeader>
+          <CardTitle>Server-authenticated users</CardTitle>
+          <CardDescription>
+            Email-based staff accounts are managed in the database for deployed mode. The local browser user manager is disabled here so dev-only KV accounts cannot leak into production behavior.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Use the Prisma seed flow to create or rotate staff accounts, then sign in with the configured email address.
+          </p>
+          <p>
+            Local-only fallback accounts remain available in development builds only.
+          </p>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -188,10 +215,10 @@ export function UserManagementView() {
             User Management
           </h1>
           <p className="text-muted-foreground mt-1">
-            Manage system users and their permissions
+            Manage local development users by email. These accounts are not used in server mode.
           </p>
         </div>
-        
+
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={resetForm}>
@@ -203,21 +230,22 @@ export function UserManagementView() {
             <DialogHeader>
               <DialogTitle>Create New User</DialogTitle>
               <DialogDescription>
-                Add a new user account to the system
+                Add a new local development account using an email address
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="email">Email</Label>
                 <Input
-                  id="username"
-                  placeholder="Enter username"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  id="email"
+                  type="email"
+                  placeholder="staff@sandboxhotel.local"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>
                 <Input
@@ -228,7 +256,7 @@ export function UserManagementView() {
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="displayName">Display Name</Label>
                 <Input
@@ -238,7 +266,7 @@ export function UserManagementView() {
                   onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>
                 <Select
@@ -258,7 +286,7 @@ export function UserManagementView() {
                 </Select>
               </div>
             </div>
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel
@@ -275,21 +303,21 @@ export function UserManagementView() {
             <DialogHeader>
               <DialogTitle>Edit User</DialogTitle>
               <DialogDescription>
-                Update user information and role
+                Update display name and role for {selectedUser?.email || selectedUser?.username}
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-username">Username</Label>
+                <Label htmlFor="edit-email">Email</Label>
                 <Input
-                  id="edit-username"
-                  value={formData.username}
+                  id="edit-email"
+                  value={formData.email}
                   disabled
                   className="bg-muted"
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="edit-displayName">Display Name</Label>
                 <Input
@@ -299,7 +327,7 @@ export function UserManagementView() {
                   onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="edit-role">Role</Label>
                 <Select
@@ -319,7 +347,7 @@ export function UserManagementView() {
                 </Select>
               </div>
             </div>
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                 Cancel
@@ -336,10 +364,10 @@ export function UserManagementView() {
             <DialogHeader>
               <DialogTitle>Change Password</DialogTitle>
               <DialogDescription>
-                Set a new password for {selectedUser?.username}
+                Set a new password for {selectedUser?.email || selectedUser?.username}
               </DialogDescription>
             </DialogHeader>
-            
+
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="newPassword">New Password</Label>
@@ -351,7 +379,7 @@ export function UserManagementView() {
                   onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <Label htmlFor="confirmPassword">Confirm Password</Label>
                 <Input
@@ -371,7 +399,7 @@ export function UserManagementView() {
                 <p className="text-sm text-destructive">Passwords do not match</p>
               )}
             </div>
-            
+
             <DialogFooter>
               <Button variant="outline" onClick={() => { setIsPasswordDialogOpen(false); resetPasswordForm(); }}>
                 Cancel
@@ -388,7 +416,7 @@ export function UserManagementView() {
         <CardHeader>
           <CardTitle>Active Users</CardTitle>
           <CardDescription>
-            {users.length} user{users.length !== 1 ? 's' : ''} in the system
+            {users.length} user{users.length !== 1 ? 's' : ''} in the local development store
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -396,7 +424,7 @@ export function UserManagementView() {
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
-                <TableHead>Username</TableHead>
+                <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -406,7 +434,7 @@ export function UserManagementView() {
               {users.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No custom users created. Using default system accounts.
+                    No local users created. Use the development demo accounts instead.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -419,7 +447,7 @@ export function UserManagementView() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">{user.username}</code>
+                      <code className="text-xs bg-muted px-2 py-1 rounded">{normalizeAuthEmail(user.email || user.username)}</code>
                     </TableCell>
                     <TableCell>
                       <Badge variant={getRoleBadgeVariant(user.role)}>
@@ -463,52 +491,44 @@ export function UserManagementView() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Default System Accounts</CardTitle>
-          <CardDescription>
-            Built-in accounts available for initial setup; passwords are not displayed in the application
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Username</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Permissions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">Neeq</code></TableCell>
-                <TableCell><Badge variant="default">Administrator</Badge></TableCell>
-                <TableCell className="text-sm text-muted-foreground">Full system access</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">manager</code></TableCell>
-                <TableCell><Badge variant="secondary">Manager</Badge></TableCell>
-                <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.manager.length} permissions</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">frontdesk</code></TableCell>
-                <TableCell><Badge variant="outline">Front Desk</Badge></TableCell>
-                <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS['front-desk'].length} permissions</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">housekeeping</code></TableCell>
-                <TableCell><Badge variant="outline">Housekeeping</Badge></TableCell>
-                <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.housekeeping.length} permissions</TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell><code className="text-xs bg-muted px-2 py-1 rounded">cashier</code></TableCell>
-                <TableCell><Badge variant="outline">Cashier</Badge></TableCell>
-                <TableCell className="text-sm text-muted-foreground">{ROLE_PERMISSIONS.cashier.length} permissions</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {LOCAL_AUTH_FALLBACK_ENABLED && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Development Demo Accounts</CardTitle>
+            <CardDescription>
+              These email-based accounts are available only in local development mode.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Permissions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {DEFAULT_DEMO_USERS.map((account) => (
+                  <TableRow key={account.email}>
+                    <TableCell>
+                      <code className="text-xs bg-muted px-2 py-1 rounded">{account.email}</code>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={account.role === 'Administrator' ? 'default' : account.role === 'Manager' ? 'secondary' : 'outline'}>
+                        {account.role}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {account.permissions} permissions
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

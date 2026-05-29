@@ -33,7 +33,7 @@ export function UserProfileMenu() {
         <DropdownMenuLabel className="font-normal">
           <div className="flex flex-col space-y-1">
             <p className="text-sm font-medium">{user.displayName}</p>
-            <p className="text-xs text-muted-foreground">@{user.username}</p>
+            <p className="text-xs text-muted-foreground">{user.email || user.username}</p>
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { canViewRoute, requirePermission } from './rbac.mjs'
@@ -12,6 +13,7 @@ import {
   checkInReservation,
   checkOutReservation,
   createGuest,
+  createCharge,
   createPayment,
   createReservation,
   createWalkInCheckIn,
@@ -104,6 +106,21 @@ async function readJson(request) {
     error.statusCode = 400
     throw error
   }
+}
+
+async function readRawBody(request) {
+  let size = 0
+  const chunks = []
+  for await (const chunk of request) {
+    size += chunk.length
+    if (size > MAX_JSON_BODY_BYTES) {
+      const error = new Error('Request body is too large.')
+      error.statusCode = 413
+      throw error
+    }
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks)
 }
 
 function publicUser(user) {
@@ -247,10 +264,59 @@ async function handleLineWebhook(request, response) {
     return
   }
 
-  sendJson(response, 501, {
-    ok: false,
-    error: 'LINE webhook processing is not implemented in this backend shell yet.',
-  })
+  if (request.method !== 'POST') {
+    sendJson(response, 405, { ok: false, error: 'Method not allowed' })
+    return
+  }
+
+  if (!process.env.LINE_CHANNEL_SECRET) {
+    sendJson(response, 503, { ok: false, error: 'LINE_CHANNEL_SECRET is not configured.' })
+    return
+  }
+
+  const rawBody = await readRawBody(request)
+  const providedSignature = String(request.headers['x-line-signature'] || '')
+  const expectedSignature = createHmac('sha256', process.env.LINE_CHANNEL_SECRET).update(rawBody).digest('base64')
+  const provided = Buffer.from(providedSignature)
+  const expected = Buffer.from(expectedSignature)
+
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+    sendJson(response, 401, { ok: false, error: 'Invalid LINE webhook signature.' })
+    return
+  }
+
+  let payload
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'))
+  } catch {
+    sendJson(response, 400, { ok: false, error: 'Webhook body must be valid JSON.' })
+    return
+  }
+
+  const events = Array.isArray(payload.events) ? payload.events : []
+  const db = await getPrisma()
+  const property = await db.property.findUnique({ where: { code: 'SANDBOX' } })
+  if (!property) {
+    sendJson(response, 503, { ok: false, error: 'Sandbox Hotel property is not seeded yet.' })
+    return
+  }
+
+  if (events.length > 0) {
+    await db.message.createMany({
+      data: events.map((event) => ({
+        propertyId: property.id,
+        recipientId: event.source?.userId || event.source?.groupId || event.source?.roomId || null,
+        recipientType: event.source?.type || 'LINE_WEBHOOK',
+        channel: 'LINE',
+        body: event.message?.text || event.type || 'LINE webhook event',
+        status: 'DELIVERED',
+        deliveredAt: event.timestamp ? new Date(event.timestamp) : new Date(),
+        metadata: event,
+      })),
+    })
+  }
+
+  sendJson(response, 200, { ok: true, received: events.length })
 }
 
 async function handleApi(request, response, url) {
@@ -395,6 +461,13 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'process:payment')
     const payment = await createPayment(db, await readJson(request), user)
     sendJson(response, 201, { ok: true, data: payment, message: 'Payment recorded.' })
+    return true
+  }
+
+  if (url.pathname === '/api/charges' && request.method === 'POST') {
+    requirePermission(user, 'post:charges')
+    const charge = await createCharge(db, await readJson(request), user)
+    sendJson(response, 201, { ok: true, data: charge, message: 'Charge posted.' })
     return true
   }
 

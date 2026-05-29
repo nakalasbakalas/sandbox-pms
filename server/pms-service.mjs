@@ -1055,6 +1055,43 @@ export async function createPayment(prisma, input, actor) {
   })
 }
 
+export async function createCharge(prisma, input, actor) {
+  return prisma.$transaction(async (tx) => {
+    const folio = await tx.folio.findUnique({ where: { id: input.folioId } })
+    if (!folio) throw new PmsValidationError('Folio was not found.', 404)
+    if (folio.status !== 'OPEN') {
+      throw new PmsValidationError('Charges can only be posted to an open folio.')
+    }
+
+    const amount = Number(input.amount)
+    const quantity = Number(input.quantity || 1)
+    const description = normalizeNullableString(input.description)
+    const category = String(input.category || 'OTHER').toUpperCase()
+    const validCategories = ['ROOM', 'EXTRA_GUEST', 'CHILD', 'CAFE', 'MINIBAR', 'LAUNDRY', 'DAMAGE', 'OTHER']
+
+    if (!description) throw new PmsValidationError('Charge description is required.')
+    if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
+    if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Charge amount must be greater than zero.')
+    if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
+
+    const charge = await tx.charge.create({
+      data: {
+        folioId: folio.id,
+        date: input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date())),
+        description,
+        category,
+        amount: roundMoney(amount),
+        quantity,
+        total: roundMoney(amount * quantity),
+        createdBy: actorName(actor),
+      },
+    })
+    const updatedFolio = await recomputeFolio(tx, folio.id)
+    await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, { folioId: folio.id, amount: charge.amount, quantity, category })
+    return { charge, folio: updatedFolio }
+  })
+}
+
 export async function createGuest(prisma, input, actor) {
   const guest = await prisma.guest.create({ data: validateGuestInput(input) })
   await createAudit(prisma, actor, 'CREATED', 'guest', guest.id)

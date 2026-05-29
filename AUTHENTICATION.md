@@ -42,7 +42,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 ## User Roles
 
 ### Admin
-**Username:** `Neeq`  
+**Email:** `admin@sandboxhotel.co.th`
 **Password:** Managed outside the application UI
 
 **Permissions:** All 27 system permissions
@@ -53,7 +53,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 - All operational features
 
 ### Manager
-**Username:** `manager`  
+**Email:** `manager@sandboxhotel.co.th`
 **Password:** Managed outside the application UI
 
 **Permissions:** 23 permissions
@@ -65,7 +65,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 - Cannot: manage users, edit settings, process refunds
 
 ### Front Desk
-**Username:** `frontdesk`  
+**Email:** `frontdesk@sandboxhotel.co.th`
 **Password:** Managed outside the application UI
 
 **Permissions:** 13 permissions
@@ -77,7 +77,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 - Cannot: edit rates, cancel reservations, view financial reports, access settings
 
 ### Housekeeping
-**Username:** `housekeeping`  
+**Email:** `housekeeping@sandboxhotel.co.th`
 **Password:** Managed outside the application UI
 
 **Permissions:** 5 permissions (minimal access)
@@ -88,7 +88,7 @@ The Sandbox Hotel PMS implements a comprehensive role-based access control (RBAC
 - Cannot: view guest details, access reservations, view reports
 
 ### Cashier
-**Username:** `cashier`  
+**Email:** `cashier@sandboxhotel.co.th`
 **Password:** Managed outside the application UI
 
 **Permissions:** 11 permissions
@@ -220,7 +220,7 @@ const primaryNavItems = [
 1. Navigate to Settings → User Management (visible only to admins)
 2. Click "Add User" button
 3. Fill in user details:
-   - Username (must be unique)
+   - Email address (must be unique)
    - Password
    - Display Name
    - Role (Admin, Manager, Front Desk, Housekeeping, Cashier)
@@ -231,13 +231,13 @@ The new user will immediately be able to log in with their credentials.
 ### Default System Accounts
 
 The system includes 5 built-in accounts that cannot be deleted:
-- **Neeq** (Admin) - Full system access
-- **manager** (Manager) - Supervisory access
-- **frontdesk** (Front Desk) - Reception operations
-- **housekeeping** (Housekeeping) - Room status management
-- **cashier** (Cashier) - Payment processing
+- **admin@sandboxhotel.local** (Admin) - Full system access
+- **manager@sandboxhotel.local** (Manager) - Supervisory access
+- **frontdesk@sandboxhotel.local** (Front Desk) - Reception operations
+- **housekeeping@sandboxhotel.local** (Housekeeping) - Room status management
+- **cashier@sandboxhotel.local** (Cashier) - Payment processing
 
-These accounts are hardcoded in `use-auth.tsx` and serve as fallback accounts for testing and initial setup.
+These accounts are hardcoded in `use-auth.tsx` and serve as local-development fallback accounts only. Deployed/server mode uses database-seeded email accounts instead.
 
 ### Deleting Users
 
@@ -254,8 +254,8 @@ These accounts are hardcoded in `use-auth.tsx` and serve as fallback accounts fo
 
 ### Login Flow
 
-1. User enters username and password
-2. Credentials are validated against default accounts or custom user list
+1. User enters email and password
+2. Credentials are validated against the server session endpoint in deployed mode or against local development demo accounts in local mode
 3. On success:
    - User object is created and stored in KV (`auth:current-user`)
    - Session persists across page refreshes
@@ -275,7 +275,7 @@ These accounts are hardcoded in `use-auth.tsx` and serve as fallback accounts fo
 
 User sessions are stored using the Spark KV API:
 - **Key:** `auth:current-user`
-- **Value:** User object (username, role, displayName, etc.)
+- **Value:** User object (email, role, displayName, etc.)
 - **Lifecycle:** Persists until explicit logout
 - **Scope:** Per-browser, per-user
 
@@ -287,13 +287,13 @@ User sessions are stored using the Spark KV API:
 - Role-based access control
 - Permission-based UI rendering
 - Session persistence
-- User management for admins
+- User management for local development fallback only
 - Granular permission system
 - Password-protected accounts
 
 - **Limitations:**
-- Authentication and RBAC run in the client/local KV layer unless a backend is connected
-- Built-in bootstrap accounts should be replaced or disabled for any live deployment
+- Authentication and RBAC run through the backend in deployed/server mode
+- Built-in bootstrap accounts are local-development only and do not ship as production login identities
 - No session expiration is currently enforced
 - No 2FA/MFA is currently enforced
 - No password reset flow (admin can recreate users)
@@ -392,7 +392,7 @@ Potential improvements to the auth system:
 ## Troubleshooting
 
 ### Cannot Login
-- Verify username is exactly as shown (case-sensitive)
+- Verify the email address is exactly as shown (case-sensitive)
 - Check password matches exactly (case-sensitive)
 - Clear browser storage and try again
 - Check browser console for errors
@@ -404,10 +404,10 @@ Potential improvements to the auth system:
 
 ### User Management Not Visible
 - Only visible to Admin role
-- Verify you're logged in as `Neeq` or another admin account
+- Verify you're logged in as `admin@sandboxhotel.co.th` or another admin account
 
 ### Session Lost on Refresh
-- Check KV storage is working correctly
+- Check session storage is working correctly
 - Verify `auth:current-user` key exists in storage
 - Check for JavaScript errors in console
 

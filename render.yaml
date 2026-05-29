@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build
-    preDeployCommand: npm run db:migrate
+    preDeployCommand: npm run db:migrate && npm run db:seed
     startCommand: npm run start
     healthCheckPath: /healthz
     autoDeploy: false
@@ -19,6 +19,18 @@ services:
           property: connectionString
       - key: SESSION_SECRET
         sync: false
+      - key: SEED_ADMIN_PASSWORD
+        sync: false
+      - key: SEED_USER_PASSWORD_HASH
+        sync: false
+      - key: SEED_MANAGER_PASSWORD
+        sync: false
+      - key: SEED_FRONT_DESK_PASSWORD
+        sync: false
+      - key: SEED_HOUSEKEEPING_PASSWORD
+        sync: false
+      - key: SEED_CASHIER_PASSWORD
+        sync: false
       - key: LINE_CHANNEL_SECRET
         sync: false
       - key: LINE_CHANNEL_ACCESS_TOKEN
@@ -26,4 +38,5 @@ services:
 
 databases:
   - name: sandbox-hotel-pms-db-v43m
+    databaseName: sandbox_hotel_pms
     plan: basic-256mb

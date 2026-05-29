@@ -1,6 +1,7 @@
 import type { BoardRoomCard } from '@/types/board'
+import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 
-export const SERVER_API_ENABLED = import.meta.env.VITE_PMS_API_MODE === 'server'
+export const SERVER_API_ENABLED = SERVER_AUTH_ENABLED
 
 export async function pmsApi<T>(path: string, token: string | null | undefined, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {

@@ -531,9 +531,17 @@ export function ReservationsView() {
                 className="pl-10"
               />
             </div>
-            <Button variant="outline" className="gap-2">
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => {
+                setSearchQuery('')
+                setSelectedTab('all')
+                toast.success('Reservation filters reset.')
+              }}
+            >
               <FunnelSimple size={18} />
-              Filters
+              Reset
             </Button>
             <Button variant="outline" className="gap-2" onClick={handlePrint}>
               <Printer size={18} weight="bold" />

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { 
@@ -234,6 +235,13 @@ export function CashierView() {
   const [paymentReference, setPaymentReference] = useState('')
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false)
+  const [chargeFolio, setChargeFolio] = useState<Folio | null>(null)
+  const [chargeCategory, setChargeCategory] = useState<FolioCharge['category']>('OTHER')
+  const [chargeDescription, setChargeDescription] = useState('')
+  const [chargeAmount, setChargeAmount] = useState('')
+  const [chargeQuantity, setChargeQuantity] = useState('1')
+  const [chargeError, setChargeError] = useState<string | null>(null)
+  const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
 
   const refreshServerFolios = useCallback(async () => {
     if (!SERVER_API_ENABLED || !authToken) return []
@@ -347,6 +355,108 @@ export function CashierView() {
     setPaymentError(null)
   }
 
+  const openChargeDialog = (folio: Folio) => {
+    setChargeFolio(folio)
+    setChargeCategory('OTHER')
+    setChargeDescription('')
+    setChargeAmount('')
+    setChargeQuantity('1')
+    setChargeError(null)
+  }
+
+  const openPostChargeFromHeader = () => {
+    const openFolios = folios.filter((folio) => folio.status === 'OPEN')
+    if (openFolios.length === 1) {
+      openChargeDialog(openFolios[0])
+      return
+    }
+    setSelectedTab('open')
+    toast.message(openFolios.length > 1 ? 'Select an open folio, then add the charge.' : 'No open folios are available for charges.')
+  }
+
+  const printSelectedFolio = (folio: Folio) => {
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      toast.error('Allow pop-ups to print this folio.')
+      return
+    }
+
+    const chargeRows = folio.charges.map((charge) => `
+      <tr>
+        <td>${format(charge.date, 'yyyy-MM-dd')}</td>
+        <td>${charge.category}</td>
+        <td>${charge.description}</td>
+        <td class="num">${charge.quantity}</td>
+        <td class="num">THB ${charge.unitPrice.toLocaleString()}</td>
+        <td class="num">THB ${charge.total.toLocaleString()}</td>
+      </tr>
+    `).join('')
+    const paymentRows = folio.payments.map((payment) => `
+      <tr>
+        <td>${format(payment.date, 'yyyy-MM-dd HH:mm')}</td>
+        <td>${payment.method.replace('_', ' ')}</td>
+        <td>${payment.reference || ''}</td>
+        <td class="num">THB ${payment.amount.toLocaleString()}</td>
+      </tr>
+    `).join('')
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>Folio ${folio.id}</title>
+          <style>
+            body { font-family: Inter, Arial, sans-serif; margin: 32px; color: #111827; }
+            h1 { margin: 0 0 4px; font-size: 24px; }
+            .muted { color: #6b7280; margin-bottom: 24px; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; }
+            th, td { border-bottom: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f3f4f6; }
+            .num { text-align: right; }
+            .totals { margin-left: auto; width: 280px; }
+            .totals div { display: flex; justify-content: space-between; padding: 4px 0; }
+            .balance { font-weight: 700; font-size: 16px; }
+          </style>
+        </head>
+        <body>
+          <h1>Sandbox Hotel Folio ${folio.id}</h1>
+          <div class="muted">${folio.guestName} · Room ${folio.roomNumber} · ${format(folio.checkIn, 'yyyy-MM-dd')} to ${folio.checkOut ? format(folio.checkOut, 'yyyy-MM-dd') : 'In-house'}</div>
+          <h2>Charges</h2>
+          <table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead><tbody>${chargeRows || '<tr><td colspan="6">No charges</td></tr>'}</tbody></table>
+          <h2>Payments</h2>
+          <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="4">No payments</td></tr>'}</tbody></table>
+          <div class="totals">
+            <div><span>Subtotal</span><span>THB ${folio.subtotal.toLocaleString()}</span></div>
+            <div><span>Paid</span><span>THB ${folio.paid.toLocaleString()}</span></div>
+            <div class="balance"><span>Balance</span><span>THB ${folio.balance.toLocaleString()}</span></div>
+          </div>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
+  }
+
+  const exportSelectedFolio = (folio: Folio) => {
+    const rows = [
+      ['type', 'date', 'category_or_method', 'description_or_reference', 'quantity', 'amount', 'total'],
+      ...folio.charges.map((charge) => ['charge', format(charge.date, 'yyyy-MM-dd'), charge.category, charge.description, String(charge.quantity), String(charge.unitPrice), String(charge.total)]),
+      ...folio.payments.map((payment) => ['payment', format(payment.date, 'yyyy-MM-dd HH:mm'), payment.method, payment.reference || '', '', String(payment.amount), String(payment.amount)]),
+      ['summary', '', 'subtotal', '', '', '', String(folio.subtotal)],
+      ['summary', '', 'paid', '', '', '', String(folio.paid)],
+      ['summary', '', 'balance', '', '', '', String(folio.balance)],
+    ]
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${folio.id}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    toast.success(`Exported folio ${folio.id}.`)
+  }
+
   const handleSubmitPayment = async () => {
     if (!paymentFolio) return
     const amount = Number(paymentAmount)
@@ -409,6 +519,80 @@ export function CashierView() {
       setIsSubmittingPayment(false)
     }
   }
+
+  const handleSubmitCharge = async () => {
+    if (!chargeFolio) return
+    const amount = Number(chargeAmount)
+    const quantity = Number(chargeQuantity)
+    if (!chargeDescription.trim()) {
+      setChargeError('Charge description is required.')
+      return
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setChargeError('Charge amount must be greater than zero.')
+      return
+    }
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      setChargeError('Quantity must be at least 1.')
+      return
+    }
+
+    setIsSubmittingCharge(true)
+    setChargeError(null)
+    try {
+      if (SERVER_API_ENABLED && authToken) {
+        await pmsApi('/api/charges', authToken, {
+          method: 'POST',
+          body: JSON.stringify({
+            folioId: chargeFolio.id,
+            category: chargeCategory,
+            description: chargeDescription,
+            amount,
+            quantity,
+          }),
+        })
+        const nextFolios = await refreshServerFolios()
+        const updated = nextFolios.find((folio) => folio.id === chargeFolio.id)
+        if (updated) setSelectedFolio(updated)
+      } else {
+        const { subtotal, taxAmount, total } = calculateTax(amount * quantity, 0)
+        const charge: FolioCharge = {
+          id: `charge-${Date.now()}`,
+          date: new Date(),
+          category: chargeCategory,
+          description: chargeDescription.trim(),
+          quantity,
+          unitPrice: amount,
+          subtotal,
+          tax: taxAmount,
+          total,
+          postedBy: 'Cashier',
+        }
+        setFolios((current) => current.map((folio) => {
+          if (folio.id !== chargeFolio.id) return folio
+          const updatedTotal = Math.round((folio.total + total) * 100) / 100
+          const updated = {
+            ...folio,
+            charges: [...folio.charges, charge],
+            subtotal: Math.round((folio.subtotal + subtotal) * 100) / 100,
+            tax: Math.round((folio.tax + taxAmount) * 100) / 100,
+            total: updatedTotal,
+            balance: Math.round((updatedTotal - folio.paid) * 100) / 100,
+            status: 'OPEN' as const,
+            updatedAt: new Date(),
+          }
+          setSelectedFolio(updated)
+          return updated
+        }))
+      }
+      toast.success(`Charge posted to folio ${chargeFolio.id}.`)
+      setChargeFolio(null)
+    } catch (error) {
+      setChargeError(error instanceof Error ? error.message : 'Charge could not be posted.')
+    } finally {
+      setIsSubmittingCharge(false)
+    }
+  }
   
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -421,7 +605,7 @@ export function CashierView() {
                 Manage guest folios and payments
               </p>
             </div>
-            <Button size="sm" className="gap-1.5 h-7 text-xs">
+            <Button size="sm" className="gap-1.5 h-7 text-xs" onClick={openPostChargeFromHeader}>
               <Plus size={14} weight="bold" />
               Post Charge
             </Button>
@@ -614,11 +798,11 @@ export function CashierView() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" className="gap-2">
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => printSelectedFolio(selectedFolio)}>
                     <Printer size={16} />
                     Print
                   </Button>
-                  <Button variant="outline" size="sm" className="gap-2">
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => exportSelectedFolio(selectedFolio)}>
                     <Download size={16} />
                     Export
                   </Button>
@@ -739,7 +923,7 @@ export function CashierView() {
                     <Money size={18} />
                     Collect Payment
                   </Button>
-                  <Button variant="outline" className="flex-1 gap-2">
+                  <Button variant="outline" className="flex-1 gap-2" onClick={() => openChargeDialog(selectedFolio)}>
                     <Plus size={18} />
                     Add Charge
                   </Button>
@@ -815,6 +999,91 @@ export function CashierView() {
                 </Button>
                 <Button onClick={handleSubmitPayment} disabled={isSubmittingPayment}>
                   {isSubmittingPayment ? 'Recording...' : 'Record payment'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {chargeFolio && (
+        <Dialog open={!!chargeFolio} onOpenChange={(open) => !open && setChargeFolio(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Post charge</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                <div className="font-medium">{chargeFolio.guestName}</div>
+                <div className="text-muted-foreground">Folio #{chargeFolio.id} Â· Room {chargeFolio.roomNumber}</div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={chargeCategory} onValueChange={(value) => setChargeCategory(value as FolioCharge['category'])}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ROOM">Room</SelectItem>
+                    <SelectItem value="EXTRA_GUEST">Extra guest</SelectItem>
+                    <SelectItem value="CHILD">Child</SelectItem>
+                    <SelectItem value="CAFE">Cafe</SelectItem>
+                    <SelectItem value="MINIBAR">Minibar</SelectItem>
+                    <SelectItem value="LAUNDRY">Laundry</SelectItem>
+                    <SelectItem value="DAMAGE">Damage</SelectItem>
+                    <SelectItem value="OTHER">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="charge-description">Description</Label>
+                <Textarea
+                  id="charge-description"
+                  value={chargeDescription}
+                  onChange={(event) => setChargeDescription(event.target.value)}
+                  placeholder="Extra towels, minibar, cafe order"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="charge-amount">Unit amount</Label>
+                  <Input
+                    id="charge-amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={chargeAmount}
+                    onChange={(event) => setChargeAmount(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="charge-quantity">Quantity</Label>
+                  <Input
+                    id="charge-quantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={chargeQuantity}
+                    onChange={(event) => setChargeQuantity(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              {chargeError && (
+                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {chargeError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setChargeFolio(null)} disabled={isSubmittingCharge}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSubmitCharge} disabled={isSubmittingCharge}>
+                  {isSubmittingCharge ? 'Posting...' : 'Post charge'}
                 </Button>
               </div>
             </div>

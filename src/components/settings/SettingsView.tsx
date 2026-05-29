@@ -16,6 +16,7 @@ import { RoomTypeManagement } from '@/components/settings/RoomTypeManagement'
 import { DataBackupExport } from '@/components/settings/DataBackupExport'
 import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine, Receipt, ArrowRight, DoorOpen } from '@phosphor-icons/react'
 import { useNavigation } from '@/hooks/use-navigation'
+import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 
 export function SettingsView() {
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
@@ -118,7 +119,9 @@ export function SettingsView() {
 
           <TabsContent value="users" className="space-y-6">
             <div className="text-center py-12 text-muted-foreground">
-              User management is available in the advanced settings
+              {SERVER_AUTH_ENABLED
+                ? 'Server mode uses email-based staff accounts from the database seed.'
+                : 'User management is available in the advanced settings'}
             </div>
           </TabsContent>
 
@@ -130,11 +133,13 @@ export function SettingsView() {
                   <div>
                     <div className="font-medium">User Accounts & Permissions</div>
                     <div className="text-sm text-muted-foreground">
-                      Manage staff accounts, roles, and access permissions
+                      {SERVER_AUTH_ENABLED
+                        ? 'Deployed mode uses database-seeded staff emails and backend sessions.'
+                        : 'Manage local development staff accounts, roles, and access permissions'}
                     </div>
                   </div>
                   <Button onClick={() => navigate('user-management')}>
-                    Manage Users
+                    {SERVER_AUTH_ENABLED ? 'View User Source' : 'Manage Users'}
                     <ArrowRight className="ml-2" size={16} />
                   </Button>
                 </div>

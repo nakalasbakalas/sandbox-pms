@@ -15,7 +15,7 @@ function roomSort(a: BoardRoomCard, b: BoardRoomCard) {
   return Number(a.number) - Number(b.number)
 }
 
-function RoomTile({ room }: { room: BoardRoomCard }) {
+function RoomTile({ room, onOpen }: { room: BoardRoomCard; onOpen: () => void }) {
   const { t } = useI18n()
   const status = getOperationalRoomStatus(room)
   const isReady = isRoomReadyForArrival(room)
@@ -23,6 +23,7 @@ function RoomTile({ room }: { room: BoardRoomCard }) {
   return (
     <button
       type="button"
+      onClick={onOpen}
       className={cn(
         'min-h-[116px] rounded-lg border bg-white p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         status === 'occupied' && 'border-sky-200 bg-sky-50/50',
@@ -121,8 +122,8 @@ export function RoomsView() {
           <RoomSummary label={t('rooms.blocked')} value={statusCounts.blocked} icon={SquaresFour} tone="text-slate-700 bg-slate-100 border-slate-200" />
         </div>
 
-        <RoomSection title={t('rooms.twin')} rooms={twinRooms} />
-        <RoomSection title={t('rooms.double')} rooms={doubleRooms} />
+        <RoomSection title={t('rooms.twin')} rooms={twinRooms} onOpenRoom={() => navigate('board')} />
+        <RoomSection title={t('rooms.double')} rooms={doubleRooms} onOpenRoom={() => navigate('board')} />
       </div>
     </div>
   )
@@ -154,7 +155,7 @@ function RoomSummary({
   )
 }
 
-function RoomSection({ title, rooms }: { title: string; rooms: BoardRoomCard[] }) {
+function RoomSection({ title, rooms, onOpenRoom }: { title: string; rooms: BoardRoomCard[]; onOpenRoom: (room: BoardRoomCard) => void }) {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
@@ -163,7 +164,7 @@ function RoomSection({ title, rooms }: { title: string; rooms: BoardRoomCard[] }
       </div>
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-[repeat(15,minmax(0,1fr))]">
         {rooms.map((room) => (
-          <RoomTile key={room.roomId} room={room} />
+          <RoomTile key={room.roomId} room={room} onOpen={() => onOpenRoom(room)} />
         ))}
       </div>
     </section>

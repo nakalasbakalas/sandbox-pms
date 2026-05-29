@@ -38,12 +38,13 @@ import {
   Broom,
 } from '@phosphor-icons/react'
 import type { NightAuditLog, NightAuditStep, NightAuditConfig } from '@/types/night-audit'
+import type { BoardRoomCard } from '@/types/board'
 import { toast } from 'sonner'
 import { format, addDays } from 'date-fns'
 
 const AUDIT_STEPS = [
   { id: 'rollover-date', name: 'Rollover System Date', description: 'Advance system date to next day' },
-  { id: 'post-charges', name: 'Post Room Charges', description: 'Apply nightly room charges to all occupied rooms' },
+  { id: 'post-charges', name: 'Verify Room Charges', description: 'Verify nightly room charges for occupied rooms' },
   { id: 'process-no-shows', name: 'Process No-Shows', description: 'Mark expected arrivals as no-show if not checked in' },
   { id: 'calculate-occupancy', name: 'Calculate Occupancy', description: 'Calculate occupancy rates and room statistics' },
   { id: 'reconcile-payments', name: 'Reconcile Payments', description: 'Verify payments and outstanding balances' },
@@ -72,6 +73,9 @@ function deserializeAuditLog(log: NightAuditLog): NightAuditLog {
 
 export function NightAuditView() {
   const [auditLogsRaw, setAuditLogsRaw] = useKV<NightAuditLog[]>('night-audit-logs', [])
+  const [roomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
+  const [reservationsRaw, setReservationsRaw] = useKV<Array<Record<string, unknown>>>('reservations-data', [])
+  const [foliosRaw] = useKV<Array<Record<string, unknown>>>('cashier-folios', [])
   const [config, setConfig] = useKV<NightAuditConfig>('night-audit-config', {
     autoRunTime: '03:00',
     autoRunEnabled: false,
@@ -116,6 +120,80 @@ export function NightAuditView() {
 
   const latestAudit = auditLogs[0]
 
+  const buildCurrentStatistics = () => {
+    const auditDate = new Date()
+    const auditDateKey = format(auditDate, 'yyyy-MM-dd')
+    const rooms = roomsRaw || []
+    const reservations = reservationsRaw || []
+    const folios = foliosRaw || []
+    const checkedIn = reservations.filter((reservation) => reservation.status === 'CHECKED_IN')
+    const arrivalsToday = reservations.filter((reservation) => format(new Date(String(reservation.checkIn)), 'yyyy-MM-dd') === auditDateKey)
+    const departuresToday = reservations.filter((reservation) => format(new Date(String(reservation.checkOut)), 'yyyy-MM-dd') === auditDateKey)
+    const payments = folios.flatMap((folio) => Array.isArray(folio.payments) ? folio.payments as Array<Record<string, unknown>> : [])
+    const charges = folios.flatMap((folio) => Array.isArray(folio.charges) ? folio.charges as Array<Record<string, unknown>> : [])
+    const paymentsToday = payments.filter((payment) => {
+      const date = payment.date || payment.receivedAt || payment.createdAt
+      return date ? format(new Date(String(date)), 'yyyy-MM-dd') === auditDateKey : true
+    })
+    const paymentAmount = (method: string) => paymentsToday
+      .filter((payment) => String(payment.method || '').toUpperCase() === method)
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+    const serviceRevenue = charges
+      .filter((charge) => String(charge.category || '').toUpperCase() !== 'ROOM')
+      .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+    const roomRevenue = charges
+      .filter((charge) => String(charge.category || '').toUpperCase() === 'ROOM')
+      .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+    const outOfServiceRooms = rooms.filter((room) => room.operationalStatus === 'OUT_OF_SERVICE' || room.operationalStatus === 'BLOCKED').length
+    const occupiedRooms = rooms.filter((room) => room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY').length
+    const availableRooms = Math.max(0, rooms.length - occupiedRooms - outOfServiceRooms)
+
+    return {
+      date: auditDate,
+      occupancy: {
+        totalRooms: rooms.length,
+        occupiedRooms,
+        availableRooms,
+        outOfServiceRooms,
+        occupancyRate: rooms.length ? Math.round((occupiedRooms / rooms.length) * 100) : 0,
+      },
+      revenue: {
+        roomRevenue,
+        extraGuestRevenue: charges
+          .filter((charge) => ['EXTRA_GUEST', 'CHILD'].includes(String(charge.category || '').toUpperCase()))
+          .reduce((sum, charge) => sum + Number(charge.total || 0), 0),
+        serviceRevenue,
+        totalRevenue: roomRevenue + serviceRevenue,
+      },
+      arrivals: {
+        expected: arrivalsToday.length,
+        actual: arrivalsToday.filter((reservation) => reservation.status === 'CHECKED_IN').length,
+        noShows: reservations.filter((reservation) => reservation.status === 'NO_SHOW').length,
+        walkIns: reservations.filter((reservation) => reservation.source === 'WALK_IN').length,
+      },
+      departures: {
+        expected: departuresToday.length,
+        actual: departuresToday.filter((reservation) => reservation.status === 'CHECKED_OUT').length,
+        stayOvers: checkedIn.filter((reservation) => new Date(String(reservation.checkOut)) < auditDate).length,
+        earlyCheckouts: 0,
+        lateCheckouts: 0,
+      },
+      housekeeping: {
+        cleanedRooms: rooms.filter((room) => room.cleanStatus === 'CLEAN').length,
+        dirtyRooms: rooms.filter((room) => room.cleanStatus === 'DIRTY').length,
+        inspectedRooms: rooms.filter((room) => room.cleanStatus === 'INSPECTED').length,
+        maintenanceRooms: outOfServiceRooms,
+      },
+      payments: {
+        cashReceived: paymentAmount('CASH'),
+        cardReceived: paymentAmount('CARD'),
+        transferReceived: paymentAmount('BANK_TRANSFER') + paymentAmount('ONLINE'),
+        totalReceived: paymentsToday.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+        outstandingBalance: folios.reduce((sum, folio) => sum + Number(folio.balance || 0), 0),
+      },
+    }
+  }
+
   const runNightAudit = async () => {
     setConfirmDialogOpen(false)
     setIsRunning(true)
@@ -132,48 +210,7 @@ export function NightAuditView() {
         description: step.description,
         status: 'PENDING',
       })),
-      statistics: {
-        date: new Date(),
-        occupancy: {
-          totalRooms: 30,
-          occupiedRooms: 0,
-          availableRooms: 0,
-          outOfServiceRooms: 0,
-          occupancyRate: 0,
-        },
-        revenue: {
-          roomRevenue: 0,
-          extraGuestRevenue: 0,
-          serviceRevenue: 0,
-          totalRevenue: 0,
-        },
-        arrivals: {
-          expected: 0,
-          actual: 0,
-          noShows: 0,
-          walkIns: 0,
-        },
-        departures: {
-          expected: 0,
-          actual: 0,
-          stayOvers: 0,
-          earlyCheckouts: 0,
-          lateCheckouts: 0,
-        },
-        housekeeping: {
-          cleanedRooms: 0,
-          dirtyRooms: 0,
-          inspectedRooms: 0,
-          maintenanceRooms: 0,
-        },
-        payments: {
-          cashReceived: 0,
-          cardReceived: 0,
-          transferReceived: 0,
-          totalReceived: 0,
-          outstandingBalance: 0,
-        },
-      },
+      statistics: buildCurrentStatistics(),
       errors: [],
     }
 
@@ -186,7 +223,18 @@ export function NightAuditView() {
       
       setCurrentAudit({ ...audit })
 
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      if (step.id === 'process-no-shows') {
+        const auditDateKey = format(audit.auditDate, 'yyyy-MM-dd')
+        setReservationsRaw((current) => (current || []).map((reservation) => {
+          const checkIn = reservation.checkIn ? format(new Date(String(reservation.checkIn)), 'yyyy-MM-dd') : auditDateKey
+          if ((reservation.status === 'CONFIRMED' || reservation.status === 'PENDING') && checkIn < auditDateKey) {
+            return { ...reservation, status: 'NO_SHOW', updatedAt: new Date() }
+          }
+          return reservation
+        }))
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 150))
 
       step.status = 'COMPLETED'
       step.completedAt = new Date()
@@ -197,48 +245,7 @@ export function NightAuditView() {
 
     audit.status = 'COMPLETED'
     audit.completedAt = new Date()
-    audit.statistics = {
-      ...audit.statistics,
-      occupancy: {
-        totalRooms: 30,
-        occupiedRooms: 18,
-        availableRooms: 10,
-        outOfServiceRooms: 2,
-        occupancyRate: 60,
-      },
-      revenue: {
-        roomRevenue: 42500,
-        extraGuestRevenue: 1500,
-        serviceRevenue: 3200,
-        totalRevenue: 47200,
-      },
-      arrivals: {
-        expected: 8,
-        actual: 7,
-        noShows: 1,
-        walkIns: 2,
-      },
-      departures: {
-        expected: 6,
-        actual: 5,
-        stayOvers: 12,
-        earlyCheckouts: 0,
-        lateCheckouts: 1,
-      },
-      housekeeping: {
-        cleanedRooms: 25,
-        dirtyRooms: 3,
-        inspectedRooms: 25,
-        maintenanceRooms: 0,
-      },
-      payments: {
-        cashReceived: 12500,
-        cardReceived: 28400,
-        transferReceived: 6300,
-        totalReceived: 47200,
-        outstandingBalance: 2500,
-      },
-    }
+    audit.statistics = buildCurrentStatistics()
 
     setAuditLogs(current => [audit, ...current])
     setCurrentAudit(audit)

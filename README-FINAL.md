@@ -90,24 +90,24 @@ After **34 iterations**, the Sandbox Hotel PMS has achieved **A++ quality across
 
 ```
 Admin:
-Username: Neeq
-Password: Neeq!1234
+Email: admin@sandboxhotel.co.th
+Password: configured during seed/onboarding
 
 Manager:
-Username: manager
-Password: manager123
+Email: manager@sandboxhotel.co.th
+Password: configured during seed/onboarding
 
 Front Desk:
-Username: frontdesk
-Password: frontdesk123
+Email: frontdesk@sandboxhotel.co.th
+Password: configured during seed/onboarding
 
 Housekeeping:
-Username: housekeeping
-Password: housekeeping123
+Email: housekeeping@sandboxhotel.co.th
+Password: configured during seed/onboarding
 
 Cashier:
-Username: cashier
-Password: cashier123
+Email: cashier@sandboxhotel.co.th
+Password: configured during seed/onboarding
 ```
 
 ### First-Time Setup
@@ -265,7 +265,7 @@ The system includes comprehensive test data:
 
 - **Role-Based Access Control** - 5 distinct user roles
 - **Permission Enforcement** - UI and route-level
-- **Secure Sessions** - Persistent login with KV storage
+- **Secure Sessions** - Persistent login with backend sessions in server mode, KV fallback in local development only
 - **Data Validation** - Input sanitization throughout
 - **Audit Trails** - Track critical operations
 - **Secure Credentials** - Encrypted storage for integrations

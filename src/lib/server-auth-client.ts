@@ -1,6 +1,5 @@
 import type { User, UserRole } from '@/types/auth'
-
-const SERVER_AUTH_ENABLED = import.meta.env.VITE_PMS_API_MODE === 'server'
+import { SERVER_AUTH_ENABLED, normalizeAuthEmail } from '@/lib/auth-mode'
 
 type ServerUser = {
   id: string
@@ -19,9 +18,11 @@ function mapRole(role: string): UserRole {
 }
 
 function mapUser(user: ServerUser): User {
+  const email = normalizeAuthEmail(user.email)
   return {
     id: user.id,
-    username: user.email,
+    email,
+    username: email,
     role: mapRole(user.role),
     displayName: user.displayName,
     createdAt: new Date().toISOString(),
@@ -47,10 +48,14 @@ export function isServerAuthEnabled() {
   return SERVER_AUTH_ENABLED
 }
 
-export async function serverLogin(username: string, password: string): Promise<{ user: User; token: string }> {
+export function mapServerUser(user: ServerUser): User {
+  return mapUser(user)
+}
+
+export async function serverLogin(email: string, password: string): Promise<{ user: User; token: string }> {
   const payload = await apiRequest<{ ok: true; user: ServerUser; token: string }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email: username, password }),
+    body: JSON.stringify({ email: normalizeAuthEmail(email), password }),
   })
   return { user: mapUser(payload.user), token: payload.token }
 }

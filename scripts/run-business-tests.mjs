@@ -18,6 +18,8 @@ async function importTypeScriptModule(path) {
     .replaceAll("from './business-rules'", "from './business-rules.mjs'")
     .replaceAll("from '@/lib/hotel/business-rules'", "from './business-rules.mjs'")
     .replaceAll("from '@/lib/hotel/rooms'", "from './rooms.mjs'")
+    .replaceAll("from '@/lib/auth-mode'", "from './auth-mode.mjs'")
+    .replaceAll("from '@/lib/server-auth-client'", "from './server-auth-client.mjs'")
   const tempDir = resolve('node_modules/.tmp/business-tests')
   await mkdir(tempDir, { recursive: true })
   const outputPath = resolve(tempDir, basename(path).replace(/\.(ts|tsx)$/, '.mjs'))
@@ -30,6 +32,8 @@ const status = await importTypeScriptModule(resolve('src/lib/hotel/status.ts'))
 await importTypeScriptModule(resolve('src/lib/hotel/rooms.ts'))
 const operations = await importTypeScriptModule(resolve('src/lib/hotel/operations.ts'))
 const workflow = await importTypeScriptModule(resolve('src/lib/front-desk-workflow.ts'))
+const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
+const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-26'), 0, 'rejects zero-night stays')
@@ -305,5 +309,17 @@ assert.equal(status.getStatusDefinition('room', 'VACANT_DIRTY').label.th, 'ร�
 assert.equal(status.getStatusDefinition('payment', 'PAID').label.en, 'Paid')
 assert.equal(status.getStatusDefinition('reservation', 'NO_SHOW').label.th, 'ไม่มาเข้าพัก')
 assert.equal(status.getStatusDefinition('room', 'BLOCKED').label.th, 'ปิดใช้งาน')
+
+assert.equal(authMode.SERVER_AUTH_ENABLED, false, 'test environment does not enable server auth by default')
+assert.equal(authMode.LOCAL_AUTH_FALLBACK_ENABLED, false, 'test environment does not enable local auth fallback by default')
+
+const mappedUser = serverAuthClient.mapServerUser({
+  id: 'user-1',
+  email: 'frontdesk@sandboxhotel.co.th',
+  role: 'FRONT_DESK',
+  displayName: 'Front Desk',
+})
+assert.equal(mappedUser.email, 'frontdesk@sandboxhotel.co.th', 'server auth users are email-based')
+assert.equal(mappedUser.role, 'front-desk', 'server auth users map backend roles to UI roles')
 
 console.log('Business rule tests passed')

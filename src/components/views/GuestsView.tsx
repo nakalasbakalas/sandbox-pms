@@ -13,13 +13,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { 
   MagnifyingGlass, Plus, User, EnvelopeSimple, Phone, MapPin, 
-  CalendarBlank, Star, Warning, Flag, Paperclip, ChatCircle
+  CalendarBlank, Star, Warning, Flag, ChatCircle
 } from '@phosphor-icons/react'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { toast } from 'sonner'
+import { useNavigation } from '@/hooks/use-navigation'
 
 export interface Guest {
   id: string
@@ -174,6 +175,7 @@ function localGuestFromForm(form: NewGuestForm): Guest {
 }
 
 export function GuestsView() {
+  const { navigate } = useNavigation()
   const [guestsRaw, setGuests] = useKV<Guest[]>('guests-data', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const [serverGuests, setServerGuests] = useState<Guest[]>([])
@@ -590,15 +592,17 @@ export function GuestsView() {
               )}
               
               <div className="flex gap-2">
-                <Button variant="outline" className="flex-1 gap-2">
+                <Button variant="outline" className="flex-1 gap-2" onClick={() => {
+                  setSelectedGuest(null)
+                  navigate('guest-communications')
+                }}>
                   <ChatCircle size={18} />
                   Send Message
                 </Button>
-                <Button variant="outline" className="flex-1 gap-2">
-                  <Paperclip size={18} />
-                  View Documents
-                </Button>
-                <Button variant="outline" className="flex-1 gap-2">
+                <Button variant="outline" className="flex-1 gap-2" onClick={() => {
+                  setSelectedGuest(null)
+                  navigate('reservations')
+                }}>
                   <CalendarBlank size={18} />
                   View Reservations
                 </Button>

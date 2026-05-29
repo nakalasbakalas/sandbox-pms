@@ -37,8 +37,10 @@ import {
 import type { Message, MessageTemplate, MessageChannel, MessageType, MessageStats } from '@/types/messaging'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
+import { useNavigation } from '@/hooks/use-navigation'
 
 export function CommunicationCenterView() {
+  const { navigate } = useNavigation()
   const [messages, setMessages] = useKV<Message[]>('messages', [])
   const [templates, setTemplates] = useKV<MessageTemplate[]>('message-templates', [])
   const [searchQuery, setSearchQuery] = useState('')
@@ -88,7 +90,7 @@ export function CommunicationCenterView() {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="icon">
+              <Button variant="outline" size="icon" onClick={() => navigate('settings')} aria-label="Communication settings">
                 <Gear size={20} />
               </Button>
               <Dialog open={showNewMessage} onOpenChange={setShowNewMessage}>
@@ -197,7 +199,7 @@ export function CommunicationCenterView() {
           </TabsContent>
 
           <TabsContent value="templates" className="mt-6">
-            <TemplateList templates={templates || []} />
+            <TemplateList templates={templates || []} onCreate={() => setShowNewMessage(true)} onUse={() => setShowNewMessage(true)} />
           </TabsContent>
         </Tabs>
       </div>
@@ -288,16 +290,18 @@ function MessageList({ messages, onSelect, emptyText }: MessageListProps) {
 
 interface TemplateListProps {
   templates: MessageTemplate[]
+  onCreate: () => void
+  onUse: () => void
 }
 
-function TemplateList({ templates }: TemplateListProps) {
+function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
   if (templates.length === 0) {
     return (
       <div className="text-center py-16">
         <p className="text-muted-foreground mb-4">No templates created yet</p>
-        <Button>
+        <Button onClick={onCreate}>
           <Plus size={20} className="mr-2" weight="bold" />
-          Create Template
+          Compose Message
         </Button>
       </div>
     )
@@ -322,10 +326,7 @@ function TemplateList({ templates }: TemplateListProps) {
             {template.body}
           </p>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="flex-1">
-              Edit
-            </Button>
-            <Button size="sm" variant="outline" className="flex-1">
+            <Button size="sm" variant="outline" className="flex-1" onClick={onUse}>
               Use
             </Button>
           </div>
