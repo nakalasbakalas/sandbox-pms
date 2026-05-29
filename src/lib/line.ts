@@ -7,6 +7,12 @@ import {
 
 const LINE_API_BASE = 'https://api.line.me/v2/bot'
 
+const debugLine = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.debug(...args)
+  }
+}
+
 export class LineService {
   private config: LineConfig | null = null
 
@@ -55,7 +61,7 @@ export class LineService {
     }
 
     if (this.config.testMode && !this.config.testRecipientIds.includes(lineUserId)) {
-      console.log('[LINE TEST MODE] Message blocked:', { lineUserId, content, metadata })
+      debugLine('[LINE TEST MODE] Message blocked:', { lineUserId, content, metadata })
       return { success: false, error: 'Test mode: message not sent to non-test recipient' }
     }
 
@@ -107,7 +113,7 @@ export class LineService {
     }
 
     if (this.config.testMode && !this.config.testRecipientIds.includes(lineUserId)) {
-      console.log('[LINE TEST MODE] Flex message blocked:', { lineUserId, altText, metadata })
+      debugLine('[LINE TEST MODE] Flex message blocked:', { lineUserId, altText, metadata })
       return { success: false, error: 'Test mode: message not sent to non-test recipient' }
     }
 
@@ -174,7 +180,7 @@ export class LineService {
   }
 
   async handleWebhookEvent(event: LineWebhookEvent): Promise<void> {
-    console.log('[LINE Webhook Event]', event)
+    debugLine('[LINE Webhook Event]', event)
 
     switch (event.type) {
       case 'message':
@@ -187,7 +193,7 @@ export class LineService {
         await this.handleUnfollowEvent(event)
         break
       default:
-        console.log('[LINE] Unhandled event type:', event.type)
+        debugLine('[LINE] Unhandled event type:', event.type)
     }
   }
 
@@ -195,17 +201,17 @@ export class LineService {
     const userId = event.source.userId
     const messageText = event.message?.text
 
-    console.log('[LINE] Incoming message:', { userId, messageText })
+    debugLine('[LINE] Incoming message:', { userId, messageText })
   }
 
   private async handleFollowEvent(event: LineWebhookEvent): Promise<void> {
     const userId = event.source.userId
-    console.log('[LINE] User followed bot:', userId)
+    debugLine('[LINE] User followed bot:', userId)
   }
 
   private async handleUnfollowEvent(event: LineWebhookEvent): Promise<void> {
     const userId = event.source.userId
-    console.log('[LINE] User unfollowed bot:', userId)
+    debugLine('[LINE] User unfollowed bot:', userId)
   }
 }
 

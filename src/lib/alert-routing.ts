@@ -9,6 +9,12 @@ import {
 } from '@/types/staff-alerts'
 import { LineConfig } from '@/types/line'
 
+const debugAlertRouting = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.debug(...args)
+  }
+}
+
 interface AlertContext {
   reservationId?: string
   guestName?: string
@@ -42,31 +48,31 @@ class AlertRoutingService {
     const rule = routingRules.find((r) => r.alertType === alertType && r.enabled)
     
     if (!rule) {
-      console.log(`No enabled routing rule found for alert type: ${alertType}`)
+      debugAlertRouting(`No enabled routing rule found for alert type: ${alertType}`)
       return null
     }
 
     if (!this.checkSchedule(rule)) {
-      console.log(`Alert ${alertType} suppressed due to schedule restrictions`)
+      debugAlertRouting(`Alert ${alertType} suppressed due to schedule restrictions`)
       return this.createSuppressedAlert(rule, context)
     }
 
     if (!this.checkThrottle(rule)) {
-      console.log(`Alert ${alertType} throttled`)
+      debugAlertRouting(`Alert ${alertType} throttled`)
       return this.createThrottledAlert(rule, context)
     }
 
     const recipients = this.resolveRecipients(rule, staffMembers)
     
     if (recipients.length === 0) {
-      console.log(`No recipients found for alert type: ${alertType}`)
+      debugAlertRouting(`No recipients found for alert type: ${alertType}`)
       return null
     }
 
     const alert = this.createAlert(rule, context, recipients)
 
     if (rule.testMode || lineConfig.testMode) {
-      console.log(`Alert in test mode:`, alert)
+      debugAlertRouting('Alert in test mode:', alert)
       return alert
     }
 
@@ -354,7 +360,7 @@ class AlertRoutingService {
     lineConfig: LineConfig
   ): Promise<void> {
     try {
-      console.log(`Sending LINE alert to ${recipient.staffName} (${recipient.lineUserId})`)
+      debugAlertRouting(`Sending LINE alert to ${recipient.staffName} (${recipient.lineUserId})`)
       
       const message = this.formatLineMessage(alert)
       
@@ -378,7 +384,7 @@ class AlertRoutingService {
 
   private async sendViaEmail(alert: AlertInstance, recipient: AlertRecipient): Promise<void> {
     try {
-      console.log(`Sending email alert to ${recipient.staffName} (${recipient.email})`)
+      debugAlertRouting(`Sending email alert to ${recipient.staffName} (${recipient.email})`)
       
       alert.deliveryStatus.push({
         recipientId: recipient.staffId,
@@ -400,7 +406,7 @@ class AlertRoutingService {
 
   private async sendViaSMS(alert: AlertInstance, recipient: AlertRecipient): Promise<void> {
     try {
-      console.log(`Sending SMS alert to ${recipient.staffName} (${recipient.phoneNumber})`)
+      debugAlertRouting(`Sending SMS alert to ${recipient.staffName} (${recipient.phoneNumber})`)
       
       alert.deliveryStatus.push({
         recipientId: recipient.staffId,
