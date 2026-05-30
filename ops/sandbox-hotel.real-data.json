@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "property": {
+    "code": "SANDBOX",
+    "name": "SANDBOX HOTEL",
+    "address": "626/1 Karom Rd., Pho Sadet, Mueang, Nakhon Si Thammarat 80000, Thailand",
+    "phone": "+66 88-578-3478",
+    "email": "booking@sandboxhotel.com",
+    "publicWebsite": "https://www.sandboxhotel.com",
+    "timezone": "Asia/Bangkok",
+    "currency": "THB",
+    "defaultCheckIn": "14:00",
+    "defaultCheckOut": "12:00",
+    "supportHours": null,
+    "reservationAlertEmail": "booking.sandboxhotel@gmail.com",
+    "inventoryMinimumRate": 550,
+    "extraGuestFee": 300,
+    "childFee": 300
+  },
+  "roomTypes": [
+    {
+      "code": "TWIN",
+      "sourceCode": "STD-TWIN",
+      "name": "Standard Twin",
+      "description": "2 single beds, 28 m2, mountain view, non-smoking. Amenities include TV, Wi-Fi, air-conditioning, and bathroom.",
+      "baseOccupancy": 2,
+      "maxOccupancy": 2,
+      "baseRate": 2000,
+      "minimumRate": 550,
+      "extraAdultFee": 300,
+      "childFee": 300,
+      "ratePlan": "Room Only",
+      "rateSource": "Little Hotelier full/rack rate"
+    },
+    {
+      "code": "DOUBLE",
+      "sourceCode": "SUP-DOUBLE",
+      "name": "Superior Double",
+      "description": "1 double bed, 28 m2, non-smoking. Amenities include TV, Wi-Fi, air-conditioning, and bathroom.",
+      "baseOccupancy": 2,
+      "maxOccupancy": 4,
+      "baseRate": 2000,
+      "minimumRate": 550,
+      "extraAdultFee": 300,
+      "childFee": 300,
+      "ratePlan": "Room Only",
+      "rateSource": "Derived from Standard Twin / Room Only; no separate base rate was set in the source system"
+    }
+  ],
+  "rooms": [
+    { "number": "201", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "202", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "203", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "204", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "205", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "206", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "207", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "208", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "209", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "210", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "211", "roomTypeCode": "DOUBLE", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "212", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "213", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "214", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "215", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "216", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "217", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "218", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "219", "roomTypeCode": "TWIN", "floor": 2, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "301", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "302", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "303", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "304", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "305", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "306", "roomTypeCode": "DOUBLE", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Owner clarified Superior Double rooms are the remaining non-twin room numbers. Inferred as part of the 17-room Superior Double inventory." },
+    { "number": "312", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "313", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "314", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "315", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "316", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "317", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "318", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." },
+    { "number": "319", "roomTypeCode": "TWIN", "floor": 3, "operationalStatus": "AVAILABLE", "currentStatus": "VACANT_CLEAN", "notes": "Confirmed Standard Twin inventory. Live occupancy state not supplied." }
+  ],
+  "rates": {
+    "currency": "THB",
+    "plans": [
+      {
+        "code": "ROOM_ONLY",
+        "name": "Room Only",
+        "notes": "Only one rate plan was defined in the source data."
+      }
+    ],
+    "rules": [],
+    "notes": [
+      "Standard Twin / Room Only full rate is THB 2,000 and minimum rate is THB 550.",
+      "Superior Double / Room Only is derived from Standard Twin / Room Only in the source system.",
+      "No seasonal rules, weekend surcharges, date overrides, or stop-sell rules were configured in the available Little Hotelier fields."
+    ]
+  },
+  "taxes": {
+    "enabled": false,
+    "pricesIncludeTax": false,
+    "taxes": [],
+    "notes": [
+      "No taxes are configured for the property.",
+      "The options to show rates including tax and service charge were available but unchecked.",
+      "No tax identifiers or accounting mappings were configured."
+    ]
+  },
+  "policies": {
+    "checkInWindow": "14:00-22:00",
+    "checkOutWindow": "06:00-12:00",
+    "defaultCheckIn": "14:00",
+    "defaultCheckOut": "12:00",
+    "smoking": "Non-smoking rooms.",
+    "privacyAndTerms": "General consent for collection and use of personal data for service, booking, contact, and legal compliance.",
+    "payment": "Payment policy appears on the guest invoice, but no detailed platform payment rule is defined in the extracted data.",
+    "cancellation": "Unavailable in supplied source data.",
+    "deposit": "Unavailable in supplied source data.",
+    "noShow": "Unavailable in supplied source data.",
+    "childPolicy": "Unavailable beyond the extra adult/child charge in room/rate configuration."
+  },
+  "paymentMethods": {
+    "enabledCards": [
+      { "name": "Visa", "surchargePercent": 0 },
+      { "name": "Mastercard", "surchargePercent": 0 }
+    ],
+    "disabledCards": ["AmEx", "DinersClub", "Discover", "JCB", "UnionPay"],
+    "paymentGatewayConfigured": false,
+    "notes": "PayPal and SiamPay activation options were available but not active."
+  },
+  "accounting": {
+    "exportDateFormat": "DD/MM/YYYY",
+    "taxIdentifiersConfigured": false,
+    "accountingMappingsConfigured": false
+  },
+  "staff": [
+    { "displayName": "Tanyatorn", "shortName": "Owner", "title": "Owner", "role": "ADMIN", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "Neeq", "shortName": "Superior Admin", "title": "Superior Admin", "role": "ADMIN", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "HM", "shortName": "HM", "title": "Hotel Manager", "role": "MANAGER", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "HK1", "shortName": "HK1", "title": "Housekeeper 1", "role": "HOUSEKEEPING", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "HK2", "shortName": "HK2", "title": "Housekeeper 2", "role": "HOUSEKEEPING", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "HK3", "shortName": "HK3", "title": "Housekeeper 3", "role": "HOUSEKEEPING", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "HK4", "shortName": "HK4", "title": "Housekeeper 4", "role": "HOUSEKEEPING", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." },
+    { "displayName": "FD", "shortName": "FD", "title": "Frontdesk", "role": "FRONT_DESK", "active": true, "email": null, "notes": "No password or email supplied; not created as a login user by the importer." }
+  ],
+  "operations": {
+    "baseLanguage": "English",
+    "housekeepingDefaults": "Unavailable in supplied source data.",
+    "alertRecipients": ["booking.sandboxhotel@gmail.com"],
+    "lineMessaging": "Unavailable in supplied source data.",
+    "receiptFooterText": null,
+    "noOverbooking": true,
+    "superiorDoubleUnnumberedInventoryCount": 0,
+    "notes": [
+      "Staff roster labels were supplied without email addresses or passwords.",
+      "Housekeeping defaults, LINE/messaging settings, receipt footer text, and custom business rules were unavailable.",
+      "Room closures appeared for several Superior Double entries on 22-23 May 2026 but exact room numbers were not supplied."
+    ]
+  },
+  "currentOperationalState": {
+    "calendarReviewedFrom": "2026-05-14",
+    "calendarReviewedTo": "2026-05-27",
+    "activeReservationsConfirmed": true,
+    "guestNamesIncluded": false,
+    "productionCutoverSafe": false,
+    "warning": "This data is suitable for staging setup and configuration mapping only. It is not sufficient for safe production cutover without full live reservations, guests, payment records, folios, room closures, and final room status exports."
+  },
+  "unavailableItems": [
+    "Live reservations and guest identities",
+    "Payment records and folios",
+    "Room closure room numbers and full out-of-service periods",
+    "Staff login emails and password/bootstrap credentials",
+    "Cancellation policy",
+    "Deposit policy",
+    "No-show policy",
+    "Full child policy",
+    "Detailed payment rules",
+    "Housekeeping defaults",
+    "LINE/messaging settings and API credentials",
+    "Receipt/footer text",
+    "Full accounting/tax mapping",
+    "Seasonal rules, weekend rules, date overrides, and stop-sell rules",
+    "Room closure room numbers and live room status at cutover"
+  ],
+  "sourceNotes": {
+    "authority": "Pasted updated PMS migration data summary supplied on 2026-05-30 plus owner clarification that Double rooms are the remaining non-twin room numbers and staff labels are Tanyatorn, Neeq, HM, HK1-HK4, and FD.",
+    "sourceBasis": "sandbox_hotel_final_data.txt, compiled from Little Hotelier setup modules and a 14-day calendar view starting 2026-05-14.",
+    "importStance": "Staging/local import first. Do not production-import until missing live operational data is supplied and reconciled.",
+    "doubleRoomInference": "Superior Double rooms were assigned to the first 17 non-twin room numbers in the current physical numbering sequence: 201-211 and 301-306."
+  }
+}

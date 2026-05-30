@@ -1,0 +1,28 @@
+{
+  "propertyCode": "SANDBOX",
+  "rooms": [
+    {
+      "number": "201",
+      "roomTypeCode": "TWIN",
+      "floor": 2,
+      "operationalStatus": "AVAILABLE",
+      "currentStatus": "VACANT_CLEAN",
+      "notes": "Approved production room inventory example"
+    },
+    {
+      "number": "216",
+      "roomTypeCode": "TWIN",
+      "floor": 2,
+      "operationalStatus": "OUT_OF_SERVICE",
+      "currentStatus": "VACANT_CLEAN",
+      "notes": "Non-sellable room"
+    },
+    {
+      "number": "301",
+      "roomTypeCode": "DOUBLE",
+      "floor": 3,
+      "operationalStatus": "AVAILABLE",
+      "currentStatus": "VACANT_CLEAN"
+    }
+  ]
+}

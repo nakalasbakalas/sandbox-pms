@@ -1,0 +1,594 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Property {
+  id              String     @id @default(cuid())
+  code            String     @unique
+  name            String
+  address         String?
+  phone           String?
+  email           String?
+  publicWebsite   String?
+  lineId          String?
+  lineUrl         String?
+  supportHours    String?
+  reservationAlertEmail String?
+  timezone        String     @default("Asia/Bangkok")
+  defaultCheckIn  String     @default("14:00")
+  defaultCheckOut String     @default("12:00")
+  currency        String     @default("THB")
+  taxRate         Float      @default(0)
+  extraGuestFee   Float      @default(200)
+  childFee        Float      @default(100)
+  inventoryMinimumRate Float?
+  taxConfiguration Json?
+  policies        Json?
+  operationalSettings Json?
+  sourceNotes     Json?
+  rooms           Room[]
+  roomTypes       RoomType[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model RoomType {
+  id             String        @id @default(cuid())
+  propertyId     String
+  property       Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  code           String
+  name           String
+  description    String?
+  baseRate       Float
+  maxOccupancy   Int
+  standardOcc    Int
+  rooms          Room[]
+  reservations   Reservation[]
+  holds          InventoryHold[]
+  
+  @@unique([propertyId, code])
+  @@index([propertyId])
+}
+
+model Room {
+  id                 String              @id @default(cuid())
+  propertyId         String
+  property           Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  roomTypeId         String
+  roomType           RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  number             String
+  floor              Int
+  operationalStatus  RoomOpStatus        @default(AVAILABLE)
+  currentStatus      RoomStatus          @default(VACANT_CLEAN)
+  currentReservation String?             @unique
+  blockedUntil       DateTime?
+  notes              String?
+  inventory          RoomDateInventory[]
+  statusHistory      RoomStatusLog[]
+  assignedReservations Reservation[]     @relation("AssignedRoom")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  
+  @@unique([propertyId, number])
+  @@index([propertyId])
+  @@index([roomTypeId])
+  @@index([operationalStatus, currentStatus])
+}
+
+enum RoomOpStatus {
+  AVAILABLE
+  OUT_OF_SERVICE
+  BLOCKED
+}
+
+enum RoomStatus {
+  VACANT_CLEAN
+  VACANT_DIRTY
+  CLEANING
+  INSPECTED
+  OCCUPIED_CLEAN
+  OCCUPIED
+  OCCUPIED_DIRTY
+}
+
+model Guest {
+  id           String        @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  nationality  String?
+  idType       String?
+  idNumber     String?
+  dateOfBirth  DateTime?
+  vipStatus    Boolean       @default(false)
+  blacklisted  Boolean       @default(false)
+  preferences  Json?
+  notes        String?
+  reservations Reservation[]
+  documents    GuestDocument[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  @@index([email])
+  @@index([phone])
+  @@index([lastName, firstName])
+}
+
+model Reservation {
+  id                String              @id @default(cuid())
+  confirmationCode  String              @unique @default(cuid())
+  propertyId        String
+  guestId           String
+  guest             Guest               @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  roomTypeId        String
+  roomType          RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  assignedRoomId    String?
+  assignedRoom      Room?               @relation("AssignedRoom", fields: [assignedRoomId], references: [id], onDelete: SetNull)
+  
+  checkIn           DateTime            @db.Date
+  checkOut          DateTime            @db.Date
+  actualCheckIn     DateTime?
+  actualCheckOut    DateTime?
+  
+  status            ReservationStatus   @default(CONFIRMED)
+  
+  adults            Int
+  children          Int                 @default(0)
+  childAges         Int[]
+  
+  ratePerNight      Float
+  totalAmount       Float
+  depositAmount     Float               @default(0)
+  depositPaid       Boolean             @default(false)
+  
+  source            BookingSource       @default(DIRECT)
+  channelRef        String?
+  
+  notes             String?
+  specialRequests   String?
+  
+  inventory         RoomDateInventory[]
+  folio             Folio?
+  history           ReservationLog[]
+  
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  @@index([propertyId, checkIn, checkOut])
+  @@index([guestId])
+  @@index([status, checkIn])
+  @@index([assignedRoomId])
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  HOLD
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+}
+
+enum BookingSource {
+  DIRECT
+  WALK_IN
+  PHONE
+  EMAIL
+  WEBSITE
+  BOOKING_COM
+  AGODA
+  EXPEDIA
+  AIRBNB
+  OTHER
+}
+
+model RoomDateInventory {
+  id            String          @id @default(cuid())
+  propertyId    String
+  roomId        String
+  room          Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  date          DateTime        @db.Date
+  
+  reservationId String?
+  reservation   Reservation?    @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  
+  status        InventoryStatus @default(AVAILABLE)
+  
+  holdId        String?
+  hold          InventoryHold?  @relation(fields: [holdId], references: [id], onDelete: SetNull)
+  
+  rate          Float?
+  notes         String?
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  
+  @@unique([roomId, date])
+  @@index([propertyId, date, status])
+  @@index([reservationId])
+  @@index([date, status])
+}
+
+enum InventoryStatus {
+  AVAILABLE
+  RESERVED
+  HELD
+  BLOCKED
+  OUT_OF_SERVICE
+}
+
+model InventoryHold {
+  id         String              @id @default(cuid())
+  propertyId String
+  roomTypeId String
+  roomType   RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  checkIn    DateTime            @db.Date
+  checkOut   DateTime            @db.Date
+  expiresAt  DateTime
+  status     HoldStatus          @default(ACTIVE)
+  createdBy  String
+  email      String?
+  phone      String?
+  notes      String?
+  inventory  RoomDateInventory[]
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+  
+  @@index([expiresAt, status])
+  @@index([propertyId, status])
+}
+
+enum HoldStatus {
+  ACTIVE
+  CONVERTED
+  EXPIRED
+  RELEASED
+}
+
+model Folio {
+  id            String      @id @default(cuid())
+  reservationId String      @unique
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  
+  subtotal      Float       @default(0)
+  tax           Float       @default(0)
+  total         Float       @default(0)
+  paid          Float       @default(0)
+  balance       Float       @default(0)
+  
+  status        FolioStatus @default(OPEN)
+  
+  charges       Charge[]
+  payments      Payment[]
+  
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  
+  @@index([status])
+}
+
+enum FolioStatus {
+  OPEN
+  CLOSED
+  REFUNDED
+}
+
+model Charge {
+  id          String         @id @default(cuid())
+  folioId     String
+  folio       Folio          @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  date        DateTime       @db.Date
+  description String
+  category    ChargeCategory
+  amount      Float
+  quantity    Int            @default(1)
+  total       Float
+  void        Boolean        @default(false)
+  voidReason  String?
+  createdBy   String
+  createdAt   DateTime       @default(now())
+  
+  @@index([folioId])
+  @@index([date])
+}
+
+enum ChargeCategory {
+  ROOM
+  EXTRA_GUEST
+  CHILD
+  CAFE
+  MINIBAR
+  LAUNDRY
+  DAMAGE
+  OTHER
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  folioId     String
+  folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  amount      Float
+  method      PaymentMethod
+  reference   String?
+  notes       String?
+  processedBy String
+  createdAt   DateTime      @default(now())
+  
+  @@index([folioId])
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ONLINE
+  OTHER
+}
+
+model GuestDocument {
+  id          String   @id @default(cuid())
+  guestId     String
+  guest       Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  type        String
+  fileName    String
+  fileUrl     String
+  uploadedBy  String
+  notes       String?
+  createdAt   DateTime @default(now())
+  
+  @@index([guestId])
+}
+
+model ReservationLog {
+  id            String             @id @default(cuid())
+  reservationId String
+  reservation   Reservation        @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  action        ReservationAction
+  fromStatus    ReservationStatus?
+  toStatus      ReservationStatus?
+  changes       Json?
+  performedBy   String
+  notes         String?
+  createdAt     DateTime           @default(now())
+  
+  @@index([reservationId, createdAt])
+}
+
+enum ReservationAction {
+  CREATED
+  MODIFIED
+  ASSIGNED_ROOM
+  CHECKED_IN
+  CHECKED_OUT
+  CANCELLED
+  NO_SHOW
+  RATE_ADJUSTED
+  MOVED_ROOM
+  DEPOSIT_PAID
+}
+
+model RoomStatusLog {
+  id         String      @id @default(cuid())
+  roomId     String
+  room       Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  fromStatus RoomStatus?
+  toStatus   RoomStatus
+  changedBy  String
+  notes      String?
+  createdAt  DateTime    @default(now())
+  
+  @@index([roomId, createdAt])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         UserRole @default(FRONT_DESK)
+  active       Boolean  @default(true)
+  lastLogin    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([email])
+  @@index([role, active])
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  FRONT_DESK
+  HOUSEKEEPING
+  CASHIER
+  CAFE_STAFF
+}
+
+model RateRule {
+  id          String       @id @default(cuid())
+  propertyId  String
+  roomTypeId  String?
+  name        String
+  description String?
+  priority    Int          @default(0)
+  startDate   DateTime?    @db.Date
+  endDate     DateTime?    @db.Date
+  daysOfWeek  Int[]
+  adjustment  Float
+  adjustmentType RateAdjustmentType @default(PERCENTAGE)
+  active      Boolean      @default(true)
+  createdBy   String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  @@index([propertyId, active])
+  @@index([startDate, endDate])
+}
+
+enum RateAdjustmentType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  OVERRIDE
+}
+
+model RateCalendar {
+  id         String   @id @default(cuid())
+  propertyId String
+  roomTypeId String
+  date       DateTime @db.Date
+  rate       Float
+  minStay    Int?
+  maxStay    Int?
+  stopSell   Boolean  @default(false)
+  closeToArrival Boolean @default(false)
+  closeToDeparture Boolean @default(false)
+  notes      String?
+  createdBy  String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  @@unique([roomTypeId, date])
+  @@index([propertyId, date])
+}
+
+model Channel {
+  id            String        @id @default(cuid())
+  propertyId    String
+  provider      ChannelProvider
+  name          String
+  hotelId       String?
+  credentials   Json
+  active        Boolean       @default(false)
+  sandboxMode   Boolean       @default(true)
+  lastSync      DateTime?
+  lastSyncStatus String?
+  syncEnabled   Boolean       @default(false)
+  config        Json?
+  mappings      ChannelMapping[]
+  logs          ChannelSyncLog[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@index([propertyId, active])
+}
+
+enum ChannelProvider {
+  BOOKING_COM
+  AGODA
+  EXPEDIA
+  AIRBNB
+  ICAL
+}
+
+model ChannelMapping {
+  id                String @id @default(cuid())
+  channelId         String
+  channel           Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  roomTypeId        String
+  externalRoomTypeId String
+  externalRatePlanId String?
+  active            Boolean @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@unique([channelId, roomTypeId])
+  @@index([channelId])
+}
+
+model ChannelSyncLog {
+  id         String         @id @default(cuid())
+  channelId  String
+  channel    Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  syncType   ChannelSyncType
+  status     String
+  recordsProcessed Int       @default(0)
+  errorCount Int            @default(0)
+  errorSummary String?
+  duration   Int?
+  startedAt  DateTime
+  completedAt DateTime?
+  
+  @@index([channelId, startedAt])
+}
+
+enum ChannelSyncType {
+  RESERVATION_PULL
+  INVENTORY_PUSH
+  RATE_PUSH
+  RESTRICTION_PUSH
+}
+
+model Message {
+  id          String        @id @default(cuid())
+  propertyId  String
+  recipientId String?
+  recipientType String
+  channel     MessageChannel
+  templateId  String?
+  subject     String?
+  body        String
+  status      MessageStatus @default(PENDING)
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  failedAt    DateTime?
+  errorMessage String?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  
+  @@index([propertyId, status])
+  @@index([recipientId])
+}
+
+enum MessageChannel {
+  LINE
+  EMAIL
+  SMS
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+model MessageTemplate {
+  id          String   @id @default(cuid())
+  propertyId  String
+  name        String
+  description String?
+  channel     MessageChannel
+  subject     String?
+  body        String
+  variables   String[]
+  active      Boolean  @default(true)
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([propertyId, channel, active])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String
+  entityType String
+  entityId   String?
+  changes    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  
+  @@index([userId, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

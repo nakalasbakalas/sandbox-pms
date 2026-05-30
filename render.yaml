@@ -1,357 +1,46 @@
 services:
   - type: web
-    name: sandbox-hotel-pms-v43m
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
+    name: sandbox-hotel-pms
+    runtime: node
     plan: starter
-    autoDeploy: true
-    healthCheckPath: /health
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    preDeployCommand: flask --app app db upgrade
-    startCommand: gunicorn --workers ${WEB_CONCURRENCY:-2} --bind 0.0.0.0:${PORT:-10000} --timeout 120 --worker-class sync --access-logfile - --error-logfile - app:app
-    customDomains:
-      - book.sandboxhotel.com
-      - staff.sandboxhotel.com
+    buildCommand: npm ci --include=dev && npm run db:generate && npm run build
+    preDeployCommand: npm run db:migrate && npm run db:seed
+    startCommand: npm run start
+    healthCheckPath: /healthz
+    autoDeploy: false
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: APP_ENV
+      - key: NODE_ENV
         value: production
-      - key: PREFERRED_URL_SCHEME
-        value: https
-      - key: FORCE_HTTPS
-        value: "1"
-      - key: TRUST_PROXY_COUNT
-        value: "1"
-      - key: ENFORCE_CANONICAL_HOSTS
-        value: "1"
-      - key: AUTH_COOKIE_SECURE
-        value: "1"
-      - key: SESSION_COOKIE_SECURE
-        value: "1"
-      - key: MARKETING_SITE_URL
-        value: https://www.sandboxhotel.com
-      - key: BOOKING_ENGINE_URL
-        value: https://book.sandboxhotel.com
-      - key: STAFF_APP_URL
-        value: https://staff.sandboxhotel.com
-      - key: APP_BASE_URL
-        value: https://book.sandboxhotel.com
-      - key: TRUSTED_HOSTS
-        value: book.sandboxhotel.com,staff.sandboxhotel.com,sandbox-hotel-pms-v43m.onrender.com
-      - key: WEB_CONCURRENCY
-        value: "2"
-      - key: LOG_LEVEL
-        value: INFO
-      - key: AUTO_BOOTSTRAP_SCHEMA
-        value: "0"
-      - key: AUTO_SEED_REFERENCE_DATA
-        value: "0"
-      - key: AUTH_SHOW_RESET_LINKS
-        value: "0"
-      - key: MAIL_FROM
-        value: reservations@sandboxhotel.com
-      - key: PAYMENT_PROVIDER
-        value: disabled
+      - key: VITE_PMS_API_MODE
+        value: server
+      - key: APP_URL
+        value: https://sandbox-hotel-pms.onrender.com
+      - key: ALLOWED_ORIGINS
+        value: https://sandbox-hotel-pms.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: sandbox-hotel-pms-db-v43m
           property: connectionString
-      - key: SECRET_KEY
+      - key: SEED_MODE
+        value: prod-safe
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SEED_USERS_JSON
         sync: false
-      - key: AUTH_ENCRYPTION_KEY
+      - key: SEED_ADMIN_EMAIL
         sync: false
-      - key: ADMIN_EMAIL
+      - key: SEED_ADMIN_PASSWORD_HASH
         sync: false
-      - key: ADMIN_PASSWORD
+      - key: SEED_ADMIN_PASSWORD
         sync: false
-      - key: SMTP_HOST
+      - key: SEED_USER_PASSWORD_HASH
         sync: false
-      - key: SMTP_USERNAME
+      - key: LINE_CHANNEL_SECRET
         sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: SENTRY_DSN
-        sync: false
-      - key: SENTRY_ENVIRONMENT
-        value: production
-      - key: SENTRY_RELEASE
-        sync: false
-      - key: SENTRY_TRACES_SAMPLE_RATE
-        value: "0.0"
-      - key: AUDIT_LOG_RETENTION_DAYS
-        value: "0"
-      - key: MAX_CONTENT_LENGTH
-        value: "12582912"
-      - key: STORAGE_BACKEND
-        value: local
-      - key: UPLOAD_DIR
-        value: /var/data/uploads/documents
-      # Optional alternative: S3-compatible storage
-      # Option B: S3 (set all four keys below)
-      # - key: STORAGE_BACKEND
-      #   value: s3
-      # - key: S3_BUCKET
-      #   sync: false
-      # - key: S3_REGION
-      #   value: ap-southeast-1
-      # - key: AWS_ACCESS_KEY_ID
-      #   sync: false
-      # - key: AWS_SECRET_ACCESS_KEY
-      #   sync: false
-    disk:
-      name: pms-document-storage
-      mountPath: /var/data/uploads/documents
-      sizeGB: 1
-
-  # -- Scheduled background tasks (cron jobs) --
-  - type: cron
-    name: pms-process-notifications
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "*/5 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app process-notifications
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        value: reservations@sandboxhotel.com
-      - key: APP_BASE_URL
-        value: https://book.sandboxhotel.com
-
-  - type: cron
-    name: pms-process-automation-events
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "*/5 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app process-automation-events
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        value: reservations@sandboxhotel.com
-      - key: APP_BASE_URL
-        value: https://book.sandboxhotel.com
-
-  - type: cron
-    name: pms-sync-ical-sources
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "*/15 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app sync-ical-sources
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: AUTH_ENCRYPTION_KEY
-        sync: false
-
-  - type: cron
-    name: pms-sync-channels
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "*/15 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app sync-channels
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: AUTH_ENCRYPTION_KEY
-        sync: false
-
-  - type: cron
-    name: pms-send-pre-arrival-reminders
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "0 9 * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app send-pre-arrival-reminders
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        value: reservations@sandboxhotel.com
-
-  - type: cron
-    name: pms-send-failed-payment-reminders
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "0 10 * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app send-failed-payment-reminders
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_USERNAME
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        value: reservations@sandboxhotel.com
-      - key: APP_BASE_URL
-        value: https://book.sandboxhotel.com
-      - key: PAYMENT_PROVIDER
-        value: disabled
-
-  - type: cron
-    name: pms-fire-pre-checkin-reminders
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "0 8 * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app fire-pre-checkin-reminders
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: APP_BASE_URL
-        value: https://book.sandboxhotel.com
-
-  - type: cron
-    name: pms-process-waitlist
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "*/15 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app process-waitlist
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-
-  - type: cron
-    name: pms-cleanup-audit-logs
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "30 3 * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app cleanup-audit-logs
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
-        sync: false
-      - key: AUDIT_LOG_RETENTION_DAYS
-        value: "0"
-
-  - type: cron
-    name: pms-auto-cancel-no-shows
-    runtime: python
-    rootDir: sandbox_pms_mvp
-    region: oregon
-    plan: starter
-    schedule: "0 * * * *"
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    startCommand: flask --app app auto-cancel-no-shows
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.11
-      - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-db-v43m
-          property: connectionString
-      - key: SECRET_KEY
+      - key: LINE_CHANNEL_ACCESS_TOKEN
         sync: false
 
 databases:
   - name: sandbox-hotel-pms-db-v43m
-    plan: basic-256mb
-    region: oregon
     databaseName: sandbox_hotel_pms
-    user: sandbox_hotel_pms
-    postgresMajorVersion: "17"
+    plan: basic-256mb
