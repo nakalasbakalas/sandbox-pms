@@ -66,7 +66,8 @@ export const integrationTests: IntegrationTest[] = [
       'folios',
       'inventory-snapshots',
       'inventory-sync-events',
-      'automated-messaging-logs',
+      'automated-message-log',
+      'internal-messages',
     ],
   },
   {
@@ -89,7 +90,7 @@ export const integrationTests: IntegrationTest[] = [
     ],
     dataStoresAffected: [
       'pms-rooms',
-      'room-ready-notifications',
+      'room-ready-notification-logs',
     ],
   },
   {
@@ -194,7 +195,7 @@ export const integrationTests: IntegrationTest[] = [
     dataStoresAffected: [
       'folios',
       'reservations',
-      'accounting-transactions',
+      'accounting-entries',
     ],
   },
   {
@@ -215,7 +216,7 @@ export const integrationTests: IntegrationTest[] = [
       'Reports view includes transaction',
     ],
     dataStoresAffected: [
-      'accounting-transactions',
+      'accounting-entries',
     ],
   },
   {
@@ -312,7 +313,6 @@ export const integrationTests: IntegrationTest[] = [
       'Audit log recorded',
     ],
     dataStoresAffected: [
-      'system-date',
       'folios',
       'reservations',
       'inventory-snapshots',
@@ -363,8 +363,9 @@ export const integrationTests: IntegrationTest[] = [
       'Correct LINE groups receive messages',
     ],
     dataStoresAffected: [
-      'automated-messaging-config',
-      'automated-messaging-logs',
+      'housekeeping-automation-config',
+      'automated-message-log',
+      'internal-messages',
     ],
   },
   {
@@ -383,10 +384,10 @@ export const integrationTests: IntegrationTest[] = [
       'All views reflect density change',
       'Tables, cards, forms adjust spacing',
       'Preference persists after refresh',
-      'Keyboard shortcut (⌘⇧D) works',
+      'Keyboard shortcut (Cmd/Ctrl+Shift+D) works',
     ],
     dataStoresAffected: [
-      'visual-density',
+      'app-density',
     ],
   },
 ]

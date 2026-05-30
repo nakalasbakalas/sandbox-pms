@@ -47,7 +47,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'View the compact room board',
       category: 'navigation',
       keywords: ['board', 'rooms', 'home', 'overview', 'calendar'],
-      shortcut: 'cmd+2',
+      shortcut: 'cmd+3',
       icon: HouseLine,
       action: () => {
         navigate?.('board')
@@ -59,7 +59,6 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Access arrivals, departures, and check-ins',
       category: 'navigation',
       keywords: ['front desk', 'reception', 'arrivals', 'departures'],
-      shortcut: 'cmd+3',
       icon: Calendar,
       action: () => {
         navigate?.('front-desk')
@@ -71,7 +70,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Manage bookings and reservation pipeline',
       category: 'navigation',
       keywords: ['reservations', 'bookings', 'schedule'],
-      shortcut: 'cmd+4',
+      shortcut: 'cmd+2',
       icon: Calendar,
       action: () => {
         navigate?.('reservations')
@@ -83,6 +82,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Review all 30 sellable rooms and room readiness',
       category: 'navigation',
       keywords: ['rooms', 'inventory', 'readiness', 'status'],
+      shortcut: 'cmd+4',
       icon: Bed,
       action: () => {
         navigate?.('rooms')
@@ -94,7 +94,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'View guest profiles and stay history',
       category: 'navigation',
       keywords: ['guests', 'profiles', 'customers'],
-      shortcut: 'cmd+4',
+      shortcut: 'cmd+6',
       icon: Users,
       action: () => {
         navigate?.('guests')
@@ -118,7 +118,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Payments, folios, and invoices',
       category: 'navigation',
       keywords: ['cashier', 'payments', 'billing', 'folio'],
-      shortcut: 'cmd+6',
+      shortcut: 'cmd+7',
       icon: CurrencyCircleDollar,
       action: () => {
         navigate?.('cashier')
@@ -163,7 +163,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'Analytics and operational reports',
       category: 'navigation',
       keywords: ['reports', 'analytics', 'metrics'],
-      shortcut: 'cmd+r',
+      shortcut: 'cmd+8',
       icon: ChartBar,
       action: () => {
         navigate?.('reports')
@@ -175,6 +175,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       description: 'System configuration and preferences',
       category: 'navigation',
       keywords: ['settings', 'admin', 'config'],
+      shortcut: 'cmd+9',
       icon: Gear,
       action: () => {
         navigate?.('settings')
@@ -284,6 +285,17 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       icon: Bed,
       action: () => {
         navigate?.('housekeeping')
+      },
+    },
+    {
+      id: 'tablet-housekeeping',
+      label: 'Open Tablet Housekeeping',
+      description: 'Open the touch-friendly housekeeping workspace',
+      category: 'housekeeping',
+      keywords: ['tablet', 'mobile', 'housekeeping', 'touch'],
+      icon: Broom,
+      action: () => {
+        navigate?.('tablet-housekeeping')
       },
     },
     {
@@ -412,6 +424,17 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       },
     },
     {
+      id: 'daily-summary',
+      label: 'Daily Summary Report',
+      description: 'Open the latest daily operational summary',
+      category: 'reports',
+      keywords: ['daily summary', 'morning report', 'readiness', 'operations'],
+      icon: ListChecks,
+      action: () => {
+        navigate?.('daily-summary')
+      },
+    },
+    {
       id: 'predictive-analytics',
       label: 'Demand Forecast',
       description: 'Forecast occupancy, revenue risk, and operational demand',
@@ -465,6 +488,17 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       icon: Database,
       action: () => {
         navigate?.('data-backup')
+      },
+    },
+    {
+      id: 'user-management',
+      label: 'User Management',
+      description: 'Manage PMS users, roles, and access',
+      category: 'settings',
+      keywords: ['users', 'roles', 'permissions', 'admin'],
+      icon: UserCirclePlus,
+      action: () => {
+        navigate?.('user-management')
       },
     },
   ]

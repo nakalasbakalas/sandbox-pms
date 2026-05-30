@@ -76,14 +76,50 @@ const emptyNewGuest: NewGuestForm = {
   vipStatus: false,
 }
 
-function deserializeGuest(guest: Guest): Guest {
+function parseGuestDate(value: unknown, fallback = new Date()): Date {
+  if (!value) return fallback
+  const date = new Date(value as Date | string)
+  return Number.isNaN(date.getTime()) ? fallback : date
+}
+
+function normalizeLocalGuest(record: any): Guest {
+  const fullName = String(
+    record.fullName ||
+    record.name ||
+    `${record.firstName || ''} ${record.lastName || ''}`.trim() ||
+    'Guest name required'
+  )
+  const nameParts = fullName.split(' ').filter(Boolean)
+  const id = String(record.id || record.guestId || `guest-${fullName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
+  const firstName = String(record.firstName || nameParts[0] || fullName)
+  const lastName = String(record.lastName || nameParts.slice(1).join(' '))
+  const isVIP = Boolean(record.isVIP || record.vipStatus)
+  const tags = Array.isArray(record.tags)
+    ? record.tags
+    : isVIP
+      ? ['VIP']
+      : []
+
   return {
-    ...guest,
-    dateOfBirth: guest.dateOfBirth ? new Date(guest.dateOfBirth) : undefined,
-    lastStayDate: guest.lastStayDate ? new Date(guest.lastStayDate) : undefined,
-    firstStayDate: new Date(guest.firstStayDate),
-    createdAt: new Date(guest.createdAt),
-    updatedAt: new Date(guest.updatedAt),
+    ...record,
+    id,
+    firstName,
+    lastName,
+    fullName,
+    email: record.email || undefined,
+    phone: record.phone || undefined,
+    nationality: record.nationality || undefined,
+    dateOfBirth: record.dateOfBirth ? parseGuestDate(record.dateOfBirth) : undefined,
+    isVIP,
+    tags,
+    preferences: preferencesToText(record.preferences),
+    totalStays: Number(record.totalStays ?? record.stays ?? 0),
+    totalNights: Number(record.totalNights ?? record.nights ?? 0),
+    totalSpent: Number(record.totalSpent ?? record.totalRevenue ?? 0),
+    lastStayDate: record.lastStayDate ? parseGuestDate(record.lastStayDate) : undefined,
+    firstStayDate: parseGuestDate(record.firstStayDate || record.createdAt),
+    createdAt: parseGuestDate(record.createdAt),
+    updatedAt: parseGuestDate(record.updatedAt || record.createdAt),
   }
 }
 
@@ -220,10 +256,10 @@ export function GuestsView() {
     if (SERVER_API_ENABLED && authToken) return serverGuests
 
     const merged = new Map<string, Guest>()
-    ;(canonicalGuestsRaw || []).map(deserializeGuest).forEach((guest) => {
+    ;(canonicalGuestsRaw || []).map(normalizeLocalGuest).forEach((guest) => {
       merged.set(guest.id, guest)
     })
-    ;(guestsRaw || []).map(deserializeGuest).forEach((guest) => {
+    ;(guestsRaw || []).map(normalizeLocalGuest).forEach((guest) => {
       merged.set(guest.id, guest)
     })
     return [...merged.values()]
@@ -320,8 +356,8 @@ export function GuestsView() {
     withWarnings: guests.filter(g => g.warnings).length
   }), [guests])
   
-  const getInitials = (name: string) => {
-    const parts = name.split(' ')
+  const getInitials = (name?: string) => {
+    const parts = (name || 'Guest').split(' ').filter(Boolean)
     return parts.map(p => p[0]).join('').substring(0, 2).toUpperCase()
   }
   

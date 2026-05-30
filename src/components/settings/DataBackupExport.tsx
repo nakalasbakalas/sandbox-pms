@@ -70,14 +70,35 @@ const DATA_CATEGORIES = [
     id: 'rooms',
     label: 'Room Configuration',
     description: 'Room types, room numbers, occupancy rules',
-    keys: ['pms-rooms', 'onboarding-room-types', 'onboarding-rooms', 'room-types', 'room-types-config'],
+    keys: ['pms-rooms', 'onboarding-room-types', 'onboarding-rooms', 'rooms', 'room-types', 'room-types-config'],
     critical: true
   },
   {
     id: 'rates',
     label: 'Rates & Pricing',
-    description: 'Base rates, seasonal rates, pricing rules',
-    keys: ['onboarding-rates', 'rate-calendar', 'seasonal-rates'],
+    description: 'Base rates, seasonal rates, pricing rules, parity, and yield data',
+    keys: [
+      'onboarding-rates',
+      'rate-calendar',
+      'seasonal-rates',
+      'rate-rules',
+      'rate-overrides',
+      'rate-plans',
+      'rate-push-logs',
+      'rate-push-settings',
+      'pending-rate-pushes',
+      'rate-snapshots',
+      'rate-parity-settings',
+      'parity-checks',
+      'parity-violations',
+      'yield-rules',
+      'yield-adjustments',
+      'competitors',
+      'competitor-rates',
+      'seasonal-packages',
+      'tax-rules',
+      'discount-rules'
+    ],
     critical: true
   },
   {
@@ -98,42 +119,98 @@ const DATA_CATEGORIES = [
     id: 'payments',
     label: 'Payment Settings',
     description: 'PromptPay, payment methods, merchant settings',
-    keys: ['promptpay-settings', 'payment-methods'],
+    keys: ['promptpay-settings', 'hotel-promptpay-id', 'payment-methods'],
+    critical: false
+  },
+  {
+    id: 'channels',
+    label: 'Channel Manager',
+    description: 'OTA channels, imported reservations, inventory sync, and push logs',
+    keys: [
+      'channels',
+      'channel-reservations',
+      'channel-sync-logs',
+      'channel-inventory-states',
+      'inventory-snapshots',
+      'inventory-sync-events',
+      'inventory-sync-logs',
+      'auto-sync-enabled'
+    ],
     critical: false
   },
   {
     id: 'messaging',
     label: 'Messaging Configuration',
-    description: 'LINE settings, message templates, automation rules',
+    description: 'LINE settings, message templates, alert routing, automation rules',
     keys: [
       'line-settings',
+      'line-config',
+      'line-templates',
+      'message-templates',
+      'messages',
+      'internal-channels',
+      'internal-messages',
+      'guest-messages',
+      'staff-members',
       'staff-message-templates',
       'guest-message-templates',
       'automated-messaging-settings',
+      'housekeeping-automation-config',
+      'automated-message-log',
+      'automation-last-processed',
       'staff-alert-settings',
-      'room-ready-notification-settings'
+      'alert-routing-rules',
+      'housekeeping-notifications',
+      'notification-sound-enabled',
+      'room-ready-notification-settings',
+      'room-ready-notification-logs'
     ],
     critical: false
   },
   {
     id: 'reports',
     label: 'Report Settings',
-    description: 'Daily summary configuration, trend data',
-    keys: ['daily-summary-settings', 'weekly-trends-data'],
+    description: 'Daily summary configuration, trend data, audit history',
+    keys: [
+      'daily-summary-settings',
+      'daily-summary-logs',
+      'last-daily-summary-report',
+      'weekly-trends-data',
+      'weekly-performance-history',
+      'night-audit-config',
+      'night-audit-logs',
+      'audit-records'
+    ],
     critical: false
   },
   {
     id: 'cashier',
     label: 'Cashier & Accounting',
     description: 'Transactions, folios, accounting entries',
-    keys: ['accounting-entries', 'folios'],
+    keys: ['accounting-entries', 'folios', 'cashier-folios', 'cash-reconciliations'],
     critical: true
   },
   {
     id: 'housekeeping',
     label: 'Housekeeping',
-    description: 'Room status, cleaning assignments, inspection data',
-    keys: ['housekeeping-assignments', 'housekeeping-inspections'],
+    description: 'Room status, cleaning assignments, inspection data, maintenance records',
+    keys: [
+      'housekeeping-assignments',
+      'housekeeping-inspections',
+      'housekeeping-staff',
+      'housekeeping-view-mode',
+      'room-staff-assignments',
+      'maintenance-issues',
+      'status-history',
+      'last-room-update'
+    ],
+    critical: false
+  },
+  {
+    id: 'growth',
+    label: 'Direct Booking',
+    description: 'Direct booking and growth suite configuration',
+    keys: ['growth-suite-settings'],
     critical: false
   }
 ]
@@ -160,6 +237,7 @@ export function DataBackupExport() {
         'auth:',
         'onboarding',
         'pms-',
+        'rooms',
         'last-room-update',
         'room-',
         'reservations',
@@ -167,6 +245,7 @@ export function DataBackupExport() {
         'guests',
         'folios',
         'cashier-',
+        'cash-',
         'accounting-',
         'audit-',
         'internal-',
@@ -174,24 +253,33 @@ export function DataBackupExport() {
         'staff-',
         'rate-',
         'yield-',
+        'pending-rate-',
         'channels',
         'channel-',
         'inventory-',
         'sync-',
+        'auto-sync-',
         'line-',
         'promptpay-',
+        'hotel-promptpay-id',
         'tax-',
         'daily-summary-',
         'weekly-',
         'maintenance-',
         'housekeeping-',
         'messages',
+        'message-',
+        'automated-',
+        'automation-',
         'growth-suite-',
         'competitor',
         'seasonal-',
+        'parity-',
         'payment-',
         'night-audit-',
         'property-branding',
+        'alert-routing-rules',
+        'status-history',
       ]
       const allKeys = await spark.kv.keys()
       const keysToDelete = allKeys.filter((key) => resetPrefixes.some((prefix) => key.startsWith(prefix)))
@@ -229,13 +317,13 @@ export function DataBackupExport() {
     setSelectedCategories(DATA_CATEGORIES.filter(c => c.critical).map(c => c.id))
   }
 
-  const exportData = async () => {
+  const exportData = async (categoryIds: string[] = selectedCategories) => {
     setIsExporting(true)
     setExportProgress(0)
 
     try {
       const selectedKeys = DATA_CATEGORIES
-        .filter(cat => selectedCategories.includes(cat.id))
+        .filter(cat => categoryIds.includes(cat.id))
         .flatMap(cat => cat.keys)
 
       const allKeys = await spark.kv.keys()
@@ -343,7 +431,7 @@ export function DataBackupExport() {
   const exportQuickBackup = async () => {
     const criticalIds = DATA_CATEGORIES.filter(c => c.critical).map(c => c.id)
     setSelectedCategories(criticalIds)
-    setTimeout(() => exportData(), 100)
+    await exportData(criticalIds)
   }
 
   return (
@@ -434,7 +522,7 @@ export function DataBackupExport() {
 
           <div className="flex gap-3">
             <Button
-              onClick={exportData}
+              onClick={() => exportData()}
               disabled={selectedCategories.length === 0 || isExporting}
               className="flex-1"
             >

@@ -16,9 +16,9 @@ export function useKeyboardShortcuts(shortcuts: KeyboardShortcut[], enabled: boo
 
     const matchingShortcut = shortcuts.find(shortcut => {
       const keyMatches = event.key.toLowerCase() === shortcut.key.toLowerCase()
-      const ctrlMatches = shortcut.ctrl ? (event.ctrlKey || event.metaKey) : true
-      const shiftMatches = shortcut.shift ? event.shiftKey : true
-      const altMatches = shortcut.alt ? event.altKey : true
+      const ctrlMatches = Boolean(shortcut.ctrl) === (event.ctrlKey || event.metaKey)
+      const shiftMatches = Boolean(shortcut.shift) === event.shiftKey
+      const altMatches = Boolean(shortcut.alt) === event.altKey
 
       return keyMatches && ctrlMatches && shiftMatches && altMatches
     })

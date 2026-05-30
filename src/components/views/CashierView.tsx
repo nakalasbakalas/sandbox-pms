@@ -1023,7 +1023,7 @@ export function CashierView() {
             <div className="space-y-4 py-2">
               <div className="rounded-md border bg-muted/40 p-3 text-sm">
                 <div className="font-medium">{chargeFolio.guestName}</div>
-                <div className="text-muted-foreground">Folio #{chargeFolio.id} Â· Room {chargeFolio.roomNumber}</div>
+                <div className="text-muted-foreground">Folio #{chargeFolio.id} · Room {chargeFolio.roomNumber}</div>
               </div>
 
               <div className="space-y-2">

@@ -18,13 +18,15 @@ export function useCommandPalette(commands?: Command[]) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault()
+        e.stopPropagation()
         toggle()
         return
       }
       
       if (e.key === 'Escape' && isOpen) {
+        e.stopPropagation()
         close()
         return
       }
@@ -33,6 +35,7 @@ export function useCommandPalette(commands?: Command[]) {
         for (const command of commands) {
           if (command.shortcut && matchesShortcut(e, command.shortcut) && !command.disabled) {
             e.preventDefault()
+            e.stopPropagation()
             command.action()
             return
           }
@@ -65,11 +68,13 @@ function matchesShortcut(e: KeyboardEvent, shortcut: string): boolean {
   const hasCtrl = modifiers.includes('ctrl')
   const hasShift = modifiers.includes('shift')
   const hasAlt = modifiers.includes('alt') || modifiers.includes('option')
+  const commandPressed = e.metaKey || e.ctrlKey
+  const expectsCommand = hasCmd || hasCtrl
 
-  if (hasCmd && !(e.metaKey || e.ctrlKey)) return false
+  if (expectsCommand !== commandPressed) return false
   if (hasCtrl && !e.ctrlKey) return false
-  if (hasShift && !e.shiftKey) return false
-  if (hasAlt && !e.altKey) return false
+  if (hasShift !== e.shiftKey) return false
+  if (hasAlt !== e.altKey) return false
 
   return true
 }
