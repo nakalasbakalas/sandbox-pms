@@ -70,7 +70,7 @@ const DATA_CATEGORIES = [
     id: 'rooms',
     label: 'Room Configuration',
     description: 'Room types, room numbers, occupancy rules',
-    keys: ['onboarding-room-types', 'onboarding-rooms', 'room-types'],
+    keys: ['pms-rooms', 'onboarding-room-types', 'onboarding-rooms', 'room-types', 'room-types-config'],
     critical: true
   },
   {

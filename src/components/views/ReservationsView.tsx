@@ -288,8 +288,10 @@ function reservationFromServer(record: any): Reservation {
 
 export function ReservationsView() {
   const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
+  const [canonicalReservationsRaw, setCanonicalReservations] = useKV<Reservation[]>('reservations', [])
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const { rooms } = useRoomSync()
   const [searchQuery, setSearchQuery] = useState('')
@@ -298,6 +300,9 @@ export function ReservationsView() {
   
   const reservations = useMemo(() => {
     const merged = new Map<string, Reservation>()
+    ;(canonicalReservationsRaw || []).map(deserializeReservation).forEach((reservation) => {
+      merged.set(reservation.id, reservation)
+    })
     ;(reservationsRaw || []).map(deserializeReservation).forEach((reservation) => {
       merged.set(reservation.id, reservation)
     })
@@ -308,12 +313,14 @@ export function ReservationsView() {
       if (!merged.has(reservation.id)) merged.set(reservation.id, reservation)
     })
     return [...merged.values()]
-  }, [reservationsRaw, rooms, unassignedReservations])
+  }, [canonicalReservationsRaw, reservationsRaw, rooms, unassignedReservations])
   
   const setReservations = (updater: Reservation[] | ((current: Reservation[]) => Reservation[])) => {
     setReservationsRaw((current) => {
-      const deserialized = (current || []).map(deserializeReservation)
+      const base = current?.length ? current : canonicalReservationsRaw || []
+      const deserialized = base.map(deserializeReservation)
       const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      setCanonicalReservations(updated)
       return updated
     })
   }
@@ -324,7 +331,11 @@ export function ReservationsView() {
     let cancelled = false
     pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
       .then((payload) => {
-        if (!cancelled) setReservationsRaw(payload.data.map(reservationFromServer))
+        if (!cancelled) {
+          const nextReservations = payload.data.map(reservationFromServer)
+          setReservationsRaw(nextReservations)
+          setCanonicalReservations(nextReservations)
+        }
       })
       .catch((error) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : 'Could not load reservations from the PMS API.')
@@ -333,7 +344,7 @@ export function ReservationsView() {
     return () => {
       cancelled = true
     }
-  }, [authToken, setReservationsRaw])
+  }, [authToken, setCanonicalReservations, setReservationsRaw])
   
   const handleCreateReservation = async (reservation: NewReservationData) => {
     if (SERVER_API_ENABLED && authToken) {
@@ -375,6 +386,11 @@ export function ReservationsView() {
       return [...current, reservationRecord]
     })
     setGuestDirectory((current) => {
+      const existing = current || []
+      if (existing.some((guest) => guest.id === guestRecord.id)) return existing
+      return [...existing, guestRecord]
+    })
+    setCanonicalGuestDirectory((current) => {
       const existing = current || []
       if (existing.some((guest) => guest.id === guestRecord.id)) return existing
       return [...existing, guestRecord]

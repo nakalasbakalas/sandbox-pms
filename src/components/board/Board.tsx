@@ -306,7 +306,9 @@ export function Board() {
   const [unassignedReservationsRaw, setUnassignedReservationsRaw] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
   const [, setReservationRecords] = useKV<ReservationListRecord[]>('reservations-data', [])
+  const [, setCanonicalReservationRecords] = useKV<ReservationListRecord[]>('reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
   
@@ -2283,7 +2285,17 @@ export function Board() {
             if (existing.some((item) => item.id === reservationRecord.id)) return existing
             return [...existing, reservationRecord]
           })
+          setCanonicalReservationRecords((current) => {
+            const existing = current || []
+            if (existing.some((item) => item.id === reservationRecord.id)) return existing
+            return [...existing, reservationRecord]
+          })
           setGuestDirectory((current) => {
+            const existing = current || []
+            if (existing.some((guest) => guest.id === guestRecord.id)) return existing
+            return [...existing, guestRecord]
+          })
+          setCanonicalGuestDirectory((current) => {
             const existing = current || []
             if (existing.some((guest) => guest.id === guestRecord.id)) return existing
             return [...existing, guestRecord]

@@ -74,8 +74,10 @@ function deserializeAuditLog(log: NightAuditLog): NightAuditLog {
 export function NightAuditView() {
   const [auditLogsRaw, setAuditLogsRaw] = useKV<NightAuditLog[]>('night-audit-logs', [])
   const [roomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
-  const [reservationsRaw, setReservationsRaw] = useKV<Array<Record<string, unknown>>>('reservations-data', [])
-  const [foliosRaw] = useKV<Array<Record<string, unknown>>>('cashier-folios', [])
+  const [canonicalReservationsRaw, setCanonicalReservationsRaw] = useKV<Array<Record<string, unknown>>>('reservations', [])
+  const [legacyReservationsRaw, setLegacyReservationsRaw] = useKV<Array<Record<string, unknown>>>('reservations-data', [])
+  const [canonicalFoliosRaw] = useKV<Array<Record<string, unknown>>>('folios', [])
+  const [legacyFoliosRaw] = useKV<Array<Record<string, unknown>>>('cashier-folios', [])
   const [config, setConfig] = useKV<NightAuditConfig>('night-audit-config', {
     autoRunTime: '03:00',
     autoRunEnabled: false,
@@ -109,6 +111,22 @@ export function NightAuditView() {
     (auditLogsRaw || []).map(deserializeAuditLog),
     [auditLogsRaw]
   )
+  const reservationsRaw = useMemo(() => {
+    return (canonicalReservationsRaw || []).length > 0 ? canonicalReservationsRaw : legacyReservationsRaw
+  }, [canonicalReservationsRaw, legacyReservationsRaw])
+  const foliosRaw = useMemo(() => {
+    return (canonicalFoliosRaw || []).length > 0 ? canonicalFoliosRaw : legacyFoliosRaw
+  }, [canonicalFoliosRaw, legacyFoliosRaw])
+
+  const setReservationsRaw = (updater: Array<Record<string, unknown>> | ((current: Array<Record<string, unknown>>) => Array<Record<string, unknown>>)) => {
+    const update = (current: Array<Record<string, unknown>>) => {
+      const base = current?.length > 0 ? current : reservationsRaw || []
+      return typeof updater === 'function' ? updater(base) : updater
+    }
+
+    setCanonicalReservationsRaw(update)
+    setLegacyReservationsRaw(update)
+  }
   
   const setAuditLogs = (updater: NightAuditLog[] | ((current: NightAuditLog[]) => NightAuditLog[])) => {
     setAuditLogsRaw((current) => {

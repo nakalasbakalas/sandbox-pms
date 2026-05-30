@@ -39,7 +39,7 @@ function deleteStoredValue(key: string) {
   window.dispatchEvent(new CustomEvent('local-kv-change', { detail: { key } }))
 }
 
-function ensureLocalSparkFallback() {
+export function ensureLocalSparkFallback() {
   if (typeof window === 'undefined') return
 
   const existingSpark = window.spark

@@ -218,6 +218,7 @@ function deserializeFolio(folio: Folio): Folio {
 
 export function CashierView() {
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
+  const [canonicalFoliosRaw, setCanonicalFolios] = useKV<Folio[]>('folios', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const { rooms } = useRoomSync()
@@ -249,6 +250,8 @@ export function CashierView() {
       const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
       const nextFolios = payload.data.map(folioFromServerReservation).filter(Boolean) as Folio[]
       setServerFolios(nextFolios)
+      setFoliosRaw(nextFolios)
+      setCanonicalFolios(nextFolios)
       return nextFolios
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load cashier folios.'
@@ -257,7 +260,7 @@ export function CashierView() {
     } finally {
       setIsLoadingFolios(false)
     }
-  }, [authToken])
+  }, [authToken, setCanonicalFolios, setFoliosRaw])
 
   useEffect(() => {
     void refreshServerFolios()
@@ -267,6 +270,9 @@ export function CashierView() {
     if (SERVER_API_ENABLED && authToken) return serverFolios
 
     const merged = new Map<string, Folio>()
+    ;(canonicalFoliosRaw || []).map(deserializeFolio).forEach((folio) => {
+      merged.set(folio.id, folio)
+    })
     ;(foliosRaw || []).map(deserializeFolio).forEach((folio) => {
       merged.set(folio.id, folio)
     })
@@ -274,12 +280,14 @@ export function CashierView() {
       if (folio && !merged.has(folio.id)) merged.set(folio.id, folio)
     })
     return [...merged.values()]
-  }, [authToken, foliosRaw, rooms, serverFolios])
+  }, [authToken, canonicalFoliosRaw, foliosRaw, rooms, serverFolios])
   
   const setFolios = (updater: Folio[] | ((current: Folio[]) => Folio[])) => {
     setFoliosRaw((current) => {
-      const deserialized = (current || []).map(deserializeFolio)
+      const base = current?.length ? current : canonicalFoliosRaw || []
+      const deserialized = base.map(deserializeFolio)
       const updated = typeof updater === 'function' ? updater(deserialized) : updater
+      setCanonicalFolios(updated)
       return updated
     })
   }

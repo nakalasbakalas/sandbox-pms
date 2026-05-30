@@ -176,7 +176,8 @@ function localGuestFromForm(form: NewGuestForm): Guest {
 
 export function GuestsView() {
   const { navigate } = useNavigation()
-  const [guestsRaw, setGuests] = useKV<Guest[]>('guests-data', [])
+  const [guestsRaw, setGuestsRaw] = useKV<Guest[]>('guests-data', [])
+  const [canonicalGuestsRaw, setCanonicalGuests] = useKV<Guest[]>('guests', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const [serverGuests, setServerGuests] = useState<Guest[]>([])
   const [isLoadingGuests, setIsLoadingGuests] = useState(false)
@@ -197,6 +198,8 @@ export function GuestsView() {
       const payload = await pmsApi<{ ok: true; data: any[] }>('/api/guests', authToken)
       const nextGuests = payload.data.map(guestFromServer)
       setServerGuests(nextGuests)
+      setGuestsRaw(nextGuests)
+      setCanonicalGuests(nextGuests)
       return nextGuests
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load guest profiles.'
@@ -205,7 +208,7 @@ export function GuestsView() {
     } finally {
       setIsLoadingGuests(false)
     }
-  }, [authToken])
+  }, [authToken, setCanonicalGuests, setGuestsRaw])
   
   useEffect(() => {
     if (SERVER_API_ENABLED && authToken) {
@@ -213,9 +216,18 @@ export function GuestsView() {
     }
   }, [authToken, refreshServerGuests])
 
-  const guests = useMemo(() => (
-    SERVER_API_ENABLED && authToken ? serverGuests : (guestsRaw || []).map(deserializeGuest)
-  ), [authToken, guestsRaw, serverGuests])
+  const guests = useMemo(() => {
+    if (SERVER_API_ENABLED && authToken) return serverGuests
+
+    const merged = new Map<string, Guest>()
+    ;(canonicalGuestsRaw || []).map(deserializeGuest).forEach((guest) => {
+      merged.set(guest.id, guest)
+    })
+    ;(guestsRaw || []).map(deserializeGuest).forEach((guest) => {
+      merged.set(guest.id, guest)
+    })
+    return [...merged.values()]
+  }, [authToken, canonicalGuestsRaw, guestsRaw, serverGuests])
 
   const updateNewGuest = (field: keyof NewGuestForm, value: string | boolean) => {
     setNewGuest((current) => ({ ...current, [field]: value }))
@@ -252,7 +264,12 @@ export function GuestsView() {
         setSelectedGuest(guestFromServer({ ...payload.data, reservations: [] }))
       } else {
         const createdGuest = localGuestFromForm(newGuest)
-        setGuests((current) => [createdGuest, ...(current || [])])
+        const nextGuests = [
+          createdGuest,
+          ...guests.filter((guest) => guest.id !== createdGuest.id),
+        ]
+        setGuestsRaw(nextGuests)
+        setCanonicalGuests(nextGuests)
         setSelectedGuest(createdGuest)
       }
       toast.success(`Guest profile created for ${newGuest.firstName.trim()} ${newGuest.lastName.trim()}.`)
