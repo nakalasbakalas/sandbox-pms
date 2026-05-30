@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sandbox-hotel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sandbox
+      POSTGRES_PASSWORD: sandbox
+      POSTGRES_DB: sandbox_hotel_dev
+    ports:
+      - "55432:5432"
+    volumes:
+      - sandbox_hotel_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandbox -d sandbox_hotel_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  sandbox_hotel_postgres_data:

@@ -1,0 +1,580 @@
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { differenceInCalendarDays, format } from 'date-fns'
+import {
+  Bed,
+  CaretDown,
+  CheckCircle,
+  CreditCard,
+  EnvelopeSimple,
+  Pencil,
+  Printer,
+  SignIn,
+  SignOut,
+  Trash,
+  Users,
+  X,
+} from '@phosphor-icons/react'
+
+import type { BoardRoomCard } from '@/types/board'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
+
+interface ReservationDetailOverlayProps {
+  room: BoardRoomCard
+  onClose: () => void
+  onEdit: (room: BoardRoomCard) => void
+  onCancelReservation: (room: BoardRoomCard) => void
+  onPrint: (room: BoardRoomCard) => void
+  onEmail: (room: BoardRoomCard) => void
+  onRecordPayment: (room: BoardRoomCard) => void
+  onCheckIn: (room: BoardRoomCard) => void
+  onCheckOut: (room: BoardRoomCard) => void
+}
+
+type OverlayTab = 'details' | 'guests' | 'inclusions' | 'extras' | 'payments' | 'notes' | 'invoices'
+
+interface ReservationOverlayDetails {
+  guest: ReturnType<typeof splitGuestName>
+  checkIn?: Date
+  checkOut?: Date
+  nights?: number
+  reservationId: string
+  outstanding?: number
+  total?: number
+  received?: number
+  paymentLabel: string
+  status: string
+}
+
+function parseDate(value?: Date | string) {
+  if (!value) return undefined
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
+function humanize(value?: string) {
+  if (!value) return 'Not recorded'
+  return value
+    .toLowerCase()
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatDate(value?: Date) {
+  return value ? format(value, 'dd MMM yyyy') : 'Not set'
+}
+
+function formatShortDate(value?: Date) {
+  return value ? format(value, 'MMM d') : 'Not set'
+}
+
+function formatAmount(value?: number) {
+  return typeof value === 'number' ? `THB ${value.toLocaleString()}` : 'Not set'
+}
+
+function splitGuestName(name?: string) {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean)
+  return {
+    firstName: parts[0] || '',
+    lastName: parts.slice(1).join(' '),
+    fullName: parts.length ? parts.join(' ') : 'Guest name required',
+  }
+}
+
+function checkedIn(room: BoardRoomCard) {
+  return room.reservation?.status === 'CHECKED_IN' || room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
+}
+
+function Field({
+  label,
+  value,
+  className,
+}: {
+  label: string
+  value: string
+  className?: string
+}) {
+  return (
+    <label className={cn('block min-w-0', className)}>
+      <span className="mb-1 block text-[11px] font-medium text-foreground">{label}</span>
+      <Input value={value} readOnly className="h-8 truncate bg-background text-xs" />
+    </label>
+  )
+}
+
+function SummaryLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={cn('flex items-center justify-between gap-3 text-xs', strong && 'font-semibold')}>
+      <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+      <span className={cn('shrink-0 text-right tabular-nums text-foreground', strong && 'text-red-600')}>{value}</span>
+    </div>
+  )
+}
+
+export function ReservationDetailOverlay({
+  room,
+  onClose,
+  onEdit,
+  onCancelReservation,
+  onPrint,
+  onEmail,
+  onRecordPayment,
+  onCheckIn,
+  onCheckOut,
+}: ReservationDetailOverlayProps) {
+  const [expanded, setExpanded] = useState(false)
+  const [activeTab, setActiveTab] = useState<OverlayTab>('details')
+
+  useEffect(() => {
+    setExpanded(false)
+    setActiveTab('details')
+  }, [room.roomId, room.reservationId, room.currentReservationId])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (expanded) {
+        setExpanded(false)
+        return
+      }
+      onClose()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [expanded, onClose])
+
+  const details = useMemo<ReservationOverlayDetails>(() => {
+    const guest = splitGuestName(room.guestName || room.reservation?.guestName)
+    const checkIn = parseDate(room.checkIn || room.reservation?.checkIn)
+    const checkOut = parseDate(room.checkOut || room.reservation?.checkOut)
+    const nights = checkIn && checkOut ? Math.max(1, differenceInCalendarDays(checkOut, checkIn)) : undefined
+    const reservationId = room.reservationId || room.currentReservationId || room.reservation?.id || `ROOM-${room.number}`
+    const outstanding = room.balanceDue ?? room.reservation?.balanceDue
+    const reservationTotal = room.reservation?.totalAmount
+    const total = typeof reservationTotal === 'number' ? reservationTotal : outstanding
+    const received = typeof total === 'number' && typeof outstanding === 'number'
+      ? Math.max(0, total - outstanding)
+      : undefined
+    const paymentLabel = outstanding === 0 || room.depositStatus === 'PAID'
+      ? 'Paid'
+      : typeof outstanding === 'number' && outstanding > 0
+        ? 'Balance due'
+        : 'Payment not recorded'
+    const status = humanize(room.reservation?.status || (checkedIn(room) ? 'CHECKED_IN' : 'CONFIRMED'))
+
+    return {
+      guest,
+      checkIn,
+      checkOut,
+      nights,
+      reservationId,
+      outstanding,
+      total,
+      received,
+      paymentLabel,
+      status,
+    }
+  }, [room])
+
+  const roomTypeLabel = `${humanize(room.type)} room`
+  const guestsLabel = `${room.guestCount || 1} ${(room.guestCount || 1) === 1 ? 'guest' : 'guests'}`
+  const canCheckIn = !checkedIn(room)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 p-3 sm:p-6" role="dialog" aria-modal="true">
+      <div
+        className={cn(
+          'w-full overflow-hidden rounded-lg border border-border/70 bg-background shadow-2xl transition-all duration-200',
+          expanded
+            ? 'max-h-[calc(100vh-2rem)] w-[min(1120px,calc(100vw-2rem))] max-w-none'
+            : 'mt-6 max-w-[640px] sm:mt-10'
+        )}
+      >
+        {!expanded ? (
+          <CompactReservationView
+            room={room}
+            details={details}
+            roomTypeLabel={roomTypeLabel}
+            guestsLabel={guestsLabel}
+            onClose={onClose}
+            onExpand={() => setExpanded(true)}
+            onCancelReservation={() => onCancelReservation(room)}
+            onPrint={() => onPrint(room)}
+            onEmail={() => onEmail(room)}
+          />
+        ) : (
+          <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as OverlayTab)} className="max-h-[calc(100vh-2rem)] gap-0">
+            <div className="flex items-center justify-between bg-[#ef6b45]">
+              <TabsList className="h-10 w-auto rounded-none bg-transparent p-0 text-white">
+                <TabButton value="details">Details</TabButton>
+                <TabButton value="guests">Guests</TabButton>
+                <TabButton value="inclusions">Inclusions</TabButton>
+                <TabButton value="extras">Extra items</TabButton>
+                <TabButton value="payments">Payments</TabButton>
+                <TabButton value="notes">Notes</TabButton>
+                <TabButton value="invoices">Invoices</TabButton>
+              </TabsList>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Close reservation"
+                onClick={onClose}
+                className="mr-2 h-8 w-8 p-0 text-white hover:bg-white/15 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="max-h-[calc(100vh-7.5rem)] overflow-y-auto">
+              <TabsContent value="details" className="m-0">
+                <ExpandedDetailsTab
+                  room={room}
+                  details={details}
+                  roomTypeLabel={roomTypeLabel}
+                  guestsLabel={guestsLabel}
+                  onRecordPayment={() => onRecordPayment(room)}
+                />
+              </TabsContent>
+              <TabsContent value="guests" className="m-0">
+                <SimpleTabPanel title="Guest Profile">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <Field label="First name" value={details.guest.firstName || 'Not recorded'} />
+                    <Field label="Last name" value={details.guest.lastName || 'Not recorded'} />
+                    <Field label="Guest count" value={guestsLabel} />
+                    <Field label="VIP status" value={room.isVIP ? 'VIP' : 'Standard'} />
+                  </div>
+                </SimpleTabPanel>
+              </TabsContent>
+              <TabsContent value="inclusions" className="m-0">
+                <SimpleTabPanel title="Inclusions">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <InfoTile icon={<Bed className="h-4 w-4" />} label="Room" value={roomTypeLabel} />
+                    <InfoTile icon={<Users className="h-4 w-4" />} label="Occupancy" value={guestsLabel} />
+                    <InfoTile icon={<CheckCircle className="h-4 w-4" />} label="Status" value={details.status} />
+                  </div>
+                </SimpleTabPanel>
+              </TabsContent>
+              <TabsContent value="extras" className="m-0">
+                <SimpleTabPanel title="Extra Items">
+                  <SummaryLine label="Extra person total" value={formatAmount(0)} />
+                  <SummaryLine label="Extras total" value={formatAmount(0)} />
+                </SimpleTabPanel>
+              </TabsContent>
+              <TabsContent value="payments" className="m-0">
+                <SimpleTabPanel title="Payments">
+                  <div className="max-w-md space-y-3">
+                    <SummaryLine label="Reservation total" value={formatAmount(details.total)} />
+                    <SummaryLine label="Total received" value={formatAmount(details.received)} />
+                    <SummaryLine label="Total outstanding" value={formatAmount(details.outstanding)} strong />
+                    <Button onClick={() => onRecordPayment(room)} className="w-full gap-2">
+                      <CreditCard className="h-4 w-4" />
+                      Record Payment
+                    </Button>
+                  </div>
+                </SimpleTabPanel>
+              </TabsContent>
+              <TabsContent value="notes" className="m-0">
+                <SimpleTabPanel title="Notes">
+                  <Textarea value={room.notes || 'No notes recorded'} readOnly className="min-h-32 resize-none text-sm" />
+                </SimpleTabPanel>
+              </TabsContent>
+              <TabsContent value="invoices" className="m-0">
+                <SimpleTabPanel title="Invoices">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <InfoTile icon={<Printer className="h-4 w-4" />} label="Registration card" value="Ready to print" />
+                    <InfoTile icon={<CreditCard className="h-4 w-4" />} label="Outstanding" value={formatAmount(details.outstanding)} />
+                  </div>
+                </SimpleTabPanel>
+              </TabsContent>
+            </div>
+
+            <div className="flex flex-col gap-2 border-t border-border bg-background px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <Button variant="ghost" size="sm" onClick={() => onCancelReservation(room)} className="justify-start gap-1.5 text-red-600 hover:text-red-700">
+                <Trash className="h-4 w-4" />
+                Cancel Booking
+              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => onEmail(room)} className="gap-1.5">
+                  <EnvelopeSimple className="h-4 w-4" />
+                  Email
+                  <CaretDown className="h-3 w-3" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => onPrint(room)} className="gap-1.5">
+                  <Printer className="h-4 w-4" />
+                  Print
+                  <CaretDown className="h-3 w-3" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onEdit(room)} className="gap-1.5">
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => (canCheckIn ? onCheckIn(room) : onCheckOut(room))}
+                  className={cn('gap-1.5', canCheckIn ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700')}
+                >
+                  {canCheckIn ? <SignIn className="h-4 w-4" /> : <SignOut className="h-4 w-4" />}
+                  {canCheckIn ? 'Check In' : 'Check Out'}
+                </Button>
+                <Button size="sm" className="min-w-28 bg-[#ef7d1f] hover:bg-[#dc6f16]">
+                  {details.status}
+                  <CaretDown className="h-3 w-3" />
+                </Button>
+                <Button size="sm" variant="secondary" onClick={onClose}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          </Tabs>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CompactReservationView({
+  room,
+  details,
+  roomTypeLabel,
+  guestsLabel,
+  onClose,
+  onExpand,
+  onCancelReservation,
+  onPrint,
+  onEmail,
+}: {
+  room: BoardRoomCard
+  details: ReservationOverlayDetails
+  roomTypeLabel: string
+  guestsLabel: string
+  onClose: () => void
+  onExpand: () => void
+  onCancelReservation: () => void
+  onPrint: () => void
+  onEmail: () => void
+}) {
+  return (
+    <>
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-lg font-medium text-foreground">
+            Reservation {details.reservationId} for {details.guest.fullName}
+          </h2>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{details.status}</Badge>
+            {room.isVIP && <Badge className="bg-amber-500 hover:bg-amber-600">VIP</Badge>}
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" aria-label="Close reservation" onClick={onClose} className="h-8 w-8 p-0">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="grid gap-4 px-4 py-4 md:grid-cols-[1fr_240px]">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">Primary contact</h3>
+            <dl className="space-y-2 text-xs">
+              <DetailRow label="Guest" value={details.guest.fullName} />
+              <DetailRow label="Email" value="Not recorded" />
+              <DetailRow label="Phone" value="Not recorded" />
+            </dl>
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">Reservation details</h3>
+            <dl className="space-y-2 text-xs">
+              <DetailRow label="Stay" value={details.nights ? `${details.nights} nights` : 'Not set'} />
+              <DetailRow label="Dates" value={`${formatShortDate(details.checkIn)} - ${formatShortDate(details.checkOut)}`} />
+              <DetailRow label="Rooms" value={`${roomTypeLabel}, Room ${room.number}`} />
+              <DetailRow label="Guests" value={guestsLabel} />
+            </dl>
+          </div>
+          <div className="sm:col-span-2">
+            <h3 className="mb-1 text-xs font-semibold text-muted-foreground">Guest comments</h3>
+            <p className="min-h-9 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs text-foreground">
+              {room.notes || 'No comments recorded'}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="rounded-md border border-green-600 bg-green-100 px-3 py-3 text-green-900">
+            <div className="mb-2 text-sm font-semibold">{details.paymentLabel}</div>
+            <SummaryLine label="Reservation total" value={formatAmount(details.total)} />
+            <SummaryLine label="Total outstanding" value={formatAmount(details.outstanding)} />
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Button variant="ghost" size="sm" onClick={onPrint} className="gap-1.5 text-xs text-blue-600">
+              <Printer className="h-4 w-4" />
+              Print
+              <CaretDown className="h-3 w-3" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={onEmail} className="gap-1.5 text-xs text-blue-600">
+              <EnvelopeSimple className="h-4 w-4" />
+              Email
+              <CaretDown className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button variant="ghost" size="sm" onClick={onCancelReservation} className="justify-start gap-1.5 text-red-600 hover:text-red-700">
+          <Trash className="h-4 w-4" />
+          Cancel reservation
+        </Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onExpand} className="min-w-48">
+            View reservation
+          </Button>
+          <Button size="sm" className="min-w-36 bg-[#ef7d1f] hover:bg-[#dc6f16]">
+            {details.status}
+            <CaretDown className="h-3 w-3" />
+          </Button>
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ExpandedDetailsTab({
+  room,
+  details,
+  roomTypeLabel,
+  guestsLabel,
+  onRecordPayment,
+}: {
+  room: BoardRoomCard
+  details: ReservationOverlayDetails
+  roomTypeLabel: string
+  guestsLabel: string
+  onRecordPayment: () => void
+}) {
+  return (
+    <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="space-y-4">
+        <div className="border-b border-border pb-4">
+          <div className="grid gap-3 lg:grid-cols-[180px_180px_minmax(0,1fr)]">
+            <Field label="Check in" value={formatDate(details.checkIn)} />
+            <Field label="Check out" value={formatDate(details.checkOut)} />
+            <div className="flex min-w-0 flex-wrap items-end gap-x-3 gap-y-2 self-end text-xs">
+              <label className="flex h-8 max-w-full items-center gap-2 rounded-md border border-border bg-background px-3">
+                <input type="checkbox" readOnly checked className="h-3.5 w-3.5 shrink-0 accent-[#8c44c7]" />
+                <span className="whitespace-nowrap">Keep rates for existing dates</span>
+              </label>
+              <span className="text-muted-foreground">|</span>
+              <span className="whitespace-nowrap">Length of stay: <strong>{details.nights || 0} Nights</strong></span>
+              <span className="text-muted-foreground">|</span>
+              <span className="whitespace-nowrap">Booking status: <span className="text-green-600">{details.status}</span></span>
+            </div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-md bg-muted/40 p-3">
+          <div className="grid min-w-[860px] grid-cols-[1.3fr_1.3fr_1fr_.7fr_.8fr_.8fr_1.2fr_.7fr] gap-2">
+            <Field label="Room type" value={roomTypeLabel} />
+            <Field label="Room rate" value={formatAmount(room.reservation?.totalAmount)} />
+            <Field label="Room #" value={`Room ${room.number}`} />
+            <Field label="Adults" value={String(room.guestCount || 1)} />
+            <Field label="Children" value="0" />
+            <Field label="Infants" value="0" />
+            <Field label="Room" value={formatAmount(details.total)} />
+            <Field label="Discount" value="0" />
+          </div>
+        </div>
+
+        <section>
+          <h3 className="mb-3 text-sm font-semibold uppercase text-[#ef6b45]">Primary Contact</h3>
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="First name" value={details.guest.firstName || 'Not recorded'} />
+            <Field label="Last name" value={details.guest.lastName || 'Not recorded'} />
+            <Field label="Email" value="Not recorded" />
+            <Field label="Phone number" value="Not recorded" />
+            <Field label="Address" value="Not recorded" />
+            <Field label="City" value="Not recorded" />
+            <Field label="Payment" value={details.paymentLabel} />
+            <Field label="Other Details" value="Arrival time not set" />
+            <Field label="ID document type" value="Not recorded" />
+            <Field label="ID document number" value="Not recorded" />
+            <Field label="Source of reservation" value="Board" />
+          </div>
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[11px] font-medium text-foreground">Guest comments</span>
+            <Textarea value={room.notes || 'No comments recorded'} readOnly className="min-h-16 resize-none text-xs" />
+          </label>
+        </section>
+      </div>
+
+      <aside className="rounded-md bg-muted/50 p-4">
+        <h3 className="mb-4 text-base font-semibold">Booking Summary</h3>
+        <div className="space-y-2">
+          <SummaryLine label="Room Total" value={formatAmount(details.total)} />
+          <SummaryLine label="Extra Person Total" value={formatAmount(0)} />
+          <SummaryLine label="Extras Total" value={formatAmount(0)} />
+          <SummaryLine label="Discount Total" value={formatAmount(0)} />
+          <SummaryLine label="Credit Card Surcharges" value={formatAmount(0)} />
+          <div className="my-4 border-t border-border" />
+          <SummaryLine label="Total" value={formatAmount(details.total)} />
+          <SummaryLine label="Total Received" value={formatAmount(details.received)} />
+          <div className="my-4 border-t border-border" />
+          <SummaryLine label="Total Outstanding" value={formatAmount(details.outstanding)} strong />
+          <Button variant="outline" className="mt-4 w-full" size="sm" onClick={onRecordPayment}>
+            Record Payment
+          </Button>
+        </div>
+        <div className="mt-4 rounded-md border border-border bg-background p-3 text-xs">
+          <div className="font-semibold text-foreground">Reservation</div>
+          <div className="mt-1 text-muted-foreground">{details.reservationId}</div>
+          <div className="mt-2 text-muted-foreground">{roomTypeLabel}, {guestsLabel}</div>
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function TabButton({ value, children }: { value: OverlayTab; children: ReactNode }) {
+  return (
+    <TabsTrigger
+      value={value}
+      className="h-10 rounded-none border-0 px-4 text-xs font-semibold uppercase text-white shadow-none data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-none"
+    >
+      {children}
+    </TabsTrigger>
+  )
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[96px_1fr] gap-2">
+      <dt className="font-semibold text-muted-foreground">{label}:</dt>
+      <dd className="min-w-0 break-words text-foreground">{value}</dd>
+    </div>
+  )
+}
+
+function SimpleTabPanel({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="p-4">
+      <h3 className="mb-4 text-base font-semibold">{title}</h3>
+      {children}
+    </section>
+  )
+}
+
+function InfoTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-border bg-background p-3">
+      <div className="mb-2 flex items-center gap-2 text-muted-foreground">
+        {icon}
+        <span className="text-xs font-medium">{label}</span>
+      </div>
+      <div className="text-sm font-semibold text-foreground">{value}</div>
+    </div>
+  )
+}

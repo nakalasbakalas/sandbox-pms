@@ -1,43 +1,49 @@
-.codex/*
-!.codex/config.toml
-.vscode/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Python cache and local tooling
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
+node_modules
+dist
+dist-ssr
+*-dist
+*.local
+.env
+.env.*
+!.env.example
+!.env.local.example
+.mcp.json
+
+# Local runtime and tooling
+.codex/
+.claude/
 .pytest_cache/
-.coverage
-htmlcov/
-.mypy_cache/
-.ruff_cache/
-
-# Local virtualenvs
 .venv/
-sandbox_pms_mvp/.venv/
-
-# Prevent nested repo clones from becoming a second source of truth.
-/sandbox-pms/
-
-# Local runtime state
-instance/
-sandbox_pms_mvp/instance/
 *.db
 *.sqlite
 *.sqlite3
+/sandbox-pms/
+/sandbox_pms_mvp/
 
-# Logs
-*.log
-
-# Environment and secrets
-.env
-.mcp.json
-*.pem
-*.key
-
-# Editor and platform noise
-Thumbs.db
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-node_modules/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+**/agent-eval-report*
+packages
+pids
+.file-manifest
+.devcontainer/
+
+.spark-workbench-id

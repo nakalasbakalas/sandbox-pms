@@ -1,0 +1,5 @@
+export { FrontDeskView } from '../front-desk/FrontDeskView'
+export { SettingsView } from '../settings/SettingsView'
+export { RatesView } from '../rates/RatesView'
+export { ChannelsView } from '../channels/ChannelsView'
+export { ReportsView } from '../reports/ReportsView'
