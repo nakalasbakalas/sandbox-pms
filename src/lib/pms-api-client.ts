@@ -53,6 +53,8 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
       status: boardStatusFromServer(room.currentStatus),
       operationalStatus: room.operationalStatus,
       guestName,
+      guestEmail: reservation?.guest?.email || undefined,
+      guestPhone: reservation?.guest?.phone || undefined,
       reservationId: reservation?.id,
       currentReservationId: room.currentReservation || reservation?.id,
       checkIn: reservation?.checkIn ? new Date(reservation.checkIn) : undefined,
@@ -72,6 +74,8 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
       reservation: reservation ? {
         id: reservation.id,
         guestName,
+        guestEmail: reservation.guest?.email || undefined,
+        guestPhone: reservation.guest?.phone || undefined,
         checkIn: reservation.checkIn,
         checkOut: reservation.checkOut,
         status: reservation.status,

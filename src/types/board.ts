@@ -3,6 +3,8 @@ import type { RoomStatus, RoomOpStatus, ReservationStatus } from './index'
 export interface BoardReservationSummary {
   id?: string
   guestName?: string
+  guestEmail?: string
+  guestPhone?: string
   checkIn?: Date | string
   checkOut?: Date | string
   status?: ReservationStatus
@@ -24,6 +26,8 @@ export interface BoardRoomCard {
   operationalStatus: RoomOpStatus
   
   guestName?: string
+  guestEmail?: string
+  guestPhone?: string
   reservationId?: string
   currentReservationId?: string
   reservation?: BoardReservationSummary

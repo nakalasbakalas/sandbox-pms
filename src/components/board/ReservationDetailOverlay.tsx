@@ -18,21 +18,31 @@ import {
 import type { BoardRoomCard } from '@/types/board'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import type { ReservationDocumentAction } from '@/lib/reservation-document-actions'
 import { cn } from '@/lib/utils'
+
+export type ReservationStatusAction = 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT'
 
 interface ReservationDetailOverlayProps {
   room: BoardRoomCard
   onClose: () => void
   onEdit: (room: BoardRoomCard) => void
   onCancelReservation: (room: BoardRoomCard) => void
-  onPrint: (room: BoardRoomCard) => void
-  onEmail: (room: BoardRoomCard) => void
+  onPrint: (room: BoardRoomCard, action: ReservationDocumentAction) => void
+  onEmail: (room: BoardRoomCard, action: ReservationDocumentAction) => void
   onRecordPayment: (room: BoardRoomCard) => void
   onCheckIn: (room: BoardRoomCard) => void
   onCheckOut: (room: BoardRoomCard) => void
+  onStatusChange: (room: BoardRoomCard, status: ReservationStatusAction) => void
 }
 
 type OverlayTab = 'details' | 'guests' | 'inclusions' | 'extras' | 'payments' | 'notes' | 'invoices'
@@ -48,6 +58,9 @@ interface ReservationOverlayDetails {
   received?: number
   paymentLabel: string
   status: string
+  statusCode: ReservationStatusAction
+  email?: string
+  phone?: string
 }
 
 function parseDate(value?: Date | string) {
@@ -126,6 +139,7 @@ export function ReservationDetailOverlay({
   onRecordPayment,
   onCheckIn,
   onCheckOut,
+  onStatusChange,
 }: ReservationDetailOverlayProps) {
   const [expanded, setExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState<OverlayTab>('details')
@@ -166,7 +180,13 @@ export function ReservationDetailOverlay({
       : typeof outstanding === 'number' && outstanding > 0
         ? 'Balance due'
         : 'Payment not recorded'
-    const status = humanize(room.reservation?.status || (checkedIn(room) ? 'CHECKED_IN' : 'CONFIRMED'))
+    const rawStatus = room.reservation?.status || (checkedIn(room) ? 'CHECKED_IN' : 'CONFIRMED')
+    const statusCode: ReservationStatusAction = rawStatus === 'CHECKED_OUT'
+      ? 'CHECKED_OUT'
+      : rawStatus === 'CHECKED_IN'
+        ? 'CHECKED_IN'
+        : 'CONFIRMED'
+    const status = humanize(statusCode)
 
     return {
       guest,
@@ -179,6 +199,9 @@ export function ReservationDetailOverlay({
       received,
       paymentLabel,
       status,
+      statusCode,
+      email: room.guestEmail || room.reservation?.guestEmail,
+      phone: room.guestPhone || room.reservation?.guestPhone,
     }
   }, [room])
 
@@ -205,8 +228,9 @@ export function ReservationDetailOverlay({
             onClose={onClose}
             onExpand={() => setExpanded(true)}
             onCancelReservation={() => onCancelReservation(room)}
-            onPrint={() => onPrint(room)}
-            onEmail={() => onEmail(room)}
+            onPrint={(action) => onPrint(room, action)}
+            onEmail={(action) => onEmail(room, action)}
+            onStatusChange={(status) => onStatusChange(room, status)}
           />
         ) : (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as OverlayTab)} className="max-h-[calc(100vh-2rem)] gap-0">
@@ -300,16 +324,8 @@ export function ReservationDetailOverlay({
                 Cancel Booking
               </Button>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button variant="ghost" size="sm" onClick={() => onEmail(room)} className="gap-1.5">
-                  <EnvelopeSimple className="h-4 w-4" />
-                  Email
-                  <CaretDown className="h-3 w-3" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => onPrint(room)} className="gap-1.5">
-                  <Printer className="h-4 w-4" />
-                  Print
-                  <CaretDown className="h-3 w-3" />
-                </Button>
+                <EmailDropdown onEmail={(action) => onEmail(room, action)} />
+                <PrintDropdown onPrint={(action) => onPrint(room, action)} />
                 <Button variant="outline" size="sm" onClick={() => onEdit(room)} className="gap-1.5">
                   <Pencil className="h-4 w-4" />
                   Edit
@@ -322,10 +338,11 @@ export function ReservationDetailOverlay({
                   {canCheckIn ? <SignIn className="h-4 w-4" /> : <SignOut className="h-4 w-4" />}
                   {canCheckIn ? 'Check In' : 'Check Out'}
                 </Button>
-                <Button size="sm" className="min-w-28 bg-[#ef7d1f] hover:bg-[#dc6f16]">
-                  {details.status}
-                  <CaretDown className="h-3 w-3" />
-                </Button>
+                <StatusDropdown
+                  status={details.statusCode}
+                  label={details.status}
+                  onStatusChange={(status) => onStatusChange(room, status)}
+                />
                 <Button size="sm" variant="secondary" onClick={onClose}>
                   Close
                 </Button>
@@ -348,6 +365,7 @@ function CompactReservationView({
   onCancelReservation,
   onPrint,
   onEmail,
+  onStatusChange,
 }: {
   room: BoardRoomCard
   details: ReservationOverlayDetails
@@ -356,8 +374,9 @@ function CompactReservationView({
   onClose: () => void
   onExpand: () => void
   onCancelReservation: () => void
-  onPrint: () => void
-  onEmail: () => void
+  onPrint: (action: ReservationDocumentAction) => void
+  onEmail: (action: ReservationDocumentAction) => void
+  onStatusChange: (status: ReservationStatusAction) => void
 }) {
   return (
     <>
@@ -382,8 +401,8 @@ function CompactReservationView({
             <h3 className="mb-2 text-xs font-semibold text-muted-foreground">Primary contact</h3>
             <dl className="space-y-2 text-xs">
               <DetailRow label="Guest" value={details.guest.fullName} />
-              <DetailRow label="Email" value="Not recorded" />
-              <DetailRow label="Phone" value="Not recorded" />
+              <DetailRow label="Email" value={details.email || 'Not recorded'} />
+              <DetailRow label="Phone" value={details.phone || 'Not recorded'} />
             </dl>
           </div>
           <div>
@@ -410,16 +429,8 @@ function CompactReservationView({
             <SummaryLine label="Total outstanding" value={formatAmount(details.outstanding)} />
           </div>
           <div className="flex flex-col items-end gap-1">
-            <Button variant="ghost" size="sm" onClick={onPrint} className="gap-1.5 text-xs text-blue-600">
-              <Printer className="h-4 w-4" />
-              Print
-              <CaretDown className="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onEmail} className="gap-1.5 text-xs text-blue-600">
-              <EnvelopeSimple className="h-4 w-4" />
-              Email
-              <CaretDown className="h-3 w-3" />
-            </Button>
+            <PrintDropdown onPrint={onPrint} variant="compact" />
+            <EmailDropdown onEmail={onEmail} variant="compact" />
           </div>
         </div>
       </div>
@@ -433,10 +444,12 @@ function CompactReservationView({
           <Button variant="outline" size="sm" onClick={onExpand} className="min-w-48">
             View reservation
           </Button>
-          <Button size="sm" className="min-w-36 bg-[#ef7d1f] hover:bg-[#dc6f16]">
-            {details.status}
-            <CaretDown className="h-3 w-3" />
-          </Button>
+          <StatusDropdown
+            status={details.statusCode}
+            label={details.status}
+            onStatusChange={onStatusChange}
+            className="min-w-36"
+          />
         </div>
       </div>
     </>
@@ -494,8 +507,8 @@ function ExpandedDetailsTab({
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="First name" value={details.guest.firstName || 'Not recorded'} />
             <Field label="Last name" value={details.guest.lastName || 'Not recorded'} />
-            <Field label="Email" value="Not recorded" />
-            <Field label="Phone number" value="Not recorded" />
+            <Field label="Email" value={details.email || 'Not recorded'} />
+            <Field label="Phone number" value={details.phone || 'Not recorded'} />
             <Field label="Address" value="Not recorded" />
             <Field label="City" value="Not recorded" />
             <Field label="Payment" value={details.paymentLabel} />
@@ -546,6 +559,115 @@ function TabButton({ value, children }: { value: OverlayTab; children: ReactNode
     >
       {children}
     </TabsTrigger>
+  )
+}
+
+function PrintDropdown({
+  onPrint,
+  variant = 'default',
+}: {
+  onPrint: (action: ReservationDocumentAction) => void
+  variant?: 'default' | 'compact'
+}) {
+  const buttonClass = variant === 'compact'
+    ? 'gap-1.5 text-xs text-blue-600'
+    : 'gap-1.5'
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className={buttonClass}>
+          <Printer className="h-4 w-4" />
+          Print
+          <CaretDown className="h-3 w-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onClick={() => onPrint('registration-card')}>
+          <Printer className="mr-2 h-4 w-4" />
+          Registration card
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onPrint('confirmation')}>
+          <CheckCircle className="mr-2 h-4 w-4" />
+          Confirmation
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function EmailDropdown({
+  onEmail,
+  variant = 'default',
+}: {
+  onEmail: (action: ReservationDocumentAction) => void
+  variant?: 'default' | 'compact'
+}) {
+  const buttonClass = variant === 'compact'
+    ? 'gap-1.5 text-xs text-blue-600'
+    : 'gap-1.5'
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className={buttonClass}>
+          <EnvelopeSimple className="h-4 w-4" />
+          Email
+          <CaretDown className="h-3 w-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem onClick={() => onEmail('confirmation')}>
+          <EnvelopeSimple className="mr-2 h-4 w-4" />
+          Confirmation email
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onEmail('registration-card')}>
+          <Printer className="mr-2 h-4 w-4" />
+          Registration card email
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function StatusDropdown({
+  status,
+  label,
+  onStatusChange,
+  className,
+}: {
+  status: ReservationStatusAction
+  label: string
+  onStatusChange: (status: ReservationStatusAction) => void
+  className?: string
+}) {
+  const options: Array<{ value: ReservationStatusAction; label: string; icon: ReactNode }> = [
+    { value: 'CONFIRMED', label: 'Confirmed', icon: <CheckCircle className="mr-2 h-4 w-4" /> },
+    { value: 'CHECKED_IN', label: 'Check in', icon: <SignIn className="mr-2 h-4 w-4" /> },
+    { value: 'CHECKED_OUT', label: 'Check out', icon: <SignOut className="mr-2 h-4 w-4" /> },
+  ]
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" className={cn('min-w-28 bg-[#ef7d1f] hover:bg-[#dc6f16]', className)}>
+          {label}
+          <CaretDown className="h-3 w-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        {options.map((option) => (
+          <DropdownMenuItem
+            key={option.value}
+            disabled={status === option.value}
+            onClick={() => onStatusChange(option.value)}
+          >
+            {option.icon}
+            {option.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

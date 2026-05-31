@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import type { BoardRoomCard, DragOperation } from '@/types/board'
+import type { BoardReservationSummary, BoardRoomCard, DragOperation } from '@/types/board'
 import { RoomCard } from './RoomCard'
 import { BoardStatsBar } from './BoardStatsBar'
 import { QuickActionsBar } from './QuickActionsBar'
@@ -39,7 +39,7 @@ import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { NewReservationDialog, type NewReservationData } from './NewReservationDialog'
 import { EditReservationDialog } from './EditReservationDialog'
-import { ReservationDetailOverlay } from './ReservationDetailOverlay'
+import { ReservationDetailOverlay, type ReservationStatusAction } from './ReservationDetailOverlay'
 import { CheckInDialog } from '@/components/front-desk/CheckInDialog'
 import { CheckOutDialog } from '@/components/front-desk/CheckOutDialog'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
@@ -54,6 +54,11 @@ import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import {
+  emailReservationDocument,
+  printReservationDocument,
+  type ReservationDocumentAction,
+} from '@/lib/reservation-document-actions'
 
 interface UnassignedReservation {
   id: string
@@ -129,6 +134,41 @@ interface GuestDirectoryRecord {
   preferredContact?: 'EMAIL' | 'PHONE' | 'LINE'
   createdAt: Date
   updatedAt: Date
+}
+
+function reservationIdentifiers(room: BoardRoomCard) {
+  return new Set(
+    [room.reservationId, room.currentReservationId, room.reservation?.id]
+      .filter((value): value is string => Boolean(value))
+  )
+}
+
+function reservationRecordMatches(record: ReservationListRecord, identifiers: Set<string>) {
+  return identifiers.has(record.id) || identifiers.has(record.confirmationNumber)
+}
+
+function buildReservationSummary(
+  room: BoardRoomCard,
+  status: ReservationStatusAction,
+  overrides: Partial<BoardReservationSummary> = {}
+): BoardReservationSummary {
+  const reservationId = overrides.id || room.reservation?.id || room.reservationId || room.currentReservationId
+  return {
+    id: reservationId,
+    guestName: overrides.guestName || room.guestName || room.reservation?.guestName,
+    guestEmail: overrides.guestEmail || room.guestEmail || room.reservation?.guestEmail,
+    guestPhone: overrides.guestPhone || room.guestPhone || room.reservation?.guestPhone,
+    checkIn: overrides.checkIn || room.checkIn || room.reservation?.checkIn,
+    checkOut: overrides.checkOut || room.checkOut || room.reservation?.checkOut,
+    status,
+    totalAmount: overrides.totalAmount ?? room.reservation?.totalAmount ?? room.balanceDue,
+    balanceDue: overrides.balanceDue ?? room.balanceDue ?? room.reservation?.balanceDue,
+    depositStatus: overrides.depositStatus || room.depositStatus || room.reservation?.depositStatus,
+  }
+}
+
+function assignedRoomStatus(room: BoardRoomCard): BoardRoomCard['status'] {
+  return room.cleanStatus === 'DIRTY' || room.cleanStatus === 'CLEANING' ? 'VACANT_DIRTY' : 'VACANT_CLEAN'
 }
 
 function toReservationListRecord(reservation: NewReservationData): ReservationListRecord {
@@ -250,6 +290,8 @@ function boardRoomToArrival(room: BoardRoomCard): ArrivalItem | null {
     roomReady: isRoomReadyForArrival(room),
     depositPaid: room.depositStatus === 'PAID',
     documentVerified: false,
+    phone: room.guestPhone || room.reservation?.guestPhone,
+    email: room.guestEmail || room.reservation?.guestEmail,
     source: 'Board',
     bookedRate: 0,
     totalAmount,
@@ -587,7 +629,11 @@ export function Board() {
       roomType: reservation.roomType,
       checkIn: reservation.checkIn.toISOString(),
       checkOut: reservation.checkOut.toISOString(),
-      guestCount: reservation.guestCount
+      guestCount: reservation.guestCount,
+      email: reservation.email,
+      phone: reservation.phone,
+      totalAmount: reservation.totalAmount,
+      balanceDue: reservation.balanceDue,
     }))
     
     setDraggingReservation(reservation.id)
@@ -651,7 +697,11 @@ export function Board() {
                   ...r,
                   status: 'VACANT_DIRTY',
                   guestName: undefined,
+                  guestEmail: undefined,
+                  guestPhone: undefined,
                   reservationId: undefined,
+                  currentReservationId: undefined,
+                  reservation: undefined,
                   checkIn: undefined,
                   checkOut: undefined,
                   guestCount: undefined,
@@ -666,7 +716,11 @@ export function Board() {
                   ...r,
                   status: sourceRoom.cleanStatus === 'DIRTY' ? 'OCCUPIED_DIRTY' : 'OCCUPIED_CLEAN',
                   guestName: data.guestName,
+                  guestEmail: sourceRoom.guestEmail,
+                  guestPhone: sourceRoom.guestPhone,
                   reservationId: data.reservationId,
+                  currentReservationId: data.reservationId,
+                  reservation: buildReservationSummary(sourceRoom, 'CHECKED_IN', { id: data.reservationId, guestName: data.guestName }),
                   checkIn: sourceRoom.checkIn,
                   checkOut: sourceRoom.checkOut,
                   guestCount: sourceRoom.guestCount,
@@ -695,19 +749,47 @@ export function Board() {
               r.roomId === targetRoom.roomId 
                 ? {
                     ...r,
-                    status: 'OCCUPIED_CLEAN',
+                    status: assignedRoomStatus(r),
                     guestName: data.guestName,
+                    guestEmail: data.email,
+                    guestPhone: data.phone,
                     reservationId: data.reservationId,
+                    currentReservationId: data.reservationId,
+                    reservation: {
+                      id: data.reservationId,
+                      guestName: data.guestName,
+                      guestEmail: data.email,
+                      guestPhone: data.phone,
+                      checkIn: new Date(data.checkIn),
+                      checkOut: new Date(data.checkOut),
+                      status: 'CONFIRMED',
+                      totalAmount: data.totalAmount,
+                      balanceDue: data.balanceDue,
+                      depositStatus: data.balanceDue && data.balanceDue > 0 ? 'PENDING' : 'PAID',
+                    },
                     checkIn: new Date(data.checkIn),
                     checkOut: new Date(data.checkOut),
                     guestCount: data.guestCount,
                     isArrivalToday: isSameDay(new Date(data.checkIn), new Date()),
                     isDepartureToday: isSameDay(new Date(data.checkOut), new Date()),
-                    nightsRemaining: Math.ceil((new Date(data.checkOut).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+                    nightsRemaining: Math.ceil((new Date(data.checkOut).getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+                    balanceDue: data.balanceDue,
+                    depositStatus: data.balanceDue && data.balanceDue > 0 ? 'PENDING' : 'PAID',
                   }
                 : r
             )
           )
+          const markAssigned = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservation.id === data.reservationId || reservation.confirmationNumber === data.reservationId
+            ? {
+                ...reservation,
+                status: 'CONFIRMED' as const,
+                roomId: targetRoom.roomId,
+                roomNumber: targetRoom.number,
+                updatedAt: new Date(),
+              }
+            : reservation)
+          setReservationRecords(markAssigned)
+          setCanonicalReservationRecords(markAssigned)
           
           setUnassignedReservations((current) => 
             current.filter(r => r.id !== data.reservationId)
@@ -843,25 +925,57 @@ export function Board() {
       return
     }
 
+    const checkedInAt = data.actualCheckIn || new Date()
+    const newBalanceDue = Math.max(0, (selectedArrival.balanceDue || 0) - (data.payment?.amount || 0))
+
     setRooms((currentRooms) =>
       currentRooms.map((room) => room.roomId === assignedRoom.roomId
         ? {
             ...room,
             status: 'OCCUPIED_CLEAN',
             guestName: selectedArrival.guestName,
+            guestEmail: selectedArrival.email,
+            guestPhone: selectedArrival.phone,
             reservationId: selectedArrival.reservationId,
             currentReservationId: selectedArrival.reservationId,
             checkIn: selectedArrival.checkInDate ? new Date(selectedArrival.checkInDate) : new Date(),
             checkOut: selectedArrival.checkOutDate ? new Date(selectedArrival.checkOutDate) : addDays(new Date(), Math.max(1, selectedArrival.nights)),
             guestCount: selectedArrival.adults + selectedArrival.children,
-            balanceDue: Math.max(0, (selectedArrival.balanceDue || 0) - (data.payment?.amount || 0)),
-            depositStatus: (selectedArrival.balanceDue || 0) - (data.payment?.amount || 0) <= 0 ? 'PAID' : 'PENDING',
+            balanceDue: newBalanceDue,
+            depositStatus: newBalanceDue <= 0 ? 'PAID' : 'PENDING',
+            reservation: {
+              id: selectedArrival.confirmationCode || selectedArrival.reservationId,
+              guestName: selectedArrival.guestName,
+              guestEmail: selectedArrival.email,
+              guestPhone: selectedArrival.phone,
+              checkIn: selectedArrival.checkInDate,
+              checkOut: selectedArrival.checkOutDate,
+              status: 'CHECKED_IN',
+              totalAmount: selectedArrival.totalAmount,
+              balanceDue: newBalanceDue,
+              depositStatus: newBalanceDue <= 0 ? 'PAID' : 'PENDING',
+            },
             lastUpdatedAt: new Date().toISOString(),
             lastUpdatedBy: user?.displayName || 'Front desk',
           }
         : room
       )
     )
+    const markCheckedIn = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservation.id === selectedArrival.reservationId || reservation.confirmationNumber === selectedArrival.confirmationCode
+      ? {
+          ...reservation,
+          status: 'CHECKED_IN' as const,
+          roomId: assignedRoom.roomId,
+          roomNumber: assignedRoom.number,
+          actualCheckIn: checkedInAt,
+          balanceDue: newBalanceDue,
+          depositStatus: newBalanceDue <= 0 ? 'PAID' as const : reservation.depositStatus,
+          depositPaid: newBalanceDue <= 0 ? reservation.depositAmount : reservation.depositPaid,
+          updatedAt: checkedInAt,
+        }
+      : reservation)
+    setReservationRecords(markCheckedIn)
+    setCanonicalReservationRecords(markCheckedIn)
     toast.success(`Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
     setCheckInDialogOpen(false)
     setSelectedArrival(null)
@@ -903,6 +1017,9 @@ export function Board() {
       return
     }
 
+    const checkedOutAt = data.actualCheckOut || new Date()
+    const remainingBalance = Math.max(0, selectedDeparture.balanceDue - (data.paymentAmount || 0))
+
     setRooms((currentRooms) => currentRooms.map((currentRoom) => currentRoom.roomId === room.roomId
       ? {
           ...currentRoom,
@@ -911,7 +1028,10 @@ export function Board() {
           housekeepingStatus: 'DIRTY',
           reservationId: undefined,
           currentReservationId: undefined,
+          reservation: undefined,
           guestName: undefined,
+          guestEmail: undefined,
+          guestPhone: undefined,
           checkIn: undefined,
           checkOut: undefined,
           guestCount: undefined,
@@ -922,6 +1042,17 @@ export function Board() {
           lastUpdatedBy: user?.displayName || 'Front desk',
         }
       : currentRoom))
+    const markCheckedOut = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservation.id === selectedDeparture.reservationId || reservation.confirmationNumber === selectedDeparture.confirmationCode
+      ? {
+          ...reservation,
+          status: 'CHECKED_OUT' as const,
+          actualCheckOut: checkedOutAt,
+          balanceDue: remainingBalance,
+          updatedAt: checkedOutAt,
+        }
+      : reservation)
+    setReservationRecords(markCheckedOut)
+    setCanonicalReservationRecords(markCheckedOut)
     toast.success(`Checked out: ${selectedDeparture.guestName} -> Room ${selectedDeparture.roomNumber}`)
     setCheckOutDialogOpen(false)
     setSelectedDeparture(null)
@@ -940,6 +1071,9 @@ export function Board() {
       })
       return
     }
+
+    const identifiers = reservationIdentifiers(room)
+    const checkedOutAt = new Date()
     
     setRooms((currentRooms) => 
       currentRooms.map(r => 
@@ -949,7 +1083,11 @@ export function Board() {
               status: 'VACANT_DIRTY',
               cleanStatus: 'DIRTY',
               guestName: undefined,
+              guestEmail: undefined,
+              guestPhone: undefined,
               reservationId: undefined,
+              currentReservationId: undefined,
+              reservation: undefined,
               checkIn: undefined,
               checkOut: undefined,
               guestCount: undefined,
@@ -966,6 +1104,17 @@ export function Board() {
           : r
       )
     )
+    const markCheckedOut = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservationRecordMatches(reservation, identifiers)
+      ? {
+          ...reservation,
+          status: 'CHECKED_OUT' as const,
+          actualCheckOut: checkedOutAt,
+          balanceDue: 0,
+          updatedAt: checkedOutAt,
+        }
+      : reservation)
+    setReservationRecords(markCheckedOut)
+    setCanonicalReservationRecords(markCheckedOut)
     
     addAudit(createAuditRecord('reservation', room.reservationId, 'CHECKED_OUT', `${room.guestName} checked out from Room ${room.number}. Room marked dirty.`, 'Front desk'))
     automation.triggerManualCheckOut(room)
@@ -1320,10 +1469,22 @@ export function Board() {
     setNoteDraft(room.notes || '')
   }
 
-  const handlePrintRegistration = (room: BoardRoomCard) => {
-    toast.success('Printing registration card', {
-      description: `Guest: ${room.guestName}, Room: ${room.number}`
-    })
+  const handlePrintReservationDocument = (room: BoardRoomCard, action: ReservationDocumentAction = 'registration-card') => {
+    const opened = printReservationDocument(room, action)
+    if (!opened) {
+      toast.error('Allow pop-ups to print this reservation.')
+      return
+    }
+    toast.success(action === 'registration-card' ? 'Registration card opened for printing.' : 'Reservation confirmation opened for printing.')
+  }
+
+  const handleEmailReservationDocument = (room: BoardRoomCard, action: ReservationDocumentAction = 'confirmation') => {
+    const result = emailReservationDocument(room, action)
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+    toast.success(result.message)
   }
 
   const handleTransferRoom = (room: BoardRoomCard) => {
@@ -1450,6 +1611,8 @@ export function Board() {
                 ...r,
                 status: 'OCCUPIED_CLEAN',
                 guestName: pendingReservation.guestName,
+                guestEmail: pendingReservation.email,
+                guestPhone: pendingReservation.phone,
                 reservationId: pendingReservation.id,
                 currentReservationId: pendingReservation.id,
                 checkIn: pendingReservation.checkIn,
@@ -1461,6 +1624,18 @@ export function Board() {
                 isVIP: pendingReservation.isVIP || false,
                 balanceDue,
                 depositStatus: balanceDue > 0 ? 'PENDING' : 'PAID',
+                reservation: {
+                  id: pendingReservation.id,
+                  guestName: pendingReservation.guestName,
+                  guestEmail: pendingReservation.email,
+                  guestPhone: pendingReservation.phone,
+                  checkIn: pendingReservation.checkIn,
+                  checkOut: pendingReservation.checkOut,
+                  status: 'CHECKED_IN',
+                  totalAmount: pendingReservation.totalAmount,
+                  balanceDue,
+                  depositStatus: balanceDue > 0 ? 'PENDING' : 'PAID',
+                },
                 lastUpdatedAt: new Date().toISOString(),
                 lastUpdatedBy: 'Front desk',
               }
@@ -1536,7 +1711,11 @@ export function Board() {
               status: 'VACANT_DIRTY',
               cleanStatus: 'DIRTY',
               guestName: undefined,
+              guestEmail: undefined,
+              guestPhone: undefined,
               reservationId: undefined,
+              currentReservationId: undefined,
+              reservation: undefined,
               checkIn: undefined,
               checkOut: undefined,
               guestCount: undefined,
@@ -1556,9 +1735,80 @@ export function Board() {
     const guestLabel = room.guestName ? ` for ${room.guestName}` : ''
     if (!confirm(`Cancel reservation${guestLabel}?`)) return
 
+    const identifiers = reservationIdentifiers(room)
+    const cancelledAt = new Date()
+    const markCancelled = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservationRecordMatches(reservation, identifiers)
+      ? {
+          ...reservation,
+          status: 'CANCELLED' as const,
+          updatedAt: cancelledAt,
+        }
+      : reservation)
+    setReservationRecords(markCancelled)
+    setCanonicalReservationRecords(markCancelled)
     handleDeleteReservation(room.roomId)
     setReservationDetailRoom(null)
     toast.success('Reservation cancelled')
+  }
+
+  const handleReservationStatusChange = (room: BoardRoomCard, status: ReservationStatusAction) => {
+    if (status === 'CHECKED_IN') {
+      openCheckInForRoom(room)
+      setReservationDetailRoom(null)
+      return
+    }
+
+    if (status === 'CHECKED_OUT') {
+      openCheckOutForRoom(room)
+      setReservationDetailRoom(null)
+      return
+    }
+
+    if (SERVER_API_ENABLED) {
+      toast.error('Server mode does not support reverting a reservation to confirmed from the board.')
+      return
+    }
+
+    const identifiers = reservationIdentifiers(room)
+    if (identifiers.size === 0) {
+      toast.error('No reservation is attached to this room.')
+      return
+    }
+
+    const updatedAt = new Date()
+    setRooms((currentRooms) => currentRooms.map((currentRoom) => {
+      if (currentRoom.roomId !== room.roomId) return currentRoom
+      const reservationId = currentRoom.reservationId || currentRoom.currentReservationId || currentRoom.reservation?.id
+      const guestName = currentRoom.guestName || currentRoom.reservation?.guestName
+
+      return {
+        ...currentRoom,
+        status: assignedRoomStatus(currentRoom),
+        guestName,
+        guestEmail: currentRoom.guestEmail || currentRoom.reservation?.guestEmail,
+        guestPhone: currentRoom.guestPhone || currentRoom.reservation?.guestPhone,
+        reservationId,
+        currentReservationId: reservationId,
+        reservation: buildReservationSummary(currentRoom, 'CONFIRMED', { id: reservationId, guestName }),
+        isArrivalToday: currentRoom.checkIn ? isSameDay(currentRoom.checkIn, new Date()) : currentRoom.isArrivalToday,
+        isDepartureToday: currentRoom.checkOut ? isSameDay(currentRoom.checkOut, new Date()) : currentRoom.isDepartureToday,
+        lastUpdatedAt: updatedAt.toISOString(),
+        lastUpdatedBy: user?.displayName || 'Front desk',
+      }
+    }))
+
+    const markConfirmed = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservationRecordMatches(reservation, identifiers)
+      ? {
+          ...reservation,
+          status: 'CONFIRMED' as const,
+          actualCheckIn: null,
+          actualCheckOut: null,
+          updatedAt,
+        }
+      : reservation)
+    setReservationRecords(markConfirmed)
+    setCanonicalReservationRecords(markConfirmed)
+    toast.success(`Reservation status set to confirmed for Room ${room.number}.`)
   }
 
   return (
@@ -1834,7 +2084,7 @@ export function Board() {
                   onPostCharge: handlePostCharge,
                   onViewFolio: handleViewFolio,
                   onAddNote: handleAddNote,
-                  onPrintRegistration: handlePrintRegistration,
+                  onPrintRegistration: handlePrintReservationDocument,
                   onTransferRoom: handleTransferRoom,
                   onMarkOutOfService: handleMarkOutOfService,
                   onRequestHousekeeping: handleRequestHousekeeping,
@@ -1889,7 +2139,7 @@ export function Board() {
                   onPostCharge: handlePostCharge,
                   onViewFolio: handleViewFolio,
                   onAddNote: handleAddNote,
-                  onPrintRegistration: handlePrintRegistration,
+                  onPrintRegistration: handlePrintReservationDocument,
                   onTransferRoom: handleTransferRoom,
                   onMarkOutOfService: handleMarkOutOfService,
                   onRequestHousekeeping: handleRequestHousekeeping,
@@ -2222,12 +2472,8 @@ export function Board() {
             setReservationDetailRoom(null)
           }}
           onCancelReservation={handleCancelReservationFromOverlay}
-          onPrint={handlePrintRegistration}
-          onEmail={(room) => {
-            toast.info('Email tools opened.', {
-              description: room.guestName ? `Reservation email for ${room.guestName}.` : `Room ${room.number}`,
-            })
-          }}
+          onPrint={handlePrintReservationDocument}
+          onEmail={handleEmailReservationDocument}
           onRecordPayment={(room) => {
             handlePostCharge(room)
             setReservationDetailRoom(null)
@@ -2240,6 +2486,7 @@ export function Board() {
             openCheckOutForRoom(room)
             setReservationDetailRoom(null)
           }}
+          onStatusChange={handleReservationStatusChange}
         />
       )}
 
@@ -2331,6 +2578,49 @@ export function Board() {
             if (existing.some((guest) => guest.id === guestRecord.id)) return existing
             return [...existing, guestRecord]
           })
+          if (reservation.assignedRoomId) {
+            const guestName = `${reservation.guest.firstName} ${reservation.guest.lastName}`
+            setRooms((currentRooms) => currentRooms.map((room) => room.roomId === reservation.assignedRoomId
+              ? {
+                  ...room,
+                  status: assignedRoomStatus(room),
+                  guestName,
+                  guestEmail: reservation.guest.email ?? undefined,
+                  guestPhone: reservation.guest.phone ?? undefined,
+                  reservationId: reservation.id,
+                  currentReservationId: reservation.id,
+                  reservation: {
+                    id: reservation.id,
+                    guestName,
+                    guestEmail: reservation.guest.email ?? undefined,
+                    guestPhone: reservation.guest.phone ?? undefined,
+                    checkIn: reservation.checkIn,
+                    checkOut: reservation.checkOut,
+                    status: 'CONFIRMED',
+                    totalAmount: reservation.totalAmount,
+                    balanceDue: reservation.totalAmount,
+                    depositStatus: 'PENDING',
+                  },
+                  checkIn: reservation.checkIn,
+                  checkOut: reservation.checkOut,
+                  guestCount: reservation.adults + reservation.children,
+                  isArrivalToday: isSameDay(reservation.checkIn, new Date()),
+                  isDepartureToday: isSameDay(reservation.checkOut, new Date()),
+                  nightsRemaining: Math.ceil((reservation.checkOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+                  isVIP: reservation.guest.vipStatus,
+                  balanceDue: reservation.totalAmount,
+                  depositStatus: 'PENDING',
+                  lastUpdatedAt: new Date().toISOString(),
+                  lastUpdatedBy: 'Front desk',
+                }
+              : room
+            ))
+            toast.success(`Reservation created and assigned to Room ${reservation.roomNumber || 'selected room'}`)
+            setShowNewReservationDialog(false)
+            setPrefilledReservation(null)
+            return
+          }
+
           setUnassignedReservations((current) => [
             ...current,
             {
