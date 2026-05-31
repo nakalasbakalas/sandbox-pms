@@ -6,16 +6,42 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { MagnifyingGlass, Plus, FunnelSimple, Calendar, User, CreditCard, MapPin, Phone, Printer } from '@phosphor-icons/react'
-import { format, isBefore, isToday } from 'date-fns'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Separator } from '@/components/ui/separator'
+import {
+  Calendar,
+  CreditCard,
+  EnvelopeSimple,
+  Eye,
+  FunnelSimple,
+  House,
+  MagnifyingGlass,
+  MapPin,
+  Phone,
+  Plus,
+  Printer,
+  Receipt,
+  SignIn,
+  SignOut,
+  SquaresFour,
+  User,
+} from '@phosphor-icons/react'
+import { format, isBefore, isToday, startOfDay } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { printReservationsList } from '@/lib/print-utils'
 import { toast } from 'sonner'
 import { NewReservationDialog, type NewReservationData } from '@/components/board/NewReservationDialog'
+import { CheckInDialog } from '@/components/front-desk/CheckInDialog'
+import { CheckOutDialog } from '@/components/front-desk/CheckOutDialog'
 import { useRoomSync } from '@/hooks/use-room-sync'
+import { useAuth } from '@/hooks/use-auth'
+import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
+import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
+import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem } from '@/types/front-desk'
 
 export interface Reservation {
   id: string
@@ -103,6 +129,8 @@ interface GuestDirectoryRecord {
   createdAt: Date
   updatedAt: Date
 }
+
+type ReservationTab = 'all' | 'arrivals' | 'departures' | 'upcoming' | 'in-house' | 'past'
 
 function isOccupied(room: BoardRoomCard) {
   return room.status === 'OCCUPIED_CLEAN' || room.status === 'OCCUPIED_DIRTY'
@@ -301,6 +329,156 @@ function reservationFromServer(record: any): Reservation {
   }
 }
 
+function formatCurrency(amount: number | undefined) {
+  return `THB ${(amount || 0).toLocaleString('en-US')}`
+}
+
+function formatReservationLabel(value: string) {
+  return value.replaceAll('_', ' ')
+}
+
+function cleanLabel(room?: BoardRoomCard): DepartureItem['roomStatus'] {
+  if (room?.cleanStatus === 'INSPECTED') return 'INSPECTED'
+  return room?.cleanStatus === 'DIRTY' || room?.cleanStatus === 'CLEANING' ? 'DIRTY' : 'CLEAN'
+}
+
+function paymentStatus(balanceDue: number, paidAmount = 0): 'PAID' | 'PARTIAL' | 'UNPAID' {
+  if (balanceDue <= 0) return 'PAID'
+  return paidAmount > 0 ? 'PARTIAL' : 'UNPAID'
+}
+
+function reservationToDetailRoom(reservation: Reservation, room?: BoardRoomCard): BoardRoomCard {
+  const checkedIn = reservation.status === 'CHECKED_IN'
+  const checkedOut = reservation.status === 'CHECKED_OUT'
+  const status: BoardRoomCard['status'] = checkedIn
+    ? 'OCCUPIED_CLEAN'
+    : checkedOut
+      ? 'VACANT_DIRTY'
+      : room?.status || 'VACANT_CLEAN'
+
+  return {
+    roomId: room?.roomId || reservation.roomId || `reservation-${reservation.id}`,
+    number: room?.number || reservation.roomNumber || 'Unassigned',
+    roomNumber: room?.roomNumber || reservation.roomNumber,
+    floor: room?.floor ?? 0,
+    type: room?.type || reservation.roomType,
+    roomType: room?.roomType || reservation.roomType,
+    roomTypeId: room?.roomTypeId,
+    status,
+    operationalStatus: room?.operationalStatus || 'AVAILABLE',
+    guestName: reservation.guestName,
+    guestEmail: reservation.guestEmail,
+    guestPhone: reservation.guestPhone,
+    reservationId: reservation.id,
+    currentReservationId: checkedIn ? reservation.id : room?.currentReservationId,
+    reservation: {
+      id: reservation.confirmationNumber,
+      guestName: reservation.guestName,
+      guestEmail: reservation.guestEmail,
+      guestPhone: reservation.guestPhone,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      status: reservation.status,
+      isVIP: reservation.isVIP,
+      totalAmount: reservation.totalAmount,
+      balanceDue: reservation.balanceDue,
+      depositStatus: reservation.depositStatus,
+    },
+    nextReservation: room?.nextReservation,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    nightsRemaining: room?.nightsRemaining,
+    guestCount: reservation.adults + reservation.children,
+    isArrivalToday: isToday(reservation.checkIn),
+    isDepartureToday: isToday(reservation.checkOut),
+    isVIP: reservation.isVIP,
+    hasIssue: room?.hasIssue || false,
+    hasIssues: room?.hasIssues,
+    needsAttention: reservation.status === 'PENDING',
+    cleanStatus: room?.cleanStatus || 'CLEAN',
+    housekeepingStatus: room?.housekeepingStatus || room?.cleanStatus || 'CLEAN',
+    lastCleaned: room?.lastCleaned,
+    lastUpdatedAt: reservation.updatedAt.toISOString(),
+    lastUpdatedBy: reservation.createdBy,
+    notes: reservation.notes || reservation.specialRequests || room?.notes,
+    extendedStay: room?.extendedStay,
+    maintenanceIssue: room?.maintenanceIssue,
+    depositStatus: reservation.depositStatus,
+    balanceDue: reservation.balanceDue,
+  }
+}
+
+function reservationToArrival(reservation: Reservation, room?: BoardRoomCard): ArrivalItem {
+  const balanceDue = Math.max(0, reservation.balanceDue)
+  const paidAmount = Math.max(0, reservation.totalAmount - balanceDue)
+  const roomReady = Boolean(room && isRoomReadyForArrival(room))
+
+  return {
+    id: reservation.id,
+    reservationId: reservation.id,
+    confirmationCode: reservation.confirmationNumber,
+    guestName: reservation.guestName,
+    roomNumber: reservation.roomNumber,
+    assignedRoomId: reservation.roomId,
+    roomType: reservation.roomType,
+    checkInTime: '14:00',
+    checkInDate: reservation.checkIn,
+    checkOutDate: reservation.checkOut,
+    nights: reservation.nights,
+    adults: reservation.adults,
+    children: reservation.children,
+    status: reservation.status === 'CHECKED_IN' ? 'CHECKED_IN' : roomReady ? 'READY' : 'DUE_IN',
+    reservationStatus: reservation.status,
+    roomReady,
+    depositPaid: reservation.depositStatus === 'PAID' || balanceDue <= 0,
+    documentVerified: false,
+    phone: reservation.guestPhone,
+    email: reservation.guestEmail,
+    specialRequests: reservation.specialRequests,
+    notes: reservation.notes,
+    source: reservation.source,
+    bookedRate: reservation.ratePerNight,
+    totalAmount: reservation.totalAmount,
+    paidAmount,
+    balanceDue,
+    depositAmount: reservation.depositAmount,
+    paymentStatus: paymentStatus(balanceDue, paidAmount),
+    roomStatus: room?.status,
+    operationalStatus: room?.operationalStatus,
+  }
+}
+
+function reservationToDeparture(reservation: Reservation, room?: BoardRoomCard): DepartureItem {
+  const balanceDue = Math.max(0, reservation.balanceDue)
+  const paidAmount = Math.max(0, reservation.totalAmount - balanceDue)
+
+  return {
+    id: reservation.id,
+    reservationId: reservation.id,
+    confirmationCode: reservation.confirmationNumber,
+    guestName: reservation.guestName,
+    roomNumber: reservation.roomNumber || room?.number || 'TBD',
+    assignedRoomId: reservation.roomId || room?.roomId,
+    roomType: reservation.roomType,
+    checkOutTime: '12:00',
+    checkInDate: reservation.checkIn,
+    checkOutDate: reservation.checkOut,
+    actualCheckIn: reservation.actualCheckIn || undefined,
+    nights: reservation.nights,
+    nightsRemaining: Math.max(0, nightsBetween(new Date(), reservation.checkOut)),
+    status: reservation.status === 'CHECKED_OUT' ? 'CHECKED_OUT' : 'IN_HOUSE',
+    reservationStatus: reservation.status,
+    balanceDue,
+    paidAmount,
+    folioTotal: reservation.totalAmount,
+    folioStatus: balanceDue > 0 ? 'OPEN' : 'CLOSED',
+    paymentStatus: paymentStatus(balanceDue, paidAmount),
+    roomStatus: cleanLabel(room),
+    specialRequests: reservation.specialRequests,
+    notes: reservation.notes,
+  }
+}
+
 export function ReservationsView() {
   const [reservationsRaw, setReservationsRaw] = useKV<Reservation[]>('reservations-data', [])
   const [canonicalReservationsRaw, setCanonicalReservations] = useKV<Reservation[]>('reservations', [])
@@ -308,10 +486,19 @@ export function ReservationsView() {
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const authToken = null
-  const { rooms } = useRoomSync()
+  const { rooms, setRooms } = useRoomSync()
+  const { user } = useAuth()
+  const { navigate } = useNavigation()
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedTab, setSelectedTab] = useState<'all' | 'upcoming' | 'in-house' | 'past'>('upcoming')
+  const [selectedTab, setSelectedTab] = useState<ReservationTab>('all')
   const [showNewReservationDialog, setShowNewReservationDialog] = useState(false)
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null)
+  const [selectedArrival, setSelectedArrival] = useState<ArrivalItem | null>(null)
+  const [selectedDeparture, setSelectedDeparture] = useState<DepartureItem | null>(null)
+  const [checkInDialogOpen, setCheckInDialogOpen] = useState(false)
+  const [checkOutDialogOpen, setCheckOutDialogOpen] = useState(false)
+  const [checkInMode, setCheckInMode] = useState<'express' | 'guided'>('guided')
+  const [checkOutMode, setCheckOutMode] = useState<'express' | 'guided'>('guided')
   
   const reservations = useMemo(() => {
     const merged = new Map<string, Reservation>()
@@ -436,15 +623,308 @@ export function ReservationsView() {
     toast.success('Reservation created and added to the assignment queue.')
     setShowNewReservationDialog(false)
   }
+
+  const findRoomForReservation = (reservation: Reservation) => {
+    return rooms.find((room) =>
+      room.roomId === reservation.roomId ||
+      room.number === reservation.roomNumber ||
+      room.reservationId === reservation.id ||
+      room.currentReservationId === reservation.id ||
+      room.reservation?.id === reservation.confirmationNumber ||
+      room.reservation?.id === reservation.id
+    )
+  }
+
+  const upsertReservation = (
+    reservationId: string,
+    fallback: Reservation | null,
+    updater: (reservation: Reservation) => Reservation,
+  ) => {
+    setReservations((current) => {
+      const existing = current.some((reservation) => reservation.id === reservationId || reservation.confirmationNumber === reservationId)
+      if (!existing && fallback) return [...current, updater(fallback)]
+      return current.map((reservation) =>
+        reservation.id === reservationId || reservation.confirmationNumber === reservationId
+          ? updater(reservation)
+          : reservation
+      )
+    })
+  }
+
+  const openCheckIn = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (reservation.status === 'CHECKED_IN') {
+      toast.info(`${reservation.guestName} is already checked in.`)
+      return
+    }
+    if (reservation.status === 'CHECKED_OUT' || reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW') {
+      toast.error('Only active reservations can be checked in.')
+      return
+    }
+
+    const room = findRoomForReservation(reservation)
+    setSelectedReservation(reservation)
+    setSelectedArrival(reservationToArrival(reservation, room))
+    setCheckInMode(mode)
+    setCheckInDialogOpen(true)
+  }
+
+  const openCheckOut = (reservation: Reservation, mode: 'express' | 'guided' = 'guided') => {
+    if (reservation.status !== 'CHECKED_IN') {
+      toast.info('Only checked-in reservations can be checked out.')
+      return
+    }
+
+    const room = findRoomForReservation(reservation)
+    setSelectedReservation(reservation)
+    setSelectedDeparture(reservationToDeparture(reservation, room))
+    setCheckOutMode(mode)
+    setCheckOutDialogOpen(true)
+  }
+
+  const markRoomReady = async (roomId: string) => {
+    const room = rooms.find((candidate) => candidate.roomId === roomId)
+    if (!room) return
+
+    if (SERVER_API_ENABLED) {
+      try {
+        await pmsApi(`/api/housekeeping/rooms/${roomId}/status`, authToken, {
+          method: 'POST',
+          body: JSON.stringify({ status: 'INSPECTED', notes: 'Reservations quick action: room ready for check-in' }),
+        })
+        toast.success(`Room ${room.number} marked clean/inspected.`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Room readiness update failed.')
+      }
+      return
+    }
+
+    setRooms((current) => current.map((candidate) => candidate.roomId === roomId
+      ? {
+          ...candidate,
+          status: 'VACANT_CLEAN',
+          cleanStatus: 'INSPECTED',
+          housekeepingStatus: 'INSPECTED',
+          lastCleaned: new Date(),
+          lastUpdatedAt: new Date().toISOString(),
+          lastUpdatedBy: user?.displayName || 'Reservations',
+        }
+      : candidate
+    ))
+    toast.success(`Room ${room.number} marked clean/inspected.`)
+  }
+
+  const confirmCheckIn = async (data: CheckInData) => {
+    if (!selectedArrival) return
+
+    const assignedRoom = rooms.find((room) => room.roomId === data.roomId)
+    if (!assignedRoom) {
+      toast.error('Assign a valid room before check-in.')
+      return
+    }
+
+    if (SERVER_API_ENABLED) {
+      try {
+        if (selectedArrival.assignedRoomId !== data.roomId) {
+          await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
+            method: 'POST',
+            body: JSON.stringify({ roomId: data.roomId }),
+          })
+        }
+        await pmsApi(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
+          method: 'POST',
+          body: JSON.stringify({
+            guest: {
+              nationality: data.nationality,
+              idType: data.idNumber ? 'PASSPORT' : undefined,
+              idNumber: data.idNumber,
+            },
+            payment: data.payment,
+            additionalNotes: data.additionalNotes,
+          }),
+        })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Check-in failed.')
+        return
+      }
+    }
+
+    const checkedInAt = data.actualCheckIn || new Date()
+    const paidNow = data.payment?.amount || 0
+    const startingBalance = Math.max(0, selectedArrival.balanceDue ?? selectedArrival.totalAmount - (selectedArrival.paidAmount || 0))
+    const balanceDue = Math.max(0, startingBalance - paidNow)
+    const sourceReservation = selectedReservation || reservations.find((reservation) => reservation.id === selectedArrival.reservationId) || null
+
+    setRooms((current) => current.map((room) => room.roomId === assignedRoom.roomId
+      ? {
+          ...room,
+          status: 'OCCUPIED_CLEAN',
+          cleanStatus: room.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
+          housekeepingStatus: room.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
+          reservationId: selectedArrival.reservationId,
+          currentReservationId: selectedArrival.reservationId,
+          guestName: selectedArrival.guestName,
+          guestEmail: selectedArrival.email,
+          guestPhone: selectedArrival.phone,
+          checkIn: selectedArrival.checkInDate ? new Date(selectedArrival.checkInDate) : new Date(),
+          checkOut: selectedArrival.checkOutDate ? new Date(selectedArrival.checkOutDate) : new Date(),
+          guestCount: selectedArrival.adults + selectedArrival.children,
+          balanceDue,
+          depositStatus: balanceDue <= 0 ? 'PAID' : 'PENDING',
+          reservation: {
+            id: selectedArrival.confirmationCode || selectedArrival.reservationId,
+            guestName: selectedArrival.guestName,
+            guestEmail: selectedArrival.email,
+            guestPhone: selectedArrival.phone,
+            checkIn: selectedArrival.checkInDate,
+            checkOut: selectedArrival.checkOutDate,
+            status: 'CHECKED_IN',
+            totalAmount: selectedArrival.totalAmount,
+            balanceDue,
+            depositStatus: balanceDue <= 0 ? 'PAID' : 'PENDING',
+          },
+          lastUpdatedAt: new Date().toISOString(),
+          lastUpdatedBy: user?.displayName || 'Reservations',
+        }
+      : room
+    ))
+
+    upsertReservation(selectedArrival.reservationId, sourceReservation, (reservation) => {
+      const nextPaid = Math.min(reservation.totalAmount, Math.max(reservation.depositPaid || 0, reservation.totalAmount - balanceDue))
+      return {
+        ...reservation,
+        status: 'CHECKED_IN',
+        roomId: assignedRoom.roomId,
+        roomNumber: assignedRoom.number,
+        actualCheckIn: checkedInAt,
+        balanceDue,
+        depositPaid: nextPaid,
+        depositStatus: balanceDue <= 0 ? 'PAID' : nextPaid > 0 ? 'PENDING' : reservation.depositStatus,
+        updatedAt: checkedInAt,
+      }
+    })
+    setUnassignedReservations((current) => (current || []).filter((reservation) => reservation.id !== selectedArrival.reservationId))
+    toast.success(`Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
+    setCheckInDialogOpen(false)
+    setSelectedArrival(null)
+    setSelectedReservation(null)
+  }
+
+  const confirmCheckOut = async (data: CheckOutData) => {
+    if (!selectedDeparture) return
+
+    if (SERVER_API_ENABLED) {
+      try {
+        await pmsApi(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
+          method: 'POST',
+          body: JSON.stringify({
+            payment: data.paymentAmount ? {
+              amount: data.paymentAmount,
+              method: data.paymentMethod,
+              reference: data.paymentReference,
+              notes: data.additionalNotes,
+            } : undefined,
+            allowUnpaidOverride: data.forceCheckout,
+            overrideReason: data.overrideReason,
+            additionalNotes: data.additionalNotes,
+          }),
+        })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Check-out failed.')
+        return
+      }
+    }
+
+    const room = rooms.find((candidate) =>
+      candidate.roomId === selectedDeparture.assignedRoomId ||
+      candidate.number === selectedDeparture.roomNumber ||
+      candidate.reservationId === selectedDeparture.reservationId ||
+      candidate.currentReservationId === selectedDeparture.reservationId
+    )
+    if (!room) {
+      toast.error(`Room ${selectedDeparture.roomNumber} was not found.`)
+      return
+    }
+
+    const checkedOutAt = data.actualCheckOut || new Date()
+    const balanceDue = Math.max(0, selectedDeparture.balanceDue - (data.paymentAmount || 0))
+    const sourceReservation = selectedReservation || reservations.find((reservation) => reservation.id === selectedDeparture.reservationId) || null
+
+    setRooms((current) => current.map((candidate) => candidate.roomId === room.roomId
+      ? {
+          ...candidate,
+          status: 'VACANT_DIRTY',
+          cleanStatus: 'DIRTY',
+          housekeepingStatus: 'DIRTY',
+          reservationId: undefined,
+          currentReservationId: undefined,
+          reservation: undefined,
+          guestName: undefined,
+          guestEmail: undefined,
+          guestPhone: undefined,
+          checkIn: undefined,
+          checkOut: undefined,
+          guestCount: undefined,
+          isVIP: false,
+          balanceDue: undefined,
+          depositStatus: 'NONE',
+          lastUpdatedAt: new Date().toISOString(),
+          lastUpdatedBy: user?.displayName || 'Reservations',
+        }
+      : candidate
+    ))
+
+    upsertReservation(selectedDeparture.reservationId, sourceReservation, (reservation) => ({
+      ...reservation,
+      status: 'CHECKED_OUT',
+      actualCheckOut: checkedOutAt,
+      balanceDue,
+      updatedAt: checkedOutAt,
+    }))
+    toast.success(`Checked out: ${selectedDeparture.guestName} -> Room ${selectedDeparture.roomNumber}`)
+    setCheckOutDialogOpen(false)
+    setSelectedDeparture(null)
+    setSelectedReservation(null)
+  }
+
+  const handlePrintReservation = (reservation: Reservation) => {
+    const opened = printReservationDocument(reservationToDetailRoom(reservation, findRoomForReservation(reservation)), 'confirmation')
+    if (!opened) {
+      toast.error('Allow pop-ups to print this reservation.')
+      return
+    }
+    toast.success('Reservation confirmation opened for printing.')
+  }
+
+  const handleEmailReservation = (reservation: Reservation) => {
+    const result = emailReservationDocument(reservationToDetailRoom(reservation, findRoomForReservation(reservation)), 'confirmation')
+    if (!result.ok) {
+      toast.error(result.message)
+      return
+    }
+    toast.success(result.message)
+  }
   
   const filteredReservations = useMemo(() => {
     let result = reservations
+    const today = startOfDay(new Date())
     
     switch (selectedTab) {
+      case 'arrivals':
+        result = result.filter(r =>
+          (r.status === 'CONFIRMED' || r.status === 'PENDING') &&
+          isToday(r.checkIn)
+        )
+        break
+      case 'departures':
+        result = result.filter(r =>
+          r.status === 'CHECKED_IN' &&
+          isToday(r.checkOut)
+        )
+        break
       case 'upcoming':
         result = result.filter(r => 
           (r.status === 'CONFIRMED' || r.status === 'PENDING') &&
-          isBefore(new Date(), r.checkIn)
+          !isBefore(r.checkIn, today)
         )
         break
       case 'in-house':
@@ -469,19 +949,20 @@ export function ReservationsView() {
       )
     }
     
-    return result
+    return [...result].sort((first, second) => first.checkIn.getTime() - second.checkIn.getTime())
   }, [reservations, selectedTab, searchQuery])
   
   const stats = useMemo(() => {
+    const today = startOfDay(new Date())
     const upcoming = reservations.filter(r => 
       (r.status === 'CONFIRMED' || r.status === 'PENDING') &&
-      isBefore(new Date(), r.checkIn)
+      !isBefore(r.checkIn, today)
     ).length
     
     const inHouse = reservations.filter(r => r.status === 'CHECKED_IN').length
     
-    const arrivingToday = reservations.filter(r => 
-      r.status === 'CONFIRMED' && isToday(r.checkIn)
+    const arrivingToday = reservations.filter(r =>
+      (r.status === 'CONFIRMED' || r.status === 'PENDING') && isToday(r.checkIn)
     ).length
     
     const departingToday = reservations.filter(r => 
@@ -517,6 +998,8 @@ export function ReservationsView() {
   const handlePrint = () => {
     const tabTitles = {
       all: 'All Reservations',
+      arrivals: 'Arrivals Today',
+      departures: 'Departures Today',
       upcoming: 'Upcoming Reservations',
       'in-house': 'In-House Guests',
       past: 'Past Reservations'
@@ -524,6 +1007,8 @@ export function ReservationsView() {
     
     const groupByOptions = {
       all: 'status' as const,
+      arrivals: 'date' as const,
+      departures: 'none' as const,
       upcoming: 'date' as const,
       'in-house': 'none' as const,
       past: 'status' as const
@@ -544,17 +1029,27 @@ export function ReservationsView() {
     <div className="h-screen flex flex-col bg-background">
       <div className="flex-none border-b border-border bg-card">
         <div className="px-6 py-4">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between mb-4">
             <div>
               <h1 className="text-2xl font-semibold text-foreground">Reservations</h1>
               <p className="text-sm text-muted-foreground mt-1">
                 Manage all guest reservations and bookings
               </p>
             </div>
-            <Button className="gap-2" onClick={() => setShowNewReservationDialog(true)}>
-              <Plus size={18} weight="bold" />
-              New Reservation
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" className="gap-2" onClick={() => navigate('front-desk')}>
+                <House size={18} weight="bold" />
+                Front Desk
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={() => navigate('board')}>
+                <SquaresFour size={18} weight="bold" />
+                Board
+              </Button>
+              <Button className="gap-2" onClick={() => setShowNewReservationDialog(true)}>
+                <Plus size={18} weight="bold" />
+                New Reservation
+              </Button>
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
@@ -611,9 +1106,11 @@ export function ReservationsView() {
       <Tabs value={selectedTab} onValueChange={(v) => setSelectedTab(v as any)} className="flex-1 flex flex-col">
         <div className="flex-none border-b border-border bg-card px-6">
           <TabsList className="bg-transparent">
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
-            <TabsTrigger value="in-house">In-House</TabsTrigger>
+            <TabsTrigger value="all">All ({reservations.length})</TabsTrigger>
+            <TabsTrigger value="arrivals">Arrivals ({stats.arrivingToday})</TabsTrigger>
+            <TabsTrigger value="departures">Departures ({stats.departingToday})</TabsTrigger>
+            <TabsTrigger value="upcoming">Upcoming ({stats.upcoming})</TabsTrigger>
+            <TabsTrigger value="in-house">In-House ({stats.inHouse})</TabsTrigger>
             <TabsTrigger value="past">Past</TabsTrigger>
           </TabsList>
         </div>
@@ -626,16 +1123,29 @@ export function ReservationsView() {
                   <Calendar className="mx-auto mb-4 text-muted-foreground" size={48} weight="light" />
                   <h3 className="text-lg font-medium text-foreground mb-2">No reservations found</h3>
                   <p className="text-sm text-muted-foreground">
-                    {searchQuery ? 'Try adjusting your search terms' : 'No reservations in this category'}
+                    {searchQuery ? 'Try adjusting your search terms' : 'No reservations are available in this category yet.'}
                   </p>
+                  <div className="mt-4 flex justify-center gap-2">
+                    <Button variant="outline" onClick={() => setSelectedTab('all')}>Show All</Button>
+                    <Button onClick={() => setShowNewReservationDialog(true)}>New Reservation</Button>
+                  </div>
                 </Card>
               ) : (
                 filteredReservations.map(reservation => (
                   <Card 
                     key={reservation.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedReservation(reservation)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelectedReservation(reservation)
+                      }
+                    }}
                     className="p-4 hover:border-primary/50 transition-colors cursor-pointer"
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
                           <h3 className="text-base font-semibold text-foreground">{reservation.guestName}</h3>
@@ -643,29 +1153,29 @@ export function ReservationsView() {
                             <Badge className="bg-amber-100 text-amber-800 border-amber-200 text-xs">VIP</Badge>
                           )}
                           <Badge className={cn('text-xs border', getStatusColor(reservation.status))}>
-                            {reservation.status.replace('_', ' ')}
+                            {formatReservationLabel(reservation.status)}
                           </Badge>
                           <Badge variant="outline" className={cn('text-xs', getSourceColor(reservation.source))}>
-                            {reservation.source.replace('_', ' ')}
+                            {formatReservationLabel(reservation.source)}
                           </Badge>
                         </div>
                         
-                        <div className="grid grid-cols-5 gap-4 text-sm">
+                        <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-5">
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <Calendar size={16} />
                             <span>{format(reservation.checkIn, 'MMM d')} - {format(reservation.checkOut, 'MMM d, yyyy')}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <MapPin size={16} />
-                            <span>{reservation.roomNumber || 'Unassigned'} • {reservation.roomType}</span>
+                            <span>{reservation.roomNumber || 'Unassigned'} - {reservation.roomType}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <User size={16} />
                             <span>{reservation.adults} {reservation.adults === 1 ? 'adult' : 'adults'}{reservation.children > 0 ? `, ${reservation.children} ${reservation.children === 1 ? 'child' : 'children'}` : ''}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <Phone size={16} />
-                            <span className="truncate">{reservation.guestEmail}</span>
+                            {reservation.guestPhone ? <Phone size={16} /> : <EnvelopeSimple size={16} />}
+                            <span className="truncate">{reservation.guestPhone || reservation.guestEmail || 'No contact'}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <span className="font-mono">#{reservation.confirmationNumber}</span>
@@ -673,12 +1183,10 @@ export function ReservationsView() {
                         </div>
                       </div>
                       
-                      <div className="text-right ml-6">
-                        <div className="text-lg font-bold text-foreground">
-                          ฿{reservation.totalAmount.toLocaleString()}
-                        </div>
+                      <div className="min-w-[220px] text-left xl:text-right">
+                        <div className="text-lg font-bold text-foreground">{formatCurrency(reservation.totalAmount)}</div>
                         <div className="text-xs text-muted-foreground mb-2">
-                          ฿{reservation.ratePerNight.toLocaleString()} × {reservation.nights} {reservation.nights === 1 ? 'night' : 'nights'}
+                          {formatCurrency(reservation.ratePerNight)} x {reservation.nights} {reservation.nights === 1 ? 'night' : 'nights'}
                         </div>
                         {reservation.depositStatus !== 'NONE' && (
                           <Badge 
@@ -694,6 +1202,46 @@ export function ReservationsView() {
                             {reservation.depositStatus === 'PAID' ? 'Deposit Paid' : 'Deposit Pending'}
                           </Badge>
                         )}
+                        <div className="mt-3 flex flex-wrap gap-2 xl:justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setSelectedReservation(reservation)
+                            }}
+                          >
+                            <Eye size={15} weight="bold" />
+                            View
+                          </Button>
+                          {reservation.status === 'CHECKED_IN' ? (
+                            <Button
+                              size="sm"
+                              className="gap-1.5 bg-blue-600 hover:bg-blue-700"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openCheckOut(reservation, reservation.balanceDue > 0 ? 'guided' : 'express')
+                              }}
+                            >
+                              <SignOut size={15} weight="bold" />
+                              Check Out
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+                              disabled={reservation.status === 'CHECKED_OUT' || reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW'}
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openCheckIn(reservation, reservation.balanceDue <= 0 ? 'express' : 'guided')
+                              }}
+                            >
+                              <SignIn size={15} weight="bold" />
+                              Check In
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                     
@@ -719,6 +1267,196 @@ export function ReservationsView() {
         onClose={() => setShowNewReservationDialog(false)}
         onSubmit={handleCreateReservation}
       />
+      <ReservationDetailDialog
+        reservation={selectedReservation}
+        open={Boolean(selectedReservation) && !checkInDialogOpen && !checkOutDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedReservation(null)
+        }}
+        onCheckIn={(reservation) => openCheckIn(reservation)}
+        onCheckOut={(reservation) => openCheckOut(reservation, reservation.balanceDue > 0 ? 'guided' : 'express')}
+        onPrint={handlePrintReservation}
+        onEmail={handleEmailReservation}
+        onBoard={() => navigate('board')}
+        onFrontDesk={() => navigate('front-desk')}
+      />
+      <CheckInDialog
+        arrival={selectedArrival}
+        rooms={rooms}
+        mode={checkInMode}
+        role={user?.role}
+        open={checkInDialogOpen}
+        onOpenChange={(open) => {
+          setCheckInDialogOpen(open)
+          if (!open) setSelectedArrival(null)
+        }}
+        onConfirm={confirmCheckIn}
+        onMarkRoomReady={markRoomReady}
+      />
+      <CheckOutDialog
+        departure={selectedDeparture}
+        mode={checkOutMode}
+        role={user?.role}
+        open={checkOutDialogOpen}
+        onOpenChange={(open) => {
+          setCheckOutDialogOpen(open)
+          if (!open) setSelectedDeparture(null)
+        }}
+        onConfirm={confirmCheckOut}
+      />
+    </div>
+  )
+}
+
+function ReservationDetailDialog({
+  reservation,
+  open,
+  onOpenChange,
+  onCheckIn,
+  onCheckOut,
+  onPrint,
+  onEmail,
+  onBoard,
+  onFrontDesk,
+}: {
+  reservation: Reservation | null
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCheckIn: (reservation: Reservation) => void
+  onCheckOut: (reservation: Reservation) => void
+  onPrint: (reservation: Reservation) => void
+  onEmail: (reservation: Reservation) => void
+  onBoard: () => void
+  onFrontDesk: () => void
+}) {
+  if (!reservation) return null
+
+  const canCheckIn = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING'
+  const canCheckOut = reservation.status === 'CHECKED_IN'
+  const paidAmount = Math.max(0, reservation.totalAmount - reservation.balanceDue)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto sm:max-w-[min(920px,calc(100vw-2rem))]">
+        <DialogHeader>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            <Receipt size={21} weight="bold" className="text-primary" />
+            Reservation {reservation.confirmationNumber}
+            {reservation.isVIP && <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">VIP</Badge>}
+          </DialogTitle>
+          <DialogDescription>
+            {reservation.guestName} - {format(reservation.checkIn, 'MMM d')} to {format(reservation.checkOut, 'MMM d, yyyy')}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="space-y-4">
+            <section className="grid gap-3 sm:grid-cols-2">
+              <DetailTile label="Guest" value={reservation.guestName} />
+              <DetailTile label="Status" value={formatReservationLabel(reservation.status)} />
+              <DetailTile label="Email" value={reservation.guestEmail || 'Not recorded'} />
+              <DetailTile label="Phone" value={reservation.guestPhone || 'Not recorded'} />
+              <DetailTile label="Room" value={`${reservation.roomNumber || 'Unassigned'} - ${reservation.roomType}`} />
+              <DetailTile label="Guests" value={`${reservation.adults} adult${reservation.adults === 1 ? '' : 's'}${reservation.children ? `, ${reservation.children} child${reservation.children === 1 ? '' : 'ren'}` : ''}`} />
+              <DetailTile label="Source" value={formatReservationLabel(reservation.source)} />
+              <DetailTile label="Created by" value={reservation.createdBy || 'Not recorded'} />
+            </section>
+
+            <section className="rounded-lg border p-3">
+              <div className="mb-2 text-sm font-semibold">Stay</div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DetailTile label="Check-in" value={format(reservation.checkIn, 'EEE, MMM d, yyyy')} compact />
+                <DetailTile label="Check-out" value={format(reservation.checkOut, 'EEE, MMM d, yyyy')} compact />
+                <DetailTile label="Length" value={`${reservation.nights} night${reservation.nights === 1 ? '' : 's'}`} compact />
+              </div>
+            </section>
+
+            {(reservation.specialRequests || reservation.notes) && (
+              <section className="rounded-lg border p-3 text-sm">
+                <div className="mb-2 font-semibold">Guest notes</div>
+                {reservation.specialRequests && (
+                  <p><span className="font-medium">Special requests:</span> {reservation.specialRequests}</p>
+                )}
+                {reservation.notes && (
+                  <p className="mt-1"><span className="font-medium">Internal notes:</span> {reservation.notes}</p>
+                )}
+              </section>
+            )}
+          </div>
+
+          <aside className="space-y-3 rounded-lg border bg-muted/30 p-3">
+            <div className="text-sm font-semibold">Folio Summary</div>
+            <SummaryRow label="Room total" value={formatCurrency(reservation.totalAmount)} />
+            <SummaryRow label="Paid" value={formatCurrency(paidAmount)} />
+            <SummaryRow label="Deposit" value={formatCurrency(reservation.depositPaid)} />
+            <Separator />
+            <SummaryRow label="Balance due" value={formatCurrency(reservation.balanceDue)} strong />
+            <div className="rounded-md border bg-background p-2 text-xs">
+              <div className="font-medium">Deposit status</div>
+              <div className={reservation.depositStatus === 'PAID' ? 'text-emerald-700' : 'text-amber-700'}>
+                {formatReservationLabel(reservation.depositStatus)}
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="gap-1.5" onClick={onFrontDesk}>
+              <House size={15} weight="bold" />
+              Front Desk
+            </Button>
+            <Button variant="outline" className="gap-1.5" onClick={onBoard}>
+              <SquaresFour size={15} weight="bold" />
+              Board
+            </Button>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" className="gap-1.5" onClick={() => onEmail(reservation)}>
+              <EnvelopeSimple size={15} weight="bold" />
+              Email
+            </Button>
+            <Button variant="outline" className="gap-1.5" onClick={() => onPrint(reservation)}>
+              <Printer size={15} weight="bold" />
+              Print
+            </Button>
+            <Button
+              className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+              disabled={!canCheckIn}
+              onClick={() => onCheckIn(reservation)}
+            >
+              <SignIn size={15} weight="bold" />
+              Check In
+            </Button>
+            <Button
+              className="gap-1.5 bg-blue-600 hover:bg-blue-700"
+              disabled={!canCheckOut}
+              onClick={() => onCheckOut(reservation)}
+            >
+              <SignOut size={15} weight="bold" />
+              Check Out
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DetailTile({ label, value, compact }: { label: string; value: string; compact?: boolean }) {
+  return (
+    <div className={cn('rounded-md border bg-background px-3 py-2', compact && 'bg-muted/20')}>
+      <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-semibold text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function SummaryRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <div className={cn('flex items-center justify-between gap-3 text-sm', strong && 'font-semibold')}>
+      <span className="text-muted-foreground">{label}</span>
+      <span className={cn('text-right tabular-nums', strong && 'text-rose-700')}>{value}</span>
     </div>
   )
 }

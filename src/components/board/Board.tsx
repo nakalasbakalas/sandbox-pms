@@ -167,6 +167,59 @@ function buildReservationSummary(
   }
 }
 
+function unassignedReservationToDetailRoom(reservation: UnassignedReservation): BoardRoomCard {
+  const balanceDue = Math.max(0, reservation.balanceDue ?? reservation.totalAmount ?? 0)
+  const paidAmount = Math.max(0, reservation.paidAmount ?? Math.max(0, (reservation.totalAmount || 0) - balanceDue))
+  const depositStatus: BoardRoomCard['depositStatus'] = balanceDue <= 0
+    ? 'PAID'
+    : paidAmount > 0
+      ? 'PARTIAL'
+      : reservation.depositAmount
+        ? 'PENDING'
+        : 'NONE'
+
+  return {
+    roomId: `unassigned-${reservation.id}`,
+    number: 'Unassigned',
+    floor: 0,
+    type: reservation.roomType,
+    status: 'VACANT_CLEAN',
+    operationalStatus: 'AVAILABLE',
+    guestName: reservation.guestName,
+    guestEmail: reservation.email,
+    guestPhone: reservation.phone,
+    reservationId: reservation.id,
+    currentReservationId: reservation.id,
+    reservation: {
+      id: reservation.id.replace(/^RES-/, 'SH-'),
+      guestName: reservation.guestName,
+      guestEmail: reservation.email,
+      guestPhone: reservation.phone,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      status: reservation.needsAttention ? 'PENDING' : 'CONFIRMED',
+      isVIP: reservation.isVIP,
+      totalAmount: reservation.totalAmount,
+      balanceDue,
+      depositStatus,
+    },
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    nightsRemaining: reservation.nights,
+    guestCount: reservation.guestCount,
+    isArrivalToday: isSameDay(reservation.checkIn, new Date()),
+    isDepartureToday: isSameDay(reservation.checkOut, new Date()),
+    isVIP: reservation.isVIP || false,
+    hasIssue: false,
+    needsAttention: reservation.needsAttention || false,
+    cleanStatus: 'CLEAN',
+    housekeepingStatus: 'CLEAN',
+    notes: reservation.notes || reservation.specialRequests,
+    depositStatus,
+    balanceDue,
+  }
+}
+
 function assignedRoomStatus(room: BoardRoomCard): BoardRoomCard['status'] {
   return room.cleanStatus === 'DIRTY' || room.cleanStatus === 'CLEANING' ? 'VACANT_DIRTY' : 'VACANT_CLEAN'
 }
@@ -976,6 +1029,7 @@ export function Board() {
       : reservation)
     setReservationRecords(markCheckedIn)
     setCanonicalReservationRecords(markCheckedIn)
+    setUnassignedReservations((current) => (current || []).filter((reservation) => reservation.id !== selectedArrival.reservationId))
     toast.success(`Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
     setCheckInDialogOpen(false)
     setSelectedArrival(null)
@@ -1839,7 +1893,20 @@ export function Board() {
               {unassignedReservations.map((reservation) => (
                 <div
                   key={reservation.id}
+                  role="button"
+                  tabIndex={0}
                   draggable
+                  onClick={() => {
+                    setSelectedRoom(null)
+                    setReservationDetailRoom(unassignedReservationToDetailRoom(reservation))
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setSelectedRoom(null)
+                      setReservationDetailRoom(unassignedReservationToDetailRoom(reservation))
+                    }
+                  }}
                   onDragStart={handleReservationDragStart(reservation)}
                   onDragEnd={handleDragEnd}
                   className={cn(
