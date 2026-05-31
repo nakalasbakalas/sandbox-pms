@@ -232,9 +232,9 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
     {
       id: 'new-reservation',
       label: 'New Reservation',
-      description: 'Create a new booking or walk-in',
+      description: 'Create a new booking',
       category: 'reservations',
-      keywords: ['new', 'booking', 'reservation', 'walk-in'],
+      keywords: ['new', 'booking', 'reservation'],
       shortcut: 'cmd+n',
       icon: Plus,
       action: () => {

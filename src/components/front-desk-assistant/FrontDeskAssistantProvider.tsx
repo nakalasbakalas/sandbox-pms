@@ -52,6 +52,12 @@ interface UnassignedReservation {
   guestCount: number
   nights: number
   source: string
+  ratePerNight?: number
+  totalAmount?: number
+  balanceDue?: number
+  paidAmount?: number
+  specialRequests?: string
+  notes?: string
 }
 
 function localReservationToAssistant(reservation: any): AssistantReservation {
@@ -90,10 +96,13 @@ function unassignedToAssistant(reservation: UnassignedReservation): AssistantRes
     checkOut: reservation.checkOut,
     adults: Math.max(1, reservation.guestCount || 1),
     children: 0,
-    balanceDue: 0,
-    totalAmount: 0,
-    depositPaid: false,
+    balanceDue: Math.max(0, reservation.balanceDue ?? reservation.totalAmount ?? 0),
+    paidAmount: reservation.paidAmount || 0,
+    totalAmount: reservation.totalAmount || 0,
+    depositPaid: (reservation.paidAmount || 0) > 0,
     documentVerified: false,
+    specialRequests: reservation.specialRequests,
+    notes: reservation.notes,
     source: reservation.source || 'Direct',
   }
 }
@@ -258,7 +267,12 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
     const roomId = String(actionToRun.payload?.roomId || '')
 
     const dispatchFrontDeskAction = () => {
-      const detail = { action: actionToRun.type, reservationId, roomId }
+      const detail = {
+        action: actionToRun.type,
+        reservationId,
+        roomId,
+        roomType: actionToRun.payload?.roomType,
+      }
       window.sessionStorage.setItem('front-desk-ai-pending-action', JSON.stringify(detail))
       window.dispatchEvent(new CustomEvent('front-desk-ai-action', { detail }))
     }

@@ -18,14 +18,21 @@ loadEnvDefaults()
 const runDbWorkflow = process.argv.includes('--db') || process.env.npm_lifecycle_event === 'test:e2e:db'
 
 const admin = { id: 'e2e-admin', role: 'ADMIN', email: 'admin@property.test' }
+const manager = { id: 'e2e-manager', role: 'MANAGER', email: 'manager@property.test' }
 const frontDesk = { id: 'e2e-front-desk', role: 'FRONT_DESK', email: 'frontdesk@property.test' }
 const housekeeping = { id: 'e2e-housekeeping', role: 'HOUSEKEEPING', email: 'housekeeping@property.test' }
 
 assert.equal(canViewRoute(admin, 'user-management'), true, 'admin can view user management')
 assert.equal(canViewRoute(frontDesk, 'user-management'), false, 'front desk cannot view user management')
+assert.equal(canViewRoute(frontDesk, 'channels'), false, 'front desk cannot view channel management')
+assert.equal(canViewRoute(manager, 'channels'), true, 'manager can view channel management')
+assert.equal(canViewRoute(housekeeping, 'tablet-housekeeping'), true, 'housekeeping can view tablet housekeeping')
+assert.equal(canViewRoute(frontDesk, 'does-not-exist'), false, 'unknown routes are denied by default')
 assert.equal(canPerformAction(frontDesk, 'check-in:guest'), true, 'front desk can check in guests')
 assert.equal(canPerformAction(frontDesk, 'override:check-in'), false, 'front desk cannot override check-in blockers')
 assert.equal(canPerformAction(admin, 'override:check-out'), true, 'admin can override checkout blockers')
+assert.equal(canPerformAction(manager, 'edit:rates'), true, 'manager server permissions match rate UI access')
+assert.equal(canPerformAction(frontDesk, 'send:guest-messages'), true, 'front desk server permissions match guest messaging UI access')
 assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekeeping cannot process payments')
 assert.equal(isSellableRoomNumber('201'), true, 'room 201 is sellable')
 assert.equal(isSellableRoomNumber('216'), true, 'sellability is driven by room configuration, not a fixed room-number list')

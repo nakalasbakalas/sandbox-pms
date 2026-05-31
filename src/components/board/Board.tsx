@@ -66,6 +66,15 @@ interface UnassignedReservation {
   source: string
   isVIP?: boolean
   needsAttention?: boolean
+  ratePerNight?: number
+  totalAmount?: number
+  depositAmount?: number
+  balanceDue?: number
+  paidAmount?: number
+  phone?: string
+  email?: string
+  specialRequests?: string
+  notes?: string
 }
 
 interface ReservationListRecord {
@@ -81,6 +90,8 @@ interface ReservationListRecord {
   roomType: 'TWIN' | 'DOUBLE'
   checkIn: Date
   checkOut: Date
+  actualCheckIn?: Date | null
+  actualCheckOut?: Date | null
   nights: number
   adults: number
   children: number
@@ -1430,6 +1441,8 @@ export function Board() {
         return
       }
 
+      const checkedInAt = new Date()
+      const balanceDue = Math.max(0, pendingReservation.balanceDue ?? pendingReservation.totalAmount ?? 0)
       setRooms((currentRooms) => 
         currentRooms.map(r => 
           r.roomId === room.roomId 
@@ -1438,6 +1451,7 @@ export function Board() {
                 status: 'OCCUPIED_CLEAN',
                 guestName: pendingReservation.guestName,
                 reservationId: pendingReservation.id,
+                currentReservationId: pendingReservation.id,
                 checkIn: pendingReservation.checkIn,
                 checkOut: pendingReservation.checkOut,
                 guestCount: pendingReservation.guestCount,
@@ -1445,12 +1459,29 @@ export function Board() {
                 isDepartureToday: isSameDay(pendingReservation.checkOut, new Date()),
                 nightsRemaining: pendingReservation.nights,
                 isVIP: pendingReservation.isVIP || false,
+                balanceDue,
+                depositStatus: balanceDue > 0 ? 'PENDING' : 'PAID',
                 lastUpdatedAt: new Date().toISOString(),
                 lastUpdatedBy: 'Front desk',
               }
             : r
         )
       )
+      const markCheckedIn = (current: ReservationListRecord[] = []) => (current || []).map((reservation) => reservation.id === pendingReservation.id
+        ? {
+            ...reservation,
+            status: 'CHECKED_IN' as const,
+            roomId: room.roomId,
+            roomNumber: room.number,
+            actualCheckIn: checkedInAt,
+            balanceDue,
+            depositStatus: balanceDue > 0 ? reservation.depositStatus : 'PAID' as const,
+            depositPaid: balanceDue > 0 ? reservation.depositPaid : reservation.depositAmount,
+            updatedAt: checkedInAt,
+          }
+        : reservation)
+      setReservationRecords(markCheckedIn)
+      setCanonicalReservationRecords(markCheckedIn)
       
       setUnassignedReservations((current) => 
         current.filter(r => r.id !== pendingReservation.id)
@@ -1460,7 +1491,7 @@ export function Board() {
       toast.success(`${pendingReservation.guestName} checked into Room ${room.number}`)
     } else {
       openNewReservationForRoom(room, new Date())
-      toast.info(`Start a new reservation or walk-in for Room ${room.number}.`)
+      toast.info(`Start a new reservation for Room ${room.number}.`)
     }
     
     setSelectedRoom(null)
@@ -2310,8 +2341,17 @@ export function Board() {
               roomType: /twin/i.test(reservation.roomTypeName) ? 'TWIN' : 'DOUBLE',
               guestCount: reservation.adults + reservation.children,
               nights: Math.ceil((reservation.checkOut.getTime() - reservation.checkIn.getTime()) / (24 * 60 * 60 * 1000)),
-              source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source,
+              source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source === 'WALK_IN' ? 'Front desk' : reservation.source,
               isVIP: false,
+              ratePerNight: reservation.ratePerNight,
+              totalAmount: reservation.totalAmount,
+              depositAmount: reservation.depositAmount,
+              balanceDue: reservation.totalAmount,
+              paidAmount: reservation.depositPaid ? reservation.depositAmount : 0,
+              phone: reservation.guest.phone ?? undefined,
+              email: reservation.guest.email ?? undefined,
+              specialRequests: reservation.specialRequests ?? undefined,
+              notes: reservation.notes ?? undefined,
             }
           ])
           toast.success('Reservation created and added to unassigned list')
@@ -2472,7 +2512,7 @@ function RoomActionDropdown({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handlers.onQuickCheckIn(room)} className="cursor-pointer">
               <Key className="h-4 w-4" />
-              Walk-in / check in
+              New reservation / check in
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handlers.onViewCalendar(room)} className="cursor-pointer">
               <Clock className="h-4 w-4" />

@@ -296,12 +296,12 @@ function availability(snapshot: AssistantSnapshot, entities: AssistantEntities) 
       detail: item.overlaps.length ? `Unavailable: overlaps ${item.overlaps.map((reservation) => reservation.confirmationCode || reservation.id).join(', ')}` : `Unavailable: ${item.room.operationalStatus}`,
     }))],
     warnings: blocked.length ? [`${blocked.length} room${blocked.length === 1 ? '' : 's'} excluded due to occupancy, blocked, or out-of-order state.`] : [],
-    nextAction: best ? `Use Room ${best.room.number} for the next matching walk-in or assignment.` : 'Check another room type or date range.',
+    nextAction: best ? `Use Room ${best.room.number} for the next matching reservation or assignment.` : 'Check another room type or date range.',
     actions: [
       ...(best ? [action('OPEN_ROOM', `View Room ${best.room.number}`, { roomId: best.room.roomId, roomNumber: best.room.number })] : []),
-      action('CREATE_WALK_IN_DRAFT', 'Open Walk-In', { roomType: entities.roomType, roomId: best?.room.roomId }, {
+      action('CREATE_WALK_IN_DRAFT', 'New Reservation', { roomType: entities.roomType, roomId: best?.room.roomId }, {
         permission: 'create:reservation',
-        description: 'Opens the front desk walk-in workflow for staff entry and confirmation.',
+        description: 'Opens the front desk reservation workflow for staff entry and confirmation.',
       }),
     ],
   })

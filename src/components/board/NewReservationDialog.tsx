@@ -113,7 +113,7 @@ const BOOKING_SOURCE_OPTIONS: Array<{ value: BookingSource; label: string }> = [
   { value: 'AGODA', label: 'Agoda' },
   { value: 'EXPEDIA', label: 'Expedia' },
   { value: 'AIRBNB', label: 'Airbnb' },
-  { value: 'WALK_IN', label: 'Walk-in' },
+  { value: 'WALK_IN', label: 'Front desk' },
   { value: 'PHONE', label: 'Phone' },
 ]
 
@@ -387,8 +387,8 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto,minmax(0,1fr),auto] gap-0 overflow-hidden p-0 sm:max-w-[min(1120px,calc(100vw-2rem))] lg:h-[min(900px,calc(100vh-2rem))]">
-        <DialogHeader className="border-b px-6 py-5 pr-14">
+      <DialogContent className="h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)] grid-rows-[auto,minmax(0,1fr),auto] gap-0 overflow-hidden p-0 sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)] sm:max-w-[min(1180px,calc(100vw-2rem))] lg:h-[min(920px,calc(100dvh-2rem))]">
+        <DialogHeader className="border-b px-4 py-4 pr-12 sm:px-6 sm:py-5 sm:pr-14">
           <DialogTitle className="text-xl">New Reservation</DialogTitle>
           <DialogDescription>
             Create a new booking
@@ -398,7 +398,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
         <ScrollArea className="h-full min-h-0">
           <form id="new-reservation-form" onSubmit={(event) => { event.preventDefault(); void handleSubmit() }}>
-            <div className="grid gap-5 p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="grid gap-5 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
               <div className="space-y-5">
                 <section className="space-y-4">
                   <div className="flex items-center gap-2">
@@ -694,7 +694,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
           </form>
         </ScrollArea>
 
-        <DialogFooter className="border-t px-6 py-4">
+        <DialogFooter className="border-t px-4 py-3 sm:px-6 sm:py-4">
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
           <Button type="submit" form="new-reservation-form" disabled={isSubmitting}>
             {isSubmitting ? (

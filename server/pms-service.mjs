@@ -743,7 +743,7 @@ function normalizeSetupRoomInput(input) {
       ? 'OUT_OF_SERVICE'
       : 'AVAILABLE'
 
-  if (!['AVAILABLE', 'OUT_OF_SERVICE', 'BLOCKED'].includes(operationalStatus)) {
+  if (!['AVAILABLE', 'OUT_OF_SERVICE', 'OUT_OF_ORDER', 'BLOCKED'].includes(operationalStatus)) {
     throw new PmsValidationError('Room operational status is invalid.')
   }
 

@@ -83,6 +83,7 @@ model Room {
 enum RoomOpStatus {
   AVAILABLE
   OUT_OF_SERVICE
+  OUT_OF_ORDER
   BLOCKED
 }
 

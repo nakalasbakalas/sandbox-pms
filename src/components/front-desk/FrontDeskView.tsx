@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem, InHouseItem } from '@/types/front-desk'
 import type { BoardRoomCard } from '@/types/board'
-import type { PropertySetup } from '@/types/onboarding'
 import { ArrivalList } from './ArrivalList'
 import { DepartureList } from './DepartureList'
 import { CheckInDialog } from './CheckInDialog'
 import { CheckOutDialog } from './CheckOutDialog'
-import { WalkInDialog, type WalkInPayload } from './WalkInDialog'
+import { NewReservationDialog, type NewReservationData } from '@/components/board/NewReservationDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyDisplay } from '@/components/ui/money-display'
@@ -38,6 +37,76 @@ interface UnassignedReservation {
   source: string
   isVIP?: boolean
   needsAttention?: boolean
+  ratePerNight?: number
+  totalAmount?: number
+  depositAmount?: number
+  balanceDue?: number
+  paidAmount?: number
+  phone?: string
+  email?: string
+  specialRequests?: string
+  notes?: string
+}
+
+type ReservationPrefill = {
+  roomId?: string
+  roomNumber?: string
+  roomType?: 'TWIN' | 'DOUBLE'
+  checkIn?: Date
+}
+
+interface ReservationRecord {
+  id: string
+  confirmationNumber: string
+  status: 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT' | 'CANCELLED' | 'NO_SHOW' | 'PENDING'
+  guestId: string
+  guestName: string
+  guestEmail?: string
+  guestPhone?: string
+  roomId?: string
+  roomNumber?: string
+  roomType: 'TWIN' | 'DOUBLE'
+  checkIn: Date
+  checkOut: Date
+  actualCheckIn?: Date | null
+  actualCheckOut?: Date | null
+  nights: number
+  adults: number
+  children: number
+  ratePerNight: number
+  totalAmount: number
+  depositAmount: number
+  depositPaid: number
+  depositStatus: 'PAID' | 'PENDING' | 'NONE'
+  balanceDue: number
+  source: 'DIRECT' | 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB' | 'WALK_IN' | 'PHONE'
+  isVIP: boolean
+  specialRequests?: string
+  notes?: string
+  createdAt: Date
+  updatedAt: Date
+  createdBy: string
+}
+
+interface GuestDirectoryRecord {
+  id: string
+  firstName: string
+  lastName: string
+  fullName: string
+  email?: string
+  phone?: string
+  nationality?: string
+  isVIP: boolean
+  tags: string[]
+  totalStays: number
+  totalNights: number
+  totalSpent: number
+  firstStayDate: Date
+  lastStayDate?: Date
+  preferredRoomType?: 'TWIN' | 'DOUBLE'
+  preferredContact?: 'EMAIL' | 'PHONE' | 'LINE'
+  createdAt: Date
+  updatedAt: Date
 }
 
 type ServerBoard = {
@@ -56,6 +125,88 @@ function isSameHotelDate(value: Date | string | undefined, hotelDateKey: string)
 
 function guestName(reservation: any) {
   return `${reservation?.guest?.firstName || ''} ${reservation?.guest?.lastName || ''}`.trim() || 'Guest name required'
+}
+
+function roomTypeFromReservation(reservation: NewReservationData): 'TWIN' | 'DOUBLE' {
+  return /twin/i.test(reservation.roomTypeName) ? 'TWIN' : 'DOUBLE'
+}
+
+function sourceLabel(source: NewReservationData['source']) {
+  if (source === 'BOOKING_COM') return 'Booking.com'
+  if (source === 'WALK_IN') return 'Front desk'
+  if (source === 'PHONE') return 'Phone'
+  if (source === 'AGODA') return 'Agoda'
+  if (source === 'EXPEDIA') return 'Expedia'
+  if (source === 'AIRBNB') return 'Airbnb'
+  return 'Direct'
+}
+
+function appendUniqueById<T extends { id: string }>(record: T) {
+  return (current: T[] = []) => {
+    if ((current || []).some((item) => item.id === record.id)) return current || []
+    return [...(current || []), record]
+  }
+}
+
+function toReservationRecord(reservation: NewReservationData): ReservationRecord {
+  const roomType = roomTypeFromReservation(reservation)
+  const nights = Math.max(1, nightsBetween(reservation.checkIn, reservation.checkOut))
+
+  return {
+    id: reservation.id,
+    confirmationNumber: reservation.id.replace(/^RES-/, 'SH-'),
+    status: reservation.status,
+    guestId: reservation.guestId,
+    guestName: `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim(),
+    guestEmail: reservation.guest.email ?? undefined,
+    guestPhone: reservation.guest.phone ?? undefined,
+    roomId: reservation.assignedRoomId ?? undefined,
+    roomNumber: reservation.roomNumber,
+    roomType,
+    checkIn: reservation.checkIn,
+    checkOut: reservation.checkOut,
+    nights,
+    adults: reservation.adults,
+    children: reservation.children,
+    ratePerNight: reservation.ratePerNight,
+    totalAmount: reservation.totalAmount,
+    depositAmount: reservation.depositAmount,
+    depositPaid: reservation.depositPaid ? reservation.depositAmount : 0,
+    depositStatus: reservation.depositAmount > 0 ? 'PENDING' : 'NONE',
+    balanceDue: reservation.totalAmount,
+    source: reservation.source as ReservationRecord['source'],
+    isVIP: reservation.guest.vipStatus,
+    specialRequests: reservation.specialRequests ?? undefined,
+    notes: reservation.notes ?? undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+    createdBy: 'Front desk',
+  }
+}
+
+function toGuestRecord(reservation: NewReservationData): GuestDirectoryRecord {
+  const roomType = roomTypeFromReservation(reservation)
+  const nights = Math.max(1, nightsBetween(reservation.checkIn, reservation.checkOut))
+
+  return {
+    id: reservation.guest.id,
+    firstName: reservation.guest.firstName,
+    lastName: reservation.guest.lastName,
+    fullName: `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim(),
+    email: reservation.guest.email ?? undefined,
+    phone: reservation.guest.phone ?? undefined,
+    nationality: reservation.guest.nationality ?? undefined,
+    isVIP: reservation.guest.vipStatus,
+    tags: reservation.guest.vipStatus ? ['VIP'] : [],
+    totalStays: 0,
+    totalNights: nights,
+    totalSpent: reservation.totalAmount,
+    firstStayDate: reservation.checkIn,
+    preferredRoomType: roomType,
+    preferredContact: reservation.guest.email ? 'EMAIL' : reservation.guest.phone ? 'PHONE' : undefined,
+    createdAt: reservation.createdAt,
+    updatedAt: reservation.updatedAt,
+  }
 }
 
 function paymentStatus(balance: number, paid = 0): 'PAID' | 'PARTIAL' | 'UNPAID' {
@@ -103,6 +254,8 @@ function roomToArrival(room: BoardRoomCard): ArrivalItem {
 }
 
 function unassignedToArrival(reservation: UnassignedReservation): ArrivalItem {
+  const balanceDue = Math.max(0, reservation.balanceDue ?? reservation.totalAmount ?? 0)
+  const paidAmount = Math.max(0, reservation.paidAmount ?? Math.max(0, (reservation.totalAmount || 0) - balanceDue))
   return {
     id: reservation.id,
     reservationId: reservation.id,
@@ -120,10 +273,16 @@ function unassignedToArrival(reservation: UnassignedReservation): ArrivalItem {
     depositPaid: false,
     documentVerified: false,
     source: reservation.source || 'Direct',
-    bookedRate: 0,
-    totalAmount: 0,
-    balanceDue: 0,
-    paymentStatus: 'PAID',
+    bookedRate: reservation.ratePerNight || 0,
+    totalAmount: reservation.totalAmount || balanceDue,
+    paidAmount,
+    balanceDue,
+    depositAmount: reservation.depositAmount || 0,
+    paymentStatus: paymentStatus(balanceDue, paidAmount),
+    phone: reservation.phone,
+    email: reservation.email,
+    specialRequests: reservation.specialRequests,
+    notes: reservation.notes,
   }
 }
 
@@ -229,10 +388,14 @@ export function FrontDeskView() {
   const [checkOutMode, setCheckOutMode] = useState<'express' | 'guided'>('guided')
   const [checkInDialogOpen, setCheckInDialogOpen] = useState(false)
   const [checkOutDialogOpen, setCheckOutDialogOpen] = useState(false)
-  const [walkInOpen, setWalkInOpen] = useState(false)
+  const [newReservationOpen, setNewReservationOpen] = useState(false)
+  const [prefilledReservation, setPrefilledReservation] = useState<ReservationPrefill | null>(null)
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
-  const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
+  const [, setReservationRecords] = useKV<ReservationRecord[]>('reservations-data', [])
+  const [, setCanonicalReservationRecords] = useKV<ReservationRecord[]>('reservations', [])
+  const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
+  const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
   const [authToken] = useKV<string | null>('auth:pms-token', null)
   const { user } = useAuth()
   const { navigate } = useNavigation()
@@ -332,11 +495,22 @@ export function FrontDeskView() {
     setCheckOutDialogOpen(true)
   }
 
+  const openNewReservation = useCallback((prefill?: ReservationPrefill | null) => {
+    setPrefilledReservation(prefill || { checkIn: new Date() })
+    setNewReservationOpen(true)
+  }, [])
+
   useEffect(() => {
     const runPendingAction = (detail: any) => {
       if (!detail?.action) return
-      if (detail.action === 'CREATE_WALK_IN_DRAFT') {
-        setWalkInOpen(true)
+      if (detail.action === 'CREATE_WALK_IN_DRAFT' || detail.action === 'CREATE_RESERVATION_DRAFT') {
+        const prefillRoom = detail.roomId ? rooms.find((room) => room.roomId === detail.roomId) : undefined
+        openNewReservation({
+          roomId: prefillRoom?.roomId,
+          roomNumber: prefillRoom?.number,
+          roomType: detail.roomType || prefillRoom?.type,
+          checkIn: new Date(),
+        })
         return
       }
       if (detail.action === 'OPEN_CHECK_IN' && detail.reservationId) {
@@ -362,7 +536,7 @@ export function FrontDeskView() {
     }
 
     return () => window.removeEventListener('front-desk-ai-action', handleAssistantAction)
-  }, [arrivals, departures])
+  }, [arrivals, departures, openNewReservation, rooms])
 
   const markRoomReady = async (roomId: string) => {
     if (SERVER_API_ENABLED && authToken) {
@@ -436,6 +610,8 @@ export function FrontDeskView() {
 
     const due = amountDueForArrival(selectedArrival)
     const paid = data.payment?.amount || 0
+    const remainingBalance = Math.max(0, due - paid)
+    const checkedInAt = new Date()
     setRooms((current) => current.map((room) => room.roomId === assignedRoom.roomId
       ? {
           ...room,
@@ -448,12 +624,27 @@ export function FrontDeskView() {
           checkIn: selectedArrival.checkInDate ? new Date(selectedArrival.checkInDate) : new Date(),
           checkOut: selectedArrival.checkOutDate ? new Date(selectedArrival.checkOutDate) : new Date(Date.now() + Math.max(1, selectedArrival.nights) * 86_400_000),
           guestCount: selectedArrival.adults + selectedArrival.children,
-          balanceDue: Math.max(0, due - paid),
-          depositStatus: due - paid <= 0 ? 'PAID' : 'PENDING',
+          balanceDue: remainingBalance,
+          depositStatus: remainingBalance <= 0 ? 'PAID' : 'PENDING',
           lastUpdatedAt: new Date().toISOString(),
           lastUpdatedBy: user?.displayName || 'Front desk',
         }
       : room))
+    const markCheckedIn = (current: ReservationRecord[] = []) => (current || []).map((reservation) => reservation.id === selectedArrival.reservationId
+      ? {
+          ...reservation,
+          status: 'CHECKED_IN' as const,
+          roomId: assignedRoom.roomId,
+          roomNumber: assignedRoom.number,
+          actualCheckIn: checkedInAt,
+          balanceDue: remainingBalance,
+          depositPaid: remainingBalance <= 0 ? reservation.depositAmount : reservation.depositPaid,
+          depositStatus: remainingBalance <= 0 ? 'PAID' as const : reservation.depositStatus,
+          updatedAt: checkedInAt,
+        }
+      : reservation)
+    setReservationRecords(markCheckedIn)
+    setCanonicalReservationRecords(markCheckedIn)
     setUnassignedReservations((current) => (current || []).filter((reservation) => reservation.id !== selectedArrival.reservationId))
     toast.success(`Checked in: ${selectedArrival.guestName} -> Room ${assignedRoom.number}`)
     setCheckInDialogOpen(false)
@@ -496,6 +687,9 @@ export function FrontDeskView() {
       return
     }
 
+    const paidNow = data.paymentAmount || 0
+    const remainingBalance = Math.max(0, selectedDeparture.balanceDue - paidNow)
+    const checkedOutAt = new Date()
     setRooms((current) => current.map((currentRoom) => currentRoom.roomId === room.roomId
       ? {
           ...currentRoom,
@@ -515,57 +709,94 @@ export function FrontDeskView() {
           lastUpdatedBy: user?.displayName || 'Front desk',
         }
       : currentRoom))
+    const markCheckedOut = (current: ReservationRecord[] = []) => (current || []).map((reservation) => reservation.id === selectedDeparture.reservationId
+      ? {
+          ...reservation,
+          status: 'CHECKED_OUT' as const,
+          actualCheckOut: checkedOutAt,
+          balanceDue: remainingBalance,
+          updatedAt: checkedOutAt,
+        }
+      : reservation)
+    setReservationRecords(markCheckedOut)
+    setCanonicalReservationRecords(markCheckedOut)
     toast.success(`Checked out: ${selectedDeparture.guestName} -> Room ${selectedDeparture.roomNumber} marked for cleaning`)
     setCheckOutDialogOpen(false)
     setSelectedDeparture(null)
   }
 
-  const confirmWalkIn = async (payload: WalkInPayload) => {
+  const confirmNewReservation = async (reservation: NewReservationData) => {
     if (SERVER_API_ENABLED && authToken) {
       try {
-        const response = await pmsApi<{ ok: true; message?: string; data?: any }>('/api/front-desk/walk-in', authToken, {
+        const response = await pmsApi<{ ok: true; message?: string; data?: any }>('/api/reservations', authToken, {
           method: 'POST',
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            guest: {
+              firstName: reservation.guest.firstName,
+              lastName: reservation.guest.lastName,
+              email: reservation.guest.email || undefined,
+              phone: reservation.guest.phone || undefined,
+              nationality: reservation.guest.nationality || undefined,
+              vipStatus: reservation.guest.vipStatus,
+            },
+            roomTypeCode: roomTypeFromReservation(reservation),
+            assignedRoomId: reservation.assignedRoomId || undefined,
+            checkIn: getBangkokDateKey(reservation.checkIn),
+            checkOut: getBangkokDateKey(reservation.checkOut),
+            adults: reservation.adults,
+            children: reservation.children,
+            childAges: reservation.childAges || [],
+            ratePerNight: reservation.ratePerNight,
+            source: reservation.source,
+            specialRequests: reservation.specialRequests || undefined,
+            notes: reservation.notes || undefined,
+          }),
         })
         await refreshServerBoard()
-        toast.success(response.message || `Walk-in checked in: ${payload.guest.firstName} ${payload.guest.lastName}`)
-        setWalkInOpen(false)
+        toast.success(response.message || 'Reservation created.')
+        setNewReservationOpen(false)
+        setPrefilledReservation(null)
         return
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Walk-in check-in failed.')
+        toast.error(error instanceof Error ? error.message : 'Reservation could not be created.')
         return
       }
     }
 
-    const room = getRoomById(payload.assignedRoomId || '')
-    if (!room) {
-      toast.error('Assign a valid room before walk-in check-in.')
-      return
-    }
-    const reservationId = `walk-in-${Date.now()}`
-    const guest = `${payload.guest.firstName} ${payload.guest.lastName}`.trim()
-    const totalPaid = payload.payment?.amount || 0
-    const total = payload.ratePerNight * Math.max(1, nightsBetween(payload.checkIn, payload.checkOut))
-    setRooms((current) => current.map((currentRoom) => currentRoom.roomId === room.roomId
-      ? {
-          ...currentRoom,
-          status: 'OCCUPIED_CLEAN',
-          cleanStatus: currentRoom.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
-          housekeepingStatus: currentRoom.cleanStatus === 'INSPECTED' ? 'INSPECTED' : 'CLEAN',
-          reservationId,
-          currentReservationId: reservationId,
-          guestName: guest,
-          checkIn: new Date(payload.checkIn),
-          checkOut: new Date(payload.checkOut),
-          guestCount: payload.adults + payload.children,
-          balanceDue: Math.max(0, total - totalPaid),
-          depositStatus: total - totalPaid <= 0 ? 'PAID' : 'PENDING',
-          lastUpdatedAt: new Date().toISOString(),
-          lastUpdatedBy: user?.displayName || 'Front desk',
-        }
-      : currentRoom))
-    toast.success(`Checked in walk-in: ${guest} -> Room ${room.number}`)
-    setWalkInOpen(false)
+    const reservationRecord = toReservationRecord(reservation)
+    const guestRecord = toGuestRecord(reservation)
+    const roomType = roomTypeFromReservation(reservation)
+
+    setReservationRecords(appendUniqueById(reservationRecord))
+    setCanonicalReservationRecords(appendUniqueById(reservationRecord))
+    setGuestDirectory(appendUniqueById(guestRecord))
+    setCanonicalGuestDirectory(appendUniqueById(guestRecord))
+    setUnassignedReservations((current) => [
+      ...(current || []),
+      {
+        id: reservation.id,
+        guestName: reservationRecord.guestName,
+        checkIn: reservation.checkIn,
+        checkOut: reservation.checkOut,
+        roomType,
+        guestCount: reservation.adults + reservation.children,
+        nights: reservationRecord.nights,
+        source: sourceLabel(reservation.source),
+        isVIP: reservation.guest.vipStatus,
+        ratePerNight: reservation.ratePerNight,
+        totalAmount: reservation.totalAmount,
+        depositAmount: reservation.depositAmount,
+        balanceDue: reservation.totalAmount,
+        paidAmount: reservation.depositPaid ? reservation.depositAmount : 0,
+        phone: reservation.guest.phone ?? undefined,
+        email: reservation.guest.email ?? undefined,
+        specialRequests: reservation.specialRequests ?? undefined,
+        notes: reservation.notes ?? undefined,
+      },
+    ])
+    toast.success('Reservation created and added to the assignment queue.')
+    setNewReservationOpen(false)
+    setPrefilledReservation(null)
   }
 
   return (
@@ -589,9 +820,9 @@ export function FrontDeskView() {
                 className="pl-9"
               />
             </div>
-            <Button onClick={() => setWalkInOpen(true)} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
+            <Button onClick={() => openNewReservation()} className="gap-1.5 bg-blue-600 hover:bg-blue-700">
               <Plus size={16} weight="bold" />
-              Walk-In
+              New Reservation
             </Button>
             <Button variant="outline" onClick={() => openAssistant({ prompt: 'Show today\'s risks' })} className="gap-1.5">
               <MagnifyingGlass size={16} weight="bold" />
@@ -657,12 +888,14 @@ export function FrontDeskView() {
         onConfirm={confirmCheckOut}
       />
 
-      <WalkInDialog
-        open={walkInOpen}
-        rooms={rooms}
-        role={user?.role}
-        onOpenChange={setWalkInOpen}
-        onConfirm={confirmWalkIn}
+      <NewReservationDialog
+        open={newReservationOpen}
+        onClose={() => {
+          setNewReservationOpen(false)
+          setPrefilledReservation(null)
+        }}
+        prefilledData={prefilledReservation}
+        onSubmit={confirmNewReservation}
       />
     </div>
   )

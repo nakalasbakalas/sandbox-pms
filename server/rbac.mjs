@@ -19,6 +19,7 @@ export const ROLE_PERMISSIONS = {
     'check-out:guest',
     'override:check-in',
     'override:check-out',
+    'edit:rates',
     'edit:room-status',
     'post:charges',
     'process:payment',
@@ -29,6 +30,8 @@ export const ROLE_PERMISSIONS = {
     'view:financial-reports',
     'edit:inventory',
     'manage:channels',
+    'send:guest-messages',
+    'send:staff-messages',
   ],
   MANAGER: [
     'view:board',
@@ -49,11 +52,14 @@ export const ROLE_PERMISSIONS = {
     'check-out:guest',
     'override:check-in',
     'override:check-out',
+    'edit:rates',
     'edit:room-status',
     'post:charges',
     'process:payment',
     'run:night-audit',
     'view:financial-reports',
+    'send:guest-messages',
+    'send:staff-messages',
   ],
   FRONT_DESK: [
     'view:board',
@@ -69,12 +75,15 @@ export const ROLE_PERMISSIONS = {
     'edit:room-status',
     'post:charges',
     'process:payment',
+    'send:guest-messages',
+    'send:staff-messages',
   ],
   HOUSEKEEPING: [
     'view:board',
     'view:housekeeping',
     'view:messaging',
     'edit:room-status',
+    'send:staff-messages',
   ],
   CASHIER: [
     'view:board',
@@ -86,6 +95,7 @@ export const ROLE_PERMISSIONS = {
     'post:charges',
     'process:payment',
     'view:financial-reports',
+    'send:staff-messages',
   ],
   CAFE_STAFF: [
     'view:cashier',
@@ -101,13 +111,23 @@ const ROUTE_PERMISSIONS = {
   reservations: ['view:reservations'],
   guests: ['view:guests'],
   housekeeping: ['view:housekeeping'],
+  'tablet-housekeeping': ['view:housekeeping'],
   cashier: ['view:cashier'],
+  rates: ['view:rates'],
+  channels: ['view:channels'],
+  'growth-suite': ['view:channels', 'view:rates', 'view:analytics'],
   reports: ['view:reports'],
   settings: ['view:settings'],
+  messaging: ['view:messaging'],
+  'internal-comms': ['view:messaging'],
+  'guest-communications': ['view:messaging'],
+  'daily-summary': ['view:reports', 'view:settings'],
   'night-audit': ['view:night-audit'],
   'revenue-analytics': ['view:analytics'],
   'predictive-analytics': ['view:analytics'],
+  'system-status': ['view:settings'],
   'user-management': ['manage:users'],
+  'data-backup': ['view:settings'],
 }
 
 export function normalizeRole(role) {
@@ -121,7 +141,7 @@ export function canPerformAction(user, permission) {
 
 export function canViewRoute(user, route) {
   const permissions = ROUTE_PERMISSIONS[route]
-  if (!permissions) return true
+  if (!permissions) return false
   return permissions.some((permission) => canPerformAction(user, permission))
 }
 

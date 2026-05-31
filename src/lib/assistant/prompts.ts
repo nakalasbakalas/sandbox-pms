@@ -7,7 +7,7 @@ export const FRONT_DESK_ASSISTANT_PROMPTS = [
   'Unassigned arrivals',
   'Dirty rooms needed today',
   'Late checkouts',
-  'Walk-in availability',
+  'New reservation availability',
 ]
 
 export const FRONT_DESK_ASSISTANT_SHORTCUTS = [

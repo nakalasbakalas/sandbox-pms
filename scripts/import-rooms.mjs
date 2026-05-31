@@ -10,7 +10,7 @@ import { loadEnvDefaults } from './env-utils.mjs'
 
 loadEnvDefaults()
 
-const roomOpStatuses = new Set(['AVAILABLE', 'OUT_OF_SERVICE', 'BLOCKED'])
+const roomOpStatuses = new Set(['AVAILABLE', 'OUT_OF_SERVICE', 'OUT_OF_ORDER', 'BLOCKED'])
 const roomStatuses = new Set([
   'VACANT_CLEAN',
   'VACANT_DIRTY',

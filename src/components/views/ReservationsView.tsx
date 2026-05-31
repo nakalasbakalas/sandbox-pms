@@ -33,6 +33,8 @@ export interface Reservation {
   
   checkIn: Date
   checkOut: Date
+  actualCheckIn?: Date | null
+  actualCheckOut?: Date | null
   nights: number
   
   adults: number
@@ -70,6 +72,15 @@ interface UnassignedReservation {
   source: string
   isVIP?: boolean
   needsAttention?: boolean
+  ratePerNight?: number
+  totalAmount?: number
+  depositAmount?: number
+  balanceDue?: number
+  paidAmount?: number
+  phone?: string
+  email?: string
+  specialRequests?: string
+  notes?: string
 }
 
 interface GuestDirectoryRecord {
@@ -137,7 +148,7 @@ function reservationFromUnassigned(reservation: UnassignedReservation): Reservat
   const nights = reservation.nights || Math.max(1, nightsBetween(checkIn, checkOut))
   const source = reservation.source === 'Booking.com'
     ? 'BOOKING_COM'
-    : reservation.source === 'Walk-in'
+    : reservation.source === 'Walk-in' || reservation.source === 'Front desk'
       ? 'WALK_IN'
       : reservation.source === 'Phone'
         ? 'PHONE'
@@ -149,20 +160,24 @@ function reservationFromUnassigned(reservation: UnassignedReservation): Reservat
     status: reservation.needsAttention ? 'PENDING' : 'CONFIRMED',
     guestId: `guest-${reservation.id}`,
     guestName: reservation.guestName,
+    guestEmail: reservation.email,
+    guestPhone: reservation.phone,
     roomType: reservation.roomType,
     checkIn,
     checkOut,
     nights,
     adults: Math.max(1, reservation.guestCount || 1),
     children: Math.max(0, (reservation.guestCount || 1) - 1),
-    ratePerNight: 0,
-    totalAmount: 0,
-    depositAmount: 0,
-    depositPaid: 0,
-    depositStatus: 'NONE',
-    balanceDue: 0,
+    ratePerNight: reservation.ratePerNight || 0,
+    totalAmount: reservation.totalAmount || 0,
+    depositAmount: reservation.depositAmount || 0,
+    depositPaid: reservation.paidAmount || 0,
+    depositStatus: (reservation.paidAmount || 0) > 0 ? 'PAID' : (reservation.depositAmount || 0) > 0 ? 'PENDING' : 'NONE',
+    balanceDue: Math.max(0, reservation.balanceDue ?? reservation.totalAmount ?? 0),
     source,
     isVIP: reservation.isVIP || false,
+    specialRequests: reservation.specialRequests,
+    notes: reservation.notes,
     createdAt: checkIn,
     updatedAt: new Date(),
     createdBy: 'Front desk board',
@@ -405,8 +420,17 @@ export function ReservationsView() {
         roomType: /twin/i.test(reservation.roomTypeName) ? 'TWIN' : 'DOUBLE',
         guestCount: reservation.adults + reservation.children,
         nights: reservationRecord.nights,
-        source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source,
+        source: reservation.source === 'DIRECT' ? 'Direct' : reservation.source === 'BOOKING_COM' ? 'Booking.com' : reservation.source === 'WALK_IN' ? 'Front desk' : reservation.source,
         isVIP: reservation.guest.vipStatus,
+        ratePerNight: reservation.ratePerNight,
+        totalAmount: reservation.totalAmount,
+        depositAmount: reservation.depositAmount,
+        balanceDue: reservation.totalAmount,
+        paidAmount: reservation.depositPaid ? reservation.depositAmount : 0,
+        phone: reservation.guest.phone ?? undefined,
+        email: reservation.guest.email ?? undefined,
+        specialRequests: reservation.specialRequests ?? undefined,
+        notes: reservation.notes ?? undefined,
       },
     ])
     toast.success('Reservation created and added to the assignment queue.')

@@ -162,7 +162,7 @@ export function CheckInDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] max-w-[calc(100vw-1rem)] overflow-y-auto p-4 sm:max-h-[calc(100dvh-2rem)] sm:max-w-[min(1040px,calc(100vw-2rem))] sm:p-6">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
             {mode === 'express' ? <Lightning className="text-emerald-600" size={21} weight="bold" /> : <CheckCircle className="text-blue-600" size={21} weight="bold" />}

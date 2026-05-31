@@ -105,7 +105,7 @@ export const createRoomSchema = z.object({
   roomTypeId: z.string().min(1, 'Room type is required'),
   number: z.string().min(1, 'Room number is required'),
   floor: z.number().int(),
-  operationalStatus: z.enum(['AVAILABLE', 'OUT_OF_SERVICE', 'BLOCKED']).optional().default('AVAILABLE'),
+  operationalStatus: z.enum(['AVAILABLE', 'OUT_OF_SERVICE', 'OUT_OF_ORDER', 'BLOCKED']).optional().default('AVAILABLE'),
   currentStatus: z.enum(['VACANT_CLEAN', 'VACANT_DIRTY', 'OCCUPIED', 'OCCUPIED_DIRTY']).optional().default('VACANT_CLEAN'),
   blockedUntil: z.date().optional(),
   notes: z.string().optional(),
