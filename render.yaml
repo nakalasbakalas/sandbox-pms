@@ -14,9 +14,9 @@ services:
       - key: VITE_PMS_API_MODE
         value: server
       - key: APP_URL
-        value: https://sandbox-hotel-pms.onrender.com
+        value: https://book.sandboxhotel.com
       - key: ALLOWED_ORIGINS
-        value: https://sandbox-hotel-pms.onrender.com
+        value: https://book.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com,https://sandbox-hotel-pms.onrender.com
       - key: DATABASE_URL
         fromDatabase:
           name: sandbox-hotel-pms-db-v43m

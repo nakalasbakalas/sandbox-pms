@@ -23,9 +23,15 @@ function loadEnvFile(path: string) {
 
 loadEnvFile(resolve(process.cwd(), '.env'))
 
+const defaultLocalDatabaseUrl = 'postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_dev?schema=public'
+
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
+    path: 'prisma/migrations',
     seed: 'tsx prisma/seed.ts',
+  },
+  datasource: {
+    url: process.env.DATABASE_URL || process.env.E2E_DATABASE_URL || defaultLocalDatabaseUrl,
   },
 })

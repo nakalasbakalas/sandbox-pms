@@ -41,6 +41,7 @@ function mapUser(user: ServerUser): User {
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
       ...(options.headers || {}),
@@ -61,25 +62,22 @@ export function mapServerUser(user: ServerUser): User {
   return mapUser(user)
 }
 
-export async function serverLogin(email: string, password: string): Promise<{ user: User; token: string }> {
-  const payload = await apiRequest<{ ok: true; user: ServerUser; token: string }>('/api/auth/login', {
+export async function serverLogin(email: string, password: string): Promise<{ user: User }> {
+  const payload = await apiRequest<{ ok: true; user: ServerUser }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: normalizeAuthEmail(email), password }),
   })
-  return { user: mapUser(payload.user), token: payload.token }
+  return { user: mapUser(payload.user) }
 }
 
-export async function serverMe(token: string): Promise<User> {
-  const payload = await apiRequest<{ ok: true; user: ServerUser }>('/api/auth/me', {
-    headers: { authorization: `Bearer ${token}` },
-  })
+export async function serverMe(): Promise<User> {
+  const payload = await apiRequest<{ ok: true; user: ServerUser }>('/api/auth/me')
   return mapUser(payload.user)
 }
 
-export async function serverLogout(token?: string) {
+export async function serverLogout() {
   await apiRequest('/api/auth/logout', {
     method: 'POST',
-    headers: token ? { authorization: `Bearer ${token}` } : undefined,
   }).catch(() => undefined)
 }
 

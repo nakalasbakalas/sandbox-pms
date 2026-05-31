@@ -154,7 +154,7 @@ npm run start
 
 `SEED_MODE=prod-safe` is set in `render.yaml`, so production seed remains limited to safe configuration and explicitly configured real users or a legacy bootstrap admin. Mutating E2E must never use the Render production database URL.
 
-Render skips `preDeployCommand` on free web service instance types. If production is running on the free instance type, apply migrations and seed from inside Render with a reviewed one-time build command such as `npm ci --include=dev && npm run db:generate && npm run db:migrate && npm run db:seed && npm run build`, then restore the normal build command. Prefer moving production to the committed `starter` plan before relying on automatic pre-deploy behavior.
+Render can skip `preDeployCommand` when the active service is not on a supported instance type or when the deploy target does not match the committed Blueprint. If production logs show predeploy was skipped, apply migrations and seed from inside Render with a reviewed one-time build command such as `npm ci --include=dev && npm run db:generate && npm run db:migrate && npm run db:seed && npm run build`, then restore the normal build command. Prefer keeping production on the committed `starter` plan before relying on automatic pre-deploy behavior.
 
 ## Final Launch Gates
 
@@ -174,7 +174,7 @@ Production launch also requires:
 
 - Render `DATABASE_URL` is provided by the managed database binding.
 - Render `SESSION_SECRET` is generated from `render.yaml` or set from a generated secret bundle.
-- Render `preDeployCommand` uses `npm run db:migrate`, which runs `prisma migrate deploy`, or an explicitly reviewed one-time Render build command has applied migrations when the service is on a free instance type.
+- Render `preDeployCommand` uses `npm run db:migrate`, which runs `prisma migrate deploy`, or an explicitly reviewed one-time Render build command has applied migrations if Render skips predeploy.
 - `npm run prod:preflight` passes against the exact production env values before deploy.
 - No mutating E2E command uses the production database.
 - Production seed uses `SEED_MODE=prod-safe`.

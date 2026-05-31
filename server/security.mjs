@@ -95,10 +95,7 @@ export function clearSessionCookie() {
   return `pms_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`
 }
 
-export function readBearerOrCookie(request) {
-  const auth = request.headers.authorization || ''
-  if (auth.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim()
-
+export function readSessionCookie(request) {
   const cookies = Object.fromEntries(
     String(request.headers.cookie || '')
       .split(';')

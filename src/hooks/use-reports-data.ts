@@ -668,7 +668,7 @@ function attachLocalFolios(reservations: ReportReservation[], folios: ReportFoli
 }
 
 export function useReportsData(dateRange: DateRange) {
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [localRooms] = useKV<ReportRoom[]>('pms-rooms', [])
   const [localReservations] = useKV<ReportReservation[]>('reservations', [])
   const [localGuests] = useKV<ReportGuest[]>('guests', [])
@@ -677,7 +677,7 @@ export function useReportsData(dateRange: DateRange) {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!SERVER_API_ENABLED || !authToken) {
+    if (!SERVER_API_ENABLED) {
       setServerSnapshot(null)
       setError(null)
       return
@@ -706,7 +706,7 @@ export function useReportsData(dateRange: DateRange) {
     return () => {
       cancelled = true
     }
-  }, [authToken])
+  }, [])
 
   const rooms = serverSnapshot?.rooms || localRooms || []
   const reservations = serverSnapshot?.reservations || attachLocalFolios(localReservations || [], localFolios || [])
@@ -726,7 +726,7 @@ export function useReportsData(dateRange: DateRange) {
     housekeepingData,
     channelData,
     guestData,
-    isLoading: SERVER_API_ENABLED && Boolean(authToken) && !serverSnapshot && !error,
+    isLoading: SERVER_API_ENABLED && !serverSnapshot && !error,
     error,
   }
 }

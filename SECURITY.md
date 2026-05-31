@@ -1,31 +1,31 @@
-Thanks for helping make GitHub safe for everyone.
-
 # Security
 
-GitHub takes the security of our software products and services seriously, including all of the open source code repositories managed through our GitHub organizations, such as [GitHub](https://github.com/GitHub).
+## Sandbox Hotel PMS Security Policy
 
-Even though [open source repositories are outside of the scope of our bug bounty program](https://bounty.github.com/index.html#scope) and therefore not eligible for bounty rewards, we will ensure that your finding gets passed along to the appropriate maintainers for remediation. 
+Server mode uses signed `HttpOnly` cookie sessions. Frontend code must not persist session material in `localStorage`, Spark KV, IndexedDB, JavaScript-readable cookies, or bearer headers. API requests rely on same-origin cookie credentials.
+
+The login endpoint includes application-layer throttling by normalized account and client IP. Defaults are documented in `.env.example` and [docs/operational-runbook.md](docs/operational-runbook.md). Keep an upstream WAF or platform rate limit in place where available, but do not rely on upstream controls as the only brute-force protection.
+
+Do not commit live secrets, production database URLs, LINE channel credentials, session secrets, guest data exports, or password hashes tied to real users. Use generated password hashes for seeded users and keep live secrets in the hosting provider.
 
 ## Reporting Security Issues
 
-If you believe you have found a security vulnerability in any GitHub-owned repository, please report it to us through coordinated disclosure.
+Report suspected vulnerabilities privately to the repository owner or operational owner. Do not disclose guest data, staff credentials, payment references, or live integration tokens in public issues, pull requests, screenshots, or chat transcripts.
 
-**Please do not report security vulnerabilities through public GitHub issues, discussions, or pull requests.**
+Include:
 
-Instead, please send an email to opensource-security[@]github.com.
+- Affected environment and URL.
+- Reproduction steps.
+- Expected and actual behavior.
+- Impact assessment.
+- Relevant logs with credentials and guest data redacted.
 
-Please include as much of the information listed below as you can to help us better understand and resolve the issue:
+## High-Scrutiny Surfaces
 
-  * The type of issue (e.g., buffer overflow, SQL injection, or cross-site scripting)
-  * Full paths of source file(s) related to the manifestation of the issue
-  * The location of the affected source code (tag/branch/commit or direct URL)
-  * Any special configuration required to reproduce the issue
-  * Step-by-step instructions to reproduce the issue
-  * Proof-of-concept or exploit code (if possible)
-  * Impact of the issue, including how an attacker might exploit the issue
+Treat these areas as security-sensitive and require full validation before release:
 
-This information will help us triage your report more quickly.
-
-## Policy
-
-See [GitHub's Safe Harbor Policy](https://docs.github.com/en/site-policy/security-policies/github-bug-bounty-program-legal-safe-harbor#1-safe-harbor-terms)
+- Authentication, sessions, RBAC, user management, and seed users.
+- Guest data, documents, reservation history, folios, payments, and exports.
+- Production database migrations, import scripts, backup/restore, and rollback paths.
+- Deployment config, `render.yaml`, domain/origin allowlists, and live secrets.
+- LINE, OTA, payment, WAF, monitoring, and any other live integration.

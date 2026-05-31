@@ -307,7 +307,7 @@ export function ReservationsView() {
   const [unassignedReservations, setUnassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const { rooms } = useRoomSync()
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedTab, setSelectedTab] = useState<'all' | 'upcoming' | 'in-house' | 'past'>('upcoming')
@@ -341,7 +341,7 @@ export function ReservationsView() {
   }
 
   useEffect(() => {
-    if (!SERVER_API_ENABLED || !authToken) return
+    if (!SERVER_API_ENABLED) return
 
     let cancelled = false
     pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
@@ -362,7 +362,7 @@ export function ReservationsView() {
   }, [authToken, setCanonicalReservations, setReservationsRaw])
   
   const handleCreateReservation = async (reservation: NewReservationData) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       const payload = await pmsApi<{ ok: true; data: any; message?: string }>('/api/reservations', authToken, {
         method: 'POST',
         body: JSON.stringify({

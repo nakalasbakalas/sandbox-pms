@@ -5,8 +5,10 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadEnvDefaults } from '../scripts/env-utils.mjs'
+import { loginThrottle, resolveClientIp } from './login-throttle.mjs'
+import { createPrismaClient } from './prisma-client.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
-import { clearSessionCookie, createSessionToken, readBearerOrCookie, sessionCookie, verifySessionToken } from './security.mjs'
+import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import {
   assignRoom,
   authenticateUser,
@@ -47,7 +49,7 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = 'content-type,authorization'
+const CORS_ALLOW_HEADERS = 'content-type'
 
 let prisma
 
@@ -172,8 +174,7 @@ async function getPrisma() {
   }
 
   if (!prisma) {
-    const { PrismaClient } = await import('@prisma/client')
-    prisma = new PrismaClient()
+    prisma = createPrismaClient()
   }
   return prisma
 }
@@ -247,7 +248,7 @@ function publicUser(user) {
 }
 
 async function requireUser(request) {
-  const session = verifySessionToken(readBearerOrCookie(request))
+  const session = verifySessionToken(readSessionCookie(request))
   if (!session) {
     const error = new Error('Authentication is required.')
     error.statusCode = 401
@@ -279,8 +280,7 @@ async function databaseStatus(deep) {
 
   let prisma
   try {
-    const { PrismaClient } = await import('@prisma/client')
-    prisma = new PrismaClient()
+    prisma = createPrismaClient()
     await prisma.$queryRaw`SELECT 1`
     return { configured: true, ok: true }
   } catch (error) {
@@ -442,13 +442,39 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const body = await readJson(request)
+    const loginIdentity = {
+      email: body.email,
+      ip: resolveClientIp(request),
+    }
+    const throttleCheck = loginThrottle.check(loginIdentity)
+    if (!throttleCheck.allowed) {
+      sendJson(
+        response,
+        429,
+        { ok: false, error: 'Too many login attempts. Try again later.' },
+        { 'retry-after': String(throttleCheck.retryAfterSeconds) },
+      )
+      return true
+    }
+
     const user = await authenticateUser(db, body.email, body.password)
     if (!user) {
+      const failure = loginThrottle.recordFailure(loginIdentity)
+      if (!failure.allowed) {
+        sendJson(
+          response,
+          429,
+          { ok: false, error: 'Too many login attempts. Try again later.' },
+          { 'retry-after': String(failure.retryAfterSeconds) },
+        )
+        return true
+      }
       sendJson(response, 401, { ok: false, error: 'Invalid email or password.' })
       return true
     }
+    loginThrottle.recordSuccess(loginIdentity)
     const token = createSessionToken(user)
-    sendJson(response, 200, { ok: true, user: publicUser(user), token }, { 'set-cookie': sessionCookie(token) })
+    sendJson(response, 200, { ok: true, user: publicUser(user) }, { 'set-cookie': sessionCookie(token) })
     return true
   }
 

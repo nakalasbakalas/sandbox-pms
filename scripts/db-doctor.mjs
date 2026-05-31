@@ -2,6 +2,7 @@
 import { assertSafeE2EDatabase, redactDatabaseUrl, summarizeDatabaseUrl } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
 import { bin, run } from './run-command.mjs'
+import { createPrismaClient } from '../server/prisma-client.mjs'
 
 loadEnvDefaults()
 
@@ -34,14 +35,7 @@ async function testConnection(label, value) {
 
   let prisma
   try {
-    const { PrismaClient } = await import('@prisma/client')
-    prisma = new PrismaClient({
-      datasources: {
-        db: {
-          url: value,
-        },
-      },
-    })
+    prisma = createPrismaClient(value)
     await prisma.$queryRaw`SELECT 1`
     console.log(`\n${label} connectivity: ok`)
     checks.push({ label: `${label} connectivity`, ok: true })

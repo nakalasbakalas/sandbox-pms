@@ -29,7 +29,7 @@ export function useRoomSync(options: UseRoomSyncOptions = {}) {
   const serverSync = options.serverSync ?? true
   const [roomsRaw, setRoomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [lastUpdate, setLastUpdate] = useKV<RoomStatusUpdate | null>('last-room-update', null)
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
 
   const rooms = useMemo(() => (roomsRaw || []).map(deserializeRoom), [roomsRaw])
 
@@ -68,7 +68,7 @@ export function useRoomSync(options: UseRoomSyncOptions = {}) {
 
     setLastUpdate(timestampedUpdate)
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       void pmsApi(`/api/housekeeping/rooms/${update.roomId}/status`, authToken, {
         method: 'POST',
         body: JSON.stringify({
@@ -100,7 +100,7 @@ export function useRoomSync(options: UseRoomSyncOptions = {}) {
   }, [setRooms])
 
   useEffect(() => {
-    if (!serverSync || !SERVER_API_ENABLED || !authToken) return
+    if (!serverSync || !SERVER_API_ENABLED) return
 
     let cancelled = false
     pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)

@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sandbox-hotel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sandbox
+      POSTGRES_PASSWORD: sandbox
+      POSTGRES_DB: sandbox_hotel_dev
+    ports:
+      - "55432:5432"
+    volumes:
+      - sandbox_hotel_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandbox -d sandbox_hotel_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      target: build
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://sandbox:sandbox@postgres:5432/sandbox_hotel_dev?schema=public
+      SEED_MODE: dev
+      SESSION_SECRET: local-compose-session-secret-change-before-shared-use
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run db:migrate && npm run db:seed"]
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: runtime
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 10000
+      VITE_PMS_API_MODE: server
+      DATABASE_URL: postgresql://sandbox:sandbox@postgres:5432/sandbox_hotel_dev?schema=public
+      APP_URL: http://localhost:10000
+      ALLOWED_ORIGINS: http://localhost:10000
+      SESSION_SECRET: local-compose-session-secret-change-before-shared-use
+      SEED_MODE: dev
+    ports:
+      - "10000:10000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  sandbox_hotel_postgres_data:

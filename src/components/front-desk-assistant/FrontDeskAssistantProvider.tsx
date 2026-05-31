@@ -168,7 +168,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
   const [pendingAction, setPendingAction] = useState<AssistantAction | null>(null)
   const [context, setContext] = useState<OpenAssistantOptions>({})
   const [serverBoard, setServerBoard] = useState<ServerBoard | null>(null)
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [localReservations] = useKV<any[]>('reservations-data', [])
   const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
@@ -177,7 +177,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
   const { rooms, setRooms, updateRoomStatus } = useRoomSync({ serverSync: false })
 
   const refreshServerBoard = useCallback(async () => {
-    if (!SERVER_API_ENABLED || !authToken) return
+    if (!SERVER_API_ENABLED) return
     const payload = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
     setServerBoard(payload.data)
     setRooms(mapServerBoardRooms(payload.data))
@@ -300,7 +300,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         return
       }
 
-      if (SERVER_API_ENABLED && authToken) {
+      if (SERVER_API_ENABLED) {
         if (actionToRun.type === 'ASSIGN_BEST_ROOM' || actionToRun.type === 'ASSIGN_SPECIFIC_ROOM') {
           await pmsApi(`/api/reservations/${reservationId}/assign-room`, authToken, {
             method: 'POST',

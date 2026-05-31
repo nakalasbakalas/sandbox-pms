@@ -1,8 +1,15 @@
-/* global console, process */
+/* global console, fetch, process, setTimeout, window */
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { access, readdir, readFile } from 'node:fs/promises'
+import { createServer as createNetServer } from 'node:net'
+import { dirname, extname, join, resolve } from 'node:path'
+import { chromium } from 'playwright'
 import { assertSafeE2EDatabase } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
 import { prepareE2EDatabase } from './prepare-e2e-db.mjs'
+import { createLoginThrottle, resolveClientIp } from '../server/login-throttle.mjs'
 import { canPerformAction, canViewRoute } from '../server/rbac.mjs'
 import {
   calculateStayPricing,
@@ -16,6 +23,370 @@ import {
 loadEnvDefaults()
 
 const runDbWorkflow = process.argv.includes('--db') || process.env.npm_lifecycle_event === 'test:e2e:db'
+const repoRoot = process.cwd()
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+
+function sleep(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
+}
+
+function hashLocalPassword(password, salt) {
+  return createHash('sha256').update(`${salt}:${password}`).digest('hex')
+}
+
+function bangkokDateKey(offsetDays = 0) {
+  const base = new Date()
+  base.setUTCDate(base.getUTCDate() + offsetDays)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(base)
+
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+  return `${year}-${month}-${day}`
+}
+
+function browserSmokeSeed() {
+  const password = 'E2E-Secure-Password-123!'
+  const passwordSalt = 'e2e-local-login-salt'
+  const today = bangkokDateKey()
+  const yesterday = bangkokDateKey(-1)
+  const tomorrow = bangkokDateKey(1)
+  const createdAt = new Date().toISOString()
+  const user = {
+    id: 'e2e-admin-user',
+    email: 'e2e-admin@property.test',
+    username: 'e2e-admin@property.test',
+    role: 'admin',
+    displayName: 'E2E Admin',
+    createdAt,
+    passwordSalt,
+    passwordHash: hashLocalPassword(password, passwordSalt),
+  }
+  const property = {
+    name: 'SANDBOX HOTEL',
+    address: '626/1 Karom Rd., Pho Sadet',
+    city: 'Mueang, Nakhon Si Thammarat 80000',
+    country: 'Thailand',
+    phone: '+66 88-578-3478',
+    email: 'booking@sandboxhotel.com',
+    website: 'https://www.sandboxhotel.com',
+    taxId: '',
+    timeZone: 'Asia/Bangkok',
+    currency: 'THB',
+    defaultCheckIn: '14:00',
+    defaultCheckOut: '12:00',
+    brandColor: '#2563eb',
+    receiptFooter: '',
+    taxConfiguration: { enabled: false, pricesIncludeTax: false, taxes: [] },
+  }
+  const roomTypes = [
+    { id: 'double', code: 'DOUBLE', name: 'Superior Double', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFreeAge: 5, childFeeAge: 11, childFee: 300 },
+    { id: 'twin', code: 'TWIN', name: 'Standard Twin', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFreeAge: 5, childFeeAge: 11, childFee: 300 },
+  ]
+  const rooms = [
+    {
+      roomId: 'room-201',
+      number: '201',
+      floor: 2,
+      type: 'DOUBLE',
+      roomTypeId: 'double',
+      status: 'VACANT_CLEAN',
+      operationalStatus: 'AVAILABLE',
+      cleanStatus: 'INSPECTED',
+      housekeepingStatus: 'INSPECTED',
+      depositStatus: 'NONE',
+      isArrivalToday: false,
+      isDepartureToday: false,
+      isVIP: false,
+      hasIssue: false,
+      needsAttention: false,
+    },
+    {
+      roomId: 'room-202',
+      number: '202',
+      floor: 2,
+      type: 'DOUBLE',
+      roomTypeId: 'double',
+      status: 'OCCUPIED_CLEAN',
+      operationalStatus: 'AVAILABLE',
+      cleanStatus: 'CLEAN',
+      housekeepingStatus: 'CLEAN',
+      depositStatus: 'PAID',
+      isArrivalToday: false,
+      isDepartureToday: true,
+      isVIP: false,
+      hasIssue: false,
+      needsAttention: false,
+      reservationId: 'res-departure',
+      currentReservationId: 'res-departure',
+      guestName: 'E2E Departing Guest',
+      checkIn: yesterday,
+      checkOut: today,
+      guestCount: 2,
+      balanceDue: 0,
+      reservation: {
+        id: 'SBX-E2E-DEP',
+        guestName: 'E2E Departing Guest',
+        checkIn: yesterday,
+        checkOut: today,
+        status: 'CHECKED_IN',
+        totalAmount: 2000,
+        balanceDue: 0,
+        depositStatus: 'PAID',
+      },
+    },
+  ]
+  const seed = {
+    'system:users': [user],
+    'auth:current-user': null,
+    'onboarding:completed': true,
+    'onboarding-property': property,
+    'onboarding-room-types': roomTypes,
+    'onboarding-rooms': [
+      { id: 'room-201', number: '201', roomTypeId: 'double', floor: 2, status: 'available', notes: '' },
+      { id: 'room-202', number: '202', roomTypeId: 'double', floor: 2, status: 'available', notes: '' },
+    ],
+    'onboarding-rates': [
+      { roomTypeId: 'double', baseRate: 2000, taxInclusive: false },
+      { roomTypeId: 'twin', baseRate: 2000, taxInclusive: false },
+    ],
+    'room-types-config': roomTypes.map((roomType) => ({ id: roomType.id, code: roomType.code, name: roomType.name, baseRate: roomType.baseRate, baseOccupancy: roomType.baseOccupancy, maxOccupancy: roomType.maxOccupancy })),
+    'pms-rooms': rooms,
+    'unassigned-reservations': [
+      {
+        id: 'res-arrival',
+        guestName: 'E2E Arrival Guest',
+        roomType: 'DOUBLE',
+        checkIn: today,
+        checkOut: tomorrow,
+        guestCount: 2,
+        nights: 1,
+        source: 'Direct',
+        ratePerNight: 2000,
+        totalAmount: 2000,
+        depositAmount: 2000,
+        balanceDue: 0,
+        paidAmount: 2000,
+      },
+    ],
+    reservations: [],
+    'reservations-data': [],
+    guests: [],
+    'guests-data': [],
+    folios: [],
+    'cashier-folios': [],
+  }
+
+  return {
+    email: user.email,
+    password,
+    seed,
+  }
+}
+
+async function availablePort() {
+  return new Promise((resolvePort, reject) => {
+    const server = createNetServer()
+    server.on('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      server.close(() => resolvePort(address.port))
+    })
+  })
+}
+
+function startVite(port) {
+  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
+  const child = process.platform === 'win32'
+    ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [npm, ...args].join(' ')], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        SPARK_VITE_PORT: String(port),
+        VITE_PMS_API_MODE: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    : spawn(npm, args, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      SPARK_VITE_PORT: String(port),
+      VITE_PMS_API_MODE: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let output = ''
+  const collect = (chunk) => {
+    output += chunk.toString()
+    if (output.length > 12_000) output = output.slice(-12_000)
+  }
+  child.stdout.on('data', collect)
+  child.stderr.on('data', collect)
+  return { child, output: () => output }
+}
+
+function stopProcessTree(child) {
+  if (!child?.pid) return Promise.resolve()
+  if (process.platform !== 'win32') {
+    child.kill('SIGTERM')
+    return Promise.resolve()
+  }
+
+  return new Promise((resolveStop) => {
+    const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], {
+      stdio: 'ignore',
+    })
+    killer.on('exit', () => resolveStop())
+    killer.on('error', () => resolveStop())
+  })
+}
+
+async function waitForHttp(url, server) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (server.child.exitCode !== null) {
+      throw new Error(`Vite dev server exited early.\n${server.output()}`)
+    }
+    try {
+      const response = await fetch(url)
+      if (response.ok) return
+    } catch {
+      // Keep polling until Vite is ready.
+    }
+    await sleep(250)
+  }
+  throw new Error(`Vite dev server did not become ready.\n${server.output()}`)
+}
+
+async function waitVisible(locator, label) {
+  await locator.waitFor({ state: 'visible', timeout: 15_000 }).catch((error) => {
+    throw new Error(`${label} was not visible: ${error.message}`)
+  })
+}
+
+async function runBrowserSmokeTests() {
+  const port = await availablePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const server = startVite(port)
+
+  try {
+    await waitForHttp(baseUrl, server)
+    const browser = await chromium.launch({ headless: true })
+    const errors = []
+
+    try {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+      const { email, password, seed } = browserSmokeSeed()
+      await context.addInitScript((storageSeed) => {
+        if (window.localStorage.getItem('__e2e_seeded') === 'true') return
+        window.localStorage.clear()
+        for (const [key, value] of Object.entries(storageSeed)) {
+          window.localStorage.setItem(key, JSON.stringify(value))
+        }
+        window.localStorage.setItem('__e2e_seeded', 'true')
+      }, seed)
+
+      const page = await context.newPage()
+      page.setDefaultTimeout(60_000)
+      page.setDefaultNavigationTimeout(60_000)
+      page.on('pageerror', (error) => errors.push(error.message))
+      page.on('console', (message) => {
+        if (message.type() === 'error') errors.push(message.text())
+      })
+
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /hotel pms/i }), 'login screen')
+      await page.getByLabel(/email address/i).fill(email)
+      await page.getByLabel(/password/i).fill(password)
+      await page.getByRole('button', { name: /^sign in$/i }).click()
+      await waitVisible(page.getByRole('heading', { name: /^today$/i }), 'Today view after login')
+
+      const legacyToken = await page.evaluate(() => window.localStorage.getItem(['auth', 'pms-token'].join(':')))
+      assert.equal(legacyToken, null, 'browser login does not write a JavaScript-readable session token')
+
+      await page.getByRole('button', { name: /open front desk board/i }).click()
+      await waitVisible(page.getByRole('heading', { name: /front desk board/i }), 'Board navigation')
+
+      await page.goto(`${baseUrl}/front-desk`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByText('E2E Departing Guest').first(), 'seeded departure')
+      await page.getByRole('button', { name: /^express check-out$/i }).first().click()
+      await waitVisible(page.getByRole('heading', { name: /express check-out: e2e departing guest/i }), 'checkout dialog')
+      await page.getByRole('button', { name: /confirm express check-out/i }).click()
+      await page.waitForFunction(() => {
+        const rooms = JSON.parse(window.localStorage.getItem('pms-rooms') || '[]')
+        return rooms.some((room) => room.number === '202' && room.status === 'VACANT_DIRTY' && !room.guestName)
+      }, { timeout: 10_000 })
+
+      await waitVisible(page.getByText('E2E Arrival Guest').first(), 'seeded arrival')
+      await page.getByRole('button', { name: /^assign room$/i }).first().click()
+      await waitVisible(page.getByRole('heading', { name: /check in: e2e arrival guest/i }), 'check-in dialog')
+      await page.getByRole('button', { name: /^assign best room$/i }).first().click()
+      await page.getByLabel(/nationality/i).fill('Thai')
+      await page.getByLabel(/id\/passport/i).fill('E2E-ID-001')
+      await page.locator('[role="dialog"]').getByRole('button', { name: /complete|confirm/i }).last().click()
+      await page.waitForFunction(() => {
+        const rooms = JSON.parse(window.localStorage.getItem('pms-rooms') || '[]')
+        return rooms.some((room) => room.number === '201' && room.status === 'OCCUPIED_CLEAN' && room.guestName === 'E2E Arrival Guest')
+      }, { timeout: 10_000 })
+
+      assert.deepEqual(errors, [], `browser console/page errors: ${errors.join('\n')}`)
+      await context.close()
+    } finally {
+      await browser.close()
+    }
+  } finally {
+    await stopProcessTree(server.child)
+  }
+
+  console.log('Playwright browser smoke passed.')
+}
+
+async function markdownFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    const fullPath = join(directory, entry.name)
+    if (entry.isDirectory()) {
+      if (['.git', 'node_modules', 'dist'].includes(entry.name)) continue
+      files.push(...await markdownFiles(fullPath))
+    } else if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
+      files.push(fullPath)
+    }
+  }
+  return files
+}
+
+async function runDocumentationLinkSmoke() {
+  const failures = []
+  const linkPattern = /!?\[[^\]]*\]\(([^)]+)\)/g
+
+  for (const file of await markdownFiles(repoRoot)) {
+    const source = await readFile(file, 'utf8')
+    for (const match of source.matchAll(linkPattern)) {
+      const rawTarget = match[1].trim()
+      if (
+        !rawTarget ||
+        rawTarget.startsWith('#') ||
+        /^[a-z][a-z0-9+.-]*:/i.test(rawTarget)
+      ) {
+        continue
+      }
+      const targetWithoutAnchor = rawTarget.split('#')[0]
+      if (!targetWithoutAnchor) continue
+      const decodedTarget = decodeURIComponent(targetWithoutAnchor)
+      const resolvedTarget = resolve(dirname(file), decodedTarget)
+      await access(resolvedTarget).catch(() => failures.push(`${file}: ${rawTarget}`))
+    }
+  }
+
+  assert.deepEqual(failures, [], `broken local documentation links:\n${failures.join('\n')}`)
+  console.log('Documentation link smoke passed.')
+}
 
 const admin = { id: 'e2e-admin', role: 'ADMIN', email: 'admin@property.test' }
 const manager = { id: 'e2e-manager', role: 'MANAGER', email: 'manager@property.test' }
@@ -78,8 +449,36 @@ assert.throws(
   'E2E DB guard requires explicit opt-in',
 )
 
+const loginThrottle = createLoginThrottle({
+  windowMs: 60_000,
+  lockoutMs: 30_000,
+  accountMaxAttempts: 2,
+  ipMaxAttempts: 3,
+})
+assert.equal(loginThrottle.check({ email: 'ADMIN@PROPERTY.TEST', ip: '203.0.113.10' }, 1_000).allowed, true, 'first login attempt is allowed')
+assert.equal(loginThrottle.recordFailure({ email: 'admin@property.test', ip: '203.0.113.10' }, 1_000).allowed, true, 'first bad password is recorded without lockout')
+const accountLockout = loginThrottle.recordFailure({ email: 'ADMIN@PROPERTY.TEST', ip: '203.0.113.10' }, 2_000)
+assert.equal(accountLockout.allowed, false, 'repeated bad password locks account scope')
+assert.equal(accountLockout.scope, 'account', 'account lockout is reported')
+assert.equal(loginThrottle.check({ email: 'admin@property.test', ip: '203.0.113.10' }, 3_000).allowed, false, 'locked account blocks subsequent attempts')
+assert.equal(loginThrottle.check({ email: 'admin@property.test', ip: '203.0.113.10' }, 33_000).allowed, true, 'account lockout expires after retry window')
+loginThrottle.reset()
+loginThrottle.recordFailure({ email: 'one@property.test', ip: '203.0.113.20' }, 1_000)
+loginThrottle.recordFailure({ email: 'two@property.test', ip: '203.0.113.20' }, 2_000)
+const ipLockout = loginThrottle.recordFailure({ email: 'three@property.test', ip: '203.0.113.20' }, 3_000)
+assert.equal(ipLockout.allowed, false, 'bad attempts across accounts lock IP scope')
+assert.equal(ipLockout.scope, 'ip', 'IP lockout is reported')
+assert.equal(
+  resolveClientIp({ headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }, socket: { remoteAddress: '127.0.0.1' } }),
+  '198.51.100.7',
+  'login throttle uses first forwarded client IP when present',
+)
+
+await runDocumentationLinkSmoke()
+await runBrowserSmokeTests()
+
 if (!runDbWorkflow) {
-  console.log('E2E contract checks passed.')
+  console.log('E2E contract and browser smoke checks passed.')
   console.log('Database-mutating workflow e2e not requested. Run npm run test:e2e:db with ALLOW_DB_E2E=true and E2E_DATABASE_URL set to a disposable/staging database.')
   process.exit(0)
 }
@@ -94,7 +493,7 @@ try {
   process.exit(1)
 }
 
-const { PrismaClient } = await import('@prisma/client')
+const { createPrismaClient } = await import('../server/prisma-client.mjs')
 const {
   assignRoom,
   cancelReservation,
@@ -103,7 +502,7 @@ const {
   createReservation,
 } = await import('../server/pms-service.mjs')
 
-const prisma = new PrismaClient()
+const prisma = createPrismaClient()
 
 try {
   const twinRoom = await prisma.room.findFirst({

@@ -38,10 +38,12 @@ The committed Blueprint defines the intended production resources:
 - managed PostgreSQL database: `sandbox-hotel-pms-db-v43m`
 - health check: `/healthz`
 - production auth mode: `VITE_PMS_API_MODE=server`
-- production app URL: `APP_URL=https://sandbox-hotel-pms.onrender.com`
-- browser API allowlist: `ALLOWED_ORIGINS=https://sandbox-hotel-pms.onrender.com`
+- production app URL: `APP_URL=https://book.sandboxhotel.com`
+- browser API allowlist: `ALLOWED_ORIGINS=https://book.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com,https://sandbox-hotel-pms.onrender.com`
 - production seed mode: `SEED_MODE=prod-safe`
 - generated session secret: `SESSION_SECRET`
+
+Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). At that time, the public custom domain `https://book.sandboxhotel.com` reached `sandbox-hotel-pms-v43m`, not the Blueprint-named `sandbox-hotel-pms` service. Both services were live on the same commit and current Render metadata includes `buildPlan=starter` for `sandbox-hotel-pms`; `sandbox-hotel-pms-v43m` was confirmed to run the predeploy migration and seed path in the gathered logs. Before launch sign-off, choose the single Render service owner for the custom domain and rollback path.
 
 Apply a new Blueprint only from a repository branch that contains the current `render.yaml`. The Dashboard path is:
 
@@ -51,7 +53,7 @@ https://dashboard.render.com/blueprint/new?repo=https://github.com/nakalasbakala
 
 Fill all `sync: false` values in Render's secret manager before first deploy. Do not paste live secrets into tracked files.
 
-The committed Blueprint uses the `starter` instance type so Render can run `preDeployCommand`. If the active service is kept on the free instance type, Render skips pre-deploy commands; apply migrations and `SEED_MODE=prod-safe` seed through a reviewed one-time Render build command or move the service to a supported paid instance type before relying on pre-deploy.
+The committed Blueprint uses the `starter` instance type so Render can run `preDeployCommand`. If Render skips pre-deploy commands, apply migrations and `SEED_MODE=prod-safe` seed through a reviewed one-time Render build command or move the service to a supported instance type before relying on pre-deploy.
 
 If a custom domain replaces the default Render host, update both `APP_URL` and `ALLOWED_ORIGINS` before deploying. The server blocks browser-origin `/api/*` requests that are not same-origin or listed in `ALLOWED_ORIGINS`; non-browser webhooks without an `Origin` header still work.
 

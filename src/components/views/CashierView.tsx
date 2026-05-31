@@ -219,7 +219,7 @@ function deserializeFolio(folio: Folio): Folio {
 export function CashierView() {
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
   const [canonicalFoliosRaw, setCanonicalFolios] = useKV<Folio[]>('folios', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const { rooms } = useRoomSync()
   const [serverFolios, setServerFolios] = useState<Folio[]>([])
@@ -243,7 +243,7 @@ export function CashierView() {
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
 
   const refreshServerFolios = useCallback(async () => {
-    if (!SERVER_API_ENABLED || !authToken) return []
+    if (!SERVER_API_ENABLED) return []
     setIsLoadingFolios(true)
     setFolioError(null)
     try {
@@ -267,7 +267,7 @@ export function CashierView() {
   }, [refreshServerFolios])
   
   const folios = useMemo(() => {
-    if (SERVER_API_ENABLED && authToken) return serverFolios
+    if (SERVER_API_ENABLED) return serverFolios
 
     const merged = new Map<string, Folio>()
     ;(canonicalFoliosRaw || []).map(deserializeFolio).forEach((folio) => {
@@ -480,7 +480,7 @@ export function CashierView() {
     setIsSubmittingPayment(true)
     setPaymentError(null)
     try {
-      if (SERVER_API_ENABLED && authToken) {
+      if (SERVER_API_ENABLED) {
         await pmsApi('/api/payments', authToken, {
           method: 'POST',
           body: JSON.stringify({
@@ -548,7 +548,7 @@ export function CashierView() {
     setIsSubmittingCharge(true)
     setChargeError(null)
     try {
-      if (SERVER_API_ENABLED && authToken) {
+      if (SERVER_API_ENABLED) {
         await pmsApi('/api/charges', authToken, {
           method: 'POST',
           body: JSON.stringify({

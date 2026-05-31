@@ -5,7 +5,7 @@
 - `DATABASE_URL`: PostgreSQL connection string for the production database.
 - `SESSION_SECRET`: long random secret for signed PMS sessions.
 - `VITE_PMS_API_MODE=server`: enables backend login/session mode in the frontend.
-- `APP_URL`: public production URL, currently `https://sandbox-hotel-pms.onrender.com`.
+- `APP_URL`: public production URL, currently `https://book.sandboxhotel.com`.
 - `ALLOWED_ORIGINS`: comma-separated browser origins allowed to call `/api/*`; must include the `APP_URL` origin.
 - `SEED_MODE=prod-safe`: keeps production seed limited to safe configuration.
 - Optional real user seed for first Render deploy:
@@ -42,11 +42,13 @@ For the live account boundary and provider-specific setup notes, see [docs/produ
 
 The intended Render web service is `sandbox-hotel-pms` at `https://sandbox-hotel-pms.onrender.com`. It should be connected to `https://github.com/nakalasbakalas/sandbox-pms`, branch `main`, and reuse the existing managed PostgreSQL database `sandbox-hotel-pms-db-v43m`. Do not use the legacy Render web service named `sandbox-hotel-pms-db` as the database target; it is a Python web service, not the PostgreSQL datastore.
 
+Current live evidence is tracked in [docs/live-environment-proof.md](docs/live-environment-proof.md). On 2026-05-31, the public custom domain `https://book.sandboxhotel.com` resolved to `sandbox-hotel-pms-v43m.onrender.com`; that service was live on the same commit as `sandbox-hotel-pms` and had completed the starter-plan predeploy migration and seed path. The committed Blueprint now uses `https://book.sandboxhotel.com` as `APP_URL` and includes the verified Render hosts in `ALLOWED_ORIGINS`.
+
 Apply a new Blueprint only from `https://github.com/nakalasbakalas/sandbox-pms` if infrastructure-as-code management is restored.
 
 Render internal database URLs only resolve from inside Render's private network. Use Render's managed database link or the external database URL for local migration checks. Never commit either URL.
 
-The committed Blueprint keeps the deploy path in server mode and declares `npm run db:migrate && npm run db:seed` before each release. Render only runs `preDeployCommand` on supported paid instance types. If the active web service remains on the free instance type, run migrations and `prod-safe` seed through a reviewed one-time Render build command or upgrade to a paid instance type before relying on pre-deploy. Render sets `SEED_MODE=prod-safe`, so production seed is limited to safe configuration data and optional explicitly configured real users.
+The committed Blueprint keeps the deploy path in server mode and declares `npm run db:migrate && npm run db:seed` before each release. Render only runs `preDeployCommand` on supported instance types. If the platform skips `preDeployCommand`, run migrations and `prod-safe` seed through a reviewed one-time Render build command or move the service to a supported plan before relying on pre-deploy. Render sets `SEED_MODE=prod-safe`, so production seed is limited to safe configuration data and optional explicitly configured real users.
 
 ## Initial Database Setup
 
@@ -82,6 +84,12 @@ Health checks:
 ```bash
 curl https://your-domain.example/healthz
 curl https://your-domain.example/healthz?deep=1
+```
+
+Automated live check:
+
+```bash
+npm run live:check
 ```
 
 ## Launch Gate

@@ -1,5 +1,4 @@
 /* global console, process */
-import { PrismaClient } from '@prisma/client'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
@@ -7,6 +6,7 @@ import {
   redactDatabaseUrl,
 } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
+import { createPrismaClient } from '../server/prisma-client.mjs'
 
 loadEnvDefaults()
 
@@ -112,7 +112,7 @@ async function main() {
   const payload = await loadPayload(file)
   console.log(`Importing ${payload.rooms.length} room records into ${redactDatabaseUrl(process.env.DATABASE_URL)}.`)
 
-  const prisma = new PrismaClient()
+  const prisma = createPrismaClient()
   try {
     const property = await prisma.property.findUnique({ where: { code: payload.propertyCode } })
     if (!property) fail(`Property ${payload.propertyCode} does not exist. Run prod-safe seed first.`)

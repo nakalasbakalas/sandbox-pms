@@ -1,5 +1,4 @@
 /* global console, process */
-import { PrismaClient } from '@prisma/client'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
@@ -7,6 +6,7 @@ import {
   redactDatabaseUrl,
 } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
+import { createPrismaClient } from '../server/prisma-client.mjs'
 
 loadEnvDefaults()
 
@@ -317,7 +317,7 @@ async function main() {
   console.log(`Importing real property data from ${resolve(file)} into ${redactDatabaseUrl(process.env.DATABASE_URL)}.`)
   console.log('Production cutover is intentionally blocked by this staging/local importer.')
 
-  const prisma = new PrismaClient()
+  const prisma = createPrismaClient()
   try {
     await assertSafeTarget(prisma, payload)
     const result = await importRealData(prisma, payload)

@@ -320,7 +320,7 @@ export function Board() {
   const [, setCanonicalReservationRecords] = useKV<ReservationListRecord[]>('reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
   
   const unassignedReservations = useMemo(() => 
@@ -383,7 +383,7 @@ export function Board() {
   }, [reservationDetailRoom, rooms])
 
   const refreshServerBoard = useCallback(async () => {
-    if (!SERVER_API_ENABLED || !authToken) return
+    if (!SERVER_API_ENABLED) return
     const board = await pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
     setRooms(mapServerBoardRooms(board.data))
   }, [authToken, setRooms])
@@ -774,7 +774,7 @@ export function Board() {
     const room = rooms.find((candidate) => candidate.roomId === roomId)
     if (!room) return
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${roomId}/status`, authToken, {
           method: 'POST',
@@ -794,7 +794,7 @@ export function Board() {
   const confirmBoardCheckIn = async (data: CheckInData) => {
     if (!selectedArrival) return
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         if (selectedArrival.assignedRoomId !== data.roomId) {
           await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
@@ -870,7 +870,7 @@ export function Board() {
   const confirmBoardCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
@@ -974,7 +974,7 @@ export function Board() {
   }
 
   const handleMarkClean = async (room: BoardRoomCard) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${room.roomId}/status`, authToken, {
           method: 'POST',
@@ -1016,7 +1016,7 @@ export function Board() {
       return
     }
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${room.roomId}/status`, authToken, {
           method: 'POST',
@@ -1053,7 +1053,7 @@ export function Board() {
   }
 
   const handleMarkDirty = async (room: BoardRoomCard) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${room.roomId}/status`, authToken, {
           method: 'POST',
@@ -1092,7 +1092,7 @@ export function Board() {
       return
     }
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       void pmsApi(`/api/rooms/${room.roomId}/operational-status`, authToken, {
         method: 'POST',
         body: JSON.stringify({ operationalStatus: 'BLOCKED', notes: 'Front desk board: room blocked' }),
@@ -1125,7 +1125,7 @@ export function Board() {
   }
 
   const handleUnblockRoom = (room: BoardRoomCard) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       void pmsApi(`/api/rooms/${room.roomId}/operational-status`, authToken, {
         method: 'POST',
         body: JSON.stringify({ operationalStatus: 'AVAILABLE', notes: 'Front desk board: room made available' }),
@@ -1338,7 +1338,7 @@ export function Board() {
       return
     }
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/rooms/${room.roomId}/operational-status`, authToken, {
           method: 'POST',
@@ -1372,7 +1372,7 @@ export function Board() {
   }
 
   const handleRequestHousekeeping = async (room: BoardRoomCard) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${room.roomId}/status`, authToken, {
           method: 'POST',
@@ -2277,7 +2277,7 @@ export function Board() {
         }}
         prefilledData={prefilledReservation}
         onSubmit={async (reservation) => {
-          if (SERVER_API_ENABLED && authToken) {
+          if (SERVER_API_ENABLED) {
             const response = await pmsApi<{ ok: true; data?: any; message?: string }>('/api/reservations', authToken, {
               method: 'POST',
               body: JSON.stringify({

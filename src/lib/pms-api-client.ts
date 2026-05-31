@@ -3,12 +3,12 @@ import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 
 export const SERVER_API_ENABLED = SERVER_AUTH_ENABLED
 
-export async function pmsApi<T>(path: string, token: string | null | undefined, options: RequestInit = {}): Promise<T> {
+export async function pmsApi<T>(path: string, _legacyToken: string | null | undefined, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
+    credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
   })

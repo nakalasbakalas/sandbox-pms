@@ -396,14 +396,14 @@ export function FrontDeskView() {
   const [, setCanonicalReservationRecords] = useKV<ReservationRecord[]>('reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const { user } = useAuth()
   const { navigate } = useNavigation()
   const { openAssistant } = useFrontDeskAssistant()
   const { rooms, setRooms, getRoomById, updateRoomStatus } = useRoomSync()
 
   const refreshServerBoard = async () => {
-    if (!SERVER_API_ENABLED || !authToken) return
+    if (!SERVER_API_ENABLED) return
     const board = await pmsApi<{ ok: true; data: ServerBoard }>('/api/front-desk/board', authToken)
     setServerBoard(board.data)
     setRooms(mapServerBoardRooms(board.data))
@@ -411,7 +411,7 @@ export function FrontDeskView() {
 
   useEffect(() => {
     void refreshServerBoard().catch(() => undefined)
-  }, [authToken])
+  }, [])
 
   const todayKey = getBangkokDateKey(new Date())
 
@@ -539,7 +539,7 @@ export function FrontDeskView() {
   }, [arrivals, departures, openNewReservation, rooms])
 
   const markRoomReady = async (roomId: string) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/housekeeping/rooms/${roomId}/status`, authToken, {
           method: 'POST',
@@ -565,7 +565,7 @@ export function FrontDeskView() {
       return
     }
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         if (selectedArrival.assignedRoomId !== data.roomId) {
           await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
@@ -654,7 +654,7 @@ export function FrontDeskView() {
   const confirmCheckOut = async (data: CheckOutData) => {
     if (!selectedDeparture) return
 
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
@@ -726,7 +726,7 @@ export function FrontDeskView() {
   }
 
   const confirmNewReservation = async (reservation: NewReservationData) => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       try {
         const response = await pmsApi<{ ok: true; message?: string; data?: any }>('/api/reservations', authToken, {
           method: 'POST',

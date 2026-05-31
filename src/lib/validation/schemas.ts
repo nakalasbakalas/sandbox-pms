@@ -11,7 +11,7 @@ export const createGuestSchema = z.object({
   dateOfBirth: z.date().optional(),
   vipStatus: z.boolean().optional().default(false),
   blacklisted: z.boolean().optional().default(false),
-  preferences: z.record(z.unknown()).optional(),
+  preferences: z.record(z.string(), z.unknown()).optional(),
   notes: z.string().optional(),
 })
 

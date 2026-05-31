@@ -214,7 +214,7 @@ export function GuestsView() {
   const { navigate } = useNavigation()
   const [guestsRaw, setGuestsRaw] = useKV<Guest[]>('guests-data', [])
   const [canonicalGuestsRaw, setCanonicalGuests] = useKV<Guest[]>('guests', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [serverGuests, setServerGuests] = useState<Guest[]>([])
   const [isLoadingGuests, setIsLoadingGuests] = useState(false)
   const [guestError, setGuestError] = useState<string | null>(null)
@@ -227,7 +227,7 @@ export function GuestsView() {
   const [isSavingGuest, setIsSavingGuest] = useState(false)
 
   const refreshServerGuests = useCallback(async () => {
-    if (!SERVER_API_ENABLED || !authToken) return []
+    if (!SERVER_API_ENABLED) return []
     setIsLoadingGuests(true)
     setGuestError(null)
     try {
@@ -247,13 +247,13 @@ export function GuestsView() {
   }, [authToken, setCanonicalGuests, setGuestsRaw])
   
   useEffect(() => {
-    if (SERVER_API_ENABLED && authToken) {
+    if (SERVER_API_ENABLED) {
       void refreshServerGuests()
     }
   }, [authToken, refreshServerGuests])
 
   const guests = useMemo(() => {
-    if (SERVER_API_ENABLED && authToken) return serverGuests
+    if (SERVER_API_ENABLED) return serverGuests
 
     const merged = new Map<string, Guest>()
     ;(canonicalGuestsRaw || []).map(normalizeLocalGuest).forEach((guest) => {
@@ -282,7 +282,7 @@ export function GuestsView() {
     setIsSavingGuest(true)
     setNewGuestError(null)
     try {
-      if (SERVER_API_ENABLED && authToken) {
+      if (SERVER_API_ENABLED) {
         const payload = await pmsApi<{ ok: true; data: any }>('/api/guests', authToken, {
           method: 'POST',
           body: JSON.stringify({

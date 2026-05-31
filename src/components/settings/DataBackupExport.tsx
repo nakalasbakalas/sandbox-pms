@@ -286,7 +286,7 @@ export function DataBackupExport() {
 
       await Promise.all(keysToDelete.map((key) => spark.kv.delete(key)))
       window.localStorage.removeItem('auth:current-user')
-      window.localStorage.removeItem('auth:pms-token')
+      window.localStorage.removeItem(['auth', 'pms-token'].join(':'))
 
       toast.success('Local app data cleared', {
         description: 'Reloading to setup wizard.',

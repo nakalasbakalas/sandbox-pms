@@ -21,7 +21,7 @@
 - [ ] `npm run db:doctor` reports the intended target database and no failing configured checks.
 - [ ] `npm run db:migrate` has been applied to the target database.
 - [ ] The Render service is connected to `nakalasbakalas/sandbox-pms`.
-- [ ] The Render Blueprint preDeploy command runs `npm run db:migrate && npm run db:seed`, or a reviewed one-time Render build command has applied migrations and `prod-safe` seed while the service remains on a free instance type.
+- [ ] The Render Blueprint preDeploy command runs `npm run db:migrate && npm run db:seed`, or a reviewed one-time Render build command has applied migrations and `prod-safe` seed if the platform skips predeploy.
 - [ ] `npm run db:seed` has run in `prod-safe` mode and did not create fake guests, reservations, payments, invoices, operational room inventory, or demo staff users.
 - [ ] Initial admin/staff login users exist only if explicitly seeded through approved secure credentials.
 - [ ] Production room inventory has been configured through an approved operational/onboarding flow, not fake seed data.
@@ -62,8 +62,13 @@
 ## Operations
 
 - [ ] HTTPS/domain is configured.
+- [ ] The public domain points to the intended Render service and matches `APP_URL` and `ALLOWED_ORIGINS`.
 - [ ] Backup and restore plan is documented for the database.
+- [ ] Latest database backup/recovery point is verified in Render.
+- [ ] A restore test has passed against a disposable database.
 - [ ] Rollback plan exists for app and database migrations.
+- [ ] Rollback owner and deputy are named and have Render dashboard access.
+- [ ] Upstream WAF/rate-limit rules are configured and recorded with rule IDs and thresholds.
 - [ ] Monitoring/health checks are configured and the `/healthz` endpoint returns 200.
 - [ ] `npm run typecheck` passes.
 - [ ] `npm run lint` passes.

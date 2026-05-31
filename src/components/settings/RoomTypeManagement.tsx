@@ -63,7 +63,7 @@ function mapServerRoom(record: any): RoomSetup {
 export function RoomTypeManagement() {
   const [roomTypes, setRoomTypes] = useKV<RoomTypeSetup[]>('onboarding-room-types', [])
   const [rooms, setRooms] = useKV<RoomSetup[]>('onboarding-rooms', [])
-  const [authToken] = useKV<string | null>('auth:pms-token', null)
+  const authToken = null
   const [serverRoomTypes, setServerRoomTypes] = useState<RoomTypeSetup[]>([])
   const [serverRooms, setServerRooms] = useState<RoomSetup[]>([])
   const [isLoadingServerSetup, setIsLoadingServerSetup] = useState(false)
@@ -115,7 +115,7 @@ export function RoomTypeManagement() {
 
   useEffect(() => {
     void loadServerRoomSetup()
-  }, [authToken])
+  }, [])
 
   const resetTypeForm = () => {
     setTypeFormData({
