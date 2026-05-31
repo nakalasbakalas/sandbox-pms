@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { 
   ArrowsClockwise, 
   Plus,
@@ -22,12 +24,10 @@ import {
   Link,
   LinkBreak,
   ArrowClockwise,
-  Calendar,
   CurrencyCircleDollar,
   Bed,
   Users,
   TrendUp,
-  Eye,
   ArrowUp
 } from '@phosphor-icons/react'
 import { toast } from 'sonner'
@@ -37,6 +37,7 @@ import { InventorySyncPanel } from './InventorySyncPanel'
 import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
 import { RateParityPanel } from './RateParityPanel'
 import { RatePushPanel } from '../rates/RatePushPanel'
+import type { BoardRoomCard } from '@/types/board'
 
 interface Channel {
   id: string
@@ -82,6 +83,58 @@ interface SyncLog {
   details?: string
 }
 
+interface ChannelRoomMapping {
+  id: string
+  channelId: string
+  externalRoomTypeId: string
+  externalRoomTypeName: string
+  externalRatePlanId?: string
+  roomTypeId: string
+  roomIds: string[]
+  active: boolean
+  updatedAt: string
+}
+
+interface RoomTypeOption {
+  id: string
+  code?: string
+  name: string
+  baseRate?: number
+}
+
+interface RoomOption {
+  id: string
+  number: string
+  roomTypeId: string
+  floor?: number
+  unavailable: boolean
+}
+
+interface MappingFormState {
+  externalRoomTypeId: string
+  externalRoomTypeName: string
+  externalRatePlanId: string
+  roomTypeId: string
+  roomIds: string[]
+}
+
+const EMPTY_MAPPING_FORM: MappingFormState = {
+  externalRoomTypeId: '',
+  externalRoomTypeName: '',
+  externalRatePlanId: '',
+  roomTypeId: '',
+  roomIds: []
+}
+
+function externalIdFromName(value: string) {
+  const normalized = value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized || `OTA_ROOM_${Date.now()}`
+}
+
+function sortByRoomNumber(a: RoomOption, b: RoomOption) {
+  return a.number.localeCompare(b.number, undefined, { numeric: true })
+}
+
 export function ChannelsView() {
   const [channels, setChannels] = useKV<Channel[]>('channels', [
     {
@@ -123,19 +176,88 @@ export function ChannelsView() {
   ])
   const [reservations, setReservations] = useKV<ChannelReservation[]>('channel-reservations', [])
   const [syncLogs, setSyncLogs] = useKV<SyncLog[]>('channel-sync-logs', [])
-  const [roomTypes] = useKV<Array<{ id: string; name: string; baseRate: number }>>('room-types-config', [])
+  const [roomTypes] = useKV<RoomTypeOption[]>('room-types-config', [])
+  const [setupRoomTypes] = useKV<RoomTypeOption[]>('onboarding-room-types', [])
+  const [boardRooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
+  const [setupRooms] = useKV<Array<{ id: string; number: string; roomTypeId: string; floor?: number; status?: string }>>('onboarding-rooms', [])
+  const [channelMappings, setChannelMappings] = useKV<ChannelRoomMapping[]>('channel-room-mappings', [])
 
+  const [activeTab, setActiveTab] = useState('channels')
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null)
+  const [selectedMappingChannelId, setSelectedMappingChannelId] = useState('booking')
+  const [editingMappingId, setEditingMappingId] = useState<string | null>(null)
+  const [mappingForm, setMappingForm] = useState<MappingFormState>(EMPTY_MAPPING_FORM)
   const [showConnectDialog, setShowConnectDialog] = useState(false)
-  const [showReservationDialog, setShowReservationDialog] = useState(false)
   const [syncing, setSyncing] = useState(false)
 
   const [apiKey, setApiKey] = useState('')
   const [propertyId, setPropertyId] = useState('')
   const [hotelId, setHotelId] = useState('')
 
+  const effectiveRoomTypes = useMemo(() => {
+    return roomTypes.length > 0 ? roomTypes : setupRoomTypes
+  }, [roomTypes, setupRoomTypes])
+
+  const roomOptions = useMemo<RoomOption[]>(() => {
+    const boardRoomOptions = (boardRooms || [])
+      .map((room) => ({
+        id: room.roomId,
+        number: room.number || room.roomNumber || room.roomId,
+        roomTypeId: room.roomTypeId || '',
+        floor: room.floor,
+        unavailable: room.operationalStatus !== 'AVAILABLE'
+      }))
+      .filter((room) => room.id && room.number && room.roomTypeId)
+
+    if (boardRoomOptions.length > 0) {
+      return [...boardRoomOptions].sort(sortByRoomNumber)
+    }
+
+    return (setupRooms || [])
+      .map((room) => ({
+        id: room.id,
+        number: room.number,
+        roomTypeId: room.roomTypeId,
+        floor: room.floor,
+        unavailable: room.status === 'out-of-service'
+      }))
+      .filter((room) => room.id && room.number && room.roomTypeId)
+      .sort(sortByRoomNumber)
+  }, [boardRooms, setupRooms])
+
+  const selectedMappingChannel = channels.find((channel) => channel.id === selectedMappingChannelId) || channels[0] || null
   const connectedChannels = channels.filter(c => c.connected)
   const pendingReservations = reservations.filter(r => r.status === 'PENDING')
+  const totalRoomCount = roomOptions.length
+  const mappedRoomCount = new Set(channelMappings.filter((mapping) => mapping.active).flatMap((mapping) => mapping.roomIds)).size
+
+  const getRoomsForType = (roomTypeId: string) => roomOptions.filter((room) => room.roomTypeId === roomTypeId)
+  const getRoomTypeName = (roomTypeId: string) => effectiveRoomTypes.find((roomType) => roomType.id === roomTypeId)?.name || roomTypeId
+  const getRoomNumber = (roomId: string) => roomOptions.find((room) => room.id === roomId)?.number || roomId
+
+  const getChannelMappings = (channelId: string) => {
+    return channelMappings.filter((mapping) => mapping.channelId === channelId)
+  }
+
+  const getMappingStats = (channelId: string) => {
+    const mappings = getChannelMappings(channelId).filter((mapping) => mapping.active)
+    const mappedRoomIds = mappings.flatMap((mapping) => mapping.roomIds)
+    const uniqueMappedRoomIds = new Set(mappedRoomIds)
+    const duplicateRoomIds = mappedRoomIds.filter((roomId, index) => mappedRoomIds.indexOf(roomId) !== index)
+    const unmappedRooms = roomOptions.filter((room) => !uniqueMappedRoomIds.has(room.id))
+
+    return {
+      mappingCount: mappings.length,
+      mappedRoomCount: uniqueMappedRoomIds.size,
+      unmappedRoomCount: unmappedRooms.length,
+      duplicateRoomCount: new Set(duplicateRoomIds).size,
+      complete: mappings.length > 0 && duplicateRoomIds.length === 0
+    }
+  }
+
+  const selectedMappingStats = selectedMappingChannel ? getMappingStats(selectedMappingChannel.id) : null
+  const selectedChannelMappings = selectedMappingChannel ? getChannelMappings(selectedMappingChannel.id) : []
+  const roomsForSelectedType = mappingForm.roomTypeId ? getRoomsForType(mappingForm.roomTypeId) : []
 
   const handleConnectChannel = () => {
     if (!selectedChannel || !apiKey || !propertyId) {
@@ -276,6 +398,140 @@ export function ChannelsView() {
     )
   }
 
+  const resetMappingForm = () => {
+    setEditingMappingId(null)
+    setMappingForm(EMPTY_MAPPING_FORM)
+  }
+
+  const handleSelectMappingChannel = (channelId: string) => {
+    setSelectedMappingChannelId(channelId)
+    resetMappingForm()
+  }
+
+  const handleMappingRoomTypeChange = (roomTypeId: string) => {
+    setMappingForm((current) => ({
+      ...current,
+      roomTypeId,
+      roomIds: getRoomsForType(roomTypeId).map((room) => room.id)
+    }))
+  }
+
+  const handleToggleMappedRoom = (roomId: string) => {
+    setMappingForm((current) => ({
+      ...current,
+      roomIds: current.roomIds.includes(roomId)
+        ? current.roomIds.filter((id) => id !== roomId)
+        : [...current.roomIds, roomId]
+    }))
+  }
+
+  const handleSaveMapping = () => {
+    if (!selectedMappingChannel) return
+    const externalRoomTypeName = mappingForm.externalRoomTypeName.trim()
+    const externalRoomTypeId = mappingForm.externalRoomTypeId.trim() || externalIdFromName(externalRoomTypeName)
+    const externalRatePlanId = mappingForm.externalRatePlanId.trim()
+
+    if (!externalRoomTypeName && !mappingForm.externalRoomTypeId.trim()) {
+      toast.error('Add an OTA room name or OTA room ID')
+      return
+    }
+
+    if (!mappingForm.roomTypeId) {
+      toast.error('Select a PMS room type')
+      return
+    }
+
+    if (mappingForm.roomIds.length === 0) {
+      toast.error('Select at least one PMS room')
+      return
+    }
+
+    const mapping: ChannelRoomMapping = {
+      id: editingMappingId || `map_${Date.now()}`,
+      channelId: selectedMappingChannel.id,
+      externalRoomTypeId,
+      externalRoomTypeName: externalRoomTypeName || externalRoomTypeId,
+      externalRatePlanId: externalRatePlanId || undefined,
+      roomTypeId: mappingForm.roomTypeId,
+      roomIds: mappingForm.roomIds,
+      active: true,
+      updatedAt: new Date().toISOString()
+    }
+
+    setChannelMappings((current) => {
+      if (editingMappingId) {
+        return current.map((item) => item.id === editingMappingId ? mapping : item)
+      }
+
+      return [mapping, ...current]
+    })
+
+    resetMappingForm()
+    toast.success(`${selectedMappingChannel.name} room mapping saved`)
+  }
+
+  const handleEditMapping = (mapping: ChannelRoomMapping) => {
+    setSelectedMappingChannelId(mapping.channelId)
+    setEditingMappingId(mapping.id)
+    setMappingForm({
+      externalRoomTypeId: mapping.externalRoomTypeId,
+      externalRoomTypeName: mapping.externalRoomTypeName,
+      externalRatePlanId: mapping.externalRatePlanId || '',
+      roomTypeId: mapping.roomTypeId,
+      roomIds: mapping.roomIds
+    })
+    setActiveTab('mapping')
+  }
+
+  const handleDeleteMapping = (mappingId: string) => {
+    setChannelMappings((current) => current.filter((mapping) => mapping.id !== mappingId))
+    if (editingMappingId === mappingId) resetMappingForm()
+    toast.success('Room mapping removed')
+  }
+
+  const handleAutoMapChannel = (channelId: string) => {
+    const channel = channels.find((item) => item.id === channelId)
+    if (!channel) return
+
+    if (effectiveRoomTypes.length === 0 || roomOptions.length === 0) {
+      toast.error('Configure PMS room types and rooms first')
+      return
+    }
+
+    const existingRoomTypeIds = new Set(
+      channelMappings
+        .filter((mapping) => mapping.channelId === channelId)
+        .map((mapping) => mapping.roomTypeId)
+    )
+
+    const generatedMappings = effectiveRoomTypes
+      .filter((roomType) => !existingRoomTypeIds.has(roomType.id))
+      .map((roomType) => {
+        const typeRooms = getRoomsForType(roomType.id)
+        if (typeRooms.length === 0) return null
+
+        return {
+          id: `map_${Date.now()}_${roomType.id}`,
+          channelId,
+          externalRoomTypeId: roomType.code || externalIdFromName(roomType.name),
+          externalRoomTypeName: roomType.name,
+          roomTypeId: roomType.id,
+          roomIds: typeRooms.map((room) => room.id),
+          active: true,
+          updatedAt: new Date().toISOString()
+        } satisfies ChannelRoomMapping
+      })
+      .filter(Boolean) as ChannelRoomMapping[]
+
+    if (generatedMappings.length === 0) {
+      toast.info(`${channel.name} already has mappings for all PMS room types`)
+      return
+    }
+
+    setChannelMappings((current) => [...generatedMappings, ...current])
+    toast.success(`Added ${generatedMappings.length} ${channel.name} mapping${generatedMappings.length > 1 ? 's' : ''}`)
+  }
+
   const getStatusColor = (status: Channel['status']) => {
     switch (status) {
       case 'ACTIVE': return 'text-green-600'
@@ -331,10 +587,14 @@ export function ChannelsView() {
       </div>
 
       <div className="flex-1 overflow-hidden p-6">
-        <Tabs defaultValue="channels" className="h-full flex flex-col">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           <TabsList>
             <TabsTrigger value="channels">
               Channels ({connectedChannels.length}/{channels.length})
+            </TabsTrigger>
+            <TabsTrigger value="mapping">
+              <Bed className="w-4 h-4 mr-2" />
+              Room Mapping ({mappedRoomCount}/{totalRoomCount})
             </TabsTrigger>
             <TabsTrigger value="rate-push">
               <ArrowUp className="w-4 h-4 mr-2" />
@@ -363,9 +623,58 @@ export function ChannelsView() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="channels" className="flex-1 mt-6">
-            <div className="grid grid-cols-2 gap-6 h-full">
-              {channels.map(channel => (
+          <TabsContent value="channels" className="flex-1 mt-6 overflow-hidden">
+            <ScrollArea className="h-full pr-4">
+              <div className="space-y-6 pb-6">
+                <div className="grid grid-cols-4 gap-4">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Connected OTAs</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{connectedChannels.length}/{channels.length}</div>
+                      <p className="text-xs text-muted-foreground">Credentials saved locally</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Mapped Rooms</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{mappedRoomCount}/{totalRoomCount}</div>
+                      <p className="text-xs text-muted-foreground">Unique PMS rooms in OTA mappings</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Pending Imports</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{pendingReservations.length}</div>
+                      <p className="text-xs text-muted-foreground">OTA bookings awaiting PMS import</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Setup Path</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => setActiveTab('mapping')}>
+                        <Bed className="w-4 h-4 mr-2" />
+                        Configure Room Mapping
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="grid grid-cols-2 gap-6">
+                  {channels.map(channel => {
+                    const mappingStats = getMappingStats(channel.id)
+
+                    return (
                 <Card key={channel.id} className="flex flex-col">
                   <CardHeader>
                     <div className="flex items-start justify-between">
@@ -386,7 +695,7 @@ export function ChannelsView() {
                       <Switch
                         checked={channel.enabled}
                         onCheckedChange={() => toggleChannel(channel.id)}
-                        disabled={!channel.connected}
+                        disabled={!channel.connected || !mappingStats.complete}
                       />
                     </div>
                   </CardHeader>
@@ -400,12 +709,41 @@ export function ChannelsView() {
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground mb-1">Revenue</p>
-                            <p className="text-xl font-bold">฿{(channel.stats?.monthlyRevenue || 0).toLocaleString()}</p>
+                            <p className="text-xl font-bold">THB {(channel.stats?.monthlyRevenue || 0).toLocaleString()}</p>
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground mb-1">Occupancy</p>
                             <p className="text-xl font-bold">{channel.stats?.occupancyRate || 0}%</p>
                           </div>
+                        </div>
+
+                        <Separator />
+
+                        <div className="rounded-md border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">Room mapping</p>
+                              <p className="text-xs text-muted-foreground">
+                                {mappingStats.mappedRoomCount}/{totalRoomCount} rooms mapped
+                                {mappingStats.duplicateRoomCount > 0 ? `, ${mappingStats.duplicateRoomCount} duplicate` : ''}
+                              </p>
+                            </div>
+                            <Badge variant={mappingStats.complete ? 'outline' : 'secondary'}>
+                              {mappingStats.complete ? 'Ready' : 'Needs setup'}
+                            </Badge>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mt-3 w-full justify-start"
+                            onClick={() => {
+                              setSelectedMappingChannelId(channel.id)
+                              setActiveTab('mapping')
+                            }}
+                          >
+                            <Bed className="w-4 h-4 mr-2" />
+                            Configure mapped rooms
+                          </Button>
                         </div>
 
                         <Separator />
@@ -442,18 +780,359 @@ export function ChannelsView() {
                         <p className="text-sm text-muted-foreground mb-4">
                           Connect {channel.name} to sync inventory and reservations
                         </p>
-                        <Button onClick={() => {
-                          setSelectedChannel(channel)
-                          setShowConnectDialog(true)
-                        }}>
-                          <Link className="w-4 h-4 mr-2" />
-                          Connect Channel
-                        </Button>
+                        <div className="flex justify-center gap-2">
+                          <Button onClick={() => {
+                            setSelectedChannel(channel)
+                            setShowConnectDialog(true)
+                          }}>
+                            <Link className="w-4 h-4 mr-2" />
+                            Connect Channel
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedMappingChannelId(channel.id)
+                              setActiveTab('mapping')
+                            }}
+                          >
+                            <Bed className="w-4 h-4 mr-2" />
+                            Map Rooms
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </CardContent>
                 </Card>
-              ))}
+                    )
+                  })}
+                </div>
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="mapping" className="flex-1 mt-6 overflow-hidden">
+            <div className="grid grid-cols-4 gap-6 h-full">
+              <Card className="overflow-hidden">
+                <CardHeader>
+                  <CardTitle>OTA Channels</CardTitle>
+                  <CardDescription>Choose a channel, then map OTA inventory to PMS rooms.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {channels.map((channel) => {
+                      const stats = getMappingStats(channel.id)
+                      const selected = selectedMappingChannel?.id === channel.id
+
+                      return (
+                        <button
+                          key={channel.id}
+                          type="button"
+                          className={cn(
+                            "w-full rounded-md border p-3 text-left transition-colors hover:bg-muted",
+                            selected && "border-primary bg-primary/5"
+                          )}
+                          onClick={() => handleSelectMappingChannel(channel.id)}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className={cn("w-7 h-7 rounded flex items-center justify-center", getProviderLogo(channel.provider))}>
+                                <span className="text-white text-xs font-bold">{channel.name.charAt(0)}</span>
+                              </div>
+                              <span className="font-medium text-sm">{channel.name}</span>
+                            </div>
+                            <Badge variant={stats.complete ? 'outline' : 'secondary'} className="text-xs">
+                              {stats.complete ? 'Ready' : 'Map'}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {stats.mappingCount} mapping{stats.mappingCount === 1 ? '' : 's'} - {stats.mappedRoomCount}/{totalRoomCount} rooms
+                          </p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <ScrollArea className="col-span-3 h-full pr-4">
+                <div className="space-y-6 pb-6">
+                  {selectedMappingChannel && selectedMappingStats ? (
+                    <>
+                      <Card>
+                        <CardHeader>
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <CardTitle>{selectedMappingChannel.name} Room Mapping</CardTitle>
+                              <CardDescription>
+                                Map each OTA room or rate-plan listing to a PMS room type and specific sellable rooms.
+                              </CardDescription>
+                            </div>
+                            <Badge variant={selectedMappingStats.complete ? 'outline' : 'secondary'}>
+                              {selectedMappingStats.complete
+                                ? 'Ready to enable'
+                                : selectedMappingStats.duplicateRoomCount > 0
+                                  ? `${selectedMappingStats.duplicateRoomCount} duplicate rooms`
+                                  : 'No active mapping'}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-4 gap-4">
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Mappings</p>
+                              <p className="text-2xl font-bold">{selectedMappingStats.mappingCount}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Mapped rooms</p>
+                              <p className="text-2xl font-bold">{selectedMappingStats.mappedRoomCount}/{totalRoomCount}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Duplicates</p>
+                              <p className={cn("text-2xl font-bold", selectedMappingStats.duplicateRoomCount > 0 && "text-orange-600")}>
+                                {selectedMappingStats.duplicateRoomCount}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                className="w-full"
+                                onClick={() => handleAutoMapChannel(selectedMappingChannel.id)}
+                              >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Auto-Fill Types
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>{editingMappingId ? 'Edit Mapping' : 'Add OTA Mapping'}</CardTitle>
+                          <CardDescription>
+                            Use this when an OTA room category should only sell selected physical rooms.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-5">
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="external-room-name">OTA Room Name</Label>
+                              <Input
+                                id="external-room-name"
+                                placeholder="e.g., Deluxe Double"
+                                value={mappingForm.externalRoomTypeName}
+                                onChange={(event) => setMappingForm((current) => ({ ...current, externalRoomTypeName: event.target.value }))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="external-room-id">OTA Room ID</Label>
+                              <Input
+                                id="external-room-id"
+                                placeholder="Optional external ID"
+                                value={mappingForm.externalRoomTypeId}
+                                onChange={(event) => setMappingForm((current) => ({ ...current, externalRoomTypeId: event.target.value }))}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="external-rate-plan-id">OTA Rate Plan ID</Label>
+                              <Input
+                                id="external-rate-plan-id"
+                                placeholder="Optional rate plan"
+                                value={mappingForm.externalRatePlanId}
+                                onChange={(event) => setMappingForm((current) => ({ ...current, externalRatePlanId: event.target.value }))}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <Label>PMS Room Type</Label>
+                              <Select value={mappingForm.roomTypeId} onValueChange={handleMappingRoomTypeChange}>
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select room type" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {effectiveRoomTypes.map((roomType) => (
+                                    <SelectItem key={roomType.id} value={roomType.id}>
+                                      {roomType.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Selected rooms</p>
+                              <p className="text-2xl font-bold">{mappingForm.roomIds.length}</p>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="text-xs text-muted-foreground">Available in type</p>
+                              <p className="text-2xl font-bold">{roomsForSelectedType.length}</p>
+                            </div>
+                          </div>
+
+                          <div className="rounded-md border">
+                            <div className="flex items-center justify-between gap-3 border-b p-3">
+                              <div>
+                                <Label>Specific PMS Rooms</Label>
+                                <p className="text-xs text-muted-foreground">
+                                  Select exactly which rooms this OTA listing can sell.
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={!mappingForm.roomTypeId}
+                                  onClick={() => setMappingForm((current) => ({
+                                    ...current,
+                                    roomIds: getRoomsForType(current.roomTypeId).map((room) => room.id)
+                                  }))}
+                                >
+                                  Select All
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={mappingForm.roomIds.length === 0}
+                                  onClick={() => setMappingForm((current) => ({ ...current, roomIds: [] }))}
+                                >
+                                  Clear
+                                </Button>
+                              </div>
+                            </div>
+
+                            <ScrollArea className="h-[230px]">
+                              {mappingForm.roomTypeId ? (
+                                roomsForSelectedType.length > 0 ? (
+                                  <div className="grid grid-cols-4 gap-2 p-3">
+                                    {roomsForSelectedType.map((room) => {
+                                      const selected = mappingForm.roomIds.includes(room.id)
+
+                                      return (
+                                        <label
+                                          key={room.id}
+                                          className={cn(
+                                            "flex cursor-pointer items-center justify-between gap-2 rounded-md border p-2 text-sm",
+                                            selected && "border-primary bg-primary/5",
+                                            room.unavailable && "opacity-70"
+                                          )}
+                                        >
+                                          <span className="flex items-center gap-2">
+                                            <Checkbox
+                                              checked={selected}
+                                              onCheckedChange={() => handleToggleMappedRoom(room.id)}
+                                            />
+                                            <span className="font-medium">{room.number}</span>
+                                          </span>
+                                          {room.unavailable && <Badge variant="secondary" className="text-xs">OOS</Badge>}
+                                        </label>
+                                      )
+                                    })}
+                                  </div>
+                                ) : (
+                                  <div className="p-8 text-center text-sm text-muted-foreground">
+                                    No PMS rooms exist for this room type.
+                                  </div>
+                                )
+                              ) : (
+                                <div className="p-8 text-center text-sm text-muted-foreground">
+                                  Select a PMS room type to choose specific rooms.
+                                </div>
+                              )}
+                            </ScrollArea>
+                          </div>
+
+                          <div className="flex justify-end gap-2">
+                            {editingMappingId && (
+                              <Button type="button" variant="outline" onClick={resetMappingForm}>
+                                Cancel Edit
+                              </Button>
+                            )}
+                            <Button type="button" onClick={handleSaveMapping}>
+                              <CheckCircle className="w-4 h-4 mr-2" />
+                              Save Mapping
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Saved Mappings</CardTitle>
+                          <CardDescription>
+                            Saved mappings define how OTA listings should match PMS rooms when connectors or imports are wired.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {selectedChannelMappings.length === 0 ? (
+                            <div className="rounded-md border border-dashed p-8 text-center">
+                              <Bed className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+                              <p className="text-sm text-muted-foreground">No mappings saved for {selectedMappingChannel.name}.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {selectedChannelMappings.map((mapping) => (
+                                <div key={mapping.id} className="rounded-md border p-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-semibold">{mapping.externalRoomTypeName}</p>
+                                        <Badge variant="outline">{mapping.roomIds.length} rooms</Badge>
+                                        {!mapping.active && <Badge variant="secondary">Paused</Badge>}
+                                      </div>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        OTA ID: {mapping.externalRoomTypeId}
+                                        {mapping.externalRatePlanId ? ` - Rate plan: ${mapping.externalRatePlanId}` : ''}
+                                      </p>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        PMS type: {getRoomTypeName(mapping.roomTypeId)}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <Switch
+                                        checked={mapping.active}
+                                        onCheckedChange={(checked) => {
+                                          setChannelMappings((current) => current.map((item) =>
+                                            item.id === mapping.id
+                                              ? { ...item, active: Boolean(checked), updatedAt: new Date().toISOString() }
+                                              : item
+                                          ))
+                                        }}
+                                      />
+                                      <Button variant="outline" size="sm" onClick={() => handleEditMapping(mapping)}>
+                                        Edit
+                                      </Button>
+                                      <Button variant="outline" size="sm" onClick={() => handleDeleteMapping(mapping.id)}>
+                                        <XCircle className="w-4 h-4 mr-2" />
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-1.5">
+                                    {mapping.roomIds.map((roomId) => (
+                                      <Badge key={roomId} variant="secondary" className="text-xs">
+                                        {getRoomNumber(roomId)}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </>
+                  ) : (
+                    <Card className="p-12 text-center">
+                      <Bed className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-semibold mb-2">No Channel Selected</h3>
+                      <p className="text-sm text-muted-foreground">Select an OTA channel to configure room mappings.</p>
+                    </Card>
+                  )}
+                </div>
+              </ScrollArea>
             </div>
           </TabsContent>
 
@@ -472,7 +1151,7 @@ export function ChannelsView() {
           <TabsContent value="inventory" className="flex-1 mt-6">
             <div className="space-y-6">
               <InventoryOverview />
-              {roomTypes.length === 0 ? (
+              {effectiveRoomTypes.length === 0 ? (
                 <Card className="p-12 text-center">
                   <Bed className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">No Room Types Configured</h3>
@@ -482,7 +1161,7 @@ export function ChannelsView() {
                 </Card>
               ) : (
                 <div className="grid grid-cols-3 gap-6">
-                  {roomTypes.map((roomType) => (
+                  {effectiveRoomTypes.map((roomType) => (
                     <InventoryCalendar key={roomType.id} roomTypeId={roomType.id} roomTypeName={roomType.name} />
                   ))}
                 </div>
@@ -545,7 +1224,7 @@ export function ChannelsView() {
                             <Separator />
                             <div className="flex items-center justify-between">
                               <span className="text-sm text-muted-foreground">Total Amount</span>
-                              <span className="text-xl font-bold">฿{reservation.totalAmount.toLocaleString()}</span>
+                              <span className="text-xl font-bold">THB {reservation.totalAmount.toLocaleString()}</span>
                             </div>
                             <Button 
                               className="w-full" 
@@ -629,7 +1308,7 @@ export function ChannelsView() {
                       </div>
                       <div className="text-center p-4 bg-muted rounded-lg">
                         <CurrencyCircleDollar className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
-                        <p className="text-2xl font-bold">฿{((channel.stats?.monthlyRevenue || 0) / 1000).toFixed(0)}k</p>
+                        <p className="text-2xl font-bold">THB {((channel.stats?.monthlyRevenue || 0) / 1000).toFixed(0)}k</p>
                         <p className="text-xs text-muted-foreground">Revenue</p>
                       </div>
                       <div className="text-center p-4 bg-muted rounded-lg">

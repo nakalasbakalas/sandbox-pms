@@ -81,6 +81,22 @@ interface Folio {
   closedAt?: Date
 }
 
+interface AccountingEntry {
+  id: string
+  date: string
+  type: 'REVENUE' | 'EXPENSE' | 'REFUND' | 'ADJUSTMENT'
+  category: string
+  subcategory?: string
+  amount: number
+  description: string
+  referenceType?: 'FOLIO' | 'RESERVATION' | 'MANUAL'
+  referenceId?: string
+  paymentMethod?: string
+  taxAmount?: number
+  createdBy: string
+  createdAt: string
+}
+
 function folioFromRoom(room: BoardRoomCard): Folio | null {
   if (!room.guestName || !room.checkIn) return null
 
@@ -219,6 +235,7 @@ function deserializeFolio(folio: Folio): Folio {
 export function CashierView() {
   const [foliosRaw, setFoliosRaw] = useKV<Folio[]>('cashier-folios', [])
   const [canonicalFoliosRaw, setCanonicalFolios] = useKV<Folio[]>('folios', [])
+  const [, setAccountingEntries] = useKV<AccountingEntry[]>('accounting-entries', [])
   const authToken = null
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const { rooms } = useRoomSync()
@@ -241,6 +258,34 @@ export function CashierView() {
   const [chargeQuantity, setChargeQuantity] = useState('1')
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
+
+  const paymentAmountNumber = Number(paymentAmount) || 0
+  const paymentRemainingBalance = paymentFolio
+    ? Math.max(0, Math.round((paymentFolio.balance - paymentAmountNumber) * 100) / 100)
+    : 0
+  const paymentReferenceRequired = ['CARD', 'BANK_TRANSFER', 'ONLINE'].includes(paymentMethod)
+
+  const postAccountingReceipt = useCallback((folio: Folio, amount: number, method: FolioPayment['method'], reference?: string) => {
+    const recordedAt = new Date()
+    const entry: AccountingEntry = {
+      id: `ACC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: recordedAt.toISOString(),
+      type: 'REVENUE',
+      category: 'Folio Payments',
+      subcategory: method.replace('_', ' '),
+      amount,
+      description: `Payment received from ${folio.guestName} for room ${folio.roomNumber}${reference ? ` (${reference})` : ''}`,
+      referenceType: 'FOLIO',
+      referenceId: folio.id,
+      paymentMethod: method,
+      taxAmount: 0,
+      createdBy: 'Cashier',
+      createdAt: recordedAt.toISOString(),
+    }
+
+    setAccountingEntries((current) => [entry, ...(Array.isArray(current) ? current : [])])
+    return entry
+  }, [setAccountingEntries])
 
   const refreshServerFolios = useCallback(async () => {
     if (!SERVER_API_ENABLED) return []
@@ -476,6 +521,10 @@ export function CashierView() {
       setPaymentError('Payment cannot exceed the remaining balance.')
       return
     }
+    if (paymentReferenceRequired && !paymentReference.trim()) {
+      setPaymentError('Reference is required for card, transfer, and online payments.')
+      return
+    }
 
     setIsSubmittingPayment(true)
     setPaymentError(null)
@@ -519,6 +568,7 @@ export function CashierView() {
           return updated
         }))
       }
+      postAccountingReceipt(paymentFolio, amount, paymentMethod, paymentReference.trim() || undefined)
       toast.success(`Payment recorded for folio ${paymentFolio.id}.`)
       setPaymentFolio(null)
     } catch (error) {
@@ -773,6 +823,19 @@ export function CashierView() {
                             Paid in Full
                           </Badge>
                         )}
+                        {folio.status === 'OPEN' && folio.balance > 0 && (
+                          <Button
+                            size="sm"
+                            className="mt-2 h-7 w-full gap-1.5 text-xs"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              openPaymentDialog(folio)
+                            }}
+                          >
+                            <Money size={14} />
+                            Collect
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </Card>
@@ -959,6 +1022,32 @@ export function CashierView() {
 
               <div className="space-y-2">
                 <Label htmlFor="payment-amount">Payment amount</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaymentAmount(paymentFolio.balance.toFixed(2))}
+                  >
+                    Full
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaymentAmount((Math.round((paymentFolio.balance / 2) * 100) / 100).toFixed(2))}
+                  >
+                    Half
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaymentAmount('')}
+                  >
+                    Clear
+                  </Button>
+                </div>
                 <Input
                   id="payment-amount"
                   type="number"
@@ -967,6 +1056,20 @@ export function CashierView() {
                   value={paymentAmount}
                   onChange={(event) => setPaymentAmount(event.target.value)}
                 />
+                <div className="rounded-md border bg-muted/40 p-3 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Remaining after payment</span>
+                    <span className={cn('font-semibold', paymentRemainingBalance > 0 ? 'text-orange-600' : 'text-emerald-600')}>
+                      à¸¿{paymentRemainingBalance.toLocaleString()}
+                    </span>
+                  </div>
+                  {paymentAmountNumber > 0 && paymentRemainingBalance <= 0 && (
+                    <div className="mt-1 flex items-center gap-1 text-emerald-600">
+                      <CheckCircle size={12} weight="fill" />
+                      This payment will close the folio.
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -991,8 +1094,11 @@ export function CashierView() {
                   id="payment-reference"
                   value={paymentReference}
                   onChange={(event) => setPaymentReference(event.target.value)}
-                  placeholder="Receipt, transfer, or card reference"
+                  placeholder={paymentReferenceRequired ? 'Required for this payment method' : 'Receipt, transfer, or card reference'}
                 />
+                {paymentReferenceRequired && (
+                  <p className="text-xs text-muted-foreground">Card, transfer, and online receipts need a reference for audit export.</p>
+                )}
               </div>
 
               {paymentError && (

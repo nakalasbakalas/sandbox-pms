@@ -129,6 +129,7 @@ const DATA_CATEGORIES = [
     keys: [
       'channels',
       'channel-reservations',
+      'channel-room-mappings',
       'channel-sync-logs',
       'channel-inventory-states',
       'inventory-snapshots',

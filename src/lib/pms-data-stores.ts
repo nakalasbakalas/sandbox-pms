@@ -80,6 +80,7 @@ export const OPTIONAL_PMS_DATA_STORES: PmsDataStoreDefinition[] = [
   { key: 'inventory-sync-logs', name: 'Inventory Sync Logs', critical: false, defaultValue: [] },
   { key: 'channel-inventory-states', name: 'Channel Inventory States', critical: false, defaultValue: [] },
   { key: 'channel-reservations', name: 'Channel Reservations', critical: false, defaultValue: [] },
+  { key: 'channel-room-mappings', name: 'Channel Room Mappings', critical: false, defaultValue: [] },
   { key: 'channel-sync-logs', name: 'Channel Sync Logs', critical: false, defaultValue: [] },
   { key: 'rate-rules', name: 'Rate Rules', critical: false, defaultValue: [] },
   { key: 'rate-overrides', name: 'Rate Overrides', critical: false, defaultValue: [] },
@@ -140,11 +141,11 @@ export const PMS_MODULE_INTEGRATIONS = [
   },
   {
     module: 'Reservations <-> Channels',
-    connections: ['reservations', 'channel-reservations', 'inventory-snapshots', 'inventory-sync-events'],
+    connections: ['reservations', 'channel-reservations', 'channel-room-mappings', 'inventory-snapshots', 'inventory-sync-events'],
   },
   {
     module: 'Channels <-> Inventory',
-    connections: ['inventory-snapshots', 'inventory-sync-events', 'inventory-sync-logs', 'channel-inventory-states'],
+    connections: ['inventory-snapshots', 'inventory-sync-events', 'inventory-sync-logs', 'channel-inventory-states', 'channel-room-mappings'],
   },
   {
     module: 'Rates <-> Channels',
