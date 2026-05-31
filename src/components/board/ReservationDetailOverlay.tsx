@@ -6,8 +6,10 @@ import {
   CheckCircle,
   CreditCard,
   EnvelopeSimple,
+  FileText,
   Pencil,
   Printer,
+  Receipt,
   SignIn,
   SignOut,
   Trash,
@@ -583,13 +585,21 @@ function PrintDropdown({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuItem onClick={() => onPrint('registration-card')}>
-          <Printer className="mr-2 h-4 w-4" />
-          Registration card
+        <DropdownMenuItem onClick={() => onPrint('invoice')}>
+          <Receipt className="mr-2 h-4 w-4" />
+          Invoice
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onPrint('summary')}>
+          <FileText className="mr-2 h-4 w-4" />
+          Summary
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => onPrint('confirmation')}>
           <CheckCircle className="mr-2 h-4 w-4" />
           Confirmation
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onPrint('registration-card')}>
+          <Users className="mr-2 h-4 w-4" />
+          Registration form
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

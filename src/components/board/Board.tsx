@@ -56,6 +56,7 @@ import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import {
   emailReservationDocument,
+  getReservationDocumentLabel,
   printReservationDocument,
   type ReservationDocumentAction,
 } from '@/lib/reservation-document-actions'
@@ -1529,7 +1530,7 @@ export function Board() {
       toast.error('Allow pop-ups to print this reservation.')
       return
     }
-    toast.success(action === 'registration-card' ? 'Registration card opened for printing.' : 'Reservation confirmation opened for printing.')
+    toast.success(`${getReservationDocumentLabel(action)} opened for printing.`)
   }
 
   const handleEmailReservationDocument = (room: BoardRoomCard, action: ReservationDocumentAction = 'confirmation') => {
