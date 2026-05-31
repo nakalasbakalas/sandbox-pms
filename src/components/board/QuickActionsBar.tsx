@@ -22,7 +22,7 @@ export function QuickActionsBar({
   onOpenAutomation 
 }: QuickActionsBarProps) {
   return (
-    <div className="flex items-center justify-between rounded-lg px-3 py-1.5 bg-muted/40 border border-border/40">
+    <div className="flex items-center justify-between rounded-lg px-2 py-1 bg-muted/40 border border-border/40">
       <div className="flex items-center gap-1">
         <div className="flex items-center bg-background rounded-md border border-border/60 p-0.5">
           {(['7day', '14day', '30day'] as const).map((mode) => (
@@ -32,7 +32,7 @@ export function QuickActionsBar({
               size="sm"
               onClick={() => onViewModeChange(mode)}
               className={cn(
-                "h-6 text-[11px] font-medium px-2.5 rounded-[5px] transition-all",
+                "h-5 text-[10px] font-medium px-2 rounded-[5px] transition-all",
                 viewMode === mode 
                   ? "bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background" 
                   : "text-muted-foreground hover:text-foreground"
@@ -63,7 +63,7 @@ export function QuickActionsBar({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <Clock className="w-3 h-3" />
         <span className="font-medium">
           {new Date().toLocaleDateString('en-GB', { 

@@ -1866,7 +1866,7 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-3 bg-background p-3">
+    <div className="h-full flex gap-3 bg-background p-2">
       {showUnassigned && unassignedReservations.length > 0 && (
         <div className="w-60 flex-shrink-0 rounded-xl bg-card border border-border/50 flex flex-col overflow-hidden">
           <div className="px-3 py-2.5 border-b border-border/40">
@@ -1963,10 +1963,10 @@ export function Board() {
       
       <div className="flex-1 flex flex-col min-w-0 gap-3">
         {/* Top Bar: Title + Actions */}
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-lg font-semibold leading-tight tracking-tight text-foreground">Front Desk Board</h1>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
+            <h1 className="text-sm sm:text-base font-semibold leading-tight tracking-tight text-foreground">Front Desk Board</h1>
+            <p className="text-[10px] text-muted-foreground mt-0.5">
               {format(new Date(), 'EEEE, MMMM d, yyyy')} · {rooms.length} rooms
             </p>
           </div>
@@ -2013,7 +2013,7 @@ export function Board() {
                 placeholder="Search rooms..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-8 h-8 text-xs border-border/50 bg-muted/30 focus:bg-background"
+                className="pl-8 h-7 text-[10px] border-border/50 bg-muted/30 focus:bg-background"
               />
             </div>
             <BoardFiltersPopover

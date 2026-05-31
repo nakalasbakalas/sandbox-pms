@@ -1,5 +1,6 @@
 import type { BoardRoomCard } from '@/types/board'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
+import { isSameDay } from 'date-fns'
 
 export const SERVER_API_ENABLED = SERVER_AUTH_ENABLED
 
@@ -44,6 +45,8 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
     const guestName = reservation?.guest
       ? `${reservation.guest.firstName} ${reservation.guest.lastName}`.trim()
       : undefined
+    const checkInDate = reservation?.checkIn ? new Date(reservation.checkIn) : undefined
+    const checkOutDate = reservation?.checkOut ? new Date(reservation.checkOut) : undefined
 
     return {
       roomId: room.id,
@@ -57,11 +60,11 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
       guestPhone: reservation?.guest?.phone || undefined,
       reservationId: reservation?.id,
       currentReservationId: room.currentReservation || reservation?.id,
-      checkIn: reservation?.checkIn ? new Date(reservation.checkIn) : undefined,
-      checkOut: reservation?.checkOut ? new Date(reservation.checkOut) : undefined,
+      checkIn: checkInDate,
+      checkOut: checkOutDate,
       guestCount: reservation ? reservation.adults + reservation.children : undefined,
-      isArrivalToday: false,
-      isDepartureToday: false,
+      isArrivalToday: checkInDate ? isSameDay(checkInDate, new Date()) : false,
+      isDepartureToday: checkOutDate ? isSameDay(checkOutDate, new Date()) : false,
       isVIP: Boolean(reservation?.guest?.vipStatus),
       hasIssue: false,
       needsAttention: false,
@@ -76,8 +79,8 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
         guestName,
         guestEmail: reservation.guest?.email || undefined,
         guestPhone: reservation.guest?.phone || undefined,
-        checkIn: reservation.checkIn,
-        checkOut: reservation.checkOut,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
         status: reservation.status,
         totalAmount: reservation.totalAmount,
         balanceDue: reservation.folio?.balance,
