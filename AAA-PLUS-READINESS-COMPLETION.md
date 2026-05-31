@@ -34,7 +34,7 @@ The following gates pass locally:
 
 Repo-controlled AAA+ readiness is complete: auth/session hardening, CI, browser E2E, login throttling, containerization, dependency holds, production URL alignment, live health automation, release documentation, and runbooks are all present and validated.
 
-Confirmed live evidence includes `https://book.sandboxhotel.com` health checks, deep database connectivity, Render PostgreSQL availability, Render starter-plan deployment metadata for the custom-domain service, and signed-cookie session behavior without exposing secrets.
+Confirmed live evidence includes `https://book.sandboxhotel.com` health checks after commit `3de37ab`, deep database connectivity, Render PostgreSQL availability, Render starter-plan deployment metadata and successful predeploy logs for the custom-domain service, and signed-cookie session behavior without exposing secrets.
 
 The remaining items are external account-owner evidence, not app code defects:
 

@@ -1,8 +1,8 @@
 # Live Environment Proof Register
 
-Verified at: 2026-05-31T03:03Z
+Verified at: 2026-05-31T03:48Z
 
-This register records external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values.
+This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
 
 ## Confirmed Live Runtime
 
@@ -11,7 +11,7 @@ This register records external evidence gathered from the live Render workspace,
 - `https://sandbox-hotel-pms.onrender.com/healthz?deep=1` returned `database.configured=true` and `database.ok=true`.
 - `https://sandbox-hotel-pms-v43m.onrender.com/healthz?deep=1` returned `database.configured=true` and `database.ok=true`.
 - Invalid signed-cookie probe against `/api/auth/me` returned `401 Authentication is required` on all three hosts. Under the production server code path, a missing `SESSION_SECRET` would throw while verifying a dotted session token, so this proves a production session secret is present without exposing it.
-- `npm run live:check` passed against `https://book.sandboxhotel.com`.
+- `npm run live:check` passed against `https://book.sandboxhotel.com` during the 2026-05-31T03:48Z proof pass after the `3de37ab` deployment.
 - Health payload reports `lineWebhookConfigured=false`; LINE live secrets are not configured on the verified runtime.
 
 ## Confirmed Render Resources
@@ -19,9 +19,9 @@ This register records external evidence gathered from the live Render workspace,
 - Render CLI is authenticated to team workspace `My Workspace` as `nakalastravels@gmail.com`.
 - Managed PostgreSQL datastore `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) is `available`, region `oregon`, version `17`, plan `basic_256mb`, database name `sandbox_hotel_pms`.
 - Render database logs during the deep health checks show SSL-authorized connections to `sandbox_hotel_pms` from the app, including the `sandbox_hotel_pms` database user.
-- Service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) is live on commit `85c0e2bf6117223673fdec53d747a8c7039bee6c`.
-- `sandbox-hotel-pms-v43m` is on the `starter` plan and its latest deploy ran `npm run db:migrate && npm run db:seed` successfully in `prod-safe` mode on 2026-05-30T16:05Z. The seed log confirms `Users: 0 database users seeded`.
-- Service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) is also live on commit `85c0e2bf6117223673fdec53d747a8c7039bee6c`; current Render metadata includes `buildPlan=starter`.
+- Service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) was verified live on commit `3de37abe51fd8b62b72e7f409c8a486b9f1503ad`; deploy `dep-d8dqrqnavr4c7381skpg` finished live at 2026-05-31T03:43:46Z.
+- `sandbox-hotel-pms-v43m` is on the `starter` plan and deploy `dep-d8dqrqnavr4c7381skpg` ran `npm run db:migrate && npm run db:seed` successfully in `prod-safe` mode on 2026-05-31T03:42Z-03:43Z. The seed log confirms `Seed completed successfully`.
+- Service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) was also verified live on commit `3de37abe51fd8b62b72e7f409c8a486b9f1503ad`; deploy `dep-d8dqt4n7f7vs73cgqr3g` finished live at 2026-05-31T03:46:16Z. Current Render metadata includes `buildPlan=starter`, but the latest deploy log still reported the predeploy command as skipped, so do not use this service as the long-term production rollback path until the Render service ownership/plan metadata path is resolved in the dashboard.
 
 ## Domain And Edge Path
 

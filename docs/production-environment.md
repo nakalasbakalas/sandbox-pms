@@ -43,7 +43,7 @@ The committed Blueprint defines the intended production resources:
 - production seed mode: `SEED_MODE=prod-safe`
 - generated session secret: `SESSION_SECRET`
 
-Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). At that time, the public custom domain `https://book.sandboxhotel.com` reached `sandbox-hotel-pms-v43m`, not the Blueprint-named `sandbox-hotel-pms` service. Both services were live on the same commit and current Render metadata includes `buildPlan=starter` for `sandbox-hotel-pms`; `sandbox-hotel-pms-v43m` was confirmed to run the predeploy migration and seed path in the gathered logs. Before launch sign-off, choose the single Render service owner for the custom domain and rollback path.
+Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). At that time, the public custom domain `https://book.sandboxhotel.com` reached `sandbox-hotel-pms-v43m`, not the Blueprint-named `sandbox-hotel-pms` service. Both services were live on commit `3de37ab`; `sandbox-hotel-pms-v43m` was confirmed on the `starter` plan and confirmed to run the predeploy migration and seed path in the gathered logs. Current Render metadata includes `buildPlan=starter` for `sandbox-hotel-pms`, but its latest deploy log still reported predeploy as skipped. Before launch sign-off, choose the single Render service owner for the custom domain and rollback path.
 
 Apply a new Blueprint only from a repository branch that contains the current `render.yaml`. The Dashboard path is:
 
