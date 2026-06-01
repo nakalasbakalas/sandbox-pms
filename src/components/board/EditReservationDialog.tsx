@@ -37,6 +37,8 @@ interface EditReservationDialogProps {
 export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete }: EditReservationDialogProps) {
   const [checkIn, setCheckIn] = useState<Date | undefined>(undefined)
   const [checkOut, setCheckOut] = useState<Date | undefined>(undefined)
+  const [checkInCalendarOpen, setCheckInCalendarOpen] = useState(false)
+  const [checkOutCalendarOpen, setCheckOutCalendarOpen] = useState(false)
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -55,6 +57,8 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
       const [firstName = '', lastName = ''] = (room.guestName || ' ').split(' ')
       setCheckIn(room.checkIn)
       setCheckOut(room.checkOut)
+      setCheckInCalendarOpen(false)
+      setCheckOutCalendarOpen(false)
       setFormData({
         firstName,
         lastName,
@@ -104,6 +108,23 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
 
     toast.success('Reservation updated successfully')
     onClose()
+  }
+
+  const handleCheckInSelect = (date: Date | undefined) => {
+    if (!date) return
+    setCheckIn(date)
+    if (checkOut && date >= checkOut) {
+      setCheckOut(undefined)
+    }
+    setCheckInCalendarOpen(false)
+    window.setTimeout(() => setCheckInCalendarOpen(false), 0)
+  }
+
+  const handleCheckOutSelect = (date: Date | undefined) => {
+    if (!date) return
+    setCheckOut(date)
+    setCheckOutCalendarOpen(false)
+    window.setTimeout(() => setCheckOutCalendarOpen(false), 0)
   }
 
   const handleDelete = () => {
@@ -214,7 +235,7 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Check-in Date *</Label>
-                  <Popover>
+                  <Popover modal open={checkInCalendarOpen} onOpenChange={setCheckInCalendarOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
@@ -231,7 +252,8 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                       <Calendar
                         mode="single"
                         selected={checkIn}
-                        onSelect={setCheckIn}
+                        defaultMonth={checkIn}
+                        onSelect={handleCheckInSelect}
                         disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                       />
                     </PopoverContent>
@@ -240,7 +262,7 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
 
                 <div>
                   <Label className="text-xs">Check-out Date *</Label>
-                  <Popover>
+                  <Popover modal open={checkOutCalendarOpen} onOpenChange={setCheckOutCalendarOpen}>
                     <PopoverTrigger asChild>
                       <Button
                         variant="outline"
@@ -257,7 +279,8 @@ export function EditReservationDialog({ open, onClose, room, onUpdate, onDelete 
                       <Calendar
                         mode="single"
                         selected={checkOut}
-                        onSelect={setCheckOut}
+                        defaultMonth={checkOut || checkIn}
+                        onSelect={handleCheckOutSelect}
                         disabled={(date) => !checkIn || date <= checkIn}
                       />
                     </PopoverContent>

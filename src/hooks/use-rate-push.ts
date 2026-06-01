@@ -49,6 +49,7 @@ interface Channel {
   name: string
   enabled: boolean
   connected: boolean
+  connectionMode?: 'ICAL'
   status: string
 }
 
@@ -85,7 +86,7 @@ export function useRatePush() {
     _rate: number
   ): Promise<boolean> => {
     const channel = channels.find(c => c.id === channelId)
-    if (!channel?.connected || !channel?.enabled) {
+    if (!channel?.connected || !channel?.enabled || channel.connectionMode === 'ICAL') {
       return false
     }
 
@@ -143,7 +144,7 @@ export function useRatePush() {
 
     const activeChannels = targetChannels.filter(channelId => {
       const channel = channels.find(c => c.id === channelId)
-      return channel?.connected && channel?.enabled
+      return channel?.connected && channel?.enabled && channel.connectionMode !== 'ICAL'
     })
 
     if (activeChannels.length === 0) {
@@ -334,7 +335,7 @@ export function useRatePush() {
 
     const targetChannels = settings.selectedChannels.length > 0 
       ? settings.selectedChannels 
-      : channels.filter(c => c.connected && c.enabled).map(c => c.id)
+      : channels.filter(c => c.connected && c.enabled && c.connectionMode !== 'ICAL').map(c => c.id)
 
     if (targetChannels.length === 0) return
 

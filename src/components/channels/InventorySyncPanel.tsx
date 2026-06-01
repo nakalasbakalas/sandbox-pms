@@ -28,6 +28,7 @@ interface InventorySyncPanelProps {
     name: string
     connected: boolean
     enabled: boolean
+    connectionMode?: 'ICAL'
   }>
 }
 
@@ -52,7 +53,7 @@ export function InventorySyncPanel({ connectedChannels }: InventorySyncPanelProp
   const recentLogs = syncLogs.slice(0, 15)
 
   useEffect(() => {
-    const activeChannels = connectedChannels.filter(ch => ch.connected && ch.enabled)
+    const activeChannels = connectedChannels.filter(ch => ch.connected && ch.enabled && ch.connectionMode !== 'ICAL')
     
     setChannelStates(current => {
       const existingIds = new Set(current.map(ch => ch.channelId))

@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -33,6 +34,9 @@ import {
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { cn } from '@/lib/utils'
+import { downloadIcalFeed, generateIcalFeed, parseIcalEvents, type IcalEvent } from '@/lib/ical'
+import { nightsBetween } from '@/lib/hotel/business-rules'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { InventorySyncPanel } from './InventorySyncPanel'
 import { InventoryCalendar, InventoryOverview } from './InventoryCalendar'
 import { RateParityPanel } from './RateParityPanel'
@@ -43,10 +47,21 @@ interface Channel {
   id: string
   name: string
   provider: 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
+  connectionMode?: 'ICAL'
   enabled: boolean
   connected: boolean
   lastSync?: string
   status: 'ACTIVE' | 'ERROR' | 'WARNING' | 'DISCONNECTED'
+  iCal?: {
+    importUrl?: string
+    exportFileName?: string
+    exportFeedUrl?: string
+    lastImportAt?: string
+    lastExportAt?: string
+    lastPublishedAt?: string
+    exportTokenIssuedAt?: string
+    lastError?: string
+  }
   credentials?: {
     apiKey?: string
     propertyId?: string
@@ -71,13 +86,14 @@ interface ChannelReservation {
   totalAmount: number
   status: 'PENDING' | 'CONFIRMED' | 'SYNCED'
   syncedAt?: string
+  importedVia?: 'ICAL'
 }
 
 interface SyncLog {
   id: string
   channelId: string
   timestamp: string
-  type: 'INVENTORY' | 'RATES' | 'RESERVATIONS' | 'RESTRICTIONS' | 'RATE_PUSH'
+  type: 'INVENTORY' | 'RATES' | 'RESERVATIONS' | 'RESTRICTIONS' | 'RATE_PUSH' | 'ICAL_IMPORT' | 'ICAL_EXPORT'
   status: 'SUCCESS' | 'ERROR' | 'WARNING'
   message: string
   details?: string
@@ -93,6 +109,16 @@ interface ChannelRoomMapping {
   roomIds: string[]
   active: boolean
   updatedAt: string
+}
+
+interface ServerIcalChannel {
+  provider: Channel['provider']
+  name: string
+  importUrl?: string
+  exportFileName?: string
+  exportFeedUrl?: string
+  lastPublishedAt?: string
+  exportTokenIssuedAt?: string
 }
 
 interface RoomTypeOption {
@@ -141,6 +167,7 @@ export function ChannelsView() {
       id: 'booking',
       name: 'Booking.com',
       provider: 'BOOKING_COM',
+      connectionMode: 'ICAL',
       enabled: false,
       connected: false,
       status: 'DISCONNECTED',
@@ -150,6 +177,7 @@ export function ChannelsView() {
       id: 'agoda',
       name: 'Agoda',
       provider: 'AGODA',
+      connectionMode: 'ICAL',
       enabled: false,
       connected: false,
       status: 'DISCONNECTED',
@@ -159,6 +187,7 @@ export function ChannelsView() {
       id: 'expedia',
       name: 'Expedia',
       provider: 'EXPEDIA',
+      connectionMode: 'ICAL',
       enabled: false,
       connected: false,
       status: 'DISCONNECTED',
@@ -168,6 +197,7 @@ export function ChannelsView() {
       id: 'airbnb',
       name: 'Airbnb',
       provider: 'AIRBNB',
+      connectionMode: 'ICAL',
       enabled: false,
       connected: false,
       status: 'DISCONNECTED',
@@ -181,6 +211,9 @@ export function ChannelsView() {
   const [boardRooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [setupRooms] = useKV<Array<{ id: string; number: string; roomTypeId: string; floor?: number; status?: string }>>('onboarding-rooms', [])
   const [channelMappings, setChannelMappings] = useKV<ChannelRoomMapping[]>('channel-room-mappings', [])
+  const [pmsReservations, setPmsReservations] = useKV<any[]>('reservations', [])
+  const [, setReservationData] = useKV<any[]>('reservations-data', [])
+  const [unassignedReservations, setUnassignedReservations] = useKV<any[]>('unassigned-reservations', [])
 
   const [activeTab, setActiveTab] = useState('channels')
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null)
@@ -189,10 +222,10 @@ export function ChannelsView() {
   const [mappingForm, setMappingForm] = useState<MappingFormState>(EMPTY_MAPPING_FORM)
   const [showConnectDialog, setShowConnectDialog] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [publishingFeedId, setPublishingFeedId] = useState<string | null>(null)
 
-  const [apiKey, setApiKey] = useState('')
-  const [propertyId, setPropertyId] = useState('')
-  const [hotelId, setHotelId] = useState('')
+  const [importUrl, setImportUrl] = useState('')
+  const [icalText, setIcalText] = useState('')
 
   const effectiveRoomTypes = useMemo(() => {
     return roomTypes.length > 0 ? roomTypes : setupRoomTypes
@@ -239,6 +272,48 @@ export function ChannelsView() {
     return channelMappings.filter((mapping) => mapping.channelId === channelId)
   }
 
+  const providerPath = (provider: Channel['provider']) => provider.toLowerCase().replaceAll('_', '-')
+
+  const mergeServerIcalChannels = useCallback((serverChannels: ServerIcalChannel[]) => {
+    setChannels((current) => current.map((channel) => {
+      const serverChannel = serverChannels.find((item) => item.provider === channel.provider)
+      if (!serverChannel) return channel
+
+      return {
+        ...channel,
+        connectionMode: 'ICAL',
+        connected: true,
+        status: 'ACTIVE',
+        lastSync: serverChannel.lastPublishedAt || channel.lastSync,
+        iCal: {
+          ...channel.iCal,
+          importUrl: serverChannel.importUrl || channel.iCal?.importUrl,
+          exportFileName: serverChannel.exportFileName || channel.iCal?.exportFileName,
+          exportFeedUrl: serverChannel.exportFeedUrl || channel.iCal?.exportFeedUrl,
+          lastPublishedAt: serverChannel.lastPublishedAt || channel.iCal?.lastPublishedAt,
+          exportTokenIssuedAt: serverChannel.exportTokenIssuedAt || channel.iCal?.exportTokenIssuedAt,
+        }
+      }
+    }))
+  }, [setChannels])
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED) return
+
+    let cancelled = false
+    void pmsApi<{ ok: true; data: ServerIcalChannel[] }>('/api/channels/ical', undefined)
+      .then((payload) => {
+        if (!cancelled) mergeServerIcalChannels(payload.data || [])
+      })
+      .catch(() => {
+        // Channel setup remains usable locally if the server feed list is not available.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [mergeServerIcalChannels])
+
   const getMappingStats = (channelId: string) => {
     const mappings = getChannelMappings(channelId).filter((mapping) => mapping.active)
     const mappedRoomIds = mappings.flatMap((mapping) => mapping.roomIds)
@@ -259,22 +334,275 @@ export function ChannelsView() {
   const selectedChannelMappings = selectedMappingChannel ? getChannelMappings(selectedMappingChannel.id) : []
   const roomsForSelectedType = mappingForm.roomTypeId ? getRoomsForType(mappingForm.roomTypeId) : []
 
-  const handleConnectChannel = () => {
-    if (!selectedChannel || !apiKey || !propertyId) {
-      toast.error('Please fill in all required fields')
+  const openIcalDialog = (channel: Channel) => {
+    setSelectedChannel(channel)
+    setImportUrl(channel.iCal?.importUrl || '')
+    setIcalText('')
+    setShowConnectDialog(true)
+  }
+
+  const exportFileNameForChannel = (channel: Channel) =>
+    channel.iCal?.exportFileName || `${channel.id}-sandbox-hotel-blocks.ics`
+
+  const roomTypeCodeFromName = (value: string): 'TWIN' | 'DOUBLE' => {
+    return /double/i.test(value) ? 'DOUBLE' : 'TWIN'
+  }
+
+  const mapIcalEventsToReservations = (channel: Channel, events: IcalEvent[]) => {
+    const channelMappings = getChannelMappings(channel.id).filter((mapping) => mapping.active)
+    const defaultMapping = channelMappings[0]
+    const mappedRoomType = defaultMapping ? getRoomTypeName(defaultMapping.roomTypeId) : effectiveRoomTypes[0]?.name || 'Imported room'
+
+    return events.map((event) => {
+      const idSafeUid = event.uid.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80)
+      return {
+        id: `ical_${channel.id}_${idSafeUid}`,
+        channelId: channel.id,
+        channelRef: event.uid,
+        guestName: event.summary || `${channel.name} iCal booking`,
+        checkIn: event.checkIn,
+        checkOut: event.checkOut,
+        roomType: mappedRoomType,
+        nights: Math.max(1, nightsBetween(event.checkIn, event.checkOut)),
+        totalAmount: 0,
+        status: 'PENDING' as const,
+        importedVia: 'ICAL' as const,
+      }
+    })
+  }
+
+  const importIcalTextForChannel = (channel: Channel, source: string) => {
+    const result = parseIcalEvents(source)
+    const importedReservations = mapIcalEventsToReservations(channel, result.events)
+    const importedRefs = new Set(reservations.filter((item) => item.channelId === channel.id).map((item) => item.channelRef))
+    const newReservations = importedReservations.filter((item) => !importedRefs.has(item.channelRef))
+
+    setReservations((current) => {
+      const byKey = new Map((current || []).map((item) => [`${item.channelId}:${item.channelRef}`, item]))
+      for (const reservation of importedReservations) {
+        const key = `${reservation.channelId}:${reservation.channelRef}`
+        if (!byKey.has(key)) byKey.set(key, reservation)
+      }
+      return Array.from(byKey.values())
+    })
+
+    const importedAt = new Date().toISOString()
+    setChannels((current) => current.map((item) =>
+      item.id === channel.id
+        ? {
+            ...item,
+            connected: true,
+            status: result.events.length > 0 ? 'ACTIVE' : 'WARNING',
+            lastSync: importedAt,
+            iCal: {
+              ...item.iCal,
+              importUrl: item.iCal?.importUrl || importUrl.trim() || undefined,
+              exportFileName: exportFileNameForChannel(item),
+              lastImportAt: importedAt,
+              lastError: undefined,
+            },
+          }
+        : item
+    ))
+
+    setSyncLogs((current) => [{
+      id: `log_${Date.now()}`,
+      channelId: channel.id,
+      timestamp: importedAt,
+      type: 'ICAL_IMPORT',
+      status: result.events.length > 0 ? 'SUCCESS' : 'WARNING',
+      message: `Imported ${newReservations.length} new iCal event${newReservations.length === 1 ? '' : 's'} from ${channel.name}`,
+      details: result.skipped > 0
+        ? `${result.skipped} event${result.skipped === 1 ? '' : 's'} skipped because dates were missing or invalid.`
+        : 'iCal carries date blocks only; guest/rate details may need manual completion.',
+    }, ...current])
+
+    return { imported: newReservations.length, parsed: result.events.length, skipped: result.skipped }
+  }
+
+  const getReservationDate = (record: any, key: 'checkIn' | 'checkOut') => {
+    const value = record?.[key] || record?.[key === 'checkIn' ? 'checkInDate' : 'checkOutDate']
+    if (!value) return null
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : date
+  }
+
+  const reservationMatchesChannel = (channel: Channel, record: any) => {
+    const activeMappings = getChannelMappings(channel.id).filter((mapping) => mapping.active)
+    if (activeMappings.length === 0) return true
+
+    const values = [
+      record?.roomTypeId,
+      record?.roomType,
+      record?.roomTypeName,
+    ].filter(Boolean).map((value) => String(value).toLowerCase())
+
+    return activeMappings.some((mapping) => {
+      const roomTypeName = getRoomTypeName(mapping.roomTypeId).toLowerCase()
+      return values.includes(mapping.roomTypeId.toLowerCase()) ||
+        values.includes(roomTypeName) ||
+        values.some((value) => roomTypeName.includes(value) || value.includes(roomTypeName))
+    })
+  }
+
+  const buildExportEvents = (channel: Channel): IcalEvent[] => {
+    const activeStatuses = new Set(['PENDING', 'CONFIRMED', 'HOLD', 'CHECKED_IN'])
+    const records = [...pmsReservations, ...unassignedReservations]
+    const uniqueRecords = new Map<string, any>()
+
+    for (const record of records) {
+      const id = String(record?.id || record?.reservationId || '')
+      if (!id || uniqueRecords.has(id)) continue
+      uniqueRecords.set(id, record)
+    }
+
+    return Array.from(uniqueRecords.values())
+      .filter((record) => activeStatuses.has(String(record.status || 'CONFIRMED').toUpperCase()))
+      .filter((record) => reservationMatchesChannel(channel, record))
+      .map((record) => {
+        const checkIn = getReservationDate(record, 'checkIn')
+        const checkOut = getReservationDate(record, 'checkOut')
+        if (!checkIn || !checkOut || checkOut <= checkIn) return null
+
+        const roomTypeLabel = record.roomTypeName || record.roomType || 'Room'
+        return {
+          uid: `sandbox-${channel.id}-${record.id}@sandbox-hotel-pms`,
+          summary: `Sandbox Hotel block - ${roomTypeLabel}`,
+          checkIn: format(checkIn, 'yyyy-MM-dd'),
+          checkOut: format(checkOut, 'yyyy-MM-dd'),
+          description: `Unavailable in Sandbox Hotel PMS. Source reservation: ${record.id}`,
+        }
+      })
+      .filter(Boolean) as IcalEvent[]
+  }
+
+  const publishServerIcalFeed = async (
+    channel: Channel,
+    options: { importUrl?: string; exportFileName?: string; rotateToken?: boolean } = {},
+  ) => {
+    const payload = await pmsApi<{ ok: true; data: ServerIcalChannel }>(
+      `/api/channels/ical/${providerPath(channel.provider)}`,
+      undefined,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          importUrl: options.importUrl ?? channel.iCal?.importUrl,
+          exportFileName: options.exportFileName ?? exportFileNameForChannel(channel),
+          rotateToken: options.rotateToken || false,
+        }),
+      },
+    )
+
+    const publishedAt = payload.data.lastPublishedAt || new Date().toISOString()
+    mergeServerIcalChannels([payload.data])
+    setSyncLogs((current) => [{
+      id: `log_${Date.now()}`,
+      channelId: channel.id,
+      timestamp: publishedAt,
+      type: 'ICAL_EXPORT',
+      status: 'SUCCESS',
+      message: `${channel.name} hosted iCal URL published`,
+      details: payload.data.exportFeedUrl
+        ? `OTA subscription URL is ready: ${payload.data.exportFeedUrl}`
+        : 'Hosted feed was saved but the URL was not returned by the server.',
+    }, ...current])
+
+    return payload.data
+  }
+
+  const handlePublishIcalFeed = async (channel: Channel, rotateToken = false) => {
+    if (!SERVER_API_ENABLED) {
+      toast.warning('Hosted iCal URLs require server mode', {
+        description: 'This local preview can still export .ics files. The subscription URL is published by the deployed PMS server.',
+      })
       return
     }
+
+    setPublishingFeedId(channel.id)
+    try {
+      const published = await publishServerIcalFeed(channel, { rotateToken })
+      toast.success(`${channel.name} iCal URL ${rotateToken ? 'rotated' : 'published'}`, {
+        description: published.exportFeedUrl || 'The hosted feed is ready for your OTA or channel manager.',
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Hosted iCal feed could not be published.'
+      toast.error(`Could not publish ${channel.name} iCal URL`, { description: message })
+      setSyncLogs((current) => [{
+        id: `log_${Date.now()}`,
+        channelId: channel.id,
+        timestamp: new Date().toISOString(),
+        type: 'ICAL_EXPORT',
+        status: 'ERROR',
+        message: `Could not publish ${channel.name} hosted iCal URL`,
+        details: message,
+      }, ...current])
+    } finally {
+      setPublishingFeedId(null)
+    }
+  }
+
+  const handleCopyIcalFeedUrl = async (channel: Channel) => {
+    const url = channel.iCal?.exportFeedUrl
+    if (!url) return
+    await navigator.clipboard.writeText(url)
+    toast.success(`${channel.name} iCal URL copied`)
+  }
+
+  const handleDownloadIcalExport = (channel: Channel) => {
+    const events = buildExportEvents(channel)
+    const contents = generateIcalFeed(`${channel.name} - Sandbox Hotel Blocks`, events)
+    downloadIcalFeed(exportFileNameForChannel(channel), contents)
+
+    const exportedAt = new Date().toISOString()
+    setChannels((current) => current.map((item) =>
+      item.id === channel.id
+        ? {
+            ...item,
+            iCal: {
+              ...item.iCal,
+              exportFileName: exportFileNameForChannel(item),
+              lastExportAt: exportedAt,
+            },
+          }
+        : item
+    ))
+    setSyncLogs((current) => [{
+      id: `log_${Date.now()}`,
+      channelId: channel.id,
+      timestamp: exportedAt,
+      type: 'ICAL_EXPORT',
+      status: 'SUCCESS',
+      message: `Generated ${channel.name} iCal export`,
+      details: `${events.length} date block${events.length === 1 ? '' : 's'} included. iCal does not carry rates, restrictions, or payment data.`,
+    }, ...current])
+    toast.success(`${channel.name} iCal file generated`, {
+      description: `${events.length} date block${events.length === 1 ? '' : 's'} exported.`,
+    })
+  }
+
+  const handleConnectChannel = async () => {
+    if (!selectedChannel) return
+
+    const trimmedImportUrl = importUrl.trim()
+    const pastedIcal = icalText.trim()
+    const exportFileName = exportFileNameForChannel(selectedChannel)
 
     setChannels(current => 
       current.map(c => 
         c.id === selectedChannel.id 
           ? {
               ...c,
-              connected: false,
-              enabled: false,
+              connectionMode: 'ICAL',
+              connected: true,
+              enabled: c.enabled,
               status: 'WARNING',
-              lastSync: undefined,
-              credentials: { apiKey, propertyId, hotelId: hotelId || undefined }
+              credentials: undefined,
+              iCal: {
+                ...c.iCal,
+                importUrl: trimmedImportUrl || undefined,
+                exportFileName,
+                lastError: undefined,
+              }
             }
           : c
       )
@@ -284,23 +612,51 @@ export function ChannelsView() {
       id: `log_${Date.now()}`,
       channelId: selectedChannel.id,
       timestamp: new Date().toISOString(),
-      type: 'INVENTORY',
+      type: 'ICAL_IMPORT',
       status: 'WARNING',
-      message: `Saved ${selectedChannel.name} credentials`,
-      details: 'No live channel connector is configured, so synchronization was not enabled.'
+      message: `Configured ${selectedChannel.name} iCal feed`,
+      details: 'iCal supports date blocks and reservation pulls only. Rates, restrictions, payments, and guest details stay manual in the OTA or channel manager.'
     }
     setSyncLogs(current => [log, ...current])
 
-    setApiKey('')
-    setPropertyId('')
-    setHotelId('')
+    if (pastedIcal) {
+      const result = importIcalTextForChannel(selectedChannel, pastedIcal)
+      toast.success(`${selectedChannel.name} iCal configured`, {
+        description: `Imported ${result.imported} new event${result.imported === 1 ? '' : 's'} from pasted calendar.`,
+      })
+    } else if (trimmedImportUrl) {
+      toast.success(`${selectedChannel.name} iCal configured`, {
+        description: 'Use Import iCal to pull reservations from the feed URL.',
+      })
+    } else {
+      toast.success(`${selectedChannel.name} iCal configured`, {
+        description: 'Export-only setup saved. Add an OTA feed URL later to pull iCal reservations.',
+      })
+    }
+
+    if (SERVER_API_ENABLED) {
+      try {
+        const published = await publishServerIcalFeed(selectedChannel, {
+          importUrl: trimmedImportUrl,
+          exportFileName,
+        })
+        toast.success(`${selectedChannel.name} hosted iCal URL published`, {
+          description: published.exportFeedUrl || 'Use the hosted URL in your OTA or channel manager.',
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Hosted feed URL could not be published.'
+        toast.warning(`${selectedChannel.name} local iCal setup saved`, {
+          description: `Server feed URL was not published: ${message}`,
+        })
+      }
+    }
+
+    setImportUrl('')
+    setIcalText('')
     setShowConnectDialog(false)
-    toast.info(`${selectedChannel.name} credentials saved`, {
-      description: 'A live channel connector is required before sync can be enabled.',
-    })
   }
 
-  const handleDisconnect = (channelId: string) => {
+  const handleDisconnect = async (channelId: string) => {
     const channel = channels.find(c => c.id === channelId)
     if (!channel) return
 
@@ -312,6 +668,11 @@ export function ChannelsView() {
               connected: false,
               enabled: false,
               status: 'DISCONNECTED',
+              iCal: {
+                ...c.iCal,
+                exportFeedUrl: undefined,
+                lastError: undefined,
+              },
               credentials: undefined
             }
           : c
@@ -322,52 +683,77 @@ export function ChannelsView() {
       id: `log_${Date.now()}`,
       channelId,
       timestamp: new Date().toISOString(),
-      type: 'INVENTORY',
+      type: 'ICAL_IMPORT',
       status: 'WARNING',
-      message: `Disconnected from ${channel.name}`
+      message: `Removed iCal feed from ${channel.name}`
     }
     setSyncLogs(current => [log, ...current])
 
-    toast.success(`Disconnected from ${channel.name}`)
+    toast.success(`Removed ${channel.name} iCal setup`)
+
+    if (SERVER_API_ENABLED) {
+      try {
+        await pmsApi(`/api/channels/ical/${providerPath(channel.provider)}`, undefined, { method: 'DELETE' })
+      } catch (error) {
+        toast.warning(`${channel.name} was removed locally`, {
+          description: error instanceof Error ? error.message : 'The hosted feed could not be disabled on the server.',
+        })
+      }
+    }
   }
 
   const handleSync = async (channelId: string) => {
     const channel = channels.find(c => c.id === channelId)
     if (!channel) return
 
-    setSyncing(true)
-    
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    const log: SyncLog = {
-      id: `log_${Date.now()}`,
-      channelId,
-      timestamp: new Date().toISOString(),
-      type: 'RESERVATIONS',
-      status: 'WARNING',
-      message: `Manual sync checked ${channel.name}`,
-      details: 'No live channel connector is configured, so no reservations were imported.'
+    const feedUrl = channel.iCal?.importUrl?.trim()
+    if (!feedUrl) {
+      toast.error(`Add a ${channel.name} iCal feed URL first`)
+      return
     }
-    setSyncLogs(current => [log, ...current])
 
-    setChannels(current => 
-      current.map(c => 
-        c.id === channelId 
-          ? { ...c, lastSync: new Date().toISOString() }
-          : c
-      )
-    )
-
-    setSyncing(false)
-    toast.info(`Checked ${channel.name}`, {
-      description: 'No live channel connector is configured.'
-    })
+    setSyncing(true)
+    try {
+      const response = await fetch(feedUrl, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(`Feed returned HTTP ${response.status}`)
+      }
+      const text = await response.text()
+      const result = importIcalTextForChannel(channel, text)
+      toast.success(`Imported ${channel.name} iCal feed`, {
+        description: `${result.imported} new event${result.imported === 1 ? '' : 's'} added to the review queue.`,
+      })
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unable to fetch iCal feed'
+      setChannels(current => current.map(c => c.id === channelId
+        ? {
+            ...c,
+            status: 'ERROR',
+            iCal: { ...c.iCal, lastError: errorMessage },
+          }
+        : c
+      ))
+      setSyncLogs(current => [{
+        id: `log_${Date.now()}`,
+        channelId,
+        timestamp: new Date().toISOString(),
+        type: 'ICAL_IMPORT',
+        status: 'ERROR',
+        message: `Could not import ${channel.name} iCal feed`,
+        details: `${errorMessage}. If the OTA blocks browser fetches, paste the .ics contents in the iCal setup dialog.`,
+      }, ...current])
+      toast.error(`Could not import ${channel.name} iCal`, {
+        description: errorMessage,
+      })
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const handleSyncAll = async () => {
     setSyncing(true)
-    
-    for (const channel of connectedChannels) {
+
+    for (const channel of connectedChannels.filter((item) => item.iCal?.importUrl)) {
       await handleSync(channel.id)
       await new Promise(resolve => setTimeout(resolve, 500))
     }
@@ -376,6 +762,63 @@ export function ChannelsView() {
   }
 
   const handleImportReservation = (reservation: ChannelReservation) => {
+    const channel = channels.find(c => c.id === reservation.channelId)
+    const roomTypeCode = roomTypeCodeFromName(reservation.roomType)
+    const checkIn = new Date(reservation.checkIn)
+    const checkOut = new Date(reservation.checkOut)
+    const importedAt = new Date()
+    const reservationRecord = {
+      id: reservation.id,
+      confirmationNumber: reservation.channelRef,
+      status: 'CONFIRMED' as const,
+      guestId: `guest_${reservation.id}`,
+      guestName: reservation.guestName,
+      guestEmail: undefined,
+      guestPhone: undefined,
+      roomType: roomTypeCode,
+      roomTypeName: reservation.roomType,
+      checkIn,
+      checkOut,
+      nights: reservation.nights,
+      adults: 1,
+      children: 0,
+      ratePerNight: 0,
+      totalAmount: reservation.totalAmount,
+      depositAmount: 0,
+      depositPaid: 0,
+      depositStatus: 'NONE' as const,
+      balanceDue: reservation.totalAmount,
+      source: channel?.provider || 'OTHER',
+      channelRef: reservation.channelRef,
+      isVIP: false,
+      notes: 'Imported from iCal. Confirm guest details, payment, and room assignment manually.',
+      createdAt: importedAt,
+      updatedAt: importedAt,
+      createdBy: 'iCal import',
+    }
+    const unassignedRecord = {
+      id: reservation.id,
+      guestName: reservation.guestName,
+      checkIn,
+      checkOut,
+      roomType: roomTypeCode,
+      guestCount: 1,
+      nights: reservation.nights,
+      source: `${channel?.name || reservation.channelId} iCal`,
+      ratePerNight: 0,
+      totalAmount: reservation.totalAmount,
+      depositAmount: 0,
+      balanceDue: reservation.totalAmount,
+      notes: reservationRecord.notes,
+    }
+    const appendUnique = (record: any) => (current: any[] = []) => {
+      if ((current || []).some((item) => item.id === record.id)) return current || []
+      return [record, ...(current || [])]
+    }
+
+    setPmsReservations(appendUnique(reservationRecord))
+    setReservationData(appendUnique(reservationRecord))
+    setUnassignedReservations(appendUnique(unassignedRecord))
     setReservations(current => 
       current.map(r => 
         r.id === reservation.id 
@@ -384,8 +827,9 @@ export function ChannelsView() {
       )
     )
 
-    const channel = channels.find(c => c.id === reservation.channelId)
-    toast.success(`Imported reservation from ${channel?.name}`)
+    toast.success(`Imported reservation from ${channel?.name}`, {
+      description: 'It is now in the PMS assignment queue. Confirm guest details before check-in.',
+    })
   }
 
   const toggleChannel = (channelId: string) => {
@@ -570,17 +1014,17 @@ export function ChannelsView() {
             </div>
             <div>
               <h1 className="text-2xl font-bold">Channel Manager</h1>
-              <p className="text-sm text-muted-foreground">OTA integrations and inventory sync</p>
+              <p className="text-sm text-muted-foreground">OTA iCal feeds, room mapping, and import review</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <Button 
               variant="outline" 
               onClick={handleSyncAll}
-              disabled={syncing || connectedChannels.length === 0}
+              disabled={syncing || connectedChannels.filter((item) => item.iCal?.importUrl).length === 0}
             >
               <ArrowClockwise className={cn("w-4 h-4 mr-2", syncing && "animate-spin")} />
-              Sync All Channels
+              Import All iCal
             </Button>
           </div>
         </div>
@@ -629,11 +1073,11 @@ export function ChannelsView() {
                 <div className="grid grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">Connected OTAs</CardTitle>
+                      <CardTitle className="text-sm font-medium text-muted-foreground">iCal Feeds</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{connectedChannels.length}/{channels.length}</div>
-                      <p className="text-xs text-muted-foreground">Credentials saved locally</p>
+                      <p className="text-xs text-muted-foreground">OTA feeds configured</p>
                     </CardContent>
                   </Card>
 
@@ -649,11 +1093,11 @@ export function ChannelsView() {
 
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">Pending Imports</CardTitle>
+                      <CardTitle className="text-sm font-medium text-muted-foreground">Pending iCal Imports</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-2xl font-bold">{pendingReservations.length}</div>
-                      <p className="text-xs text-muted-foreground">OTA bookings awaiting PMS import</p>
+                      <p className="text-xs text-muted-foreground">Date blocks awaiting PMS import</p>
                     </CardContent>
                   </Card>
 
@@ -702,19 +1146,67 @@ export function ChannelsView() {
                   <CardContent className="flex-1">
                     {channel.connected ? (
                       <div className="space-y-4">
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-4 gap-4">
                           <div>
-                            <p className="text-xs text-muted-foreground mb-1">Bookings</p>
-                            <p className="text-xl font-bold">{channel.stats?.totalBookings || 0}</p>
+                            <p className="text-xs text-muted-foreground mb-1">Mode</p>
+                            <p className="text-xl font-bold">iCal</p>
                           </div>
                           <div>
-                            <p className="text-xs text-muted-foreground mb-1">Revenue</p>
-                            <p className="text-xl font-bold">THB {(channel.stats?.monthlyRevenue || 0).toLocaleString()}</p>
+                            <p className="text-xs text-muted-foreground mb-1">Import feed</p>
+                            <p className="text-xl font-bold">{channel.iCal?.importUrl ? 'Saved' : 'Missing'}</p>
                           </div>
                           <div>
-                            <p className="text-xs text-muted-foreground mb-1">Occupancy</p>
-                            <p className="text-xl font-bold">{channel.stats?.occupancyRate || 0}%</p>
+                            <p className="text-xs text-muted-foreground mb-1">Rates</p>
+                            <p className="text-xl font-bold">Manual</p>
                           </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Export feed</p>
+                            <p className="text-xl font-bold">{channel.iCal?.exportFeedUrl ? 'Live' : SERVER_API_ENABLED ? 'Draft' : 'File'}</p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                          iCal syncs blocked dates and simple reservation events only. Keep rates, restrictions, payments, and full guest details in your OTA or channel manager.
+                        </div>
+
+                        <div className="rounded-md border p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">Hosted export feed</p>
+                              <p className="text-xs text-muted-foreground">
+                                {channel.iCal?.exportFeedUrl
+                                  ? 'Copy this URL into the OTA or channel manager calendar import.'
+                                  : SERVER_API_ENABLED
+                                    ? 'Publish the server feed URL before adding this channel to an OTA.'
+                                    : 'Available after deployment in server mode; local preview can download .ics files.'}
+                              </p>
+                            </div>
+                            {channel.iCal?.lastPublishedAt && (
+                              <Badge variant="outline">
+                                {format(new Date(channel.iCal.lastPublishedAt), 'MMM d, HH:mm')}
+                              </Badge>
+                            )}
+                          </div>
+                          {channel.iCal?.exportFeedUrl && (
+                            <div className="mt-3 flex gap-2">
+                              <Input
+                                readOnly
+                                value={channel.iCal.exportFeedUrl}
+                                className="h-8 text-xs"
+                              />
+                              <Button size="sm" variant="outline" onClick={() => handleCopyIcalFeedUrl(channel)}>
+                                Copy
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handlePublishIcalFeed(channel, true)}
+                                disabled={publishingFeedId === channel.id}
+                              >
+                                Rotate
+                              </Button>
+                            </div>
+                          )}
                         </div>
 
                         <Separator />
@@ -750,18 +1242,44 @@ export function ChannelsView() {
 
                         <div>
                           <p className="text-sm text-muted-foreground mb-2">
-                            Last sync: {channel.lastSync ? format(new Date(channel.lastSync), 'MMM d, HH:mm') : 'Never'}
+                            Last import: {channel.iCal?.lastImportAt ? format(new Date(channel.iCal.lastImportAt), 'MMM d, HH:mm') : 'Never'}
                           </p>
-                          <div className="flex gap-2">
-                            <Button 
-                              className="flex-1" 
-                              variant="outline" 
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              className="flex-1"
+                              variant="outline"
                               size="sm"
                               onClick={() => handleSync(channel.id)}
-                              disabled={syncing || !channel.enabled}
+                              disabled={syncing || !channel.iCal?.importUrl}
                             >
                               <ArrowClockwise className={cn("w-4 h-4 mr-2", syncing && "animate-spin")} />
-                              Sync Now
+                              Import iCal
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadIcalExport(channel)}
+                            >
+                              <ArrowUp className="w-4 h-4 mr-2" />
+                              Export .ics
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePublishIcalFeed(channel)}
+                              disabled={!SERVER_API_ENABLED || publishingFeedId === channel.id}
+                              title={SERVER_API_ENABLED ? 'Publish hosted iCal URL' : 'Hosted URLs require server mode'}
+                            >
+                              <Link className="w-4 h-4 mr-2" />
+                              Publish URL
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openIcalDialog(channel)}
+                            >
+                              <Link className="w-4 h-4 mr-2" />
+                              Setup
                             </Button>
                             <Button 
                               variant="outline" 
@@ -778,15 +1296,12 @@ export function ChannelsView() {
                       <div className="text-center py-8">
                         <LinkBreak className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                         <p className="text-sm text-muted-foreground mb-4">
-                          Connect {channel.name} to sync inventory and reservations
+                          Add a {channel.name} iCal feed URL to import OTA date blocks and export PMS blocks.
                         </p>
                         <div className="flex justify-center gap-2">
-                          <Button onClick={() => {
-                            setSelectedChannel(channel)
-                            setShowConnectDialog(true)
-                          }}>
+                          <Button onClick={() => openIcalDialog(channel)}>
                             <Link className="w-4 h-4 mr-2" />
-                            Connect Channel
+                            Set Up iCal
                           </Button>
                           <Button
                             variant="outline"
@@ -1062,7 +1577,7 @@ export function ChannelsView() {
                         <CardHeader>
                           <CardTitle>Saved Mappings</CardTitle>
                           <CardDescription>
-                            Saved mappings define how OTA listings should match PMS rooms when connectors or imports are wired.
+                            Saved mappings define how OTA listings should match PMS rooms for iCal imports and block exports.
                           </CardDescription>
                         </CardHeader>
                         <CardContent>
@@ -1362,41 +1877,44 @@ export function ChannelsView() {
       <Dialog open={showConnectDialog} onOpenChange={setShowConnectDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Connect {selectedChannel?.name}</DialogTitle>
+            <DialogTitle>Set Up {selectedChannel?.name} iCal</DialogTitle>
             <DialogDescription>
-              Save your {selectedChannel?.name} credentials. A live connector must be added before synchronization is enabled.
+              Use calendar feeds when private PMS API access is not available. Import feeds pull OTA date blocks; exports produce PMS blocks for your OTA or channel manager.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>API Key</Label>
+              <Label>OTA Import iCal URL</Label>
               <Input
-                type="password"
-                placeholder="Enter API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="https://.../calendar.ics"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
               />
+              <p className="text-xs text-muted-foreground">
+                Paste the private iCal export URL from {selectedChannel?.name} or from your channel manager.
+              </p>
             </div>
             <div className="space-y-2">
-              <Label>Property ID</Label>
-              <Input
-                placeholder="Enter property ID"
-                value={propertyId}
-                onChange={(e) => setPropertyId(e.target.value)}
+              <Label>One-Time iCal Import</Label>
+              <Textarea
+                placeholder="Paste BEGIN:VCALENDAR ... END:VCALENDAR if the OTA feed cannot be fetched directly."
+                value={icalText}
+                onChange={(e) => setIcalText(e.target.value)}
+                rows={6}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Hotel ID (Optional)</Label>
-              <Input
-                placeholder="Enter hotel ID if required"
-                value={hotelId}
-                onChange={(e) => setHotelId(e.target.value)}
-              />
+            <div className="rounded-md border bg-muted/50 p-3 text-xs text-muted-foreground">
+              Export file: {selectedChannel ? exportFileNameForChannel(selectedChannel) : 'sandbox-hotel-blocks.ics'}. Download it locally or publish a hosted /ical feed URL in server mode for OTA subscription imports.
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowConnectDialog(false)}>Cancel</Button>
-            <Button onClick={handleConnectChannel}>Save Credentials</Button>
+            <Button
+              onClick={handleConnectChannel}
+              disabled={Boolean(selectedChannel && publishingFeedId === selectedChannel.id)}
+            >
+              Save iCal Setup
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

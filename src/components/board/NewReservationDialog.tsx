@@ -164,6 +164,8 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const [checkIn, setCheckIn] = useState<Date>(() => getDefaultCheckInDate())
   const [checkOut, setCheckOut] = useState<Date>(() => getDefaultCheckOutDate())
+  const [checkInCalendarOpen, setCheckInCalendarOpen] = useState(false)
+  const [checkOutCalendarOpen, setCheckOutCalendarOpen] = useState(false)
   const [formData, setFormData] = useState<ReservationFormState>(() => createInitialFormData())
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -210,11 +212,15 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
     const currentStayLength = Math.max(1, nightsBetween(checkIn, checkOut))
     setCheckIn(nextCheckIn)
     setCheckOut(addDays(nextCheckIn, currentStayLength))
+    setCheckInCalendarOpen(false)
+    window.setTimeout(() => setCheckInCalendarOpen(false), 0)
   }
 
   const handleCheckOutChange = (date: Date | undefined) => {
     if (!date) return
     setCheckOut(startOfDay(date))
+    setCheckOutCalendarOpen(false)
+    window.setTimeout(() => setCheckOutCalendarOpen(false), 0)
   }
 
   const applyStayLength = (stayLength: number) => {
@@ -465,17 +471,18 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <Label className="text-sm">Check-in Date</Label>
-                      <Popover>
+                      <Popover modal open={checkInCalendarOpen} onOpenChange={setCheckInCalendarOpen}>
                         <PopoverTrigger asChild>
                           <Button variant="outline" className="mt-2 h-11 w-full justify-start text-left text-sm">
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {format(checkIn, 'EEE, MMM d, yyyy')}
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
+                        <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
                             selected={checkIn}
+                            defaultMonth={checkIn}
                             onSelect={handleCheckInChange}
                             disabled={(date) => startOfDay(date) < today}
                           />
@@ -484,17 +491,18 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                     </div>
                     <div>
                       <Label className="text-sm">Check-out Date</Label>
-                      <Popover>
+                      <Popover modal open={checkOutCalendarOpen} onOpenChange={setCheckOutCalendarOpen}>
                         <PopoverTrigger asChild>
                           <Button variant="outline" className="mt-2 h-11 w-full justify-start text-left text-sm">
                             <CalendarIcon className="mr-2 h-4 w-4" />
                             {format(checkOut, 'EEE, MMM d, yyyy')}
                           </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
+                        <PopoverContent className="w-auto p-0" align="start">
                           <Calendar
                             mode="single"
                             selected={checkOut}
+                            defaultMonth={checkOut}
                             onSelect={handleCheckOutChange}
                             disabled={(date) => startOfDay(date) <= startOfDay(checkIn)}
                           />

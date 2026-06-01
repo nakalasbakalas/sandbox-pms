@@ -40,6 +40,7 @@ interface Channel {
   provider: string
   enabled: boolean
   connected: boolean
+  connectionMode?: 'ICAL'
 }
 
 interface RateParityPanelProps {
@@ -73,7 +74,7 @@ export function RateParityPanel({ connectedChannels }: RateParityPanelProps) {
 
   const activeViolations = getActiveViolations()
   const overallScore = getOverallParityScore()
-  const enabledChannels = connectedChannels.filter(c => c.enabled && c.connected)
+  const enabledChannels = connectedChannels.filter(c => c.enabled && c.connected && c.connectionMode !== 'ICAL')
 
   const handleCheckNow = async () => {
     if (enabledChannels.length === 0) {

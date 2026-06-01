@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 
 async function importTypeScriptModule(path) {
   const source = await readFile(path, 'utf8')
@@ -41,6 +42,7 @@ const assistantIntents = await importTypeScriptModule(resolve('src/lib/assistant
 const assistantTools = await importTypeScriptModule(resolve('src/lib/assistant/tools.ts'))
 const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
+const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-26'), 0, 'rejects zero-night stays')
@@ -328,6 +330,70 @@ const mappedUser = serverAuthClient.mapServerUser({
 })
 assert.equal(mappedUser.email, 'frontdesk@property.test', 'server auth users are email-based')
 assert.equal(mappedUser.role, 'front-desk', 'server auth users map backend roles to UI roles')
+
+const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:booking-test-001
+DTSTART;VALUE=DATE:20260612
+DTEND;VALUE=DATE:20260614
+SUMMARY:Booking.com iCal booking
+DESCRIPTION:Smoke\\nimport
+END:VEVENT
+END:VCALENDAR`)
+assert.equal(parsedIcal.events.length, 1, 'iCal parser imports VEVENT date blocks')
+assert.equal(parsedIcal.events[0].uid, 'booking-test-001')
+assert.equal(parsedIcal.events[0].checkIn, '2026-06-12')
+assert.equal(parsedIcal.events[0].checkOut, '2026-06-14')
+assert.equal(parsedIcal.events[0].description, 'Smoke\nimport')
+
+const generatedIcal = ical.generateIcalFeed('Sandbox Hotel Blocks', [{
+  uid: 'res,1',
+  summary: 'Sandbox Hotel block - Twin; balcony',
+  checkIn: '2026-06-12',
+  checkOut: '2026-06-14',
+  description: 'Unavailable in PMS',
+}])
+assert.match(generatedIcal, /^BEGIN:VCALENDAR/, 'iCal export starts with calendar envelope')
+assert.match(generatedIcal, /DTSTART;VALUE=DATE:20260612/, 'iCal export includes check-in date')
+assert.match(generatedIcal, /DTEND;VALUE=DATE:20260614/, 'iCal export includes check-out date')
+assert.match(generatedIcal, /UID:res\\,1/, 'iCal export escapes UID text')
+assert.match(generatedIcal, /SUMMARY:Sandbox Hotel block - Twin\\; balcony/, 'iCal export escapes summary text')
+
+assert.equal(normalizeIcalProvider('booking-com'), 'BOOKING_COM', 'server iCal provider slugs normalize to enums')
+assert.equal(
+  buildIcalFeedUrl('https://pms.example.test/', 'token_1234567890123456'),
+  'https://pms.example.test/ical/token_1234567890123456.ics',
+  'server iCal feed URLs use the public app origin',
+)
+
+const fakeIcalPrisma = {
+  reservation: {
+    findMany: async (query) => {
+      assert.deepEqual(query.where.roomTypeId, { in: ['rt-twin'] }, 'server iCal feed honors active room-type mappings')
+      return [{
+        id: 'res-ical-1',
+        confirmationCode: 'SBX-ICAL-1',
+        roomType: { code: 'TWIN', name: 'Standard Twin' },
+        checkIn: new Date('2026-06-12T00:00:00.000Z'),
+        checkOut: new Date('2026-06-14T00:00:00.000Z'),
+      }]
+    },
+  },
+}
+const serverIcalFeed = await buildIcalFeedForChannel(fakeIcalPrisma, {
+  name: 'Booking.com',
+  provider: 'BOOKING_COM',
+  propertyId: 'property-1',
+  mappings: [
+    { roomTypeId: 'rt-twin', active: true },
+    { roomTypeId: 'rt-double', active: false },
+  ],
+}, new Date('2026-06-01T00:00:00.000Z'))
+assert.match(serverIcalFeed, /X-WR-CALNAME:Booking.com - Sandbox Hotel Blocks/, 'server iCal feed names the channel calendar')
+assert.match(serverIcalFeed, /DTSTART;VALUE=DATE:20260612/, 'server iCal feed exports reservation start dates')
+assert.match(serverIcalFeed, /DTEND;VALUE=DATE:20260614/, 'server iCal feed exports reservation end dates')
+assert.equal(serverIcalFeed.includes('Guest'), false, 'server iCal feed avoids guest PII in event summaries')
 
 function shiftDateKey(dateKey, days) {
   const date = new Date(`${dateKey}T00:00:00.000Z`)

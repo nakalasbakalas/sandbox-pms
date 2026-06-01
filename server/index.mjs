@@ -10,6 +10,12 @@ import { createPrismaClient } from './prisma-client.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import {
+  configureIcalFeedChannel,
+  deactivateIcalFeedChannel,
+  getIcalFeedByToken,
+  listIcalFeedChannels,
+} from './ical-feed.mjs'
+import {
   assignRoom,
   authenticateUser,
   cancelReservation,
@@ -194,6 +200,15 @@ function sendNoContent(response, headers = {}) {
     ...mergeResponseHeaders(response, headers),
   })
   response.end()
+}
+
+function sendCalendar(response, contents, fileName) {
+  response.writeHead(200, {
+    'content-type': 'text/calendar; charset=utf-8',
+    'content-disposition': `inline; filename="${String(fileName || 'sandbox-hotel-blocks.ics').replace(/"/g, '')}"`,
+    'cache-control': 'no-store',
+  })
+  response.end(contents)
 }
 
 async function readJson(request) {
@@ -542,6 +557,31 @@ async function handleApi(request, response, url) {
 
   let params
 
+  if (url.pathname === '/api/channels/ical' && request.method === 'GET') {
+    requirePermission(user, 'view:channels')
+    sendJson(response, 200, { ok: true, data: await listIcalFeedChannels(db, requestBaseOrigin(request)) })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/channels\/ical\/(?<provider>[^/]+)$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'manage:channels')
+    const feed = await configureIcalFeedChannel(
+      db,
+      { provider: params.provider, ...(await readJson(request)) },
+      requestBaseOrigin(request),
+    )
+    sendJson(response, 200, { ok: true, data: feed, message: `${feed.name} iCal feed published.` })
+    return true
+  }
+
+  if (params && request.method === 'DELETE') {
+    requirePermission(user, 'manage:channels')
+    const feed = await deactivateIcalFeedChannel(db, params.provider, requestBaseOrigin(request))
+    sendJson(response, 200, { ok: true, data: feed, message: `${feed.name} iCal feed disabled.` })
+    return true
+  }
+
   if (url.pathname === '/api/settings/room-setup' && request.method === 'GET') {
     requirePermission(user, 'view:settings')
     sendJson(response, 200, { ok: true, data: await getRoomSetup(db) })
@@ -743,6 +783,13 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === '/api/line/webhook') {
       await handleLineWebhook(request, response)
+      return
+    }
+
+    const icalParams = routeParam(url.pathname, /^\/ical\/(?<token>[a-zA-Z0-9_-]+)\.ics$/)
+    if (icalParams && request.method === 'GET') {
+      const feed = await getIcalFeedByToken(await getPrisma(), icalParams.token)
+      sendCalendar(response, feed.contents, feed.fileName)
       return
     }
 
