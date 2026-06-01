@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sandbox-hotel-pms
+    name: sandbox-hotel-pms-v43m
     runtime: node
     plan: starter
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build
