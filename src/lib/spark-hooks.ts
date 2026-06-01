@@ -71,11 +71,20 @@ export function useKV<T = string>(
 ): readonly [T, KVSetter<T>, () => void] {
   const defaultValueRef = useRef(initialValue as T)
   const [value, setValue] = useState<T>(() => readStoredValue(key, defaultValueRef.current))
+  const valueRef = useRef(value)
+
+  useEffect(() => {
+    valueRef.current = value
+  }, [value])
 
   useEffect(() => {
     ensureLocalSparkFallback()
 
-    const syncValue = () => setValue(readStoredValue(key, defaultValueRef.current))
+    const syncValue = () => {
+      const storedValue = readStoredValue(key, defaultValueRef.current)
+      valueRef.current = storedValue
+      setValue(storedValue)
+    }
     const handleStorage = (event: StorageEvent) => {
       if (event.key === key) syncValue()
     }
@@ -93,20 +102,20 @@ export function useKV<T = string>(
 
   const setStoredValue = useCallback<KVSetter<T>>(
     (newValue) => {
-      setValue((current) => {
-        const resolvedValue = typeof newValue === 'function'
-          ? (newValue as (oldValue: T) => T)(current)
-          : newValue
+      const resolvedValue = typeof newValue === 'function'
+        ? (newValue as (oldValue: T) => T)(valueRef.current)
+        : newValue
 
-        writeStoredValue(key, resolvedValue)
-        return resolvedValue
-      })
+      valueRef.current = resolvedValue
+      setValue(resolvedValue)
+      writeStoredValue(key, resolvedValue)
     },
     [key]
   )
 
   const deleteValue = useCallback(() => {
     deleteStoredValue(key)
+    valueRef.current = defaultValueRef.current
     setValue(defaultValueRef.current)
   }, [key])
 

@@ -22,36 +22,36 @@ export function BoardStatsBar({ stats }: BoardStatsBarProps) {
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
       {kpis.map((kpi) => (
         <div
           key={kpi.label}
-          className="flex items-center gap-2 rounded-lg bg-card border border-border/60 px-2.5 py-1.5 transition-colors hover:border-border/80"
+          className="flex min-w-0 items-center gap-1.5 rounded-md bg-card border border-border/60 px-2 py-1 transition-colors hover:border-border/80"
         >
-          <div className={cn('flex items-center justify-center w-7 h-7 rounded-md', kpi.bg)}>
-            <kpi.icon weight="duotone" className={cn('w-3.5 h-3.5', kpi.color)} />
+          <div className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-md', kpi.bg)}>
+            <kpi.icon weight="duotone" className={cn('w-3 h-3', kpi.color)} />
           </div>
           <div className="min-w-0">
-            <div className={cn('text-base font-semibold leading-none tracking-tight', kpi.color)}>{kpi.value}</div>
-            <div className="text-[9px] text-muted-foreground mt-0.5 font-medium uppercase tracking-wide">{kpi.label}</div>
+            <div className={cn('text-sm font-semibold leading-none tracking-tight', kpi.color)}>{kpi.value}</div>
+            <div className="truncate text-[8px] text-muted-foreground mt-0.5 font-medium uppercase tracking-wide">{kpi.label}</div>
           </div>
         </div>
       ))}
 
-      <div className="flex items-center gap-2 rounded-lg bg-card border border-border/60 px-2.5 py-1.5 transition-colors hover:border-border/80">
+      <div className="flex min-w-0 items-center gap-1.5 rounded-md bg-card border border-border/60 px-2 py-1 transition-colors hover:border-border/80">
         <div className={cn(
-          'flex items-center justify-center w-7 h-7 rounded-md',
+          'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
           stats.occupancyRate >= 80 ? 'bg-emerald-50' :
           stats.occupancyRate >= 60 ? 'bg-blue-50' :
           'bg-amber-50'
         )}>
-          <ChartBar weight="duotone" className={cn('w-3.5 h-3.5', occupancyColor)} />
+          <ChartBar weight="duotone" className={cn('w-3 h-3', occupancyColor)} />
         </div>
         <div className="min-w-0">
-          <div className={cn('text-base font-semibold leading-none tracking-tight', occupancyColor)}>
+          <div className={cn('text-sm font-semibold leading-none tracking-tight', occupancyColor)}>
             {stats.occupancyRate.toFixed(0)}%
           </div>
-          <div className="text-[9px] text-muted-foreground mt-0.5 font-medium uppercase tracking-wide">Occupancy</div>
+          <div className="truncate text-[8px] text-muted-foreground mt-0.5 font-medium uppercase tracking-wide">Occupancy</div>
         </div>
       </div>
     </div>

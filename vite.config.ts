@@ -24,6 +24,9 @@ export default defineConfig({
       '@': resolve(projectRoot, 'src')
     }
   },
+  optimizeDeps: {
+    exclude: ['@github/spark/hooks'],
+  },
   build: {
     chunkSizeWarningLimit: 3000,
   },

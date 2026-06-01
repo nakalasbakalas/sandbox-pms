@@ -39,7 +39,16 @@ interface ReservationDocumentData {
   balanceDue?: number
   paidAmount?: number
   ratePerNight?: number
+  extraItemsTotal: number
+  lineItems: ReservationDocumentLineItem[]
   notes?: string
+}
+
+interface ReservationDocumentLineItem {
+  description: string
+  quantity: number | string
+  unitPrice?: number
+  total?: number
 }
 
 const DOCUMENT_TITLES: Record<ReservationDocumentAction, string> = {
@@ -90,6 +99,11 @@ function formatShortDate(value: Date | null) {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
+}
+
+function readNumber(value: unknown) {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : undefined
 }
 
 function formatAmount(value: number | undefined, currency: string) {
@@ -147,6 +161,10 @@ function getReservationId(room: BoardRoomCard) {
   return room.reservation?.id || room.reservationId || room.currentReservationId || `ROOM-${room.number}`
 }
 
+function getReservationIdentifiers(room: BoardRoomCard) {
+  return new Set([room.reservationId, room.currentReservationId, room.reservation?.id, getReservationId(room)].filter((value): value is string => Boolean(value)))
+}
+
 function getNights(checkIn: Date | null, checkOut: Date | null) {
   if (!checkIn || !checkOut) return null
   return Math.max(1, differenceInCalendarDays(checkOut, checkIn))
@@ -159,6 +177,32 @@ function compactDocumentId(value: string) {
 
 function getDocumentNumber(action: ReservationDocumentAction, reservationId: string) {
   return `${DOCUMENT_PREFIXES[action]}-${format(new Date(), 'yyyyMMdd')}-${compactDocumentId(reservationId)}`
+}
+
+function readStoredFolios() {
+  const folios: any[] = []
+
+  for (const key of ['folios', 'cashier-folios']) {
+    try {
+      const raw = window.localStorage.getItem(key)
+      const parsed = raw ? JSON.parse(raw) : []
+      if (Array.isArray(parsed)) folios.push(...parsed)
+    } catch {
+      // Ignore malformed local fallback data and continue with room-level totals.
+    }
+  }
+
+  return folios
+}
+
+function findStoredFolio(room: BoardRoomCard) {
+  const identifiers = getReservationIdentifiers(room)
+
+  return readStoredFolios().find((folio) =>
+    identifiers.has(String(folio?.reservationId || '')) ||
+    identifiers.has(String(folio?.id || '')) ||
+    [...identifiers].some((id) => String(folio?.id || '') === `folio-${id}`)
+  )
 }
 
 export function getReservationDocumentLabel(action: ReservationDocumentAction) {
@@ -179,14 +223,36 @@ function getDocumentData(room: BoardRoomCard, action: ReservationDocumentAction)
   const checkOut = parseDate(room.checkOut || room.reservation?.checkOut)
   const nights = getNights(checkIn, checkOut)
   const reservationId = getReservationId(room)
-  const totalAmount = room.reservation?.totalAmount ?? room.balanceDue
-  const balanceDue = room.balanceDue ?? room.reservation?.balanceDue
+  const folio = findStoredFolio(room)
+  const folioCharges = Array.isArray(folio?.charges) ? folio.charges : []
+  const extraCharges = folioCharges.filter((charge) => charge?.category && charge.category !== 'ROOM')
+  const extraItemsTotal = extraCharges.reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
+  const roomChargeTotal = folioCharges
+    .filter((charge) => charge?.category === 'ROOM')
+    .reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
+  const totalAmount = readNumber(folio?.total) ?? room.reservation?.totalAmount ?? room.balanceDue
+  const balanceDue = readNumber(folio?.balance) ?? room.balanceDue ?? room.reservation?.balanceDue
   const paidAmount = isFiniteNumber(totalAmount) && isFiniteNumber(balanceDue)
     ? Math.max(0, totalAmount - balanceDue)
     : undefined
-  const ratePerNight = isFiniteNumber(totalAmount) && nights
-    ? totalAmount / nights
+  const roomAmount = roomChargeTotal || (isFiniteNumber(totalAmount) ? Math.max(0, totalAmount - extraItemsTotal) : undefined)
+  const ratePerNight = isFiniteNumber(roomAmount) && nights
+    ? roomAmount / nights
     : undefined
+  const lineItems: ReservationDocumentLineItem[] = [
+    {
+      description: `${humanize(room.type)} room ${room.number}`,
+      quantity: nights ?? 'Not set',
+      unitPrice: ratePerNight,
+      total: roomAmount,
+    },
+    ...extraCharges.map((charge): ReservationDocumentLineItem => ({
+      description: readString(charge?.description, humanize(charge?.category)),
+      quantity: Number(charge?.quantity || 1),
+      unitPrice: readNumber(charge?.unitPrice) ?? readNumber(charge?.amount),
+      total: readNumber(charge?.total),
+    })),
+  ]
 
   return {
     action,
@@ -208,6 +274,8 @@ function getDocumentData(room: BoardRoomCard, action: ReservationDocumentAction)
     balanceDue,
     paidAmount,
     ratePerNight,
+    extraItemsTotal,
+    lineItems,
     notes: room.notes,
   }
 }
@@ -242,13 +310,13 @@ function buildStayGrid(data: ReservationDocumentData) {
 
 function buildFinancialRows(data: ReservationDocumentData) {
   const currency = data.property.currency
-  return `
+  return data.lineItems.map((item) => `
     <tr>
-      <td>${escapeHtml(`${data.roomType} room ${data.roomNumber}`)}</td>
-      <td class="text-center">${escapeHtml(data.nights ?? 'Not set')}</td>
-      <td class="text-right">${escapeHtml(formatAmount(data.ratePerNight, currency))}</td>
-      <td class="text-right">${escapeHtml(formatAmount(data.totalAmount, currency))}</td>
-    </tr>`
+      <td>${escapeHtml(item.description)}</td>
+      <td class="text-center">${escapeHtml(item.quantity)}</td>
+      <td class="text-right">${escapeHtml(formatAmount(item.unitPrice, currency))}</td>
+      <td class="text-right">${escapeHtml(formatAmount(item.total, currency))}</td>
+    </tr>`).join('')
 }
 
 function buildFinancialTable(data: ReservationDocumentData) {
@@ -305,6 +373,7 @@ function buildSummaryBody(data: ReservationDocumentData) {
     ${moneyCell('Reservation total', data.totalAmount, currency)}
     ${moneyCell('Total received', data.paidAmount, currency)}
     ${moneyCell('Total outstanding', data.balanceDue, currency)}
+    ${moneyCell('Extra items', data.extraItemsTotal, currency)}
     ${moneyCell('Average nightly rate', data.ratePerNight, currency)}
   </div>
   <h2>Notes</h2>
@@ -573,6 +642,7 @@ function buildEmailBody(data: ReservationDocumentData) {
     `Guests: ${data.guests}`,
     `Nights: ${data.nights ?? 'Not set'}`,
     `Reservation total: ${formatAmount(data.totalAmount, data.property.currency)}`,
+    `Extra items: ${formatAmount(data.extraItemsTotal, data.property.currency)}`,
     `Balance due: ${formatAmount(data.balanceDue, data.property.currency)}`,
     '',
     'Thank you.',

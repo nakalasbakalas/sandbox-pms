@@ -22,6 +22,7 @@ function loadEnvFile(path: string) {
 }
 
 loadEnvFile(resolve(process.cwd(), '.env'))
+loadEnvFile(resolve(process.cwd(), '.env.local'))
 
 const defaultLocalDatabaseUrl = 'postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_dev?schema=public'
 

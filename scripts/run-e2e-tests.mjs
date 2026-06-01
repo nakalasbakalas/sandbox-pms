@@ -1,4 +1,4 @@
-/* global console, fetch, process, setTimeout, window */
+/* global console, document, fetch, process, setTimeout, window */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -25,6 +25,32 @@ loadEnvDefaults()
 const runDbWorkflow = process.argv.includes('--db') || process.env.npm_lifecycle_event === 'test:e2e:db'
 const repoRoot = process.cwd()
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+const AUTHENTICATED_ROUTE_SMOKE_PATHS = [
+  '/',
+  '/board',
+  '/rooms',
+  '/front-desk',
+  '/reservations',
+  '/guests',
+  '/housekeeping',
+  '/tablet-housekeeping',
+  '/cashier',
+  '/rates',
+  '/channels',
+  '/growth-suite',
+  '/reports',
+  '/settings',
+  '/messaging',
+  '/internal-comms',
+  '/guest-communications',
+  '/daily-summary',
+  '/night-audit',
+  '/revenue-analytics',
+  '/predictive-analytics',
+  '/system-status',
+  '/user-management',
+  '/data-backup',
+]
 
 function sleep(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms))
@@ -176,8 +202,8 @@ function browserSmokeSeed() {
     ],
     reservations: [],
     'reservations-data': [],
-    guests: [],
-    'guests-data': [],
+    guests: [{ id: 'legacy-sparse-guest', name: 'Legacy Sparse Guest' }],
+    'guests-data': [{ id: 'legacy-sparse-guest', name: 'Legacy Sparse Guest' }],
     folios: [],
     'cashier-folios': [],
   }
@@ -201,7 +227,7 @@ async function availablePort() {
 }
 
 function startVite(port) {
-  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
+  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--force']
   const child = process.platform === 'win32'
     ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [npm, ...args].join(' ')], {
       cwd: repoRoot,
@@ -269,6 +295,17 @@ async function waitVisible(locator, label) {
   })
 }
 
+async function smokeAuthenticatedRoute(page, baseUrl, path) {
+  await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+
+  const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
+  assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
+  assert.equal(bodyText.includes('Page not found'), false, `${path} rendered Page not found`)
+  assert.equal(bodyText.includes('Access restricted'), false, `${path} rendered Access restricted`)
+  assert.equal(bodyText.includes('Something went wrong'), false, `${path} rendered the error boundary`)
+}
+
 async function runBrowserSmokeTests() {
   const port = await availablePort()
   const baseUrl = `http://127.0.0.1:${port}`
@@ -278,6 +315,10 @@ async function runBrowserSmokeTests() {
     await waitForHttp(baseUrl, server)
     const browser = await chromium.launch({ headless: true })
     const errors = []
+    let currentStep = 'browser setup'
+    const setStep = (step) => {
+      currentStep = step
+    }
 
     try {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -294,11 +335,25 @@ async function runBrowserSmokeTests() {
       const page = await context.newPage()
       page.setDefaultTimeout(60_000)
       page.setDefaultNavigationTimeout(60_000)
-      page.on('pageerror', (error) => errors.push(error.message))
-      page.on('console', (message) => {
-        if (message.type() === 'error') errors.push(message.text())
+      page.on('pageerror', (error) => errors.push(`[${currentStep}] ${error.stack || error.message}`))
+      page.on('console', async (message) => {
+        if (message.type() === 'error') {
+          const location = message.location()
+          const suffix = location.url ? ` (${location.url}:${location.lineNumber}:${location.columnNumber})` : ''
+          const args = []
+          for (const arg of message.args()) {
+            try {
+              args.push(await arg.jsonValue())
+            } catch {
+              // Ignore unserializable console arguments.
+            }
+          }
+          const details = args.length ? ` args=${JSON.stringify(args)}` : ''
+          errors.push(`[${currentStep}] ${message.text()}${suffix}${details}`)
+        }
       })
 
+      setStep('login')
       await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
       await waitVisible(page.getByRole('heading', { name: /hotel pms/i }), 'login screen')
       await page.getByLabel(/email address/i).fill(email)
@@ -309,9 +364,11 @@ async function runBrowserSmokeTests() {
       const legacyToken = await page.evaluate(() => window.localStorage.getItem(['auth', 'pms-token'].join(':')))
       assert.equal(legacyToken, null, 'browser login does not write a JavaScript-readable session token')
 
+      setStep('open board from today')
       await page.getByRole('button', { name: /open front desk board/i }).click()
       await waitVisible(page.getByRole('heading', { name: /front desk board/i }), 'Board navigation')
 
+      setStep('front desk checkout')
       await page.goto(`${baseUrl}/front-desk`, { waitUntil: 'domcontentloaded' })
       await waitVisible(page.getByText('E2E Departing Guest').first(), 'seeded departure')
       await page.getByRole('button', { name: /^express check-out$/i }).first().click()
@@ -322,6 +379,7 @@ async function runBrowserSmokeTests() {
         return rooms.some((room) => room.number === '202' && room.status === 'VACANT_DIRTY' && !room.guestName)
       }, { timeout: 10_000 })
 
+      setStep('front desk check-in')
       await waitVisible(page.getByText('E2E Arrival Guest').first(), 'seeded arrival')
       await page.getByRole('button', { name: /^assign room$/i }).first().click()
       await waitVisible(page.getByRole('heading', { name: /check in: e2e arrival guest/i }), 'check-in dialog')
@@ -333,6 +391,41 @@ async function runBrowserSmokeTests() {
         const rooms = JSON.parse(window.localStorage.getItem('pms-rooms') || '[]')
         return rooms.some((room) => room.number === '201' && room.status === 'OCCUPIED_CLEAN' && room.guestName === 'E2E Arrival Guest')
       }, { timeout: 10_000 })
+
+      setStep('board extra item load')
+      await page.goto(`${baseUrl}/board`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /front desk board/i }), 'Board after check-in')
+      setStep('board extra item open overlay')
+      await page.getByText('E2E Arrival Guest').last().click()
+      await waitVisible(page.getByRole('heading', { name: /reservation .*e2e arrival guest/i }), 'reservation detail overlay')
+      setStep('board extra item view reservation')
+      await page.getByRole('button', { name: /view reservation/i }).click()
+      await page.getByRole('tab', { name: /extra items/i }).click()
+      setStep('board extra item fill form')
+      await page.locator('#reservation-extra-description').fill('Late checkout')
+      await page.locator('#reservation-extra-unit').fill('250')
+      await page.locator('#reservation-extra-quantity').fill('2')
+      setStep('board extra item submit')
+      await page.getByRole('button', { name: /^add$/i }).click()
+      setStep('board extra item verify storage')
+      await page.waitForFunction(() => {
+        const folios = [
+          ...JSON.parse(window.localStorage.getItem('folios') || '[]'),
+          ...JSON.parse(window.localStorage.getItem('cashier-folios') || '[]'),
+        ]
+        return folios.some((folio) =>
+          folio.reservationId === 'res-arrival' &&
+          Number(folio.balance) === 500 &&
+          folio.charges?.some((charge) => charge.description === 'Late checkout' && Number(charge.total) === 500)
+        )
+      }, { timeout: 10_000 })
+      setStep('board extra item close overlay')
+      await page.getByRole('button', { name: /^close$/i }).click()
+
+      for (const path of AUTHENTICATED_ROUTE_SMOKE_PATHS) {
+        setStep(`route smoke ${path}`)
+        await smokeAuthenticatedRoute(page, baseUrl, path)
+      }
 
       assert.deepEqual(errors, [], `browser console/page errors: ${errors.join('\n')}`)
       await context.close()

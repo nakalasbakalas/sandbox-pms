@@ -27,20 +27,54 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import type { ReservationDocumentAction } from '@/lib/reservation-document-actions'
 import { cn } from '@/lib/utils'
 
 export type ReservationStatusAction = 'CONFIRMED' | 'CHECKED_IN' | 'CHECKED_OUT'
+export type ReservationExtraItemCategory = 'EXTRA_GUEST' | 'CHILD' | 'CAFE' | 'LAUNDRY' | 'MINIBAR' | 'DAMAGE' | 'OTHER'
+
+export interface ReservationExtraItemDraft {
+  category: ReservationExtraItemCategory
+  description: string
+  quantity: number
+  unitPrice: number
+}
+
+export interface ReservationExtraItem {
+  id: string
+  date: Date | string
+  category: ReservationExtraItemCategory | 'ROOM'
+  description: string
+  quantity: number
+  unitPrice: number
+  total: number
+  postedBy?: string
+}
+
+export interface ReservationBillingSummary {
+  currency: string
+  roomTotal?: number
+  extraPersonTotal: number
+  extrasTotal: number
+  total?: number
+  received?: number
+  outstanding?: number
+  items: ReservationExtraItem[]
+}
 
 interface ReservationDetailOverlayProps {
   room: BoardRoomCard
+  billing?: ReservationBillingSummary
   onClose: () => void
   onEdit: (room: BoardRoomCard) => void
   onCancelReservation: (room: BoardRoomCard) => void
   onPrint: (room: BoardRoomCard, action: ReservationDocumentAction) => void
   onEmail: (room: BoardRoomCard, action: ReservationDocumentAction) => void
+  onAddExtraItem: (room: BoardRoomCard, item: ReservationExtraItemDraft) => void
   onRecordPayment: (room: BoardRoomCard) => void
   onCheckIn: (room: BoardRoomCard) => void
   onCheckOut: (room: BoardRoomCard) => void
@@ -88,8 +122,8 @@ function formatShortDate(value?: Date) {
   return value ? format(value, 'MMM d') : 'Not set'
 }
 
-function formatAmount(value?: number) {
-  return typeof value === 'number' ? `THB ${value.toLocaleString()}` : 'Not set'
+function formatAmount(value?: number, currency = 'THB') {
+  return typeof value === 'number' ? `${currency} ${value.toLocaleString()}` : 'Not set'
 }
 
 function splitGuestName(name?: string) {
@@ -133,11 +167,13 @@ function SummaryLine({ label, value, strong }: { label: string; value: string; s
 
 export function ReservationDetailOverlay({
   room,
+  billing,
   onClose,
   onEdit,
   onCancelReservation,
   onPrint,
   onEmail,
+  onAddExtraItem,
   onRecordPayment,
   onCheckIn,
   onCheckOut,
@@ -210,6 +246,16 @@ export function ReservationDetailOverlay({
   const roomTypeLabel = `${humanize(room.type)} room`
   const guestsLabel = `${room.guestCount || 1} ${(room.guestCount || 1) === 1 ? 'guest' : 'guests'}`
   const canCheckIn = !checkedIn(room)
+  const billingSummary = billing || {
+    currency: 'THB',
+    roomTotal: details.total,
+    extraPersonTotal: 0,
+    extrasTotal: 0,
+    total: details.total,
+    received: details.received,
+    outstanding: details.outstanding,
+    items: [],
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 p-3 sm:p-6" role="dialog" aria-modal="true">
@@ -225,6 +271,7 @@ export function ReservationDetailOverlay({
           <CompactReservationView
             room={room}
             details={details}
+            billing={billingSummary}
             roomTypeLabel={roomTypeLabel}
             guestsLabel={guestsLabel}
             onClose={onClose}
@@ -262,6 +309,7 @@ export function ReservationDetailOverlay({
                 <ExpandedDetailsTab
                   room={room}
                   details={details}
+                  billing={billingSummary}
                   roomTypeLabel={roomTypeLabel}
                   guestsLabel={guestsLabel}
                   onRecordPayment={() => onRecordPayment(room)}
@@ -287,17 +335,17 @@ export function ReservationDetailOverlay({
                 </SimpleTabPanel>
               </TabsContent>
               <TabsContent value="extras" className="m-0">
-                <SimpleTabPanel title="Extra Items">
-                  <SummaryLine label="Extra person total" value={formatAmount(0)} />
-                  <SummaryLine label="Extras total" value={formatAmount(0)} />
-                </SimpleTabPanel>
+                <ExtraItemsTab
+                  billing={billingSummary}
+                  onAddExtraItem={(item) => onAddExtraItem(room, item)}
+                />
               </TabsContent>
               <TabsContent value="payments" className="m-0">
                 <SimpleTabPanel title="Payments">
                   <div className="max-w-md space-y-3">
-                    <SummaryLine label="Reservation total" value={formatAmount(details.total)} />
-                    <SummaryLine label="Total received" value={formatAmount(details.received)} />
-                    <SummaryLine label="Total outstanding" value={formatAmount(details.outstanding)} strong />
+                    <SummaryLine label="Reservation total" value={formatAmount(billingSummary.total, billingSummary.currency)} />
+                    <SummaryLine label="Total received" value={formatAmount(billingSummary.received, billingSummary.currency)} />
+                    <SummaryLine label="Total outstanding" value={formatAmount(billingSummary.outstanding, billingSummary.currency)} strong />
                     <Button onClick={() => onRecordPayment(room)} className="w-full gap-2">
                       <CreditCard className="h-4 w-4" />
                       Record Payment
@@ -314,7 +362,7 @@ export function ReservationDetailOverlay({
                 <SimpleTabPanel title="Invoices">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <InfoTile icon={<Printer className="h-4 w-4" />} label="Registration card" value="Ready to print" />
-                    <InfoTile icon={<CreditCard className="h-4 w-4" />} label="Outstanding" value={formatAmount(details.outstanding)} />
+                    <InfoTile icon={<CreditCard className="h-4 w-4" />} label="Outstanding" value={formatAmount(billingSummary.outstanding, billingSummary.currency)} />
                   </div>
                 </SimpleTabPanel>
               </TabsContent>
@@ -360,6 +408,7 @@ export function ReservationDetailOverlay({
 function CompactReservationView({
   room,
   details,
+  billing,
   roomTypeLabel,
   guestsLabel,
   onClose,
@@ -371,6 +420,7 @@ function CompactReservationView({
 }: {
   room: BoardRoomCard
   details: ReservationOverlayDetails
+  billing: ReservationBillingSummary
   roomTypeLabel: string
   guestsLabel: string
   onClose: () => void
@@ -427,8 +477,8 @@ function CompactReservationView({
         <div className="space-y-3">
           <div className="rounded-md border border-green-600 bg-green-100 px-3 py-3 text-green-900">
             <div className="mb-2 text-sm font-semibold">{details.paymentLabel}</div>
-            <SummaryLine label="Reservation total" value={formatAmount(details.total)} />
-            <SummaryLine label="Total outstanding" value={formatAmount(details.outstanding)} />
+            <SummaryLine label="Reservation total" value={formatAmount(billing.total, billing.currency)} />
+            <SummaryLine label="Total outstanding" value={formatAmount(billing.outstanding, billing.currency)} />
           </div>
           <div className="flex flex-col items-end gap-1">
             <PrintDropdown onPrint={onPrint} variant="compact" />
@@ -461,12 +511,14 @@ function CompactReservationView({
 function ExpandedDetailsTab({
   room,
   details,
+  billing,
   roomTypeLabel,
   guestsLabel,
   onRecordPayment,
 }: {
   room: BoardRoomCard
   details: ReservationOverlayDetails
+  billing: ReservationBillingSummary
   roomTypeLabel: string
   guestsLabel: string
   onRecordPayment: () => void
@@ -494,12 +546,12 @@ function ExpandedDetailsTab({
         <div className="overflow-x-auto rounded-md bg-muted/40 p-3">
           <div className="grid min-w-[860px] grid-cols-[1.3fr_1.3fr_1fr_.7fr_.8fr_.8fr_1.2fr_.7fr] gap-2">
             <Field label="Room type" value={roomTypeLabel} />
-            <Field label="Room rate" value={formatAmount(room.reservation?.totalAmount)} />
+            <Field label="Room rate" value={formatAmount(billing.roomTotal, billing.currency)} />
             <Field label="Room #" value={`Room ${room.number}`} />
             <Field label="Adults" value={String(room.guestCount || 1)} />
             <Field label="Children" value="0" />
             <Field label="Infants" value="0" />
-            <Field label="Room" value={formatAmount(details.total)} />
+            <Field label="Room" value={formatAmount(billing.roomTotal, billing.currency)} />
             <Field label="Discount" value="0" />
           </div>
         </div>
@@ -529,16 +581,16 @@ function ExpandedDetailsTab({
       <aside className="rounded-md bg-muted/50 p-4">
         <h3 className="mb-4 text-base font-semibold">Booking Summary</h3>
         <div className="space-y-2">
-          <SummaryLine label="Room Total" value={formatAmount(details.total)} />
-          <SummaryLine label="Extra Person Total" value={formatAmount(0)} />
-          <SummaryLine label="Extras Total" value={formatAmount(0)} />
-          <SummaryLine label="Discount Total" value={formatAmount(0)} />
-          <SummaryLine label="Credit Card Surcharges" value={formatAmount(0)} />
+          <SummaryLine label="Room Total" value={formatAmount(billing.roomTotal, billing.currency)} />
+          <SummaryLine label="Extra Person Total" value={formatAmount(billing.extraPersonTotal, billing.currency)} />
+          <SummaryLine label="Extras Total" value={formatAmount(billing.extrasTotal, billing.currency)} />
+          <SummaryLine label="Discount Total" value={formatAmount(0, billing.currency)} />
+          <SummaryLine label="Credit Card Surcharges" value={formatAmount(0, billing.currency)} />
           <div className="my-4 border-t border-border" />
-          <SummaryLine label="Total" value={formatAmount(details.total)} />
-          <SummaryLine label="Total Received" value={formatAmount(details.received)} />
+          <SummaryLine label="Total" value={formatAmount(billing.total, billing.currency)} />
+          <SummaryLine label="Total Received" value={formatAmount(billing.received, billing.currency)} />
           <div className="my-4 border-t border-border" />
-          <SummaryLine label="Total Outstanding" value={formatAmount(details.outstanding)} strong />
+          <SummaryLine label="Total Outstanding" value={formatAmount(billing.outstanding, billing.currency)} strong />
           <Button variant="outline" className="mt-4 w-full" size="sm" onClick={onRecordPayment}>
             Record Payment
           </Button>
@@ -561,6 +613,152 @@ function TabButton({ value, children }: { value: OverlayTab; children: ReactNode
     >
       {children}
     </TabsTrigger>
+  )
+}
+
+function ExtraItemsTab({
+  billing,
+  onAddExtraItem,
+}: {
+  billing: ReservationBillingSummary
+  onAddExtraItem: (item: ReservationExtraItemDraft) => void
+}) {
+  const [category, setCategory] = useState<ReservationExtraItemCategory>('OTHER')
+  const [description, setDescription] = useState('')
+  const [unitPrice, setUnitPrice] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = () => {
+    const amount = Number(unitPrice)
+    const qty = Number(quantity)
+
+    if (!description.trim()) {
+      setError('Description is required.')
+      return
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Unit amount must be greater than zero.')
+      return
+    }
+    if (!Number.isInteger(qty) || qty < 1) {
+      setError('Quantity must be at least 1.')
+      return
+    }
+
+    onAddExtraItem({
+      category,
+      description: description.trim(),
+      quantity: qty,
+      unitPrice: amount,
+    })
+    setDescription('')
+    setUnitPrice('')
+    setQuantity('1')
+    setCategory('OTHER')
+    setError(null)
+  }
+
+  return (
+    <SimpleTabPanel title="Extra Items">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-3">
+          <div className="rounded-md border border-border">
+            <div className="grid grid-cols-[120px_1fr_64px_96px] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[11px] font-semibold uppercase text-muted-foreground">
+              <span>Category</span>
+              <span>Description</span>
+              <span className="text-right">Qty</span>
+              <span className="text-right">Total</span>
+            </div>
+            {billing.items.length ? billing.items.map((item) => (
+              <div key={item.id} className="grid grid-cols-[120px_1fr_64px_96px] gap-2 border-b border-border/60 px-3 py-2 text-xs last:border-b-0">
+                <span className="truncate font-medium">{humanize(item.category)}</span>
+                <span className="min-w-0 truncate">{item.description}</span>
+                <span className="text-right tabular-nums">{item.quantity}</span>
+                <span className="text-right tabular-nums">{formatAmount(item.total, billing.currency)}</span>
+              </div>
+            )) : (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No billable extras posted yet.
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-3 rounded-md border border-border bg-background p-3 md:grid-cols-[180px_minmax(0,1fr)_110px_90px_auto]">
+            <div className="space-y-1.5">
+              <Label className="text-[11px]">Category</Label>
+              <Select value={category} onValueChange={(value) => setCategory(value as ReservationExtraItemCategory)}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="EXTRA_GUEST">Extra guest</SelectItem>
+                  <SelectItem value="CHILD">Child</SelectItem>
+                  <SelectItem value="CAFE">Cafe</SelectItem>
+                  <SelectItem value="MINIBAR">Minibar</SelectItem>
+                  <SelectItem value="LAUNDRY">Laundry</SelectItem>
+                  <SelectItem value="DAMAGE">Damage</SelectItem>
+                  <SelectItem value="OTHER">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="reservation-extra-description" className="text-[11px]">Description</Label>
+              <Input
+                id="reservation-extra-description"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                className="h-8 text-xs"
+                placeholder="Late checkout, minibar, laundry"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="reservation-extra-unit" className="text-[11px]">Unit amount</Label>
+              <Input
+                id="reservation-extra-unit"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={unitPrice}
+                onChange={(event) => setUnitPrice(event.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="reservation-extra-quantity" className="text-[11px]">Qty</Label>
+              <Input
+                id="reservation-extra-quantity"
+                type="number"
+                min="1"
+                step="1"
+                value={quantity}
+                onChange={(event) => setQuantity(event.target.value)}
+                className="h-8 text-xs"
+              />
+            </div>
+            <div className="flex items-end">
+              <Button type="button" size="sm" onClick={submit} className="h-8 w-full">
+                Add
+              </Button>
+            </div>
+            {error && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive md:col-span-5">
+                {error}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <aside className="space-y-2 rounded-md bg-muted/50 p-4">
+          <SummaryLine label="Room total" value={formatAmount(billing.roomTotal, billing.currency)} />
+          <SummaryLine label="Extra person total" value={formatAmount(billing.extraPersonTotal, billing.currency)} />
+          <SummaryLine label="Extras total" value={formatAmount(billing.extrasTotal, billing.currency)} />
+          <div className="my-3 border-t border-border" />
+          <SummaryLine label="Reservation total" value={formatAmount(billing.total, billing.currency)} />
+          <SummaryLine label="Outstanding" value={formatAmount(billing.outstanding, billing.currency)} strong />
+        </aside>
+      </div>
+    </SimpleTabPanel>
   )
 }
 

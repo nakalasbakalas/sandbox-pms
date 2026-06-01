@@ -24,7 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { MoneyDisplay } from '@/components/ui/money-display'
 import { StatusPill } from '@/components/ui/status-pill'
-import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil, Robot, DotsThreeVertical, Receipt, Bed, Key, ListBullets, ArrowsClockwise, Wrench, Prohibit, Star } from '@phosphor-icons/react'
+import { MagnifyingGlass, Funnel, Command, CaretDown, CaretRight, Info, X, Check, Broom, SignOut, Users, Warning, Clock, Plus, Pencil, Robot, DotsThreeVertical, Receipt, Bed, Key, ListBullets, ArrowsClockwise, Wrench, Prohibit, Star, Sparkle, DoorOpen, TrendUp, TrendDown, ChartBar, CalendarBlank } from '@phosphor-icons/react'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { CommandPalette } from '@/components/CommandPalette'
@@ -39,7 +39,13 @@ import { useKV } from '@github/spark/hooks'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { NewReservationDialog, type NewReservationData } from './NewReservationDialog'
 import { EditReservationDialog } from './EditReservationDialog'
-import { ReservationDetailOverlay, type ReservationStatusAction } from './ReservationDetailOverlay'
+import {
+  ReservationDetailOverlay,
+  type ReservationBillingSummary,
+  type ReservationExtraItemDraft,
+  type ReservationExtraItemCategory,
+  type ReservationStatusAction,
+} from './ReservationDetailOverlay'
 import { CheckInDialog } from '@/components/front-desk/CheckInDialog'
 import { CheckOutDialog } from '@/components/front-desk/CheckOutDialog'
 import { useKeyboardShortcuts } from '@/hooks/use-keyboard-shortcuts'
@@ -48,7 +54,7 @@ import { useAutomaticHousekeepingMessaging } from '@/hooks/use-automatic-houseke
 import { AutomatedMessagingSettings } from '@/components/settings/AutomatedMessagingSettings'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { createAuditRecord, type AuditRecord } from '@/lib/hotel/operations'
-import { getRoomAssignmentDecision, getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
+import { getRoomAssignmentDecision, getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem } from '@/types/front-desk'
 import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
@@ -135,6 +141,62 @@ interface GuestDirectoryRecord {
   preferredContact?: 'EMAIL' | 'PHONE' | 'LINE'
   createdAt: Date
   updatedAt: Date
+}
+
+interface BoardFolioCharge {
+  id: string
+  date: Date
+  category: 'ROOM' | ReservationExtraItemCategory
+  description: string
+  quantity: number
+  unitPrice: number
+  subtotal: number
+  tax: number
+  total: number
+  postedBy: string
+}
+
+interface BoardFolioPayment {
+  id: string
+  date: Date
+  method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'ONLINE' | 'OTHER'
+  amount: number
+  reference?: string
+  receivedBy: string
+}
+
+interface BoardFolio {
+  id: string
+  reservationId: string
+  guestName: string
+  roomNumber: string
+  checkIn: Date
+  checkOut?: Date
+  status: 'OPEN' | 'CLOSED' | 'VOID'
+  charges: BoardFolioCharge[]
+  payments: BoardFolioPayment[]
+  subtotal: number
+  tax: number
+  total: number
+  paid: number
+  balance: number
+  createdAt: Date
+  updatedAt: Date
+  closedAt?: Date
+}
+
+const BOARD_ROOM_LABEL_WIDTH = 136
+
+function getTimelineMinCellWidth(dateCount: number) {
+  if (dateCount >= 30) return 58
+  if (dateCount >= 14) return 68
+  return 88
+}
+
+function getTimelineRowHeightClass(dateCount: number) {
+  if (dateCount >= 30) return 'min-h-[22px]'
+  if (dateCount >= 14) return 'min-h-[24px]'
+  return 'min-h-[26px]'
 }
 
 function reservationIdentifiers(room: BoardRoomCard) {
@@ -258,6 +320,138 @@ function toReservationListRecord(reservation: NewReservationData): ReservationLi
     updatedAt: reservation.updatedAt,
     createdBy: 'Front desk',
   }
+}
+
+function deserializeReservationListRecord(record: ReservationListRecord): ReservationListRecord {
+  return {
+    ...record,
+    checkIn: new Date(record.checkIn),
+    checkOut: new Date(record.checkOut),
+    actualCheckIn: record.actualCheckIn ? new Date(record.actualCheckIn) : record.actualCheckIn,
+    actualCheckOut: record.actualCheckOut ? new Date(record.actualCheckOut) : record.actualCheckOut,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+  }
+}
+
+function mergeReservationRecords(...sources: Array<ReservationListRecord[] | undefined>) {
+  const merged = new Map<string, ReservationListRecord>()
+
+  for (const source of sources) {
+    for (const record of source || []) {
+      const normalized = deserializeReservationListRecord(record)
+      merged.set(normalized.id || normalized.confirmationNumber, normalized)
+    }
+  }
+
+  return [...merged.values()]
+}
+
+function isActiveReservationRecord(record: ReservationListRecord) {
+  return record.status !== 'CANCELLED' && record.status !== 'NO_SHOW' && record.status !== 'CHECKED_OUT'
+}
+
+function reservationRecordMatchesRoom(record: ReservationListRecord, room: BoardRoomCard) {
+  return Boolean(
+    (record.roomId && record.roomId === room.roomId) ||
+    (record.roomNumber && record.roomNumber === room.number)
+  )
+}
+
+function reservationRecordToBoardBooking(record: ReservationListRecord, room: BoardRoomCard): BoardRoomCard {
+  const guestCount = Math.max(1, (record.adults || 0) + (record.children || 0))
+  const depositStatus = record.balanceDue <= 0
+    ? 'PAID'
+    : record.depositPaid > 0
+      ? 'PARTIAL'
+      : record.depositStatus
+
+  return {
+    ...room,
+    status: record.status === 'CHECKED_IN'
+      ? (room.cleanStatus === 'DIRTY' || room.cleanStatus === 'CLEANING' ? 'OCCUPIED_DIRTY' : 'OCCUPIED_CLEAN')
+      : assignedRoomStatus(room),
+    guestName: record.guestName,
+    guestEmail: record.guestEmail,
+    guestPhone: record.guestPhone,
+    reservationId: record.id,
+    currentReservationId: record.id,
+    reservation: {
+      id: record.id,
+      guestName: record.guestName,
+      guestEmail: record.guestEmail,
+      guestPhone: record.guestPhone,
+      checkIn: record.checkIn,
+      checkOut: record.checkOut,
+      status: record.status,
+      totalAmount: record.totalAmount,
+      balanceDue: record.balanceDue,
+      depositStatus,
+    },
+    checkIn: record.checkIn,
+    checkOut: record.checkOut,
+    guestCount,
+    isArrivalToday: isSameDay(record.checkIn, new Date()),
+    isDepartureToday: isSameDay(record.checkOut, new Date()),
+    nightsRemaining: Math.ceil((record.checkOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+    isVIP: record.isVIP,
+    needsAttention: record.status === 'PENDING' || room.needsAttention,
+    balanceDue: record.balanceDue,
+    depositStatus,
+    notes: record.notes || record.specialRequests || room.notes,
+  }
+}
+
+function buildRoomBookingSegments(
+  room: BoardRoomCard,
+  records: ReservationListRecord[],
+) {
+  const bookings = new Map<string, BoardRoomCard>()
+  const roomIdentifiers = reservationIdentifiers(room)
+
+  if (hasRoomReservation(room)) {
+    bookings.set(primaryReservationId(room), room)
+  }
+
+  for (const record of records) {
+    if (!isActiveReservationRecord(record) || !reservationRecordMatchesRoom(record, room)) continue
+    if (roomIdentifiers.has(record.id) || roomIdentifiers.has(record.confirmationNumber)) continue
+    bookings.set(record.id || record.confirmationNumber, reservationRecordToBoardBooking(record, room))
+  }
+
+  return [...bookings.values()].sort((a, b) => {
+    const first = a.checkIn ? new Date(a.checkIn).getTime() : 0
+    const second = b.checkIn ? new Date(b.checkIn).getTime() : 0
+    return first - second
+  })
+}
+
+function roomHasOverlappingBooking(
+  room: BoardRoomCard,
+  checkIn: Date,
+  checkOut: Date,
+  records: ReservationListRecord[],
+  excludeReservationId?: string,
+) {
+  const roomIdentifiers = reservationIdentifiers(room)
+
+  if (
+    hasRoomReservation(room) &&
+    room.checkIn &&
+    room.checkOut &&
+    !roomIdentifiers.has(excludeReservationId || '') &&
+    reservationsOverlap(checkIn, checkOut, room.checkIn, room.checkOut)
+  ) {
+    return true
+  }
+
+  return records.some((record) =>
+    isActiveReservationRecord(record) &&
+    record.id !== excludeReservationId &&
+    record.confirmationNumber !== excludeReservationId &&
+    reservationRecordMatchesRoom(record, room) &&
+    reservationsOverlap(checkIn, checkOut, record.checkIn, record.checkOut)
+  )
 }
 
 function toGuestDirectoryRecord(reservation: NewReservationData): GuestDirectoryRecord {
@@ -390,6 +584,142 @@ function boardRoomToDeparture(room: BoardRoomCard): DepartureItem | null {
   }
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100
+}
+
+function primaryReservationId(room: BoardRoomCard) {
+  return room.reservationId || room.currentReservationId || room.reservation?.id || room.roomId
+}
+
+function deserializeBoardFolio(folio: BoardFolio): BoardFolio {
+  return {
+    ...folio,
+    checkIn: new Date(folio.checkIn),
+    checkOut: folio.checkOut ? new Date(folio.checkOut) : undefined,
+    createdAt: new Date(folio.createdAt),
+    updatedAt: new Date(folio.updatedAt),
+    closedAt: folio.closedAt ? new Date(folio.closedAt) : undefined,
+    charges: (folio.charges || []).map((charge) => ({
+      ...charge,
+      date: new Date(charge.date),
+    })),
+    payments: (folio.payments || []).map((payment) => ({
+      ...payment,
+      date: new Date(payment.date),
+    })),
+  }
+}
+
+function mergeBoardFolios(...sources: Array<BoardFolio[] | undefined>) {
+  const merged = new Map<string, BoardFolio>()
+
+  for (const source of sources) {
+    for (const folio of source || []) {
+      merged.set(folio.id, deserializeBoardFolio(folio))
+    }
+  }
+
+  return [...merged.values()]
+}
+
+function folioMatchesRoom(folio: BoardFolio, room: BoardRoomCard) {
+  const identifiers = reservationIdentifiers(room)
+  return identifiers.has(folio.reservationId) ||
+    identifiers.has(folio.id) ||
+    [...identifiers].some((id) => folio.id === `folio-${id}`)
+}
+
+function createBoardFolioFromRoom(room: BoardRoomCard): BoardFolio {
+  const reservationId = primaryReservationId(room)
+  const checkIn = room.checkIn ? new Date(room.checkIn) : new Date()
+  const checkOut = room.checkOut ? new Date(room.checkOut) : undefined
+  const roomTotal = Math.max(0, room.reservation?.totalAmount ?? room.balanceDue ?? 0)
+  const balance = Math.max(0, room.balanceDue ?? room.reservation?.balanceDue ?? roomTotal)
+  const paid = Math.max(0, roomTotal - balance)
+  const nights = checkOut ? Math.max(1, nightsBetween(checkIn, checkOut)) : 1
+  const roomRate = nights > 0 ? roundMoney(roomTotal / nights) : roomTotal
+  const updatedAt = room.lastUpdatedAt ? new Date(room.lastUpdatedAt) : new Date()
+
+  return {
+    id: `folio-${reservationId}`,
+    reservationId,
+    guestName: room.guestName || room.reservation?.guestName || 'Guest',
+    roomNumber: room.number,
+    checkIn,
+    checkOut,
+    status: balance <= 0 && room.status === 'VACANT_DIRTY' ? 'CLOSED' : 'OPEN',
+    charges: roomTotal > 0 ? [{
+      id: `charge-room-${reservationId}`,
+      date: checkIn,
+      category: 'ROOM',
+      description: `Room ${room.number} - ${nights} night${nights === 1 ? '' : 's'}`,
+      quantity: nights,
+      unitPrice: roomRate,
+      subtotal: roomTotal,
+      tax: 0,
+      total: roomTotal,
+      postedBy: 'Front desk',
+    }] : [],
+    payments: paid > 0 ? [{
+      id: `payment-${reservationId}`,
+      date: updatedAt,
+      method: room.depositStatus === 'PAID' ? 'CASH' : 'BANK_TRANSFER',
+      amount: paid,
+      reference: room.depositStatus === 'PAID' ? 'Deposit recorded' : undefined,
+      receivedBy: 'Front desk',
+    }] : [],
+    subtotal: roomTotal,
+    tax: 0,
+    total: roomTotal,
+    paid,
+    balance,
+    createdAt: checkIn,
+    updatedAt,
+    closedAt: balance <= 0 && room.status === 'VACANT_DIRTY' ? updatedAt : undefined,
+  }
+}
+
+function billingSummaryForRoom(
+  room: BoardRoomCard,
+  cashierFolios: BoardFolio[] | undefined,
+  canonicalFolios: BoardFolio[] | undefined,
+  currency = 'THB'
+): ReservationBillingSummary {
+  const folio = mergeBoardFolios(canonicalFolios, cashierFolios).find((candidate) => folioMatchesRoom(candidate, room))
+    || createBoardFolioFromRoom(room)
+  const activeCharges = (folio.charges || []).filter((charge) => charge.category !== 'ROOM')
+  const extraPersonTotal = activeCharges
+    .filter((charge) => charge.category === 'EXTRA_GUEST' || charge.category === 'CHILD')
+    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+  const extrasTotal = activeCharges
+    .filter((charge) => charge.category !== 'EXTRA_GUEST' && charge.category !== 'CHILD')
+    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+  const roomTotal = (folio.charges || [])
+    .filter((charge) => charge.category === 'ROOM')
+    .reduce((sum, charge) => sum + Number(charge.total || 0), 0)
+
+  return {
+    currency,
+    roomTotal: roomTotal || room.reservation?.totalAmount,
+    extraPersonTotal: roundMoney(extraPersonTotal),
+    extrasTotal: roundMoney(extrasTotal),
+    total: roundMoney(Number(folio.total || 0)),
+    received: roundMoney(Number(folio.paid || 0)),
+    outstanding: roundMoney(Number(folio.balance || 0)),
+    items: activeCharges.map((charge) => ({
+      id: charge.id,
+      date: charge.date,
+      category: charge.category,
+      description: charge.description,
+      quantity: charge.quantity,
+      unitPrice: charge.unitPrice,
+      total: charge.total,
+      postedBy: charge.postedBy,
+    })),
+  }
+}
+
 export function Board() {
   const { rooms, lastUpdate, setRooms } = useRoomSync()
   const { openAssistant } = useFrontDeskAssistant()
@@ -412,10 +742,12 @@ export function Board() {
   const [showUnassigned, setShowUnassigned] = useState(true)
   const [unassignedReservationsRaw, setUnassignedReservationsRaw] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [auditRecords, setAuditRecords] = useKV<AuditRecord[]>('audit-records', [])
-  const [, setReservationRecords] = useKV<ReservationListRecord[]>('reservations-data', [])
-  const [, setCanonicalReservationRecords] = useKV<ReservationListRecord[]>('reservations', [])
+  const [reservationRecordsRaw, setReservationRecords] = useKV<ReservationListRecord[]>('reservations-data', [])
+  const [canonicalReservationRecordsRaw, setCanonicalReservationRecords] = useKV<ReservationListRecord[]>('reservations', [])
   const [, setGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests-data', [])
   const [, setCanonicalGuestDirectory] = useKV<GuestDirectoryRecord[]>('guests', [])
+  const [cashierFoliosRaw, setCashierFolios] = useKV<BoardFolio[]>('cashier-folios', [])
+  const [canonicalFoliosRaw, setCanonicalFolios] = useKV<BoardFolio[]>('folios', [])
   const authToken = null
   const [draggingReservation, setDraggingReservation] = useState<string | null>(null)
   
@@ -478,6 +810,24 @@ export function Board() {
     return rooms.find((room) => room.roomId === reservationDetailRoom.roomId) ?? reservationDetailRoom
   }, [reservationDetailRoom, rooms])
 
+  const activeReservationBilling = useMemo(() => {
+    if (!activeReservationDetailRoom) return undefined
+    return billingSummaryForRoom(activeReservationDetailRoom, cashierFoliosRaw, canonicalFoliosRaw)
+  }, [activeReservationDetailRoom, cashierFoliosRaw, canonicalFoliosRaw])
+
+  const assignedReservationRecords = useMemo(() =>
+    mergeReservationRecords(canonicalReservationRecordsRaw, reservationRecordsRaw),
+    [canonicalReservationRecordsRaw, reservationRecordsRaw]
+  )
+
+  const bookingSegmentsByRoomId = useMemo(() => {
+    const segments = new Map<string, BoardRoomCard[]>()
+    for (const room of rooms) {
+      segments.set(room.roomId, buildRoomBookingSegments(room, assignedReservationRecords))
+    }
+    return segments
+  }, [assignedReservationRecords, rooms])
+
   const refreshServerBoard = useCallback(async () => {
     if (!SERVER_API_ENABLED) return
     const board = await pmsApi<{ ok: true; data: unknown }>('/api/front-desk/board', authToken)
@@ -485,6 +835,14 @@ export function Board() {
   }, [authToken, setRooms])
 
   const stats = useMemo(() => calculateBoardStats(rooms), [rooms])
+  const compactBoardStats = useMemo(() => [
+    { label: 'Occ', value: stats.occupied, icon: Users, text: 'text-blue-700', bg: 'bg-blue-100/70', title: 'Occupied' },
+    { label: 'Avail', value: stats.vacant, icon: DoorOpen, text: 'text-emerald-700', bg: 'bg-emerald-100/70', title: 'Available' },
+    { label: 'Arr', value: stats.arrivalsToday, icon: TrendUp, text: 'text-amber-700', bg: 'bg-amber-100/70', title: 'Arrivals' },
+    { label: 'Dep', value: stats.departuresToday, icon: TrendDown, text: 'text-rose-700', bg: 'bg-rose-100/70', title: 'Departures' },
+    { label: 'Dirty', value: stats.dirty, icon: Broom, text: 'text-orange-700', bg: 'bg-orange-100/70', title: 'Dirty' },
+    { label: 'Occ %', value: `${stats.occupancyRate.toFixed(0)}%`, icon: ChartBar, text: 'text-muted-foreground', bg: 'bg-amber-50', title: 'Occupancy' },
+  ], [stats])
 
   const roomAuditRecords = useMemo(() => {
     if (!selectedRoom) return []
@@ -586,6 +944,8 @@ export function Board() {
   const dateColumns = useMemo(() => {
     return Array.from({ length: dayCount }, (_, i) => addDays(startDate, i))
   }, [startDate, dayCount])
+  const timelineMinCellWidth = getTimelineMinCellWidth(dateColumns.length)
+  const boardMinWidth = BOARD_ROOM_LABEL_WIDTH + dateColumns.length * timelineMinCellWidth
 
   const filteredRooms = useMemo(() => {
     let result = rooms
@@ -1503,6 +1863,121 @@ export function Board() {
     toast.success(`Room ${room.number} ${room.isVIP ? 'removed from' : 'added to'} VIP status`)
   }
 
+  const updateBoardFolioStores = (updater: (current: BoardFolio[]) => BoardFolio[]) => {
+    const updated = updater(mergeBoardFolios(canonicalFoliosRaw, cashierFoliosRaw))
+    setCashierFolios(updated)
+    setCanonicalFolios(updated)
+  }
+
+  const handleAddReservationExtraItem = (room: BoardRoomCard, item: ReservationExtraItemDraft) => {
+    if (!hasRoomReservation(room)) {
+      toast.error('Select a reservation before adding billable items.')
+      return
+    }
+
+    const quantity = Math.max(1, item.quantity)
+    const unitPrice = roundMoney(item.unitPrice)
+    const total = roundMoney(unitPrice * quantity)
+    const reservationId = primaryReservationId(room)
+    const identifiers = reservationIdentifiers(room)
+    const charge: BoardFolioCharge = {
+      id: `charge-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      date: new Date(),
+      category: item.category,
+      description: item.description,
+      quantity,
+      unitPrice,
+      subtotal: total,
+      tax: 0,
+      total,
+      postedBy: 'Front desk',
+    }
+
+    const applyChargeToRoom = (candidate: BoardRoomCard): BoardRoomCard => {
+      const currentReservationTotal = Math.max(0, candidate.reservation?.totalAmount ?? candidate.balanceDue ?? 0)
+      const currentReservationBalance = Math.max(0, candidate.balanceDue ?? candidate.reservation?.balanceDue ?? currentReservationTotal)
+      const nextTotal = roundMoney(currentReservationTotal + total)
+      const nextBalance = roundMoney(currentReservationBalance + total)
+
+      return {
+        ...candidate,
+        balanceDue: nextBalance,
+        reservation: {
+          ...(candidate.reservation || {}),
+          id: candidate.reservation?.id || reservationId,
+          guestName: candidate.reservation?.guestName || candidate.guestName,
+          guestEmail: candidate.reservation?.guestEmail || candidate.guestEmail,
+          guestPhone: candidate.reservation?.guestPhone || candidate.guestPhone,
+          checkIn: candidate.reservation?.checkIn || candidate.checkIn,
+          checkOut: candidate.reservation?.checkOut || candidate.checkOut,
+          status: candidate.reservation?.status || (isCheckedInRoom(candidate) ? 'CHECKED_IN' : 'CONFIRMED'),
+          totalAmount: nextTotal,
+          balanceDue: nextBalance,
+          depositStatus: nextBalance > 0 ? candidate.depositStatus : 'PAID',
+        },
+        lastUpdatedAt: new Date().toISOString(),
+        lastUpdatedBy: 'Front desk',
+      }
+    }
+
+    const updateReservationRecords = (current: ReservationListRecord[] = []) => (current || []).map((reservation) =>
+      reservationRecordMatches(reservation, identifiers)
+        ? {
+            ...reservation,
+            totalAmount: roundMoney((reservation.totalAmount || 0) + total),
+            balanceDue: roundMoney((reservation.balanceDue || 0) + total),
+            updatedAt: new Date(),
+        }
+        : reservation
+    )
+
+    window.setTimeout(() => {
+      updateBoardFolioStores((currentFolios) => {
+        const existing = currentFolios.find((folio) => folioMatchesRoom(folio, room))
+        const baseFolio = existing || createBoardFolioFromRoom(room)
+        const updatedFolio: BoardFolio = {
+          ...baseFolio,
+          charges: [...baseFolio.charges, charge],
+          subtotal: roundMoney(baseFolio.subtotal + charge.subtotal),
+          tax: roundMoney(baseFolio.tax + charge.tax),
+          total: roundMoney(baseFolio.total + charge.total),
+          balance: roundMoney(baseFolio.balance + charge.total),
+          status: 'OPEN',
+          updatedAt: new Date(),
+        }
+
+        return existing
+          ? currentFolios.map((folio) => folio.id === existing.id ? updatedFolio : folio)
+          : [...currentFolios, updatedFolio]
+      })
+
+      setRooms(rooms.map((candidate) => candidate.roomId === room.roomId ? applyChargeToRoom(candidate) : candidate))
+      if (reservationDetailRoom?.roomId === room.roomId) {
+        setReservationDetailRoom(applyChargeToRoom(reservationDetailRoom))
+      }
+      setUnassignedReservationsRaw(unassignedReservations.map((reservation) =>
+        identifiers.has(reservation.id)
+          ? {
+              ...reservation,
+              totalAmount: roundMoney((reservation.totalAmount || 0) + total),
+              balanceDue: roundMoney((reservation.balanceDue || 0) + total),
+            }
+          : reservation
+      ))
+      setReservationRecords(updateReservationRecords(reservationRecordsRaw || []))
+      setCanonicalReservationRecords(updateReservationRecords(canonicalReservationRecordsRaw || reservationRecordsRaw || []))
+
+      addAudit(createAuditRecord(
+        'reservation',
+        reservationId,
+        'CHARGE_POSTED',
+        `${item.description} posted to ${room.guestName || 'reservation'} for THB ${total.toLocaleString()}.`,
+        'Front desk',
+      ))
+      toast.success(`Added ${item.description} to ${room.guestName || 'reservation'} folio.`)
+    }, 0)
+  }
+
   const handlePostCharge = (room: BoardRoomCard) => {
     navigate('cashier')
     setSelectedRoom(null)
@@ -1867,9 +2342,9 @@ export function Board() {
   }
 
   return (
-    <div className="h-full flex gap-3 bg-background p-2">
+    <div className="h-full flex gap-2 bg-background p-1.5">
       {showUnassigned && unassignedReservations.length > 0 && (
-        <div className="w-60 flex-shrink-0 rounded-xl bg-card border border-border/50 flex flex-col overflow-hidden">
+        <div className="w-56 flex-shrink-0 rounded-lg bg-card border border-border/50 flex flex-col overflow-hidden">
           <div className="px-3 py-2.5 border-b border-border/40">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -1962,9 +2437,143 @@ export function Board() {
         </div>
       )}
       
-      <div className="flex-1 flex flex-col min-w-0 gap-3">
+      <div className="flex-1 flex flex-col min-w-0 gap-1">
+        <div className="flex min-h-10 flex-wrap items-center gap-1 rounded-lg border border-border/50 bg-card px-1.5 py-1 shadow-sm">
+          <div className="flex min-w-[112px] shrink-0 flex-col justify-center">
+            <h1 className="text-sm font-semibold leading-none tracking-tight text-foreground">Front Desk Board</h1>
+            <p className="mt-0.5 truncate text-[9px] text-muted-foreground">
+              {format(new Date(), 'MMM d, yyyy')} · {rooms.length} rooms
+            </p>
+          </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => openAssistant()}
+            className="h-7 shrink-0 gap-1 px-2 text-xs font-medium"
+          >
+            <Sparkle className="h-3.5 w-3.5 text-blue-600" weight="duotone" />
+            Front Desk AI
+          </Button>
+
+          <Button
+            onClick={() => {
+              setPrefilledReservation(null)
+              setShowNewReservationDialog(true)
+            }}
+            className="h-7 shrink-0 gap-1 px-2.5 text-xs font-medium"
+          >
+            <Plus className="h-3.5 w-3.5" weight="bold" />
+            New Reservation
+          </Button>
+          <RoomJumpDropdown rooms={rooms} onSelectRoom={handleRoomClick} />
+
+          {!showUnassigned && unassignedReservations.length > 0 && (
+            <button
+              onClick={() => setShowUnassigned(true)}
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100"
+            >
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-600 px-1 text-[9px] font-semibold text-white">
+                {unassignedReservations.length}
+              </span>
+              Unassigned
+            </button>
+          )}
+
+          <div className="flex shrink-0 items-center gap-1">
+            {compactBoardStats.map((kpi) => (
+              <div
+                key={kpi.title}
+                title={kpi.title}
+                className="flex h-7 min-w-[42px] items-center gap-1 rounded-md border border-border/50 bg-background px-1"
+              >
+                <div className={cn('hidden h-5 w-5 shrink-0 items-center justify-center rounded min-[1180px]:flex', kpi.bg)}>
+                  <kpi.icon className={cn('h-3 w-3', kpi.text)} weight="duotone" />
+                </div>
+                <div className="min-w-0 leading-none">
+                  <div className={cn('text-[11px] font-semibold leading-none', kpi.text)}>{kpi.value}</div>
+                    <div className="mt-0.5 truncate text-[7px] font-medium uppercase tracking-wide text-muted-foreground">{kpi.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex h-7 shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5">
+            {(['7day', '14day', '30day'] as const).map((mode) => (
+              <Button
+                key={mode}
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewMode(mode)}
+                className={cn(
+                  "h-5 rounded-[5px] px-1 text-[10px] font-medium transition-all",
+                  viewMode === mode
+                    ? "bg-foreground text-background shadow-sm hover:bg-foreground hover:text-background"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {mode === '7day' && <CalendarBlank className="mr-1 h-3 w-3" />}
+                {mode.replace('day', 'D')}
+              </Button>
+            ))}
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAutomationSettings(true)}
+            className="h-7 shrink-0 gap-1 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            <Robot className="h-3 w-3" />
+            Automation
+            {automation.config.enabled && <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+          </Button>
+
+          <div className="relative w-28 shrink-0 min-[1180px]:w-32">
+            <MagnifyingGlass className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search rooms..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-7 border-border/50 bg-muted/30 pl-8 text-[10px] focus:bg-background"
+            />
+          </div>
+          <BoardFiltersPopover
+            filters={filters}
+            onFiltersChange={setFilters}
+            activeCount={activeFilterCount}
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={commandPalette.open}
+            className="h-7 shrink-0 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            <Command className="h-3.5 w-3.5" />
+            <kbd className="pointer-events-none ml-1 hidden h-4 select-none items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[9px] text-muted-foreground md:inline-flex">
+              ⌘K
+            </kbd>
+          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground">
+                <Info className="h-3.5 w-3.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-[320px]">
+              <StatusLegend />
+            </PopoverContent>
+          </Popover>
+
+          <div className="flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1 text-[10px] font-medium text-muted-foreground">
+            {lastUpdate && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />}
+            <Clock className="h-3 w-3" />
+            <span>{format(new Date(), 'dd MMM')}</span>
+          </div>
+        </div>
+        <div className="hidden">
         {/* Top Bar: Title + Actions */}
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-sm sm:text-base font-semibold leading-tight tracking-tight text-foreground">Front Desk Board</h1>
             <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -1972,14 +2581,14 @@ export function Board() {
             </p>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
             {/* Primary CTA */}
             <Button
               onClick={() => {
                 setPrefilledReservation(null)
                 setShowNewReservationDialog(true)
               }}
-              className="h-8 gap-1.5 text-xs font-medium px-3.5"
+              className="h-7 gap-1.5 text-xs font-medium px-3"
             >
               <Plus className="w-3.5 h-3.5" weight="bold" />
               New Reservation
@@ -1990,7 +2599,7 @@ export function Board() {
             {!showUnassigned && unassignedReservations.length > 0 && (
               <button
                 onClick={() => setShowUnassigned(true)}
-                className="inline-flex items-center gap-1.5 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+                className="inline-flex items-center gap-1.5 h-7 rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
               >
                 <span className="inline-flex items-center justify-center h-4.5 min-w-[18px] rounded-full bg-amber-600 text-white text-[10px] font-semibold px-1">
                   {unassignedReservations.length}
@@ -1999,7 +2608,7 @@ export function Board() {
               </button>
             )}
 
-            <div className="h-5 w-px bg-border/50" />
+            <div className="hidden h-5 w-px bg-border/50 sm:block" />
 
             {/* Utilities */}
             {lastUpdate && (
@@ -2008,7 +2617,7 @@ export function Board() {
                 <span className="font-medium">Live</span>
               </div>
             )}
-            <div className="relative w-40">
+            <div className="relative w-36">
               <MagnifyingGlass className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input
                 placeholder="Search rooms..."
@@ -2055,48 +2664,46 @@ export function Board() {
           automationEnabled={automation.config.enabled}
           onOpenAutomation={() => setShowAutomationSettings(true)}
         />
+        </div>
 
-        <div className="flex-1 overflow-auto rounded-xl border border-border/40 bg-card">
-          <div className="calendar-board">
+        <div className="flex-1 overflow-auto rounded-lg border border-border/40 bg-card">
+          <div className="calendar-board min-w-full" style={{ minWidth: boardMinWidth }}>
             <div className="sticky top-0 z-20 bg-muted/80 backdrop-blur-sm border-b border-border/40">
               <div className="flex">
-                <div className="w-52 flex-shrink-0 border-r border-border/30 py-2.5 px-3">
-                  <div className="text-[10px] font-medium text-muted-foreground tracking-wide">Room / guest</div>
+                <div className="flex h-5 flex-shrink-0 items-center border-r border-border/30 px-2.5" style={{ width: BOARD_ROOM_LABEL_WIDTH }}>
+                  <div className="text-[10px] font-medium text-muted-foreground tracking-wide">Room</div>
                 </div>
                 
-                <div className="flex-1 flex overflow-x-auto">
+                <div className="flex flex-1 min-w-0">
                   {dateColumns.map((date, i) => {
                     const isToday = isSameDay(date, new Date())
                     const isWeekendDay = isWeekend(date)
+                    const dayLabel = dateColumns.length >= 30 ? format(date, 'd') : format(date, 'EEE d')
                     return (
                       <div 
                         key={i} 
                         className={cn(
-                          "flex-1 min-w-[80px] border-r border-border/20 py-2 px-2 text-center transition-colors",
+                          "flex h-5 flex-1 min-w-0 items-center justify-center gap-1 border-r border-border/20 px-1 text-center transition-colors",
                           isToday && "bg-blue-50 border-x border-x-blue-200",
                           isWeekendDay && !isToday && "bg-muted/40"
                         )}
                       >
-                        <div className={cn(
-                          "text-[9px] font-medium uppercase tracking-wide",
+                        <span className={cn(
+                          "truncate text-[9px] font-semibold uppercase tracking-wide",
                           isToday ? "text-blue-600" : "text-muted-foreground/70"
                         )}>
-                          {format(date, 'EEE')}
-                        </div>
-                        <div className={cn(
-                          "text-sm font-semibold leading-none my-0.5",
-                          isToday ? "text-blue-600" : "text-foreground"
-                        )}>
-                          {format(date, 'd')}
-                        </div>
-                        <div className={cn(
-                          "text-[9px] font-normal",
-                          isToday ? "text-blue-500" : "text-muted-foreground/60"
-                        )}>
-                          {format(date, 'MMM')}
-                        </div>
+                          {dayLabel}
+                        </span>
+                        {dateColumns.length < 14 && (
+                          <span className={cn(
+                            "text-[8px] font-normal",
+                            isToday ? "text-blue-500" : "text-muted-foreground/60"
+                          )}>
+                            {format(date, 'MMM')}
+                          </span>
+                        )}
                         {isToday && (
-                          <div className="mx-auto mt-1 w-1 h-1 rounded-full bg-blue-500" />
+                          <span className="h-1 w-1 shrink-0 rounded-full bg-blue-500" />
                         )}
                       </div>
                     )
@@ -2110,6 +2717,7 @@ export function Board() {
                 title="Twin Rooms"
                 subtitle="Floor 2"
                 rooms={twinRooms}
+                bookingSegmentsByRoomId={bookingSegmentsByRoomId}
                 dateColumns={dateColumns}
                 isCollapsed={collapsedRoomTypes.has('TWIN')}
                 onToggleCollapse={() => toggleRoomType('TWIN')}
@@ -2165,6 +2773,7 @@ export function Board() {
                 title="Double Rooms"
                 subtitle="Floor 3"
                 rooms={doubleRooms}
+                bookingSegmentsByRoomId={bookingSegmentsByRoomId}
                 dateColumns={dateColumns}
                 isCollapsed={collapsedRoomTypes.has('DOUBLE')}
                 onToggleCollapse={() => toggleRoomType('DOUBLE')}
@@ -2534,6 +3143,7 @@ export function Board() {
       {activeReservationDetailRoom && (
         <ReservationDetailOverlay
           room={activeReservationDetailRoom}
+          billing={activeReservationBilling}
           onClose={() => setReservationDetailRoom(null)}
           onEdit={(room) => {
             openEditReservationForRoom(room)
@@ -2542,6 +3152,7 @@ export function Board() {
           onCancelReservation={handleCancelReservationFromOverlay}
           onPrint={handlePrintReservationDocument}
           onEmail={handleEmailReservationDocument}
+          onAddExtraItem={handleAddReservationExtraItem}
           onRecordPayment={(room) => {
             handlePostCharge(room)
             setReservationDetailRoom(null)
@@ -2625,6 +3236,23 @@ export function Board() {
 
           const reservationRecord = toReservationListRecord(reservation)
           const guestRecord = toGuestDirectoryRecord(reservation)
+          const assignedRoom = reservation.assignedRoomId
+            ? rooms.find((room) => room.roomId === reservation.assignedRoomId)
+            : undefined
+
+          if (
+            assignedRoom &&
+            roomHasOverlappingBooking(
+              assignedRoom,
+              reservation.checkIn,
+              reservation.checkOut,
+              assignedReservationRecords,
+              reservation.id,
+            )
+          ) {
+            toast.error(`Room ${assignedRoom.number} already has a booking for those dates.`)
+            return
+          }
 
           setReservationRecords((current) => {
             const existing = current || []
@@ -2648,41 +3276,52 @@ export function Board() {
           })
           if (reservation.assignedRoomId) {
             const guestName = `${reservation.guest.firstName} ${reservation.guest.lastName}`
-            setRooms((currentRooms) => currentRooms.map((room) => room.roomId === reservation.assignedRoomId
-              ? {
+            setRooms((currentRooms) => currentRooms.map((room) => {
+              if (room.roomId !== reservation.assignedRoomId) return room
+
+              const newReservationSummary = buildReservationSummary(room, 'CONFIRMED', {
+                id: reservation.id,
+                guestName,
+                guestEmail: reservation.guest.email ?? undefined,
+                guestPhone: reservation.guest.phone ?? undefined,
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                totalAmount: reservation.totalAmount,
+                balanceDue: reservation.totalAmount,
+                depositStatus: 'PENDING',
+              })
+
+              if (hasRoomReservation(room)) {
+                return {
                   ...room,
-                  status: assignedRoomStatus(room),
-                  guestName,
-                  guestEmail: reservation.guest.email ?? undefined,
-                  guestPhone: reservation.guest.phone ?? undefined,
-                  reservationId: reservation.id,
-                  currentReservationId: reservation.id,
-                  reservation: {
-                    id: reservation.id,
-                    guestName,
-                    guestEmail: reservation.guest.email ?? undefined,
-                    guestPhone: reservation.guest.phone ?? undefined,
-                    checkIn: reservation.checkIn,
-                    checkOut: reservation.checkOut,
-                    status: 'CONFIRMED',
-                    totalAmount: reservation.totalAmount,
-                    balanceDue: reservation.totalAmount,
-                    depositStatus: 'PENDING',
-                  },
-                  checkIn: reservation.checkIn,
-                  checkOut: reservation.checkOut,
-                  guestCount: reservation.adults + reservation.children,
-                  isArrivalToday: isSameDay(reservation.checkIn, new Date()),
-                  isDepartureToday: isSameDay(reservation.checkOut, new Date()),
-                  nightsRemaining: Math.ceil((reservation.checkOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
-                  isVIP: reservation.guest.vipStatus,
-                  balanceDue: reservation.totalAmount,
-                  depositStatus: 'PENDING',
+                  nextReservation: newReservationSummary,
                   lastUpdatedAt: new Date().toISOString(),
                   lastUpdatedBy: 'Front desk',
                 }
-              : room
-            ))
+              }
+
+              return {
+                ...room,
+                status: assignedRoomStatus(room),
+                guestName,
+                guestEmail: reservation.guest.email ?? undefined,
+                guestPhone: reservation.guest.phone ?? undefined,
+                reservationId: reservation.id,
+                currentReservationId: reservation.id,
+                reservation: newReservationSummary,
+                checkIn: reservation.checkIn,
+                checkOut: reservation.checkOut,
+                guestCount: reservation.adults + reservation.children,
+                isArrivalToday: isSameDay(reservation.checkIn, new Date()),
+                isDepartureToday: isSameDay(reservation.checkOut, new Date()),
+                nightsRemaining: Math.ceil((reservation.checkOut.getTime() - Date.now()) / (24 * 60 * 60 * 1000)),
+                isVIP: reservation.guest.vipStatus,
+                balanceDue: reservation.totalAmount,
+                depositStatus: 'PENDING',
+                lastUpdatedAt: new Date().toISOString(),
+                lastUpdatedBy: 'Front desk',
+              }
+            }))
             toast.success(`Reservation created and assigned to Room ${reservation.roomNumber || 'selected room'}`)
             setShowNewReservationDialog(false)
             setPrefilledReservation(null)
@@ -2763,7 +3402,7 @@ function RoomJumpDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="h-8 gap-1.5 px-3 text-xs font-medium">
+        <Button variant="outline" className="h-7 gap-1 px-2 text-xs font-medium">
           <ListBullets className="h-3.5 w-3.5" />
           Rooms
           <CaretDown className="h-3 w-3" />
@@ -2846,9 +3485,9 @@ function RoomActionDropdown({
           title={`Actions for Room ${room.number}`}
           aria-label={`Actions for Room ${room.number}`}
           onClick={(event) => event.stopPropagation()}
-          className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+          className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
         >
-          <DotsThreeVertical className="h-4 w-4" weight="bold" />
+          <DotsThreeVertical className="h-3.5 w-3.5" weight="bold" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64" onClick={(event) => event.stopPropagation()}>
@@ -3004,6 +3643,7 @@ interface RoomTypeRowProps {
   title: string
   subtitle: string
   rooms: BoardRoomCard[]
+  bookingSegmentsByRoomId: Map<string, BoardRoomCard[]>
   dateColumns: Date[]
   isCollapsed: boolean
   onToggleCollapse: () => void
@@ -3056,6 +3696,7 @@ function RoomTypeRow({
   title,
   subtitle,
   rooms,
+  bookingSegmentsByRoomId,
   dateColumns,
   isCollapsed,
   onToggleCollapse,
@@ -3085,7 +3726,7 @@ function RoomTypeRow({
     <div className="border-b border-border/30 last:border-b-0">
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center gap-2 px-3 py-1.5 bg-muted/30 hover:bg-muted/50 transition-colors border-b border-border/20 group"
+        className="w-full flex items-center gap-2 px-3 py-1 bg-muted/30 hover:bg-muted/50 transition-colors border-b border-border/20 group"
       >
         {isCollapsed ? (
           <CaretRight className="w-3 h-3 text-muted-foreground group-hover:text-foreground flex-shrink-0 transition-colors" weight="bold" />
@@ -3116,9 +3757,10 @@ function RoomTypeRow({
             <CalendarRoomRow
               key={room.roomId}
               room={room}
+              bookings={bookingSegmentsByRoomId.get(room.roomId) || []}
               dateColumns={dateColumns}
               onClick={() => onRoomClick(room)}
-              onReservationClick={() => onReservationClick(room)}
+              onReservationClick={onReservationClick}
               onEditReservation={() => onEditReservation(room)}
               isDragging={draggingRoom === room.roomId}
               isDropTarget={dropTarget === room.roomId}
@@ -3144,9 +3786,10 @@ function RoomTypeRow({
 
 interface CalendarRoomRowProps {
   room: BoardRoomCard
+  bookings: BoardRoomCard[]
   dateColumns: Date[]
   onClick: () => void
-  onReservationClick: () => void
+  onReservationClick: (booking: BoardRoomCard) => void
   onEditReservation: () => void
   isDragging: boolean
   isDropTarget: boolean
@@ -3192,6 +3835,7 @@ interface CalendarRoomRowProps {
 
 function CalendarRoomRow({
   room,
+  bookings,
   dateColumns,
   onClick,
   onReservationClick,
@@ -3211,12 +3855,12 @@ function CalendarRoomRow({
   onEmptyBlockClick,
   contextMenuHandlers,
 }: CalendarRoomRowProps) {
-  const getStatusColor = (status: BoardRoomCard['status']) => {
-    if (hasRoomReservation(room) && !isCheckedInRoom(room)) {
+  const getStatusColor = (booking: BoardRoomCard) => {
+    if (hasRoomReservation(booking) && !isCheckedInRoom(booking)) {
       return 'bg-amber-50/90 border-amber-200/70 border-l-[3px] border-l-amber-500'
     }
 
-    switch (status) {
+    switch (booking.status) {
       case 'OCCUPIED_CLEAN':
         return 'bg-blue-100/80 border-blue-300/60 border-l-[3px] border-l-blue-500'
       case 'OCCUPIED_DIRTY':
@@ -3243,19 +3887,71 @@ function CalendarRoomRow({
     }
   }
 
-  const isRoomOccupied = room.guestName && room.reservationId
+  const primaryBookingId = hasRoomReservation(room) ? primaryReservationId(room) : null
+  const reservationBookings = bookings.length ? bookings : (hasRoomReservation(room) ? [room] : [])
   const isAvailableForAssignment = room.operationalStatus === 'AVAILABLE' && 
     (room.status === 'VACANT_CLEAN' || room.status === 'VACANT_DIRTY') &&
     !hasRoomReservation(room)
+  const isRoomOperationallyBookable = room.operationalStatus === 'AVAILABLE'
 
   const isResizing = resizingReservation?.roomId === room.roomId
   const [hoveredCell, setHoveredCell] = useState<number | null>(null)
 
-  const normalizeDate = (date: Date) => {
+  function normalizeDate(date: Date) {
     const normalized = new Date(date)
     normalized.setHours(0, 0, 0, 0)
     return normalized
   }
+
+  const rowHeightClass = getTimelineRowHeightClass(dateColumns.length)
+  const bookingBars = useMemo(() => {
+    const firstVisibleDate = dateColumns[0] ? normalizeDate(dateColumns[0]) : null
+    const lastVisibleDate = dateColumns[dateColumns.length - 1] ? normalizeDate(dateColumns[dateColumns.length - 1]) : null
+
+    if (!firstVisibleDate || !lastVisibleDate || !dateColumns.length) return []
+
+    return reservationBookings.flatMap((booking) => {
+      const bookingCheckIn = booking.checkIn ? normalizeDate(booking.checkIn) : null
+      const bookingCheckOut = booking.checkOut ? normalizeDate(booking.checkOut) : null
+
+      if (!bookingCheckIn || !bookingCheckOut) return []
+      if (bookingCheckOut < firstVisibleDate || bookingCheckIn > lastVisibleDate) return []
+
+      const startsBeforeView = bookingCheckIn < firstVisibleDate
+      const endsAfterView = bookingCheckOut > lastVisibleDate
+      const checkInIndex = startsBeforeView
+        ? -1
+        : dateColumns.findIndex((date) => isSameDay(date, bookingCheckIn))
+      const checkOutIndex = endsAfterView
+        ? dateColumns.length
+        : dateColumns.findIndex((date) => isSameDay(date, bookingCheckOut))
+
+      if (!startsBeforeView && checkInIndex < 0) return []
+      if (!endsAfterView && checkOutIndex < 0) return []
+
+      const leftUnits = startsBeforeView ? 0 : checkInIndex + 0.5
+      const rightUnits = endsAfterView ? dateColumns.length : checkOutIndex + 0.5
+      const clippedLeftUnits = Math.max(0, leftUnits)
+      const clippedRightUnits = Math.min(dateColumns.length, rightUnits)
+      const visibleUnits = Math.max(0.5, clippedRightUnits - clippedLeftUnits)
+      const bookingId = primaryReservationId(booking)
+      const isPrimaryBooking = primaryBookingId === bookingId
+      const stayNights = Math.max(1, nightsBetween(bookingCheckIn, bookingCheckOut))
+
+      return [{
+        booking,
+        bookingId,
+        isPrimaryBooking,
+        isBookingDraggable: Boolean(isPrimaryBooking && booking.guestName && booking.reservationId && !isResizing),
+        isCheckInVisible: !startsBeforeView,
+        isCheckOutVisible: !endsAfterView,
+        isMultiNight: stayNights > 1,
+        leftPercent: (clippedLeftUnits / dateColumns.length) * 100,
+        widthPercent: (visibleUnits / dateColumns.length) * 100,
+        stayNights,
+      }]
+    })
+  }, [dateColumns, isResizing, primaryBookingId, reservationBookings])
 
   const handleResizeMouseDown = (direction: 'start' | 'end', date: Date) => (e: React.MouseEvent) => {
     e.preventDefault()
@@ -3291,7 +3987,7 @@ function CalendarRoomRow({
     const { direction, currentDate } = resizingReservation
 
     if (direction === 'end') {
-      const newCheckOut = addDays(currentDate, 1)
+      const newCheckOut = normalizeDate(currentDate)
       onStayResize(room.roomId, undefined, newCheckOut)
     } else {
       onStayResize(room.roomId, currentDate, undefined)
@@ -3330,24 +4026,12 @@ function CalendarRoomRow({
         onMouseLeave={handleResizeMouseUp}
       >
       <div
-        className="flex w-52 flex-shrink-0 items-center gap-2 border-r border-border/30 px-2 py-1.5 transition-colors"
+        className="flex flex-shrink-0 items-center gap-1 border-r border-border/30 px-1.5 py-0 transition-colors"
+        style={{ width: BOARD_ROOM_LABEL_WIDTH }}
       >
-        <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/40" onClick={onClick}>
+        <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 hover:bg-muted/40" onClick={onClick}>
           <div className={cn("h-2 w-2 flex-shrink-0 rounded-full", roomStatusDotClass(room))} />
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold tracking-tight text-foreground">{room.number}</span>
-              {room.isVIP && (
-                <span className="text-[8px] font-medium text-amber-700 bg-amber-50 px-1 py-0.5 rounded">VIP</span>
-              )}
-            </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-[10px] text-muted-foreground">
-                {room.guestName || roomStatusLabel(room)}
-              </span>
-              {room.guestName && <RoomStateBadge room={room} />}
-            </div>
-          </div>
+          <span className="truncate text-xs font-semibold tracking-tight text-foreground">{room.number}</span>
         </div>
         <RoomActionDropdown
           room={room}
@@ -3357,35 +4041,44 @@ function CalendarRoomRow({
         />
       </div>
       
-      <div className="flex-1 flex overflow-x-auto">
+      <div className="relative flex flex-1 min-w-0">
         {dateColumns.map((date, i) => {
           const normalizedDate = normalizeDate(date)
-          const normalizedCheckIn = room.checkIn ? normalizeDate(room.checkIn) : null
-          const normalizedCheckOut = room.checkOut ? normalizeDate(room.checkOut) : null
-          
-          const isInStay = normalizedCheckIn && normalizedCheckOut &&
-            normalizedDate >= normalizedCheckIn && normalizedDate < normalizedCheckOut
-
-          const isCheckIn = room.checkIn && isSameDay(date, room.checkIn)
-          const isCheckOut = room.checkOut && isSameDay(date, room.checkOut)
           const isToday = isSameDay(date, new Date())
           const isWeekendDay = isWeekend(date)
-
-          const isFirstDay = isInStay && isCheckIn
-          const isLastDay = isInStay && isCheckOut
+          const bookingsInCell = reservationBookings.filter((booking) => {
+            const bookingCheckIn = booking.checkIn ? normalizeDate(booking.checkIn) : null
+            const bookingCheckOut = booking.checkOut ? normalizeDate(booking.checkOut) : null
+            return bookingCheckIn && bookingCheckOut &&
+              normalizedDate >= bookingCheckIn &&
+              normalizedDate <= bookingCheckOut
+          })
+          const hasCheckInBooking = bookingsInCell.some((booking) => Boolean(booking.checkIn && isSameDay(date, booking.checkIn)))
+          const hasCheckOutBooking = bookingsInCell.some((booking) => Boolean(booking.checkOut && isSameDay(date, booking.checkOut)))
+          const hasFullDayBooking = bookingsInCell.some((booking) => {
+            const isBookingCheckIn = Boolean(booking.checkIn && isSameDay(date, booking.checkIn))
+            const isBookingCheckOut = Boolean(booking.checkOut && isSameDay(date, booking.checkOut))
+            return !isBookingCheckIn && !isBookingCheckOut
+          })
+          const canAddFullDate = isRoomOperationallyBookable && !bookingsInCell.length && !draggingReservation && !isResizing
+          const canAddAfterCheckout = isRoomOperationallyBookable &&
+            hasCheckOutBooking &&
+            !hasCheckInBooking &&
+            !hasFullDayBooking &&
+            !draggingReservation &&
+            !isResizing
 
           return (
             <div 
               key={i}
               className={cn(
-                "flex-1 min-w-[80px] border-r border-border/15 py-1.5 px-1.5 relative transition-colors",
+                "relative flex-1 min-w-0 border-r border-border/15 transition-colors",
+                rowHeightClass,
                 isToday && "bg-blue-50/50 border-x border-x-blue-100",
                 isWeekendDay && !isToday && "bg-muted/20",
-                draggingReservation && isAvailableForAssignment && "bg-blue-50/40",
+                draggingReservation && (isAvailableForAssignment || isRoomOperationallyBookable) && "bg-blue-50/40",
                 isResizing && "cursor-col-resize"
               )}
-              draggable={!!(isRoomOccupied && isInStay && !isResizing)}
-              onDragStart={isInStay && !isResizing ? onDragStart : undefined}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onDragLeave={onDragLeave}
@@ -3394,108 +4087,7 @@ function CalendarRoomRow({
               onMouseEnter={() => setHoveredCell(i)}
               onMouseLeave={() => setHoveredCell(null)}
             >
-              {isInStay && (
-                <div 
-                  className={cn(
-                    "h-full rounded-md border transition-all relative overflow-hidden group/reservation",
-                    getStatusColor(room.status),
-                    isDragging && "opacity-30 scale-95",
-                    isDropTarget && !isDragging && "ring-2 ring-blue-500 ring-offset-1 scale-[1.02]",
-                    isFirstDay && "rounded-l-lg",
-                    isLastDay && "rounded-r-lg",
-                    isRoomOccupied && !isResizing && "cursor-grab active:cursor-grabbing hover:shadow-sm",
-                    isResizing && "ring-2 ring-blue-500 shadow-lg z-10"
-                  )}
-                  onClick={(e) => {
-                    if (isResizing) return
-                    e.stopPropagation()
-                    onReservationClick()
-                  }}
-                >
-                  <div className="px-2 py-1 h-full flex flex-col justify-between">
-                    {isCheckIn && (
-                      <div className="space-y-0.5">
-                        <div className="text-[11px] font-medium truncate text-foreground leading-snug">
-                          {room.guestName}
-                        </div>
-                        {room.guestCount && (
-                          <div className="text-[9px] text-foreground/50 flex items-center gap-1">
-                            <Users className="w-2 h-2" />
-                            <span>{room.guestCount}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    <div className="flex items-center justify-between mt-auto">
-                      {room.isArrivalToday && isCheckIn && (
-                        <span className="text-[8px] font-medium text-amber-700 bg-amber-100 px-1 py-0.5 rounded">
-                          IN
-                        </span>
-                      )}
-                      {room.isDepartureToday && isCheckOut && (
-                        <span className="text-[8px] font-medium text-rose-700 bg-rose-100 px-1 py-0.5 rounded ml-auto">
-                          OUT
-                        </span>
-                      )}
-                      {room.depositStatus === 'PENDING' && isCheckIn && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500 ml-auto" />
-                      )}
-                    </div>
-                  </div>
-
-                  {isCheckIn && isRoomOccupied && (
-                    <div
-                      className={cn(
-                        "absolute left-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-blue-500/30 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-blue-500/40"
-                      )}
-                      onMouseDown={handleResizeMouseDown('start', date)}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-500/70 rounded-full" />
-                    </div>
-                  )}
-
-                  {isLastDay && isRoomOccupied && (
-                    <div
-                      className={cn(
-                        "absolute right-0 top-0 bottom-0 w-2.5 cursor-col-resize hover:bg-blue-500/30 transition-colors opacity-0 group-hover/reservation:opacity-100",
-                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-blue-500/40"
-                      )}
-                      onMouseDown={handleResizeMouseDown('end', date)}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="absolute right-0.5 top-1/2 -translate-y-1/2 w-1 h-8 bg-blue-500/70 rounded-full" />
-                    </div>
-                  )}
-                  
-                  {isDropTarget && !isDragging && (
-                    <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-[1px] flex items-center justify-center rounded-md">
-                      <span className="text-[10px] font-medium text-blue-700 bg-white/80 px-2 py-0.5 rounded shadow-sm">
-                        Drop here
-                      </span>
-                    </div>
-                  )}
-
-                  {isResizing && resizingReservation && (
-                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-foreground text-background text-[10px] font-medium px-2 py-1 rounded-md shadow-lg whitespace-nowrap z-20">
-                      {resizingReservation.direction === 'end' 
-                        ? `Out: ${format(addDays(resizingReservation.currentDate, 1), 'MMM d')}`
-                        : `In: ${format(resizingReservation.currentDate, 'MMM d')}`
-                      }
-                    </div>
-                  )}
-                </div>
-              )}
-              
-              {!isInStay && draggingReservation && isAvailableForAssignment && (
-                <div className="h-full rounded-md border border-dashed border-blue-300 bg-blue-50/50 flex items-center justify-center transition-colors">
-                  <span className="text-[9px] text-blue-500 font-medium">Assign</span>
-                </div>
-              )}
-
-              {!isInStay && !draggingReservation && !isResizing && isAvailableForAssignment && (
+              {canAddFullDate && (
                 <div 
                   className="h-full rounded-md hover:bg-muted/30 flex items-center justify-center transition-colors cursor-pointer group/empty"
                   onClick={(e) => {
@@ -3507,7 +4099,26 @@ function CalendarRoomRow({
                 </div>
               )}
 
-              {!isInStay && isResizing && resizingReservation && hoveredCell === i && (
+              {canAddAfterCheckout && (
+                <div
+                  className="absolute inset-y-0.5 left-1/2 right-0 rounded hover:bg-muted/30 flex items-center justify-center transition-colors cursor-pointer group/empty"
+                  title="Add same-day arrival"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onEmptyBlockClick(date)
+                  }}
+                >
+                  <Plus className="w-3 h-3 text-transparent group-hover/empty:text-muted-foreground/50 transition-colors" weight="bold" />
+                </div>
+              )}
+
+              {!bookingsInCell.length && draggingReservation && isAvailableForAssignment && (
+                <div className="h-full rounded-md border border-dashed border-blue-300 bg-blue-50/50 flex items-center justify-center transition-colors">
+                  <span className="text-[9px] text-blue-500 font-medium">Assign</span>
+                </div>
+              )}
+
+              {!bookingsInCell.length && isResizing && resizingReservation && hoveredCell === i && (
                 <div className={cn(
                   "h-full rounded-md border border-dashed transition-colors",
                   resizingReservation.direction === 'end' && date >= (room.checkIn || new Date()) && "border-blue-400 bg-blue-50/50",
@@ -3517,6 +4128,128 @@ function CalendarRoomRow({
             </div>
           )
         })}
+
+        <div className="pointer-events-none absolute inset-0 z-10">
+          {bookingBars.map(({
+            booking,
+            bookingId,
+            isPrimaryBooking,
+            isBookingDraggable,
+            isCheckInVisible,
+            isCheckOutVisible,
+            isMultiNight,
+            leftPercent,
+            widthPercent,
+            stayNights,
+          }) => {
+            const solidStayColor = hasRoomReservation(booking) && !isCheckedInRoom(booking)
+              ? 'border-amber-600 bg-amber-500 text-white shadow-sm'
+              : booking.status === 'OCCUPIED_DIRTY'
+                ? 'border-blue-700 bg-blue-600 text-white shadow-sm ring-1 ring-orange-300/80'
+                : 'border-blue-700 bg-blue-600 text-white shadow-sm'
+            const textTone = isMultiNight ? 'text-white' : 'text-foreground'
+            const mutedTextTone = isMultiNight ? 'text-white/85' : 'text-foreground/55'
+            const stayLengthLabel = `${stayNights}n`
+
+            return (
+              <div
+                key={bookingId}
+                className="absolute inset-y-0.5 px-0.5"
+                style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
+              >
+                <div
+                  title={`${booking.guestName || 'Reservation'} - ${booking.guestCount || 0} guest${booking.guestCount === 1 ? '' : 's'} - ${stayLengthLabel}`}
+                  className={cn(
+                    "pointer-events-auto relative h-full overflow-hidden rounded border transition-all group/reservation",
+                    getStatusColor(booking),
+                    isMultiNight && solidStayColor,
+                    isDragging && isPrimaryBooking && "opacity-30 scale-95",
+                    isDropTarget && !isDragging && "ring-2 ring-blue-500 ring-offset-1 scale-[1.01]",
+                    isBookingDraggable && "cursor-grab active:cursor-grabbing hover:shadow-sm",
+                    isResizing && isPrimaryBooking && "ring-2 ring-blue-500 shadow-lg z-10"
+                  )}
+                  draggable={isBookingDraggable}
+                  onDragStart={isBookingDraggable ? onDragStart : undefined}
+                  onClick={(e) => {
+                    if (isResizing) return
+                    e.stopPropagation()
+                    onReservationClick(booking)
+                  }}
+                >
+                  <div className="flex h-full min-w-0 items-center gap-1 overflow-hidden px-1.5 py-0">
+                    <span className={cn("min-w-0 flex-1 truncate text-[9px] font-semibold leading-none", textTone)}>
+                      {booking.guestName}
+                    </span>
+                    {booking.guestCount && (
+                      <span className={cn("shrink-0 text-[8px] font-medium leading-none", mutedTextTone)}>
+                        {booking.guestCount}
+                      </span>
+                    )}
+                    <span className={cn("shrink-0 text-[8px] font-medium leading-none", mutedTextTone)}>
+                      {stayLengthLabel}
+                    </span>
+                    {booking.isArrivalToday && isCheckInVisible && (
+                      <span className="shrink-0 rounded bg-amber-100 px-0.5 py-0 text-[7px] font-medium leading-none text-amber-700">
+                        IN
+                      </span>
+                    )}
+                    {booking.isDepartureToday && isCheckOutVisible && (
+                      <span className="shrink-0 rounded bg-rose-100 px-0.5 py-0 text-[7px] font-medium leading-none text-rose-700">
+                        OUT
+                      </span>
+                    )}
+                    {booking.depositStatus === 'PENDING' && isCheckInVisible && (
+                      <div className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" />
+                    )}
+                  </div>
+
+                  {isCheckInVisible && isPrimaryBooking && isBookingDraggable && booking.checkIn && (
+                    <div
+                      className={cn(
+                        "absolute bottom-0 left-0 top-0 w-2.5 cursor-col-resize opacity-0 transition-colors hover:bg-blue-500/30 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'start' && "opacity-100 bg-blue-500/40"
+                      )}
+                      onMouseDown={handleResizeMouseDown('start', booking.checkIn)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="absolute left-0.5 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full bg-blue-500/70" />
+                    </div>
+                  )}
+
+                  {isCheckOutVisible && isPrimaryBooking && isBookingDraggable && booking.checkOut && (
+                    <div
+                      className={cn(
+                        "absolute bottom-0 right-0 top-0 w-2.5 cursor-col-resize opacity-0 transition-colors hover:bg-blue-500/30 group-hover/reservation:opacity-100",
+                        isResizing && resizingReservation?.direction === 'end' && "opacity-100 bg-blue-500/40"
+                      )}
+                      onMouseDown={handleResizeMouseDown('end', booking.checkOut)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="absolute right-0.5 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full bg-blue-500/70" />
+                    </div>
+                  )}
+
+                  {isDropTarget && !isDragging && (
+                    <div className="absolute inset-0 flex items-center justify-center rounded-md bg-blue-500/20 backdrop-blur-[1px]">
+                      <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-medium text-blue-700 shadow-sm">
+                        Drop here
+                      </span>
+                    </div>
+                  )}
+
+                  {isResizing && resizingReservation && isPrimaryBooking && (
+                    <div className="absolute -top-8 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[10px] font-medium text-background shadow-lg">
+                      {resizingReservation.direction === 'end' 
+                        ? `Out: ${format(resizingReservation.currentDate, 'MMM d')}`
+                        : `In: ${format(resizingReservation.currentDate, 'MMM d')}`
+                      }
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
     </RoomContextMenu>
