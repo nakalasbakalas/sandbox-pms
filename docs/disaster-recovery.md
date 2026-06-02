@@ -6,6 +6,9 @@ This document defines the owner actions required before production launch sign-o
 
 - Production database: Render PostgreSQL `sandbox-hotel-pms-db-v43m`.
 - Public runtime: `https://book.sandboxhotel.com`.
+- Long-term production Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
+- Latest known-good live deploy: `dep-d8ekncs2m8qs7391cvig`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished at 2026-06-01T09:09:36Z.
+- Render Postgres point-in-time recovery status: `AVAILABLE`, with recovery starting at 2026-05-29T21:59:40Z.
 - Automated public health check: `npm run live:check`.
 - Local release gate: `npm run launch:check`.
 
@@ -32,6 +35,8 @@ Before migrations, seed changes, or launch sign-off:
 ## Restore Test
 
 A restore test must use a disposable database, never the live production database.
+
+Status as of 2026-06-02T08:25Z: no disposable-database restore test has been triggered or recorded from this repo session. Do not mark launch sign-off complete until the account owner performs and records one.
 
 Record:
 

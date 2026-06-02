@@ -4,10 +4,11 @@ The app already enforces login throttling in `server/login-throttle.mjs`. Upstre
 
 ## Current Confirmed State
 
-- `https://book.sandboxhotel.com` returns Cloudflare and Render edge headers.
+- `https://book.sandboxhotel.com` returns Cloudflare and Render edge headers, and DNS resolves through `sandbox-hotel-pms-v43m.onrender.com`.
 - No `CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `CF_ACCOUNT_ID`, or `CF_ZONE_ID` is present in the local shell.
 - Wrangler is not installed locally.
-- Therefore, customer-owned Cloudflare WAF/rate-limit rules were not created or verified from this repo session.
+- Non-destructive probes for `/.env`, `/wp-login.php`, and `/phpmyadmin/` returned `404` through Cloudflare on 2026-06-02.
+- Therefore, customer-owned Cloudflare WAF/rate-limit rules were not created or verified from this repo session. The probe results confirm those paths are not exposed; they do not prove rule IDs, thresholds, or rate-limit behavior.
 
 ## Required Rules
 
