@@ -1,8 +1,18 @@
 # Live Environment Proof Register
 
-Verified at: 2026-06-02T08:25Z
+Verified at: 2026-06-07T15:57Z
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-06-07 Disposable Restore Test
+
+- Tester: Codex using the locally authenticated Render CLI/API session for `nakalastravels@gmail.com`.
+- Date/time: 2026-06-07T15:51Z-15:57Z.
+- Source recovery point: 2026-06-07T14:51:09Z, selected from the Render point-in-time recovery window for `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`).
+- Restore target: temporary Render PostgreSQL `sandbox-hotel-pms-db-v43m-copy` (`dpg-d8ip6rdckfvc73c2qirg-a`), database `sandbox_hotel_pms_snep`, user `sandbox_hotel_pms`, plan `basic_256mb`.
+- Validation command: `npm.cmd run db:generate`, then `npm.cmd run db:doctor` with `DATABASE_URL` and `E2E_DATABASE_URL` set in process memory to the restored database external URL. The URL value was not printed beyond the script's existing password-redacted summary.
+- Result: restore target became `available`; Prisma client generation passed; `db:doctor` reported Prisma validate `ok`, restored database connectivity `ok`, restored database migrate status `ok`, and `Doctor summary: No failing configured checks`.
+- Cleanup: the temporary restored database was deleted via Render API at 2026-06-07T15:57:55Z, and a follow-up retrieve returned `404`, confirming the disposable target was removed.
 
 ## 2026-06-02 Provider Evidence Refresh
 
@@ -14,7 +24,7 @@ This register records point-in-time external evidence gathered from the live Ren
 - Render env-var API exposed configured key names only in this record. Required runtime keys with values present include `DATABASE_URL`, `SESSION_SECRET`, `VITE_PMS_API_MODE`, `APP_URL`, `ALLOWED_ORIGINS`, `SEED_MODE`, and `NODE_ENV`; `LINE_CHANNEL_SECRET` and `LINE_CHANNEL_ACCESS_TOKEN` are present but blank. The API response used here did not include creation, update, or rotation timestamps for individual keys.
 - Legacy or compatibility key names are still present on the Render service, including `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `SECRET_KEY`, and Python-era app settings. Values were not printed. Treat these as cleanup candidates only after confirming they are not required by any active rollback path.
 - Render PostgreSQL `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) is `available`, primary, PostgreSQL 17, region `oregon`, plan `basic_256mb`, disk 15 GB, not suspended.
-- Render Postgres recovery API reports `recoveryStatus=AVAILABLE` with point-in-time recovery starting at 2026-05-29T21:59:40Z. Recent database logs also show successful WAL archive-push events at 2026-06-02T08:20Z and 2026-06-02T08:25Z.
+- Render Postgres recovery API reports `recoveryStatus=AVAILABLE`; the 2026-06-07 restore-test pass reported recovery starting at 2026-06-03T21:59:41Z.
 - Latest `sandbox-hotel-pms-v43m` deploy logs show predeploy `npm run db:migrate && npm run db:seed`, `prisma migrate deploy`, `prisma db seed`, and `Seed completed successfully` at 2026-06-01T09:08Z.
 - Non-destructive probe paths `/.env`, `/wp-login.php`, and `/phpmyadmin/` returned `404` through Cloudflare. This confirms those paths are not exposed, but does not prove customer-owned Cloudflare WAF or rate-limit rule IDs.
 - Unauthenticated `GET /api/auth/me` returned `401 Authentication is required`.
@@ -48,14 +58,12 @@ This register records point-in-time external evidence gathered from the live Ren
 ## External Items Still Not Proven
 
 - Production secret inventory beyond behavioral proof: the configured Render key names were verified without printing values, but key creation and rotation timestamps were not exposed by the API response used for this pass. Verify rotation status in Render's secret manager.
-- Restore test status: Render point-in-time recovery is available from 2026-05-29T21:59:40Z, but no disposable-database restore test was triggered or recorded in this pass.
 - Rollback ownership: no named rollback owner, deputy, or access check is recorded in the repo or provider metadata. Assign an owner with Render dashboard access before claiming launch readiness.
 - Upstream WAF/rate-limit configuration: no Cloudflare API token, zone access, rule IDs, or thresholds were available. Common probe paths returned 404 through Cloudflare, but the app-layer login limiter is separate and does not replace upstream controls.
 
 ## Required Evidence Before Sign-Off
 
 - Render secret manager screenshot or exported metadata showing required key names and rotation dates only, with values redacted.
-- Restore test record against a disposable database, including tester, date, source recovery point, and result.
 - Rollback owner and deputy, with the latest known-good deploy ID and a tested rollback path.
 - Upstream WAF/rate-limit rule IDs, thresholds, protected hostnames, and a non-destructive test result.
 

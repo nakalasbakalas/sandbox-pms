@@ -1,6 +1,6 @@
 # Hotel PMS Launch Checklist
 
-Checked items reflect evidence recorded through 2026-06-02T08:25Z in `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, a disposable restore target, or role-by-role manual sign-off remain unchecked.
+Checked items reflect evidence recorded through 2026-06-07T15:57Z in `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, or role-by-role manual sign-off remain unchecked.
 
 ## Environment
 
@@ -67,7 +67,7 @@ Checked items reflect evidence recorded through 2026-06-02T08:25Z in `docs/live-
 - [x] The public domain points to the intended Render service and matches `APP_URL` and `ALLOWED_ORIGINS`.
 - [x] Backup and restore plan is documented for the database.
 - [x] Latest database backup/recovery point is verified in Render.
-- [ ] A restore test has passed against a disposable database.
+- [x] A restore test has passed against a disposable database.
 - [x] Rollback plan exists for app and database migrations.
 - [ ] Rollback owner and deputy are named and have Render dashboard access.
 - [ ] Upstream WAF/rate-limit rules are configured and recorded with rule IDs and thresholds.
