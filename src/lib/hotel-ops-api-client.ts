@@ -2,6 +2,7 @@ import type {
   HotelOpsApproval,
   HotelOpsCommandResult,
   HotelOpsEmergencyStop,
+  HotelOpsNotification,
   HotelOpsOtaStatus,
   HotelOpsTask,
   HotelOpsTrendAlert,
@@ -71,6 +72,10 @@ export const hotelOpsApi = {
 
   listApprovals() {
     return apiRequest<{ ok: true; data: HotelOpsApproval[] }>('/api/ops/approvals')
+  },
+
+  listNotifications(filters: { status?: string; channel?: string; limit?: number } = {}) {
+    return apiRequest<{ ok: true; data: HotelOpsNotification[] }>(`/api/ops/notifications${query(filters)}`)
   },
 
   listAlerts(filters: { status?: string; limit?: number } = {}) {

@@ -38,6 +38,7 @@ model Property {
   hotelOpsTasks        HotelOpsTask[]
   hotelOpsTrendAlerts  HotelOpsTrendAlert[]
   hotelOpsEmergencyStop HotelOpsEmergencyStop?
+  hotelOpsNotifications HotelOpsNotification[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -576,6 +577,7 @@ model HotelOpsTask {
   updatedAt          DateTime                @updatedAt
   approvals          HotelOpsTaskApproval[]
   logs               HotelOpsTaskLog[]
+  notifications      HotelOpsNotification[]
 
   @@index([propertyId, status, createdAt])
   @@index([taskType, riskLevel])
@@ -628,6 +630,7 @@ model HotelOpsTrendAlert {
   status             HotelOpsTrendAlertStatus @default(CREATED)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
+  notifications      HotelOpsNotification[]
 
   @@index([propertyId, status, createdAt])
   @@index([alertType, severity])
@@ -642,6 +645,33 @@ model HotelOpsEmergencyStop {
   updatedBy  String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+model HotelOpsNotification {
+  id               String                       @id @default(cuid())
+  propertyId       String
+  property         Property                     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  taskId           String?
+  task             HotelOpsTask?                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  trendAlertId     String?
+  trendAlert       HotelOpsTrendAlert?          @relation(fields: [trendAlertId], references: [id], onDelete: Cascade)
+  type             HotelOpsNotificationType
+  channel          HotelOpsNotificationChannel
+  status           HotelOpsNotificationStatus   @default(RECORDED)
+  recipientRole    HotelOpsRole?
+  recipientUserId  String?
+  recipientAddress String?
+  title            String
+  summary          String
+  actionUrl        String?
+  metadata         Json?
+  sentAt           DateTime?
+  createdAt        DateTime                     @default(now())
+
+  @@index([propertyId, status, createdAt])
+  @@index([taskId, createdAt])
+  @@index([trendAlertId, createdAt])
+  @@index([type, channel])
 }
 
 enum HotelOpsPlatform {
@@ -738,6 +768,26 @@ enum HotelOpsTrendAlertStatus {
   ACKNOWLEDGED
   RECOMMENDATION_APPROVED
   RESOLVED
+}
+
+enum HotelOpsNotificationType {
+  TASK_UPDATE
+  APPROVAL_REQUEST
+  TREND_ALERT
+  NEEDS_HUMAN
+  EMERGENCY_STOP
+}
+
+enum HotelOpsNotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+enum HotelOpsNotificationStatus {
+  RECORDED
+  PENDING_PROVIDER
+  SENT
+  FAILED
 }
 
 model RateRule {

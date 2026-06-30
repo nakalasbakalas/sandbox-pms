@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
 import { createUser } from '../server/pms-service.mjs'
 
 async function importTypeScriptModule(path) {
@@ -375,6 +375,24 @@ assert.equal(usernameOnlyUser.username, 'hk2', 'admin can create a username-only
 assert.equal(usernameOnlyUser.email, null, 'username-only server user stores null email')
 assert.equal(usernameOnlyUser.role, 'HOUSEKEEPING', 'username-only server user role normalizes to backend enum')
 assert.equal(createdAudits[0]?.action, 'USER_CREATED', 'username-only server user creation is audited')
+
+const notificationDrafts = buildOpsNotificationDrafts({
+  id: 'property-1',
+  reservationAlertEmail: 'ops@property.test',
+}, {
+  type: 'APPROVAL_REQUEST',
+  taskId: 'task-1',
+  recipientRole: 'OWNER',
+  title: 'Approval required',
+  summary: 'Rate update needs owner approval.',
+  actionPath: '/ops/approvals',
+})
+assert.equal(notificationDrafts.length, 2, 'Hotel Ops notification abstraction records in-app plus email intent when alert email exists')
+assert.equal(notificationDrafts[0].channel, 'IN_APP', 'Hotel Ops notification records in-app delivery')
+assert.equal(notificationDrafts[0].status, 'SENT', 'Hotel Ops in-app notification is immediately available')
+assert.equal(notificationDrafts[1].channel, 'EMAIL', 'Hotel Ops notification records email channel intent')
+assert.equal(notificationDrafts[1].status, 'PENDING_PROVIDER', 'Hotel Ops does not fake email delivery without a provider')
+assert.equal(notificationDrafts[1].recipientAddress, 'ops@property.test', 'Hotel Ops email intent targets the property alert email')
 
 const fixedOpsDate = new Date('2026-06-30T00:00:00.000Z')
 const rateCommand = parseHotelOpsCommand('Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', { now: fixedOpsDate })

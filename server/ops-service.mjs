@@ -64,6 +64,7 @@ const FORBIDDEN_PATTERNS = [
 const taskInclude = {
   approvals: { orderBy: { requestedAt: 'desc' } },
   logs: { orderBy: { createdAt: 'desc' }, take: 20 },
+  notifications: { orderBy: { createdAt: 'desc' }, take: 10 },
 }
 
 function actorLabel(actor) {
@@ -347,6 +348,8 @@ function dateOrNull(key) {
 
 function serializeTask(task) {
   if (!task) return null
+  const hasAvailability = (task.availabilityStatus !== null && task.availabilityStatus !== undefined)
+    || (task.availabilityRooms !== null && task.availabilityRooms !== undefined)
   return {
     id: task.id,
     requesterUserId: task.requesterUserId,
@@ -362,7 +365,7 @@ function serializeTask(task) {
       end: task.dateEnd ? isoDate(task.dateEnd) : null,
     },
     rate: task.rateAmount === null || task.rateAmount === undefined ? undefined : { amount: task.rateAmount, currency: task.rateCurrency || 'THB' },
-    availability: task.availabilityStatus || task.availabilityRooms !== null ? { rooms: task.availabilityRooms, status: task.availabilityStatus } : undefined,
+    availability: hasAvailability ? { rooms: task.availabilityRooms, status: task.availabilityStatus } : undefined,
     message: task.message,
     riskLevel: task.riskLevel,
     approvalRequired: task.approvalRequired,
@@ -378,8 +381,31 @@ function serializeTask(task) {
     errorMessage: task.errorMessage,
     approvals: task.approvals || [],
     logs: task.logs || [],
+    notifications: (task.notifications || []).map(serializeNotification),
     createdAt: task.createdAt?.toISOString?.() || task.createdAt,
     updatedAt: task.updatedAt?.toISOString?.() || task.updatedAt,
+  }
+}
+
+function serializeNotification(notification) {
+  if (!notification) return null
+  return {
+    id: notification.id,
+    propertyId: notification.propertyId,
+    taskId: notification.taskId,
+    trendAlertId: notification.trendAlertId,
+    type: notification.type,
+    channel: notification.channel,
+    status: notification.status,
+    recipientRole: notification.recipientRole,
+    recipientUserId: notification.recipientUserId,
+    recipientAddress: notification.recipientAddress,
+    title: notification.title,
+    summary: notification.summary,
+    actionUrl: notification.actionUrl,
+    metadata: notification.metadata,
+    sentAt: notification.sentAt?.toISOString?.() || notification.sentAt,
+    createdAt: notification.createdAt?.toISOString?.() || notification.createdAt,
   }
 }
 
@@ -410,6 +436,76 @@ async function getProperty(prisma) {
   const property = await prisma.property.findUnique({ where: { code: SANDBOX_RULES.propertyCode } })
   if (!property) throw new PmsValidationError('Property setup has not been completed yet.', 503)
   return property
+}
+
+function appActionUrl(path) {
+  const normalizedPath = String(path || '/ops/tasks').startsWith('/') ? String(path || '/ops/tasks') : `/${path}`
+  const base = normalizeNullableString(process.env.APP_URL || process.env.RENDER_EXTERNAL_URL)
+  return base ? `${base.replace(/\/+$/, '')}${normalizedPath}` : normalizedPath
+}
+
+function notificationEmailAddress(property) {
+  return normalizeNullableString(property?.reservationAlertEmail || property?.email)
+}
+
+export function buildOpsNotificationDrafts(property, input = {}) {
+  const actionUrl = appActionUrl(input.actionPath || '/ops/tasks')
+  const title = normalizeText(input.title)
+  const summary = normalizeText(input.summary)
+  if (!title || !summary) throw new PmsValidationError('Notification title and summary are required.')
+
+  const shared = {
+    propertyId: property.id,
+    taskId: normalizeNullableString(input.taskId),
+    trendAlertId: normalizeNullableString(input.trendAlertId),
+    type: input.type || 'TASK_UPDATE',
+    recipientRole: input.recipientRole || null,
+    recipientUserId: normalizeNullableString(input.recipientUserId),
+    title,
+    summary,
+    actionUrl,
+    metadata: input.metadata || undefined,
+  }
+
+  const drafts = [{
+    ...shared,
+    channel: 'IN_APP',
+    status: 'SENT',
+    sentAt: new Date(),
+  }]
+
+  const emailAddress = input.includeEmail === false ? null : notificationEmailAddress(property)
+  if (emailAddress) {
+    drafts.push({
+      ...shared,
+      channel: 'EMAIL',
+      status: 'PENDING_PROVIDER',
+      recipientAddress: emailAddress,
+      sentAt: null,
+    })
+  }
+
+  return drafts
+}
+
+async function recordOpsNotifications(tx, propertyId, input, actor) {
+  const property = await tx.property.findUnique({ where: { id: propertyId } })
+  if (!property) return []
+  const created = []
+  for (const draft of buildOpsNotificationDrafts(property, input)) {
+    created.push(await tx.hotelOpsNotification.create({ data: draft }))
+  }
+  if (input.taskId) {
+    await taskLog(tx, input.taskId, 'NOTIFICATION_RECORDED', input.title, actor, {
+      type: input.type,
+      channels: created.map((notification) => ({ channel: notification.channel, status: notification.status })),
+    })
+  }
+  await audit(tx, actor, 'OPS_NOTIFICATION_RECORDED', input.taskId ? 'hotelOpsTask' : input.trendAlertId ? 'hotelOpsTrendAlert' : 'hotelOpsNotification', input.taskId || input.trendAlertId || created[0]?.id, {
+    type: input.type,
+    channels: created.map((notification) => ({ channel: notification.channel, status: notification.status })),
+  })
+  return created
 }
 
 async function taskLog(tx, taskId, action, message, actor, metadata) {
@@ -497,7 +593,22 @@ async function executeMockTask(tx, task, actor) {
   })
   await taskLog(tx, task.id, `WORKER_${result.status}`, result.summary, actor, result)
   await audit(tx, actor, `OPS_TASK_${result.status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status: result.status, dryRun: true })
-  return updated
+  await recordOpsNotifications(tx, task.propertyId, {
+    type: result.status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',
+    taskId: task.id,
+    recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
+    recipientRole: result.status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
+    title: result.status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${result.status.toLowerCase().replace(/_/g, ' ')}`,
+    summary: result.summary,
+    actionPath: '/ops/tasks',
+    metadata: {
+      status: result.status,
+      taskType: task.taskType,
+      platform: task.platform,
+      errorCode: result.errorCode,
+    },
+  }, actor)
+  return tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude })
 }
 
 export async function submitOpsCommand(prisma, input, actor) {
@@ -567,6 +678,20 @@ export async function submitOpsCommand(prisma, input, actor) {
       })
       await taskLog(tx, task.id, 'APPROVAL_REQUESTED', decision.reason, actor, { requiredRole: decision.requiredApprovalRole })
       await audit(tx, actor, 'OPS_APPROVAL_REQUESTED', 'hotelOpsTask', task.id, { requiredRole: decision.requiredApprovalRole })
+      await recordOpsNotifications(tx, property.id, {
+        type: 'APPROVAL_REQUEST',
+        taskId: task.id,
+        recipientRole: decision.requiredApprovalRole || 'HOTEL_MANAGER',
+        title: 'Hotel Ops approval required',
+        summary: `${parsed.taskType.replace(/_/g, ' ')} for ${parsed.platform} requires approval before execution.`,
+        actionPath: '/ops/approvals',
+        metadata: {
+          taskType: parsed.taskType,
+          riskLevel: decision.riskLevel,
+          platform: parsed.platform,
+          requiredRole: decision.requiredApprovalRole || 'HOTEL_MANAGER',
+        },
+      }, actor)
       return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, duplicate: false }
     }
 
@@ -653,7 +778,16 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
     const updated = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'DENIED' }, include: taskInclude })
     await taskLog(tx, task.id, 'APPROVAL_DENIED', 'Hotel Ops task denied.', actor, { reason: normalizeNullableString(input?.reason || input?.notes) })
     await audit(tx, actor, 'OPS_APPROVAL_DENIED', 'hotelOpsTask', task.id, { reason: normalizeNullableString(input?.reason || input?.notes) })
-    return serializeTask(updated)
+    await recordOpsNotifications(tx, task.propertyId, {
+      type: 'TASK_UPDATE',
+      taskId: task.id,
+      recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
+      title: 'Hotel Ops task denied',
+      summary: normalizeNullableString(input?.reason || input?.notes) || 'The Hotel Ops task was denied before execution.',
+      actionPath: '/ops/tasks',
+      metadata: { status: 'DENIED', taskType: task.taskType },
+    }, actor)
+    return serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude }))
   })
 }
 
@@ -665,7 +799,16 @@ export async function cancelOpsTask(prisma, taskId, input, actor) {
     const updated = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'CANCELLED' }, include: taskInclude })
     await taskLog(tx, task.id, 'TASK_CANCELLED', 'Hotel Ops task cancelled.', actor, { reason: normalizeNullableString(input?.reason) })
     await audit(tx, actor, 'OPS_TASK_CANCELLED', 'hotelOpsTask', task.id, { reason: normalizeNullableString(input?.reason) })
-    return serializeTask(updated)
+    await recordOpsNotifications(tx, task.propertyId, {
+      type: 'TASK_UPDATE',
+      taskId: task.id,
+      recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
+      title: 'Hotel Ops task cancelled',
+      summary: normalizeNullableString(input?.reason) || 'The Hotel Ops task was cancelled before completion.',
+      actionPath: '/ops/tasks',
+      metadata: { status: 'CANCELLED', taskType: task.taskType },
+    }, actor)
+    return serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude }))
   })
 }
 
@@ -679,6 +822,19 @@ export async function listOpsApprovals(prisma) {
     ...approval,
     task: serializeTask(approval.task),
   }))
+}
+
+export async function listOpsNotifications(prisma, filters = {}) {
+  const property = await getProperty(prisma)
+  const where = { propertyId: property.id }
+  if (filters.status) where.status = String(filters.status).toUpperCase()
+  if (filters.channel) where.channel = String(filters.channel).toUpperCase()
+  const notifications = await prisma.hotelOpsNotification.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(Math.max(Number(filters.limit) || 50, 1), 200),
+  })
+  return notifications.map(serializeNotification)
 }
 
 export async function getEmergencyStop(prisma) {
@@ -712,6 +868,14 @@ export async function setEmergencyStop(prisma, input, actor) {
     enabled,
     reason: normalizeNullableString(input?.reason),
   })
+  await recordOpsNotifications(prisma, property.id, {
+    type: 'EMERGENCY_STOP',
+    recipientRole: 'OWNER',
+    title: enabled ? 'Hotel Ops emergency stop enabled' : 'Hotel Ops emergency stop disabled',
+    summary: normalizeNullableString(input?.reason) || (enabled ? 'Write tasks are blocked until emergency stop is disabled.' : 'Write tasks can be reviewed and queued again.'),
+    actionPath: '/ops/settings',
+    metadata: { enabled },
+  }, actor)
   return stop
 }
 
@@ -820,6 +984,21 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
   }))
 
   await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', created[0]?.id || null, { created: created.length, occupancy })
+  for (const alert of created) {
+    await recordOpsNotifications(prisma, property.id, {
+      type: 'TREND_ALERT',
+      trendAlertId: alert.id,
+      recipientRole: 'HOTEL_MANAGER',
+      title: alert.title,
+      summary: alert.summary,
+      actionPath: '/ops/intelligence',
+      metadata: {
+        alertType: alert.alertType,
+        severity: alert.severity,
+        recommendation: Boolean(alert.recommendedAction),
+      },
+    }, actor)
+  }
   return created.map(serializeAlert)
 }
 

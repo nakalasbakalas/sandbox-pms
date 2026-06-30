@@ -522,6 +522,7 @@ assert.deepEqual(resolveApiRouteContract('/api/ops/commands')?.methods, ['POST']
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks')?.methods, ['GET'], 'Hotel Ops task history exposes read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/approve')?.methods, ['POST'], 'Hotel Ops approve endpoint only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/ops/approvals')?.methods, ['GET'], 'Hotel Ops approvals expose read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/notifications')?.methods, ['GET'], 'Hotel Ops notifications expose read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/approve-recommendation')?.methods, ['POST'], 'Hotel Ops recommendation approval exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/emergency-stop')?.methods, ['GET', 'POST'], 'Hotel Ops emergency stop exposes read/update methods')
 assert.deepEqual(resolveApiRouteContract('/api/ops/ota/status')?.methods, ['GET'], 'Hotel Ops OTA status exposes read method')

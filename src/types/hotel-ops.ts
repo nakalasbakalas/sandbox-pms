@@ -106,6 +106,25 @@ export type HotelOpsTaskLog = {
   createdAt: string
 }
 
+export type HotelOpsNotification = {
+  id: string
+  propertyId: string
+  taskId?: string | null
+  trendAlertId?: string | null
+  type: 'TASK_UPDATE' | 'APPROVAL_REQUEST' | 'TREND_ALERT' | 'NEEDS_HUMAN' | 'EMERGENCY_STOP'
+  channel: 'IN_APP' | 'EMAIL'
+  status: 'RECORDED' | 'PENDING_PROVIDER' | 'SENT' | 'FAILED'
+  recipientRole?: HotelOpsRole | null
+  recipientUserId?: string | null
+  recipientAddress?: string | null
+  title: string
+  summary: string
+  actionUrl?: string | null
+  metadata?: unknown
+  sentAt?: string | null
+  createdAt: string
+}
+
 export type HotelOpsTask = ParsedHotelOpsTask & {
   id: string
   requesterUserId: string
@@ -121,6 +140,7 @@ export type HotelOpsTask = ParsedHotelOpsTask & {
   errorMessage?: string | null
   approvals?: HotelOpsApproval[]
   logs?: HotelOpsTaskLog[]
+  notifications?: HotelOpsNotification[]
   createdAt: string
   updatedAt: string
 }

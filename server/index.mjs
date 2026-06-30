@@ -25,6 +25,7 @@ import {
   getEmergencyStop,
   getOpsTask,
   getOtaStatus,
+  listOpsNotifications,
   listOpsApprovals,
   listOpsTasks,
   listOpsTrendAlerts,
@@ -648,6 +649,19 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/ops/approvals' && request.method === 'GET') {
     requirePermission(user, 'approve:ops-task')
     sendJson(response, 200, { ok: true, data: await listOpsApprovals(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/notifications' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, {
+      ok: true,
+      data: await listOpsNotifications(db, {
+        status: url.searchParams.get('status'),
+        channel: url.searchParams.get('channel'),
+        limit: url.searchParams.get('limit'),
+      }),
+    })
     return true
   }
 
