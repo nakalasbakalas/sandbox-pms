@@ -57,7 +57,8 @@ export function createSessionToken(user, options = {}) {
   const expiresAt = now + Math.floor((options.hours ?? DEFAULT_SESSION_HOURS) * 60 * 60)
   const payload = base64UrlEncode(JSON.stringify({
     sub: user.id,
-    email: user.email,
+    email: user.email || null,
+    username: user.username,
     role: user.role,
     name: `${user.firstName} ${user.lastName}`.trim(),
     iat: now,

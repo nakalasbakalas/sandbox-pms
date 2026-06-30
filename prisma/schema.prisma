@@ -513,7 +513,8 @@ model RoomStatusLog {
 
 model User {
   id           String   @id @default(cuid())
-  email        String   @unique
+  email        String?  @unique
+  username     String   @unique
   passwordHash String
   firstName    String
   lastName     String
@@ -524,6 +525,7 @@ model User {
   updatedAt    DateTime @updatedAt
   
   @@index([email])
+  @@index([username])
   @@index([role, active])
 }
 

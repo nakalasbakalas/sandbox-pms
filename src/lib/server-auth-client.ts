@@ -4,9 +4,11 @@ import { SERVER_AUTH_ENABLED, normalizeAuthEmail } from '@/lib/auth-mode'
 
 type ServerUser = {
   id: string
-  email: string
+  email?: string | null
+  username: string
   role: string
   displayName: string
+  active?: boolean
   createdAt?: string | null
 }
 
@@ -28,13 +30,15 @@ function mapRole(role: string): UserRole {
 }
 
 function mapUser(user: ServerUser): User {
-  const email = normalizeAuthEmail(user.email)
+  const email = user.email ? normalizeAuthEmail(user.email) : null
+  const username = normalizeAuthEmail(user.username || user.email)
   return {
     id: user.id,
     email,
-    username: email,
+    username,
     role: mapRole(user.role),
     displayName: user.displayName,
+    active: user.active,
     createdAt: user.createdAt || '',
   }
 }
@@ -63,10 +67,10 @@ export function mapServerUser(user: ServerUser): User {
   return mapUser(user)
 }
 
-export async function serverLogin(email: string, password: string): Promise<{ user: User }> {
+export async function serverLogin(identity: string, password: string): Promise<{ user: User }> {
   const payload = await apiRequest<{ ok: true; user: ServerUser }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email: normalizeAuthEmail(email), password }),
+    body: JSON.stringify({ identity: normalizeAuthEmail(identity), password }),
   })
   return { user: mapUser(payload.user) }
 }
@@ -97,4 +101,47 @@ export async function completeServerSetup(data: OnboardingState['data'], setupTo
     headers: setupToken ? { 'x-setup-token': setupToken } : undefined,
     body: JSON.stringify(data),
   })
+}
+
+export type ServerUserCreateInput = {
+  username?: string
+  email?: string | null
+  password: string
+  displayName?: string
+  firstName?: string
+  lastName?: string
+  role: string
+  active?: boolean
+}
+
+export type ServerUserUpdateInput = Partial<Omit<ServerUserCreateInput, 'password'>> & {
+  password?: string
+}
+
+export async function listServerUsers(): Promise<User[]> {
+  const payload = await apiRequest<{ ok: true; data: ServerUser[] }>('/api/users')
+  return payload.data.map(mapUser)
+}
+
+export async function createServerUser(input: ServerUserCreateInput): Promise<User> {
+  const payload = await apiRequest<{ ok: true; data: ServerUser }>('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  return mapUser(payload.data)
+}
+
+export async function updateServerUser(userId: string, input: ServerUserUpdateInput): Promise<User> {
+  const payload = await apiRequest<{ ok: true; data: ServerUser }>(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  })
+  return mapUser(payload.data)
+}
+
+export async function deactivateServerUser(userId: string): Promise<User> {
+  const payload = await apiRequest<{ ok: true; data: ServerUser }>(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  })
+  return mapUser(payload.data)
 }

@@ -57,7 +57,7 @@ async function serializableTransaction(prisma, callback) {
 }
 
 function actorName(actor) {
-  return actor?.name || actor?.email || actor?.id || 'System'
+  return actor?.name || actor?.email || actor?.username || actor?.id || 'System'
 }
 
 function normalizeNullableString(value) {
@@ -142,6 +142,69 @@ function setupString(value, label, required = true) {
   const normalized = String(value || '').trim()
   if (required && !normalized) throw new PmsValidationError(`${label} is required.`)
   return normalized || null
+}
+
+const VALID_USER_ROLES = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER', 'CAFE_STAFF']
+
+function normalizeUserEmail(value) {
+  const email = normalizeNullableString(value)?.toLowerCase() || null
+  if (!email) return null
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new PmsValidationError('Email must be a valid email address.')
+  }
+  return email
+}
+
+function normalizeUserUsername(value, fallbackEmail = null) {
+  const username = normalizeNullableString(value || fallbackEmail)?.toLowerCase() || null
+  if (!username) {
+    throw new PmsValidationError('Login username is required when no email address is supplied.')
+  }
+  if (username.includes('@')) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) {
+      throw new PmsValidationError('Login username must be a valid email address or staff username.')
+    }
+    return username
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{1,62}$/.test(username)) {
+    throw new PmsValidationError('Login username must be 2-63 characters using letters, numbers, dot, dash, or underscore.')
+  }
+  return username
+}
+
+function normalizeUserRole(value) {
+  const role = String(value || 'FRONT_DESK').trim().toUpperCase().replace(/-/g, '_')
+  if (!VALID_USER_ROLES.includes(role)) {
+    throw new PmsValidationError(`Role must be one of: ${VALID_USER_ROLES.join(', ')}.`)
+  }
+  return role
+}
+
+function normalizeUserNameParts(input) {
+  const displayName = normalizeNullableString(input?.displayName || input?.name)
+  const firstName = normalizeNullableString(input?.firstName)
+  const lastName = normalizeNullableString(input?.lastName)
+  if (firstName && lastName) return { firstName, lastName }
+  if (displayName) {
+    const parts = displayName.split(/\s+/)
+    return {
+      firstName: firstName || parts.shift() || 'Staff',
+      lastName: lastName || parts.join(' ') || 'User',
+    }
+  }
+  return {
+    firstName: firstName || 'Staff',
+    lastName: lastName || 'User',
+  }
+}
+
+function validateUserPassword(password, required = true) {
+  const value = String(password || '')
+  if (!value && !required) return null
+  if (value.length < 12) {
+    throw new PmsValidationError('User password must be at least 12 characters.')
+  }
+  return value
 }
 
 function setupNumber(value, label, options = {}) {
@@ -1173,8 +1236,17 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   return { payment, folio: updatedFolio }
 }
 
-export async function authenticateUser(prisma, email, password) {
-  const user = await prisma.user.findUnique({ where: { email } })
+export async function authenticateUser(prisma, identity, password) {
+  const normalizedIdentity = String(identity || '').trim().toLowerCase()
+  if (!normalizedIdentity) return null
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username: normalizedIdentity },
+        { email: normalizedIdentity },
+      ],
+    },
+  })
   if (!user?.active) return null
 
   const { verifyPassword } = await import('./security.mjs')
@@ -1200,6 +1272,122 @@ export async function getSetupStatus(prisma) {
     hasUsers: userCount > 0,
     propertyName: property?.name || null,
   }
+}
+
+export async function listUsers(prisma) {
+  return prisma.user.findMany({
+    orderBy: [
+      { active: 'desc' },
+      { role: 'asc' },
+      { username: 'asc' },
+    ],
+  })
+}
+
+export async function createUser(prisma, input, actor) {
+  const email = normalizeUserEmail(input?.email)
+  const username = normalizeUserUsername(input?.username, email)
+  const { firstName, lastName } = normalizeUserNameParts(input)
+  const role = normalizeUserRole(input?.role)
+  const password = validateUserPassword(input?.password, true)
+
+  const duplicate = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { username },
+        ...(email ? [{ email }] : []),
+      ],
+    },
+  })
+  if (duplicate) {
+    throw new PmsValidationError(email && duplicate.email === email ? 'A user with this email already exists.' : 'A user with this username already exists.', 409)
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      email,
+      username,
+      passwordHash: createPasswordHash(password),
+      firstName,
+      lastName,
+      role,
+      active: input?.active === undefined ? true : Boolean(input.active),
+    },
+  })
+  await createAudit(prisma, actor, 'USER_CREATED', 'user', user.id, {
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    active: user.active,
+  })
+  return user
+}
+
+export async function updateUser(prisma, userId, input, actor) {
+  const existing = await prisma.user.findUnique({ where: { id: userId } })
+  if (!existing) throw new PmsValidationError('User was not found.', 404)
+
+  const data = {}
+  if (input?.email !== undefined) data.email = normalizeUserEmail(input.email)
+  if (input?.username !== undefined) data.username = normalizeUserUsername(input.username, data.email ?? existing.email)
+  if (input?.displayName !== undefined || input?.name !== undefined) {
+    Object.assign(data, normalizeUserNameParts({ displayName: input?.displayName || input?.name }))
+  } else if (input?.firstName !== undefined || input?.lastName !== undefined) {
+    Object.assign(data, normalizeUserNameParts({
+      firstName: input?.firstName ?? existing.firstName,
+      lastName: input?.lastName ?? existing.lastName,
+    }))
+  }
+  if (input?.role !== undefined) data.role = normalizeUserRole(input.role)
+  if (input?.active !== undefined) data.active = Boolean(input.active)
+  const password = validateUserPassword(input?.password, false)
+  if (password) data.passwordHash = createPasswordHash(password)
+
+  const nextUsername = data.username ?? existing.username
+  const nextEmail = data.email === undefined ? existing.email : data.email
+  const duplicate = await prisma.user.findFirst({
+    where: {
+      id: { not: existing.id },
+      OR: [
+        { username: nextUsername },
+        ...(nextEmail ? [{ email: nextEmail }] : []),
+      ],
+    },
+  })
+  if (duplicate) {
+    throw new PmsValidationError(nextEmail && duplicate.email === nextEmail ? 'A user with this email already exists.' : 'A user with this username already exists.', 409)
+  }
+
+  const user = await prisma.user.update({
+    where: { id: existing.id },
+    data,
+  })
+  await createAudit(prisma, actor, 'USER_UPDATED', 'user', user.id, {
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    active: user.active,
+    passwordChanged: Boolean(password),
+  })
+  return user
+}
+
+export async function deactivateUser(prisma, userId, actor) {
+  if (actor?.id === userId) {
+    throw new PmsValidationError('You cannot deactivate your own account.', 409)
+  }
+  const existing = await prisma.user.findUnique({ where: { id: userId } })
+  if (!existing) throw new PmsValidationError('User was not found.', 404)
+  const user = await prisma.user.update({
+    where: { id: existing.id },
+    data: { active: false },
+  })
+  await createAudit(prisma, actor, 'USER_DEACTIVATED', 'user', user.id, {
+    username: user.username,
+    email: user.email,
+    role: user.role,
+  })
+  return user
 }
 
 export async function completeInitialSetup(prisma, input) {
@@ -1274,6 +1462,7 @@ export async function completeInitialSetup(prisma, input) {
     const admin = await tx.user.create({
       data: {
         email: setup.adminUser.email,
+        username: setup.adminUser.email,
         passwordHash: createPasswordHash(setup.adminUser.password),
         firstName,
         lastName,

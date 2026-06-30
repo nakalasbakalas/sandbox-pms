@@ -26,6 +26,7 @@ import {
   checkOutReservation,
   completeInitialSetup,
   createBookingEmailSource,
+  createUser,
   createRoomType,
   createSetupRoom,
   createGuest,
@@ -45,9 +46,11 @@ import {
   listGuests,
   listReservations,
   listRooms,
+  listUsers,
   rejectBookingEmailEvent,
   reprocessBookingEmailEvent,
   syncBookingEmail,
+  deactivateUser,
   deleteRoomType,
   deleteSetupRoom,
   updateBookingEmailSource,
@@ -57,6 +60,7 @@ import {
   updateRoomOperationalStatus,
   updateRoomType,
   updateSetupRoom,
+  updateUser,
 } from './pms-service.mjs'
 
 loadEnvDefaults()
@@ -287,9 +291,11 @@ function publicUser(user) {
   if (!user) return null
   return {
     id: user.id,
-    email: user.email,
+    email: user.email || null,
+    username: user.username,
     role: user.role,
     displayName: `${user.firstName} ${user.lastName}`.trim(),
+    active: user.active,
     createdAt: user.createdAt?.toISOString?.() || null,
   }
 }
@@ -497,8 +503,9 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const body = await readJson(request)
+    const identity = body.identity || body.username || body.email
     const loginIdentity = {
-      email: body.email,
+      email: identity,
       ip: resolveClientIp(request),
     }
     const throttleCheck = loginThrottle.check(loginIdentity)
@@ -512,7 +519,7 @@ async function handleApi(request, response, url) {
       return true
     }
 
-    const user = await authenticateUser(db, body.email, body.password)
+    const user = await authenticateUser(db, identity, body.password)
     if (!user) {
       const failure = loginThrottle.recordFailure(loginIdentity)
       if (!failure.allowed) {
@@ -524,7 +531,7 @@ async function handleApi(request, response, url) {
         )
         return true
       }
-      sendJson(response, 401, { ok: false, error: 'Invalid email or password.' })
+      sendJson(response, 401, { ok: false, error: 'Invalid username/email or password.' })
       return true
     }
     loginThrottle.recordSuccess(loginIdentity)
@@ -573,6 +580,34 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/can-view' && request.method === 'GET') {
     sendJson(response, 200, { ok: true, allowed: canViewRoute(user, url.searchParams.get('route')) })
+    return true
+  }
+
+  if (url.pathname === '/api/users' && request.method === 'GET') {
+    requirePermission(user, 'manage:users')
+    sendJson(response, 200, { ok: true, data: (await listUsers(db)).map(publicUser) })
+    return true
+  }
+
+  if (url.pathname === '/api/users' && request.method === 'POST') {
+    requirePermission(user, 'manage:users')
+    const createdUser = await createUser(db, await readJson(request), user)
+    sendJson(response, 201, { ok: true, data: publicUser(createdUser), message: `User ${createdUser.username} created.` })
+    return true
+  }
+
+  let userParams = routeParam(url.pathname, /^\/api\/users\/(?<id>[^/]+)$/)
+  if (userParams && request.method === 'PATCH') {
+    requirePermission(user, 'manage:users')
+    const updatedUser = await updateUser(db, userParams.id, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: publicUser(updatedUser), message: `User ${updatedUser.username} updated.` })
+    return true
+  }
+
+  if (userParams && request.method === 'DELETE') {
+    requirePermission(user, 'manage:users')
+    const deactivatedUser = await deactivateUser(db, userParams.id, user)
+    sendJson(response, 200, { ok: true, data: publicUser(deactivatedUser), message: `User ${deactivatedUser.username} deactivated.` })
     return true
   }
 

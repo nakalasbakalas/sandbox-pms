@@ -325,11 +325,23 @@ assert.equal(authMode.LOCAL_AUTH_FALLBACK_ENABLED, false, 'test environment does
 const mappedUser = serverAuthClient.mapServerUser({
   id: 'user-1',
   email: 'frontdesk@property.test',
+  username: 'frontdesk@property.test',
   role: 'FRONT_DESK',
   displayName: 'Front Desk',
 })
 assert.equal(mappedUser.email, 'frontdesk@property.test', 'server auth users are email-based')
 assert.equal(mappedUser.role, 'front-desk', 'server auth users map backend roles to UI roles')
+
+const mappedUsernameOnlyUser = serverAuthClient.mapServerUser({
+  id: 'user-2',
+  email: null,
+  username: 'hk1',
+  role: 'HOUSEKEEPING',
+  displayName: 'Housekeeper 1',
+})
+assert.equal(mappedUsernameOnlyUser.email, null, 'server auth users can omit email')
+assert.equal(mappedUsernameOnlyUser.username, 'hk1', 'server auth users use username as login identifier')
+assert.equal(mappedUsernameOnlyUser.role, 'housekeeping', 'username-only server auth users map backend roles')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

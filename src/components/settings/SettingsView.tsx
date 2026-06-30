@@ -120,7 +120,7 @@ export function SettingsView() {
           <TabsContent value="users" className="space-y-6">
             <div className="text-center py-12 text-muted-foreground">
               {SERVER_AUTH_ENABLED
-                ? 'Server mode uses email-based staff accounts from the database.'
+                ? 'Server mode uses database staff accounts with username or email login.'
                 : 'User management is available in the advanced settings'}
             </div>
           </TabsContent>
@@ -134,12 +134,12 @@ export function SettingsView() {
                     <div className="font-medium">User Accounts & Permissions</div>
                     <div className="text-sm text-muted-foreground">
                       {SERVER_AUTH_ENABLED
-                        ? 'Deployed mode uses database staff emails and backend sessions.'
+                        ? 'Deployed mode uses database staff usernames, optional emails, and backend sessions.'
                         : 'Manage local development staff accounts, roles, and access permissions'}
                     </div>
                   </div>
                   <Button onClick={() => navigate('user-management')}>
-                    {SERVER_AUTH_ENABLED ? 'View User Source' : 'Manage Users'}
+                    Manage Users
                     <ArrowRight className="ml-2" size={16} />
                   </Button>
                 </div>

@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 
 export function LoginScreen() {
-  const [email, setEmail] = useState('')
+  const [identity, setIdentity] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const { login } = useAuth()
@@ -19,12 +19,12 @@ export function LoginScreen() {
     setIsLoading(true)
 
     try {
-      const success = await login(email, password)
+      const success = await login(identity, password)
       
       if (success) {
         toast.success('Login successful')
       } else {
-        toast.error('Invalid email or password')
+        toast.error('Invalid username/email or password')
       }
     } catch (error) {
       toast.error('An error occurred during login')
@@ -48,23 +48,20 @@ export function LoginScreen() {
               Sign In
             </CardTitle>
             <CardDescription>
-              {SERVER_AUTH_ENABLED
-                ? 'Enter your staff email address and password to access the system'
-                : 'Enter your staff email address and password to access the system'
-              }
+              Enter your staff username or email address and password to access the system
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email address</Label>
+                <Label htmlFor="identity">Username or email</Label>
                 <Input
-                  id="email"
-                  type="email"
-                  inputMode="email"
-                  placeholder="Staff email address"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="identity"
+                  type="text"
+                  inputMode="text"
+                  placeholder="staff username or email"
+                  value={identity}
+                  onChange={(e) => setIdentity(e.target.value)}
                   disabled={isLoading}
                   autoFocus
                   required

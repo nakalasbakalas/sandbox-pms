@@ -7,7 +7,7 @@ import { LOCAL_AUTH_FALLBACK_ENABLED, SERVER_AUTH_ENABLED, normalizeAuthEmail } 
 import { serverLogin, serverLogout, serverMe } from '@/lib/server-auth-client'
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password: string) => Promise<boolean>
+  login: (identity: string, password: string) => Promise<boolean>
   logout: () => void
   hasPermission: (permission: Permission) => boolean
   hasAnyPermission: (permissions: Permission[]) => boolean
@@ -47,6 +47,7 @@ function sameAuthUser(currentUser: User | null, nextUser: User) {
     currentUser &&
     currentUser.id === nextUser.id &&
     currentUser.email === nextUser.email &&
+    currentUser.username === nextUser.username &&
     currentUser.role === nextUser.role &&
     currentUser.displayName === nextUser.displayName &&
     currentUser.createdAt === nextUser.createdAt,
@@ -59,11 +60,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [serverSessionReady, setServerSessionReady] = useState(!SERVER_AUTH_ENABLED)
   const isAuthenticated = Boolean(currentUser && (!SERVER_AUTH_ENABLED || serverSessionReady))
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    const normalizedEmail = normalizeAuthEmail(email)
+  const login = async (identity: string, password: string): Promise<boolean> => {
+    const normalizedIdentity = normalizeAuthEmail(identity)
 
     if (SERVER_AUTH_ENABLED) {
-      const result = await serverLogin(normalizedEmail, password)
+      const result = await serverLogin(normalizedIdentity, password)
       setCurrentUser(result.user)
       setServerSessionReady(true)
       writeBrowserStorage(AUTH_USER_STORAGE_KEY, result.user)
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false
     }
 
-    const matchingUser = customUsers.find((u) => normalizeAuthEmail(u.email || u.username) === normalizedEmail)
+    const matchingUser = customUsers.find((u) => normalizeAuthEmail(u.username || u.email) === normalizedIdentity || normalizeAuthEmail(u.email) === normalizedIdentity)
     const customUser = matchingUser && await hashPassword(password, matchingUser.passwordSalt) === matchingUser.passwordHash
       ? matchingUser
       : null
@@ -83,8 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (customUser) {
       const user: User = {
         id: customUser.id,
-        email: normalizeAuthEmail(customUser.email || customUser.username),
-        username: normalizeAuthEmail(customUser.email || customUser.username),
+        email: customUser.email ? normalizeAuthEmail(customUser.email) : null,
+        username: normalizeAuthEmail(customUser.username || customUser.email),
         role: customUser.role,
         displayName: customUser.displayName,
         createdAt: customUser.createdAt,

@@ -12,7 +12,7 @@
     "defaultCheckIn": "14:00",
     "defaultCheckOut": "12:00",
     "supportHours": null,
-    "reservationAlertEmail": "booking.sandboxhotel@gmail.com",
+    "reservationAlertEmail": "booking@sandboxhotel.com",
     "inventoryMinimumRate": 550,
     "extraGuestFee": 300,
     "childFee": 300
@@ -148,7 +148,7 @@
   "operations": {
     "baseLanguage": "English",
     "housekeepingDefaults": "Unavailable in supplied source data.",
-    "alertRecipients": ["booking.sandboxhotel@gmail.com"],
+    "alertRecipients": ["booking@sandboxhotel.com"],
     "lineMessaging": "Unavailable in supplied source data.",
     "receiptFooterText": null,
     "noOverbooking": true,

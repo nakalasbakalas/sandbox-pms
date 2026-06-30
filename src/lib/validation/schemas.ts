@@ -122,17 +122,25 @@ export const createRoomTypeSchema = z.object({
 })
 
 export const createUserSchema = z.object({
-  email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  username: z.string().min(2, 'Login username is required').optional(),
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  password: z.string().min(12, 'Password must be at least 12 characters'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   role: z.enum(['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER', 'CAFE_STAFF']),
   active: z.boolean().optional().default(true),
-})
+}).refine(
+  (data) => Boolean(data.username?.trim() || data.email?.trim()),
+  {
+    message: 'Username is required when email is blank',
+    path: ['username'],
+  }
+)
 
 export const updateUserSchema = z.object({
-  email: z.string().email('Invalid email').optional(),
-  password: z.string().min(8, 'Password must be at least 8 characters').optional(),
+  username: z.string().min(2, 'Login username is required').optional(),
+  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  password: z.string().min(12, 'Password must be at least 12 characters').optional(),
   firstName: z.string().min(1, 'First name is required').optional(),
   lastName: z.string().min(1, 'Last name is required').optional(),
   role: z.enum(['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING', 'CASHIER', 'CAFE_STAFF']).optional(),
@@ -140,7 +148,7 @@ export const updateUserSchema = z.object({
 })
 
 export const loginSchema = z.object({
-  email: z.string().email('Invalid email'),
+  identity: z.string().min(1, 'Username or email is required'),
   password: z.string().min(1, 'Password is required'),
 })
 

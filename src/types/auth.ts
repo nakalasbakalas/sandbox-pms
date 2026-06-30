@@ -2,11 +2,12 @@ export type UserRole = 'admin' | 'manager' | 'front-desk' | 'housekeeping' | 'ca
 
 export interface User {
   id: string
-  email: string
+  email?: string | null
   role: UserRole
   displayName: string
   createdAt: string
   username?: string
+  active?: boolean
 }
 
 export interface AuthState {

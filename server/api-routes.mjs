@@ -6,6 +6,8 @@ const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/auth\/can-view$/, methods: ['GET'] },
   { pattern: /^\/api\/setup\/status$/, methods: ['GET'] },
   { pattern: /^\/api\/setup\/complete$/, methods: ['POST'] },
+  { pattern: /^\/api\/users$/, methods: ['GET', 'POST'] },
+  { pattern: /^\/api\/users\/[^/]+$/, methods: ['PATCH', 'DELETE'] },
   { pattern: /^\/api\/today$/, methods: ['GET'] },
   { pattern: /^\/api\/front-desk\/board$/, methods: ['GET'] },
   { pattern: /^\/api\/front-desk\/walk-in$/, methods: ['POST'] },

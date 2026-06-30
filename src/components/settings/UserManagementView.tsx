@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
-import { Plus, Trash, UserCircle, Shield, Key, PencilSimple } from '@phosphor-icons/react'
+import { Plus, Trash, UserCircle, Shield, Key, PencilSimple, ArrowClockwise } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -15,36 +15,70 @@ import { ROLE_LABELS, ROLE_PERMISSIONS } from '@/types/auth'
 import { useAuth } from '@/hooks/use-auth'
 import { createPasswordSalt, hashPassword, type PasswordCredential } from '@/lib/auth-passwords'
 import { SERVER_AUTH_ENABLED, normalizeAuthEmail } from '@/lib/auth-mode'
+import { createServerUser, deactivateServerUser, listServerUsers, updateServerUser } from '@/lib/server-auth-client'
 
-interface ManagedUser extends User, PasswordCredential {}
+type ManagedUser = User & Partial<PasswordCredential>
+
+const emptyForm = {
+  username: '',
+  email: '',
+  password: '',
+  displayName: '',
+  role: 'front-desk' as UserRole,
+}
+
+function loginIdFor(user?: Pick<User, 'username' | 'email'> | null) {
+  return normalizeAuthEmail(user?.username || user?.email || '')
+}
+
+function emailFor(user?: Pick<User, 'email'> | null) {
+  return user?.email ? normalizeAuthEmail(user.email) : ''
+}
+
+function validEmail(email: string) {
+  return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
 
 export function UserManagementView() {
-  const [users, setUsers] = useKV<ManagedUser[]>('system:users', [])
+  const [localUsers, setLocalUsers] = useKV<ManagedUser[]>('system:users', [])
+  const [serverUsers, setServerUsers] = useState<ManagedUser[]>([])
+  const [serverLoading, setServerLoading] = useState(false)
+  const [serverError, setServerError] = useState<string | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<ManagedUser | null>(null)
   const { user: currentUser } = useAuth()
 
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    displayName: '',
-    role: 'front-desk' as UserRole,
-  })
-
+  const [formData, setFormData] = useState(emptyForm)
   const [passwordForm, setPasswordForm] = useState({
     newPassword: '',
     confirmPassword: '',
   })
 
+  const users = SERVER_AUTH_ENABLED ? serverUsers : localUsers
+
+  const loadUsers = async () => {
+    if (!SERVER_AUTH_ENABLED) return
+    setServerLoading(true)
+    setServerError(null)
+    try {
+      setServerUsers(await listServerUsers())
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not load users.'
+      setServerError(message)
+      toast.error(message)
+    } finally {
+      setServerLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadUsers()
+  }, [])
+
   const resetForm = () => {
-    setFormData({
-      email: '',
-      password: '',
-      displayName: '',
-      role: 'front-desk',
-    })
+    setFormData(emptyForm)
     setSelectedUser(null)
   }
 
@@ -55,51 +89,115 @@ export function UserManagementView() {
     })
   }
 
-  const handleAddUser = async () => {
-    const email = normalizeAuthEmail(formData.email)
+  const validateUserForm = (requirePassword: boolean) => {
+    const username = normalizeAuthEmail(formData.username || formData.email)
+    const email = emailFor(formData)
 
-    if (!email || !formData.password || !formData.displayName) {
-      toast.error('Please fill in all fields')
-      return
+    if (!username) {
+      toast.error('Enter a login username. Email is optional.')
+      return null
     }
-
-    if (users.some((u) => normalizeAuthEmail(u.email || u.username) === email)) {
-      toast.error('Email already exists')
-      return
+    if (!validEmail(email)) {
+      toast.error('Enter a valid email address or leave email blank.')
+      return null
     }
-
-    const passwordSalt = createPasswordSalt()
-    const passwordHash = await hashPassword(formData.password, passwordSalt)
-    const newUser: ManagedUser = {
-      id: `user-${Date.now()}`,
-      email,
-      username: email,
-      passwordHash,
-      passwordSalt,
-      displayName: formData.displayName,
-      role: formData.role,
-      createdAt: new Date().toISOString(),
+    if (requirePassword && !formData.password) {
+      toast.error('Enter a temporary password.')
+      return null
     }
-
-    setUsers((current) => [...current, newUser])
-    toast.success(`User ${email} created successfully`)
-    setIsAddDialogOpen(false)
-    resetForm()
+    if (requirePassword && formData.password.length < 12) {
+      toast.error('Temporary password must be at least 12 characters.')
+      return null
+    }
+    if (!formData.displayName.trim()) {
+      toast.error('Enter a display name.')
+      return null
+    }
+    return { username, email: email || null, displayName: formData.displayName.trim() }
   }
 
-  const handleEditUser = () => {
-    if (!selectedUser) return
+  const handleAddUser = async () => {
+    const normalized = validateUserForm(true)
+    if (!normalized) return
 
-    setUsers((current) =>
-      current.map((u) =>
-        u.id === selectedUser.id
-          ? { ...u, displayName: formData.displayName, role: formData.role }
-          : u
+    if (!SERVER_AUTH_ENABLED) {
+      if (localUsers.some((user) => loginIdFor(user) === normalized.username || (normalized.email && emailFor(user) === normalized.email))) {
+        toast.error('User login already exists.')
+        return
+      }
+
+      const passwordSalt = createPasswordSalt()
+      const passwordHash = await hashPassword(formData.password, passwordSalt)
+      const newUser: ManagedUser = {
+        id: `user-${Date.now()}`,
+        username: normalized.username,
+        email: normalized.email,
+        passwordHash,
+        passwordSalt,
+        displayName: normalized.displayName,
+        role: formData.role,
+        active: true,
+        createdAt: new Date().toISOString(),
+      }
+
+      setLocalUsers((current) => [...current, newUser])
+      toast.success(`User ${normalized.username} created successfully`)
+      setIsAddDialogOpen(false)
+      resetForm()
+      return
+    }
+
+    try {
+      const user = await createServerUser({
+        username: normalized.username,
+        email: normalized.email,
+        password: formData.password,
+        displayName: normalized.displayName,
+        role: formData.role,
+        active: true,
+      })
+      setServerUsers((current) => [...current, user].sort((a, b) => loginIdFor(a).localeCompare(loginIdFor(b))))
+      toast.success(`User ${loginIdFor(user)} created successfully`)
+      setIsAddDialogOpen(false)
+      resetForm()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not create user.')
+    }
+  }
+
+  const handleEditUser = async () => {
+    if (!selectedUser) return
+    const normalized = validateUserForm(false)
+    if (!normalized) return
+
+    if (!SERVER_AUTH_ENABLED) {
+      setLocalUsers((current) =>
+        current.map((user) =>
+          user.id === selectedUser.id
+            ? { ...user, username: normalized.username, email: normalized.email, displayName: normalized.displayName, role: formData.role }
+            : user
+        )
       )
-    )
-    toast.success('User updated successfully')
-    setIsEditDialogOpen(false)
-    resetForm()
+      toast.success('User updated successfully')
+      setIsEditDialogOpen(false)
+      resetForm()
+      return
+    }
+
+    try {
+      const updatedUser = await updateServerUser(selectedUser.id, {
+        username: normalized.username,
+        email: normalized.email,
+        displayName: normalized.displayName,
+        role: formData.role,
+      })
+      setServerUsers((current) => current.map((user) => user.id === selectedUser.id ? updatedUser : user))
+      toast.success('User updated successfully')
+      setIsEditDialogOpen(false)
+      resetForm()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update user.')
+    }
   }
 
   const handleChangePassword = async () => {
@@ -115,31 +213,44 @@ export function UserManagementView() {
       return
     }
 
-    if (passwordForm.newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters')
+    if (passwordForm.newPassword.length < 12) {
+      toast.error('Password must be at least 12 characters')
       return
     }
 
-    const passwordSalt = createPasswordSalt()
-    const passwordHash = await hashPassword(passwordForm.newPassword, passwordSalt)
-
-    setUsers((current) =>
-      current.map((u) =>
-        u.id === selectedUser.id
-          ? { ...u, passwordHash, passwordSalt }
-          : u
+    if (!SERVER_AUTH_ENABLED) {
+      const passwordSalt = createPasswordSalt()
+      const passwordHash = await hashPassword(passwordForm.newPassword, passwordSalt)
+      setLocalUsers((current) =>
+        current.map((user) =>
+          user.id === selectedUser.id
+            ? { ...user, passwordHash, passwordSalt }
+            : user
+        )
       )
-    )
-    toast.success('Password changed successfully')
-    setIsPasswordDialogOpen(false)
-    resetPasswordForm()
-    setSelectedUser(null)
+      toast.success('Password changed successfully')
+      setIsPasswordDialogOpen(false)
+      resetPasswordForm()
+      setSelectedUser(null)
+      return
+    }
+
+    try {
+      await updateServerUser(selectedUser.id, { password: passwordForm.newPassword })
+      toast.success('Password changed successfully')
+      setIsPasswordDialogOpen(false)
+      resetPasswordForm()
+      setSelectedUser(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not change password.')
+    }
   }
 
   const openEditDialog = (user: ManagedUser) => {
     setSelectedUser(user)
     setFormData({
-      email: normalizeAuthEmail(user.email || user.username),
+      username: loginIdFor(user),
+      email: emailFor(user),
       password: '',
       displayName: user.displayName,
       role: user.role,
@@ -153,17 +264,28 @@ export function UserManagementView() {
     setIsPasswordDialogOpen(true)
   }
 
-  const handleDeleteUser = (userId: string) => {
-    const user = users.find((u) => u.id === userId)
+  const handleDeleteUser = async (userId: string) => {
+    const user = users.find((candidate) => candidate.id === userId)
     if (!user) return
 
     if (user.id === currentUser?.id) {
-      toast.error('Cannot delete your own account')
+      toast.error('Cannot deactivate your own account')
       return
     }
 
-    setUsers((current) => current.filter((u) => u.id !== userId))
-    toast.success(`User ${normalizeAuthEmail(user.email || user.username)} deleted`)
+    if (!SERVER_AUTH_ENABLED) {
+      setLocalUsers((current) => current.filter((candidate) => candidate.id !== userId))
+      toast.success(`User ${loginIdFor(user)} deleted`)
+      return
+    }
+
+    try {
+      const deactivatedUser = await deactivateServerUser(user.id)
+      setServerUsers((current) => current.map((candidate) => candidate.id === user.id ? deactivatedUser : candidate))
+      toast.success(`User ${loginIdFor(user)} deactivated`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not deactivate user.')
+    }
   }
 
   const getRoleBadgeVariant = (role: UserRole) => {
@@ -177,168 +299,68 @@ export function UserManagementView() {
     }
   }
 
-  if (SERVER_AUTH_ENABLED) {
-    return (
-      <Card className="m-6">
-        <CardHeader>
-          <CardTitle>Server-authenticated users</CardTitle>
-          <CardDescription>
-            Email-based staff accounts are managed in the database for deployed mode. The local browser user manager is disabled here so dev-only KV accounts cannot leak into production behavior.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
-          <p>
-            Use first-run setup or controlled database administration to create and rotate staff accounts.
-          </p>
-          <p>
-            Local-only fallback accounts remain available in development builds only.
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Shield className="text-primary" />
             User Management
           </h1>
           <p className="text-muted-foreground mt-1">
-            Manage local development users by email. These accounts are not used in server mode.
+            {SERVER_AUTH_ENABLED
+              ? 'Manage database staff accounts. Email is optional; every user needs a unique login username.'
+              : 'Manage local development users. Email is optional; every user needs a unique login username.'}
           </p>
         </div>
 
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={resetForm}>
-              <Plus className="mr-2" />
-              Add User
+        <div className="flex gap-2">
+          {SERVER_AUTH_ENABLED && (
+            <Button variant="outline" onClick={() => void loadUsers()} disabled={serverLoading}>
+              <ArrowClockwise className="mr-2" />
+              Refresh
             </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New User</DialogTitle>
-              <DialogDescription>
-                Add a new local development account using an email address
-              </DialogDescription>
-            </DialogHeader>
+          )}
 
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="staff@property.com"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Enter password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="displayName">Display Name</Label>
-                <Input
-                  id="displayName"
-                  placeholder="Enter display name"
-                  value={formData.displayName}
-                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(ROLE_LABELS).map(([role, label]) => (
-                      <SelectItem key={role} value={role}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                Cancel
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={resetForm}>
+                <Plus className="mr-2" />
+                Add User
               </Button>
-              <Button onClick={handleAddUser}>
-                Create User
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New User</DialogTitle>
+                <DialogDescription>
+                  Add a staff account with a username. Email can be left blank for staff without email addresses.
+                </DialogDescription>
+              </DialogHeader>
+
+              <UserFormFields formData={formData} setFormData={setFormData} includePassword />
+
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleAddUser}>
+                  Create User
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
 
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Edit User</DialogTitle>
               <DialogDescription>
-                Update display name and role for {selectedUser?.email || selectedUser?.username}
+                Update login, display name, and role for {selectedUser ? loginIdFor(selectedUser) : 'this user'}
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-email">Email</Label>
-                <Input
-                  id="edit-email"
-                  value={formData.email}
-                  disabled
-                  className="bg-muted"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-displayName">Display Name</Label>
-                <Input
-                  id="edit-displayName"
-                  placeholder="Enter display name"
-                  value={formData.displayName}
-                  onChange={(e) => setFormData({ ...formData, displayName: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="edit-role">Role</Label>
-                <Select
-                  value={formData.role}
-                  onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(ROLE_LABELS).map(([role, label]) => (
-                      <SelectItem key={role} value={role}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            <UserFormFields formData={formData} setFormData={setFormData} />
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
@@ -356,7 +378,7 @@ export function UserManagementView() {
             <DialogHeader>
               <DialogTitle>Change Password</DialogTitle>
               <DialogDescription>
-                Set a new password for {selectedUser?.email || selectedUser?.username}
+                Set a new password for {selectedUser ? loginIdFor(selectedUser) : 'this user'}
               </DialogDescription>
             </DialogHeader>
 
@@ -368,7 +390,7 @@ export function UserManagementView() {
                   type="password"
                   placeholder="Enter new password"
                   value={passwordForm.newPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
                 />
               </div>
 
@@ -379,12 +401,12 @@ export function UserManagementView() {
                   type="password"
                   placeholder="Confirm new password"
                   value={passwordForm.confirmPassword}
-                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })}
                 />
               </div>
 
-              {passwordForm.newPassword && passwordForm.newPassword.length < 6 && (
-                <p className="text-sm text-destructive">Password must be at least 6 characters</p>
+              {passwordForm.newPassword && passwordForm.newPassword.length < 12 && (
+                <p className="text-sm text-destructive">Password must be at least 12 characters</p>
               )}
 
               {passwordForm.newPassword && passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
@@ -404,11 +426,17 @@ export function UserManagementView() {
         </Dialog>
       </div>
 
+      {SERVER_AUTH_ENABLED && serverError && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="p-4 text-sm text-destructive">{serverError}</CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
-          <CardTitle>Active Users</CardTitle>
+          <CardTitle>Staff Accounts</CardTitle>
           <CardDescription>
-            {users.length} user{users.length !== 1 ? 's' : ''} in the local development store
+            {users.length} user{users.length !== 1 ? 's' : ''} {SERVER_AUTH_ENABLED ? 'in the database' : 'in the local development store'}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -416,22 +444,30 @@ export function UserManagementView() {
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
+                <TableHead>Login</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.length === 0 ? (
+              {serverLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No local users created.
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    Loading users...
+                  </TableCell>
+                </TableRow>
+              ) : users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    No users created.
                   </TableCell>
                 </TableRow>
               ) : (
                 users.map((user) => (
-                  <TableRow key={user.id}>
+                  <TableRow key={user.id} className={user.active === false ? 'opacity-60' : undefined}>
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <UserCircle className="text-muted-foreground" size={20} />
@@ -439,37 +475,37 @@ export function UserManagementView() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <code className="text-xs bg-muted px-2 py-1 rounded">{normalizeAuthEmail(user.email || user.username)}</code>
+                      <code className="text-xs bg-muted px-2 py-1 rounded">{loginIdFor(user)}</code>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {emailFor(user) || 'Not recorded'}
                     </TableCell>
                     <TableCell>
                       <Badge variant={getRoleBadgeVariant(user.role)}>
                         {ROLE_LABELS[user.role]}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      <Badge variant={user.active === false ? 'outline' : 'secondary'}>
+                        {user.active === false ? 'Inactive' : 'Active'}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
-                      {new Date(user.createdAt).toLocaleDateString()}
+                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Not recorded'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditDialog(user)}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => openEditDialog(user)} disabled={user.active === false}>
                           <PencilSimple size={16} />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openPasswordDialog(user)}
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => openPasswordDialog(user)} disabled={user.active === false}>
                           <Key size={16} />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDeleteUser(user.id)}
-                          disabled={user.id === currentUser?.id}
+                          onClick={() => void handleDeleteUser(user.id)}
+                          disabled={user.id === currentUser?.id || user.active === false}
                         >
                           <Trash size={16} className="text-destructive" />
                         </Button>
@@ -513,6 +549,84 @@ export function UserManagementView() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+function UserFormFields({
+  formData,
+  setFormData,
+  includePassword = false,
+}: {
+  formData: typeof emptyForm
+  setFormData: (value: typeof emptyForm) => void
+  includePassword?: boolean
+}) {
+  return (
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <Label htmlFor="username">Login username</Label>
+        <Input
+          id="username"
+          type="text"
+          placeholder="hm, hk1, frontdesk, or staff email"
+          value={formData.username}
+          onChange={(event) => setFormData({ ...formData, username: event.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="email">Email (optional)</Label>
+        <Input
+          id="email"
+          type="email"
+          placeholder="staff@property.com"
+          value={formData.email}
+          onChange={(event) => setFormData({ ...formData, email: event.target.value })}
+        />
+      </div>
+
+      {includePassword && (
+        <div className="space-y-2">
+          <Label htmlFor="password">Temporary password</Label>
+          <Input
+            id="password"
+            type="password"
+            placeholder="At least 12 characters"
+            value={formData.password}
+            onChange={(event) => setFormData({ ...formData, password: event.target.value })}
+          />
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="displayName">Display Name</Label>
+        <Input
+          id="displayName"
+          placeholder="Enter display name"
+          value={formData.displayName}
+          onChange={(event) => setFormData({ ...formData, displayName: event.target.value })}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="role">Role</Label>
+        <Select
+          value={formData.role}
+          onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(ROLE_LABELS).map(([role, label]) => (
+              <SelectItem key={role} value={role}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   )
 }

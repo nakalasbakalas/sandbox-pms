@@ -7,6 +7,7 @@ type SeedMode = 'dev' | 'e2e' | 'prod-safe'
 
 type SeedUser = {
   email: string
+  username?: string
   firstName: string
   lastName: string
   role: UserRole
@@ -24,7 +25,7 @@ const propertySeed = {
   lineId: null,
   lineUrl: null,
   supportHours: null,
-  reservationAlertEmail: 'booking.sandboxhotel@gmail.com',
+  reservationAlertEmail: 'booking@sandboxhotel.com',
   timezone: 'Asia/Bangkok',
   defaultCheckIn: '14:00',
   defaultCheckOut: '12:00',
@@ -87,7 +88,7 @@ const propertySeed = {
     ],
     operations: {
       baseLanguage: 'English',
-      alertRecipients: ['booking.sandboxhotel@gmail.com'],
+      alertRecipients: ['booking@sandboxhotel.com'],
       noOverbooking: true,
       superiorDoubleUnnumberedInventoryCount: 0,
     },
@@ -200,6 +201,16 @@ function normalizeSeedEmail(value: unknown) {
   return email
 }
 
+function normalizeSeedUsername(value: unknown, fallbackEmail: string) {
+  const username = String(value || fallbackEmail || '').trim().toLowerCase()
+  if (!username) throw new Error('Seed user username is required.')
+  if (username.includes('@')) return normalizeSeedEmail(username)
+  if (!/^[a-z0-9][a-z0-9._-]{1,62}$/.test(username)) {
+    throw new Error('Seed user username must be 2-63 characters using letters, numbers, dot, dash, or underscore.')
+  }
+  return username
+}
+
 function normalizeSeedText(value: unknown, label: string) {
   const text = String(value || '').trim()
   if (!text) throw new Error(`${label} is required for each seed user.`)
@@ -256,8 +267,11 @@ function parseSeedUsersJson() {
       throw new Error(`SEED_USERS_JSON[${index}].passwordHash is not a supported PBKDF2 hash.`)
     }
 
+    const email = normalizeSeedEmail(seed.email)
+
     return {
-      email: normalizeSeedEmail(seed.email),
+      email,
+      username: normalizeSeedUsername(seed.username, email),
       firstName: normalizeSeedText(seed.firstName, `SEED_USERS_JSON[${index}].firstName`),
       lastName: normalizeSeedText(seed.lastName, `SEED_USERS_JSON[${index}].lastName`),
       role: normalizeSeedRole(seed.role),
@@ -316,6 +330,7 @@ async function seedUser(user: SeedUser, passwordHash: string) {
   return prisma.user.upsert({
     where: { email: user.email },
     update: {
+      username: user.username || user.email,
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
@@ -323,7 +338,11 @@ async function seedUser(user: SeedUser, passwordHash: string) {
       active: true,
     },
     create: {
-      ...user,
+      email: user.email,
+      username: user.username || user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
       passwordHash,
       active: true,
     },
