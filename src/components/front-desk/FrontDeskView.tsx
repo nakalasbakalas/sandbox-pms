@@ -22,7 +22,7 @@ import {
   toInHouseItem,
 } from '@/lib/front-desk-workflow'
 import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
-import { Calendar, House, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
+import { Calendar, EnvelopeSimple, House, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 
@@ -831,6 +831,10 @@ export function FrontDeskView() {
             <Button variant="outline" onClick={() => navigate('board')} className="gap-1.5">
               <House size={16} weight="bold" />
               Board
+            </Button>
+            <Button variant="outline" onClick={() => navigate('booking-inbox')} className="gap-1.5">
+              <EnvelopeSimple size={16} weight="bold" />
+              Booking Inbox
             </Button>
           </div>
         </div>

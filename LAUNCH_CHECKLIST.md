@@ -1,6 +1,22 @@
 # Hotel PMS Launch Checklist
 
-Checked items reflect evidence recorded through 2026-06-07T15:57Z in `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, or role-by-role manual sign-off remain unchecked.
+Checked command-based items reflect evidence recorded through 2026-06-15 in `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, or role-by-role manual sign-off remain unchecked until proven.
+
+## 2026-06-15 Validation Evidence
+
+- [x] `npm.cmd run typecheck` passes.
+- [x] `npm.cmd run lint` passes.
+- [x] `npm.cmd test` passes.
+- [x] `npm.cmd run test:e2e` passes, including API contract assertions, documentation link smoke, and Playwright browser smoke.
+- [x] `npm.cmd run build` passes.
+- [x] `npm.cmd run prod:preflight` passes with the expected warning that LINE credentials are not configured.
+- [x] `npm.cmd run render:validate` passes.
+- [x] `npm.cmd run live:check` passes against `https://book.sandboxhotel.com` and reports `lineWebhookConfigured=false`.
+- [x] `npm.cmd run launch:check` passes.
+- [x] `npm.cmd audit --audit-level=high` returns zero vulnerabilities.
+- [x] Guarded local disposable DB E2E passes with `ALLOW_DB_E2E=true` and `E2E_DATABASE_URL` pointed at `localhost:55432/sandbox_hotel_e2e`.
+
+Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mutating E2E, rollback, and WAF ownership are tracked in `docs/launch-scope-decisions.md`.
 
 ## Environment
 
@@ -77,5 +93,5 @@ Checked items reflect evidence recorded through 2026-06-07T15:57Z in `docs/live-
 - [x] `npm test` passes.
 - [x] `npm run build` passes.
 - [x] `npm run launch:check` passes.
-- [ ] `npm run db:e2e:ready` passes against a disposable/staging E2E database.
-- [ ] Database-mutating E2E tests have passed against staging with `ALLOW_DB_E2E=true` and a non-production `E2E_DATABASE_URL`.
+- [x] `npm run db:e2e:ready` passes against a disposable/staging E2E database.
+- [x] Database-mutating E2E tests have passed against staging with `ALLOW_DB_E2E=true` and a non-production `E2E_DATABASE_URL`.

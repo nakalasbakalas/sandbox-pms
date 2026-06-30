@@ -17,10 +17,10 @@ This document defines the owner actions required before production launch sign-o
 
 Record these in the live proof register before launch:
 
-- Primary rollback owner with Render dashboard access.
-- Rollback deputy with Render dashboard access.
-- Database recovery owner with Render PostgreSQL access.
-- WAF/rate-limit owner with Cloudflare or upstream edge access.
+- Primary rollback owner with Render dashboard access: TBD.
+- Rollback deputy with Render dashboard access: TBD.
+- Database recovery owner with Render PostgreSQL access: TBD.
+- WAF/rate-limit owner with Cloudflare or upstream edge access: TBD.
 
 The confirmed Render workspace owner from CLI is `nakalastravels@gmail.com`; do not treat that as a complete operational roster until a deputy is named.
 

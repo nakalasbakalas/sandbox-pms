@@ -155,6 +155,10 @@ export function normalizePaymentMethod(method) {
   throw new PmsValidationError('Select a valid payment method.')
 }
 
+export function paymentMethodRequiresReference(method) {
+  return ['CARD', 'BANK_TRANSFER', 'ONLINE'].includes(normalizePaymentMethod(method))
+}
+
 export function activeReservationStatuses() {
   return ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'HOLD']
 }

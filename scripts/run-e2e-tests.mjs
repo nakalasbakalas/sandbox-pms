@@ -9,12 +9,15 @@ import { chromium } from 'playwright'
 import { assertSafeE2EDatabase } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
 import { prepareE2EDatabase } from './prepare-e2e-db.mjs'
+import { resolveApiRouteContract } from '../server/api-routes.mjs'
 import { createLoginThrottle, resolveClientIp } from '../server/login-throttle.mjs'
 import { canPerformAction, canViewRoute } from '../server/rbac.mjs'
+import { requestSetupToken, requireSetupPermission, setupTokenRequired } from '../server/setup-permission.mjs'
 import {
   calculateStayPricing,
   isSellableRoomNumber,
   normalizePaymentMethod,
+  paymentMethodRequiresReference,
   reservationsOverlap,
   roomStatusForHousekeeping,
   PmsValidationError,
@@ -29,6 +32,7 @@ const AUTHENTICATED_ROUTE_SMOKE_PATHS = [
   '/',
   '/board',
   '/rooms',
+  '/booking-inbox',
   '/front-desk',
   '/reservations',
   '/guests',
@@ -498,6 +502,18 @@ assert.equal(canPerformAction(admin, 'override:check-out'), true, 'admin can ove
 assert.equal(canPerformAction(manager, 'edit:rates'), true, 'manager server permissions match rate UI access')
 assert.equal(canPerformAction(frontDesk, 'send:guest-messages'), true, 'front desk server permissions match guest messaging UI access')
 assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekeeping cannot process payments')
+assert.deepEqual(resolveApiRouteContract('/api/auth/login')?.methods, ['POST'], 'auth login only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/reservations')?.methods, ['GET', 'POST'], 'reservations collection exposes read/create methods')
+assert.deepEqual(resolveApiRouteContract('/api/reservations/res-1/check-in')?.methods, ['POST'], 'check-in mutation only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/status')?.methods, ['GET'], 'booking email status exposes read method')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/sync')?.methods, ['POST'], 'booking email sync exposes mutation method')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/events')?.methods, ['GET'], 'booking email events expose read methods')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/events/event-1/approve')?.methods, ['POST'], 'booking email approve mutation only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/events/event-1/reprocess')?.methods, ['POST'], 'booking email reprocess mutation only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/sources')?.methods, ['GET', 'POST'], 'booking email sources expose read/create methods')
+assert.deepEqual(resolveApiRouteContract('/api/booking-email/sources/source-1')?.methods, ['PATCH'], 'booking email source detail exposes update method')
+assert.deepEqual(resolveApiRouteContract('/api/channels/ical/booking-com')?.methods, ['POST', 'DELETE'], 'iCal channel route exposes publish/disable methods')
+assert.equal(resolveApiRouteContract('/api/does-not-exist'), null, 'unknown API routes fall through to 404')
 assert.equal(isSellableRoomNumber('201'), true, 'room 201 is sellable')
 assert.equal(isSellableRoomNumber('216'), true, 'sellability is driven by room configuration, not a fixed room-number list')
 assert.equal(isSellableRoomNumber(''), false, 'blank room numbers are not sellable')
@@ -508,6 +524,30 @@ assert.equal(roomStatusForHousekeeping('VACANT_DIRTY', 'INSPECTED'), 'INSPECTED'
 assert.equal(normalizePaymentMethod('CARD'), 'CARD', 'card payment method is accepted')
 assert.equal(normalizePaymentMethod('promptpay'), 'BANK_TRANSFER', 'PromptPay maps to bank transfer for folio posting')
 assert.throws(() => normalizePaymentMethod('negative-test-method'), PmsValidationError, 'invalid payment methods are rejected')
+assert.equal(paymentMethodRequiresReference('CASH'), false, 'cash payment does not require a provider reference')
+assert.equal(paymentMethodRequiresReference('CARD'), true, 'card payment requires a provider reference')
+assert.equal(paymentMethodRequiresReference('promptpay'), true, 'PromptPay/bank transfer payment requires a provider reference')
+assert.equal(requestSetupToken({ headers: { 'x-setup-token': ' launch-token ' } }), 'launch-token', 'setup token can be supplied through x-setup-token')
+assert.equal(requestSetupToken({ headers: { authorization: 'Bearer bearer-token' } }), 'bearer-token', 'setup token can be supplied through bearer auth')
+assert.equal(setupTokenRequired({ INITIAL_SETUP_TOKEN: 'launch-token' }), true, 'setup status reports when a setup token is configured')
+assert.doesNotThrow(
+  () => requireSetupPermission({ headers: { 'x-setup-token': 'launch-token' } }, { NODE_ENV: 'production', INITIAL_SETUP_TOKEN: 'launch-token' }),
+  'production setup accepts the configured setup token',
+)
+assert.throws(
+  () => requireSetupPermission({ headers: {} }, { NODE_ENV: 'production', INITIAL_SETUP_TOKEN: 'launch-token' }),
+  /valid setup token/,
+  'production setup rejects missing setup token when one is configured',
+)
+assert.throws(
+  () => requireSetupPermission({ headers: {} }, { NODE_ENV: 'production' }),
+  /Public first-run setup is disabled/,
+  'production setup rejects public first-run setup by default',
+)
+assert.doesNotThrow(
+  () => requireSetupPermission({ headers: {} }, { NODE_ENV: 'production', ALLOW_PUBLIC_SETUP: 'true' }),
+  'production setup can be explicitly opened only through ALLOW_PUBLIC_SETUP=true',
+)
 
 const pricing = calculateStayPricing({
   checkIn: '2026-05-27',
@@ -561,11 +601,21 @@ loginThrottle.recordFailure({ email: 'two@property.test', ip: '203.0.113.20' }, 
 const ipLockout = loginThrottle.recordFailure({ email: 'three@property.test', ip: '203.0.113.20' }, 3_000)
 assert.equal(ipLockout.allowed, false, 'bad attempts across accounts lock IP scope')
 assert.equal(ipLockout.scope, 'ip', 'IP lockout is reported')
+const previousTrustProxyHeaders = process.env.TRUST_PROXY_HEADERS
+delete process.env.TRUST_PROXY_HEADERS
+assert.equal(
+  resolveClientIp({ headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }, socket: { remoteAddress: '127.0.0.1' } }),
+  '127.0.0.1',
+  'login throttle ignores forwarded client IP unless proxy header trust is enabled',
+)
+process.env.TRUST_PROXY_HEADERS = 'true'
 assert.equal(
   resolveClientIp({ headers: { 'x-forwarded-for': '198.51.100.7, 10.0.0.1' }, socket: { remoteAddress: '127.0.0.1' } }),
   '198.51.100.7',
-  'login throttle uses first forwarded client IP when present',
+  'login throttle uses first forwarded client IP when proxy header trust is enabled',
 )
+if (previousTrustProxyHeaders === undefined) delete process.env.TRUST_PROXY_HEADERS
+else process.env.TRUST_PROXY_HEADERS = previousTrustProxyHeaders
 
 await runDocumentationLinkSmoke()
 await runBrowserSmokeTests()

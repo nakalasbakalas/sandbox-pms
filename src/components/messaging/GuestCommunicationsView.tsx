@@ -145,8 +145,7 @@ export function GuestCommunicationsView() {
       recipient: composeRecipient.trim(),
       subject: composeSubject.trim() || undefined,
       body: composeBody.trim(),
-      status: 'SENT',
-      sentAt: new Date(),
+      status: 'DRAFT',
       metadata: { manual: true },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -155,7 +154,7 @@ export function GuestCommunicationsView() {
     setMessages(current => [message, ...current])
     resetComposer()
     setComposerOpen(false)
-    toast.success('Message recorded')
+    toast.success('Message draft recorded')
   }
 
   const previewTemplate = (template: GuestMessageTemplate) => {

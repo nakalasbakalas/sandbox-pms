@@ -33,6 +33,8 @@ model Property {
   sourceNotes     Json?
   rooms           Room[]
   roomTypes       RoomType[]
+  bookingEmailSources BookingEmailSource[]
+  bookingEmailEvents  BookingEmailEvent[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -150,6 +152,8 @@ model Reservation {
   
   source            BookingSource       @default(DIRECT)
   channelRef        String?
+  sourceEmailEventId String?             @unique
+  sourceEmailEvent  BookingEmailEvent?   @relation("ReservationSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   
   notes             String?
   specialRequests   String?
@@ -157,6 +161,8 @@ model Reservation {
   inventory         RoomDateInventory[]
   folio             Folio?
   history           ReservationLog[]
+  bookingEmailEvents BookingEmailEvent[] @relation("BookingEmailEventReservation")
+  documents         GuestDocument[]
   
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -285,6 +291,8 @@ model Charge {
   id          String         @id @default(cuid())
   folioId     String
   folio       Folio          @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  sourceEmailEventId String?
+  sourceEmailEvent BookingEmailEvent? @relation("ChargeSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   date        DateTime       @db.Date
   description String
   category    ChargeCategory
@@ -297,6 +305,7 @@ model Charge {
   createdAt   DateTime       @default(now())
   
   @@index([folioId])
+  @@index([sourceEmailEventId])
   @@index([date])
 }
 
@@ -318,11 +327,15 @@ model Payment {
   amount      Float
   method      PaymentMethod
   reference   String?
+  referenceFingerprint String? @unique
+  sourceEmailEventId String?   @unique
+  sourceEmailEvent BookingEmailEvent? @relation("PaymentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   notes       String?
   processedBy String
   createdAt   DateTime      @default(now())
   
   @@index([folioId])
+  @@index([reference])
 }
 
 enum PaymentMethod {
@@ -337,6 +350,10 @@ model GuestDocument {
   id          String   @id @default(cuid())
   guestId     String
   guest       Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  reservationId String?
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  sourceEmailEventId String?
+  sourceEmailEvent BookingEmailEvent? @relation("GuestDocumentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   type        String
   fileName    String
   fileUrl     String
@@ -345,6 +362,112 @@ model GuestDocument {
   createdAt   DateTime @default(now())
   
   @@index([guestId])
+  @@index([reservationId])
+  @@index([sourceEmailEventId])
+}
+
+model BookingEmailSource {
+  id          String               @id @default(cuid())
+  propertyId  String
+  property    Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  name        String
+  provider    BookingEmailProvider @default(GMAIL)
+  mailbox     String
+  enabled     Boolean              @default(true)
+  autoProcessSafeEvents Boolean    @default(false)
+  reviewThreshold Float            @default(0.85)
+  query       String?
+  credentialsRef String?
+  lastSyncAt  DateTime?
+  lastSyncCursor String?
+  lastError   String?
+  events      BookingEmailEvent[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@unique([propertyId, mailbox])
+  @@index([propertyId, enabled])
+  @@index([provider])
+}
+
+enum BookingEmailProvider {
+  GMAIL
+  IMAP
+  FORWARDED_MAILBOX
+  MANUAL
+  OTHER
+}
+
+model BookingEmailEvent {
+  id          String                  @id @default(cuid())
+  propertyId  String
+  property    Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sourceId    String?
+  source      BookingEmailSource?     @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceName  String?
+  sourceMailbox String?
+  sourceMessageId String?
+  threadId    String?
+  rawEmailUrl String?
+  sender      String
+  recipient   String?
+  subject     String?
+  receivedAt  DateTime
+  eventType   BookingEmailEventType   @default(UNKNOWN)
+  status      BookingEmailEventStatus @default(NEEDS_REVIEW)
+  confidence  Float                   @default(0)
+  channelRef  String?
+  guestName   String?
+  checkIn     DateTime?               @db.Date
+  checkOut    DateTime?               @db.Date
+  roomType    String?
+  amount      Float?
+  currency    String?
+  paymentStatus String?
+  proposedAction String?
+  completedAction String?
+  reviewReason String?
+  errorReason String?
+  parsedDetails Json?
+  rawHeaders  Json?
+  rawText     String?
+  reservationId String?
+  reservation Reservation?            @relation("BookingEmailEventReservation", fields: [reservationId], references: [id], onDelete: SetNull)
+  sourceReservation Reservation?      @relation("ReservationSourceEmail")
+  sourcePayment Payment?              @relation("PaymentSourceEmail")
+  sourceCharges Charge[]              @relation("ChargeSourceEmail")
+  sourceDocuments GuestDocument[]     @relation("GuestDocumentSourceEmail")
+  duplicateOfEventId String?
+  duplicateOfEvent BookingEmailEvent? @relation("DuplicateBookingEmailEvent", fields: [duplicateOfEventId], references: [id], onDelete: SetNull)
+  duplicateEvents BookingEmailEvent[] @relation("DuplicateBookingEmailEvent")
+  processedAt DateTime?
+  processedBy String?
+  rejectedAt  DateTime?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  @@unique([sourceId, sourceMessageId])
+  @@index([propertyId, status, receivedAt])
+  @@index([sourceId, receivedAt])
+  @@index([reservationId])
+  @@index([eventType, status])
+  @@index([channelRef])
+}
+
+enum BookingEmailEventStatus {
+  NEEDS_REVIEW
+  PROCESSED
+  ERROR
+  IGNORED
+}
+
+enum BookingEmailEventType {
+  NEW_BOOKING
+  MODIFICATION
+  CANCELLATION
+  PAYMENT_NOTICE
+  GUEST_MESSAGE
+  UNKNOWN
 }
 
 model ReservationLog {

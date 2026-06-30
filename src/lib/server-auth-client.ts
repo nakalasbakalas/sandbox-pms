@@ -15,6 +15,7 @@ export type ServerSetupStatus = {
   hasProperty: boolean
   hasUsers: boolean
   propertyName?: string | null
+  setupTokenRequired?: boolean
 }
 
 function mapRole(role: string): UserRole {
@@ -90,9 +91,10 @@ export async function getServerSetupStatus(): Promise<ServerSetupStatus> {
   return payload.data
 }
 
-export async function completeServerSetup(data: OnboardingState['data']): Promise<void> {
+export async function completeServerSetup(data: OnboardingState['data'], setupToken?: string): Promise<void> {
   await apiRequest('/api/setup/complete', {
     method: 'POST',
+    headers: setupToken ? { 'x-setup-token': setupToken } : undefined,
     body: JSON.stringify(data),
   })
 }

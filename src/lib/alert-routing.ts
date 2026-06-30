@@ -360,15 +360,13 @@ class AlertRoutingService {
     lineConfig: LineConfig
   ): Promise<void> {
     try {
-      debugAlertRouting(`Sending LINE alert to ${recipient.staffName} (${recipient.lineUserId})`)
-      
-      const message = this.formatLineMessage(alert)
-      
+      debugAlertRouting(`LINE alert not sent to ${recipient.staffName} (${recipient.lineUserId}); no provider adapter is configured`, lineConfig.enabled)
       alert.deliveryStatus.push({
         recipientId: recipient.staffId,
         channel: 'line',
-        status: 'SENT',
+        status: 'FAILED',
         sentAt: new Date(),
+        failureReason: 'LINE provider adapter is not configured.',
       })
     } catch (error) {
       console.error('Failed to send LINE alert:', error)
@@ -384,13 +382,13 @@ class AlertRoutingService {
 
   private async sendViaEmail(alert: AlertInstance, recipient: AlertRecipient): Promise<void> {
     try {
-      debugAlertRouting(`Sending email alert to ${recipient.staffName} (${recipient.email})`)
-      
+      debugAlertRouting(`Email alert not sent to ${recipient.staffName} (${recipient.email}); no provider adapter is configured`)
       alert.deliveryStatus.push({
         recipientId: recipient.staffId,
         channel: 'email',
-        status: 'SENT',
+        status: 'FAILED',
         sentAt: new Date(),
+        failureReason: 'Email provider adapter is not configured.',
       })
     } catch (error) {
       console.error('Failed to send email alert:', error)
@@ -406,13 +404,13 @@ class AlertRoutingService {
 
   private async sendViaSMS(alert: AlertInstance, recipient: AlertRecipient): Promise<void> {
     try {
-      debugAlertRouting(`Sending SMS alert to ${recipient.staffName} (${recipient.phoneNumber})`)
-      
+      debugAlertRouting(`SMS alert not sent to ${recipient.staffName} (${recipient.phoneNumber}); no provider adapter is configured`)
       alert.deliveryStatus.push({
         recipientId: recipient.staffId,
         channel: 'sms',
-        status: 'SENT',
+        status: 'FAILED',
         sentAt: new Date(),
+        failureReason: 'SMS provider adapter is not configured.',
       })
     } catch (error) {
       console.error('Failed to send SMS alert:', error)

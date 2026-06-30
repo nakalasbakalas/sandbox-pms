@@ -14,6 +14,7 @@ const VALID_ROUTES = new Set<NavigationRoute>([
   'today',
   'board',
   'rooms',
+  'booking-inbox',
   'front-desk',
   'reservations',
   'guests',

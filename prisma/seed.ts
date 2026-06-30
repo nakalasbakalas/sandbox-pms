@@ -355,6 +355,37 @@ async function seedProperty() {
   })
 }
 
+async function seedBookingEmailSource(propertyId: string) {
+  const mailbox = 'booking@sandboxhotel.com'
+  return prisma.bookingEmailSource.upsert({
+    where: {
+      propertyId_mailbox: {
+        propertyId,
+        mailbox,
+      },
+    },
+    update: {
+      name: 'Primary booking Gmail',
+      provider: 'GMAIL',
+      enabled: true,
+      autoProcessSafeEvents: false,
+      reviewThreshold: 0.85,
+      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+    },
+    create: {
+      propertyId,
+      name: 'Primary booking Gmail',
+      provider: 'GMAIL',
+      mailbox,
+      enabled: true,
+      autoProcessSafeEvents: false,
+      reviewThreshold: 0.85,
+      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      lastError: 'Gmail API credentials are not configured for this server.',
+    },
+  })
+}
+
 async function seedRoomTypes(propertyId: string) {
   const roomTypes: RoomType[] = []
 
@@ -456,6 +487,8 @@ async function main() {
 
   const property = await seedProperty()
   console.log('Seeded property configuration:', property.name)
+  const bookingEmailSource = await seedBookingEmailSource(property.id)
+  console.log('Seeded booking email source:', bookingEmailSource.mailbox)
 
   const [twinRoomType, doubleRoomType] = await seedRoomTypes(property.id)
 

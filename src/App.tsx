@@ -22,6 +22,7 @@ import { Button } from './components/ui/button'
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
 const RoomsView = lazy(() => import('./components/rooms/RoomsView').then((module) => ({ default: module.RoomsView })))
+const BookingInboxView = lazy(() => import('./components/booking-email/BookingInboxView').then((module) => ({ default: module.BookingInboxView })))
 const FrontDeskView = lazy(() => import('./components/front-desk/FrontDeskView').then((module) => ({ default: module.FrontDeskView })))
 const ReservationsView = lazy(() => import('./components/views/ReservationsView').then((module) => ({ default: module.ReservationsView })))
 const GuestsView = lazy(() => import('./components/views/GuestsView').then((module) => ({ default: module.GuestsView })))
@@ -98,6 +99,7 @@ const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
   rooms: ['view:board', 'view:housekeeping'],
+  'booking-inbox': ['view:reservations', 'view:messaging'],
   'front-desk': ['view:board', 'check-in:guest', 'check-out:guest'],
   reservations: ['view:reservations'],
   guests: ['view:guests'],
@@ -142,6 +144,8 @@ function AppRouter() {
       return <Board />
     case 'rooms':
       return <RoomsView />
+    case 'booking-inbox':
+      return <BookingInboxView />
     case 'front-desk':
       return <FrontDeskView />
     case 'reservations':

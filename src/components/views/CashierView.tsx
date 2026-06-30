@@ -22,6 +22,7 @@ import { CashReconciliation } from '@/components/cashier/CashReconciliation'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
 import type { PropertySetup } from '@/types/onboarding'
@@ -437,19 +438,19 @@ export function CashierView() {
     const chargeRows = folio.charges.map((charge) => `
       <tr>
         <td>${format(charge.date, 'yyyy-MM-dd')}</td>
-        <td>${charge.category}</td>
-        <td>${charge.description}</td>
+        <td>${escapeHtml(charge.category)}</td>
+        <td>${escapeHtml(charge.description)}</td>
         <td class="num">${charge.quantity}</td>
-        <td class="num">${currency} ${charge.unitPrice.toLocaleString()}</td>
-        <td class="num">${currency} ${charge.total.toLocaleString()}</td>
+        <td class="num">${escapeHtml(currency)} ${charge.unitPrice.toLocaleString()}</td>
+        <td class="num">${escapeHtml(currency)} ${charge.total.toLocaleString()}</td>
       </tr>
     `).join('')
     const paymentRows = folio.payments.map((payment) => `
       <tr>
         <td>${format(payment.date, 'yyyy-MM-dd HH:mm')}</td>
-        <td>${payment.method.replace('_', ' ')}</td>
-        <td>${payment.reference || ''}</td>
-        <td class="num">${currency} ${payment.amount.toLocaleString()}</td>
+        <td>${escapeHtml(payment.method.replace('_', ' '))}</td>
+        <td>${escapeHtml(payment.reference || '')}</td>
+        <td class="num">${escapeHtml(currency)} ${payment.amount.toLocaleString()}</td>
       </tr>
     `).join('')
 
@@ -457,7 +458,7 @@ export function CashierView() {
       <!doctype html>
       <html>
         <head>
-          <title>Folio ${folio.id}</title>
+          <title>Folio ${escapeHtml(folio.id)}</title>
           <style>
             body { font-family: Inter, Arial, sans-serif; margin: 32px; color: #111827; }
             h1 { margin: 0 0 4px; font-size: 24px; }
@@ -472,16 +473,16 @@ export function CashierView() {
           </style>
         </head>
         <body>
-          <h1>${propertyName} Folio ${folio.id}</h1>
-          <div class="muted">${folio.guestName} · Room ${folio.roomNumber} · ${format(folio.checkIn, 'yyyy-MM-dd')} to ${folio.checkOut ? format(folio.checkOut, 'yyyy-MM-dd') : 'In-house'}</div>
+          <h1>${escapeHtml(propertyName)} Folio ${escapeHtml(folio.id)}</h1>
+          <div class="muted">${escapeHtml(folio.guestName)} · Room ${escapeHtml(folio.roomNumber)} · ${format(folio.checkIn, 'yyyy-MM-dd')} to ${folio.checkOut ? format(folio.checkOut, 'yyyy-MM-dd') : 'In-house'}</div>
           <h2>Charges</h2>
           <table><thead><tr><th>Date</th><th>Category</th><th>Description</th><th class="num">Qty</th><th class="num">Unit</th><th class="num">Total</th></tr></thead><tbody>${chargeRows || '<tr><td colspan="6">No charges</td></tr>'}</tbody></table>
           <h2>Payments</h2>
           <table><thead><tr><th>Date</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="4">No payments</td></tr>'}</tbody></table>
           <div class="totals">
-            <div><span>Subtotal</span><span>${currency} ${folio.subtotal.toLocaleString()}</span></div>
-            <div><span>Paid</span><span>${currency} ${folio.paid.toLocaleString()}</span></div>
-            <div class="balance"><span>Balance</span><span>${currency} ${folio.balance.toLocaleString()}</span></div>
+            <div><span>Subtotal</span><span>${escapeHtml(currency)} ${folio.subtotal.toLocaleString()}</span></div>
+            <div><span>Paid</span><span>${escapeHtml(currency)} ${folio.paid.toLocaleString()}</span></div>
+            <div class="balance"><span>Balance</span><span>${escapeHtml(currency)} ${folio.balance.toLocaleString()}</span></div>
           </div>
         </body>
       </html>

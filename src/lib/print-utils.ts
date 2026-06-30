@@ -1,6 +1,7 @@
 import { format } from 'date-fns'
 import type { HousekeepingRoom } from '@/types/housekeeping'
 import type { Reservation } from '@/components/views/ReservationsView'
+import { escapeHtml } from '@/lib/html-escape'
 
 export function printHousekeepingReport(
   rooms: HousekeepingRoom[],
@@ -54,7 +55,7 @@ export function printHousekeepingReport(
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>
           @media print {
             @page {
@@ -278,7 +279,7 @@ export function printHousekeepingReport(
         <button class="print-button no-print" onclick="window.print()">🖨️ Print Report</button>
         
         <div class="header">
-          <h1>${title}</h1>
+          <h1>${escapeHtml(title)}</h1>
           <div class="meta">
             Generated: ${format(new Date(), 'EEEE, MMMM d, yyyy • h:mm a')}
           </div>
@@ -309,7 +310,7 @@ export function printHousekeepingReport(
         
         ${Object.entries(groupedRooms).map(([groupName, groupRooms]) => `
           <div class="section">
-            <h2 class="section-title">${groupName} (${groupRooms.length} rooms)</h2>
+            <h2 class="section-title">${escapeHtml(groupName)} (${groupRooms.length} rooms)</h2>
             <table>
               <thead>
                 <tr>
@@ -325,18 +326,18 @@ export function printHousekeepingReport(
               <tbody>
                 ${groupRooms.map(room => `
                   <tr>
-                    <td class="room-number">${room.number}</td>
-                    <td>${room.type}</td>
-                    ${includeStatus ? `<td><span class="status-badge status-${room.cleanStatus.toLowerCase()}">${getStatusLabel(room.cleanStatus)}</span></td>` : ''}
-                    ${includeAssignments ? `<td>${getStaffName(room.roomId)}</td>` : ''}
-                    <td>${room.guestName || '—'}</td>
+                    <td class="room-number">${escapeHtml(room.number)}</td>
+                    <td>${escapeHtml(room.type)}</td>
+                    ${includeStatus ? `<td><span class="status-badge status-${escapeHtml(room.cleanStatus.toLowerCase())}">${escapeHtml(getStatusLabel(room.cleanStatus))}</span></td>` : ''}
+                    ${includeAssignments ? `<td>${escapeHtml(getStaffName(room.roomId))}</td>` : ''}
+                    <td>${room.guestName ? escapeHtml(room.guestName) : '—'}</td>
                     <td>
-                      ${room.isArrivalToday ? `<span class="badge badge-arrival">Arrival ${room.arrivalTime || ''}</span>` : ''}
-                      ${room.isDepartureToday ? `<span class="badge badge-departure">Departure ${room.checkOutTime || ''}</span>` : ''}
+                      ${room.isArrivalToday ? `<span class="badge badge-arrival">Arrival ${escapeHtml(room.arrivalTime || '')}</span>` : ''}
+                      ${room.isDepartureToday ? `<span class="badge badge-departure">Departure ${escapeHtml(room.checkOutTime || '')}</span>` : ''}
                       ${room.hasMaintenanceIssue ? '<span class="badge badge-maintenance">Maintenance</span>' : ''}
                       ${room.guestCount ? `${room.guestCount} guest${room.guestCount > 1 ? 's' : ''}` : ''}
                     </td>
-                    <td>${room.specialInstructions || '—'}</td>
+                    <td>${room.specialInstructions ? escapeHtml(room.specialInstructions) : '—'}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -408,7 +409,7 @@ export function printReservationsList(
     <!DOCTYPE html>
     <html>
       <head>
-        <title>${title}</title>
+        <title>${escapeHtml(title)}</title>
         <style>
           @media print {
             @page {
@@ -625,7 +626,7 @@ export function printReservationsList(
         <button class="print-button no-print" onclick="window.print()">🖨️ Print Report</button>
         
         <div class="header">
-          <h1>${title}</h1>
+          <h1>${escapeHtml(title)}</h1>
           <div class="meta">
             Generated: ${format(new Date(), 'EEEE, MMMM d, yyyy • h:mm a')} • Total Reservations: ${reservations.length}
           </div>
@@ -654,7 +655,7 @@ export function printReservationsList(
         
         ${Object.entries(groupedReservations).map(([groupName, groupRes]) => `
           <div class="section">
-            <h2 class="section-title">${groupName} (${groupRes.length})</h2>
+            <h2 class="section-title">${escapeHtml(groupName)} (${groupRes.length})</h2>
             <table>
               <thead>
                 <tr>
@@ -674,18 +675,18 @@ export function printReservationsList(
               <tbody>
                 ${groupRes.map(res => `
                   <tr>
-                    <td><code>${res.confirmationNumber}</code></td>
+                    <td><code>${escapeHtml(res.confirmationNumber)}</code></td>
                     <td class="guest-name">
-                      ${res.guestName}
+                      ${escapeHtml(res.guestName)}
                       ${res.isVIP ? '<span class="vip-badge">VIP</span>' : ''}
                     </td>
-                    <td><span class="status-badge status-${res.status.toLowerCase().replace('_', '-')}">${getStatusLabel(res.status)}</span></td>
-                    <td>${res.roomNumber || 'Unassigned'}</td>
+                    <td><span class="status-badge status-${escapeHtml(res.status.toLowerCase().replace('_', '-'))}">${escapeHtml(getStatusLabel(res.status))}</span></td>
+                    <td>${res.roomNumber ? escapeHtml(res.roomNumber) : 'Unassigned'}</td>
                     <td>${format(res.checkIn, 'MMM d, yy')}</td>
                     <td>${format(res.checkOut, 'MMM d, yy')}</td>
                     <td>${res.nights}</td>
                     <td>${res.adults}${res.children > 0 ? `+${res.children}` : ''}</td>
-                    <td style="font-size: 8pt;">${getSourceLabel(res.source)}</td>
+                    <td style="font-size: 8pt;">${escapeHtml(getSourceLabel(res.source))}</td>
                     ${showFinancials ? `<td class="amount">฿${res.totalAmount.toLocaleString()}</td>` : ''}
                     ${showFinancials ? `<td class="amount" style="color: ${res.depositStatus === 'PAID' ? '#155724' : '#856404'}">฿${res.depositPaid.toLocaleString()}</td>` : ''}
                   </tr>
@@ -718,7 +719,7 @@ export function printReservationDetail(reservation: Reservation) {
     <!DOCTYPE html>
     <html>
       <head>
-        <title>Reservation ${reservation.confirmationNumber}</title>
+        <title>Reservation ${escapeHtml(reservation.confirmationNumber)}</title>
         <style>
           @media print {
             @page {
@@ -921,7 +922,7 @@ export function printReservationDetail(reservation: Reservation) {
         
         <div class="confirmation">
           <div class="label">Confirmation Number</div>
-          <div class="number">${reservation.confirmationNumber}</div>
+          <div class="number">${escapeHtml(reservation.confirmationNumber)}</div>
         </div>
         
         <div class="section">
@@ -929,19 +930,19 @@ export function printReservationDetail(reservation: Reservation) {
           <div class="info-grid">
             <div class="info-item">
               <div class="info-label">Guest Name</div>
-              <div class="info-value">${reservation.guestName} ${reservation.isVIP ? '⭐ VIP' : ''}</div>
+              <div class="info-value">${escapeHtml(reservation.guestName)} ${reservation.isVIP ? '⭐ VIP' : ''}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Email</div>
-              <div class="info-value">${reservation.guestEmail || 'N/A'}</div>
+              <div class="info-value">${reservation.guestEmail ? escapeHtml(reservation.guestEmail) : 'N/A'}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Phone</div>
-              <div class="info-value">${reservation.guestPhone || 'N/A'}</div>
+              <div class="info-value">${reservation.guestPhone ? escapeHtml(reservation.guestPhone) : 'N/A'}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Guest ID</div>
-              <div class="info-value">${reservation.guestId}</div>
+              <div class="info-value">${escapeHtml(reservation.guestId)}</div>
             </div>
           </div>
         </div>
@@ -953,13 +954,13 @@ export function printReservationDetail(reservation: Reservation) {
               <div class="info-label">Status</div>
               <div class="info-value">
                 <span class="status-badge" style="background: #d4edda; color: #155724;">
-                  ${getStatusLabel(reservation.status)}
+                  ${escapeHtml(getStatusLabel(reservation.status))}
                 </span>
               </div>
             </div>
             <div class="info-item">
               <div class="info-label">Booking Source</div>
-              <div class="info-value">${reservation.source.replace('_', ' ')}</div>
+              <div class="info-value">${escapeHtml(reservation.source.replace('_', ' '))}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Check-In</div>
@@ -971,11 +972,11 @@ export function printReservationDetail(reservation: Reservation) {
             </div>
             <div class="info-item">
               <div class="info-label">Room Type</div>
-              <div class="info-value">${reservation.roomType}</div>
+              <div class="info-value">${escapeHtml(reservation.roomType)}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Room Number</div>
-              <div class="info-value">${reservation.roomNumber || 'To be assigned'}</div>
+              <div class="info-value">${reservation.roomNumber ? escapeHtml(reservation.roomNumber) : 'To be assigned'}</div>
             </div>
             <div class="info-item">
               <div class="info-label">Number of Nights</div>
@@ -1020,13 +1021,13 @@ export function printReservationDetail(reservation: Reservation) {
             ${reservation.specialRequests ? `
               <div class="notes-box">
                 <div class="info-label">Special Requests</div>
-                <div style="margin-top: 8px; font-size: 11pt;">${reservation.specialRequests}</div>
+                <div style="margin-top: 8px; font-size: 11pt;">${escapeHtml(reservation.specialRequests)}</div>
               </div>
             ` : ''}
             ${reservation.notes ? `
               <div class="notes-box" style="margin-top: 12px;">
                 <div class="info-label">Internal Notes</div>
-                <div style="margin-top: 8px; font-size: 11pt;">${reservation.notes}</div>
+                <div style="margin-top: 8px; font-size: 11pt;">${escapeHtml(reservation.notes)}</div>
               </div>
             ` : ''}
           </div>

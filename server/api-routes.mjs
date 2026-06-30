@@ -1,0 +1,51 @@
+const API_ROUTE_CONTRACTS = [
+  { pattern: /^\/api\/health$/, methods: ['GET'] },
+  { pattern: /^\/api\/auth\/login$/, methods: ['POST'] },
+  { pattern: /^\/api\/auth\/logout$/, methods: ['POST'] },
+  { pattern: /^\/api\/auth\/me$/, methods: ['GET'] },
+  { pattern: /^\/api\/auth\/can-view$/, methods: ['GET'] },
+  { pattern: /^\/api\/setup\/status$/, methods: ['GET'] },
+  { pattern: /^\/api\/setup\/complete$/, methods: ['POST'] },
+  { pattern: /^\/api\/today$/, methods: ['GET'] },
+  { pattern: /^\/api\/front-desk\/board$/, methods: ['GET'] },
+  { pattern: /^\/api\/front-desk\/walk-in$/, methods: ['POST'] },
+  { pattern: /^\/api\/booking-email\/status$/, methods: ['GET'] },
+  { pattern: /^\/api\/booking-email\/sync$/, methods: ['POST'] },
+  { pattern: /^\/api\/booking-email\/events$/, methods: ['GET'] },
+  { pattern: /^\/api\/booking-email\/events\/[^/]+$/, methods: ['GET'] },
+  { pattern: /^\/api\/booking-email\/events\/[^/]+\/approve$/, methods: ['POST'] },
+  { pattern: /^\/api\/booking-email\/events\/[^/]+\/reject$/, methods: ['POST'] },
+  { pattern: /^\/api\/booking-email\/events\/[^/]+\/reprocess$/, methods: ['POST'] },
+  { pattern: /^\/api\/booking-email\/sources$/, methods: ['GET', 'POST'] },
+  { pattern: /^\/api\/booking-email\/sources\/[^/]+$/, methods: ['PATCH'] },
+  { pattern: /^\/api\/rooms$/, methods: ['GET'] },
+  { pattern: /^\/api\/rooms\/[^/]+\/operational-status$/, methods: ['POST'] },
+  { pattern: /^\/api\/channels\/ical$/, methods: ['GET'] },
+  { pattern: /^\/api\/channels\/ical\/[^/]+$/, methods: ['POST', 'DELETE'] },
+  { pattern: /^\/api\/settings\/room-setup$/, methods: ['GET'] },
+  { pattern: /^\/api\/settings\/room-types$/, methods: ['POST'] },
+  { pattern: /^\/api\/settings\/room-types\/[^/]+$/, methods: ['PATCH', 'DELETE'] },
+  { pattern: /^\/api\/settings\/rooms$/, methods: ['POST'] },
+  { pattern: /^\/api\/settings\/rooms\/[^/]+$/, methods: ['PATCH', 'DELETE'] },
+  { pattern: /^\/api\/reservations$/, methods: ['GET', 'POST'] },
+  { pattern: /^\/api\/reservations\/[^/]+$/, methods: ['PATCH'] },
+  { pattern: /^\/api\/reservations\/[^/]+\/assign-room$/, methods: ['POST'] },
+  { pattern: /^\/api\/reservations\/[^/]+\/check-in$/, methods: ['POST'] },
+  { pattern: /^\/api\/reservations\/[^/]+\/check-out$/, methods: ['POST'] },
+  { pattern: /^\/api\/reservations\/[^/]+\/cancel$/, methods: ['POST'] },
+  { pattern: /^\/api\/reservations\/[^/]+\/no-show$/, methods: ['POST'] },
+  { pattern: /^\/api\/housekeeping\/rooms\/[^/]+\/status$/, methods: ['POST'] },
+  { pattern: /^\/api\/payments$/, methods: ['POST'] },
+  { pattern: /^\/api\/charges$/, methods: ['POST'] },
+  { pattern: /^\/api\/guests$/, methods: ['GET', 'POST'] },
+  { pattern: /^\/api\/guests\/[^/]+$/, methods: ['PATCH'] },
+]
+
+export function resolveApiRouteContract(pathname) {
+  const contract = API_ROUTE_CONTRACTS.find((route) => route.pattern.test(pathname))
+  if (!contract) return null
+  return {
+    methods: [...contract.methods],
+    allow: contract.methods.join(', '),
+  }
+}

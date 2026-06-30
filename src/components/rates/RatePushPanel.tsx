@@ -172,7 +172,7 @@ export function RatePushPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Recent Push Activity</CardTitle>
-                <CardDescription>Latest rate pushes to OTA channels</CardDescription>
+                <CardDescription>Recorded channel update attempts for review and manual follow-up</CardDescription>
               </div>
               <Button
                 onClick={() => setShowManualPushDialog(true)}
@@ -190,7 +190,7 @@ export function RatePushPanel() {
                   <ArrowUp className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
                   <p className="text-sm text-muted-foreground">No rate pushes yet</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Changes to rates will automatically push to connected channels
+                    Rate changes are recorded here; live OTA delivery requires a configured channel provider
                   </p>
                 </div>
               ) : (
@@ -285,7 +285,7 @@ export function RatePushPanel() {
                 <div className="space-y-0.5">
                   <Label>Auto Push</Label>
                   <p className="text-xs text-muted-foreground">
-                    Automatically push rate changes
+                    Automatically record rate changes for channel follow-up
                   </p>
                 </div>
                 <Switch
@@ -357,7 +357,7 @@ export function RatePushPanel() {
                   <span className="text-sm text-muted-foreground">days</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  How far ahead to push rates
+                  How far ahead to prepare rate updates
                 </p>
               </div>
             </div>
@@ -397,7 +397,7 @@ export function RatePushPanel() {
           <DialogHeader>
             <DialogTitle>Rate Push Settings</DialogTitle>
             <DialogDescription>
-              Configure automatic rate push behavior
+              Configure automatic rate-update recording behavior
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -410,7 +410,7 @@ export function RatePushPanel() {
                 placeholder="90"
               />
               <p className="text-xs text-muted-foreground">
-                Number of days ahead to push rate changes
+                Number of days ahead to prepare rate changes
               </p>
             </div>
           </div>

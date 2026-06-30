@@ -446,7 +446,7 @@ export function DataBackupExport() {
             <div className="flex-1">
               <CardTitle>Data Backup & Export</CardTitle>
               <CardDescription>
-                Export all system data for backup, migration, or compliance
+                Export browser-stored app data for local backup or migration
               </CardDescription>
             </div>
           </div>
@@ -455,8 +455,7 @@ export function DataBackupExport() {
           <Alert>
             <Info weight="duotone" className="h-4 w-4" />
             <AlertDescription>
-              Backups are saved as JSON files and can be imported to restore data. 
-              Passwords are automatically excluded for security.
+              These JSON files cover local browser storage only. Server database backups, off-site retention, and point-in-time recovery must be handled separately.
             </AlertDescription>
           </Alert>
 
@@ -551,7 +550,7 @@ export function DataBackupExport() {
             <div className="flex-1">
               <CardTitle>Import Backup</CardTitle>
               <CardDescription>
-                Restore data from a previous backup file
+                Restore browser-stored app data from a previous export file
               </CardDescription>
             </div>
           </div>
@@ -560,8 +559,7 @@ export function DataBackupExport() {
           <Alert variant="destructive">
             <Warning weight="duotone" className="h-4 w-4" />
             <AlertDescription>
-              <strong>Warning:</strong> Importing will overwrite ALL existing data. 
-              Create a backup of your current data before proceeding.
+              <strong>Warning:</strong> Importing will overwrite matching local browser data only. It does not restore or roll back the server database.
             </AlertDescription>
           </Alert>
 

@@ -373,12 +373,19 @@ export function useOnboarding() {
     validateSetupData(currentState.data)
 
     if (SERVER_AUTH_ENABLED) {
-      await completeServerSetup(currentState.data)
+      const setupToken = serverSetupStatus?.setupTokenRequired
+        ? window.prompt('Enter the production setup token configured in INITIAL_SETUP_TOKEN.')?.trim()
+        : undefined
+      if (serverSetupStatus?.setupTokenRequired && !setupToken) {
+        throw new Error('Setup token is required.')
+      }
+      await completeServerSetup(currentState.data, setupToken)
       setServerSetupStatus({
         needsSetup: false,
         hasProperty: true,
         hasUsers: true,
         propertyName: currentState.data.property.name,
+        setupTokenRequired: false,
       })
     } else {
       const email = normalizeAuthEmail(currentState.data.adminUser.email)

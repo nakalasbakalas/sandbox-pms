@@ -42,6 +42,15 @@ function getContextLabel(room: BoardRoomCard, t: ReturnType<typeof useI18n>['t']
   return t('housekeeping.vacant')
 }
 
+function getNextHousekeepingAction(room: BoardRoomCard, t: ReturnType<typeof useI18n>['t']) {
+  const status = getHousekeepingStatus(room)
+  if (status === 'MAINTENANCE') return t('housekeeping.maintenance')
+  if (status === 'DIRTY') return t('housekeeping.startCleaning')
+  if (status === 'CLEANING') return t('housekeeping.markClean')
+  if (status === 'CLEAN') return t('housekeeping.inspect')
+  return t('common.ready')
+}
+
 function sortRoomsForHousekeeping(a: BoardRoomCard, b: BoardRoomCard) {
   const priorityDiff = getRoomPriority(b) - getRoomPriority(a)
   return priorityDiff !== 0 ? priorityDiff : Number(a.number) - Number(b.number)
@@ -172,6 +181,7 @@ export function HousekeepingBoardView() {
                         <TableCell>
                           <div className="font-medium">{getContextLabel(room, t)}</div>
                           <div className="text-xs text-muted-foreground">{room.guestName || t('housekeeping.vacant')}</div>
+                          <div className="mt-1 text-xs font-medium text-foreground">Next: {getNextHousekeepingAction(room, t)}</div>
                         </TableCell>
                         <TableCell>
                           <span className={cn('rounded-md px-2 py-1 text-xs font-semibold', priority >= 80 ? 'bg-rose-100 text-rose-800' : priority >= 60 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700')}>

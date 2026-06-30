@@ -1,8 +1,29 @@
 # Live Environment Proof Register
 
-Verified at: 2026-06-07T15:57Z
+Latest validation refresh: 2026-06-15.
+Latest external provider evidence refresh: 2026-06-07T15:57Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-06-15 Local And Live Validation Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Code validation passed: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd test`, `npm.cmd run test:e2e`, `npm.cmd run build`, `npm.cmd run prod:preflight`, `npm.cmd run render:validate`, `npm.cmd run live:check`, and `npm.cmd run launch:check`.
+- `npm.cmd run prod:preflight` passed with the expected warning: LINE credentials are not configured, so live LINE messaging remains disabled.
+- `npm.cmd run live:check` passed against `https://book.sandboxhotel.com`; the public health payload reported `lineWebhookConfigured=false`.
+- `npm.cmd run launch:check` passed. During that gate, `db:doctor` reported `DATABASE_URL` and `E2E_DATABASE_URL` reachable on local PostgreSQL at `localhost:55432`, Prisma validation ok, and migration status ok for both configured local databases.
+- `npm.cmd audit --audit-level=high` returned `found 0 vulnerabilities` inside `launch:check`.
+- Guarded DB-mutating E2E passed on the local disposable database only: `ALLOW_DB_E2E=true`, `E2E_DATABASE_URL=postgresql://sandbox:***@localhost:55432/sandbox_hotel_e2e?schema=public`, `npm.cmd run db:e2e:ready`, then `npm.cmd run test:e2e:db`.
+- The DB-mutating E2E seed used `SEED_MODE=e2e`, created local/e2e room inventory, skipped database users, and finished with `Database workflow e2e passed`.
+
+Still not proven by this refresh:
+
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Current Render secret rotation metadata or screenshots with values redacted.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner.
+- Upstream Cloudflare/WAF rule IDs and thresholds.
+- Live LINE, OTA API, PromptPay, card gateway, or other payment-provider send/charge evidence.
 
 ## 2026-06-07 Disposable Restore Test
 

@@ -22,10 +22,15 @@ function retryAfterSeconds(until, now) {
 }
 
 export function resolveClientIp(request) {
-  const forwardedFor = String(request.headers['x-forwarded-for'] || '')
-    .split(',')[0]
-    .trim()
-  return forwardedFor || request.socket?.remoteAddress || 'unknown'
+  const trustProxyHeaders = String(process.env.TRUST_PROXY_HEADERS || '').toLowerCase() === 'true'
+  if (trustProxyHeaders) {
+    const forwardedFor = String(request.headers['cf-connecting-ip'] || request.headers['x-real-ip'] || request.headers['x-forwarded-for'] || '')
+      .split(',')[0]
+      .trim()
+    if (forwardedFor) return forwardedFor
+  }
+
+  return request.socket?.remoteAddress || 'unknown'
 }
 
 export function createLoginThrottle(options = {}) {
