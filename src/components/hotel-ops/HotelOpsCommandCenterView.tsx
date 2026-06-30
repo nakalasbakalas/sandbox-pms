@@ -220,6 +220,24 @@ function TaskCard({
             </div>
           </div>
         )}
+
+        {!compact && task.logs && task.logs.length > 0 && (
+          <div className="space-y-2 rounded border bg-background px-3 py-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Activity Timeline</div>
+            <div className="space-y-2">
+              {task.logs.slice(0, 6).map((log) => (
+                <div key={log.id} className="rounded border bg-muted/30 px-2 py-2 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Badge variant="outline">{log.action.replace(/_/g, ' ')}</Badge>
+                    <span className="text-[11px] text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-1 text-muted-foreground">{log.message}</p>
+                  <div className="mt-1 text-[11px] text-muted-foreground">Actor: {log.actor || 'system'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

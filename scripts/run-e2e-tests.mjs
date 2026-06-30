@@ -601,6 +601,7 @@ assert.deepEqual(resolveApiRouteContract('/api/users')?.methods, ['GET', 'POST']
 assert.deepEqual(resolveApiRouteContract('/api/users/user-1')?.methods, ['PATCH', 'DELETE'], 'user detail exposes admin update/deactivate methods')
 assert.deepEqual(resolveApiRouteContract('/api/ops/commands')?.methods, ['POST'], 'Hotel Ops command endpoint accepts command posts')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks')?.methods, ['GET'], 'Hotel Ops task history exposes read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1')?.methods, ['GET'], 'Hotel Ops task detail exposes read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/approve')?.methods, ['POST'], 'Hotel Ops approve endpoint only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/run')?.methods, ['POST'], 'Hotel Ops queued task runner only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/ops/approvals')?.methods, ['GET'], 'Hotel Ops approvals expose read method')
