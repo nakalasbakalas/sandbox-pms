@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -36,6 +37,11 @@ import type {
 import type { NavigationRoute } from '@/types/navigation'
 
 type HotelOpsTab = 'chat' | 'approvals' | 'tasks' | 'intelligence' | 'settings'
+type PendingReasonAction =
+  | { kind: 'deny-task'; task: HotelOpsTask }
+  | { kind: 'cancel-task'; task: HotelOpsTask }
+  | { kind: 'resolve-alert'; alert: HotelOpsTrendAlert }
+  | { kind: 'emergency-stop'; enabled: boolean }
 
 const tabRoutes: Record<HotelOpsTab, NavigationRoute> = {
   chat: 'ops-chat',
@@ -106,6 +112,54 @@ function formatPercentValue(value?: number) {
 
 function canOpenProofUrl(url: string) {
   return /^https?:\/\//i.test(url)
+}
+
+function reasonActionCopy(action: PendingReasonAction | null) {
+  if (!action) {
+    return {
+      title: 'Record reason',
+      description: 'This action requires an audit reason.',
+      placeholder: 'Record the operational reason...',
+      confirmLabel: 'Submit',
+      destructive: false,
+    }
+  }
+  if (action.kind === 'deny-task') {
+    return {
+      title: 'Deny Hotel Ops task',
+      description: `${action.task.taskType.replace(/_/g, ' ')} will be closed without worker execution. Record why this approval is being denied.`,
+      placeholder: 'Example: Rate change is not approved for this date range.',
+      confirmLabel: 'Deny task',
+      destructive: true,
+    }
+  }
+  if (action.kind === 'cancel-task') {
+    return {
+      title: 'Cancel Hotel Ops task',
+      description: `${action.task.taskType.replace(/_/g, ' ')} will be cancelled before completion. Record why staff should not continue this task.`,
+      placeholder: 'Example: Duplicate request; newer task replaces this one.',
+      confirmLabel: 'Cancel task',
+      destructive: true,
+    }
+  }
+  if (action.kind === 'resolve-alert') {
+    return {
+      title: 'Resolve intelligence alert',
+      description: `${action.alert.title} will leave the active alert queue. Record what changed or what action was taken.`,
+      placeholder: 'Example: Rates reviewed and no change needed.',
+      confirmLabel: 'Resolve alert',
+      destructive: false,
+    }
+  }
+  return {
+    title: action.enabled ? 'Enable emergency stop' : 'Disable emergency stop',
+    description: action.enabled
+      ? 'Hotel Ops write tasks will be blocked until this is disabled. Record the operational reason.'
+      : 'Hotel Ops write tasks can be reviewed and queued again. Record why it is safe to resume.',
+    placeholder: action.enabled ? 'Example: OTA rates are being reconciled manually.' : 'Example: OTA checks complete; normal approvals may resume.',
+    confirmLabel: action.enabled ? 'Enable stop' : 'Disable stop',
+    destructive: action.enabled,
+  }
 }
 
 async function copyProofUrl(url: string) {
@@ -260,11 +314,15 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
   const [otaStatus, setOtaStatus] = useState<HotelOpsOtaStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pendingReasonAction, setPendingReasonAction] = useState<PendingReasonAction | null>(null)
+  const [reasonText, setReasonText] = useState('')
+  const [reasonSubmitting, setReasonSubmitting] = useState(false)
 
   const pendingApprovalTasks = useMemo(
     () => approvals.map((approval) => approval.task).filter(Boolean) as HotelOpsTask[],
     [approvals],
   )
+  const pendingReasonCopy = useMemo(() => reasonActionCopy(pendingReasonAction), [pendingReasonAction])
 
   const refresh = async () => {
     if (!SERVER_AUTH_ENABLED) {
@@ -346,15 +404,8 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    const reason = window.prompt('Reason for denial?')?.trim()
-    if (!reason) return
-    try {
-      const payload = await hotelOpsApi.denyTask(task.id, reason)
-      toast.success(payload.message || 'Task denied.')
-      await refresh()
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not deny task.')
-    }
+    setPendingReasonAction({ kind: 'deny-task', task })
+    setReasonText('')
   }
 
   const cancelTask = async (task: HotelOpsTask) => {
@@ -362,15 +413,8 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    const reason = window.prompt('Reason for cancellation?')?.trim()
-    if (!reason) return
-    try {
-      const payload = await hotelOpsApi.cancelTask(task.id, reason)
-      toast.success(payload.message || 'Task cancelled.')
-      await refresh()
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not cancel task.')
-    }
+    setPendingReasonAction({ kind: 'cancel-task', task })
+    setReasonText('')
   }
 
   const runTask = async (task: HotelOpsTask) => {
@@ -438,15 +482,8 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    const reason = window.prompt('Resolution note?')?.trim()
-    if (!reason) return
-    try {
-      const payload = await hotelOpsApi.resolveAlert(alert.id, reason)
-      toast.success(payload.message || 'Alert resolved.')
-      await refresh()
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not resolve alert.')
-    }
+    setPendingReasonAction({ kind: 'resolve-alert', alert })
+    setReasonText('')
   }
 
   const toggleEmergencyStop = async (enabled: boolean) => {
@@ -454,15 +491,46 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    const reason = window.prompt(enabled ? 'Reason for enabling emergency stop?' : 'Reason for disabling emergency stop?')?.trim()
-    if (!reason) return
+    setPendingReasonAction({ kind: 'emergency-stop', enabled })
+    setReasonText('')
+  }
+
+  const closeReasonDialog = () => {
+    if (reasonSubmitting) return
+    setPendingReasonAction(null)
+    setReasonText('')
+  }
+
+  const submitReasonAction = async () => {
+    if (!pendingReasonAction) return
+    const reason = reasonText.trim()
+    if (!reason) {
+      toast.error('Record a reason before continuing.')
+      return
+    }
+    setReasonSubmitting(true)
     try {
-      const payload = await hotelOpsApi.setEmergencyStop(enabled, reason)
-      setEmergencyStop(payload.data)
-      toast.success(payload.message || 'Emergency stop updated.')
+      if (pendingReasonAction.kind === 'deny-task') {
+        const payload = await hotelOpsApi.denyTask(pendingReasonAction.task.id, reason)
+        toast.success(payload.message || 'Task denied.')
+      } else if (pendingReasonAction.kind === 'cancel-task') {
+        const payload = await hotelOpsApi.cancelTask(pendingReasonAction.task.id, reason)
+        toast.success(payload.message || 'Task cancelled.')
+      } else if (pendingReasonAction.kind === 'resolve-alert') {
+        const payload = await hotelOpsApi.resolveAlert(pendingReasonAction.alert.id, reason)
+        toast.success(payload.message || 'Alert resolved.')
+      } else {
+        const payload = await hotelOpsApi.setEmergencyStop(pendingReasonAction.enabled, reason)
+        setEmergencyStop(payload.data)
+        toast.success(payload.message || 'Emergency stop updated.')
+      }
+      setPendingReasonAction(null)
+      setReasonText('')
       await refresh()
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not update emergency stop.')
+      toast.error(caught instanceof Error ? caught.message : 'Could not complete Hotel Ops action.')
+    } finally {
+      setReasonSubmitting(false)
     }
   }
 
@@ -777,6 +845,37 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             </Card>
           </div>
         )}
+
+        <Dialog open={Boolean(pendingReasonAction)} onOpenChange={(open) => {
+          if (!open) closeReasonDialog()
+        }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{pendingReasonCopy.title}</DialogTitle>
+              <DialogDescription>{pendingReasonCopy.description}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="hotel-ops-action-reason">Audit reason</Label>
+              <Textarea
+                id="hotel-ops-action-reason"
+                value={reasonText}
+                onChange={(event) => setReasonText(event.target.value)}
+                placeholder={pendingReasonCopy.placeholder}
+                className="min-h-28"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={closeReasonDialog} disabled={reasonSubmitting}>Keep open</Button>
+              <Button
+                variant={pendingReasonCopy.destructive ? 'destructive' : 'default'}
+                onClick={() => void submitReasonAction()}
+                disabled={reasonSubmitting}
+              >
+                {pendingReasonCopy.confirmLabel}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
