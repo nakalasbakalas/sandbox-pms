@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
+import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
 
 const TASK_TYPES = new Set([
@@ -540,7 +541,7 @@ function idempotencyKey(actor, rawMessage, sourceChannel) {
     .digest('hex')
 }
 
-function mockProof(task, kind = 'after') {
+function workerFailureProof(task, kind = 'error') {
   return [{
     id: `${task.id}-${kind}`,
     kind,
@@ -552,62 +553,66 @@ function mockProof(task, kind = 'after') {
 
 async function executeMockTask(tx, task, actor) {
   await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'RUNNING' } })
-  await taskLog(tx, task.id, 'WORKER_STARTED', 'Mock OTA worker started in dry-run mode.', actor, { dryRun: true })
+  await taskLog(tx, task.id, 'WORKER_STARTED', 'Signed OTA worker execution started in dry-run mode.', actor, {
+    dryRun: true,
+    signed: true,
+    workerConfigured: opsWorkerConfigured(),
+  })
 
-  const raw = task.rawMessage.toLowerCase()
   let result
-  if (raw.includes('selector failure')) {
+  try {
+    result = await executeOpsWorkerTask(task, { dryRun: true })
+  } catch (error) {
     result = {
       status: 'FAILED',
-      summary: 'Mock OTA worker could not find the expected selector.',
-      proofScreenshots: mockProof(task, 'error'),
-      errorCode: 'MOCK_SELECTOR_FAILURE',
-      errorMessage: 'Selector not found in mock adapter.',
-    }
-  } else if (raw.includes('2fa') || raw.includes('captcha')) {
-    result = {
-      status: 'NEEDS_HUMAN',
-      summary: 'Mock OTA worker requires human 2FA/CAPTCHA completion. No bypass attempted.',
-      proofScreenshots: mockProof(task, 'trace'),
-      errorCode: 'NEEDS_HUMAN_CHALLENGE',
-      errorMessage: '2FA/CAPTCHA requires authorized human action.',
-    }
-  } else {
-    result = {
-      status: 'SUCCEEDED',
-      summary: WRITE_TASK_TYPES.has(task.taskType)
-        ? `Dry-run ${task.taskType} completed for ${task.platform}. No OTA state was changed.`
-        : `${task.taskType} completed using PMS/mock booking data.`,
-      proofScreenshots: mockProof(task, WRITE_TASK_TYPES.has(task.taskType) ? 'after' : 'trace'),
+      summary: error instanceof Error ? error.message : 'Signed OTA worker execution failed.',
+      proofScreenshots: workerFailureProof(task, 'error'),
+      errorCode: error?.statusCode ? `WORKER_HTTP_${error.statusCode}` : 'WORKER_EXECUTION_FAILED',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      workerMode: 'worker-error',
+      signed: true,
     }
   }
 
+  const status = ['SUCCEEDED', 'FAILED', 'NEEDS_HUMAN'].includes(result.status) ? result.status : 'FAILED'
+  const proofScreenshots = Array.isArray(result.proofScreenshots) ? result.proofScreenshots : workerFailureProof(task, status === 'NEEDS_HUMAN' ? 'trace' : 'error')
   const updated = await tx.hotelOpsTask.update({
     where: { id: task.id },
     data: {
-      status: result.status,
-      proofScreenshots: result.proofScreenshots,
+      status,
+      proofScreenshots,
       executionSummary: result.summary,
       errorCode: result.errorCode,
       errorMessage: result.errorMessage,
     },
     include: taskInclude,
   })
-  await taskLog(tx, task.id, `WORKER_${result.status}`, result.summary, actor, result)
-  await audit(tx, actor, `OPS_TASK_${result.status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status: result.status, dryRun: true })
+  await taskLog(tx, task.id, `WORKER_${status}`, result.summary, actor, {
+    status,
+    summary: result.summary,
+    errorCode: result.errorCode,
+    errorMessage: result.errorMessage,
+    workerMode: result.workerMode,
+    signed: result.signed,
+    data: result.data,
+    proofScreenshots,
+  })
+  await audit(tx, actor, `OPS_TASK_${status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status, dryRun: true, workerMode: result.workerMode, signed: result.signed })
   await recordOpsNotifications(tx, task.propertyId, {
-    type: result.status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',
+    type: status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',
     taskId: task.id,
     recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
-    recipientRole: result.status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
-    title: result.status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${result.status.toLowerCase().replace(/_/g, ' ')}`,
+    recipientRole: status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
+    title: status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${status.toLowerCase().replace(/_/g, ' ')}`,
     summary: result.summary,
     actionPath: '/ops/tasks',
     metadata: {
-      status: result.status,
+      status,
       taskType: task.taskType,
       platform: task.platform,
       errorCode: result.errorCode,
+      workerMode: result.workerMode,
+      signed: result.signed,
     },
   }, actor)
   return tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude })

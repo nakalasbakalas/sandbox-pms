@@ -1,4 +1,4 @@
-/* global console */
+/* global console, Response */
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { buildOpsNotificationDrafts, evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createUser } from '../server/pms-service.mjs'
@@ -514,6 +515,74 @@ const bookingHumanTask = await executeBookingComTask({
 })
 assert.equal(bookingHumanTask.status, 'NEEDS_HUMAN', 'Booking.com adapter returns NEEDS_HUMAN for CAPTCHA instead of bypassing it')
 assert.equal(bookingHumanTask.errorCode, 'NEEDS_HUMAN_CAPTCHA', 'Booking.com adapter preserves the human challenge reason')
+
+const workerTask = {
+  id: 'ops-task-1',
+  taskType: 'UPDATE_RATE',
+  platform: 'booking',
+  hotelId: 'SANDBOX',
+  roomType: 'Deluxe Room',
+  dateStart: new Date('2026-07-03T00:00:00.000Z'),
+  dateEnd: new Date('2026-07-04T00:00:00.000Z'),
+  rateAmount: 2200,
+  rateCurrency: 'THB',
+  availabilityRooms: null,
+  availabilityStatus: null,
+  rawMessage: 'Change Booking Deluxe Room to 2,200 THB.',
+}
+const workerPayload = buildOpsWorkerTaskPayload(workerTask)
+assert.equal(workerPayload.taskId, 'ops-task-1', 'Hotel Ops executor builds a worker task id')
+assert.equal(workerPayload.rate.amount, 2200, 'Hotel Ops executor maps rate amount into worker payload')
+assert.equal(JSON.stringify(workerPayload).includes(workerTask.rawMessage), false, 'Hotel Ops executor does not send raw free text to worker')
+assert.equal(JSON.stringify(workerPayload).includes('password'), false, 'Hotel Ops executor payload contains no credential fields')
+
+const localWorkerResult = await executeOpsWorkerTask(workerTask, {
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+  },
+})
+assert.equal(localWorkerResult.workerMode, 'local-signed-worker', 'Hotel Ops executor uses local signed worker fallback when no worker URL is configured')
+assert.equal(localWorkerResult.status, 'SUCCEEDED', 'Hotel Ops executor local worker returns structured success')
+assert.equal(localWorkerResult.proofScreenshots.length, 2, 'Hotel Ops executor stores Booking.com dry-run proof placeholders')
+assert.equal(JSON.stringify(localWorkerResult).includes('booking-password'), false, 'Hotel Ops executor never returns OTA credentials')
+
+let remoteWorkerRequestChecked = false
+const remoteWorkerResult = await executeOpsWorkerTask({
+  ...workerTask,
+  id: 'ops-task-remote',
+  platform: 'agoda',
+}, {
+  env: {
+    OTA_WORKER_BASE_URL: 'https://worker.example.test/tasks',
+    OTA_WORKER_SHARED_SECRET: 'remote-worker-secret',
+  },
+  fetchImpl: async (url, request) => {
+    assert.equal(url, 'https://worker.example.test/tasks', 'Hotel Ops executor posts to configured worker URL')
+    const verification = verifyOpsWorkerRequest({
+      body: request.body,
+      headers: request.headers,
+      secret: 'remote-worker-secret',
+      now: Number(request.headers['x-ops-worker-timestamp']),
+    })
+    assert.equal(verification.ok, true, 'Hotel Ops executor signs remote worker requests')
+    assert.equal(request.body.includes(workerTask.rawMessage), false, 'Hotel Ops remote worker body omits raw command text')
+    remoteWorkerRequestChecked = true
+    return new Response(JSON.stringify({
+      ok: true,
+      data: {
+        taskId: 'ops-task-remote',
+        status: 'SUCCEEDED',
+        summary: 'Remote worker accepted task.',
+        proofScreenshots: [],
+        data: { dryRun: true },
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  },
+})
+assert.equal(remoteWorkerRequestChecked, true, 'Hotel Ops executor exercised the remote signed worker path')
+assert.equal(remoteWorkerResult.workerMode, 'remote-signed-worker', 'Hotel Ops executor labels remote worker results')
+assert.equal(remoteWorkerResult.signed, true, 'Hotel Ops executor records signed worker execution')
 
 const fixedOpsDate = new Date('2026-06-30T00:00:00.000Z')
 const rateCommand = parseHotelOpsCommand('Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', { now: fixedOpsDate })

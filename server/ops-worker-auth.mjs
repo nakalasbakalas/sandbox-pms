@@ -142,18 +142,59 @@ export function normalizeOpsWorkerTaskPayload(payload = {}) {
     rate: payload.rate && typeof payload.rate === 'object' ? payload.rate : undefined,
     availability: payload.availability && typeof payload.availability === 'object' ? payload.availability : undefined,
     dryRun: payload.dryRun !== false,
+    mockScenario: ['selector_failure', 'human_challenge'].includes(payload.mockScenario) ? payload.mockScenario : null,
   }
 }
 
 export function runSignedMockOtaWorkerTask(payload = {}) {
   const task = normalizeOpsWorkerTaskPayload(payload)
+  const proof = (kind) => [{
+    id: `${task.taskId}-${kind}`,
+    kind,
+    storageUrl: `mock://hotel-ops/${encodeURIComponent(task.taskId)}/${kind}`,
+    capturedAt: new Date().toISOString(),
+    redactionStatus: 'SAFE',
+  }]
+
+  if (task.mockScenario === 'selector_failure') {
+    return {
+      taskId: task.taskId,
+      status: 'FAILED',
+      summary: 'Signed mock worker could not find the expected selector.',
+      proofScreenshots: proof('error'),
+      errorCode: 'MOCK_SELECTOR_FAILURE',
+      errorMessage: 'Selector not found in mock adapter.',
+      data: {
+        dryRun: task.dryRun,
+        platform: task.platform,
+        taskType: task.taskType,
+      },
+    }
+  }
+
+  if (task.mockScenario === 'human_challenge') {
+    return {
+      taskId: task.taskId,
+      status: 'NEEDS_HUMAN',
+      summary: 'Signed mock worker requires human 2FA/CAPTCHA completion. No bypass attempted.',
+      proofScreenshots: proof('trace'),
+      errorCode: 'NEEDS_HUMAN_CHALLENGE',
+      errorMessage: '2FA/CAPTCHA requires authorized human action.',
+      data: {
+        dryRun: task.dryRun,
+        platform: task.platform,
+        taskType: task.taskType,
+      },
+    }
+  }
+
   return {
     taskId: task.taskId,
     status: 'SUCCEEDED',
     summary: task.dryRun
       ? `Dry run: signed mock worker accepted ${task.taskType} for ${task.platform}.`
       : `Signed mock worker accepted ${task.taskType} for ${task.platform}.`,
-    proofScreenshots: [],
+    proofScreenshots: proof(['UPDATE_RATE', 'UPDATE_AVAILABILITY', 'CLOSE_ROOM', 'OPEN_ROOM'].includes(task.taskType) ? 'after' : 'trace'),
     data: {
       dryRun: task.dryRun,
       platform: task.platform,
