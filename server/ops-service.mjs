@@ -33,6 +33,8 @@ const WRITE_TASK_TYPES = new Set([
   'UPDATE_PHOTOS',
 ])
 
+const ACTIVE_TREND_ALERT_STATUSES = ['CREATED', 'ACKNOWLEDGED', 'RECOMMENDATION_APPROVED']
+
 const RULES = {
   READ_RESERVATIONS: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'], approvalRequired: false },
   READ_GUEST_MESSAGES: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'SYSTEM'], approvalRequired: false },
@@ -121,6 +123,12 @@ function isoDate(date) {
 
 function dateValue(value) {
   return value instanceof Date ? value : new Date(value)
+}
+
+function dateKeyOrEmpty(value) {
+  if (!value) return ''
+  const date = dateValue(value)
+  return Number.isNaN(date.getTime()) ? String(value).slice(0, 10) : isoDate(date)
 }
 
 function bangkokTodayDate(now = new Date()) {
@@ -428,6 +436,21 @@ export function evaluateOpsPermission(parsedTask, actor, emergencyStop = { enabl
 
 function dateOrNull(key) {
   return key ? new Date(`${key}T00:00:00.000Z`) : null
+}
+
+function alertDateOrNull(value) {
+  const key = dateKeyOrEmpty(value)
+  return key ? dateOrNull(key) : null
+}
+
+export function hotelOpsTrendAlertFingerprint(alert = {}) {
+  return [
+    normalizeText(alert.alertType).toUpperCase(),
+    normalizeNullableString(alert.platform) || '',
+    normalizeNullableString(alert.roomType) || '',
+    dateKeyOrEmpty(alert.dateStart || alert.dateRange?.start),
+    dateKeyOrEmpty(alert.dateEnd || alert.dateRange?.end),
+  ].join('|')
 }
 
 function serializeTask(task) {
@@ -1260,6 +1283,50 @@ export function buildOpsScanInsights({
   return insights
 }
 
+function trendAlertIdentity(insight = {}) {
+  return {
+    alertType: insight.alertType,
+    platform: normalizeNullableString(insight.platform),
+    roomType: normalizeNullableString(insight.roomType),
+    dateStart: alertDateOrNull(insight.dateStart),
+    dateEnd: alertDateOrNull(insight.dateEnd),
+  }
+}
+
+async function upsertActiveOpsTrendAlert(prisma, propertyId, insight) {
+  const identity = trendAlertIdentity(insight)
+  const existing = await prisma.hotelOpsTrendAlert.findFirst({
+    where: {
+      propertyId,
+      ...identity,
+      status: { in: ACTIVE_TREND_ALERT_STATUSES },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (existing) {
+    const updated = await prisma.hotelOpsTrendAlert.update({
+      where: { id: existing.id },
+      data: {
+        severity: insight.severity,
+        title: insight.title,
+        summary: insight.summary,
+        metrics: insight.metrics,
+        recommendedAction: insight.recommendedAction ?? null,
+      },
+    })
+    return { alert: updated, created: false }
+  }
+
+  const created = await prisma.hotelOpsTrendAlert.create({
+    data: {
+      propertyId,
+      ...insight,
+    },
+  })
+  return { alert: created, created: true }
+}
+
 export async function runOpsScan(prisma, input = {}, actor = { id: 'system', role: 'SYSTEM' }) {
   const property = await getProperty(prisma)
   const now = input?.now ? dateValue(input.now) : new Date()
@@ -1294,23 +1361,30 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
     now,
     force: input?.force,
   })
-  const created = []
+  const alerts = []
+  const createdAlerts = []
+  let createdCount = 0
+  let updatedCount = 0
   for (const insight of insights) {
-    created.push(await prisma.hotelOpsTrendAlert.create({
-      data: {
-        propertyId: property.id,
-        ...insight,
-      },
-    }))
+    const result = await upsertActiveOpsTrendAlert(prisma, property.id, insight)
+    alerts.push(result.alert)
+    if (result.created) {
+      createdCount += 1
+      createdAlerts.push(result.alert)
+    } else {
+      updatedCount += 1
+    }
   }
 
-  await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', created[0]?.id || null, {
-    created: created.length,
+  await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', alerts[0]?.id || null, {
+    created: createdCount,
+    updated: updatedCount,
+    activeAlerts: alerts.length,
     activeReservations: reservations.length,
     sellableRooms: rooms,
     cancellationLogs: cancellationLogs.length,
   })
-  for (const alert of created) {
+  for (const alert of createdAlerts) {
     await recordOpsNotifications(prisma, property.id, {
       type: 'TREND_ALERT',
       trendAlertId: alert.id,
@@ -1325,7 +1399,7 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
       },
     }, actor)
   }
-  return created.map(serializeAlert)
+  return alerts.map(serializeAlert)
 }
 
 export async function listOpsTrendAlerts(prisma, filters = {}) {

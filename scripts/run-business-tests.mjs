@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, hotelOpsTrendAlertFingerprint, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -765,6 +765,96 @@ const weekendInsights = buildOpsScanInsights({
   now: fixedOpsDate,
 })
 assert.equal(weekendInsights.some((alert) => alert.alertType === 'WEEKEND_SPIKE'), true, 'Hotel Ops scan creates weekend spike alert only when weekend velocity accelerates')
+
+assert.equal(
+  hotelOpsTrendAlertFingerprint({
+    alertType: 'LOW_DEMAND',
+    platform: 'all',
+    roomType: 'All Rooms',
+    dateStart: new Date('2026-06-30T00:00:00.000Z'),
+    dateEnd: '2026-07-07',
+  }),
+  hotelOpsTrendAlertFingerprint({
+    alertType: 'LOW_DEMAND',
+    platform: 'all',
+    roomType: 'All Rooms',
+    dateStart: '2026-06-30',
+    dateEnd: new Date('2026-07-07T00:00:00.000Z'),
+  }),
+  'Hotel Ops trend alert fingerprint normalizes equivalent date windows',
+)
+assert.notEqual(
+  hotelOpsTrendAlertFingerprint({ alertType: 'LOW_DEMAND', platform: 'all', roomType: 'All Rooms', dateStart: '2026-06-30', dateEnd: '2026-07-07' }),
+  hotelOpsTrendAlertFingerprint({ alertType: 'LOW_DEMAND', platform: 'all', roomType: 'All Rooms', dateStart: '2026-06-30', dateEnd: '2026-07-08' }),
+  'Hotel Ops trend alert fingerprint changes when the action window changes',
+)
+
+const scanAlertRows = []
+const scanNotifications = []
+const scanAudits = []
+const scanProperty = { id: 'property-scan-1', code: 'SANDBOX', email: null, reservationAlertEmail: null }
+const dateKey = (value) => (value ? new Date(value).toISOString().slice(0, 10) : null)
+const scanPrisma = {
+  property: {
+    findUnique: async () => scanProperty,
+  },
+  reservation: {
+    findMany: async () => [],
+  },
+  room: {
+    count: async () => 10,
+  },
+  reservationLog: {
+    findMany: async () => [],
+  },
+  hotelOpsTrendAlert: {
+    findFirst: async ({ where }) => scanAlertRows.find((alert) => (
+      alert.propertyId === where.propertyId
+      && alert.alertType === where.alertType
+      && (alert.platform || null) === (where.platform || null)
+      && (alert.roomType || null) === (where.roomType || null)
+      && dateKey(alert.dateStart) === dateKey(where.dateStart)
+      && dateKey(alert.dateEnd) === dateKey(where.dateEnd)
+      && where.status.in.includes(alert.status)
+    )) || null,
+    create: async ({ data }) => {
+      const now = new Date(`2026-06-30T00:00:0${scanAlertRows.length}.000Z`)
+      const row = {
+        id: `scan-alert-${scanAlertRows.length + 1}`,
+        status: 'CREATED',
+        createdAt: now,
+        updatedAt: now,
+        ...data,
+      }
+      scanAlertRows.push(row)
+      return row
+    },
+    update: async ({ where, data }) => {
+      const row = scanAlertRows.find((alert) => alert.id === where.id)
+      Object.assign(row, data, { updatedAt: new Date('2026-06-30T00:00:10.000Z') })
+      return row
+    },
+  },
+  hotelOpsNotification: {
+    create: async ({ data }) => {
+      const row = { id: `scan-notification-${scanNotifications.length + 1}`, createdAt: new Date('2026-06-30T00:00:00.000Z'), ...data }
+      scanNotifications.push(row)
+      return row
+    },
+  },
+  auditLog: {
+    create: async ({ data }) => {
+      scanAudits.push(data)
+      return data
+    },
+  },
+}
+const firstLowDemandScan = await runOpsScan(scanPrisma, { force: 'low-demand', now: fixedOpsDate }, { id: 'manager', role: 'MANAGER' })
+const secondLowDemandScan = await runOpsScan(scanPrisma, { force: 'low-demand', now: fixedOpsDate }, { id: 'manager', role: 'MANAGER' })
+assert.equal(scanAlertRows.length, 1, 'Hotel Ops scan reuses an active alert instead of creating duplicates')
+assert.equal(firstLowDemandScan[0]?.id, secondLowDemandScan[0]?.id, 'Hotel Ops repeated scan returns the existing active alert')
+assert.equal(scanNotifications.filter((notification) => notification.type === 'TREND_ALERT').length, 1, 'Hotel Ops repeated scan does not re-notify for the same active alert')
+assert.equal(scanAudits.filter((audit) => audit.action === 'OPS_SCAN_RUN').at(-1)?.changes.updated, 1, 'Hotel Ops repeated scan audits alert refresh count')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0
