@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, evaluateOpsPermission, evaluateOpsTaskRun, parseHotelOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -686,6 +686,27 @@ assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk 
 assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'staff cannot create high-risk Hotel Ops write task')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops emergency stop blocks write tasks')
+
+const queuedReadTask = {
+  taskType: 'READ_RESERVATIONS',
+  status: 'QUEUED',
+  approvalRequired: false,
+  approvals: [],
+}
+assert.equal(evaluateOpsTaskRun(queuedReadTask, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, true, 'Hotel Ops runner allows queued low-risk tasks for permitted staff')
+assert.equal(evaluateOpsTaskRun({ ...queuedReadTask, status: 'DENIED' }, { id: 'manager', role: 'MANAGER' }).allowed, false, 'Hotel Ops runner rejects denied tasks')
+
+const pendingRateTask = {
+  taskType: 'UPDATE_RATE',
+  status: 'QUEUED',
+  approvalRequired: true,
+  permissionDecision: { requiredApprovalRole: 'OWNER' },
+  approvals: [{ status: 'PENDING', requiredRole: 'OWNER' }],
+}
+assert.equal(evaluateOpsTaskRun(pendingRateTask, { id: 'owner', role: 'ADMIN' }).allowed, false, 'Hotel Ops runner refuses queued write tasks without completed approval')
+assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'owner', role: 'ADMIN' }).allowed, true, 'Hotel Ops runner allows owner-approved write tasks')
+assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'Hotel Ops runner prevents lower-role execution of owner-approved write tasks')
+assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops runner rechecks emergency stop before write execution')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

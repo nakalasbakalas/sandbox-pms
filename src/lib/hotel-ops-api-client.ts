@@ -70,6 +70,13 @@ export const hotelOpsApi = {
     })
   },
 
+  runTask(taskId: string) {
+    return apiRequest<{ ok: true; data: HotelOpsTask; message?: string }>(`/api/ops/tasks/${encodeURIComponent(taskId)}/run`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
   listApprovals() {
     return apiRequest<{ ok: true; data: HotelOpsApproval[] }>('/api/ops/approvals')
   },

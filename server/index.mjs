@@ -36,6 +36,7 @@ import {
   listOpsApprovals,
   listOpsTasks,
   listOpsTrendAlerts,
+  runQueuedOpsTask,
   runOpsScan,
   setEmergencyStop,
   submitOpsCommand,
@@ -674,6 +675,14 @@ async function handleApi(request, response, url) {
   if (opsParams && request.method === 'POST') {
     requirePermission(user, 'create:ops-task')
     sendJson(response, 200, { ok: true, data: await cancelOpsTask(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops task cancelled.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/tasks\/(?<id>[^/]+)\/run$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    await readJson(request)
+    sendJson(response, 200, { ok: true, data: await runQueuedOpsTask(db, opsParams.id, user), message: 'Hotel Ops queued task ran through the signed worker.' })
     return true
   }
 

@@ -103,12 +103,14 @@ function TaskCard({
   onApprove,
   onDeny,
   onCancel,
+  onRun,
   compact = false,
 }: {
   task: HotelOpsTask
   onApprove?: (task: HotelOpsTask) => void
   onDeny?: (task: HotelOpsTask) => void
   onCancel?: (task: HotelOpsTask) => void
+  onRun?: (task: HotelOpsTask) => void
   compact?: boolean
 }) {
   return (
@@ -135,6 +137,12 @@ function TaskCard({
               <Button size="sm" variant="outline" onClick={() => onDeny(task)}>
                 <XCircle className="mr-2" />
                 Deny
+              </Button>
+            )}
+            {['QUEUED', 'APPROVED'].includes(task.status) && onRun && (
+              <Button size="sm" onClick={() => onRun(task)}>
+                <PlayCircle className="mr-2" />
+                Run
               </Button>
             )}
             {['DRAFT', 'PENDING_APPROVAL', 'QUEUED', 'APPROVED'].includes(task.status) && onCancel && (
@@ -296,6 +304,20 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
+  const runTask = async (task: HotelOpsTask) => {
+    if (!SERVER_AUTH_ENABLED) {
+      toast.error('Hotel Ops backend is not connected.')
+      return
+    }
+    try {
+      const payload = await hotelOpsApi.runTask(task.id)
+      toast.success(payload.message || 'Queued task ran.')
+      await refresh()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Could not run queued task.')
+    }
+  }
+
   const runScan = async (force?: 'high-demand' | 'low-demand') => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
@@ -352,7 +374,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Hotel Ops Command Center</h1>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              Controlled command intake, approvals, mock OTA execution, trend alerts, and emergency stop for manager-led operations.
+              Controlled command intake, approvals, signed dry-run execution, trend alerts, and emergency stop for manager-led operations.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -459,7 +481,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     </div>
                     <div className="font-semibold">{commandResult.parsed.taskType.replace(/_/g, ' ')}</div>
                     <div className="text-muted-foreground">{commandResult.decision.reason}</div>
-                    <TaskCard task={commandResult.task} compact onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} />
+                    <TaskCard task={commandResult.task} compact onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />
                   </div>
                 ) : (
                   <div className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -480,7 +502,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             {pendingApprovalTasks.length === 0 ? (
               <Card className="rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No Hotel Ops tasks need approval.</CardContent></Card>
             ) : (
-              pendingApprovalTasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} />)
+              pendingApprovalTasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />)
             )}
           </section>
         )}
@@ -494,7 +516,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             {tasks.length === 0 ? (
               <Card className="rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No Hotel Ops tasks recorded yet.</CardContent></Card>
             ) : (
-              tasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} />)
+              tasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />)
             )}
           </section>
         )}

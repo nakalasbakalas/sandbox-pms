@@ -618,13 +618,139 @@ function workerFailureProof(task, kind = 'error') {
   }]
 }
 
-async function executeMockTask(tx, task, actor) {
-  await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'RUNNING' } })
-  await taskLog(tx, task.id, 'WORKER_STARTED', 'Signed OTA worker execution started in dry-run mode.', actor, {
-    dryRun: true,
-    signed: true,
-    workerConfigured: opsWorkerConfigured(),
+async function queueOpsTask(tx, task, actor, message = 'Task queued for signed worker execution.') {
+  const queued = task.status === 'QUEUED'
+    ? await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
+    : await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'QUEUED' }, include: taskInclude })
+  await taskLog(tx, task.id, 'TASK_QUEUED', message, actor, { dryRun: true, signed: true })
+  await audit(tx, actor, 'OPS_TASK_QUEUED', 'hotelOpsTask', task.id, { taskType: task.taskType, status: 'QUEUED', dryRun: true, signed: true })
+  await recordOpsNotifications(tx, task.propertyId, {
+    type: 'TASK_UPDATE',
+    taskId: task.id,
+    recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
+    title: 'Hotel Ops task queued',
+    summary: `${task.taskType.replace(/_/g, ' ')} is queued for signed worker execution.`,
+    actionPath: '/ops/tasks',
+    metadata: { status: 'QUEUED', taskType: task.taskType, platform: task.platform, dryRun: true, signed: true },
+  }, actor)
+  return queued
+}
+
+function requiredApprovalRoleForTask(task) {
+  return task?.permissionDecision?.requiredApprovalRole
+    || task?.approvals?.find((approval) => approval.status === 'APPROVED')?.requiredRole
+    || task?.approvals?.find((approval) => approval.status === 'PENDING')?.requiredRole
+    || 'HOTEL_MANAGER'
+}
+
+export function evaluateOpsTaskRun(task, actor, emergencyStop = { enabled: false }) {
+  if (!task) return { allowed: false, statusCode: 404, reason: 'Hotel Ops task was not found.' }
+  if (!['QUEUED', 'APPROVED'].includes(task.status)) {
+    return { allowed: false, statusCode: 409, reason: `Only queued Hotel Ops tasks can run. Current status is ${task.status}.` }
+  }
+
+  const rule = RULES[task.taskType] || null
+  if (!rule || rule.execute === false || task.taskType === 'FORBIDDEN') {
+    return { allowed: false, statusCode: 409, reason: `${task.taskType} cannot be sent to the OTA worker.` }
+  }
+
+  if (emergencyStop?.enabled && WRITE_TASK_TYPES.has(task.taskType)) {
+    return { allowed: false, statusCode: 409, reason: 'Emergency stop is enabled for Hotel Ops write tasks.', blockedByEmergencyStop: true }
+  }
+
+  const role = opsRoleForUser(actor)
+  if (task.approvalRequired) {
+    const approved = task.approvals?.some((approval) => approval.status === 'APPROVED')
+    if (!approved) return { allowed: false, statusCode: 409, reason: 'Task approval must be granted before execution.' }
+    const requiredRole = requiredApprovalRoleForTask(task)
+    if (role !== 'SYSTEM' && !canApprove(actor, requiredRole)) {
+      return { allowed: false, statusCode: 403, reason: `${requiredRole} must run this approved Hotel Ops task.` }
+    }
+  } else if (!rule.allowedRoles.includes(role)) {
+    return { allowed: false, statusCode: 403, reason: `${role} cannot run ${task.taskType}.` }
+  }
+
+  return { allowed: true, statusCode: 200, reason: 'Task is queued and ready for signed worker execution.' }
+}
+
+async function prepareOpsTaskRun(prisma, taskId, actor) {
+  return prisma.$transaction(async (tx) => {
+    const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
+    if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    const stop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
+    const decision = evaluateOpsTaskRun(task, actor, stop || { enabled: false })
+    if (!decision.allowed) throw new PmsValidationError(decision.reason, decision.statusCode)
+
+    const running = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'RUNNING' }, include: taskInclude })
+    await taskLog(tx, task.id, 'WORKER_STARTED', 'Signed OTA worker execution started in dry-run mode.', actor, {
+      dryRun: true,
+      signed: true,
+      workerConfigured: opsWorkerConfigured(),
+    })
+    await audit(tx, actor, 'OPS_TASK_STARTED', 'hotelOpsTask', task.id, { taskType: task.taskType, status: 'RUNNING', dryRun: true, signed: true })
+    return running
   })
+}
+
+async function finalizeOpsTaskRun(prisma, task, actor, result) {
+  const status = ['SUCCEEDED', 'FAILED', 'NEEDS_HUMAN'].includes(result.status) ? result.status : 'FAILED'
+  const proofScreenshots = Array.isArray(result.proofScreenshots) ? result.proofScreenshots : workerFailureProof(task, status === 'NEEDS_HUMAN' ? 'trace' : 'error')
+  return prisma.$transaction(async (tx) => {
+    const current = await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
+    if (!current) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    if (current.status !== 'RUNNING') {
+      await taskLog(tx, task.id, 'WORKER_RESULT_IGNORED', 'Worker result arrived after the task left RUNNING state.', actor, {
+        currentStatus: current.status,
+        workerStatus: status,
+      })
+      return current
+    }
+
+    const updated = await tx.hotelOpsTask.update({
+      where: { id: task.id },
+      data: {
+        status,
+        proofScreenshots,
+        executionSummary: result.summary,
+        errorCode: result.errorCode,
+        errorMessage: result.errorMessage,
+      },
+      include: taskInclude,
+    })
+    await taskLog(tx, task.id, `WORKER_${status}`, result.summary, actor, {
+      status,
+      summary: result.summary,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+      workerMode: result.workerMode,
+      signed: result.signed,
+      data: result.data,
+      proofScreenshots,
+    })
+    await audit(tx, actor, `OPS_TASK_${status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status, dryRun: true, workerMode: result.workerMode, signed: result.signed })
+    await recordOpsNotifications(tx, task.propertyId, {
+      type: status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',
+      taskId: task.id,
+      recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
+      recipientRole: status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
+      title: status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${status.toLowerCase().replace(/_/g, ' ')}`,
+      summary: result.summary,
+      actionPath: '/ops/tasks',
+      metadata: {
+        status,
+        taskType: task.taskType,
+        platform: task.platform,
+        errorCode: result.errorCode,
+        workerMode: result.workerMode,
+        signed: result.signed,
+      },
+    }, actor)
+    return updated
+  })
+}
+
+export async function runQueuedOpsTask(prisma, taskId, actor) {
+  const task = await prepareOpsTaskRun(prisma, taskId, actor)
 
   let result
   try {
@@ -641,48 +767,7 @@ async function executeMockTask(tx, task, actor) {
     }
   }
 
-  const status = ['SUCCEEDED', 'FAILED', 'NEEDS_HUMAN'].includes(result.status) ? result.status : 'FAILED'
-  const proofScreenshots = Array.isArray(result.proofScreenshots) ? result.proofScreenshots : workerFailureProof(task, status === 'NEEDS_HUMAN' ? 'trace' : 'error')
-  const updated = await tx.hotelOpsTask.update({
-    where: { id: task.id },
-    data: {
-      status,
-      proofScreenshots,
-      executionSummary: result.summary,
-      errorCode: result.errorCode,
-      errorMessage: result.errorMessage,
-    },
-    include: taskInclude,
-  })
-  await taskLog(tx, task.id, `WORKER_${status}`, result.summary, actor, {
-    status,
-    summary: result.summary,
-    errorCode: result.errorCode,
-    errorMessage: result.errorMessage,
-    workerMode: result.workerMode,
-    signed: result.signed,
-    data: result.data,
-    proofScreenshots,
-  })
-  await audit(tx, actor, `OPS_TASK_${status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status, dryRun: true, workerMode: result.workerMode, signed: result.signed })
-  await recordOpsNotifications(tx, task.propertyId, {
-    type: status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',
-    taskId: task.id,
-    recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
-    recipientRole: status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
-    title: status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${status.toLowerCase().replace(/_/g, ' ')}`,
-    summary: result.summary,
-    actionPath: '/ops/tasks',
-    metadata: {
-      status,
-      taskType: task.taskType,
-      platform: task.platform,
-      errorCode: result.errorCode,
-      workerMode: result.workerMode,
-      signed: result.signed,
-    },
-  }, actor)
-  return tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude })
+  return serializeTask(await finalizeOpsTaskRun(prisma, task, actor, result))
 }
 
 export async function submitOpsCommand(prisma, input, actor) {
@@ -771,8 +856,7 @@ export async function submitOpsCommand(prisma, input, actor) {
     }
 
     if (status === 'QUEUED') {
-      await taskLog(tx, task.id, 'TASK_QUEUED', 'Task queued for mock execution.', actor, { dryRun: true })
-      return { task: serializeTask(await executeMockTask(tx, task, actor)), parsed, decision, duplicate: false }
+      return { task: serializeTask(await queueOpsTask(tx, task, actor)), parsed, decision, duplicate: false }
     }
 
     return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, duplicate: false }
@@ -825,11 +909,9 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
         notes: normalizeNullableString(input?.notes),
       },
     })
-    await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'APPROVED' } })
     await taskLog(tx, task.id, 'APPROVAL_GRANTED', 'Hotel Ops task approved.', actor, { notes: normalizeNullableString(input?.notes) })
     await audit(tx, actor, 'OPS_APPROVAL_GRANTED', 'hotelOpsTask', task.id, { requiredRole: approval.requiredRole })
-    await taskLog(tx, task.id, 'TASK_QUEUED', 'Approved task queued for mock execution.', actor, { dryRun: true })
-    return serializeTask(await executeMockTask(tx, task, actor))
+    return serializeTask(await queueOpsTask(tx, task, actor, 'Approved task queued for signed worker execution.'))
   })
 }
 
