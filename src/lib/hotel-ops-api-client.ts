@@ -8,6 +8,8 @@ import type {
   HotelOpsTrendAlert,
 } from '@/types/hotel-ops'
 
+export type HotelOpsScanForce = 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike' | 'ota-imbalance'
+
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -125,7 +127,7 @@ export const hotelOpsApi = {
     return apiRequest<{ ok: true; data: HotelOpsOtaStatus }>('/api/ops/ota/status')
   },
 
-  runScan(force?: 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike') {
+  runScan(force?: HotelOpsScanForce) {
     return apiRequest<{ ok: true; data: HotelOpsTrendAlert[]; message?: string }>('/api/ops/scan/run', {
       method: 'POST',
       body: JSON.stringify({ force }),

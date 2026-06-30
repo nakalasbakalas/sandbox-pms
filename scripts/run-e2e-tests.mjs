@@ -472,6 +472,9 @@ async function runBrowserSmokeTests() {
       await waitVisible(page.getByRole('heading', { name: /hotel ops command center/i }), 'Hotel Ops command center')
       await page.getByRole('button', { name: /^approvals$/i }).click()
       await page.waitForURL('**/ops/approvals', { timeout: 10_000 })
+      await page.getByRole('button', { name: /^intelligence$/i }).click()
+      await page.waitForURL('**/ops/intelligence', { timeout: 10_000 })
+      await waitVisible(page.getByRole('button', { name: /^ota imbalance demo$/i }), 'Hotel Ops OTA imbalance demo control')
 
       assert.deepEqual(errors, [], `browser console/page errors: ${errors.join('\n')}`)
       await context.close()

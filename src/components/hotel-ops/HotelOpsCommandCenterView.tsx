@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label'
 import { useNavigation } from '@/hooks/use-navigation'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 import { hotelOpsApi } from '@/lib/hotel-ops-api-client'
+import type { HotelOpsScanForce } from '@/lib/hotel-ops-api-client'
 import type {
   HotelOpsApproval,
   HotelOpsCommandResult,
@@ -108,6 +109,16 @@ function formatTaskSummary(task: HotelOpsTask) {
 
 function formatPercentValue(value?: number) {
   return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'Not set'
+}
+
+function numericMetric(alert: HotelOpsTrendAlert, key: string) {
+  const value = alert.metrics?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function stringMetric(alert: HotelOpsTrendAlert, key: string) {
+  const value = alert.metrics?.[key]
+  return typeof value === 'string' ? value : null
 }
 
 function canOpenProofUrl(url: string) {
@@ -431,7 +442,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
-  const runScan = async (force?: 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike') => {
+  const runScan = async (force?: HotelOpsScanForce) => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
       return
@@ -699,6 +710,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                 <Button variant="outline" onClick={() => void runScan()} disabled={loading}>Run Scan</Button>
                 <Button variant="outline" onClick={() => void runScan('high-demand')} disabled={loading}>High-demand Demo</Button>
                 <Button variant="outline" onClick={() => void runScan('low-demand')} disabled={loading}>Low-demand Demo</Button>
+                <Button variant="outline" onClick={() => void runScan('ota-imbalance')} disabled={loading}>OTA Imbalance Demo</Button>
               </div>
             </div>
             {alerts.length === 0 ? (
@@ -739,6 +751,22 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                       {alert.recommendedAction && (
                         <div className="rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                           Recommendation: {alert.recommendedAction.taskType.replace(/_/g, ' ')} · {alert.recommendedAction.roomType || 'room type pending'}
+                        </div>
+                      )}
+                      {alert.alertType === 'OTA_IMBALANCE' && (
+                        <div className="grid gap-2 rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground sm:grid-cols-3">
+                          <div>
+                            <span className="font-medium text-foreground">Dominant platform</span>
+                            <div>{stringMetric(alert, 'dominantPlatformLabel') || alert.platform || 'Unknown OTA'}</div>
+                          </div>
+                          <div>
+                            <span className="font-medium text-foreground">OTA share</span>
+                            <div>{formatPercentValue(numericMetric(alert, 'dominantShare') ?? undefined)}</div>
+                          </div>
+                          <div>
+                            <span className="font-medium text-foreground">Reservation count</span>
+                            <div>{numericMetric(alert, 'dominantReservations') ?? 0} of {numericMetric(alert, 'totalOtaReservations') ?? 0}</div>
+                          </div>
                         </div>
                       )}
                     </CardContent>
@@ -831,6 +859,12 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                       <div className="font-medium">Cancellation spike</div>
                       <div className="text-xs text-muted-foreground">
                         {otaStatus.scanPolicy.thresholds.cancellationRecentHours}h count over {otaStatus.scanPolicy.thresholds.cancellationBaselineDays}d baseline x{otaStatus.scanPolicy.thresholds.cancellationSpikeMultiplier}
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">OTA imbalance</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.thresholds.otaImbalanceMinimumReservations}+ OTA reservations and {formatPercentValue(otaStatus.scanPolicy.thresholds.otaImbalanceDominanceRatio)} on one platform
                       </div>
                     </div>
                     <div className="rounded border px-3 py-2">

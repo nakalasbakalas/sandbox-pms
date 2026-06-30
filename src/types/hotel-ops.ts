@@ -211,6 +211,8 @@ export type HotelOpsOtaStatus = {
       cancellationBaselineDays: number
       cancellationSpikeMultiplier: number
       weekendVelocityRatio: number
+      otaImbalanceMinimumReservations: number
+      otaImbalanceDominanceRatio: number
       highDemandRecommendedRate: number
       lowDemandRecommendedRate: number
       currency: string
