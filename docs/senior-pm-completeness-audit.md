@@ -1,6 +1,7 @@
 # Senior PM Completeness Audit
 
 Date: 2026-06-15
+Latest validation refresh: 2026-06-30
 Scope: `D:\sandbox-pms`
 Issue: GitHub `#135` - Audit current repo structure, dependencies, and completion gaps
 Mode: evidence-backed documentation and launch-contract refresh.
@@ -9,7 +10,7 @@ Mode: evidence-backed documentation and launch-contract refresh.
 
 The repository is technically mature for a hotel PMS staging/internal release, but the current evidence does not support a launch-ready or production-user sign-off claim.
 
-The strongest local technical gate now passes, the high-severity dependency audit is clean, the Render Blueprint validates, the public live health check passes, and guarded DB-mutating E2E passed against a local disposable database. Those are engineering readiness signals, not operational launch approval. The remaining launch gaps are mostly proof gaps: approved production users, production room inventory, role-by-role auth checks, manual hotel workflow acceptance, upstream WAF/rate-limit proof, rollback ownership, and live provider decisions.
+The strongest local technical gate passed on 2026-06-15, but the 2026-06-30 refresh could not complete `launch:check` because the local Docker/Postgres service was unavailable. Non-DB local checks still pass, the high-severity dependency audit remains clean, and the prior Render/live validation evidence remains recorded below. Those are engineering readiness signals, not operational launch approval. The remaining launch gaps are mostly proof gaps: approved production users, production room inventory, role-by-role auth checks, manual hotel workflow acceptance, upstream WAF/rate-limit proof, rollback ownership, and live provider decisions.
 
 ## Current Validation Evidence
 
@@ -32,9 +33,22 @@ Commands run on 2026-06-15:
 | `npm.cmd run test:e2e:db` | Passed | Documentation link smoke, Playwright browser smoke, guarded database preparation, and database workflow E2E passed against the local disposable E2E database. |
 | `git diff --check` | Passed | No whitespace errors; Git printed CRLF/LF working-copy warnings only. |
 
+Commands run on 2026-06-30:
+
+| Command | Result | Evidence notes |
+| --- | --- | --- |
+| `git fetch --prune origin` | Passed | Local `main` remained aligned with `origin/main`. |
+| `npm.cmd run launch:check` | Blocked by local environment | `db:doctor` could not reach Postgres on `localhost:55432`; `npm.cmd run db:up` then failed because the Docker Desktop Linux engine pipe was unavailable. |
+| `npm.cmd run lint` | Passed | ESLint completed without reported errors. |
+| `npm.cmd run typecheck` | Passed | TypeScript build check completed without reported errors. |
+| `npm.cmd run test` | Passed | Business rule tests passed. |
+| `npm.cmd run build` | Passed | Typecheck and Vite production build completed. |
+| `npm.cmd audit --audit-level=high` | Passed with lower-severity finding | Exit code 0 at the high threshold; one moderate `js-yaml` advisory remained. |
+
 Important interpretation:
 
-- The latest `launch:check` pass is current evidence that the integrated local engineering gate can pass.
+- The latest complete `launch:check` pass remains the 2026-06-15 evidence that the integrated local engineering gate can pass when local Postgres is available.
+- The 2026-06-30 refresh proves lint, typecheck, business tests, production build, and high-threshold audit still pass, but it does not replace a full `launch:check` pass.
 - The earlier first-run `launch:check` timeout remains historical evidence of cold-start/browser-smoke instability, but it was not reproduced in the latest gate.
 - DB-mutating workflow E2E is now proven only for the local disposable `sandbox_hotel_e2e` database, not production data.
 - The live check proves public health/auth probe behavior for `book.sandboxhotel.com`; it does not prove staff login readiness, production room inventory, provider credentials, or operational workflow acceptance.
@@ -45,42 +59,9 @@ Current git context:
 
 - Branch: `main`, tracking `origin/main`.
 - Remote: `https://github.com/nakalasbakalas/sandbox-pms.git`.
-- HEAD: `2064cef (HEAD -> main, origin/main, origin/HEAD) Record disposable restore test`.
-- Issue `#135` is open with `planning` and `docs` labels and no issue comments at the time of this audit.
-
-Working tree state before this documentation refresh already contained uncommitted hardening changes. This report treats those changes as current local evidence and does not revert or stage them.
-
-Modified tracked files before this report:
-
-- `.env.example`
-- `index.html`
-- `package.json`
-- `package-lock.json`
-- `render.yaml`
-- `scripts/run-e2e-tests.mjs`
-- `server/index.mjs`
-- `server/login-throttle.mjs`
-- `server/pms-service.mjs`
-- `src/components/front-desk/ReceiptDialog.tsx`
-- `src/components/messaging/CommunicationCenterView.tsx`
-- `src/components/messaging/GuestCommunicationsView.tsx`
-- `src/components/rates/RatePushPanel.tsx`
-- `src/components/settings/DataBackupExport.tsx`
-- `src/components/settings/LineSettings.tsx`
-- `src/components/settings/StaffAlertSettings.tsx`
-- `src/components/views/CashierView.tsx`
-- `src/components/views/SystemStatusView.tsx`
-- `src/hooks/use-onboarding.ts`
-- `src/lib/alert-routing.ts`
-- `src/lib/line.ts`
-- `src/lib/print-utils.ts`
-- `src/lib/reservation-document-actions.ts`
-- `src/lib/server-auth-client.ts`
-
-Untracked files before this report:
-
-- `docs/senior-pm-completeness-audit.md`
-- `src/lib/html-escape.ts`
+- HEAD at the 2026-06-30 refresh: `a56ae0b (HEAD -> main, origin/main, origin/HEAD) Merge pull request #143 from nakalasbakalas/codex/booking-email-ops-api`.
+- Issue `#135` is open with `planning` and `docs` labels and contains the 2026-06-15 audit evidence comment.
+- Working tree at the start of the 2026-06-30 refresh was clean.
 
 ## Architecture Map
 
@@ -284,7 +265,8 @@ Current docs with launch relevance:
 
 Current high-severity audit:
 
-- `npm.cmd audit --audit-level=high`: passed with `found 0 vulnerabilities`.
+- `npm.cmd audit --audit-level=high`: passed on 2026-06-30 at the high threshold.
+- Current lower-severity finding: one moderate `js-yaml` advisory remains.
 
 Relevant current `package.json` and lockfile changes:
 
@@ -307,9 +289,9 @@ Dependency risk interpretation:
 | Area | Current status | Evidence |
 | --- | --- | --- |
 | Repo architecture map | Current in this report | Frontend routes, API routes, Prisma models/migrations, deployment config, and ops docs are enumerated above. |
-| Local technical release gate | Passes | Latest `npm.cmd run launch:check` passed on 2026-06-15. |
+| Local technical release gate | Last complete pass on 2026-06-15 | `npm.cmd run launch:check` passed on 2026-06-15. The 2026-06-30 rerun was blocked by local Docker/Postgres availability before non-DB checks. |
 | Cold E2E reliability | Watch item | Earlier `launch:check` failed on a 60s Playwright navigation timeout before passing on rerun; latest pass did not reproduce it. |
-| Dependency audit | Clean at high threshold | `npm.cmd audit --audit-level=high` found 0 vulnerabilities. |
+| Dependency audit | Clean at high threshold | `npm.cmd audit --audit-level=high` passed on 2026-06-30; one moderate `js-yaml` advisory remains below the high threshold. |
 | Render Blueprint | Valid | `npm.cmd run render:validate` passed. |
 | Live public health | Passing, limited proof | `npm.cmd run live:check` passed against `https://book.sandboxhotel.com`; LINE remains optional/disabled. |
 | Production env preflight | Passing with known disabled provider | `npm.cmd run prod:preflight` passed with LINE disabled warning. |
@@ -388,7 +370,7 @@ Dependency risk interpretation:
 
 Confirmed facts:
 
-- Current local `launch:check` passes.
+- The latest complete local `launch:check` pass is from 2026-06-15; the 2026-06-30 rerun was blocked because local Docker/Postgres was unavailable.
 - High-severity npm audit is clean in this checkout.
 - Render Blueprint validates locally.
 - Public live health check for `https://book.sandboxhotel.com` passes.
