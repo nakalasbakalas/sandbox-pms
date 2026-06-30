@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   ArrowClockwise,
+  ArrowSquareOut,
   Brain,
   CheckCircle,
   ClipboardText,
+  Copy,
   PauseCircle,
   PlayCircle,
   ShieldWarning,
@@ -98,6 +100,19 @@ function formatTaskSummary(task: HotelOpsTask) {
   return parts.length > 0 ? parts.join(' · ') : task.rationale
 }
 
+function canOpenProofUrl(url: string) {
+  return /^https?:\/\//i.test(url)
+}
+
+async function copyProofUrl(url: string) {
+  try {
+    await navigator.clipboard.writeText(url)
+    toast.success('Proof reference copied.')
+  } catch {
+    toast.error('Could not copy proof reference.')
+  }
+}
+
 function TaskCard({
   task,
   onApprove,
@@ -171,6 +186,38 @@ function TaskCard({
         {task.executionSummary && (
           <div className="rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             {task.executionSummary}
+          </div>
+        )}
+
+        {!compact && task.proofScreenshots && task.proofScreenshots.length > 0 && (
+          <div className="space-y-2 rounded border bg-background px-3 py-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Proof Artifacts</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {task.proofScreenshots.map((proof, index) => (
+                <div key={proof.id || `${proof.kind}-${index}`} className="rounded border bg-muted/30 px-2 py-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline">{proof.kind}</Badge>
+                    <Badge variant={proof.redactionStatus === 'FAILED' ? 'destructive' : 'secondary'}>{proof.redactionStatus}</Badge>
+                  </div>
+                  <div className="mt-1 truncate text-muted-foreground" title={proof.storageUrl}>{proof.storageUrl}</div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] text-muted-foreground">{new Date(proof.capturedAt).toLocaleString()}</span>
+                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void copyProofUrl(proof.storageUrl)}>
+                      <Copy className="mr-1" />
+                      Copy
+                    </Button>
+                    {canOpenProofUrl(proof.storageUrl) && (
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" asChild>
+                        <a href={proof.storageUrl} target="_blank" rel="noreferrer">
+                          <ArrowSquareOut className="mr-1" />
+                          Open
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </CardContent>
