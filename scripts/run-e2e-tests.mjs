@@ -277,6 +277,8 @@ function startApiServer(port) {
       NODE_ENV: 'test',
       OTA_WORKER_SHARED_SECRET: 'route-test-worker-secret',
       OTA_WORKER_BASE_URL: `http://127.0.0.1:${port}/api/internal/ops/worker/tasks`,
+      BOOKING_USERNAME: 'route-test-booking-user',
+      BOOKING_PASSWORD: 'route-test-booking-password',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -501,8 +503,12 @@ async function runInternalWorkerRouteSmoke() {
 
     const validSignedRequest = signOpsWorkerRequest({
       taskId: 'route-task-valid',
-      taskType: 'READ_RATES',
-      platform: 'agoda',
+      taskType: 'UPDATE_RATE',
+      platform: 'booking',
+      roomType: 'Deluxe Room',
+      dateStart: '2026-07-03',
+      dateEnd: '2026-07-04',
+      rate: { amount: 2200, currency: 'THB' },
       dryRun: true,
     }, { secret: 'route-test-worker-secret' })
     const validResponse = await fetch(`${baseUrl}/api/internal/ops/worker/tasks`, {
@@ -514,6 +520,8 @@ async function runInternalWorkerRouteSmoke() {
     const payload = await validResponse.json()
     assert.equal(payload.data.status, 'SUCCEEDED', 'internal worker route returns a structured execution result')
     assert.equal(payload.data.data.dryRun, true, 'internal worker route defaults to dry-run execution')
+    assert.equal(payload.data.proofScreenshots.length, 2, 'internal worker route returns Booking.com dry-run proof placeholders')
+    assert.equal(JSON.stringify(payload).includes('route-test-booking-password'), false, 'internal worker route never returns OTA credentials')
   } finally {
     await stopProcessTree(server.child)
   }

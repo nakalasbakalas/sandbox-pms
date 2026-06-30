@@ -15,9 +15,9 @@ import {
   OPS_WORKER_NONCE_HEADER,
   OPS_WORKER_SIGNATURE_HEADER,
   OPS_WORKER_TIMESTAMP_HEADER,
-  runSignedMockOtaWorkerTask,
   verifyOpsWorkerRequest,
 } from './ops-worker-auth.mjs'
+import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
 import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
@@ -540,8 +540,8 @@ async function handleApi(request, response, url) {
 
     sendJson(response, 200, {
       ok: true,
-      data: runSignedMockOtaWorkerTask(payload),
-      message: 'Signed Hotel Ops worker request accepted in mock mode.',
+      data: await executeSignedOtaWorkerTask(payload),
+      message: 'Signed Hotel Ops worker request accepted in dry-run worker mode.',
     })
     return true
   }

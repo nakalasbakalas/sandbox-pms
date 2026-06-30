@@ -189,6 +189,8 @@ export type HotelOpsEmergencyStop = {
 export type HotelOpsOtaStatus = {
   dryRun: boolean
   workerConfigured: boolean
+  workerBaseUrlConfigured?: boolean
+  workerSecretConfigured?: boolean
   platforms: Array<{
     platform: OtaPlatform
     configured: boolean

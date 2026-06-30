@@ -568,12 +568,13 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             <Card className="rounded-lg">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg"><ClipboardText /> OTA Worker Status</CardTitle>
-                <CardDescription>Current MVP uses mock dry-run execution until browser worker credentials and selectors are verified.</CardDescription>
+                <CardDescription>Signed worker boundary, dry-run adapter readiness, and platform-specific OTA implementation status.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={otaStatus?.dryRun ? 'secondary' : 'destructive'}>{otaStatus?.dryRun ? 'Dry-run on' : 'Dry-run off'}</Badge>
                   <Badge variant={otaStatus?.workerConfigured ? 'secondary' : 'outline'}>{otaStatus?.workerConfigured ? 'Worker configured' : 'Mock worker only'}</Badge>
+                  <Badge variant={otaStatus?.workerSecretConfigured ? 'secondary' : 'outline'}>{otaStatus?.workerSecretConfigured ? 'Signing secret set' : 'Signing secret missing'}</Badge>
                 </div>
                 <div className="grid gap-2">
                   {otaStatus?.platforms?.map((platform) => (

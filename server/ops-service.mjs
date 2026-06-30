@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
+import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
 
 const TASK_TYPES = new Set([
   'READ_RESERVATIONS',
@@ -885,19 +886,30 @@ export async function getOtaStatus(prisma) {
   const workerBaseUrlConfigured = Boolean(opsWorkerBaseUrl())
   const workerSecretConfigured = Boolean(opsWorkerSecret())
   const signedWorkerConfigured = opsWorkerConfigured()
+  const bookingConfigured = bookingComCredentialsConfigured()
   return {
     dryRun: String(process.env.OTA_DRY_RUN || 'true').toLowerCase() !== 'false',
     workerConfigured: signedWorkerConfigured,
     workerBaseUrlConfigured,
     workerSecretConfigured,
-    platforms: ['booking', 'agoda', 'trip', 'expedia'].map((platform) => ({
-      platform,
-      configured: false,
-      status: signedWorkerConfigured ? 'signed-worker-ready' : 'mock-dry-run',
-      message: signedWorkerConfigured
-        ? 'Signed OTA worker boundary is configured. Keep dry-run enabled until credentials and selectors are verified.'
-        : 'MVP uses MockOtaBot/dry-run until OTA credentials and Playwright selectors are verified.',
-    })),
+    platforms: [
+      {
+        platform: 'booking',
+        configured: bookingConfigured,
+        status: bookingConfigured ? 'adapter-dry-run-ready' : 'credentials-needed',
+        message: bookingConfigured
+          ? 'Booking.com adapter skeleton is available for signed dry-run tasks. Real browser writes remain disabled until selectors are verified.'
+          : 'Booking.com adapter skeleton is installed, but server-side Booking.com credentials are not configured.',
+      },
+      ...['agoda', 'trip', 'expedia'].map((platform) => ({
+        platform,
+        configured: false,
+        status: signedWorkerConfigured ? 'signed-mock-ready' : 'mock-dry-run',
+        message: signedWorkerConfigured
+          ? 'Signed worker boundary is configured; this platform still uses MockOtaBot until its adapter is implemented.'
+          : 'MVP uses MockOtaBot/dry-run until OTA credentials and Playwright selectors are verified.',
+      })),
+    ],
   }
 }
 

@@ -7,6 +7,7 @@ import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { buildOpsNotificationDrafts, evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
+import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createUser } from '../server/pms-service.mjs'
 
 async function importTypeScriptModule(path) {
@@ -449,6 +450,70 @@ assert.equal(
   true,
   'Hotel Ops worker config remains compatible with legacy environment variable names',
 )
+
+const unauthenticatedBookingAdapter = createBookingComAdapter({
+  env: {},
+  now: '2026-06-30T00:00:00.000Z',
+})
+const unauthenticatedBookingHealth = await unauthenticatedBookingAdapter.healthCheck()
+assert.equal(unauthenticatedBookingHealth.authenticated, false, 'Booking.com adapter reports missing server credentials')
+assert.equal(unauthenticatedBookingHealth.requiresHuman, true, 'Booking.com adapter requests human setup when credentials are missing')
+assert.equal(JSON.stringify(unauthenticatedBookingHealth).includes('booking-password'), false, 'Booking.com adapter health does not expose credential values')
+
+const bookingAdapter = createBookingComAdapter({
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+  },
+  now: '2026-06-30T00:00:00.000Z',
+})
+const bookingAuth = await bookingAdapter.ensureAuthenticated()
+assert.equal(bookingAuth.authenticated, true, 'Booking.com adapter can authenticate in dry-run mode when server credentials exist')
+const bookingDryRunRate = await bookingAdapter.updateRate({
+  taskId: 'booking-task-1',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  amount: 2200,
+  currency: 'THB',
+  dryRun: true,
+})
+assert.equal(bookingDryRunRate.changed, false, 'Booking.com dry-run rate update does not mutate OTA state')
+assert.equal(bookingDryRunRate.proofScreenshots.length, 2, 'Booking.com dry-run write records before/after proof placeholders')
+assert.equal(bookingDryRunRate.proofScreenshots.every((item) => item.redactionStatus === 'SAFE'), true, 'Booking.com dry-run proof placeholders are marked safe')
+assert.equal(JSON.stringify(bookingDryRunRate).includes('booking-password'), false, 'Booking.com dry-run result does not include OTA credentials')
+await assert.rejects(
+  () => bookingAdapter.updateRate({
+    taskId: 'booking-task-2',
+    roomType: 'Deluxe Room',
+    dateStart: '2026-07-03',
+    dateEnd: '2026-07-04',
+    amount: 2200,
+    currency: 'THB',
+    dryRun: false,
+  }),
+  /real Booking\.com browser writes are not implemented/,
+  'Booking.com adapter rejects non-dry-run writes until selectors are verified',
+)
+const bookingHumanTask = await executeBookingComTask({
+  taskId: 'booking-task-3',
+  taskType: 'UPDATE_RATE',
+  platform: 'booking',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  rate: { amount: 2200, currency: 'THB' },
+  dryRun: true,
+}, {
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+    BOOKING_FORCE_HUMAN_CHALLENGE: 'CAPTCHA',
+  },
+  now: '2026-06-30T00:00:00.000Z',
+})
+assert.equal(bookingHumanTask.status, 'NEEDS_HUMAN', 'Booking.com adapter returns NEEDS_HUMAN for CAPTCHA instead of bypassing it')
+assert.equal(bookingHumanTask.errorCode, 'NEEDS_HUMAN_CAPTCHA', 'Booking.com adapter preserves the human challenge reason')
 
 const fixedOpsDate = new Date('2026-06-30T00:00:00.000Z')
 const rateCommand = parseHotelOpsCommand('Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', { now: fixedOpsDate })
