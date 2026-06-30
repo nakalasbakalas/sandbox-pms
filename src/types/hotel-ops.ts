@@ -191,6 +191,31 @@ export type HotelOpsOtaStatus = {
   workerConfigured: boolean
   workerBaseUrlConfigured?: boolean
   workerSecretConfigured?: boolean
+  scanPolicy?: {
+    schedule: {
+      configured: boolean
+      mode: 'manual' | 'cron' | 'interval'
+      cron?: string | null
+      intervalMinutes?: number | null
+      timezone: string
+      message: string
+    }
+    thresholds: {
+      horizonDays: number
+      highDemandOccupancy: number
+      highDemandVelocityRatio: number
+      lowDemandOccupancy: number
+      bookingVelocityWindowHours: number
+      bookingVelocityBaselineDays: number
+      cancellationRecentHours: number
+      cancellationBaselineDays: number
+      cancellationSpikeMultiplier: number
+      weekendVelocityRatio: number
+      highDemandRecommendedRate: number
+      lowDemandRecommendedRate: number
+      currency: string
+    }
+  }
   platforms: Array<{
     platform: OtaPlatform
     configured: boolean

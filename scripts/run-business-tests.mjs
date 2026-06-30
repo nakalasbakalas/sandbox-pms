@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, hotelOpsTrendAlertFingerprint, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -451,6 +451,17 @@ assert.equal(
   true,
   'Hotel Ops worker config remains compatible with legacy environment variable names',
 )
+const manualScanPolicy = getOpsScanPolicy({})
+assert.equal(manualScanPolicy.schedule.mode, 'manual', 'Hotel Ops scan policy reports manual mode when no schedule is configured')
+assert.equal(manualScanPolicy.schedule.configured, false, 'Hotel Ops scan policy does not fake an automatic schedule')
+assert.equal(manualScanPolicy.thresholds.highDemandOccupancy, 0.7, 'Hotel Ops scan policy exposes high-demand occupancy threshold')
+assert.equal(manualScanPolicy.thresholds.cancellationSpikeMultiplier, 2, 'Hotel Ops scan policy exposes cancellation spike multiplier')
+const cronScanPolicy = getOpsScanPolicy({ HOTEL_OPS_SCAN_CRON: '*/15 * * * *' })
+assert.equal(cronScanPolicy.schedule.mode, 'cron', 'Hotel Ops scan policy reports configured cron schedule')
+assert.equal(cronScanPolicy.schedule.cron, '*/15 * * * *', 'Hotel Ops scan policy exposes cron expression without secrets')
+const intervalScanPolicy = getOpsScanPolicy({ HOTEL_OPS_SCAN_INTERVAL_MINUTES: '30' })
+assert.equal(intervalScanPolicy.schedule.mode, 'interval', 'Hotel Ops scan policy reports configured interval schedule')
+assert.equal(intervalScanPolicy.schedule.intervalMinutes, 30, 'Hotel Ops scan policy exposes interval minutes')
 
 const unauthenticatedBookingAdapter = createBookingComAdapter({
   env: {},

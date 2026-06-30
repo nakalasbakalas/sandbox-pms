@@ -100,6 +100,10 @@ function formatTaskSummary(task: HotelOpsTask) {
   return parts.length > 0 ? parts.join(' · ') : task.rationale
 }
 
+function formatPercentValue(value?: number) {
+  return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'Not set'
+}
+
 function canOpenProofUrl(url: string) {
   return /^https?:\/\//i.test(url)
 }
@@ -714,6 +718,61 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     </div>
                   )) || <div className="text-sm text-muted-foreground">OTA status unavailable.</div>}
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg"><Brain /> Booking Intelligence Policy</CardTitle>
+                <CardDescription>Backend scan schedule and thresholds used to create operational trend alerts.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant={otaStatus?.scanPolicy?.schedule.configured ? 'secondary' : 'outline'}>
+                    {otaStatus?.scanPolicy?.schedule.configured ? 'Schedule configured' : 'Manual or external schedule'}
+                  </Badge>
+                  <Badge variant="outline">{otaStatus?.scanPolicy?.schedule.mode || 'manual'}</Badge>
+                  <Badge variant="outline">{otaStatus?.scanPolicy?.schedule.timezone || 'Asia/Bangkok'}</Badge>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {otaStatus?.scanPolicy?.schedule.message || 'Scan policy is not available from the backend yet.'}
+                </p>
+                {otaStatus?.scanPolicy?.thresholds && (
+                  <div className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Scan horizon</div>
+                      <div className="text-xs text-muted-foreground">{otaStatus.scanPolicy.thresholds.horizonDays} day forward window</div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">High demand</div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatPercentValue(otaStatus.scanPolicy.thresholds.highDemandOccupancy)} occupancy and {otaStatus.scanPolicy.thresholds.highDemandVelocityRatio}x velocity
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Low demand</div>
+                      <div className="text-xs text-muted-foreground">Below {formatPercentValue(otaStatus.scanPolicy.thresholds.lowDemandOccupancy)} occupancy</div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Booking velocity</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.thresholds.bookingVelocityWindowHours}h window over {otaStatus.scanPolicy.thresholds.bookingVelocityBaselineDays}d baseline
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Cancellation spike</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.thresholds.cancellationRecentHours}h count over {otaStatus.scanPolicy.thresholds.cancellationBaselineDays}d baseline x{otaStatus.scanPolicy.thresholds.cancellationSpikeMultiplier}
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Rate recommendation band</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.thresholds.lowDemandRecommendedRate.toLocaleString()}-{otaStatus.scanPolicy.thresholds.highDemandRecommendedRate.toLocaleString()} {otaStatus.scanPolicy.thresholds.currency}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

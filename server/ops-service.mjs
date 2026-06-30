@@ -35,6 +35,23 @@ const WRITE_TASK_TYPES = new Set([
 
 const ACTIVE_TREND_ALERT_STATUSES = ['CREATED', 'ACKNOWLEDGED', 'RECOMMENDATION_APPROVED']
 
+const OPS_SCAN_POLICY = Object.freeze({
+  timezone: 'Asia/Bangkok',
+  horizonDays: 7,
+  bookingVelocityWindowHours: 24,
+  bookingVelocityBaselineDays: 28,
+  highDemandOccupancy: 0.7,
+  highDemandVelocityRatio: 1.5,
+  lowDemandOccupancy: 0.3,
+  cancellationRecentHours: 24,
+  cancellationBaselineDays: 14,
+  cancellationSpikeMultiplier: 2,
+  weekendVelocityRatio: 1.5,
+  highDemandRecommendedRate: 2200,
+  lowDemandRecommendedRate: 1300,
+  currency: 'THB',
+})
+
 const RULES = {
   READ_RESERVATIONS: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'], approvalRequired: false },
   READ_GUEST_MESSAGES: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'SYSTEM'], approvalRequired: false },
@@ -1096,6 +1113,7 @@ export async function getOtaStatus(prisma) {
     workerConfigured: signedWorkerConfigured,
     workerBaseUrlConfigured,
     workerSecretConfigured,
+    scanPolicy: getOpsScanPolicy(),
     platforms: [
       {
         platform: 'booking',
@@ -1117,13 +1135,50 @@ export async function getOtaStatus(prisma) {
   }
 }
 
+export function getOpsScanPolicy(env = process.env) {
+  const cron = normalizeNullableString(env.HOTEL_OPS_SCAN_CRON || env.OPS_SCAN_CRON)
+  const intervalMinutes = Number(env.HOTEL_OPS_SCAN_INTERVAL_MINUTES || env.OPS_SCAN_INTERVAL_MINUTES)
+  const hasInterval = Number.isFinite(intervalMinutes) && intervalMinutes > 0
+  const schedule = {
+    configured: Boolean(cron || hasInterval),
+    mode: cron ? 'cron' : hasInterval ? 'interval' : 'manual',
+    cron: cron || null,
+    intervalMinutes: hasInterval ? intervalMinutes : null,
+    timezone: OPS_SCAN_POLICY.timezone,
+    message: cron
+      ? `Scheduled by cron expression ${cron}.`
+      : hasInterval
+        ? `Scheduled every ${intervalMinutes} minute${intervalMinutes === 1 ? '' : 's'}.`
+        : 'No automatic scan schedule is configured; scans run manually or by an external job calling /api/ops/scan/run.',
+  }
+
+  return {
+    schedule,
+    thresholds: {
+      horizonDays: OPS_SCAN_POLICY.horizonDays,
+      highDemandOccupancy: OPS_SCAN_POLICY.highDemandOccupancy,
+      highDemandVelocityRatio: OPS_SCAN_POLICY.highDemandVelocityRatio,
+      lowDemandOccupancy: OPS_SCAN_POLICY.lowDemandOccupancy,
+      bookingVelocityWindowHours: OPS_SCAN_POLICY.bookingVelocityWindowHours,
+      bookingVelocityBaselineDays: OPS_SCAN_POLICY.bookingVelocityBaselineDays,
+      cancellationRecentHours: OPS_SCAN_POLICY.cancellationRecentHours,
+      cancellationBaselineDays: OPS_SCAN_POLICY.cancellationBaselineDays,
+      cancellationSpikeMultiplier: OPS_SCAN_POLICY.cancellationSpikeMultiplier,
+      weekendVelocityRatio: OPS_SCAN_POLICY.weekendVelocityRatio,
+      highDemandRecommendedRate: OPS_SCAN_POLICY.highDemandRecommendedRate,
+      lowDemandRecommendedRate: OPS_SCAN_POLICY.lowDemandRecommendedRate,
+      currency: OPS_SCAN_POLICY.currency,
+    },
+  }
+}
+
 function recommendedRateTask(alertType, roomType, start, end) {
   const increase = alertType === 'HIGH_DEMAND' || alertType === 'WEEKEND_SPIKE'
   return taskWithRule('UPDATE_RATE', {
     platform: 'all',
     roomType,
     dateRange: { start, end },
-    rate: { amount: increase ? 2200 : 1300, currency: 'THB' },
+    rate: { amount: increase ? OPS_SCAN_POLICY.highDemandRecommendedRate : OPS_SCAN_POLICY.lowDemandRecommendedRate, currency: OPS_SCAN_POLICY.currency },
     rationale: increase ? 'Demand signal suggests reviewing a controlled rate increase.' : 'Low-demand signal suggests reviewing a controlled promotional rate.',
     confidence: 0.7,
   })
@@ -1149,8 +1204,8 @@ function dominantRoomType(reservations) {
   return counts.keys().next().value || 'All Rooms'
 }
 
-function velocityMetrics(reservations, now, baselineDays = 28) {
-  const recentStart = addMilliseconds(now, -24 * 60 * 60 * 1000)
+function velocityMetrics(reservations, now, baselineDays = OPS_SCAN_POLICY.bookingVelocityBaselineDays) {
+  const recentStart = addMilliseconds(now, -OPS_SCAN_POLICY.bookingVelocityWindowHours * 60 * 60 * 1000)
   const baselineStart = addUtcDays(recentStart, -baselineDays)
   const recentBookings = reservations.filter((reservation) => dateValue(reservation.createdAt || now) >= recentStart).length
   const baselineBookings = reservations.filter((reservation) => {
@@ -1168,15 +1223,15 @@ function velocityMetrics(reservations, now, baselineDays = 28) {
 }
 
 function cancellationMetrics(cancellationLogs, now) {
-  const recentStart = addMilliseconds(now, -24 * 60 * 60 * 1000)
-  const baselineStart = addUtcDays(recentStart, -14)
+  const recentStart = addMilliseconds(now, -OPS_SCAN_POLICY.cancellationRecentHours * 60 * 60 * 1000)
+  const baselineStart = addUtcDays(recentStart, -OPS_SCAN_POLICY.cancellationBaselineDays)
   const cancellationsLast24h = cancellationLogs.filter((log) => dateValue(log.createdAt || now) >= recentStart).length
   const baselineCancellations = cancellationLogs.filter((log) => {
     const createdAt = dateValue(log.createdAt || now)
     return createdAt >= baselineStart && createdAt < recentStart
   }).length
-  const rollingDailyAverage = baselineCancellations / 14
-  const spikeThreshold = rollingDailyAverage * 2
+  const rollingDailyAverage = baselineCancellations / OPS_SCAN_POLICY.cancellationBaselineDays
+  const spikeThreshold = rollingDailyAverage * OPS_SCAN_POLICY.cancellationSpikeMultiplier
   const cancellationRatio = cancellationsLast24h / Math.max(rollingDailyAverage, 1)
   return {
     cancellationsLast24h,
@@ -1196,7 +1251,7 @@ export function buildOpsScanInsights({
 } = {}) {
   const scanNow = dateValue(now)
   const today = bangkokTodayDate(scanNow)
-  const weekEnd = addUtcDays(today, 7)
+  const weekEnd = addUtcDays(today, OPS_SCAN_POLICY.horizonDays)
   const start = isoDate(today)
   const end = isoDate(weekEnd)
   const activeReservations = reservations.filter((reservation) => (
@@ -1214,7 +1269,7 @@ export function buildOpsScanInsights({
   const insights = []
   const forceValue = String(force || '')
 
-  if ((sellableRooms > 0 && occupancy >= 0.7 && velocity.velocityRatio >= 1.5) || forceValue === 'high-demand') {
+  if ((sellableRooms > 0 && occupancy >= OPS_SCAN_POLICY.highDemandOccupancy && velocity.velocityRatio >= OPS_SCAN_POLICY.highDemandVelocityRatio) || forceValue === 'high-demand') {
     insights.push({
       alertType: 'HIGH_DEMAND',
       severity: 'HIGH',
@@ -1224,12 +1279,12 @@ export function buildOpsScanInsights({
       roomType,
       dateStart: dateOrNull(start),
       dateEnd: dateOrNull(end),
-      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: 7, ...velocity },
+      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: OPS_SCAN_POLICY.horizonDays, ...velocity },
       recommendedAction: recommendedRateTask('HIGH_DEMAND', roomType, start, end),
     })
   }
 
-  if ((sellableRooms > 0 && occupancy < 0.3) || forceValue === 'low-demand') {
+  if ((sellableRooms > 0 && occupancy < OPS_SCAN_POLICY.lowDemandOccupancy) || forceValue === 'low-demand') {
     insights.push({
       alertType: 'LOW_DEMAND',
       severity: 'MEDIUM',
@@ -1239,7 +1294,7 @@ export function buildOpsScanInsights({
       roomType,
       dateStart: dateOrNull(start),
       dateEnd: dateOrNull(end),
-      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: 7, ...velocity },
+      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: OPS_SCAN_POLICY.horizonDays, ...velocity },
       recommendedAction: recommendedRateTask('LOW_DEMAND', roomType, start, end),
     })
   }
@@ -1259,7 +1314,7 @@ export function buildOpsScanInsights({
     })
   }
 
-  if (weekendVelocity.velocityRatio >= 1.5 || forceValue === 'weekend-spike') {
+  if (weekendVelocity.velocityRatio >= OPS_SCAN_POLICY.weekendVelocityRatio || forceValue === 'weekend-spike') {
     insights.push({
       alertType: 'WEEKEND_SPIKE',
       severity: 'MEDIUM',
@@ -1331,8 +1386,11 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
   const property = await getProperty(prisma)
   const now = input?.now ? dateValue(input.now) : new Date()
   const today = bangkokTodayDate(now)
-  const weekEnd = addUtcDays(today, 7)
-  const cancellationWindowStart = addUtcDays(addMilliseconds(now, -24 * 60 * 60 * 1000), -14)
+  const weekEnd = addUtcDays(today, OPS_SCAN_POLICY.horizonDays)
+  const cancellationWindowStart = addUtcDays(
+    addMilliseconds(now, -OPS_SCAN_POLICY.cancellationRecentHours * 60 * 60 * 1000),
+    -OPS_SCAN_POLICY.cancellationBaselineDays,
+  )
   const [reservations, rooms, cancellationLogs] = await Promise.all([
     prisma.reservation.findMany({
       where: {
