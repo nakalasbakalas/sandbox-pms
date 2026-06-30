@@ -695,6 +695,7 @@ const queuedReadTask = {
 }
 assert.equal(evaluateOpsTaskRun(queuedReadTask, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, true, 'Hotel Ops runner allows queued low-risk tasks for permitted staff')
 assert.equal(evaluateOpsTaskRun({ ...queuedReadTask, status: 'DENIED' }, { id: 'manager', role: 'MANAGER' }).allowed, false, 'Hotel Ops runner rejects denied tasks')
+assert.equal(evaluateOpsTaskRun({ ...queuedReadTask, status: 'RUNNING' }, { id: 'manager', role: 'MANAGER' }).allowed, false, 'Hotel Ops runner rejects already-claimed tasks')
 
 const pendingRateTask = {
   taskType: 'UPDATE_RATE',

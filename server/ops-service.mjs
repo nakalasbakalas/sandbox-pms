@@ -695,7 +695,19 @@ async function prepareOpsTaskRun(prisma, taskId, actor) {
     const decision = evaluateOpsTaskRun(task, actor, stop || { enabled: false })
     if (!decision.allowed) throw new PmsValidationError(decision.reason, decision.statusCode)
 
-    const running = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'RUNNING' }, include: taskInclude })
+    const claimed = await tx.hotelOpsTask.updateMany({
+      where: {
+        id: task.id,
+        status: task.status,
+      },
+      data: { status: 'RUNNING' },
+    })
+    if (claimed.count !== 1) {
+      const current = await tx.hotelOpsTask.findUnique({ where: { id: task.id } })
+      throw new PmsValidationError(`Only queued Hotel Ops tasks can run. Current status is ${current?.status || 'UNKNOWN'}.`, 409)
+    }
+
+    const running = await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
     await taskLog(tx, task.id, 'WORKER_STARTED', 'Signed OTA worker execution started in dry-run mode.', actor, {
       dryRun: true,
       signed: true,
