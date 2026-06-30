@@ -60,6 +60,11 @@ const AUTHENTICATED_ROUTE_SMOKE_PATHS = [
   '/ops-tasks',
   '/ops-intelligence',
   '/ops-settings',
+  '/ops/chat',
+  '/ops/approvals',
+  '/ops/tasks',
+  '/ops/intelligence',
+  '/ops/settings',
 ]
 
 function sleep(ms) {

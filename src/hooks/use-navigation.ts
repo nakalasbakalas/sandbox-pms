@@ -43,6 +43,14 @@ const VALID_ROUTES = new Set<NavigationRoute>([
   'ops-settings',
 ])
 
+const PATH_ALIASES: Record<string, NavigationRoute> = {
+  'ops/chat': 'ops-chat',
+  'ops/approvals': 'ops-approvals',
+  'ops/tasks': 'ops-tasks',
+  'ops/intelligence': 'ops-intelligence',
+  'ops/settings': 'ops-settings',
+}
+
 function normalizePathname(pathname: string): string {
   const trimmed = pathname.replace(/^\/+|\/+$/g, '')
   return trimmed === '' ? 'today' : trimmed
@@ -58,6 +66,15 @@ function readRouteFromLocation() {
   }
 
   const pathname = normalizePathname(window.location.pathname)
+  const aliasedRoute = PATH_ALIASES[pathname]
+  if (aliasedRoute) {
+    return {
+      currentRoute: aliasedRoute,
+      requestedPath: null,
+      isKnownRoute: true,
+    }
+  }
+
   if (VALID_ROUTES.has(pathname as NavigationRoute)) {
     return {
       currentRoute: pathname as NavigationRoute,
