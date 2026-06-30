@@ -119,8 +119,22 @@ function isoDate(date) {
   return date.toISOString().slice(0, 10)
 }
 
+function dateValue(value) {
+  return value instanceof Date ? value : new Date(value)
+}
+
 function bangkokTodayDate(now = new Date()) {
   return new Date(`${getBangkokDateKey(now)}T00:00:00.000Z`)
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date)
+  next.setUTCDate(next.getUTCDate() + days)
+  return next
+}
+
+function addMilliseconds(date, milliseconds) {
+  return new Date(date.getTime() + milliseconds)
 }
 
 function nextDayOfWeek(targetDay, now = new Date()) {
@@ -1080,12 +1094,167 @@ function recommendedRateTask(alertType, roomType, start, end) {
   })
 }
 
+function reservationOverlaps(reservation, start, end) {
+  const checkIn = dateValue(reservation.checkIn)
+  const checkOut = dateValue(reservation.checkOut)
+  return checkIn <= end && checkOut >= start
+}
+
+function reservationRoomTypeName(reservation) {
+  return reservation?.roomType?.name || reservation?.roomTypeName || null
+}
+
+function dominantRoomType(reservations) {
+  const counts = new Map()
+  for (const reservation of reservations) {
+    const roomType = reservationRoomTypeName(reservation)
+    if (roomType) counts.set(roomType, (counts.get(roomType) || 0) + 1)
+  }
+  if (counts.size !== 1) return 'All Rooms'
+  return counts.keys().next().value || 'All Rooms'
+}
+
+function velocityMetrics(reservations, now, baselineDays = 28) {
+  const recentStart = addMilliseconds(now, -24 * 60 * 60 * 1000)
+  const baselineStart = addUtcDays(recentStart, -baselineDays)
+  const recentBookings = reservations.filter((reservation) => dateValue(reservation.createdAt || now) >= recentStart).length
+  const baselineBookings = reservations.filter((reservation) => {
+    const createdAt = dateValue(reservation.createdAt || now)
+    return createdAt >= baselineStart && createdAt < recentStart
+  }).length
+  const baselineDaily = baselineBookings / baselineDays
+  const velocityRatio = recentBookings / Math.max(baselineDaily, 1)
+  return {
+    recentBookings,
+    baselineBookings,
+    baselineDaily,
+    velocityRatio,
+  }
+}
+
+function cancellationMetrics(cancellationLogs, now) {
+  const recentStart = addMilliseconds(now, -24 * 60 * 60 * 1000)
+  const baselineStart = addUtcDays(recentStart, -14)
+  const cancellationsLast24h = cancellationLogs.filter((log) => dateValue(log.createdAt || now) >= recentStart).length
+  const baselineCancellations = cancellationLogs.filter((log) => {
+    const createdAt = dateValue(log.createdAt || now)
+    return createdAt >= baselineStart && createdAt < recentStart
+  }).length
+  const rollingDailyAverage = baselineCancellations / 14
+  const spikeThreshold = rollingDailyAverage * 2
+  const cancellationRatio = cancellationsLast24h / Math.max(rollingDailyAverage, 1)
+  return {
+    cancellationsLast24h,
+    baselineCancellations,
+    rollingDailyAverage,
+    spikeThreshold,
+    cancellationRatio,
+  }
+}
+
+export function buildOpsScanInsights({
+  reservations = [],
+  cancellationLogs = [],
+  sellableRooms = 0,
+  now = new Date(),
+  force,
+} = {}) {
+  const scanNow = dateValue(now)
+  const today = bangkokTodayDate(scanNow)
+  const weekEnd = addUtcDays(today, 7)
+  const start = isoDate(today)
+  const end = isoDate(weekEnd)
+  const activeReservations = reservations.filter((reservation) => (
+    ['CONFIRMED', 'CHECKED_IN'].includes(String(reservation.status || '')) && reservationOverlaps(reservation, today, weekEnd)
+  ))
+  const occupancy = sellableRooms > 0 ? activeReservations.length / sellableRooms : 0
+  const roomType = dominantRoomType(activeReservations)
+  const velocity = velocityMetrics(activeReservations, scanNow)
+  const cancellation = cancellationMetrics(cancellationLogs, scanNow)
+  const weekend = nextDayOfWeek(6, scanNow)
+  const weekendEnd = addUtcDays(weekend, 1)
+  const weekendKey = isoDate(weekend)
+  const weekendReservations = activeReservations.filter((reservation) => reservationOverlaps(reservation, weekend, weekendEnd))
+  const weekendVelocity = velocityMetrics(weekendReservations, scanNow)
+  const insights = []
+  const forceValue = String(force || '')
+
+  if ((sellableRooms > 0 && occupancy >= 0.7 && velocity.velocityRatio >= 1.5) || forceValue === 'high-demand') {
+    insights.push({
+      alertType: 'HIGH_DEMAND',
+      severity: 'HIGH',
+      title: 'High demand window',
+      summary: `Upcoming occupancy is ${(occupancy * 100).toFixed(0)}% and booking velocity is ${velocity.velocityRatio.toFixed(1)}x baseline. Review rates before rooms sell out.`,
+      platform: 'all',
+      roomType,
+      dateStart: dateOrNull(start),
+      dateEnd: dateOrNull(end),
+      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: 7, ...velocity },
+      recommendedAction: recommendedRateTask('HIGH_DEMAND', roomType, start, end),
+    })
+  }
+
+  if ((sellableRooms > 0 && occupancy < 0.3) || forceValue === 'low-demand') {
+    insights.push({
+      alertType: 'LOW_DEMAND',
+      severity: 'MEDIUM',
+      title: 'Low demand next 7 days',
+      summary: `Upcoming occupancy is ${(occupancy * 100).toFixed(0)}%. Consider a controlled promotion or direct-booking push.`,
+      platform: 'all',
+      roomType,
+      dateStart: dateOrNull(start),
+      dateEnd: dateOrNull(end),
+      metrics: { occupancy, activeReservations: activeReservations.length, sellableRooms, horizonDays: 7, ...velocity },
+      recommendedAction: recommendedRateTask('LOW_DEMAND', roomType, start, end),
+    })
+  }
+
+  if ((cancellation.cancellationsLast24h > 0 && cancellation.cancellationsLast24h > cancellation.spikeThreshold) || forceValue === 'cancellation-spike') {
+    insights.push({
+      alertType: 'CANCELLATION_SPIKE',
+      severity: cancellation.cancellationsLast24h >= 3 ? 'HIGH' : 'MEDIUM',
+      title: 'Cancellation spike detected',
+      summary: `${cancellation.cancellationsLast24h} cancellation${cancellation.cancellationsLast24h === 1 ? '' : 's'} in the last 24 hours versus ${cancellation.rollingDailyAverage.toFixed(1)} daily baseline. Review resale and refund follow-up.`,
+      platform: 'all',
+      roomType: 'All Rooms',
+      dateStart: dateOrNull(start),
+      dateEnd: dateOrNull(end),
+      metrics: cancellation,
+      recommendedAction: null,
+    })
+  }
+
+  if (weekendVelocity.velocityRatio >= 1.5 || forceValue === 'weekend-spike') {
+    insights.push({
+      alertType: 'WEEKEND_SPIKE',
+      severity: 'MEDIUM',
+      title: 'Weekend booking acceleration',
+      summary: `Weekend booking velocity is ${weekendVelocity.velocityRatio.toFixed(1)}x baseline. Review weekend rate controls before the window fills.`,
+      platform: 'all',
+      roomType: dominantRoomType(weekendReservations),
+      dateStart: dateOrNull(weekendKey),
+      dateEnd: dateOrNull(weekendKey),
+      metrics: {
+        occupancy,
+        activeReservations: activeReservations.length,
+        weekendReservations: weekendReservations.length,
+        sellableRooms,
+        ...weekendVelocity,
+      },
+      recommendedAction: recommendedRateTask('WEEKEND_SPIKE', dominantRoomType(weekendReservations), weekendKey, weekendKey),
+    })
+  }
+
+  return insights
+}
+
 export async function runOpsScan(prisma, input = {}, actor = { id: 'system', role: 'SYSTEM' }) {
   const property = await getProperty(prisma)
-  const today = bangkokTodayDate()
-  const weekEnd = new Date(today)
-  weekEnd.setUTCDate(today.getUTCDate() + 7)
-  const [reservations, rooms] = await Promise.all([
+  const now = input?.now ? dateValue(input.now) : new Date()
+  const today = bangkokTodayDate(now)
+  const weekEnd = addUtcDays(today, 7)
+  const cancellationWindowStart = addUtcDays(addMilliseconds(now, -24 * 60 * 60 * 1000), -14)
+  const [reservations, rooms, cancellationLogs] = await Promise.all([
     prisma.reservation.findMany({
       where: {
         propertyId: property.id,
@@ -1096,69 +1265,39 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
       include: { roomType: true },
     }),
     prisma.room.count({ where: { propertyId: property.id, operationalStatus: 'AVAILABLE' } }),
+    prisma.reservationLog.findMany({
+      where: {
+        action: { in: ['CANCELLED', 'NO_SHOW'] },
+        createdAt: { gte: cancellationWindowStart },
+        reservation: { is: { propertyId: property.id } },
+      },
+      include: { reservation: { include: { roomType: true } } },
+    }),
   ])
 
-  const occupancy = rooms > 0 ? reservations.length / rooms : 0
-  const start = isoDate(today)
-  const end = isoDate(weekEnd)
-  const weekend = nextDayOfWeek(6)
-  const weekendKey = isoDate(weekend)
-  const roomType = reservations[0]?.roomType?.name || 'All Rooms'
+  const insights = buildOpsScanInsights({
+    reservations,
+    cancellationLogs,
+    sellableRooms: rooms,
+    now,
+    force: input?.force,
+  })
   const created = []
-
-  if (occupancy >= 0.7 || input.force === 'high-demand') {
+  for (const insight of insights) {
     created.push(await prisma.hotelOpsTrendAlert.create({
       data: {
         propertyId: property.id,
-        alertType: 'HIGH_DEMAND',
-        severity: 'HIGH',
-        title: 'High demand window',
-        summary: `Upcoming occupancy is ${(occupancy * 100).toFixed(0)}%. Review rates before rooms sell out.`,
-        platform: 'all',
-        roomType,
-        dateStart: dateOrNull(start),
-        dateEnd: dateOrNull(end),
-        metrics: { occupancy, activeReservations: reservations.length, sellableRooms: rooms, velocityRatio: 1.6 },
-        recommendedAction: recommendedRateTask('HIGH_DEMAND', roomType, start, end),
+        ...insight,
       },
     }))
   }
 
-  if (occupancy < 0.3 || input.force === 'low-demand') {
-    created.push(await prisma.hotelOpsTrendAlert.create({
-      data: {
-        propertyId: property.id,
-        alertType: 'LOW_DEMAND',
-        severity: 'MEDIUM',
-        title: 'Low demand next 7 days',
-        summary: `Upcoming occupancy is ${(occupancy * 100).toFixed(0)}%. Consider a controlled promotion or direct-booking push.`,
-        platform: 'all',
-        roomType,
-        dateStart: dateOrNull(start),
-        dateEnd: dateOrNull(end),
-        metrics: { occupancy, activeReservations: reservations.length, sellableRooms: rooms },
-        recommendedAction: recommendedRateTask('LOW_DEMAND', roomType, start, end),
-      },
-    }))
-  }
-
-  created.push(await prisma.hotelOpsTrendAlert.create({
-    data: {
-      propertyId: property.id,
-      alertType: 'WEEKEND_SPIKE',
-      severity: 'LOW',
-      title: 'Weekend scan complete',
-      summary: 'Weekend demand scan completed. Review this alert if reservations accelerate.',
-      platform: 'all',
-      roomType,
-      dateStart: dateOrNull(weekendKey),
-      dateEnd: dateOrNull(weekendKey),
-      metrics: { occupancy, velocityRatio: occupancy >= 0.7 ? 1.5 : 1, activeReservations: reservations.length },
-      recommendedAction: occupancy >= 0.7 ? recommendedRateTask('WEEKEND_SPIKE', roomType, weekendKey, weekendKey) : null,
-    },
-  }))
-
-  await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', created[0]?.id || null, { created: created.length, occupancy })
+  await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', created[0]?.id || null, {
+    created: created.length,
+    activeReservations: reservations.length,
+    sellableRooms: rooms,
+    cancellationLogs: cancellationLogs.length,
+  })
   for (const alert of created) {
     await recordOpsNotifications(prisma, property.id, {
       type: 'TREND_ALERT',

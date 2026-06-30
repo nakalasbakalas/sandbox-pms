@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, evaluateOpsPermission, evaluateOpsTaskRun, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, parseHotelOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -707,6 +707,63 @@ assert.equal(evaluateOpsTaskRun(pendingRateTask, { id: 'owner', role: 'ADMIN' })
 assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'owner', role: 'ADMIN' }).allowed, true, 'Hotel Ops runner allows owner-approved write tasks')
 assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'Hotel Ops runner prevents lower-role execution of owner-approved write tasks')
 assert.equal(evaluateOpsTaskRun({ ...pendingRateTask, approvals: [{ status: 'APPROVED', requiredRole: 'OWNER' }] }, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops runner rechecks emergency stop before write execution')
+
+const makeOpsReservation = (id, createdAt, overrides = {}) => ({
+  id,
+  status: 'CONFIRMED',
+  checkIn: new Date('2026-07-03T00:00:00.000Z'),
+  checkOut: new Date('2026-07-05T00:00:00.000Z'),
+  createdAt: new Date(createdAt),
+  roomType: { name: 'Deluxe Room' },
+  ...overrides,
+})
+const recentDemandReservations = Array.from({ length: 8 }, (_, index) => makeOpsReservation(
+  `recent-demand-${index}`,
+  index < 2 ? '2026-06-29T12:00:00.000Z' : '2026-06-10T12:00:00.000Z',
+))
+const highDemandInsights = buildOpsScanInsights({
+  reservations: recentDemandReservations,
+  sellableRooms: 10,
+  now: fixedOpsDate,
+})
+assert.equal(highDemandInsights.some((alert) => alert.alertType === 'HIGH_DEMAND'), true, 'Hotel Ops scan creates high-demand alert only when occupancy and velocity are elevated')
+assert.equal(highDemandInsights.find((alert) => alert.alertType === 'HIGH_DEMAND')?.recommendedAction?.approvalRequired, true, 'Hotel Ops high-demand recommendation remains approval-gated')
+
+const slowFullWindowInsights = buildOpsScanInsights({
+  reservations: Array.from({ length: 8 }, (_, index) => makeOpsReservation(`slow-demand-${index}`, '2026-06-10T12:00:00.000Z')),
+  sellableRooms: 10,
+  now: fixedOpsDate,
+})
+assert.equal(slowFullWindowInsights.some((alert) => alert.alertType === 'HIGH_DEMAND'), false, 'Hotel Ops scan does not create high-demand alert from occupancy alone')
+
+const lowDemandInsights = buildOpsScanInsights({
+  reservations: [makeOpsReservation('low-demand-1', '2026-06-28T12:00:00.000Z')],
+  sellableRooms: 10,
+  now: fixedOpsDate,
+})
+assert.equal(lowDemandInsights.some((alert) => alert.alertType === 'LOW_DEMAND'), true, 'Hotel Ops scan creates low-demand alert inside the 7-day window')
+
+const cancellationInsights = buildOpsScanInsights({
+  reservations: recentDemandReservations,
+  cancellationLogs: [
+    { createdAt: new Date('2026-06-29T20:00:00.000Z'), action: 'CANCELLED' },
+    { createdAt: new Date('2026-06-29T21:00:00.000Z'), action: 'NO_SHOW' },
+    { createdAt: new Date('2026-06-20T12:00:00.000Z'), action: 'CANCELLED' },
+  ],
+  sellableRooms: 10,
+  now: fixedOpsDate,
+})
+assert.equal(cancellationInsights.some((alert) => alert.alertType === 'CANCELLATION_SPIKE'), true, 'Hotel Ops scan creates cancellation spike alert from recent cancellation acceleration')
+
+const weekendInsights = buildOpsScanInsights({
+  reservations: [
+    makeOpsReservation('weekend-1', '2026-06-29T12:00:00.000Z'),
+    makeOpsReservation('weekend-2', '2026-06-29T13:00:00.000Z'),
+  ],
+  sellableRooms: 10,
+  now: fixedOpsDate,
+})
+assert.equal(weekendInsights.some((alert) => alert.alertType === 'WEEKEND_SPIKE'), true, 'Hotel Ops scan creates weekend spike alert only when weekend velocity accelerates')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

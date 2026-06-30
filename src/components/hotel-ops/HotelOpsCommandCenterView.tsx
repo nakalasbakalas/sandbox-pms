@@ -318,7 +318,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
-  const runScan = async (force?: 'high-demand' | 'low-demand') => {
+  const runScan = async (force?: 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike') => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
       return

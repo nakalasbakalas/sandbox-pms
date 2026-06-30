@@ -111,7 +111,7 @@ export const hotelOpsApi = {
     return apiRequest<{ ok: true; data: HotelOpsOtaStatus }>('/api/ops/ota/status')
   },
 
-  runScan(force?: 'high-demand' | 'low-demand') {
+  runScan(force?: 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike') {
     return apiRequest<{ ok: true; data: HotelOpsTrendAlert[]; message?: string }>('/api/ops/scan/run', {
       method: 'POST',
       body: JSON.stringify({ force }),
