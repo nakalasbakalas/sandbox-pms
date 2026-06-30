@@ -1340,9 +1340,41 @@ export async function listOpsTrendAlerts(prisma, filters = {}) {
   return alerts.map(serializeAlert)
 }
 
-export async function approveOpsAlertRecommendation(prisma, alertId, input, actor) {
+async function updateOpsAlertStatus(prisma, alertId, status, input, actor) {
+  const property = await getProperty(prisma)
   const alert = await prisma.hotelOpsTrendAlert.findUnique({ where: { id: alertId } })
-  if (!alert) throw new PmsValidationError('Hotel Ops alert was not found.', 404)
+  if (!alert || alert.propertyId !== property.id) throw new PmsValidationError('Hotel Ops alert was not found.', 404)
+  if (alert.status === 'RESOLVED' && status !== 'RESOLVED') {
+    throw new PmsValidationError('Resolved Hotel Ops alerts cannot be reopened from this action.', 409)
+  }
+  if (alert.status === status) return serializeAlert(alert)
+
+  const updated = await prisma.hotelOpsTrendAlert.update({
+    where: { id: alert.id },
+    data: { status },
+  })
+  await audit(prisma, actor, `OPS_ALERT_${status}`, 'hotelOpsTrendAlert', alert.id, {
+    alertType: alert.alertType,
+    previousStatus: alert.status,
+    status,
+    reason: normalizeNullableString(input?.reason || input?.notes),
+  })
+  return serializeAlert(updated)
+}
+
+export async function acknowledgeOpsTrendAlert(prisma, alertId, input, actor) {
+  return updateOpsAlertStatus(prisma, alertId, 'ACKNOWLEDGED', input, actor)
+}
+
+export async function resolveOpsTrendAlert(prisma, alertId, input, actor) {
+  return updateOpsAlertStatus(prisma, alertId, 'RESOLVED', input, actor)
+}
+
+export async function approveOpsAlertRecommendation(prisma, alertId, input, actor) {
+  const property = await getProperty(prisma)
+  const alert = await prisma.hotelOpsTrendAlert.findUnique({ where: { id: alertId } })
+  if (!alert || alert.propertyId !== property.id) throw new PmsValidationError('Hotel Ops alert was not found.', 404)
+  if (alert.status === 'RESOLVED') throw new PmsValidationError('Resolved Hotel Ops alerts cannot queue recommendations.', 409)
   if (!alert.recommendedAction) throw new PmsValidationError('This alert does not have a recommended action.', 409)
   const action = alert.recommendedAction
   const rateText = action.rate?.amount ? `to ${Number(action.rate.amount).toLocaleString()} ${action.rate.currency || 'THB'}` : ''
@@ -1352,6 +1384,11 @@ export async function approveOpsAlertRecommendation(prisma, alertId, input, acto
   await prisma.hotelOpsTrendAlert.update({
     where: { id: alert.id },
     data: { status: 'RECOMMENDATION_APPROVED' },
+  })
+  await audit(prisma, actor, 'OPS_ALERT_RECOMMENDATION_APPROVED', 'hotelOpsTrendAlert', alert.id, {
+    alertType: alert.alertType,
+    previousStatus: alert.status,
+    taskId: result.task?.id,
   })
   return result
 }

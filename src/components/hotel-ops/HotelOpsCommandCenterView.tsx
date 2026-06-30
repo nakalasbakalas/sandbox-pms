@@ -415,6 +415,36 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
+  const acknowledgeAlert = async (alert: HotelOpsTrendAlert) => {
+    if (!SERVER_AUTH_ENABLED) {
+      toast.error('Hotel Ops backend is not connected.')
+      return
+    }
+    try {
+      const payload = await hotelOpsApi.acknowledgeAlert(alert.id)
+      toast.success(payload.message || 'Alert acknowledged.')
+      await refresh()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Could not acknowledge alert.')
+    }
+  }
+
+  const resolveAlert = async (alert: HotelOpsTrendAlert) => {
+    if (!SERVER_AUTH_ENABLED) {
+      toast.error('Hotel Ops backend is not connected.')
+      return
+    }
+    const reason = window.prompt('Resolution note?')?.trim()
+    if (!reason) return
+    try {
+      const payload = await hotelOpsApi.resolveAlert(alert.id, reason)
+      toast.success(payload.message || 'Alert resolved.')
+      await refresh()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Could not resolve alert.')
+    }
+  }
+
   const toggleEmergencyStop = async (enabled: boolean) => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
@@ -611,15 +641,28 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                           <div className="flex flex-wrap gap-2">
                             <Badge variant={riskTone(alert.severity as RiskLevel)}>{alert.severity}</Badge>
                             <Badge variant="outline">{alert.alertType.replace(/_/g, ' ')}</Badge>
+                            <Badge variant={alert.status === 'RESOLVED' ? 'secondary' : 'outline'}>{(alert.status || 'CREATED').replace(/_/g, ' ')}</Badge>
                           </div>
                           <h3 className="mt-2 font-semibold">{alert.title}</h3>
                           <p className="mt-1 text-sm text-muted-foreground">{alert.summary}</p>
                         </div>
-                        {alert.recommendedAction && alert.status !== 'RECOMMENDATION_APPROVED' && (
-                          <Button size="sm" onClick={() => void approveRecommendation(alert)}>
-                            Queue Recommendation
-                          </Button>
-                        )}
+                        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                          {alert.status === 'CREATED' && (
+                            <Button size="sm" variant="outline" onClick={() => void acknowledgeAlert(alert)}>
+                              Acknowledge
+                            </Button>
+                          )}
+                          {alert.recommendedAction && alert.status !== 'RECOMMENDATION_APPROVED' && alert.status !== 'RESOLVED' && (
+                            <Button size="sm" onClick={() => void approveRecommendation(alert)}>
+                              Queue Recommendation
+                            </Button>
+                          )}
+                          {alert.status !== 'RESOLVED' && (
+                            <Button size="sm" variant="ghost" onClick={() => void resolveAlert(alert)}>
+                              Resolve
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       {alert.recommendedAction && (
                         <div className="rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">

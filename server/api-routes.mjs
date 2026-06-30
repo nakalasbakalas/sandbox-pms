@@ -19,6 +19,8 @@ const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/ops\/notifications$/, methods: ['GET'] },
   { pattern: /^\/api\/ops\/intelligence\/alerts$/, methods: ['GET'] },
   { pattern: /^\/api\/ops\/intelligence\/alerts\/[^/]+\/approve-recommendation$/, methods: ['POST'] },
+  { pattern: /^\/api\/ops\/intelligence\/alerts\/[^/]+\/acknowledge$/, methods: ['POST'] },
+  { pattern: /^\/api\/ops\/intelligence\/alerts\/[^/]+\/resolve$/, methods: ['POST'] },
   { pattern: /^\/api\/ops\/emergency-stop$/, methods: ['GET', 'POST'] },
   { pattern: /^\/api\/ops\/ota\/status$/, methods: ['GET'] },
   { pattern: /^\/api\/ops\/scan\/run$/, methods: ['POST'] },

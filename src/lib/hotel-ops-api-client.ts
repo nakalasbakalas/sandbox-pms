@@ -96,6 +96,20 @@ export const hotelOpsApi = {
     })
   },
 
+  acknowledgeAlert(alertId: string, reason?: string) {
+    return apiRequest<{ ok: true; data: HotelOpsTrendAlert; message?: string }>(`/api/ops/intelligence/alerts/${encodeURIComponent(alertId)}/acknowledge`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
+
+  resolveAlert(alertId: string, reason?: string) {
+    return apiRequest<{ ok: true; data: HotelOpsTrendAlert; message?: string }>(`/api/ops/intelligence/alerts/${encodeURIComponent(alertId)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
+
   getEmergencyStop() {
     return apiRequest<{ ok: true; data: HotelOpsEmergencyStop }>('/api/ops/emergency-stop')
   },

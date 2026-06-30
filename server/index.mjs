@@ -25,6 +25,7 @@ import {
   listIcalFeedChannels,
 } from './ical-feed.mjs'
 import {
+  acknowledgeOpsTrendAlert,
   approveOpsAlertRecommendation,
   approveOpsTask,
   cancelOpsTask,
@@ -36,6 +37,7 @@ import {
   listOpsApprovals,
   listOpsTasks,
   listOpsTrendAlerts,
+  resolveOpsTrendAlert,
   runQueuedOpsTask,
   runOpsScan,
   setEmergencyStop,
@@ -721,6 +723,20 @@ async function handleApi(request, response, url) {
   if (opsParams && request.method === 'POST') {
     requirePermission(user, 'approve:ops-task')
     sendJson(response, 201, { ok: true, data: await approveOpsAlertRecommendation(db, opsParams.id, await readJson(request), user), message: 'Recommendation converted into an approval-gated task.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/intelligence\/alerts\/(?<id>[^/]+)\/acknowledge$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    sendJson(response, 200, { ok: true, data: await acknowledgeOpsTrendAlert(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops alert acknowledged.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/intelligence\/alerts\/(?<id>[^/]+)\/resolve$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    sendJson(response, 200, { ok: true, data: await resolveOpsTrendAlert(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops alert resolved.' })
     return true
   }
 
