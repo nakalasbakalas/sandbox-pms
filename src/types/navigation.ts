@@ -2,6 +2,7 @@ export type NavigationRoute =
   | 'today'
   | 'board'
   | 'rooms'
+  | 'booking-inbox'
   | 'front-desk'
   | 'reservations'
   | 'guests'

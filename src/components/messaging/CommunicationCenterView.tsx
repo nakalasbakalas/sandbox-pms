@@ -59,7 +59,7 @@ export function CommunicationCenterView() {
   const failedMessages = filteredMessages.filter(m => m.status === 'FAILED')
 
   const stats: MessageStats = {
-    totalSent: (messages || []).filter(m => m.status !== 'DRAFT' && m.status !== 'SCHEDULED').length,
+    totalSent: (messages || []).filter(m => m.status === 'SENT' || m.status === 'DELIVERED' || m.status === 'READ').length,
     totalDelivered: (messages || []).filter(m => m.status === 'DELIVERED' || m.status === 'READ').length,
     totalFailed: (messages || []).filter(m => m.status === 'FAILED').length,
     byChannel: {
@@ -106,7 +106,7 @@ export function CommunicationCenterView() {
                     onClose={() => setShowNewMessage(false)}
                     onSend={(msg) => {
                       setMessages((current) => [...(current || []), msg])
-                      toast.success('Message sent via ' + msg.channel)
+                      toast.success('Message draft recorded for ' + msg.channel)
                       setShowNewMessage(false)
                     }}
                   />
@@ -365,8 +365,7 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
       recipientContact,
       roomNumber: roomNumber || undefined,
       body,
-      status: 'SENT',
-      sentAt: new Date(),
+      status: 'DRAFT',
       createdBy: 'Current User',
       createdAt: new Date()
     }
@@ -377,9 +376,9 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Send New Message</DialogTitle>
+        <DialogTitle>Record New Message</DialogTitle>
         <DialogDescription>
-          Send a message to a guest via LINE, Email, or SMS
+          Save a draft message. Delivery requires a configured messaging provider.
         </DialogDescription>
       </DialogHeader>
 
@@ -473,7 +472,7 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
         </Button>
         <Button onClick={handleSend}>
           <PaperPlaneTilt size={20} className="mr-2" weight="bold" />
-          Send via {channel}
+          Save Draft
         </Button>
       </DialogFooter>
     </>

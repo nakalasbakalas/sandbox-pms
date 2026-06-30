@@ -156,8 +156,7 @@ export function StaffAlertSettings() {
           <Alert>
             <Info size={18} />
             <AlertDescription>
-              Configure when and how staff receive alerts. Alerts can be sent via LINE, Email, or
-              SMS based on your configuration.
+              Configure when staff alert records are created. LINE, email, and SMS delivery require server provider adapters before alerts are actually sent.
             </AlertDescription>
           </Alert>
 

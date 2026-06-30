@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -11,16 +11,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { 
   CheckCircle, 
   XCircle, 
-  Eye, 
-  EyeSlash, 
   Sparkle,
   CircleNotch,
   Info,
   Copy,
   ChatCircle,
 } from '@phosphor-icons/react'
-import { lineService, lineThrottleService } from '@/lib/line'
-import { LineConfig, LineBotInfo, DEFAULT_LINE_TEMPLATES, LineTemplate } from '@/types/line'
+import { LineConfig, DEFAULT_LINE_TEMPLATES, LineTemplate } from '@/types/line'
 import { toast } from 'sonner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -39,54 +36,51 @@ export function LineSettings() {
   })
 
   const [templates, setTemplates] = useKV<LineTemplate[]>('line-templates', DEFAULT_LINE_TEMPLATES)
-  const [showSecret, setShowSecret] = useState(false)
-  const [showToken, setShowToken] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [botInfo, setBotInfo] = useState<LineBotInfo | null>(null)
+  const [serverCredentialsConfigured, setServerCredentialsConfigured] = useState<boolean | null>(null)
   const [testError, setTestError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (config?.channelAccessToken) {
-      lineService.setConfig(config)
-    }
-  }, [config])
-
   const handleTestConnection = async () => {
-    if (!config?.channelAccessToken) {
-      toast.error('Please enter Channel Access Token')
-      return
-    }
-
     setTesting(true)
     setTestError(null)
-    setBotInfo(null)
+    setServerCredentialsConfigured(null)
 
-    lineService.setConfig(config)
-    const result = await lineService.testConnection()
-
-    setTesting(false)
-
-    if (result.success && result.info) {
-      setBotInfo(result.info)
+    try {
+      const response = await fetch('/api/health')
+      const payload = await response.json()
+      const configured = Boolean(payload?.integrations?.lineWebhookConfigured)
+      setServerCredentialsConfigured(configured)
       setConfig((current) => ({
         ...current!,
+        channelSecret: '',
+        channelAccessToken: '',
         lastTestedAt: new Date().toISOString(),
-        lastTestSuccess: true,
+        lastTestSuccess: configured,
       }))
-      toast.success('LINE connection successful!')
-    } else {
-      setTestError(result.error || 'Connection failed')
+      if (configured) {
+        toast.success('LINE server credentials are configured')
+      } else {
+        setTestError('LINE server credentials are not configured in the hosting environment.')
+        toast.error('LINE server credentials are not configured')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to check LINE status'
+      setTestError(message)
       setConfig((current) => ({
         ...current!,
+        channelSecret: '',
+        channelAccessToken: '',
         lastTestedAt: new Date().toISOString(),
         lastTestSuccess: false,
       }))
-      toast.error('LINE connection failed')
+      toast.error('LINE status check failed')
+    } finally {
+      setTesting(false)
     }
   }
 
   const handleSaveConfig = () => {
-    setConfig((current) => ({ ...current! }))
+    setConfig((current) => ({ ...current!, channelSecret: '', channelAccessToken: '' }))
     toast.success('LINE configuration saved')
   }
 
@@ -159,14 +153,14 @@ export function LineSettings() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {botInfo && (
+          {serverCredentialsConfigured && (
             <Alert className="bg-green-50 border-green-200">
               <CheckCircle className="text-green-600" size={18} />
               <AlertDescription>
-                <strong>Connected to: {botInfo.displayName}</strong>
+                <strong>LINE server credentials detected</strong>
                 <br />
                 <span className="text-sm text-muted-foreground">
-                  Basic ID: {botInfo.basicId} • User ID: {botInfo.userId.slice(0, 16)}...
+                  Secrets are stored in the hosting environment, not browser storage.
                 </span>
               </AlertDescription>
             </Alert>
@@ -191,18 +185,18 @@ export function LineSettings() {
 
           <Button
             onClick={handleTestConnection}
-            disabled={testing || !config?.channelAccessToken}
+            disabled={testing}
             className="w-full"
           >
             {testing ? (
               <>
                 <CircleNotch className="animate-spin mr-2" size={16} />
-                Testing Connection...
+                Checking Server Status...
               </>
             ) : (
               <>
                 <Sparkle className="mr-2" size={16} />
-                Test Connection
+                Check Server LINE Status
               </>
             )}
           </Button>
@@ -213,7 +207,7 @@ export function LineSettings() {
         <CardHeader>
           <CardTitle>API Configuration</CardTitle>
           <CardDescription>
-            Enter your LINE Official Account credentials from the LINE Developers Console
+            Store LINE secrets in the server environment, not browser storage
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -229,50 +223,28 @@ export function LineSettings() {
 
           <div className="space-y-2">
             <Label htmlFor="channel-secret">Channel Secret</Label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  id="channel-secret"
-                  type={showSecret ? 'text' : 'password'}
-                  value={config?.channelSecret ?? ''}
-                  onChange={(e) =>
-                    setConfig((current) => ({ ...current!, channelSecret: e.target.value }))
-                  }
-                  placeholder="Enter your channel secret"
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setShowSecret(!showSecret)}
-              >
-                {showSecret ? <EyeSlash size={18} /> : <Eye size={18} />}
-              </Button>
-            </div>
+            <Input
+              id="channel-secret"
+              value="Managed by server environment"
+              readOnly
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Configure LINE_CHANNEL_SECRET in the hosting environment.
+            </p>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="access-token">Channel Access Token (Long-lived)</Label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  id="access-token"
-                  type={showToken ? 'text' : 'password'}
-                  value={config?.channelAccessToken ?? ''}
-                  onChange={(e) =>
-                    setConfig((current) => ({ ...current!, channelAccessToken: e.target.value }))
-                  }
-                  placeholder="Enter your channel access token"
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setShowToken(!showToken)}
-              >
-                {showToken ? <EyeSlash size={18} /> : <Eye size={18} />}
-              </Button>
-            </div>
+            <Input
+              id="access-token"
+              value="Managed by server environment"
+              readOnly
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Configure LINE_CHANNEL_ACCESS_TOKEN in the hosting environment.
+            </p>
           </div>
 
           <Separator />

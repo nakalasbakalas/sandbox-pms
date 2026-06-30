@@ -2,6 +2,8 @@
 
 This repo can generate app-owned secrets and validate production environment variables. It cannot create or verify third-party business accounts without the account owner's authenticated provider access.
 
+Launch-scope decisions for LINE, OTA, payments, production users, room inventory, DB-mutating E2E, rollback, and WAF ownership are tracked in [launch-scope-decisions.md](launch-scope-decisions.md).
+
 ## App-Owned Credentials
 
 Generate an ignored local credential bundle:

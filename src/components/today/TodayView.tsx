@@ -6,6 +6,7 @@ import {
   Broom,
   CalendarBlank,
   CurrencyCircleDollar,
+  EnvelopeSimple,
   House,
   SignIn,
   SignOut,
@@ -22,11 +23,14 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useRoomSync } from '@/hooks/use-room-sync'
+import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { formatBangkokDate, formatBangkokTime, useI18n } from '@/lib/i18n'
 import { SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
 import { getOperationalRoomStatus, isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { cn } from '@/lib/utils'
 import type { PropertySetup } from '@/types/onboarding'
+import type { NavigationRoute } from '@/types/navigation'
+import type { BookingEmailEvent } from '@/types/booking-email'
 
 interface UnassignedReservation {
   id: string
@@ -42,7 +46,7 @@ interface ActionItem {
   id: string
   label: string
   detail: string
-  route: 'board' | 'front-desk' | 'cashier' | 'housekeeping'
+  route: NavigationRoute
   actionLabel: string
   statusGroup: 'room' | 'payment' | 'reservation'
   status: string
@@ -69,9 +73,24 @@ function getAvailableTonight(rooms: BoardRoomCard[]) {
 function buildActionQueue(
   rooms: BoardRoomCard[],
   unassignedReservations: UnassignedReservation[],
+  emailEvents: BookingEmailEvent[],
   inputDate: string,
   t: ReturnType<typeof useI18n>['t'],
 ): ActionItem[] {
+  const emailActions = emailEvents
+    .filter((event) => event.status === 'NEEDS_REVIEW' || event.status === 'ERROR')
+    .slice(0, 4)
+    .map<ActionItem>((event) => ({
+      id: `booking-email-${event.id}`,
+      label: event.guestName || event.parsedDetails?.guestName || 'Booking email event',
+      detail: `${event.sourceName || event.source} · ${event.channelRef || event.sender} · ${event.reviewReason || event.errorReason || 'Needs staff review'}`,
+      route: 'booking-inbox',
+      actionLabel: event.status === 'ERROR' ? 'Review error' : 'Review email',
+      statusGroup: 'reservation',
+      status: event.status === 'ERROR' ? 'blocked' : 'pending',
+      amount: event.amount,
+    }))
+
   const unassignedActions = unassignedReservations
     .filter((reservation) => !reservation.checkIn || isSameInputDate(reservation.checkIn, inputDate))
     .map<ActionItem>((reservation) => ({
@@ -125,13 +144,14 @@ function buildActionQueue(
       status: 'dirty',
     }))
 
-  return [...unassignedActions, ...arrivalActions, ...departureActions, ...housekeepingActions].slice(0, 10)
+  return [...emailActions, ...unassignedActions, ...arrivalActions, ...departureActions, ...housekeepingActions].slice(0, 12)
 }
 
 export function TodayView() {
   const { t, language } = useI18n()
   const { navigate } = useNavigation()
   const { rooms } = useRoomSync()
+  const { events: bookingEmailEvents, status: bookingEmailStatus, notConfigured: bookingEmailNotConfigured } = useBookingEmailInbox()
   const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const [selectedDate, setSelectedDate] = useState(() => toInputDate(new Date()))
@@ -151,6 +171,9 @@ export function TodayView() {
     const dirty = operationalRooms.filter((room) => room.cleanStatus === 'DIRTY' || room.status === 'VACANT_DIRTY' || room.status === 'OCCUPIED_DIRTY')
     const readyForArrival = operationalRooms.filter(isRoomReadyForArrival)
     const paymentIssues = operationalRooms.filter((room) => !!room.balanceDue || room.depositStatus === 'PENDING')
+    const emailNeedsReview = bookingEmailEvents.filter((event) => event.status === 'NEEDS_REVIEW')
+    const emailErrors = bookingEmailEvents.filter((event) => event.status === 'ERROR')
+    const outOfOrder = operationalRooms.filter((room) => room.operationalStatus === 'OUT_OF_ORDER' || room.operationalStatus === 'OUT_OF_SERVICE' || room.operationalStatus === 'BLOCKED')
     const earlyArrivals = arrivals.filter((room) => room.checkIn && new Date(room.checkIn).getHours() < 14)
     const lateCheckouts = departures.filter((room) => room.checkOut && new Date(room.checkOut).getHours() > 11)
 
@@ -162,16 +185,19 @@ export function TodayView() {
       dirty,
       readyForArrival,
       paymentIssues,
+      emailNeedsReview,
+      emailErrors,
+      outOfOrder,
       unassigned: unassignedReservations.filter((reservation) => !reservation.checkIn || isSameInputDate(reservation.checkIn, selectedDate)),
       earlyArrivals,
       lateCheckouts,
       noShows: 0,
     }
-  }, [operationalRooms, selectedDate, unassignedReservations])
+  }, [bookingEmailEvents, operationalRooms, selectedDate, unassignedReservations])
 
   const actionQueue = useMemo(
-    () => buildActionQueue(operationalRooms, unassignedReservations, selectedDate, t),
-    [operationalRooms, selectedDate, t, unassignedReservations],
+    () => buildActionQueue(operationalRooms, unassignedReservations, bookingEmailEvents, selectedDate, t),
+    [bookingEmailEvents, operationalRooms, selectedDate, t, unassignedReservations],
   )
 
   const metricCards = [
@@ -183,6 +209,8 @@ export function TodayView() {
     { label: t('today.readyRooms'), value: metrics.readyForArrival.length, icon: Bed, tone: 'text-teal-700 bg-teal-50 border-teal-100' },
     { label: t('today.paymentIssues'), value: metrics.paymentIssues.length, icon: CurrencyCircleDollar, tone: 'text-rose-700 bg-rose-50 border-rose-100' },
     { label: t('today.unassigned'), value: metrics.unassigned.length, icon: Warning, tone: 'text-yellow-800 bg-yellow-50 border-yellow-100' },
+    { label: 'Booking emails', value: metrics.emailNeedsReview.length + metrics.emailErrors.length, icon: EnvelopeSimple, tone: 'text-fuchsia-800 bg-fuchsia-50 border-fuchsia-100' },
+    { label: 'Out of order', value: metrics.outOfOrder.length, icon: Warning, tone: 'text-slate-800 bg-slate-50 border-slate-200' },
   ]
 
   return (
@@ -302,6 +330,10 @@ export function TodayView() {
                   <CurrencyCircleDollar size={16} weight="bold" />
                   {t('today.openCashier')}
                 </Button>
+                <Button variant="outline" className="justify-start" onClick={() => navigate('booking-inbox')}>
+                  <EnvelopeSimple size={16} weight="bold" />
+                  Booking Inbox
+                </Button>
                 <Button variant="outline" className="justify-start" onClick={() => navigate('reservations')}>
                   <CalendarBlank size={16} weight="bold" />
                   {t('today.createReservation')}
@@ -317,6 +349,8 @@ export function TodayView() {
                 <WatchItem label={t('today.earlyArrivals')} value={metrics.earlyArrivals.length} />
                 <WatchItem label={t('today.lateCheckouts')} value={metrics.lateCheckouts.length} />
                 <WatchItem label={t('today.noShows')} value={metrics.noShows} />
+                <WatchItem label="Email processing errors" value={metrics.emailErrors.length} />
+                <WatchItem label="Mailbox not configured" value={bookingEmailNotConfigured && !bookingEmailStatus?.configured ? 1 : 0} />
                 <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
                   {t('common.taxInclusive')} · Asia/Bangkok · 24-hour time
                 </div>

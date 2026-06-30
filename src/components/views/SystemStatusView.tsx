@@ -257,20 +257,20 @@ export function SystemStatusView() {
         <CardHeader>
           <CardTitle>Complete Wiring Overview</CardTitle>
           <CardDescription>
-            Summary of all implemented integrations and operations
+            Summary of implemented integrations and operational boundaries
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {[
-              ['Check-In/Check-Out', 'Updates Board, Housekeeping, Cashier, and Channel inventory'],
-              ['Reservation Management', 'Syncs to Board timeline, inventory, and OTA channels'],
+              ['Check-In/Check-Out', 'Updates Board, Housekeeping, Cashier, and local channel inventory'],
+              ['Reservation Management', 'Syncs to Board timeline, local inventory, and iCal blocks'],
               ['Bulk Operations', 'Edit/assign multiple reservations with full sync'],
               ['Payment Processing', 'Updates folios, reservations, and accounting dashboard'],
               ['Housekeeping Workflow', 'Room status syncs to Board with auto-notifications'],
-              ['Channel Sync', 'Real-time inventory and rate push to all OTAs'],
+              ['Channel Sync', 'iCal blocks and reservation pulls only; OTA rates and restrictions remain manual'],
               ['Night Audit', 'Automated daily processing across all modules'],
-              ['Automated Messaging', 'LINE notifications for housekeeping and operations'],
+              ['Automated Messaging', 'Draft/record workflows are local until server messaging providers are configured'],
               ['Print Functions', 'Housekeeping, Reservations, Folios, and Receipts'],
             ].map(([title, description]) => (
               <div key={title} className="rounded-lg border p-4">

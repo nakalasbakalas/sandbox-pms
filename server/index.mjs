@@ -5,10 +5,12 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadEnvDefaults } from '../scripts/env-utils.mjs'
+import { resolveApiRouteContract } from './api-routes.mjs'
 import { loginThrottle, resolveClientIp } from './login-throttle.mjs'
 import { createPrismaClient } from './prisma-client.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
+import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
@@ -18,10 +20,12 @@ import {
 import {
   assignRoom,
   authenticateUser,
+  approveBookingEmailEvent,
   cancelReservation,
   checkInReservation,
   checkOutReservation,
   completeInitialSetup,
+  createBookingEmailSource,
   createRoomType,
   createSetupRoom,
   createGuest,
@@ -29,16 +33,24 @@ import {
   createPayment,
   createReservation,
   createWalkInCheckIn,
+  getBookingEmailEvent,
+  getBookingEmailStatus,
   getAuthenticatedUser,
   getFrontDeskBoard,
   getRoomSetup,
   getSetupStatus,
   getTodayData,
+  listBookingEmailEvents,
+  listBookingEmailSources,
   listGuests,
   listReservations,
   listRooms,
+  rejectBookingEmailEvent,
+  reprocessBookingEmailEvent,
+  syncBookingEmail,
   deleteRoomType,
   deleteSetupRoom,
+  updateBookingEmailSource,
   updateReservation,
   updateGuest,
   updateHousekeepingStatus,
@@ -55,7 +67,8 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = 'content-type'
+const CORS_ALLOW_HEADERS = 'content-type, authorization, x-setup-token'
+const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
 
@@ -109,16 +122,23 @@ function configuredAllowedOrigins() {
 
 const allowedOrigins = configuredAllowedOrigins()
 
+function trustProxyHeaders() {
+  return envEnabled(process.env.TRUST_PROXY_HEADERS)
+}
+
 function requestOrigin(request) {
   return normalizeOrigin(firstHeaderValue(request.headers.origin))
 }
 
 function requestBaseOrigin(request) {
-  const forwardedHost = firstHeaderValue(request.headers['x-forwarded-host'])
+  const configured = normalizeOrigin(process.env.APP_URL || process.env.RENDER_EXTERNAL_URL)
+  if (PRODUCTION && configured) return configured
+
+  const forwardedHost = trustProxyHeaders() ? firstHeaderValue(request.headers['x-forwarded-host']) : ''
   const requestHost = forwardedHost || firstHeaderValue(request.headers.host)
   if (!requestHost) return ''
 
-  const forwardedProto = firstHeaderValue(request.headers['x-forwarded-proto'])
+  const forwardedProto = trustProxyHeaders() ? firstHeaderValue(request.headers['x-forwarded-proto']) : ''
   const proto = String(forwardedProto || (process.env.NODE_ENV === 'production' ? 'https' : 'http'))
     .split(',')[0]
     .trim()
@@ -172,6 +192,18 @@ function mergeResponseHeaders(response, headers = {}) {
   return merged
 }
 
+function securityHeaders(headers = {}) {
+  return {
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'strict-origin-when-cross-origin',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'content-security-policy': "base-uri 'self'; object-src 'none'; frame-ancestors 'none'",
+    ...(PRODUCTION ? { 'strict-transport-security': 'max-age=31536000; includeSubDomains' } : {}),
+    ...headers,
+  }
+}
+
 async function getPrisma() {
   if (!process.env.DATABASE_URL) {
     const error = new Error('DATABASE_URL is not configured.')
@@ -186,28 +218,28 @@ async function getPrisma() {
 }
 
 function sendJson(response, statusCode, payload, headers = {}) {
-  response.writeHead(statusCode, {
+  response.writeHead(statusCode, securityHeaders({
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     ...mergeResponseHeaders(response, headers),
-  })
+  }))
   response.end(JSON.stringify(payload))
 }
 
 function sendNoContent(response, headers = {}) {
-  response.writeHead(204, {
+  response.writeHead(204, securityHeaders({
     'cache-control': 'no-store',
     ...mergeResponseHeaders(response, headers),
-  })
+  }))
   response.end()
 }
 
 function sendCalendar(response, contents, fileName) {
-  response.writeHead(200, {
+  response.writeHead(200, securityHeaders({
     'content-type': 'text/calendar; charset=utf-8',
     'content-disposition': `inline; filename="${String(fileName || 'sandbox-hotel-blocks.ics').replace(/"/g, '')}"`,
     'cache-control': 'no-store',
-  })
+  }))
   response.end(contents)
 }
 
@@ -364,10 +396,10 @@ async function serveStatic(request, response) {
 
   try {
     const contentType = mimeTypes[extname(filePath)] || 'application/octet-stream'
-    response.writeHead(200, {
+    response.writeHead(200, securityHeaders({
       'content-type': contentType,
       'cache-control': filePath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
-    })
+    }))
 
     if (request.method === 'HEAD') {
       response.end()
@@ -448,12 +480,20 @@ async function handleLineWebhook(request, response) {
 }
 
 async function handleApi(request, response, url) {
-  const db = await getPrisma()
+  const routeContract = resolveApiRouteContract(url.pathname)
+  if (!routeContract) return false
+
+  if (!routeContract.methods.includes(request.method || '')) {
+    sendJson(response, 405, { ok: false, error: 'Method not allowed' }, { allow: routeContract.allow })
+    return true
+  }
 
   if (request.method === 'OPTIONS') {
     sendNoContent(response)
     return true
   }
+
+  const db = await getPrisma()
 
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const body = await readJson(request)
@@ -505,11 +545,18 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/setup/status' && request.method === 'GET') {
-    sendJson(response, 200, { ok: true, data: await getSetupStatus(db) })
+    sendJson(response, 200, {
+      ok: true,
+      data: {
+        ...(await getSetupStatus(db)),
+        setupTokenRequired: setupTokenRequired(),
+      },
+    })
     return true
   }
 
   if (url.pathname === '/api/setup/complete' && request.method === 'POST') {
+    requireSetupPermission(request)
     const result = await completeInitialSetup(db, await readJson(request))
     sendJson(response, 201, {
       ok: true,
@@ -549,13 +596,91 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  if (url.pathname === '/api/booking-email/status' && request.method === 'GET') {
+    requirePermission(user, 'view:reservations')
+    sendJson(response, 200, { ok: true, data: await getBookingEmailStatus(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/booking-email/sync' && request.method === 'POST') {
+    requirePermission(user, 'edit:reservation')
+    const result = await syncBookingEmail(db, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: result.status, events: result.events, message: `Booking email sync processed ${result.events.length} event${result.events.length === 1 ? '' : 's'}.` })
+    return true
+  }
+
+  if (url.pathname === '/api/booking-email/events' && request.method === 'GET') {
+    requirePermission(user, 'view:reservations')
+    sendJson(response, 200, {
+      ok: true,
+      data: await listBookingEmailEvents(db, {
+        status: url.searchParams.get('status'),
+        sourceId: url.searchParams.get('sourceId'),
+        limit: url.searchParams.get('limit'),
+      }),
+    })
+    return true
+  }
+
+  let params
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)$/)
+  if (params && request.method === 'GET') {
+    requirePermission(user, 'view:reservations')
+    sendJson(response, 200, { ok: true, data: await getBookingEmailEvent(db, params.id) })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/approve$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'edit:reservation')
+    const event = await approveBookingEmailEvent(db, params.id, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: event, message: 'Booking email event applied.' })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/reject$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'edit:reservation')
+    const event = await rejectBookingEmailEvent(db, params.id, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: event, message: 'Booking email event ignored.' })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/reprocess$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'edit:reservation')
+    const event = await reprocessBookingEmailEvent(db, params.id, user)
+    sendJson(response, 200, { ok: true, data: event, message: 'Booking email event reprocessed.' })
+    return true
+  }
+
+  if (url.pathname === '/api/booking-email/sources' && request.method === 'GET') {
+    requirePermission(user, 'view:reservations')
+    sendJson(response, 200, { ok: true, data: await listBookingEmailSources(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/booking-email/sources' && request.method === 'POST') {
+    requirePermission(user, 'edit:reservation')
+    const source = await createBookingEmailSource(db, await readJson(request), user)
+    sendJson(response, 201, { ok: true, data: source, message: 'Booking email source saved.' })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/booking-email\/sources\/(?<id>[^/]+)$/)
+  if (params && request.method === 'PATCH') {
+    requirePermission(user, 'edit:reservation')
+    const source = await updateBookingEmailSource(db, params.id, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: source, message: 'Booking email source updated.' })
+    return true
+  }
+
   if (url.pathname === '/api/rooms' && request.method === 'GET') {
     requirePermission(user, 'view:board')
     sendJson(response, 200, { ok: true, data: await listRooms(db) })
     return true
   }
-
-  let params
 
   if (url.pathname === '/api/channels/ical' && request.method === 'GET') {
     requirePermission(user, 'view:channels')

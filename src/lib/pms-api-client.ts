@@ -1,4 +1,12 @@
 import type { BoardRoomCard } from '@/types/board'
+import type {
+  BookingEmailApprovePayload,
+  BookingEmailEvent,
+  BookingEmailEventFilters,
+  BookingEmailRejectPayload,
+  BookingEmailSource,
+  BookingEmailStatus,
+} from '@/types/booking-email'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 import { isSameDay } from 'date-fns'
 
@@ -18,6 +26,80 @@ export async function pmsApi<T>(path: string, _legacyToken: string | null | unde
     throw new Error(payload?.error || 'PMS request failed.')
   }
   return payload as T
+}
+
+function bookingEmailQuery(filters: BookingEmailEventFilters = {}) {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.sourceId) params.set('sourceId', filters.sourceId)
+  if (filters.limit) params.set('limit', String(filters.limit))
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
+
+export function isBookingEmailApiNotConfigured(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || '')
+  return /not found|not configured|not implemented/i.test(message)
+}
+
+export const bookingEmailApi = {
+  status(authToken?: string | null) {
+    return pmsApi<{ ok: true; data: BookingEmailStatus }>('/api/booking-email/status', authToken)
+  },
+
+  sync(authToken?: string | null) {
+    return pmsApi<{ ok: true; data: BookingEmailStatus; events?: BookingEmailEvent[]; message?: string }>('/api/booking-email/sync', authToken, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
+  listEvents(authToken?: string | null, filters: BookingEmailEventFilters = {}) {
+    return pmsApi<{ ok: true; data: BookingEmailEvent[] }>(`/api/booking-email/events${bookingEmailQuery(filters)}`, authToken)
+  },
+
+  getEvent(authToken: string | null | undefined, eventId: string) {
+    return pmsApi<{ ok: true; data: BookingEmailEvent }>(`/api/booking-email/events/${encodeURIComponent(eventId)}`, authToken)
+  },
+
+  approveEvent(authToken: string | null | undefined, eventId: string, payload: BookingEmailApprovePayload) {
+    return pmsApi<{ ok: true; data: BookingEmailEvent; message?: string }>(`/api/booking-email/events/${encodeURIComponent(eventId)}/approve`, authToken, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  rejectEvent(authToken: string | null | undefined, eventId: string, payload: BookingEmailRejectPayload) {
+    return pmsApi<{ ok: true; data: BookingEmailEvent; message?: string }>(`/api/booking-email/events/${encodeURIComponent(eventId)}/reject`, authToken, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  reprocessEvent(authToken: string | null | undefined, eventId: string) {
+    return pmsApi<{ ok: true; data: BookingEmailEvent; message?: string }>(`/api/booking-email/events/${encodeURIComponent(eventId)}/reprocess`, authToken, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
+  listSources(authToken?: string | null) {
+    return pmsApi<{ ok: true; data: BookingEmailSource[] }>('/api/booking-email/sources', authToken)
+  },
+
+  createSource(authToken: string | null | undefined, payload: Partial<BookingEmailSource>) {
+    return pmsApi<{ ok: true; data: BookingEmailSource; message?: string }>('/api/booking-email/sources', authToken, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  },
+
+  updateSource(authToken: string | null | undefined, sourceId: string, payload: Partial<BookingEmailSource>) {
+    return pmsApi<{ ok: true; data: BookingEmailSource; message?: string }>(`/api/booking-email/sources/${encodeURIComponent(sourceId)}`, authToken, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  },
 }
 
 function cleanStatusFromServer(status: string): BoardRoomCard['cleanStatus'] {

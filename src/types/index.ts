@@ -284,6 +284,7 @@ export interface DashboardStats {
 }
 
 export * from './auth'
+export * from './booking-email'
 export * from './board'
 export * from './command-palette'
 export * from './daily-summary'

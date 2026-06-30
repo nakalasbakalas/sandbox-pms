@@ -5,13 +5,14 @@ import {
   LineWebhookEvent,
 } from '@/types/line'
 
-const LINE_API_BASE = 'https://api.line.me/v2/bot'
-
 const debugLine = (...args: unknown[]) => {
   if (import.meta.env.DEV) {
     console.debug(...args)
   }
 }
+
+const CLIENT_SIDE_LINE_DISABLED =
+  'Client-side LINE API access is disabled. Configure LINE credentials on the server and send through server endpoints.'
 
 export class LineService {
   private config: LineConfig | null = null
@@ -21,30 +22,7 @@ export class LineService {
   }
 
   async testConnection(): Promise<{ success: boolean; info?: LineBotInfo; error?: string }> {
-    if (!this.config?.channelAccessToken) {
-      return { success: false, error: 'No access token configured' }
-    }
-
-    try {
-      const response = await fetch(`${LINE_API_BASE}/info`, {
-        headers: {
-          Authorization: `Bearer ${this.config.channelAccessToken}`,
-        },
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        return { success: false, error: `API Error: ${response.status} - ${error}` }
-      }
-
-      const info: LineBotInfo = await response.json()
-      return { success: true, info }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }
-    }
+    return { success: false, error: CLIENT_SIDE_LINE_DISABLED }
   }
 
   async sendMessage(
@@ -52,50 +30,8 @@ export class LineService {
     content: string,
     metadata?: Record<string, any>
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    if (!this.config?.channelAccessToken) {
-      return { success: false, error: 'LINE not configured' }
-    }
-
-    if (!this.config.enabled) {
-      return { success: false, error: 'LINE integration is disabled' }
-    }
-
-    if (this.config.testMode && !this.config.testRecipientIds.includes(lineUserId)) {
-      debugLine('[LINE TEST MODE] Message blocked:', { lineUserId, content, metadata })
-      return { success: false, error: 'Test mode: message not sent to non-test recipient' }
-    }
-
-    try {
-      const response = await fetch(`${LINE_API_BASE}/message/push`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.channelAccessToken}`,
-        },
-        body: JSON.stringify({
-          to: lineUserId,
-          messages: [
-            {
-              type: 'text',
-              text: content,
-            },
-          ],
-        }),
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        return { success: false, error: `API Error: ${response.status} - ${error}` }
-      }
-
-      const result = await response.json()
-      return { success: true, messageId: result.sentMessages?.[0]?.id }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }
-    }
+    debugLine('[LINE] Client-side text send blocked:', { lineUserId, content, metadata })
+    return { success: false, error: CLIENT_SIDE_LINE_DISABLED }
   }
 
   async sendFlexMessage(
@@ -104,79 +40,13 @@ export class LineService {
     flexContent: any,
     metadata?: Record<string, any>
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    if (!this.config?.channelAccessToken) {
-      return { success: false, error: 'LINE not configured' }
-    }
-
-    if (!this.config.enabled) {
-      return { success: false, error: 'LINE integration is disabled' }
-    }
-
-    if (this.config.testMode && !this.config.testRecipientIds.includes(lineUserId)) {
-      debugLine('[LINE TEST MODE] Flex message blocked:', { lineUserId, altText, metadata })
-      return { success: false, error: 'Test mode: message not sent to non-test recipient' }
-    }
-
-    try {
-      const response = await fetch(`${LINE_API_BASE}/message/push`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.channelAccessToken}`,
-        },
-        body: JSON.stringify({
-          to: lineUserId,
-          messages: [
-            {
-              type: 'flex',
-              altText,
-              contents: flexContent,
-            },
-          ],
-        }),
-      })
-
-      if (!response.ok) {
-        const error = await response.text()
-        return { success: false, error: `API Error: ${response.status} - ${error}` }
-      }
-
-      const result = await response.json()
-      return { success: true, messageId: result.sentMessages?.[0]?.id }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }
-    }
+    debugLine('[LINE] Client-side flex send blocked:', { lineUserId, altText, flexContent, metadata })
+    return { success: false, error: CLIENT_SIDE_LINE_DISABLED }
   }
 
   async validateWebhookSignature(signatureHeader: string, body: string): Promise<boolean> {
-    if (!this.config?.channelSecret) {
-      return false
-    }
-
-    try {
-      const encoder = new TextEncoder()
-      const keyData = encoder.encode(this.config.channelSecret)
-      const messageData = encoder.encode(body)
-
-      const key = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-      )
-
-      const signatureBuffer = await crypto.subtle.sign('HMAC', key, messageData)
-      const hash = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)))
-
-      return hash === signatureHeader
-    } catch (error) {
-      console.error('[LINE] Signature validation error:', error)
-      return false
-    }
+    debugLine('[LINE] Client-side webhook signature validation blocked:', { signatureHeader, bodyLength: body.length })
+    return false
   }
 
   async handleWebhookEvent(event: LineWebhookEvent): Promise<void> {

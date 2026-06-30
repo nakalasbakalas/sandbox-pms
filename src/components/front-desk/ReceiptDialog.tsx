@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Receipt, Printer, Download, Envelope, CheckCircle, FileText } from '@phosphor-icons/react'
 import { toast } from 'sonner'
+import { escapeHtml, safeCssColor } from '@/lib/html-escape'
 
 interface ReceiptDialogProps {
   receipt: ReceiptData | null
@@ -32,26 +33,16 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
   if (!receipt) return null
 
   const logoUrl = propertyData?.logoUrl
-  const brandColor = propertyData?.brandColor || '#000000'
+  const brandColor = safeCssColor(propertyData?.brandColor, '#000000')
   const receiptFooter = propertyData?.receiptFooter || 'Thank you for staying with us!\nWe hope to see you again soon.'
 
   const documentTitle = activeTab === 'RECEIPT' ? 'Receipt' : 'Tax Invoice'
   const documentNumber = activeTab === 'RECEIPT' ? receipt.receiptNumber : receipt.invoiceNumber
 
-  const handlePrint = () => {
-    const printContent = printRef.current
-    if (!printContent) return
-
-    const printWindow = window.open('', '', 'width=800,height=600')
-    if (!printWindow) {
-      toast.error('Unable to open print window. Please check your popup blocker.')
-      return
-    }
-
-    printWindow.document.write(`
+  const buildPrintableHtml = (bodyHtml: string) => `
       <html>
         <head>
-          <title>${documentTitle} - ${documentNumber}</title>
+          <title>${escapeHtml(documentTitle)} - ${escapeHtml(documentNumber)}</title>
           <style>
             * {
               margin: 0;
@@ -166,10 +157,22 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
           </style>
         </head>
         <body>
-          ${printContent.innerHTML}
+          ${bodyHtml}
         </body>
       </html>
-    `)
+    `
+
+  const handlePrint = () => {
+    const printContent = printRef.current
+    if (!printContent) return
+
+    const printWindow = window.open('', '', 'width=800,height=600')
+    if (!printWindow) {
+      toast.error('Unable to open print window. Please check your popup blocker.')
+      return
+    }
+
+    printWindow.document.write(buildPrintableHtml(printContent.innerHTML))
     printWindow.document.close()
     printWindow.focus()
     
@@ -182,8 +185,18 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
   }
 
   const handleDownload = () => {
-    toast.success(`${documentTitle} download started`, {
-      description: `${documentNumber}.pdf`,
+    const printContent = printRef.current
+    if (!printContent) return
+
+    const html = buildPrintableHtml(printContent.innerHTML)
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${documentNumber}.html`
+    link.click()
+    URL.revokeObjectURL(url)
+    toast.success(`${documentTitle} downloaded`, {
+      description: `${documentNumber}.html`,
     })
   }
 
@@ -193,8 +206,21 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
       return
     }
 
-    toast.success(`${documentTitle} sent to ${receipt.guestEmail}`, {
-      description: 'Email delivery may take a few moments',
+    const subject = `${documentTitle} ${documentNumber} - ${receipt.companyInfo.name}`
+    const body = [
+      `Dear ${receipt.guestName},`,
+      '',
+      `Your ${documentTitle.toLowerCase()} ${documentNumber} is ready.`,
+      `Total: ฿${receipt.total.toLocaleString()}`,
+      `Paid: ฿${receipt.paid.toLocaleString()}`,
+      receipt.balance ? `Balance: ฿${receipt.balance.toLocaleString()}` : '',
+      '',
+      'Regards,',
+      receipt.companyInfo.name,
+    ].filter(Boolean).join('\n')
+    window.location.href = `mailto:${encodeURIComponent(receipt.guestEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    toast.success(`${documentTitle} email draft opened`, {
+      description: 'Review and send it from your mail client.',
     })
   }
 
@@ -472,7 +498,7 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
               className="gap-2"
             >
               <Download size={18} weight="bold" />
-              Download PDF
+              Download HTML
             </Button>
             {receipt.guestEmail && (
               <Button
@@ -481,7 +507,7 @@ export function ReceiptDialog({ receipt, open, onOpenChange, type: initialType =
                 className="gap-2"
               >
                 <Envelope size={18} weight="bold" />
-                Email Guest
+                Draft Email
               </Button>
             )}
           </div>

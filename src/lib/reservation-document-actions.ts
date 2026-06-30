@@ -1,6 +1,7 @@
 import { differenceInCalendarDays, format } from 'date-fns'
 
 import type { BoardRoomCard } from '@/types/board'
+import { safeCssColor } from '@/lib/html-escape'
 
 export type ReservationDocumentAction = 'invoice' | 'summary' | 'confirmation' | 'registration-card'
 
@@ -429,6 +430,7 @@ function buildDocumentBody(data: ReservationDocumentData) {
 function buildPrintableHtml(data: ReservationDocumentData) {
   const printedAt = format(new Date(), 'MMMM d, yyyy h:mm a')
   const address = propertyAddress(data.property)
+  const brandColor = safeCssColor(data.property.brandColor, '#2563eb')
 
   return `<!doctype html>
 <html>
@@ -457,7 +459,7 @@ function buildPrintableHtml(data: ReservationDocumentData) {
     .toolbar button {
       border: 0;
       border-radius: 6px;
-      background: ${escapeHtml(data.property.brandColor)};
+      background: ${brandColor};
       color: #ffffff;
       cursor: pointer;
       font-weight: 700;
@@ -465,7 +467,7 @@ function buildPrintableHtml(data: ReservationDocumentData) {
     }
     .header {
       align-items: flex-start;
-      border-bottom: 2px solid ${escapeHtml(data.property.brandColor)};
+      border-bottom: 2px solid ${brandColor};
       display: flex;
       gap: 24px;
       justify-content: space-between;

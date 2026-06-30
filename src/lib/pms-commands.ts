@@ -77,6 +77,17 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       },
     },
     {
+      id: 'nav-booking-inbox',
+      label: 'Go to Booking Inbox',
+      description: 'Review booking email events before applying PMS changes',
+      category: 'navigation',
+      keywords: ['booking inbox', 'email bookings', 'mailbox', 'booking email', 'automation'],
+      icon: EnvelopeSimple,
+      action: () => {
+        navigate?.('booking-inbox')
+      },
+    },
+    {
       id: 'nav-rooms',
       label: 'Go to Rooms',
       description: 'Review all 30 sellable rooms and room readiness',
