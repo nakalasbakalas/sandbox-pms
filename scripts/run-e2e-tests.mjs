@@ -13,6 +13,7 @@ import { resolveApiRouteContract } from '../server/api-routes.mjs'
 import { createLoginThrottle, resolveClientIp } from '../server/login-throttle.mjs'
 import { canPerformAction, canViewRoute } from '../server/rbac.mjs'
 import { requestSetupToken, requireSetupPermission, setupTokenRequired } from '../server/setup-permission.mjs'
+import { signOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import {
   calculateStayPricing,
   isSellableRoomNumber,
@@ -266,6 +267,29 @@ function startVite(port) {
   return { child, output: () => output }
 }
 
+function startApiServer(port) {
+  const child = spawn(process.execPath, ['server/index.mjs'], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      NODE_ENV: 'test',
+      OTA_WORKER_SHARED_SECRET: 'route-test-worker-secret',
+      OTA_WORKER_BASE_URL: `http://127.0.0.1:${port}/api/internal/ops/worker/tasks`,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let output = ''
+  const collect = (chunk) => {
+    output += chunk.toString()
+    if (output.length > 12_000) output = output.slice(-12_000)
+  }
+  child.stdout.on('data', collect)
+  child.stderr.on('data', collect)
+  return { child, output: () => output }
+}
+
 function stopProcessTree(child) {
   if (!child?.pid) return Promise.resolve()
   if (process.platform !== 'win32') {
@@ -448,6 +472,55 @@ async function runBrowserSmokeTests() {
   console.log('Playwright browser smoke passed.')
 }
 
+async function runInternalWorkerRouteSmoke() {
+  const port = await availablePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const server = startApiServer(port)
+
+  try {
+    await waitForHttp(`${baseUrl}/api/health`, server)
+
+    const unsignedResponse = await fetch(`${baseUrl}/api/internal/ops/worker/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ taskId: 'route-task-unsigned', taskType: 'READ_RATES', platform: 'agoda' }),
+    })
+    assert.equal(unsignedResponse.status, 401, 'internal worker endpoint rejects unsigned requests')
+
+    const invalidSignedRequest = signOpsWorkerRequest({
+      taskId: 'route-task-invalid',
+      taskType: 'FORBIDDEN',
+      platform: 'agoda',
+    }, { secret: 'route-test-worker-secret' })
+    const invalidResponse = await fetch(`${baseUrl}/api/internal/ops/worker/tasks`, {
+      method: 'POST',
+      headers: invalidSignedRequest.headers,
+      body: invalidSignedRequest.body,
+    })
+    assert.equal(invalidResponse.status, 400, 'internal worker endpoint rejects disallowed signed tasks')
+
+    const validSignedRequest = signOpsWorkerRequest({
+      taskId: 'route-task-valid',
+      taskType: 'READ_RATES',
+      platform: 'agoda',
+      dryRun: true,
+    }, { secret: 'route-test-worker-secret' })
+    const validResponse = await fetch(`${baseUrl}/api/internal/ops/worker/tasks`, {
+      method: 'POST',
+      headers: validSignedRequest.headers,
+      body: validSignedRequest.body,
+    })
+    assert.equal(validResponse.status, 200, 'internal worker endpoint accepts signed allowed tasks')
+    const payload = await validResponse.json()
+    assert.equal(payload.data.status, 'SUCCEEDED', 'internal worker route returns a structured execution result')
+    assert.equal(payload.data.data.dryRun, true, 'internal worker route defaults to dry-run execution')
+  } finally {
+    await stopProcessTree(server.child)
+  }
+
+  console.log('Internal worker route smoke passed.')
+}
+
 async function markdownFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true })
   const files = []
@@ -527,6 +600,7 @@ assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/a
 assert.deepEqual(resolveApiRouteContract('/api/ops/emergency-stop')?.methods, ['GET', 'POST'], 'Hotel Ops emergency stop exposes read/update methods')
 assert.deepEqual(resolveApiRouteContract('/api/ops/ota/status')?.methods, ['GET'], 'Hotel Ops OTA status exposes read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/scan/run')?.methods, ['POST'], 'Hotel Ops scan run exposes mutation method')
+assert.deepEqual(resolveApiRouteContract('/api/internal/ops/worker/tasks')?.methods, ['POST'], 'Hotel Ops internal worker endpoint only accepts signed posts')
 assert.deepEqual(resolveApiRouteContract('/api/reservations')?.methods, ['GET', 'POST'], 'reservations collection exposes read/create methods')
 assert.deepEqual(resolveApiRouteContract('/api/reservations/res-1/check-in')?.methods, ['POST'], 'check-in mutation only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/booking-email/status')?.methods, ['GET'], 'booking email status exposes read method')
@@ -642,6 +716,7 @@ if (previousTrustProxyHeaders === undefined) delete process.env.TRUST_PROXY_HEAD
 else process.env.TRUST_PROXY_HEADERS = previousTrustProxyHeaders
 
 await runDocumentationLinkSmoke()
+await runInternalWorkerRouteSmoke()
 await runBrowserSmokeTests()
 
 if (!runDbWorkflow) {

@@ -12,6 +12,13 @@ import { canViewRoute, requirePermission } from './rbac.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
+  OPS_WORKER_NONCE_HEADER,
+  OPS_WORKER_SIGNATURE_HEADER,
+  OPS_WORKER_TIMESTAMP_HEADER,
+  runSignedMockOtaWorkerTask,
+  verifyOpsWorkerRequest,
+} from './ops-worker-auth.mjs'
+import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
   getIcalFeedByToken,
@@ -87,7 +94,7 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = 'content-type, authorization, x-setup-token'
+const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
 const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
@@ -512,6 +519,30 @@ async function handleApi(request, response, url) {
 
   if (request.method === 'OPTIONS') {
     sendNoContent(response)
+    return true
+  }
+
+  if (url.pathname === '/api/internal/ops/worker/tasks' && request.method === 'POST') {
+    const rawBody = await readRawBody(request)
+    const workerAuth = verifyOpsWorkerRequest({ body: rawBody, headers: request.headers })
+    if (!workerAuth.ok) {
+      sendJson(response, workerAuth.statusCode || 401, { ok: false, error: workerAuth.error || 'Signed OTA worker request is required.' })
+      return true
+    }
+
+    let payload
+    try {
+      payload = JSON.parse(rawBody.toString('utf8'))
+    } catch {
+      sendJson(response, 400, { ok: false, error: 'Worker request body must be valid JSON.' })
+      return true
+    }
+
+    sendJson(response, 200, {
+      ok: true,
+      data: runSignedMockOtaWorkerTask(payload),
+      message: 'Signed Hotel Ops worker request accepted in mock mode.',
+    })
     return true
   }
 

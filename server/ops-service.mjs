@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
+import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
 
 const TASK_TYPES = new Set([
   'READ_RESERVATIONS',
@@ -881,14 +882,21 @@ export async function setEmergencyStop(prisma, input, actor) {
 
 export async function getOtaStatus(prisma) {
   await getProperty(prisma)
+  const workerBaseUrlConfigured = Boolean(opsWorkerBaseUrl())
+  const workerSecretConfigured = Boolean(opsWorkerSecret())
+  const signedWorkerConfigured = opsWorkerConfigured()
   return {
     dryRun: String(process.env.OTA_DRY_RUN || 'true').toLowerCase() !== 'false',
-    workerConfigured: Boolean(process.env.OTA_WORKER_URL && process.env.OTA_WORKER_SECRET),
+    workerConfigured: signedWorkerConfigured,
+    workerBaseUrlConfigured,
+    workerSecretConfigured,
     platforms: ['booking', 'agoda', 'trip', 'expedia'].map((platform) => ({
       platform,
       configured: false,
-      status: 'mock-dry-run',
-      message: 'MVP uses MockOtaBot/dry-run until OTA credentials and Playwright selectors are verified.',
+      status: signedWorkerConfigured ? 'signed-worker-ready' : 'mock-dry-run',
+      message: signedWorkerConfigured
+        ? 'Signed OTA worker boundary is configured. Keep dry-run enabled until credentials and selectors are verified.'
+        : 'MVP uses MockOtaBot/dry-run until OTA credentials and Playwright selectors are verified.',
     })),
   }
 }

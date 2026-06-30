@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { buildOpsNotificationDrafts, evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createUser } from '../server/pms-service.mjs'
 
 async function importTypeScriptModule(path) {
@@ -393,6 +394,61 @@ assert.equal(notificationDrafts[0].status, 'SENT', 'Hotel Ops in-app notificatio
 assert.equal(notificationDrafts[1].channel, 'EMAIL', 'Hotel Ops notification records email channel intent')
 assert.equal(notificationDrafts[1].status, 'PENDING_PROVIDER', 'Hotel Ops does not fake email delivery without a provider')
 assert.equal(notificationDrafts[1].recipientAddress, 'ops@property.test', 'Hotel Ops email intent targets the property alert email')
+
+const signedWorkerBody = {
+  taskId: 'task-1',
+  taskType: 'UPDATE_RATE',
+  platform: 'agoda',
+  hotelId: 'SANDBOX',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  rate: { amount: 2200, currency: 'THB' },
+  dryRun: true,
+}
+const signedWorkerRequest = signOpsWorkerRequest(signedWorkerBody, {
+  secret: 'shared-worker-secret',
+  timestamp: 1_000_000,
+  nonce: 'business-test-nonce',
+})
+assert.equal(
+  verifyOpsWorkerRequest({ body: signedWorkerRequest.body, headers: signedWorkerRequest.headers, secret: 'shared-worker-secret', now: 1_000_000 }).ok,
+  true,
+  'Hotel Ops signed worker requests verify with shared secret',
+)
+assert.equal(
+  verifyOpsWorkerRequest({ body: signedWorkerRequest.body, headers: {}, secret: 'shared-worker-secret', now: 1_000_000 }).statusCode,
+  401,
+  'Hotel Ops worker rejects unsigned requests',
+)
+assert.equal(
+  verifyOpsWorkerRequest({ body: signedWorkerRequest.body.replace('UPDATE_RATE', 'READ_RATES'), headers: signedWorkerRequest.headers, secret: 'shared-worker-secret', now: 1_000_000 }).ok,
+  false,
+  'Hotel Ops worker rejects tampered signed payloads',
+)
+const signedMockWorkerResult = runSignedMockOtaWorkerTask(JSON.parse(signedWorkerRequest.body))
+assert.equal(signedMockWorkerResult.status, 'SUCCEEDED', 'Hotel Ops signed mock worker returns structured result')
+assert.equal(signedMockWorkerResult.data.dryRun, true, 'Hotel Ops signed mock worker stays in dry-run by default')
+assert.throws(
+  () => runSignedMockOtaWorkerTask({ taskId: 'task-2', taskType: 'FORBIDDEN', platform: 'agoda' }),
+  /not allowed/,
+  'Hotel Ops worker rejects disallowed task types',
+)
+assert.throws(
+  () => runSignedMockOtaWorkerTask({ taskId: 'task-3', taskType: 'READ_RATES', platform: 'agoda', password: 'never' }),
+  /credential field/,
+  'Hotel Ops worker payload rejects credential fields',
+)
+assert.equal(
+  opsWorkerConfigured({ OTA_WORKER_BASE_URL: 'http://localhost:8788', OTA_WORKER_SHARED_SECRET: 'secret' }),
+  true,
+  'Hotel Ops worker config honors package environment variable names',
+)
+assert.equal(
+  opsWorkerConfigured({ OTA_WORKER_URL: 'http://localhost:8788', OTA_WORKER_SECRET: 'secret' }),
+  true,
+  'Hotel Ops worker config remains compatible with legacy environment variable names',
+)
 
 const fixedOpsDate = new Date('2026-06-30T00:00:00.000Z')
 const rateCommand = parseHotelOpsCommand('Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', { now: fixedOpsDate })
