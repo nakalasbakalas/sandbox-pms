@@ -1049,6 +1049,22 @@ const weekendInsights = buildOpsScanInsights({
 })
 assert.equal(weekendInsights.some((alert) => alert.alertType === 'WEEKEND_SPIKE'), true, 'Hotel Ops scan creates weekend spike alert only when weekend velocity accelerates')
 
+const otaImbalanceInsights = buildOpsScanInsights({
+  reservations: [
+    ...Array.from({ length: 4 }, (_, index) => makeOpsReservation(`ota-booking-${index}`, '2026-06-10T12:00:00.000Z', { source: 'BOOKING_COM' })),
+    makeOpsReservation('ota-booking-email', '2026-06-10T12:00:00.000Z', { source: 'EMAIL', sourceEmailEvent: { sourceName: 'Booking.com' } }),
+    makeOpsReservation('ota-agoda-1', '2026-06-10T12:00:00.000Z', { source: 'AGODA' }),
+    makeOpsReservation('ota-agoda-2', '2026-06-10T12:00:00.000Z', { source: 'AGODA' }),
+  ],
+  sellableRooms: 20,
+  now: fixedOpsDate,
+})
+const otaImbalanceAlert = otaImbalanceInsights.find((alert) => alert.alertType === 'OTA_IMBALANCE')
+assert.equal(Boolean(otaImbalanceAlert), true, 'Hotel Ops scan creates OTA imbalance alert when one supported platform dominates channel mix')
+assert.equal(otaImbalanceAlert?.platform, 'booking', 'Hotel Ops OTA imbalance alert identifies the dominant platform')
+assert.equal(otaImbalanceAlert?.metrics?.platformCounts?.booking, 5, 'Hotel Ops OTA imbalance counts persisted source and source-email reservations')
+assert.equal(otaImbalanceAlert?.recommendedAction, null, 'Hotel Ops OTA imbalance is alert-only and does not create an automatic OTA mutation recommendation')
+
 assert.equal(
   hotelOpsTrendAlertFingerprint({
     alertType: 'LOW_DEMAND',

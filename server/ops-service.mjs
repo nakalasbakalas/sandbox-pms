@@ -48,9 +48,25 @@ const OPS_SCAN_POLICY = Object.freeze({
   cancellationBaselineDays: 14,
   cancellationSpikeMultiplier: 2,
   weekendVelocityRatio: 1.5,
+  otaImbalanceMinimumReservations: 4,
+  otaImbalanceDominanceRatio: 0.65,
   highDemandRecommendedRate: 2200,
   lowDemandRecommendedRate: 1300,
   currency: 'THB',
+})
+
+const RESERVATION_SOURCE_PLATFORM = Object.freeze({
+  BOOKING_COM: 'booking',
+  AGODA: 'agoda',
+  EXPEDIA: 'expedia',
+})
+
+const PLATFORM_LABELS = Object.freeze({
+  booking: 'Booking.com',
+  agoda: 'Agoda',
+  expedia: 'Expedia',
+  trip: 'Trip.com',
+  unknown: 'Unknown OTA',
 })
 
 const RULES = {
@@ -1234,6 +1250,8 @@ export function getOpsScanPolicy(env = process.env) {
       cancellationBaselineDays: OPS_SCAN_POLICY.cancellationBaselineDays,
       cancellationSpikeMultiplier: OPS_SCAN_POLICY.cancellationSpikeMultiplier,
       weekendVelocityRatio: OPS_SCAN_POLICY.weekendVelocityRatio,
+      otaImbalanceMinimumReservations: OPS_SCAN_POLICY.otaImbalanceMinimumReservations,
+      otaImbalanceDominanceRatio: OPS_SCAN_POLICY.otaImbalanceDominanceRatio,
       highDemandRecommendedRate: OPS_SCAN_POLICY.highDemandRecommendedRate,
       lowDemandRecommendedRate: OPS_SCAN_POLICY.lowDemandRecommendedRate,
       currency: OPS_SCAN_POLICY.currency,
@@ -1271,6 +1289,63 @@ function dominantRoomType(reservations) {
   }
   if (counts.size !== 1) return 'All Rooms'
   return counts.keys().next().value || 'All Rooms'
+}
+
+function supportedOtaPlatform(value) {
+  const platform = normalizePlatform(value)
+  return platform && !['all', 'unknown'].includes(platform) ? platform : null
+}
+
+function reservationOtaPlatform(reservation) {
+  const source = String(reservation?.source || '').trim().toUpperCase()
+  if (RESERVATION_SOURCE_PLATFORM[source]) return RESERVATION_SOURCE_PLATFORM[source]
+
+  const explicitPlatform = supportedOtaPlatform([
+    reservation?.platform,
+    reservation?.channelProvider,
+    reservation?.channel?.provider,
+    reservation?.channel?.name,
+  ].filter(Boolean).join(' '))
+  if (explicitPlatform) return explicitPlatform
+
+  return supportedOtaPlatform([
+    reservation?.source,
+    reservation?.sourceName,
+    reservation?.sender,
+    reservation?.sourceEmailEvent?.sourceName,
+    reservation?.sourceEmailEvent?.sender,
+    reservation?.sourceEmailEvent?.sourceMailbox,
+    reservation?.channelRef,
+  ].filter(Boolean).join(' '))
+}
+
+function platformLabel(platform) {
+  return PLATFORM_LABELS[platform] || String(platform || 'OTA')
+}
+
+function otaPlatformDistribution(reservations) {
+  const counts = new Map()
+  for (const reservation of reservations) {
+    const platform = reservationOtaPlatform(reservation)
+    if (!platform) continue
+    counts.set(platform, (counts.get(platform) || 0) + 1)
+  }
+  const total = Array.from(counts.values()).reduce((sum, count) => sum + count, 0)
+  const platforms = Array.from(counts.entries())
+    .map(([platform, count]) => ({
+      platform,
+      label: platformLabel(platform),
+      count,
+      share: total > 0 ? count / total : 0,
+    }))
+    .sort((a, b) => b.count - a.count || a.platform.localeCompare(b.platform))
+  return {
+    total,
+    platforms,
+    counts: Object.fromEntries(platforms.map((item) => [item.platform, item.count])),
+    shares: Object.fromEntries(platforms.map((item) => [item.platform, item.share])),
+    dominant: platforms[0] || null,
+  }
 }
 
 function velocityMetrics(reservations, now, baselineDays = OPS_SCAN_POLICY.bookingVelocityBaselineDays) {
@@ -1335,6 +1410,8 @@ export function buildOpsScanInsights({
   const weekendKey = isoDate(weekend)
   const weekendReservations = activeReservations.filter((reservation) => reservationOverlaps(reservation, weekend, weekendEnd))
   const weekendVelocity = velocityMetrics(weekendReservations, scanNow)
+  const otaDistribution = otaPlatformDistribution(activeReservations)
+  const dominantOta = otaDistribution.dominant
   const insights = []
   const forceValue = String(force || '')
 
@@ -1404,6 +1481,44 @@ export function buildOpsScanInsights({
     })
   }
 
+  if (
+    (
+      dominantOta
+      && otaDistribution.total >= OPS_SCAN_POLICY.otaImbalanceMinimumReservations
+      && dominantOta.share >= OPS_SCAN_POLICY.otaImbalanceDominanceRatio
+    )
+    || forceValue === 'ota-imbalance'
+  ) {
+    const platform = dominantOta?.platform || 'unknown'
+    const share = dominantOta?.share || 0
+    const reservationCount = dominantOta?.count || 0
+    insights.push({
+      alertType: 'OTA_IMBALANCE',
+      severity: share >= 0.8 ? 'HIGH' : 'MEDIUM',
+      title: 'OTA channel imbalance',
+      summary: dominantOta
+        ? `${dominantOta.label} accounts for ${(share * 100).toFixed(0)}% of OTA reservations in the next ${OPS_SCAN_POLICY.horizonDays} days. Review channel mix and direct-booking exposure.`
+        : 'OTA channel mix needs review. Check booking sources before changing rates or availability.',
+      platform,
+      roomType,
+      dateStart: dateOrNull(start),
+      dateEnd: dateOrNull(end),
+      metrics: {
+        totalOtaReservations: otaDistribution.total,
+        dominantPlatform: platform,
+        dominantPlatformLabel: dominantOta?.label || platformLabel(platform),
+        dominantReservations: reservationCount,
+        dominantShare: share,
+        platformCounts: otaDistribution.counts,
+        platformShares: otaDistribution.shares,
+        minimumReservations: OPS_SCAN_POLICY.otaImbalanceMinimumReservations,
+        dominanceThreshold: OPS_SCAN_POLICY.otaImbalanceDominanceRatio,
+        horizonDays: OPS_SCAN_POLICY.horizonDays,
+      },
+      recommendedAction: null,
+    })
+  }
+
   return insights
 }
 
@@ -1468,7 +1583,7 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
         checkIn: { lte: weekEnd },
         checkOut: { gte: today },
       },
-      include: { roomType: true },
+      include: { roomType: true, sourceEmailEvent: true },
     }),
     prisma.room.count({ where: { propertyId: property.id, operationalStatus: 'AVAILABLE' } }),
     prisma.reservationLog.findMany({
