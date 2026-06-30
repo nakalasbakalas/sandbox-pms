@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -667,6 +667,23 @@ assert.equal(['READ_RESERVATIONS', 'SCAN_BOOKINGS'].includes(scanCommand.taskTyp
 assert.equal(scanCommand.riskLevel, 'LOW', 'Hotel Ops booking scans are low risk')
 assert.equal(scanCommand.approvalRequired, false, 'Hotel Ops booking scans do not require owner approval')
 
+const readAvailabilityCommand = parseHotelOpsCommand('Check Booking Deluxe Room availability this Friday and Saturday.', { now: fixedOpsDate })
+assert.equal(readAvailabilityCommand.taskType, 'READ_AVAILABILITY', 'Hotel Ops parser maps availability checks to read-only tasks')
+assert.equal(readAvailabilityCommand.roomType, 'Deluxe Room', 'Hotel Ops availability check keeps the room type')
+assert.equal(readAvailabilityCommand.riskLevel, 'LOW', 'Hotel Ops availability checks are low risk')
+
+const availabilityCommand = parseHotelOpsCommand('Set Booking Deluxe Room availability to 3 rooms this Friday and Saturday.', { now: fixedOpsDate })
+assert.equal(availabilityCommand.taskType, 'UPDATE_AVAILABILITY', 'Hotel Ops parser maps availability changes to update tasks')
+assert.equal(availabilityCommand.platform, 'booking', 'Hotel Ops availability parser detects Booking platform')
+assert.equal(availabilityCommand.availability.rooms, 3, 'Hotel Ops availability parser extracts rooms available')
+assert.equal(availabilityCommand.availability.status, 'open', 'Hotel Ops availability parser marks positive rooms as open')
+assert.equal(availabilityCommand.approvalRequired, true, 'Hotel Ops availability updates require approval')
+
+const ambiguousAvailabilityCommand = parseHotelOpsCommand('Set Booking availability to 3 rooms.', { now: fixedOpsDate })
+assert.equal(ambiguousAvailabilityCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser requests clarification for incomplete availability updates')
+assert.equal(ambiguousAvailabilityCommand.missingFields.includes('roomType'), true, 'Hotel Ops incomplete availability update asks for room type')
+assert.equal(ambiguousAvailabilityCommand.missingFields.includes('dateRange'), true, 'Hotel Ops incomplete availability update asks for dates')
+
 const guestMessagesCommand = parseHotelOpsCommand('Read guest messages from Booking.com.', { now: fixedOpsDate })
 assert.equal(guestMessagesCommand.taskType, 'READ_GUEST_MESSAGES', 'Hotel Ops parser maps guest message reads to read-only message tasks')
 assert.equal(guestMessagesCommand.riskLevel, 'LOW', 'Hotel Ops guest message reads are low risk')
@@ -691,6 +708,13 @@ assert.equal(ambiguousRateCommand.missingFields.includes('roomType'), true, 'Hot
 const allRoomsRateCommand = parseHotelOpsCommand('Set all rooms to 2,200 THB 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
 assert.equal(allRoomsRateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser accepts all-room recommendation tasks')
 assert.equal(allRoomsRateCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room target')
+
+assert.equal(normalizeOpsSourceChannel('LINE'), 'line', 'Hotel Ops source channel normalization accepts known channels case-insensitively')
+assert.throws(
+  () => normalizeOpsSourceChannel('browser-extension'),
+  /source channel is not allowed/,
+  'Hotel Ops source channel normalization rejects unsupported channels before Prisma writes',
+)
 
 const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')

@@ -34,6 +34,7 @@ const WRITE_TASK_TYPES = new Set([
 ])
 
 const ACTIVE_TREND_ALERT_STATUSES = ['CREATED', 'ACKNOWLEDGED', 'RECOMMENDATION_APPROVED']
+const OPS_SOURCE_CHANNELS = new Set(['web', 'line', 'whatsapp', 'telegram', 'email', 'system'])
 
 const OPS_SCAN_POLICY = Object.freeze({
   timezone: 'Asia/Bangkok',
@@ -215,6 +216,16 @@ function parseMoney(text) {
   return { amount: Number(match[1].replace(/,/g, '')), currency: 'THB' }
 }
 
+function parseAvailabilityRooms(text) {
+  const source = String(text || '').toLowerCase()
+  const match = source.match(/(?:availability|inventory)\s*(?:to|at|=)?\s*(\d+)/)
+    || source.match(/(\d+)\s+(?:rooms?|units?)\s+(?:available|open|left)/)
+    || source.match(/(?:set|update|change|adjust)\s+.*?(?:to|at)\s*(\d+)\s+(?:rooms?|units?)/)
+  if (!match) return null
+  const rooms = Number(match[1])
+  return Number.isInteger(rooms) && rooms >= 0 ? rooms : null
+}
+
 function parseMessagePayload(text) {
   const source = String(text || '').trim()
   const explicit = source.match(/\b(?:reply|message|description|listing)\s*[:=-]\s*(.+)$/i)?.[1]
@@ -268,6 +279,29 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
     })
   }
 
+  if (/(read|check|show|scan).*(availability|inventory|rooms?\s+available|open\s+rooms?)/.test(lower)) {
+    const missingFields = []
+    if (!roomType) missingFields.push('roomType')
+    if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
+    if (missingFields.length > 0) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        roomType,
+        dateRange,
+        missingFields,
+        rationale: 'Availability lookups need room type and dates.',
+        confidence: 0.68,
+      })
+    }
+    return taskWithRule('READ_AVAILABILITY', {
+      platform,
+      roomType,
+      dateRange,
+      rationale: 'Read-only availability lookup request.',
+      confidence: 0.84,
+    })
+  }
+
   if (/(read|check|show|scan).*(guest\s+)?messages?/.test(lower)) {
     return taskWithRule('READ_GUEST_MESSAGES', {
       platform,
@@ -293,6 +327,33 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
       dateRange,
       rationale: 'Read-only rate lookup request.',
       confidence: 0.82,
+    })
+  }
+
+  if (/(set|update|change|adjust).*(availability|inventory|rooms?\s+available)/.test(lower)) {
+    const availabilityRooms = parseAvailabilityRooms(message)
+    const missingFields = []
+    if (!roomType) missingFields.push('roomType')
+    if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
+    if (availabilityRooms === null) missingFields.push('availability.rooms')
+    if (missingFields.length > 0) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        roomType,
+        dateRange,
+        availability: availabilityRooms === null ? undefined : { rooms: availabilityRooms, status: availabilityRooms === 0 ? 'closed' : 'open' },
+        missingFields,
+        rationale: 'Availability changes need room type, dates, and rooms available before approval.',
+        confidence: 0.7,
+      })
+    }
+    return taskWithRule('UPDATE_AVAILABILITY', {
+      platform,
+      roomType,
+      dateRange,
+      availability: { rooms: availabilityRooms, status: availabilityRooms === 0 ? 'closed' : 'open' },
+      rationale: 'High-risk availability change request.',
+      confidence: 0.86,
     })
   }
 
@@ -662,6 +723,14 @@ function idempotencyKey(actor, rawMessage, sourceChannel) {
     .digest('hex')
 }
 
+export function normalizeOpsSourceChannel(value) {
+  const channel = normalizeText(value || 'web').toLowerCase()
+  if (!OPS_SOURCE_CHANNELS.has(channel)) {
+    throw new PmsValidationError('Hotel Ops source channel is not allowed.', 400)
+  }
+  return channel
+}
+
 function workerFailureProof(task, kind = 'error') {
   return [{
     id: `${task.id}-${kind}`,
@@ -840,7 +909,7 @@ export async function submitOpsCommand(prisma, input, actor) {
   const property = await getProperty(prisma)
   const rawMessage = normalizeText(input?.message || input?.rawMessage)
   const persistedRawMessage = redactedSensitiveText(rawMessage)
-  const sourceChannel = normalizeText(input?.sourceChannel || 'web') || 'web'
+  const sourceChannel = normalizeOpsSourceChannel(input?.sourceChannel || 'web')
   const parsed = parseHotelOpsCommand(rawMessage)
   const stop = await getEmergencyStop(prisma)
   const decision = decisionFor(parsed, actor, stop)
