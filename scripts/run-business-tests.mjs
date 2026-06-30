@@ -903,6 +903,34 @@ assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_S
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
 assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
 
+const selectorFailureFixture = createOpsCommandPrismaFixture()
+const selectorFailureResult = await submitOpsCommand(
+  selectorFailureFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday selector failure.', sourceChannel: 'web' },
+  opsManager,
+)
+await approveOpsTask(selectorFailureFixture.prisma, selectorFailureResult.task.id, { notes: 'Approved selector failure smoke.' }, opsOwner)
+const failedRateTask = await runQueuedOpsTask(selectorFailureFixture.prisma, selectorFailureResult.task.id, opsOwner)
+assert.equal(failedRateTask.status, 'FAILED', 'Hotel Ops service persists failed signed worker results')
+assert.equal(failedRateTask.errorCode, 'MOCK_SELECTOR_FAILURE', 'Hotel Ops service preserves worker failure error codes')
+assert.equal(failedRateTask.proofScreenshots.some((proof) => proof.kind === 'error'), true, 'Hotel Ops service persists worker error proof screenshots')
+assert.equal(selectorFailureFixture.logs.some((log) => log.action === 'WORKER_FAILED'), true, 'Hotel Ops service logs worker failures')
+assert.equal(selectorFailureFixture.audits.some((audit) => audit.action === 'OPS_TASK_FAILED'), true, 'Hotel Ops service audits worker failures')
+
+const humanChallengeFixture = createOpsCommandPrismaFixture()
+const humanChallengeResult = await submitOpsCommand(
+  humanChallengeFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday captcha.', sourceChannel: 'web' },
+  opsManager,
+)
+await approveOpsTask(humanChallengeFixture.prisma, humanChallengeResult.task.id, { notes: 'Approved human challenge smoke.' }, opsOwner)
+const humanChallengeTask = await runQueuedOpsTask(humanChallengeFixture.prisma, humanChallengeResult.task.id, opsOwner)
+assert.equal(humanChallengeTask.status, 'NEEDS_HUMAN', 'Hotel Ops service persists human-challenge worker results')
+assert.equal(humanChallengeTask.errorCode, 'NEEDS_HUMAN_CHALLENGE', 'Hotel Ops service preserves human-challenge error codes')
+assert.equal(humanChallengeTask.proofScreenshots.some((proof) => proof.kind === 'trace'), true, 'Hotel Ops service persists human-challenge trace proof')
+assert.equal(humanChallengeFixture.logs.some((log) => log.action === 'WORKER_NEEDS_HUMAN'), true, 'Hotel Ops service logs human-challenge worker results')
+assert.equal(humanChallengeFixture.notifications.some((notification) => notification.type === 'NEEDS_HUMAN'), true, 'Hotel Ops service records human-action notifications')
+
 const emergencyFixture = createOpsCommandPrismaFixture()
 await setEmergencyStop(emergencyFixture.prisma, { enabled: true, reason: 'Owner paused OTA writes.' }, opsOwner)
 assert.equal(emergencyFixture.audits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLED'), true, 'Hotel Ops service audits emergency stop activation')
