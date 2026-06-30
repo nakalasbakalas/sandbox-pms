@@ -46,6 +46,14 @@ function looksLikePasswordHash(raw) {
     /^[0-9a-f]+$/i.test(hash || '')
 }
 
+function validEmail(raw) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(raw || '').trim().toLowerCase())
+}
+
+function validStaffUsername(raw) {
+  return /^[a-z0-9][a-z0-9._-]{1,62}$/.test(String(raw || '').trim().toLowerCase())
+}
+
 function validateSeedUsersJson() {
   const raw = value('SEED_USERS_JSON')
   if (!raw) return
@@ -64,6 +72,7 @@ function validateSeedUsersJson() {
   }
 
   const emails = new Set()
+  const logins = new Set()
   for (const [index, user] of parsed.entries()) {
     const label = `SEED_USERS_JSON[${index}]`
     if (!user || typeof user !== 'object') {
@@ -72,12 +81,23 @@ function validateSeedUsersJson() {
     }
 
     const email = String(user.email || '').trim().toLowerCase()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      addLine(errors, `${label}.email`, 'must be a valid email address')
+    if (email && !validEmail(email)) {
+      addLine(errors, `${label}.email`, 'must be a valid email address or blank')
     } else if (emails.has(email)) {
       addLine(errors, `${label}.email`, 'must be unique')
-    } else {
+    } else if (email) {
       emails.add(email)
+    }
+
+    const username = String(user.username || email).trim().toLowerCase()
+    if (!username) {
+      addLine(errors, `${label}.username`, 'is required when email is blank')
+    } else if (username.includes('@') ? !validEmail(username) : !validStaffUsername(username)) {
+      addLine(errors, `${label}.username`, 'must be a valid email login or 2-63 character staff username')
+    } else if (logins.has(username)) {
+      addLine(errors, `${label}.username`, 'must be unique')
+    } else {
+      logins.add(username)
     }
 
     if (!String(user.firstName || '').trim()) addLine(errors, `${label}.firstName`, 'is required')

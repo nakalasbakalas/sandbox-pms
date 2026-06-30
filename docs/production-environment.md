@@ -17,7 +17,7 @@ The generated file is `ops/production-credentials.local` and is ignored by git.
 Use these values as follows:
 
 - `SESSION_SECRET`: Render can generate this automatically from `render.yaml`. Use the local value only on platforms without generated secrets.
-- `SEED_USERS_JSON`: preferred for approved real staff/admin accounts, using hash-only entries.
+- `SEED_USERS_JSON`: preferred for approved real staff/admin accounts, using hash-only entries. Each user needs a unique `username`; `email` can be null for staff who do not have email addresses.
 - `SEED_ADMIN_EMAIL`: legacy single-admin bootstrap fallback.
 - `SEED_ADMIN_PASSWORD_HASH`: set this in Render only for the legacy bootstrap fallback.
 - `SEED_ADMIN_TEMP_PASSWORD`: only generated when `npm run prod:credentials -- --with-temp-admin --admin-email owner@example.com` is used for the legacy bootstrap path.
@@ -28,7 +28,7 @@ Before deployment, run:
 npm run prod:preflight
 ```
 
-The preflight verifies production mode, server auth mode, safe seed mode, a real database URL, a strong session secret, safe E2E flags, seed user shape/hash validity, legacy bootstrap email/hash pairing, and complete LINE credentials when LINE is enabled.
+The preflight verifies production mode, server auth mode, safe seed mode, a real database URL, a strong session secret, safe E2E flags, seed user shape/hash validity, username-only staff login support, legacy bootstrap email/hash pairing, and complete LINE credentials when LINE is enabled.
 
 ## Render Environment
 

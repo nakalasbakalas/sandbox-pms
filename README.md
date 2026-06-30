@@ -74,7 +74,7 @@ Against a production-like database URL, the room import also requires:
 ALLOW_PROD_ROOM_ONBOARDING=true
 ```
 
-Real staff users must be approved and configured through hash-only `SEED_USERS_JSON`, a setup-token flow, or an explicitly reviewed bootstrap path. Do not commit plaintext credentials.
+Real staff users must be approved and configured through hash-only `SEED_USERS_JSON`, a setup-token flow, or an explicitly reviewed bootstrap path. Staff accounts can be username-only when email is not available. Do not commit plaintext credentials.
 
 ## Production Operations
 

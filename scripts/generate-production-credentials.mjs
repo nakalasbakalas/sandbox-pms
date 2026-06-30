@@ -68,7 +68,7 @@ const lines = [
   `SESSION_SECRET=${sessionSecret}`,
   '',
   '# Preferred real user setup: set approved users in Render with passwordHash values.',
-  '# Example shape: [{"email":"owner@example.com","firstName":"Owner","lastName":"Admin","role":"ADMIN","passwordHash":"..."}]',
+  '# Example shape: [{"username":"owner@example.com","email":"owner@example.com","firstName":"Owner","lastName":"Admin","role":"ADMIN","passwordHash":"..."},{"username":"hk1","email":null,"firstName":"HK","lastName":"One","role":"HOUSEKEEPING","passwordHash":"..."}]',
   'SEED_USERS_JSON=',
   '',
   withTempAdmin
