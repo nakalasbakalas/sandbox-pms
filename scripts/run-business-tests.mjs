@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -47,6 +47,7 @@ function createOpsCommandPrismaFixture() {
       },
     },
     hotelOpsEmergencyStop: {
+      findUnique: async ({ where }) => where?.propertyId === property.id ? stop : null,
       upsert: async ({ create, update }) => {
         stop = { id: 'stop-ops-test', createdAt: now(), updatedAt: now(), ...(stop || create), ...update }
         return stop
@@ -77,6 +78,12 @@ function createOpsCommandPrismaFixture() {
         Object.assign(task, data, { updatedAt: now() })
         return withTaskRelations(task)
       },
+      updateMany: async ({ where, data }) => {
+        const task = tasks.find((item) => item.id === where?.id && (!where?.status || item.status === where.status))
+        if (!task) return { count: 0 }
+        Object.assign(task, data, { updatedAt: now() })
+        return { count: 1 }
+      },
     },
     hotelOpsTaskApproval: {
       create: async ({ data }) => {
@@ -90,6 +97,12 @@ function createOpsCommandPrismaFixture() {
           ...data,
         }
         approvals.push(approval)
+        return approval
+      },
+      update: async ({ where, data }) => {
+        const approval = approvals.find((item) => item.id === where?.id)
+        if (!approval) return null
+        Object.assign(approval, data)
         return approval
       },
     },
@@ -868,11 +881,33 @@ assert.equal(approvalFixture.approvals[0].requiredRole, 'OWNER', 'Hotel Ops rate
 assert.equal(approvalFixture.notifications.some((notification) => notification.type === 'APPROVAL_REQUEST'), true, 'Hotel Ops service records approval request notifications')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REQUESTED'), true, 'Hotel Ops service audits approval requests')
 
+const opsOwner = { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' }
+const approvedRateTask = await approveOpsTask(
+  approvalFixture.prisma,
+  pendingRateResult.task.id,
+  { notes: 'Approved dry-run rate proof.' },
+  opsOwner,
+)
+assert.equal(approvedRateTask.status, 'QUEUED', 'Hotel Ops approval queues the task for signed worker execution')
+assert.equal(approvalFixture.approvals[0].status, 'APPROVED', 'Hotel Ops approval records the owner decision')
+assert.equal(approvalFixture.logs.some((log) => log.action === 'APPROVAL_GRANTED'), true, 'Hotel Ops service logs approval grants')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_GRANTED'), true, 'Hotel Ops service audits approval grants')
+
+const executedRateTask = await runQueuedOpsTask(approvalFixture.prisma, pendingRateResult.task.id, opsOwner)
+assert.equal(executedRateTask.status, 'SUCCEEDED', 'Hotel Ops service executes approved mock rate updates successfully')
+assert.equal(executedRateTask.proofScreenshots.length > 0, true, 'Hotel Ops service persists worker proof screenshots')
+assert.equal(executedRateTask.proofScreenshots.every((proof) => proof.redactionStatus === 'SAFE'), true, 'Hotel Ops persisted worker proof is marked safe')
+assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_STARTED'), true, 'Hotel Ops service logs worker start')
+assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_SUCCEEDED'), true, 'Hotel Ops service logs worker success')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_STARTED'), true, 'Hotel Ops service audits worker start')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
+assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
+
 const forbiddenFixture = createOpsCommandPrismaFixture()
 const forbiddenServiceResult = await submitOpsCommand(
   forbiddenFixture.prisma,
   { message: 'Cancel all bookings and refund guests.', sourceChannel: 'web' },
-  { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' },
+  opsOwner,
 )
 assert.equal(forbiddenServiceResult.task.status, 'DENIED', 'Hotel Ops service persists forbidden commands as denied attempts')
 assert.equal(forbiddenFixture.approvals.length, 0, 'Hotel Ops service does not create approvals for forbidden commands')
