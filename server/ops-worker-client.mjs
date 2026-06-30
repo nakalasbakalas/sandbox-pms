@@ -36,6 +36,7 @@ export function buildOpsWorkerTaskPayload(task, options = {}) {
     roomType: normalizeString(task.roomType),
     dateStart: isoDateOrNull(task.dateStart),
     dateEnd: isoDateOrNull(task.dateEnd),
+    message: normalizeString(task.message),
     dryRun: options.dryRun !== false,
   }
 

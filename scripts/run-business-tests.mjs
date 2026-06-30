@@ -516,6 +516,40 @@ const bookingHumanTask = await executeBookingComTask({
 assert.equal(bookingHumanTask.status, 'NEEDS_HUMAN', 'Booking.com adapter returns NEEDS_HUMAN for CAPTCHA instead of bypassing it')
 assert.equal(bookingHumanTask.errorCode, 'NEEDS_HUMAN_CAPTCHA', 'Booking.com adapter preserves the human challenge reason')
 
+const bookingDraftReply = await executeBookingComTask({
+  taskId: 'booking-task-4',
+  taskType: 'DRAFT_GUEST_REPLY',
+  platform: 'booking',
+  message: 'Late check-in is confirmed.',
+  dryRun: true,
+}, {
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+  },
+  now: '2026-06-30T00:00:00.000Z',
+})
+assert.equal(bookingDraftReply.status, 'SUCCEEDED', 'Booking.com adapter supports draft guest replies in dry-run mode')
+assert.equal(bookingDraftReply.proofScreenshots.length, 1, 'Booking.com draft guest reply records trace proof')
+assert.equal(JSON.stringify(bookingDraftReply).includes('booking-password'), false, 'Booking.com draft reply result does not expose credentials')
+
+const bookingSendReply = await executeBookingComTask({
+  taskId: 'booking-task-5',
+  taskType: 'SEND_GUEST_REPLY',
+  platform: 'booking',
+  message: 'Door code password=guest-secret',
+  dryRun: true,
+}, {
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+  },
+  now: '2026-06-30T00:00:00.000Z',
+})
+assert.equal(bookingSendReply.status, 'SUCCEEDED', 'Booking.com adapter supports approved send guest replies in dry-run mode')
+assert.equal(bookingSendReply.proofScreenshots.length, 2, 'Booking.com send guest reply records before/after proof placeholders')
+assert.equal(JSON.stringify(bookingSendReply).includes('guest-secret'), false, 'Booking.com send reply dry-run result redacts credential-like message text')
+
 const workerTask = {
   id: 'ops-task-1',
   taskType: 'UPDATE_RATE',
@@ -536,6 +570,16 @@ assert.equal(workerPayload.rate.amount, 2200, 'Hotel Ops executor maps rate amou
 assert.equal(JSON.stringify(workerPayload).includes(workerTask.rawMessage), false, 'Hotel Ops executor does not send raw free text to worker')
 assert.equal(JSON.stringify(workerPayload).includes('password'), false, 'Hotel Ops executor payload contains no credential fields')
 
+const messageWorkerPayload = buildOpsWorkerTaskPayload({
+  ...workerTask,
+  id: 'ops-task-message',
+  taskType: 'SEND_GUEST_REPLY',
+  message: 'Late check-in is confirmed.',
+  rawMessage: 'Send guest reply: Late check-in is confirmed.',
+})
+assert.equal(messageWorkerPayload.message, 'Late check-in is confirmed.', 'Hotel Ops executor carries structured guest reply message text')
+assert.equal(JSON.stringify(messageWorkerPayload).includes('Send guest reply:'), false, 'Hotel Ops executor does not send raw guest reply command text')
+
 const localWorkerResult = await executeOpsWorkerTask(workerTask, {
   env: {
     BOOKING_USERNAME: 'booking-user',
@@ -546,6 +590,20 @@ assert.equal(localWorkerResult.workerMode, 'local-signed-worker', 'Hotel Ops exe
 assert.equal(localWorkerResult.status, 'SUCCEEDED', 'Hotel Ops executor local worker returns structured success')
 assert.equal(localWorkerResult.proofScreenshots.length, 2, 'Hotel Ops executor stores Booking.com dry-run proof placeholders')
 assert.equal(JSON.stringify(localWorkerResult).includes('booking-password'), false, 'Hotel Ops executor never returns OTA credentials')
+
+const localReplyWorkerResult = await executeOpsWorkerTask({
+  ...workerTask,
+  id: 'ops-task-reply',
+  taskType: 'SEND_GUEST_REPLY',
+  message: 'Late check-in is confirmed.',
+}, {
+  env: {
+    BOOKING_USERNAME: 'booking-user',
+    BOOKING_PASSWORD: 'booking-password',
+  },
+})
+assert.equal(localReplyWorkerResult.status, 'SUCCEEDED', 'Hotel Ops executor local worker handles Booking.com guest reply dry-run tasks')
+assert.equal(localReplyWorkerResult.proofScreenshots.length, 2, 'Hotel Ops executor stores reply before/after proof placeholders')
 
 let remoteWorkerRequestChecked = false
 const remoteWorkerResult = await executeOpsWorkerTask({
@@ -597,6 +655,18 @@ const scanCommand = parseHotelOpsCommand('Check bookings for next weekend.', { n
 assert.equal(['READ_RESERVATIONS', 'SCAN_BOOKINGS'].includes(scanCommand.taskType), true, 'Hotel Ops parser maps booking checks to read-only tasks')
 assert.equal(scanCommand.riskLevel, 'LOW', 'Hotel Ops booking scans are low risk')
 assert.equal(scanCommand.approvalRequired, false, 'Hotel Ops booking scans do not require owner approval')
+
+const guestMessagesCommand = parseHotelOpsCommand('Read guest messages from Booking.com.', { now: fixedOpsDate })
+assert.equal(guestMessagesCommand.taskType, 'READ_GUEST_MESSAGES', 'Hotel Ops parser maps guest message reads to read-only message tasks')
+assert.equal(guestMessagesCommand.riskLevel, 'LOW', 'Hotel Ops guest message reads are low risk')
+
+const sendReplyCommand = parseHotelOpsCommand('Send guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
+assert.equal(sendReplyCommand.taskType, 'SEND_GUEST_REPLY', 'Hotel Ops parser maps explicit send reply commands')
+assert.equal(sendReplyCommand.approvalRequired, true, 'Hotel Ops send reply tasks require approval')
+assert.equal(sendReplyCommand.message, 'Late check-in is confirmed.', 'Hotel Ops parser extracts structured guest reply text')
+
+const redactedReplyCommand = parseHotelOpsCommand('Send guest reply: password=guest-secret', { now: fixedOpsDate })
+assert.equal(redactedReplyCommand.message.includes('guest-secret'), false, 'Hotel Ops parser redacts credential-like text from structured messages')
 
 const forbiddenCommand = parseHotelOpsCommand('Cancel all bookings and refund guests.', { now: fixedOpsDate })
 assert.equal(forbiddenCommand.taskType, 'FORBIDDEN', 'Hotel Ops parser blocks destructive booking/refund command')

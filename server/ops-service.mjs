@@ -83,6 +83,28 @@ function normalizeNullableString(value) {
   return normalized || null
 }
 
+function redactedSensitiveText(value) {
+  return String(value || '')
+    .replace(/\b(password|passcode|secret|token|api[_ -]?key|credential|session)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED_API_KEY]')
+}
+
+function sensitiveKey(key) {
+  return /(password|passcode|secret|token|api[_-]?key|credential|session)/i.test(String(key || ''))
+}
+
+function sanitizeOpsMetadata(value, depth = 0) {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'string') return redactedSensitiveText(value)
+  if (typeof value !== 'object') return value
+  if (depth > 6) return '[REDACTED_DEPTH]'
+  if (Array.isArray(value)) return value.map((item) => sanitizeOpsMetadata(item, depth + 1))
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    key,
+    sensitiveKey(key) ? '[REDACTED]' : sanitizeOpsMetadata(child, depth + 1),
+  ]))
+}
+
 function normalizePlatform(text) {
   const lower = String(text || '').toLowerCase()
   if (lower.includes('agoda')) return 'agoda'
@@ -154,6 +176,14 @@ function parseMoney(text) {
   return { amount: Number(match[1].replace(/,/g, '')), currency: 'THB' }
 }
 
+function parseMessagePayload(text) {
+  const source = String(text || '').trim()
+  const explicit = source.match(/\b(?:reply|message|description|listing)\s*[:=-]\s*(.+)$/i)?.[1]
+    || source.match(/\b(?:say|saying)\s+["'](.+?)["']/i)?.[1]
+    || source.match(/["'](.+?)["']/)?.[1]
+  return normalizeNullableString(explicit)
+}
+
 function taskWithRule(taskType, overrides = {}) {
   const rule = RULES[taskType] || RULES.FORBIDDEN
   return {
@@ -196,6 +226,15 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
       approvalRequired: false,
       rationale: 'The command matches a prohibited Hotel Ops pattern.',
       confidence: 0.96,
+    })
+  }
+
+  if (/(read|check|show|scan).*(guest\s+)?messages?/.test(lower)) {
+    return taskWithRule('READ_GUEST_MESSAGES', {
+      platform,
+      dateRange,
+      rationale: 'Read-only guest message lookup request.',
+      confidence: 0.82,
     })
   }
 
@@ -278,11 +317,39 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
     })
   }
 
-  if (/(message|reply|guest)/.test(lower)) {
-    return taskWithRule(lower.includes('send') ? 'SEND_GUEST_REPLY' : 'DRAFT_GUEST_REPLY', {
+  if (/(update|change|rewrite).*(description|listing)/.test(lower)) {
+    const description = parseMessagePayload(message)
+    if (!description) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        missingFields: ['message'],
+        rationale: 'Listing description updates need the new approved text before owner review.',
+        confidence: 0.62,
+      })
+    }
+    return taskWithRule('UPDATE_DESCRIPTION', {
       platform,
-      message,
-      rationale: lower.includes('send') ? 'Sending guest replies requires approval.' : 'Draft guest reply request.',
+      message: redactedSensitiveText(description),
+      rationale: 'Listing description updates require owner approval and dry-run proof.',
+      confidence: 0.72,
+    })
+  }
+
+  if (/(message|reply|guest)/.test(lower)) {
+    const replyMessage = parseMessagePayload(message)
+    const wantsSend = /\bsend\b/.test(lower)
+    if (wantsSend && !replyMessage) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        missingFields: ['message'],
+        rationale: 'Sending a guest reply needs the exact approved message text.',
+        confidence: 0.58,
+      })
+    }
+    return taskWithRule(wantsSend ? 'SEND_GUEST_REPLY' : 'DRAFT_GUEST_REPLY', {
+      platform,
+      message: redactedSensitiveText(replyMessage || message),
+      rationale: wantsSend ? 'Sending guest replies requires approval.' : 'Draft guest reply request.',
       confidence: 0.7,
     })
   }
@@ -516,9 +583,9 @@ async function taskLog(tx, taskId, action, message, actor, metadata) {
     data: {
       taskId,
       action,
-      message,
+      message: redactedSensitiveText(message),
       actor: actorLabel(actor),
-      metadata,
+      metadata: sanitizeOpsMetadata(metadata),
     },
   })
 }
@@ -530,7 +597,7 @@ async function audit(tx, actor, action, entityType, entityId, changes) {
       action,
       entityType,
       entityId,
-      changes,
+      changes: sanitizeOpsMetadata(changes),
     },
   })
 }
@@ -621,6 +688,7 @@ async function executeMockTask(tx, task, actor) {
 export async function submitOpsCommand(prisma, input, actor) {
   const property = await getProperty(prisma)
   const rawMessage = normalizeText(input?.message || input?.rawMessage)
+  const persistedRawMessage = redactedSensitiveText(rawMessage)
   const sourceChannel = normalizeText(input?.sourceChannel || 'web') || 'web'
   const parsed = parseHotelOpsCommand(rawMessage)
   const stop = await getEmergencyStop(prisma)
@@ -645,7 +713,7 @@ export async function submitOpsCommand(prisma, input, actor) {
         propertyId: property.id,
         requesterUserId: actor?.id || 'system',
         requesterLabel: actorLabel(actor),
-        rawMessage,
+        rawMessage: persistedRawMessage,
         sourceChannel,
         taskType: parsed.taskType,
         platform: parsed.platform,
@@ -657,7 +725,7 @@ export async function submitOpsCommand(prisma, input, actor) {
         rateCurrency: parsed.rate?.currency ?? null,
         availabilityRooms: parsed.availability?.rooms ?? null,
         availabilityStatus: parsed.availability?.status ?? null,
-        message: parsed.message,
+        message: parsed.message ? redactedSensitiveText(parsed.message) : parsed.message,
         riskLevel: decision.riskLevel,
         approvalRequired: decision.approvalRequired,
         confidence: parsed.confidence,
@@ -670,10 +738,10 @@ export async function submitOpsCommand(prisma, input, actor) {
       include: taskInclude,
     })
 
-    await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage })
+    await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage: persistedRawMessage })
     await taskLog(tx, task.id, 'PARSER_OUTPUT', 'Command parsed into a controlled task.', actor, parsed)
     await taskLog(tx, task.id, 'PERMISSION_DECISION', decision.reason, actor, decision)
-    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage, parsed })
+    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, parsed })
     await audit(tx, actor, 'OPS_PERMISSION_DECISION', 'hotelOpsTask', task.id, decision)
 
     if (status === 'PENDING_APPROVAL') {

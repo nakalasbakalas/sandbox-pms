@@ -9,12 +9,15 @@ const DEFAULT_MAX_SKEW_MS = 5 * 60 * 1000
 const ALLOWED_TASK_TYPES = new Set([
   'READ_RESERVATIONS',
   'READ_GUEST_MESSAGES',
+  'DRAFT_GUEST_REPLY',
+  'SEND_GUEST_REPLY',
   'READ_RATES',
   'UPDATE_RATE',
   'READ_AVAILABILITY',
   'UPDATE_AVAILABILITY',
   'CLOSE_ROOM',
   'OPEN_ROOM',
+  'UPDATE_DESCRIPTION',
   'SCAN_BOOKINGS',
 ])
 const ALLOWED_PLATFORMS = new Set(['booking', 'agoda', 'trip', 'expedia', 'all', 'unknown'])
@@ -141,6 +144,7 @@ export function normalizeOpsWorkerTaskPayload(payload = {}) {
     dateEnd: normalizeString(payload.dateEnd),
     rate: payload.rate && typeof payload.rate === 'object' ? payload.rate : undefined,
     availability: payload.availability && typeof payload.availability === 'object' ? payload.availability : undefined,
+    message: normalizeString(payload.message),
     dryRun: payload.dryRun !== false,
     mockScenario: ['selector_failure', 'human_challenge'].includes(payload.mockScenario) ? payload.mockScenario : null,
   }
@@ -194,11 +198,12 @@ export function runSignedMockOtaWorkerTask(payload = {}) {
     summary: task.dryRun
       ? `Dry run: signed mock worker accepted ${task.taskType} for ${task.platform}.`
       : `Signed mock worker accepted ${task.taskType} for ${task.platform}.`,
-    proofScreenshots: proof(['UPDATE_RATE', 'UPDATE_AVAILABILITY', 'CLOSE_ROOM', 'OPEN_ROOM'].includes(task.taskType) ? 'after' : 'trace'),
+    proofScreenshots: proof(['SEND_GUEST_REPLY', 'UPDATE_RATE', 'UPDATE_AVAILABILITY', 'CLOSE_ROOM', 'OPEN_ROOM', 'UPDATE_DESCRIPTION'].includes(task.taskType) ? 'after' : 'trace'),
     data: {
       dryRun: task.dryRun,
       platform: task.platform,
       taskType: task.taskType,
+      messagePresent: Boolean(task.message),
     },
   }
 }

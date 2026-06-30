@@ -14,6 +14,12 @@ function normalizeString(value) {
   return text || null
 }
 
+function redactedSensitiveText(value) {
+  return String(value || '')
+    .replace(/\b(password|passcode|secret|token|api[_ -]?key|credential|session)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED_API_KEY]')
+}
+
 function envFlag(env, name) {
   return String(env?.[name] || '').trim().toLowerCase() === 'true'
 }
@@ -60,6 +66,17 @@ function validateTaskId(input) {
   const taskId = normalizeString(input.taskId)
   if (!taskId) throw new PmsValidationError('Booking.com adapter requires taskId.', 400)
   return taskId
+}
+
+function validateMessage(input, label = 'message') {
+  const message = normalizeString(input.message)
+  if (!message) throw new PmsValidationError(`Booking.com adapter requires ${label}.`, 400)
+  return redactedSensitiveText(message)
+}
+
+function messagePreview(message) {
+  const text = redactedSensitiveText(message).replace(/\s+/g, ' ').trim()
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text
 }
 
 function proof(taskId, kind, options = {}) {
@@ -155,6 +172,36 @@ export function createBookingComAdapter(options = {}) {
       }
     },
 
+    async draftGuestReply(input) {
+      const taskId = validateTaskId(input)
+      const message = validateMessage(input, 'draft reply instructions')
+      return {
+        changed: false,
+        dryRun: true,
+        draft: {
+          platform: 'booking',
+          messagePreview: messagePreview(message),
+        },
+        proofScreenshots: [proof(taskId, 'trace', options)],
+        summary: 'Dry run: drafted a Booking.com guest reply. No OTA message was sent.',
+      }
+    },
+
+    async sendGuestReply(input) {
+      const taskId = validateTaskId(input)
+      const message = validateMessage(input, 'approved guest reply text')
+      const dryRun = dryRunEnabled(input, env)
+      assertDryRunOnly('SEND_GUEST_REPLY', dryRun)
+      return {
+        changed: false,
+        dryRun: true,
+        before: { platform: 'booking', messageComposer: 'not-opened-in-dry-run' },
+        after: { platform: 'booking', plannedMessagePreview: messagePreview(message), sent: false },
+        proofScreenshots: [proof(taskId, 'before', options), proof(taskId, 'after', options)],
+        summary: 'Dry run: would send a Booking.com guest reply after approval. No OTA message was sent.',
+      }
+    },
+
     async readRates(input) {
       const roomType = validateRoomType(input)
       const dates = validateDateRange(input)
@@ -229,6 +276,21 @@ export function createBookingComAdapter(options = {}) {
       return this.updateAvailability({ ...input, availability: { rooms: input.rooms ?? null, status: 'open' }, status: 'open' })
     },
 
+    async updateDescription(input) {
+      const taskId = validateTaskId(input)
+      const description = validateMessage(input, 'approved listing description')
+      const dryRun = dryRunEnabled(input, env)
+      assertDryRunOnly('UPDATE_DESCRIPTION', dryRun)
+      return {
+        changed: false,
+        dryRun: true,
+        before: { platform: 'booking', description: 'not-read-in-dry-run' },
+        after: { platform: 'booking', plannedDescriptionPreview: messagePreview(description), changed: false },
+        proofScreenshots: [proof(taskId, 'before', options), proof(taskId, 'after', options)],
+        summary: 'Dry run: would update the Booking.com listing description after owner approval.',
+      }
+    },
+
     async takeProofScreenshot(input) {
       return proof(validateTaskId(input), input.kind || 'trace', options)
     },
@@ -258,6 +320,7 @@ export async function executeBookingComTask(payload, options = {}) {
     dateEnd: payload.dateEnd,
     rate: payload.rate,
     availability: payload.availability,
+    message: payload.message,
     dryRun: payload.dryRun !== false,
   }
 
@@ -266,6 +329,10 @@ export async function executeBookingComTask(payload, options = {}) {
     result = await adapter.readReservations(common)
   } else if (payload.taskType === 'READ_GUEST_MESSAGES') {
     result = await adapter.readGuestMessages(common)
+  } else if (payload.taskType === 'DRAFT_GUEST_REPLY') {
+    result = await adapter.draftGuestReply(common)
+  } else if (payload.taskType === 'SEND_GUEST_REPLY') {
+    result = await adapter.sendGuestReply(common)
   } else if (payload.taskType === 'READ_RATES') {
     result = await adapter.readRates(common)
   } else if (payload.taskType === 'UPDATE_RATE') {
@@ -282,6 +349,8 @@ export async function executeBookingComTask(payload, options = {}) {
     result = await adapter.closeRoom(common)
   } else if (payload.taskType === 'OPEN_ROOM') {
     result = await adapter.openRoom(common)
+  } else if (payload.taskType === 'UPDATE_DESCRIPTION') {
+    result = await adapter.updateDescription(common)
   } else {
     throw new PmsValidationError('Booking.com adapter does not support this task type.', 400)
   }
