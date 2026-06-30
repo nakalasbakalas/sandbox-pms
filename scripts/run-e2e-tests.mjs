@@ -467,6 +467,12 @@ async function runBrowserSmokeTests() {
         await smokeAuthenticatedRoute(page, baseUrl, path)
       }
 
+      setStep('Hotel Ops canonical tab paths')
+      await page.goto(`${baseUrl}/ops/chat`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /hotel ops command center/i }), 'Hotel Ops command center')
+      await page.getByRole('button', { name: /^approvals$/i }).click()
+      await page.waitForURL('**/ops/approvals', { timeout: 10_000 })
+
       assert.deepEqual(errors, [], `browser console/page errors: ${errors.join('\n')}`)
       await context.close()
     } finally {

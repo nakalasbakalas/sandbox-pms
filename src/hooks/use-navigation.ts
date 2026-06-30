@@ -51,6 +51,14 @@ const PATH_ALIASES: Record<string, NavigationRoute> = {
   'ops/settings': 'ops-settings',
 }
 
+const CANONICAL_ROUTE_PATHS: Partial<Record<NavigationRoute, string>> = {
+  'ops-chat': '/ops/chat',
+  'ops-approvals': '/ops/approvals',
+  'ops-tasks': '/ops/tasks',
+  'ops-intelligence': '/ops/intelligence',
+  'ops-settings': '/ops/settings',
+}
+
 function normalizePathname(pathname: string): string {
   const trimmed = pathname.replace(/^\/+|\/+$/g, '')
   return trimmed === '' ? 'today' : trimmed
@@ -91,6 +99,7 @@ function readRouteFromLocation() {
 }
 
 function routeToPath(route: NavigationRoute) {
+  if (CANONICAL_ROUTE_PATHS[route]) return CANONICAL_ROUTE_PATHS[route]
   return route === 'today' ? '/' : `/${route}`
 }
 
