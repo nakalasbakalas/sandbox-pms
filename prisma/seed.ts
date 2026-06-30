@@ -6,7 +6,7 @@ const prisma = new PrismaClient()
 type SeedMode = 'dev' | 'e2e' | 'prod-safe'
 
 type SeedUser = {
-  email: string
+  email?: string | null
   username?: string
   firstName: string
   lastName: string
@@ -193,18 +193,23 @@ function createPasswordHash(password: string) {
   return `pbkdf2_sha256$${iterations}$${salt}$${hash}`
 }
 
-function normalizeSeedEmail(value: unknown) {
+function normalizeSeedEmail(value: unknown, required = true): string | null {
   const email = String(value || '').trim().toLowerCase()
+  if (!email && !required) return null
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new Error('Seed user email must be a valid email address.')
   }
   return email
 }
 
-function normalizeSeedUsername(value: unknown, fallbackEmail: string) {
+function normalizeSeedUsername(value: unknown, fallbackEmail?: string | null): string {
   const username = String(value || fallbackEmail || '').trim().toLowerCase()
   if (!username) throw new Error('Seed user username is required.')
-  if (username.includes('@')) return normalizeSeedEmail(username)
+  if (username.includes('@')) {
+    const email = normalizeSeedEmail(username)
+    if (!email) throw new Error('Seed user username is required.')
+    return email
+  }
   if (!/^[a-z0-9][a-z0-9._-]{1,62}$/.test(username)) {
     throw new Error('Seed user username must be 2-63 characters using letters, numbers, dot, dash, or underscore.')
   }
@@ -267,11 +272,12 @@ function parseSeedUsersJson() {
       throw new Error(`SEED_USERS_JSON[${index}].passwordHash is not a supported PBKDF2 hash.`)
     }
 
-    const email = normalizeSeedEmail(seed.email)
+    const email = normalizeSeedEmail(seed.email, false)
+    const username = normalizeSeedUsername(seed.username, email)
 
     return {
       email,
-      username: normalizeSeedUsername(seed.username, email),
+      username,
       firstName: normalizeSeedText(seed.firstName, `SEED_USERS_JSON[${index}].firstName`),
       lastName: normalizeSeedText(seed.lastName, `SEED_USERS_JSON[${index}].lastName`),
       role: normalizeSeedRole(seed.role),
@@ -317,20 +323,22 @@ function legacyUsersForMode(mode: SeedMode) {
 }
 
 function usersForMode(mode: SeedMode) {
-  const usersByEmail = new Map<string, SeedUser>()
+  const usersByLogin = new Map<string, SeedUser>()
 
   for (const user of [...legacyUsersForMode(mode), ...parseSeedUsersJson()]) {
-    usersByEmail.set(user.email, user)
+    const login = normalizeSeedUsername(user.username, user.email)
+    usersByLogin.set(login, { ...user, username: login })
   }
 
-  return [...usersByEmail.values()]
+  return [...usersByLogin.values()]
 }
 
 async function seedUser(user: SeedUser, passwordHash: string) {
+  const username = normalizeSeedUsername(user.username, user.email)
   return prisma.user.upsert({
-    where: { email: user.email },
+    where: { username },
     update: {
-      username: user.username || user.email,
+      email: user.email || null,
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
@@ -338,8 +346,8 @@ async function seedUser(user: SeedUser, passwordHash: string) {
       active: true,
     },
     create: {
-      email: user.email,
-      username: user.username || user.email,
+      email: user.email || null,
+      username,
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
@@ -520,11 +528,11 @@ async function main() {
   const currentSeedEmails = new Set<string>()
   let seededUserCount = 0
   for (const user of usersForMode(seedMode)) {
-    currentSeedEmails.add(user.email)
+    if (user.email) currentSeedEmails.add(user.email)
     const passwordHash = configuredPasswordHashFor(user)
     if (passwordHash) {
       const seededUser = await seedUser(user, passwordHash)
-      console.log('Seeded user:', seededUser.email)
+      console.log('Seeded user:', seededUser.username)
       seededUserCount += 1
     }
   }

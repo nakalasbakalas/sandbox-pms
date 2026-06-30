@@ -502,6 +502,39 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       },
     },
     {
+      id: 'ops-command-center',
+      label: 'Hotel Ops Command',
+      description: 'Open controlled manager command intake',
+      category: 'operations',
+      keywords: ['hotel ops', 'ai ops', 'command', 'ota', 'approval'],
+      icon: Brain,
+      action: () => {
+        navigate?.('ops-chat')
+      },
+    },
+    {
+      id: 'ops-approvals',
+      label: 'Hotel Ops Approvals',
+      description: 'Review high-risk Hotel Ops tasks before execution',
+      category: 'operations',
+      keywords: ['hotel ops', 'approvals', 'owner approval', 'rate change'],
+      icon: ListChecks,
+      action: () => {
+        navigate?.('ops-approvals')
+      },
+    },
+    {
+      id: 'ops-intelligence',
+      label: 'Hotel Ops Intelligence',
+      description: 'Review booking trend alerts and recommendations',
+      category: 'operations',
+      keywords: ['hotel ops', 'intelligence', 'demand', 'alerts', 'recommendations'],
+      icon: ChartLineUp,
+      action: () => {
+        navigate?.('ops-intelligence')
+      },
+    },
+    {
       id: 'user-management',
       label: 'User Management',
       description: 'Manage PMS users, roles, and access',

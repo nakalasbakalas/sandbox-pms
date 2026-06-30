@@ -24,6 +24,11 @@ export type NavigationRoute =
   | 'system-status'
   | 'user-management'
   | 'data-backup'
+  | 'ops-chat'
+  | 'ops-approvals'
+  | 'ops-tasks'
+  | 'ops-intelligence'
+  | 'ops-settings'
 
 export interface NavigationState {
   currentRoute: NavigationRoute

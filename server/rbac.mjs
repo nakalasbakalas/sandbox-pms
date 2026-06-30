@@ -32,6 +32,10 @@ export const ROLE_PERMISSIONS = {
     'manage:channels',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
+    'approve:ops-task',
+    'manage:ops-settings',
   ],
   MANAGER: [
     'view:board',
@@ -60,6 +64,9 @@ export const ROLE_PERMISSIONS = {
     'view:financial-reports',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
+    'approve:ops-task',
   ],
   FRONT_DESK: [
     'view:board',
@@ -77,6 +84,8 @@ export const ROLE_PERMISSIONS = {
     'process:payment',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
   ],
   HOUSEKEEPING: [
     'view:board',
@@ -84,6 +93,7 @@ export const ROLE_PERMISSIONS = {
     'view:messaging',
     'edit:room-status',
     'send:staff-messages',
+    'view:ops',
   ],
   CASHIER: [
     'view:board',
@@ -96,6 +106,7 @@ export const ROLE_PERMISSIONS = {
     'process:payment',
     'view:financial-reports',
     'send:staff-messages',
+    'view:ops',
   ],
   CAFE_STAFF: [
     'view:cashier',
@@ -129,6 +140,11 @@ const ROUTE_PERMISSIONS = {
   'system-status': ['view:settings'],
   'user-management': ['manage:users'],
   'data-backup': ['view:settings'],
+  'ops-chat': ['create:ops-task'],
+  'ops-approvals': ['approve:ops-task'],
+  'ops-tasks': ['view:ops'],
+  'ops-intelligence': ['view:ops'],
+  'ops-settings': ['manage:ops-settings'],
 }
 
 export function normalizeRole(role) {

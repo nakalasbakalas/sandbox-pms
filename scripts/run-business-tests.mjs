@@ -5,6 +5,8 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
+import { evaluateOpsPermission, parseHotelOpsCommand } from '../server/ops-service.mjs'
+import { createUser } from '../server/pms-service.mjs'
 
 async function importTypeScriptModule(path) {
   const source = await readFile(path, 'utf8')
@@ -342,6 +344,70 @@ const mappedUsernameOnlyUser = serverAuthClient.mapServerUser({
 assert.equal(mappedUsernameOnlyUser.email, null, 'server auth users can omit email')
 assert.equal(mappedUsernameOnlyUser.username, 'hk1', 'server auth users use username as login identifier')
 assert.equal(mappedUsernameOnlyUser.role, 'housekeeping', 'username-only server auth users map backend roles')
+
+const createdAudits = []
+const usernameOnlyUser = await createUser({
+  user: {
+    findFirst: async (query) => {
+      assert.deepEqual(query.where.OR, [{ username: 'hk2' }], 'username-only user duplicate check does not require email')
+      return null
+    },
+    create: async ({ data }) => ({
+      id: 'user-hk2',
+      createdAt: new Date('2026-06-30T00:00:00.000Z'),
+      ...data,
+    }),
+  },
+  auditLog: {
+    create: async ({ data }) => {
+      createdAudits.push(data)
+      return data
+    },
+  },
+}, {
+  username: 'hk2',
+  email: '',
+  password: 'Temporary1234!',
+  displayName: 'Housekeeper 2',
+  role: 'housekeeping',
+}, { id: 'admin-1', username: 'admin' })
+assert.equal(usernameOnlyUser.username, 'hk2', 'admin can create a username-only server user')
+assert.equal(usernameOnlyUser.email, null, 'username-only server user stores null email')
+assert.equal(usernameOnlyUser.role, 'HOUSEKEEPING', 'username-only server user role normalizes to backend enum')
+assert.equal(createdAudits[0]?.action, 'USER_CREATED', 'username-only server user creation is audited')
+
+const fixedOpsDate = new Date('2026-06-30T00:00:00.000Z')
+const rateCommand = parseHotelOpsCommand('Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', { now: fixedOpsDate })
+assert.equal(rateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser recognizes rate updates')
+assert.equal(rateCommand.platform, 'agoda', 'Hotel Ops parser detects Agoda platform')
+assert.equal(rateCommand.riskLevel, 'HIGH', 'Hotel Ops rate updates are high risk')
+assert.equal(rateCommand.approvalRequired, true, 'Hotel Ops rate updates require approval')
+assert.equal(rateCommand.dateRange.start, '2026-07-03', 'Hotel Ops parser resolves this Friday')
+assert.equal(rateCommand.dateRange.end, '2026-07-04', 'Hotel Ops parser resolves Saturday')
+
+const scanCommand = parseHotelOpsCommand('Check bookings for next weekend.', { now: fixedOpsDate })
+assert.equal(['READ_RESERVATIONS', 'SCAN_BOOKINGS'].includes(scanCommand.taskType), true, 'Hotel Ops parser maps booking checks to read-only tasks')
+assert.equal(scanCommand.riskLevel, 'LOW', 'Hotel Ops booking scans are low risk')
+assert.equal(scanCommand.approvalRequired, false, 'Hotel Ops booking scans do not require owner approval')
+
+const forbiddenCommand = parseHotelOpsCommand('Cancel all bookings and refund guests.', { now: fixedOpsDate })
+assert.equal(forbiddenCommand.taskType, 'FORBIDDEN', 'Hotel Ops parser blocks destructive booking/refund command')
+assert.equal(evaluateOpsPermission(forbiddenCommand, { id: 'owner', role: 'ADMIN' }).allowed, false, 'Hotel Ops forbidden commands cannot execute')
+
+const ambiguousRateCommand = parseHotelOpsCommand('Raise Booking price to 3000.', { now: fixedOpsDate })
+assert.equal(ambiguousRateCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser requests clarification for incomplete rate command')
+assert.equal(ambiguousRateCommand.missingFields.includes('dateRange'), true, 'Hotel Ops incomplete rate command asks for dates')
+assert.equal(ambiguousRateCommand.missingFields.includes('roomType'), true, 'Hotel Ops incomplete rate command asks for room type')
+
+const allRoomsRateCommand = parseHotelOpsCommand('Set all rooms to 2,200 THB 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
+assert.equal(allRoomsRateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser accepts all-room recommendation tasks')
+assert.equal(allRoomsRateCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room target')
+
+const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
+assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')
+assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
+assert.equal(evaluateOpsPermission(rateCommand, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'staff cannot create high-risk Hotel Ops write task')
+assert.equal(evaluateOpsPermission(rateCommand, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops emergency stop blocks write tasks')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

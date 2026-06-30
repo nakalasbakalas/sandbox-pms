@@ -48,6 +48,10 @@ export type Permission =
   | 'manage:channels'
   | 'send:guest-messages'
   | 'send:staff-messages'
+  | 'view:ops'
+  | 'create:ops-task'
+  | 'approve:ops-task'
+  | 'manage:ops-settings'
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   admin: [
@@ -83,6 +87,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'manage:channels',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
+    'approve:ops-task',
+    'manage:ops-settings',
   ],
   manager: [
     'view:board',
@@ -111,6 +119,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:financial-reports',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
+    'approve:ops-task',
   ],
   'front-desk': [
     'view:board',
@@ -128,6 +139,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'process:payment',
     'send:guest-messages',
     'send:staff-messages',
+    'view:ops',
+    'create:ops-task',
   ],
   housekeeping: [
     'view:board',
@@ -135,6 +148,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:messaging',
     'edit:room-status',
     'send:staff-messages',
+    'view:ops',
   ],
   cashier: [
     'view:board',
@@ -147,6 +161,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'process:payment',
     'view:financial-reports',
     'send:staff-messages',
+    'view:ops',
   ],
 }
 

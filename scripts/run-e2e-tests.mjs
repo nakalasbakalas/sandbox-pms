@@ -54,6 +54,11 @@ const AUTHENTICATED_ROUTE_SMOKE_PATHS = [
   '/system-status',
   '/user-management',
   '/data-backup',
+  '/ops-chat',
+  '/ops-approvals',
+  '/ops-tasks',
+  '/ops-intelligence',
+  '/ops-settings',
 ]
 
 function sleep(ms) {
@@ -491,6 +496,14 @@ const frontDesk = { id: 'e2e-front-desk', role: 'FRONT_DESK', email: 'frontdesk@
 const housekeeping = { id: 'e2e-housekeeping', role: 'HOUSEKEEPING', email: 'housekeeping@property.test' }
 
 assert.equal(canViewRoute(admin, 'user-management'), true, 'admin can view user management')
+assert.equal(canViewRoute(admin, 'ops-settings'), true, 'admin can view Hotel Ops settings')
+assert.equal(canViewRoute(manager, 'ops-approvals'), true, 'manager can view Hotel Ops approvals')
+assert.equal(canViewRoute(frontDesk, 'ops-chat'), true, 'front desk can submit Hotel Ops read commands')
+assert.equal(canViewRoute(frontDesk, 'ops-settings'), false, 'front desk cannot view Hotel Ops settings')
+assert.equal(canViewRoute(housekeeping, 'ops-tasks'), true, 'housekeeping can view Hotel Ops task history')
+assert.equal(canViewRoute(housekeeping, 'ops-chat'), false, 'housekeeping cannot submit Hotel Ops commands')
+assert.equal(canViewRoute(housekeeping, 'ops-approvals'), false, 'housekeeping cannot approve Hotel Ops tasks')
+assert.equal(canViewRoute(manager, 'ops-settings'), false, 'manager cannot change Hotel Ops settings')
 assert.equal(canViewRoute(frontDesk, 'user-management'), false, 'front desk cannot view user management')
 assert.equal(canViewRoute(frontDesk, 'channels'), false, 'front desk cannot view channel management')
 assert.equal(canViewRoute(manager, 'channels'), true, 'manager can view channel management')
@@ -505,6 +518,14 @@ assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekee
 assert.deepEqual(resolveApiRouteContract('/api/auth/login')?.methods, ['POST'], 'auth login only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/users')?.methods, ['GET', 'POST'], 'user collection exposes admin read/create methods')
 assert.deepEqual(resolveApiRouteContract('/api/users/user-1')?.methods, ['PATCH', 'DELETE'], 'user detail exposes admin update/deactivate methods')
+assert.deepEqual(resolveApiRouteContract('/api/ops/commands')?.methods, ['POST'], 'Hotel Ops command endpoint accepts command posts')
+assert.deepEqual(resolveApiRouteContract('/api/ops/tasks')?.methods, ['GET'], 'Hotel Ops task history exposes read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/approve')?.methods, ['POST'], 'Hotel Ops approve endpoint only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/ops/approvals')?.methods, ['GET'], 'Hotel Ops approvals expose read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/approve-recommendation')?.methods, ['POST'], 'Hotel Ops recommendation approval exposes mutation method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/emergency-stop')?.methods, ['GET', 'POST'], 'Hotel Ops emergency stop exposes read/update methods')
+assert.deepEqual(resolveApiRouteContract('/api/ops/ota/status')?.methods, ['GET'], 'Hotel Ops OTA status exposes read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/scan/run')?.methods, ['POST'], 'Hotel Ops scan run exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/reservations')?.methods, ['GET', 'POST'], 'reservations collection exposes read/create methods')
 assert.deepEqual(resolveApiRouteContract('/api/reservations/res-1/check-in')?.methods, ['POST'], 'check-in mutation only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/booking-email/status')?.methods, ['GET'], 'booking email status exposes read method')

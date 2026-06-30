@@ -80,6 +80,14 @@ const operationsItems: readonly NavItem[] = [
   { id: 'predictive-analytics', labelKey: 'nav.predictiveAnalytics', icon: Brain, permission: 'view:analytics' as const },
 ]
 
+const hotelOpsItems: readonly NavItem[] = [
+  { id: 'ops-chat', labelKey: 'nav.opsChat', icon: Brain, permission: 'create:ops-task' as const },
+  { id: 'ops-approvals', labelKey: 'nav.opsApprovals', icon: Shield, permission: 'approve:ops-task' as const },
+  { id: 'ops-tasks', labelKey: 'nav.opsTasks', icon: Receipt, permission: 'view:ops' as const },
+  { id: 'ops-intelligence', labelKey: 'nav.opsIntelligence', icon: ChartLine, permission: 'view:ops' as const },
+  { id: 'ops-settings', labelKey: 'nav.opsSettings', icon: Gear, permission: 'manage:ops-settings' as const },
+]
+
 const adminItems: readonly NavItem[] = [
   { id: 'user-management', labelKey: 'nav.userManagement', icon: Shield, permission: 'manage:users' as const },
 ]
@@ -194,6 +202,31 @@ export function AppSidebar() {
             <SidebarGroupContent>
               <SidebarMenu>
                 {operationsItems.filter(canViewItem).map((item) => (
+                  <SidebarMenuItem key={item.id}>
+                    <SidebarMenuButton
+                      isActive={currentRoute === item.id}
+                      onClick={() => navigate(item.id)}
+                      tooltip={t(item.labelKey)}
+                      className="h-8 text-xs"
+                    >
+                      <item.icon className="w-3.5 h-3.5" weight={currentRoute === item.id ? 'fill' : 'regular'} />
+                      <span>{t(item.labelKey)}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {hotelOpsItems.some(canViewItem) && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] text-sidebar-foreground/50 py-1 tracking-wide">
+              Hotel Ops AI
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {hotelOpsItems.filter(canViewItem).map((item) => (
                   <SidebarMenuItem key={item.id}>
                     <SidebarMenuButton
                       isActive={currentRoute === item.id}

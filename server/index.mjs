@@ -18,6 +18,21 @@ import {
   listIcalFeedChannels,
 } from './ical-feed.mjs'
 import {
+  approveOpsAlertRecommendation,
+  approveOpsTask,
+  cancelOpsTask,
+  denyOpsTask,
+  getEmergencyStop,
+  getOpsTask,
+  getOtaStatus,
+  listOpsApprovals,
+  listOpsTasks,
+  listOpsTrendAlerts,
+  runOpsScan,
+  setEmergencyStop,
+  submitOpsCommand,
+} from './ops-service.mjs'
+import {
   assignRoom,
   authenticateUser,
   approveBookingEmailEvent,
@@ -580,6 +595,102 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/auth/can-view' && request.method === 'GET') {
     sendJson(response, 200, { ok: true, allowed: canViewRoute(user, url.searchParams.get('route')) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/commands' && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    const result = await submitOpsCommand(db, await readJson(request), user)
+    sendJson(response, result.duplicate ? 200 : 201, { ok: true, data: result, message: result.duplicate ? 'Duplicate command returned existing Hotel Ops task.' : 'Hotel Ops command accepted.' })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/tasks' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, {
+      ok: true,
+      data: await listOpsTasks(db, {
+        status: url.searchParams.get('status'),
+        limit: url.searchParams.get('limit'),
+      }),
+    })
+    return true
+  }
+
+  let opsParams = routeParam(url.pathname, /^\/api\/ops\/tasks\/(?<id>[^/]+)$/)
+  if (opsParams && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: await getOpsTask(db, opsParams.id) })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/tasks\/(?<id>[^/]+)\/approve$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'approve:ops-task')
+    sendJson(response, 200, { ok: true, data: await approveOpsTask(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops task approved.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/tasks\/(?<id>[^/]+)\/deny$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'approve:ops-task')
+    sendJson(response, 200, { ok: true, data: await denyOpsTask(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops task denied.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/tasks\/(?<id>[^/]+)\/cancel$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    sendJson(response, 200, { ok: true, data: await cancelOpsTask(db, opsParams.id, await readJson(request), user), message: 'Hotel Ops task cancelled.' })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/approvals' && request.method === 'GET') {
+    requirePermission(user, 'approve:ops-task')
+    sendJson(response, 200, { ok: true, data: await listOpsApprovals(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/intelligence/alerts' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, {
+      ok: true,
+      data: await listOpsTrendAlerts(db, {
+        status: url.searchParams.get('status'),
+        limit: url.searchParams.get('limit'),
+      }),
+    })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/intelligence\/alerts\/(?<id>[^/]+)\/approve-recommendation$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'approve:ops-task')
+    sendJson(response, 201, { ok: true, data: await approveOpsAlertRecommendation(db, opsParams.id, await readJson(request), user), message: 'Recommendation converted into an approval-gated task.' })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/emergency-stop' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: await getEmergencyStop(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/emergency-stop' && request.method === 'POST') {
+    requirePermission(user, 'manage:ops-settings')
+    sendJson(response, 200, { ok: true, data: await setEmergencyStop(db, await readJson(request), user), message: 'Hotel Ops emergency stop updated.' })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/ota/status' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: await getOtaStatus(db) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/scan/run' && request.method === 'POST') {
+    requirePermission(user, 'create:ops-task')
+    sendJson(response, 201, { ok: true, data: await runOpsScan(db, await readJson(request), user), message: 'Hotel Ops scan completed.' })
     return true
   }
 

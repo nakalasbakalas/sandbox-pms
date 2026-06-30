@@ -36,6 +36,11 @@ const VALID_ROUTES = new Set<NavigationRoute>([
   'system-status',
   'user-management',
   'data-backup',
+  'ops-chat',
+  'ops-approvals',
+  'ops-tasks',
+  'ops-intelligence',
+  'ops-settings',
 ])
 
 function normalizePathname(pathname: string): string {

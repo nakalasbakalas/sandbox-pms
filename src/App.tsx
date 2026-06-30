@@ -44,6 +44,7 @@ const PredictiveAnalyticsDashboard = lazy(() => import('./components/reports/Pre
 const SystemStatusView = lazy(() => import('./components/views/SystemStatusView').then((module) => ({ default: module.SystemStatusView })))
 const UserManagementView = lazy(() => import('./components/settings/UserManagementView').then((module) => ({ default: module.UserManagementView })))
 const DataBackupView = lazy(() => import('./components/views/DataBackupView').then((module) => ({ default: module.DataBackupView })))
+const HotelOpsCommandCenterView = lazy(() => import('./components/hotel-ops/HotelOpsCommandCenterView').then((module) => ({ default: module.HotelOpsCommandCenterView })))
 
 function RouteLoading() {
   return (
@@ -121,6 +122,11 @@ const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   'system-status': ['view:settings'],
   'user-management': ['manage:users'],
   'data-backup': ['view:settings'],
+  'ops-chat': ['create:ops-task'],
+  'ops-approvals': ['approve:ops-task'],
+  'ops-tasks': ['view:ops'],
+  'ops-intelligence': ['view:ops'],
+  'ops-settings': ['manage:ops-settings'],
 }
 
 function AppRouter() {
@@ -188,6 +194,16 @@ function AppRouter() {
       return <UserManagementView />
     case 'data-backup':
       return <DataBackupView />
+    case 'ops-chat':
+      return <HotelOpsCommandCenterView tab="chat" />
+    case 'ops-approvals':
+      return <HotelOpsCommandCenterView tab="approvals" />
+    case 'ops-tasks':
+      return <HotelOpsCommandCenterView tab="tasks" />
+    case 'ops-intelligence':
+      return <HotelOpsCommandCenterView tab="intelligence" />
+    case 'ops-settings':
+      return <HotelOpsCommandCenterView tab="settings" />
     default:
       return <TodayView />
   }

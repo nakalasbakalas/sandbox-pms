@@ -35,6 +35,9 @@ model Property {
   roomTypes       RoomType[]
   bookingEmailSources BookingEmailSource[]
   bookingEmailEvents  BookingEmailEvent[]
+  hotelOpsTasks        HotelOpsTask[]
+  hotelOpsTrendAlerts  HotelOpsTrendAlert[]
+  hotelOpsEmergencyStop HotelOpsEmergencyStop?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -536,6 +539,205 @@ enum UserRole {
   HOUSEKEEPING
   CASHIER
   CAFE_STAFF
+}
+
+model HotelOpsTask {
+  id                 String                  @id @default(cuid())
+  propertyId         String
+  property           Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  requesterUserId    String
+  requesterLabel     String?
+  rawMessage         String
+  sourceChannel      HotelOpsSourceChannel   @default(web)
+  taskType           HotelOpsTaskType
+  platform           HotelOpsPlatform        @default(unknown)
+  hotelId            String
+  roomType           String?
+  dateStart          DateTime?               @db.Date
+  dateEnd            DateTime?               @db.Date
+  rateAmount         Float?
+  rateCurrency       String?
+  availabilityRooms  Int?
+  availabilityStatus String?
+  message            String?
+  riskLevel          HotelOpsRiskLevel
+  approvalRequired   Boolean                 @default(false)
+  confidence         Float                   @default(0)
+  missingFields      String[]
+  rationale          String
+  status             HotelOpsTaskStatus      @default(DRAFT)
+  idempotencyKey     String                  @unique
+  permissionDecision Json?
+  proofScreenshots   Json?
+  executionSummary   String?
+  errorCode          String?
+  errorMessage       String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  approvals          HotelOpsTaskApproval[]
+  logs               HotelOpsTaskLog[]
+
+  @@index([propertyId, status, createdAt])
+  @@index([taskType, riskLevel])
+  @@index([requesterUserId, createdAt])
+}
+
+model HotelOpsTaskApproval {
+  id           String                 @id @default(cuid())
+  taskId       String
+  task         HotelOpsTask           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  requiredRole HotelOpsRole
+  status       HotelOpsApprovalStatus @default(PENDING)
+  requestedAt  DateTime               @default(now())
+  decidedAt    DateTime?
+  decidedBy    String?
+  notes        String?
+
+  @@index([taskId, status])
+  @@index([status, requestedAt])
+}
+
+model HotelOpsTaskLog {
+  id        String       @id @default(cuid())
+  taskId    String
+  task      HotelOpsTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  action    String
+  message   String
+  metadata  Json?
+  actor     String?
+  createdAt DateTime     @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([action, createdAt])
+}
+
+model HotelOpsTrendAlert {
+  id                 String                   @id @default(cuid())
+  propertyId         String
+  property           Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  alertType          HotelOpsTrendAlertType
+  severity           HotelOpsAlertSeverity
+  title              String
+  summary            String
+  platform           HotelOpsPlatform?
+  roomType           String?
+  dateStart          DateTime?                @db.Date
+  dateEnd            DateTime?                @db.Date
+  metrics            Json
+  recommendedAction  Json?
+  status             HotelOpsTrendAlertStatus @default(CREATED)
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([propertyId, status, createdAt])
+  @@index([alertType, severity])
+}
+
+model HotelOpsEmergencyStop {
+  id         String   @id @default(cuid())
+  propertyId String   @unique
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  enabled    Boolean  @default(false)
+  reason     String?
+  updatedBy  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+enum HotelOpsPlatform {
+  booking
+  agoda
+  trip
+  expedia
+  all
+  unknown
+}
+
+enum HotelOpsTaskType {
+  READ_RESERVATIONS
+  READ_GUEST_MESSAGES
+  DRAFT_GUEST_REPLY
+  SEND_GUEST_REPLY
+  READ_RATES
+  UPDATE_RATE
+  READ_AVAILABILITY
+  UPDATE_AVAILABILITY
+  CLOSE_ROOM
+  OPEN_ROOM
+  UPDATE_DESCRIPTION
+  UPDATE_PHOTOS
+  SCAN_BOOKINGS
+  GENERATE_RECOMMENDATION
+  NO_OP_CLARIFY
+  FORBIDDEN
+}
+
+enum HotelOpsRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+  FORBIDDEN
+}
+
+enum HotelOpsTaskStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DENIED
+  CANCELLED
+  NEEDS_HUMAN
+}
+
+enum HotelOpsSourceChannel {
+  web
+  line
+  whatsapp
+  telegram
+  email
+  system
+}
+
+enum HotelOpsRole {
+  OWNER
+  HOTEL_MANAGER
+  STAFF
+  VIEWER
+  SYSTEM
+}
+
+enum HotelOpsApprovalStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+enum HotelOpsTrendAlertType {
+  HIGH_DEMAND
+  LOW_DEMAND
+  CANCELLATION_SPIKE
+  WEEKEND_SPIKE
+  ROOM_IMBALANCE
+  OTA_IMBALANCE
+  INFO
+}
+
+enum HotelOpsAlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum HotelOpsTrendAlertStatus {
+  CREATED
+  ACKNOWLEDGED
+  RECOMMENDATION_APPROVED
+  RESOLVED
 }
 
 model RateRule {
