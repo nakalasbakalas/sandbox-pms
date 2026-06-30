@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -902,6 +902,35 @@ assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_SUCCEEDED
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_STARTED'), true, 'Hotel Ops service audits worker start')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
 assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
+
+const emergencyFixture = createOpsCommandPrismaFixture()
+await setEmergencyStop(emergencyFixture.prisma, { enabled: true, reason: 'Owner paused OTA writes.' }, opsOwner)
+assert.equal(emergencyFixture.audits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLED'), true, 'Hotel Ops service audits emergency stop activation')
+assert.equal(emergencyFixture.notifications.some((notification) => notification.type === 'EMERGENCY_STOP'), true, 'Hotel Ops service records emergency stop notifications')
+const stoppedRateResult = await submitOpsCommand(
+  emergencyFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
+  opsManager,
+)
+assert.equal(stoppedRateResult.task.status, 'DENIED', 'Hotel Ops service denies write commands while emergency stop is active')
+assert.equal(stoppedRateResult.decision.blockedByEmergencyStop, true, 'Hotel Ops service marks emergency-stop-denied command decisions')
+assert.equal(emergencyFixture.approvals.length, 0, 'Hotel Ops service does not create approvals while emergency stop blocks writes')
+
+const deniedFixture = createOpsCommandPrismaFixture()
+const deniedRateResult = await submitOpsCommand(
+  deniedFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
+  opsManager,
+)
+const deniedRateTask = await denyOpsTask(deniedFixture.prisma, deniedRateResult.task.id, { reason: 'Do not change rates today.' }, opsOwner)
+assert.equal(deniedRateTask.status, 'DENIED', 'Hotel Ops service can deny a pending write task')
+assert.equal(deniedFixture.approvals[0].status, 'DENIED', 'Hotel Ops denial records the approval decision')
+assert.equal(deniedFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_DENIED'), true, 'Hotel Ops service audits denied approvals')
+await assert.rejects(
+  () => runQueuedOpsTask(deniedFixture.prisma, deniedRateResult.task.id, opsOwner),
+  /Only queued Hotel Ops tasks can run/,
+  'Hotel Ops service refuses to execute denied tasks',
+)
 
 const forbiddenFixture = createOpsCommandPrismaFixture()
 const forbiddenServiceResult = await submitOpsCommand(
