@@ -5,11 +5,120 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan } from '../server/ops-service.mjs'
+import { buildOpsNotificationDrafts, buildOpsScanInsights, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createUser } from '../server/pms-service.mjs'
+
+function createOpsCommandPrismaFixture() {
+  const property = {
+    id: 'property-ops-test',
+    code: 'SANDBOX',
+    name: 'SANDBOX HOTEL',
+    email: null,
+    reservationAlertEmail: null,
+  }
+  const tasks = []
+  const approvals = []
+  const logs = []
+  const audits = []
+  const notifications = []
+  let stop = null
+  let taskCounter = 0
+  let approvalCounter = 0
+  let logCounter = 0
+  let auditCounter = 0
+  let notificationCounter = 0
+
+  const now = () => new Date('2026-06-30T00:00:00.000Z')
+  const withTaskRelations = (task) => task ? {
+    ...task,
+    approvals: approvals.filter((approval) => approval.taskId === task.id),
+    logs: logs.filter((log) => log.taskId === task.id),
+    notifications: notifications.filter((notification) => notification.taskId === task.id),
+  } : null
+
+  const prisma = {
+    property: {
+      findUnique: async ({ where }) => {
+        if (where?.id === property.id || where?.code === property.code) return property
+        return null
+      },
+    },
+    hotelOpsEmergencyStop: {
+      upsert: async ({ create, update }) => {
+        stop = { id: 'stop-ops-test', createdAt: now(), updatedAt: now(), ...(stop || create), ...update }
+        return stop
+      },
+    },
+    hotelOpsTask: {
+      findUnique: async ({ where }) => withTaskRelations(tasks.find((task) => (
+        (where?.id && task.id === where.id)
+        || (where?.idempotencyKey && task.idempotencyKey === where.idempotencyKey)
+      ))),
+      create: async ({ data }) => {
+        const task = {
+          id: `ops-task-${++taskCounter}`,
+          createdAt: now(),
+          updatedAt: now(),
+          proofScreenshots: null,
+          executionSummary: null,
+          errorCode: null,
+          errorMessage: null,
+          ...data,
+        }
+        tasks.push(task)
+        return withTaskRelations(task)
+      },
+      update: async ({ where, data }) => {
+        const task = tasks.find((item) => item.id === where?.id)
+        if (!task) return null
+        Object.assign(task, data, { updatedAt: now() })
+        return withTaskRelations(task)
+      },
+    },
+    hotelOpsTaskApproval: {
+      create: async ({ data }) => {
+        const approval = {
+          id: `ops-approval-${++approvalCounter}`,
+          status: 'PENDING',
+          requestedAt: now(),
+          decidedAt: null,
+          decidedBy: null,
+          notes: null,
+          ...data,
+        }
+        approvals.push(approval)
+        return approval
+      },
+    },
+    hotelOpsTaskLog: {
+      create: async ({ data }) => {
+        const log = { id: `ops-log-${++logCounter}`, createdAt: now(), ...data }
+        logs.push(log)
+        return log
+      },
+    },
+    auditLog: {
+      create: async ({ data }) => {
+        const audit = { id: `ops-audit-${++auditCounter}`, createdAt: now(), ...data }
+        audits.push(audit)
+        return audit
+      },
+    },
+    hotelOpsNotification: {
+      create: async ({ data }) => {
+        const notification = { id: `ops-notification-${++notificationCounter}`, createdAt: now(), ...data }
+        notifications.push(notification)
+        return notification
+      },
+    },
+    $transaction: async (callback) => callback(prisma),
+  }
+
+  return { prisma, tasks, approvals, logs, audits, notifications }
+}
 
 async function importTypeScriptModule(path) {
   const source = await readFile(path, 'utf8')
@@ -721,6 +830,53 @@ assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk 
 assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'staff cannot create high-risk Hotel Ops write task')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops emergency stop blocks write tasks')
+
+const opsCommandFixture = createOpsCommandPrismaFixture()
+const opsManager = { id: 'manager-ops-test', role: 'MANAGER', name: 'Ops Manager' }
+const queuedScanResult = await submitOpsCommand(
+  opsCommandFixture.prisma,
+  { message: 'Check bookings for next weekend.', sourceChannel: 'web', idempotencyKey: 'ops-command-scan-test' },
+  opsManager,
+)
+assert.equal(queuedScanResult.task.status, 'QUEUED', 'Hotel Ops service queues low-risk scan commands')
+assert.equal(opsCommandFixture.tasks.length, 1, 'Hotel Ops service persists one task for a new command')
+assert.equal(opsCommandFixture.logs.some((log) => log.action === 'COMMAND_RECEIVED'), true, 'Hotel Ops service logs command receipt')
+assert.equal(opsCommandFixture.logs.some((log) => log.action === 'TASK_QUEUED'), true, 'Hotel Ops service logs queueing')
+assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED'), true, 'Hotel Ops service audits command receipt')
+assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION'), true, 'Hotel Ops service audits permission decisions')
+assert.equal(opsCommandFixture.notifications.some((notification) => notification.type === 'TASK_UPDATE'), true, 'Hotel Ops service records queue notifications')
+
+const duplicateScanResult = await submitOpsCommand(
+  opsCommandFixture.prisma,
+  { message: 'Check bookings for next weekend.', sourceChannel: 'web', idempotencyKey: 'ops-command-scan-test' },
+  opsManager,
+)
+assert.equal(duplicateScanResult.duplicate, true, 'Hotel Ops service marks repeated command idempotency keys as duplicate')
+assert.equal(duplicateScanResult.task.id, queuedScanResult.task.id, 'Hotel Ops duplicate commands return the existing task')
+assert.equal(opsCommandFixture.tasks.length, 1, 'Hotel Ops duplicate command idempotency does not create another task')
+assert.equal(opsCommandFixture.logs.some((log) => log.action === 'IDEMPOTENT_REPLAY'), true, 'Hotel Ops duplicate command replay is logged')
+
+const approvalFixture = createOpsCommandPrismaFixture()
+const pendingRateResult = await submitOpsCommand(
+  approvalFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'line' },
+  opsManager,
+)
+assert.equal(pendingRateResult.task.status, 'PENDING_APPROVAL', 'Hotel Ops service holds high-risk rate changes for approval')
+assert.equal(approvalFixture.approvals.length, 1, 'Hotel Ops service creates an approval record for high-risk commands')
+assert.equal(approvalFixture.approvals[0].requiredRole, 'OWNER', 'Hotel Ops rate updates require owner approval')
+assert.equal(approvalFixture.notifications.some((notification) => notification.type === 'APPROVAL_REQUEST'), true, 'Hotel Ops service records approval request notifications')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REQUESTED'), true, 'Hotel Ops service audits approval requests')
+
+const forbiddenFixture = createOpsCommandPrismaFixture()
+const forbiddenServiceResult = await submitOpsCommand(
+  forbiddenFixture.prisma,
+  { message: 'Cancel all bookings and refund guests.', sourceChannel: 'web' },
+  { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' },
+)
+assert.equal(forbiddenServiceResult.task.status, 'DENIED', 'Hotel Ops service persists forbidden commands as denied attempts')
+assert.equal(forbiddenFixture.approvals.length, 0, 'Hotel Ops service does not create approvals for forbidden commands')
+assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION' && audit.changes.allowed === false), true, 'Hotel Ops service audits denied forbidden decisions')
 
 const queuedReadTask = {
   taskType: 'READ_RESERVATIONS',
