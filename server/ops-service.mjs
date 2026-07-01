@@ -1528,6 +1528,15 @@ function platformLabel(platform) {
   return PLATFORM_LABELS[platform] || String(platform || 'OTA')
 }
 
+function recommendationPlatformPhrase(platform) {
+  const raw = normalizeText(platform).toLowerCase()
+  if (raw === 'all') return 'all channels'
+  const normalized = normalizePlatform(platform)
+  if (normalized === 'all') return 'all channels'
+  if (normalized && normalized !== 'unknown') return platformLabel(normalized)
+  return 'selected OTA'
+}
+
 function otaPlatformDistribution(reservations) {
   const counts = new Map()
   for (const reservation of reservations) {
@@ -1941,7 +1950,8 @@ export async function approveOpsAlertRecommendation(prisma, alertId, input, acto
   const action = alert.recommendedAction
   const rateText = action.rate?.amount ? `to ${Number(action.rate.amount).toLocaleString()} ${action.rate.currency || 'THB'}` : ''
   const dateText = action.dateRange?.start && action.dateRange?.end ? `${action.dateRange.start} to ${action.dateRange.end}` : ''
-  const message = input?.message || `Set ${action.platform || 'all'} ${action.roomType || 'room'} price ${rateText} ${dateText}`.replace(/\s+/g, ' ').trim()
+  const platformText = recommendationPlatformPhrase(action.platform || 'all')
+  const message = input?.message || `Set ${platformText} ${action.roomType || 'room'} price ${rateText} ${dateText}`.replace(/\s+/g, ' ').trim()
   const result = await submitOpsCommand(prisma, { message, sourceChannel: 'system', idempotencyKey: `alert:${alert.id}:recommendation` }, actor)
   await prisma.hotelOpsTrendAlert.update({
     where: { id: alert.id },

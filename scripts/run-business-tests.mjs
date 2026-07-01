@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -24,6 +24,7 @@ function createOpsCommandPrismaFixture() {
   const logs = []
   const audits = []
   const notifications = []
+  const trendAlerts = []
   let stop = null
   let taskCounter = 0
   let approvalCounter = 0
@@ -127,10 +128,19 @@ function createOpsCommandPrismaFixture() {
         return notification
       },
     },
+    hotelOpsTrendAlert: {
+      findUnique: async ({ where }) => trendAlerts.find((alert) => alert.id === where?.id) || null,
+      update: async ({ where, data }) => {
+        const alert = trendAlerts.find((item) => item.id === where?.id)
+        if (!alert) return null
+        Object.assign(alert, data, { updatedAt: now() })
+        return alert
+      },
+    },
     $transaction: async (callback) => callback(prisma),
   }
 
-  return { prisma, tasks, approvals, logs, audits, notifications }
+  return { prisma, tasks, approvals, logs, audits, notifications, trendAlerts }
 }
 
 async function importTypeScriptModule(path) {
@@ -1154,6 +1164,38 @@ const highDemandInsights = buildOpsScanInsights({
 })
 assert.equal(highDemandInsights.some((alert) => alert.alertType === 'HIGH_DEMAND'), true, 'Hotel Ops scan creates high-demand alert only when occupancy and velocity are elevated')
 assert.equal(highDemandInsights.find((alert) => alert.alertType === 'HIGH_DEMAND')?.recommendedAction?.approvalRequired, true, 'Hotel Ops high-demand recommendation remains approval-gated')
+const highDemandRecommendation = highDemandInsights.find((alert) => alert.alertType === 'HIGH_DEMAND')?.recommendedAction
+const recommendationFixture = createOpsCommandPrismaFixture()
+recommendationFixture.trendAlerts.push({
+  id: 'trend-alert-high-demand',
+  propertyId: 'property-ops-test',
+  alertType: 'HIGH_DEMAND',
+  severity: 'HIGH',
+  title: 'High demand window',
+  summary: 'Review a controlled rate increase.',
+  platform: 'all',
+  roomType: 'Deluxe Room',
+  dateStart: new Date('2026-06-30T00:00:00.000Z'),
+  dateEnd: new Date('2026-07-07T00:00:00.000Z'),
+  metrics: {},
+  recommendedAction: highDemandRecommendation,
+  status: 'CREATED',
+  createdAt: fixedOpsDate,
+  updatedAt: fixedOpsDate,
+})
+const approvedRecommendationResult = await approveOpsAlertRecommendation(
+  recommendationFixture.prisma,
+  'trend-alert-high-demand',
+  {},
+  opsOwner,
+)
+assert.equal(approvedRecommendationResult.task.taskType, 'UPDATE_RATE', 'Hotel Ops recommendation approval creates a typed rate task')
+assert.equal(approvedRecommendationResult.task.platform, 'all', 'Hotel Ops recommendation approval preserves all-channel target')
+assert.equal(approvedRecommendationResult.task.status, 'PENDING_APPROVAL', 'Hotel Ops recommendation approval creates an approval-gated task instead of executing directly')
+assert.equal(recommendationFixture.approvals.length, 1, 'Hotel Ops recommendation approval creates a task approval record')
+assert.equal(recommendationFixture.trendAlerts[0].status, 'RECOMMENDATION_APPROVED', 'Hotel Ops recommendation approval updates alert status')
+assert.equal(recommendationFixture.logs.some((log) => log.action === 'WORKER_STARTED'), false, 'Hotel Ops recommendation approval does not start the worker directly')
+assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RECOMMENDATION_APPROVED'), true, 'Hotel Ops recommendation approval is audited')
 
 const slowFullWindowInsights = buildOpsScanInsights({
   reservations: Array.from({ length: 8 }, (_, index) => makeOpsReservation(`slow-demand-${index}`, '2026-06-10T12:00:00.000Z')),
