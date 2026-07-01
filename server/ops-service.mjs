@@ -836,6 +836,50 @@ function workerFailureProof(task, kind = 'error') {
   }]
 }
 
+const SAFE_PROOF_KINDS = new Set(['before', 'after', 'error', 'trace'])
+const SAFE_PROOF_REDACTION_STATUSES = new Set(['SAFE', 'REDACTED'])
+const MAX_WORKER_PROOF_ARTIFACTS = 10
+
+function safeProofKind(kind, fallbackKind = 'trace') {
+  const normalized = String(kind || '').trim().toLowerCase()
+  if (SAFE_PROOF_KINDS.has(normalized)) return normalized
+  return SAFE_PROOF_KINDS.has(fallbackKind) ? fallbackKind : 'trace'
+}
+
+function safeProofCapturedAt(value) {
+  const parsed = value ? new Date(value) : null
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString()
+}
+
+function sanitizeWorkerProofScreenshots(task, proofScreenshots, fallbackKind = 'error') {
+  const proofs = Array.isArray(proofScreenshots)
+    ? proofScreenshots
+    : workerFailureProof(task, fallbackKind)
+  return proofs.slice(0, MAX_WORKER_PROOF_ARTIFACTS).map((proof, index) => {
+    const kind = safeProofKind(proof?.kind, fallbackKind)
+    const redactionStatus = String(proof?.redactionStatus || 'UNKNOWN').trim().toUpperCase()
+    const safeRedactionStatus = SAFE_PROOF_REDACTION_STATUSES.has(redactionStatus)
+      ? redactionStatus
+      : 'FAILED'
+    const storageUrl = safeRedactionStatus === 'FAILED'
+      ? `mock://hotel-ops/${task.id}/${kind}-redaction-blocked`
+      : redactedSensitiveText(normalizeNullableString(proof?.storageUrl) || `mock://hotel-ops/${task.id}/${kind}`)
+    return {
+      id: redactedSensitiveText(normalizeNullableString(proof?.id) || `${task.id}-${kind}-${index + 1}`),
+      kind,
+      storageUrl,
+      capturedAt: safeProofCapturedAt(proof?.capturedAt),
+      redactionStatus: safeRedactionStatus,
+    }
+  })
+}
+
+function fallbackProofKindForTaskRun(status, task) {
+  if (status === 'FAILED') return 'error'
+  if (status === 'NEEDS_HUMAN') return 'trace'
+  return WRITE_TASK_TYPES.has(task?.taskType) ? 'after' : 'trace'
+}
+
 async function queueOpsTask(tx, task, actor, message = 'Task queued for signed worker execution.') {
   const queued = task.status === 'QUEUED'
     ? await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
@@ -953,7 +997,10 @@ async function prepareOpsTaskRun(prisma, taskId, actor) {
 
 async function finalizeOpsTaskRun(prisma, task, actor, result) {
   const status = ['SUCCEEDED', 'FAILED', 'NEEDS_HUMAN'].includes(result.status) ? result.status : 'FAILED'
-  const proofScreenshots = Array.isArray(result.proofScreenshots) ? result.proofScreenshots : workerFailureProof(task, status === 'NEEDS_HUMAN' ? 'trace' : 'error')
+  const fallbackProofKind = fallbackProofKindForTaskRun(status, task)
+  const proofScreenshots = sanitizeWorkerProofScreenshots(task, result.proofScreenshots, fallbackProofKind)
+  const executionSummary = redactedSensitiveText(result.summary || 'Signed OTA worker execution completed.')
+  const errorMessage = result.errorMessage ? redactedSensitiveText(result.errorMessage) : result.errorMessage
   return prisma.$transaction(async (tx) => {
     const current = await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
     if (!current) throw new PmsValidationError('Hotel Ops task was not found.', 404)
@@ -970,17 +1017,17 @@ async function finalizeOpsTaskRun(prisma, task, actor, result) {
       data: {
         status,
         proofScreenshots,
-        executionSummary: result.summary,
+        executionSummary,
         errorCode: result.errorCode,
-        errorMessage: result.errorMessage,
+        errorMessage,
       },
       include: taskInclude,
     })
-    await taskLog(tx, task.id, `WORKER_${status}`, result.summary, actor, {
+    await taskLog(tx, task.id, `WORKER_${status}`, executionSummary, actor, {
       status,
-      summary: result.summary,
+      summary: executionSummary,
       errorCode: result.errorCode,
-      errorMessage: result.errorMessage,
+      errorMessage,
       workerMode: result.workerMode,
       signed: result.signed,
       data: result.data,
@@ -1002,7 +1049,7 @@ async function finalizeOpsTaskRun(prisma, task, actor, result) {
       recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
       recipientRole: status === 'NEEDS_HUMAN' ? 'HOTEL_MANAGER' : null,
       title: status === 'NEEDS_HUMAN' ? 'Hotel Ops needs human action' : `Hotel Ops task ${status.toLowerCase().replace(/_/g, ' ')}`,
-      summary: result.summary,
+      summary: executionSummary,
       actionPath: '/ops/tasks',
       metadata: {
         status,

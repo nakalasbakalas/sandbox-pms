@@ -1,4 +1,4 @@
-/* global console, Response */
+/* global console, process, Response */
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
@@ -1084,6 +1084,74 @@ assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_S
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofCount > 0), true, 'Hotel Ops service audits persisted worker proof artifacts')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
 assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
+
+const unsafeProofFixture = createOpsCommandPrismaFixture()
+const unsafeProofResult = await submitOpsCommand(
+  unsafeProofFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
+  opsManager,
+)
+await approveOpsTask(unsafeProofFixture.prisma, unsafeProofResult.task.id, { notes: 'Approved remote proof sanitization smoke.' }, opsOwner)
+const originalOpsWorkerFetch = globalThis.fetch
+const originalOpsWorkerBaseUrl = process.env.OTA_WORKER_BASE_URL
+const originalOpsWorkerSecret = process.env.OTA_WORKER_SHARED_SECRET
+try {
+  process.env.OTA_WORKER_BASE_URL = 'https://worker.example.test/tasks'
+  process.env.OTA_WORKER_SHARED_SECRET = 'remote-worker-secret'
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    ok: true,
+    data: {
+      taskId: unsafeProofResult.task.id,
+      status: 'SUCCEEDED',
+      summary: 'Remote worker accepted task with password=summary-secret.',
+      errorMessage: 'token=error-secret',
+      proofScreenshots: [
+        {
+          id: 'proof-password=proof-secret',
+          kind: 'after',
+          storageUrl: 'https://proof.example.test/screenshot?password=proof-secret&token=proof-token',
+          capturedAt: 'not-a-date',
+          redactionStatus: 'UNKNOWN',
+          ignoredCredential: 'password=extra-secret',
+        },
+        {
+          id: 'safe-api_key=safe-proof-secret',
+          kind: 'sideways',
+          storageUrl: 'https://proof.example.test/safe?api_key=safe-secret',
+          capturedAt: '2026-06-30T01:00:00.000Z',
+          redactionStatus: 'SAFE',
+        },
+        ...Array.from({ length: 12 }, (_, index) => ({
+          id: `safe-proof-${index}`,
+          kind: 'trace',
+          storageUrl: `https://proof.example.test/${index}`,
+          capturedAt: '2026-06-30T01:00:00.000Z',
+          redactionStatus: 'SAFE',
+        })),
+      ],
+      data: { dryRun: true },
+    },
+  }), { status: 200, headers: { 'content-type': 'application/json' } })
+
+  const unsafeProofTask = await runQueuedOpsTask(unsafeProofFixture.prisma, unsafeProofResult.task.id, opsOwner)
+  const unsafeProofJson = JSON.stringify(unsafeProofTask)
+  assert.equal(unsafeProofTask.status, 'SUCCEEDED', 'Hotel Ops service persists remote signed-worker success')
+  assert.equal(unsafeProofTask.proofScreenshots.length, 10, 'Hotel Ops service caps persisted worker proof artifacts')
+  assert.equal(unsafeProofTask.proofScreenshots[0].redactionStatus, 'FAILED', 'Hotel Ops service blocks proof artifacts with unknown redaction status')
+  assert.equal(unsafeProofTask.proofScreenshots[0].storageUrl.includes('redaction-blocked'), true, 'Hotel Ops service replaces unsafe proof URLs with a blocked reference')
+  assert.equal(unsafeProofTask.proofScreenshots[1].kind, 'after', 'Hotel Ops service normalizes unexpected proof kinds for successful write tasks')
+  assert.equal(unsafeProofJson.includes('summary-secret'), false, 'Hotel Ops service redacts worker execution summaries before persistence')
+  assert.equal(unsafeProofJson.includes('error-secret'), false, 'Hotel Ops service redacts worker error messages before persistence')
+  assert.equal(unsafeProofJson.includes('proof-secret'), false, 'Hotel Ops service redacts credential-like proof ids and URLs')
+  assert.equal(unsafeProofJson.includes('proof-token'), false, 'Hotel Ops service redacts credential-like proof URL tokens')
+  assert.equal(unsafeProofJson.includes('safe-secret'), false, 'Hotel Ops service redacts credential-like query parameters in safe proof URLs')
+} finally {
+  globalThis.fetch = originalOpsWorkerFetch
+  if (originalOpsWorkerBaseUrl === undefined) delete process.env.OTA_WORKER_BASE_URL
+  else process.env.OTA_WORKER_BASE_URL = originalOpsWorkerBaseUrl
+  if (originalOpsWorkerSecret === undefined) delete process.env.OTA_WORKER_SHARED_SECRET
+  else process.env.OTA_WORKER_SHARED_SECRET = originalOpsWorkerSecret
+}
 
 const sendReplyApprovalFixture = createOpsCommandPrismaFixture()
 const pendingSendReplyResult = await submitOpsCommand(
