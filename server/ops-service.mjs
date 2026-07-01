@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
 import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
 
-const TASK_TYPES = new Set([
+const TASK_TYPE_VALUES = [
   'READ_RESERVATIONS',
   'READ_GUEST_MESSAGES',
   'DRAFT_GUEST_REPLY',
@@ -21,7 +22,12 @@ const TASK_TYPES = new Set([
   'GENERATE_RECOMMENDATION',
   'NO_OP_CLARIFY',
   'FORBIDDEN',
-])
+]
+
+const TASK_TYPES = new Set(TASK_TYPE_VALUES)
+
+const PLATFORM_VALUES = ['booking', 'agoda', 'expedia', 'trip', 'all', 'unknown']
+const RISK_LEVEL_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'FORBIDDEN']
 
 const WRITE_TASK_TYPES = new Set([
   'SEND_GUEST_REPLY',
@@ -68,6 +74,7 @@ const PLATFORM_LABELS = Object.freeze({
   agoda: 'Agoda',
   expedia: 'Expedia',
   trip: 'Trip.com',
+  all: 'All OTA channels',
   unknown: 'Unknown OTA',
 })
 
@@ -149,6 +156,48 @@ const taskInclude = {
   approvals: { orderBy: { requestedAt: 'desc' } },
   logs: { orderBy: { createdAt: 'desc' }, take: 20 },
   notifications: { orderBy: { createdAt: 'desc' }, take: 10 },
+}
+
+const dateKeySchema = z
+  .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must use YYYY-MM-DD.'), z.null()])
+  .refine((value) => {
+    if (value === null) return true
+    const date = new Date(`${value}T00:00:00.000Z`)
+    return !Number.isNaN(date.getTime()) && isoDate(date) === value
+  }, 'Date must be a real calendar date.')
+
+const parsedOpsTaskSchema = z.object({
+  taskType: z.enum(TASK_TYPE_VALUES),
+  platform: z.enum(PLATFORM_VALUES),
+  hotelId: z.string().trim().min(1, 'Hotel ID is required.'),
+  roomType: z.string().trim().min(1, 'Room type cannot be blank.').nullable(),
+  dateRange: z.object({
+    start: dateKeySchema,
+    end: dateKeySchema,
+  }).strict(),
+  rate: z.object({
+    amount: z.number().finite().nonnegative().nullable(),
+    currency: z.string().trim().min(1, 'Rate currency is required.'),
+  }).strict().optional(),
+  availability: z.object({
+    rooms: z.number().int().nonnegative().nullable(),
+    status: z.enum(['open', 'closed']).nullable(),
+  }).strict().optional(),
+  message: z.string().nullable(),
+  riskLevel: z.enum(RISK_LEVEL_VALUES),
+  approvalRequired: z.boolean(),
+  confidence: z.number().finite().min(0).max(1),
+  missingFields: z.array(z.string().trim().min(1)),
+  rationale: z.string().trim().min(1, 'Parser rationale is required.'),
+}).strict()
+
+function schemaIssuePath(issue) {
+  return issue.path.length ? issue.path.join('.') : 'task'
+}
+
+function parsedTaskSchemaReason(result) {
+  const issue = result.error.issues[0]
+  return `Parsed task failed schema validation: ${schemaIssuePath(issue)} ${issue.message}`
 }
 
 function actorLabel(actor) {
@@ -624,8 +673,19 @@ export function evaluateOpsPermission(parsedTask, actor, emergencyStop = { enabl
   return decisionFor(parsedTask, actor, emergencyStop)
 }
 
-function validateParsedOpsTask(parsedTask) {
-  if (!TASK_TYPES.has(parsedTask?.taskType)) {
+export function validateParsedOpsTask(parsedTask) {
+  const schemaResult = parsedOpsTaskSchema.safeParse(parsedTask)
+  if (!schemaResult.success) {
+    return {
+      valid: false,
+      reason: parsedTaskSchemaReason(schemaResult),
+      missingFields: [],
+    }
+  }
+
+  const task = schemaResult.data
+
+  if (!TASK_TYPES.has(task.taskType)) {
     return {
       valid: false,
       reason: 'Unknown Hotel Ops task type.',
@@ -633,19 +693,19 @@ function validateParsedOpsTask(parsedTask) {
     }
   }
 
-  if (parsedTask.taskType === 'FORBIDDEN') {
+  if (task.taskType === 'FORBIDDEN') {
     return {
       valid: false,
-      reason: parsedTask.rationale || 'The command is prohibited by Hotel Ops policy.',
+      reason: task.rationale || 'The command is prohibited by Hotel Ops policy.',
       missingFields: [],
     }
   }
 
-  if (parsedTask.taskType === 'NO_OP_CLARIFY' || parsedTask.missingFields?.length > 0) {
+  if (task.taskType === 'NO_OP_CLARIFY' || task.missingFields?.length > 0) {
     return {
       valid: false,
-      reason: parsedTask.rationale || 'The command needs clarification before execution.',
-      missingFields: parsedTask.missingFields || [],
+      reason: task.rationale || 'The command needs clarification before execution.',
+      missingFields: task.missingFields || [],
     }
   }
 

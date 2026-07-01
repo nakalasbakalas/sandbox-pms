@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1162,6 +1162,16 @@ assert.equal(rateCommand.riskLevel, 'HIGH', 'Hotel Ops rate updates are high ris
 assert.equal(rateCommand.approvalRequired, true, 'Hotel Ops rate updates require approval')
 assert.equal(rateCommand.dateRange.start, '2026-07-03', 'Hotel Ops parser resolves this Friday')
 assert.equal(rateCommand.dateRange.end, '2026-07-04', 'Hotel Ops parser resolves Saturday')
+assert.equal(validateParsedOpsTask(rateCommand).valid, true, 'Hotel Ops strict parser schema accepts complete parsed rate tasks')
+const invalidDateParsedTask = validateParsedOpsTask({ ...rateCommand, dateRange: { start: '2026-02-30', end: '2026-07-04' } })
+assert.equal(invalidDateParsedTask.valid, false, 'Hotel Ops strict parser schema rejects impossible calendar dates')
+assert.match(invalidDateParsedTask.reason, /dateRange\.start/, 'Hotel Ops strict parser schema points to the invalid date field')
+const invalidConfidenceParsedTask = validateParsedOpsTask({ ...rateCommand, confidence: 1.5 })
+assert.equal(invalidConfidenceParsedTask.valid, false, 'Hotel Ops strict parser schema rejects confidence values outside 0-1')
+assert.match(invalidConfidenceParsedTask.reason, /confidence/, 'Hotel Ops strict parser schema points to confidence violations')
+const unexpectedSecretFieldParsedTask = validateParsedOpsTask({ ...rateCommand, password: 'never-store-this' })
+assert.equal(unexpectedSecretFieldParsedTask.valid, false, 'Hotel Ops strict parser schema rejects unexpected credential-like parser fields')
+assert.match(unexpectedSecretFieldParsedTask.reason, /password/, 'Hotel Ops strict parser schema identifies unrecognized parser fields')
 
 const scanCommand = parseHotelOpsCommand('Check bookings for next weekend.', { now: fixedOpsDate })
 assert.equal(['READ_RESERVATIONS', 'SCAN_BOOKINGS'].includes(scanCommand.taskType), true, 'Hotel Ops parser maps booking checks to read-only tasks')

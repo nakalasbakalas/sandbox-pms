@@ -16,6 +16,9 @@ This file maps the package acceptance criteria to current repo evidence.
 - `Raise Booking price to 3000.`
   - Expected: `NO_OP_CLARIFY` with missing date or room type.
   - Evidence: `scripts/run-business-tests.mjs`.
+- Strict parsed-task schema validation
+  - Expected: complete parsed tasks pass; impossible dates, out-of-range confidence, and unexpected credential-like fields fail validation before permission decisions.
+  - Evidence: `scripts/run-business-tests.mjs`.
 
 ## Permissions
 

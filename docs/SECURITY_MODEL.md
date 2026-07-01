@@ -2,9 +2,9 @@
 
 ## Trust Boundaries
 
-Manager commands are untrusted input. They must be parsed, validated, permission-checked, persisted, and audited before any execution.
+Manager commands are untrusted input. They must be parsed, strict-schema validated, permission-checked, persisted, and audited before any execution.
 
-The parser is not an execution authority. The backend owns policy, approvals, emergency stop, queueing, worker signing, secrets, audit records, and notifications.
+The parser is not an execution authority. The backend owns parsed-task schema validation, policy, approvals, emergency stop, queueing, worker signing, secrets, audit records, and notifications.
 
 The OTA worker accepts only signed, typed tasks. It rejects unknown task types, unknown platforms, unsigned requests, replayed nonces, and credential-shaped payload fields.
 

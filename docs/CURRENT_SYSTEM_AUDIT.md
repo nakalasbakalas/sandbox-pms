@@ -10,7 +10,7 @@ Last reviewed: 2026-07-01
 - Database: Prisma with Postgres-compatible schema.
 - Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`.
 - Deployment: Render-oriented server build with local and GitHub CI launch checks.
-- Hotel Ops AI mode: deterministic controlled parser today, not live OpenAI execution.
+- Hotel Ops AI mode: deterministic controlled parser today, with strict parsed-task schema validation before permission decisions; not live OpenAI execution.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
 - Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is persisted through backend acknowledgment routes.
@@ -54,7 +54,7 @@ Last reviewed: 2026-07-01
 - Agoda, Trip.com, and Expedia currently use the signed mock worker path.
 - Email notifications are recorded as provider-pending intents unless a real provider adapter is configured.
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
-- The parser is deterministic and schema-shaped; there is no live OpenAI parser call in production code yet.
+- The parser is deterministic and strict-schema validated; there is no live OpenAI parser call in production code yet.
 - Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.
 
 ## Validation Evidence

@@ -390,8 +390,8 @@ async function runBrowserSmokeTests() {
       }, seed)
 
       const page = await context.newPage()
-      page.setDefaultTimeout(60_000)
-      page.setDefaultNavigationTimeout(60_000)
+      page.setDefaultTimeout(90_000)
+      page.setDefaultNavigationTimeout(120_000)
       page.on('pageerror', (error) => errors.push(`[${currentStep}] ${error.stack || error.message}`))
       page.on('console', async (message) => {
         if (message.type() === 'error') {

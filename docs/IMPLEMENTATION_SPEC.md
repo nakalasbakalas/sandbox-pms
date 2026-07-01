@@ -141,6 +141,10 @@ Scheduled scans:
 - overlapping scheduled runs are skipped
 - scheduler status is exposed through `/api/ops/ota/status`
 
+## Parser Validation
+
+Hotel Ops commands use the deterministic parser in `server/ops-service.mjs`. Parsed task output is strict-schema validated before permission decisions, task persistence, approval routing, or worker queueing. Schema failures are recorded as validation failures and audited through the existing Hotel Ops task log/audit path. This is not a live OpenAI parser integration.
+
 ## Booking Email Inbox
 
 The Booking Inbox is a staff-facing exception queue for email-derived booking events. Existing imported events can be approved, edited and applied, linked to an existing reservation, used to create a reservation, rejected, or reprocessed through `server/pms-service.mjs`.
