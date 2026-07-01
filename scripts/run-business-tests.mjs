@@ -1312,11 +1312,24 @@ recommendationFixture.trendAlerts.push({
 })
 const scopedTrendAlerts = await listOpsTrendAlerts(recommendationFixture.prisma)
 assert.equal(scopedTrendAlerts.some((alert) => alert.id === 'foreign-trend-alert'), false, 'Hotel Ops intelligence list hides alerts from other properties')
+await assert.rejects(
+  () => approveOpsAlertRecommendation(
+    recommendationFixture.prisma,
+    'trend-alert-high-demand',
+    {},
+    opsOwner,
+  ),
+  /Recommendation approval reason is required/,
+  'Hotel Ops recommendation approval requires an audit reason before creating a task',
+)
+assert.equal(recommendationFixture.tasks.length, 0, 'Hotel Ops reasonless recommendation approval does not create a task')
+assert.equal(recommendationFixture.trendAlerts[0].status, 'CREATED', 'Hotel Ops reasonless recommendation approval leaves alert status unchanged')
+assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RECOMMENDATION_REJECTED'), true, 'Hotel Ops service audits reasonless recommendation approval attempts')
 
 const approvedRecommendationResult = await approveOpsAlertRecommendation(
   recommendationFixture.prisma,
   'trend-alert-high-demand',
-  {},
+  { reason: 'Pickup trend reviewed; prepare a rate task for owner approval.' },
   opsOwner,
 )
 assert.equal(approvedRecommendationResult.task.taskType, 'UPDATE_RATE', 'Hotel Ops recommendation approval creates a typed rate task')
@@ -1325,7 +1338,7 @@ assert.equal(approvedRecommendationResult.task.status, 'PENDING_APPROVAL', 'Hote
 assert.equal(recommendationFixture.approvals.length, 1, 'Hotel Ops recommendation approval creates a task approval record')
 assert.equal(recommendationFixture.trendAlerts[0].status, 'RECOMMENDATION_APPROVED', 'Hotel Ops recommendation approval updates alert status')
 assert.equal(recommendationFixture.logs.some((log) => log.action === 'WORKER_STARTED'), false, 'Hotel Ops recommendation approval does not start the worker directly')
-assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RECOMMENDATION_APPROVED'), true, 'Hotel Ops recommendation approval is audited')
+assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RECOMMENDATION_APPROVED' && audit.changes.reason === 'Pickup trend reviewed; prepare a rate task for owner approval.'), true, 'Hotel Ops recommendation approval is audited with the reason')
 
 const slowFullWindowInsights = buildOpsScanInsights({
   reservations: Array.from({ length: 8 }, (_, index) => makeOpsReservation(`slow-demand-${index}`, '2026-06-10T12:00:00.000Z')),

@@ -42,6 +42,7 @@ type PendingReasonAction =
   | { kind: 'approve-task'; task: HotelOpsTask }
   | { kind: 'deny-task'; task: HotelOpsTask }
   | { kind: 'cancel-task'; task: HotelOpsTask }
+  | { kind: 'approve-recommendation'; alert: HotelOpsTrendAlert }
   | { kind: 'resolve-alert'; alert: HotelOpsTrendAlert }
   | { kind: 'emergency-stop'; enabled: boolean }
 
@@ -176,6 +177,15 @@ function reasonActionCopy(action: PendingReasonAction | null) {
       placeholder: 'Example: Duplicate request; newer task replaces this one.',
       confirmLabel: 'Cancel task',
       destructive: true,
+    }
+  }
+  if (action.kind === 'approve-recommendation') {
+    return {
+      title: 'Queue recommendation',
+      description: `${action.alert.title} will create a new approval-gated Hotel Ops task. Record why this recommendation should enter the task queue.`,
+      placeholder: 'Example: Pickup trend reviewed; prepare a rate task for owner approval.',
+      confirmLabel: 'Queue recommendation',
+      destructive: false,
     }
   }
   if (action.kind === 'resolve-alert') {
@@ -484,14 +494,8 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    try {
-      const payload = await hotelOpsApi.approveRecommendation(alert.id)
-      toast.success(payload.message || 'Recommendation queued.')
-      setCommandResult(payload.data)
-      await refresh()
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not approve recommendation.')
-    }
+    setPendingReasonAction({ kind: 'approve-recommendation', alert })
+    setReasonText('')
   }
 
   const acknowledgeAlert = async (alert: HotelOpsTrendAlert) => {
@@ -550,6 +554,10 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       } else if (pendingReasonAction.kind === 'cancel-task') {
         const payload = await hotelOpsApi.cancelTask(pendingReasonAction.task.id, reason)
         toast.success(payload.message || 'Task cancelled.')
+      } else if (pendingReasonAction.kind === 'approve-recommendation') {
+        const payload = await hotelOpsApi.approveRecommendation(pendingReasonAction.alert.id, reason)
+        toast.success(payload.message || 'Recommendation queued.')
+        setCommandResult(payload.data)
       } else if (pendingReasonAction.kind === 'resolve-alert') {
         const payload = await hotelOpsApi.resolveAlert(pendingReasonAction.alert.id, reason)
         toast.success(payload.message || 'Alert resolved.')

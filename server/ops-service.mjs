@@ -2027,6 +2027,15 @@ export async function approveOpsAlertRecommendation(prisma, alertId, input, acto
   if (!alert || alert.propertyId !== property.id) throw new PmsValidationError('Hotel Ops alert was not found.', 404)
   if (alert.status === 'RESOLVED') throw new PmsValidationError('Resolved Hotel Ops alerts cannot queue recommendations.', 409)
   if (!alert.recommendedAction) throw new PmsValidationError('This alert does not have a recommended action.', 409)
+  const approvalReason = normalizeNullableString(input?.reason || input?.notes)
+  if (!approvalReason) {
+    await audit(prisma, actor, 'OPS_ALERT_RECOMMENDATION_REJECTED', 'hotelOpsTrendAlert', alert.id, {
+      alertType: alert.alertType,
+      previousStatus: alert.status,
+      reason: 'Recommendation approval reason is required before queueing a Hotel Ops task.',
+    })
+    throw new PmsValidationError('Recommendation approval reason is required before queueing a Hotel Ops task.', 400)
+  }
   const action = alert.recommendedAction
   const rateText = action.rate?.amount ? `to ${Number(action.rate.amount).toLocaleString()} ${action.rate.currency || 'THB'}` : ''
   const dateText = action.dateRange?.start && action.dateRange?.end ? `${action.dateRange.start} to ${action.dateRange.end}` : ''
@@ -2041,6 +2050,7 @@ export async function approveOpsAlertRecommendation(prisma, alertId, input, acto
     alertType: alert.alertType,
     previousStatus: alert.status,
     taskId: result.task?.id,
+    reason: approvalReason,
   })
   return result
 }

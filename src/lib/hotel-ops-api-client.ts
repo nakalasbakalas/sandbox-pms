@@ -91,10 +91,10 @@ export const hotelOpsApi = {
     return apiRequest<{ ok: true; data: HotelOpsTrendAlert[] }>(`/api/ops/intelligence/alerts${query(filters)}`)
   },
 
-  approveRecommendation(alertId: string) {
+  approveRecommendation(alertId: string, reason?: string) {
     return apiRequest<{ ok: true; data: HotelOpsCommandResult; message?: string }>(`/api/ops/intelligence/alerts/${encodeURIComponent(alertId)}/approve-recommendation`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reason }),
     })
   },
 
