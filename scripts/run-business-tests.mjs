@@ -208,6 +208,7 @@ const assistantTools = await importTypeScriptModule(resolve('src/lib/assistant/t
 const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
 const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
+const bookingEmailCapabilities = await importTypeScriptModule(resolve('src/lib/booking-email-capabilities.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
@@ -570,6 +571,32 @@ assert.equal(nullEmailUser.username, 'fd3', 'admin UI null-email payload creates
 assert.equal(nullEmailUser.email, null, 'null-email server user stores null email')
 assert.equal(nullEmailUser.role, 'FRONT_DESK', 'null-email server user role normalizes to backend enum')
 assert.equal(nullEmailUserAudits[0]?.action, 'USER_CREATED', 'null-email server user creation is audited')
+
+const bookingEmailNoApi = bookingEmailCapabilities.resolveBookingEmailCapabilities({
+  serverApiEnabled: true,
+  apiAvailable: false,
+  mailboxConfigured: false,
+})
+assert.equal(bookingEmailNoApi.canApplyEvents, false, 'booking-email UI disables event mutations when API routes are unavailable')
+assert.equal(bookingEmailNoApi.canSyncMailbox, false, 'booking-email UI disables sync when API routes are unavailable')
+assert.equal(bookingEmailNoApi.bannerTitle, 'Booking-email backend connection needed', 'booking-email UI names missing API routes clearly')
+
+const bookingEmailMissingMailboxCreds = bookingEmailCapabilities.resolveBookingEmailCapabilities({
+  serverApiEnabled: true,
+  apiAvailable: true,
+  mailboxConfigured: false,
+})
+assert.equal(bookingEmailMissingMailboxCreds.canApplyEvents, true, 'booking-email UI can apply existing events when only mailbox sync credentials are missing')
+assert.equal(bookingEmailMissingMailboxCreds.canSyncMailbox, false, 'booking-email UI blocks mailbox sync until provider credentials are configured')
+assert.equal(bookingEmailMissingMailboxCreds.bannerTitle, 'Mailbox sync credentials needed', 'booking-email UI distinguishes provider credential gaps from missing backend routes')
+
+const bookingEmailReady = bookingEmailCapabilities.resolveBookingEmailCapabilities({
+  serverApiEnabled: true,
+  apiAvailable: true,
+  mailboxConfigured: true,
+})
+assert.equal(bookingEmailReady.canApplyEvents, true, 'booking-email UI applies events when backend routes are available')
+assert.equal(bookingEmailReady.canSyncMailbox, true, 'booking-email UI syncs mailbox when backend and provider credentials are ready')
 
 const notificationDrafts = buildOpsNotificationDrafts({
   id: 'property-1',

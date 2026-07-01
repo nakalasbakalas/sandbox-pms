@@ -10,6 +10,7 @@ interface BookingEmailInboxState {
   loading: boolean
   error: string | null
   notConfigured: boolean
+  apiAvailable: boolean
   mode: 'server' | 'local-draft'
   reload: () => Promise<void>
 }
@@ -36,6 +37,7 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notConfigured, setNotConfigured] = useState(false)
+  const [apiAvailable, setApiAvailable] = useState(false)
   const [mode, setMode] = useState<'server' | 'local-draft'>('server')
   const authToken = null
 
@@ -46,6 +48,7 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
     setSources(nextSources)
     setStatus(summarizeLocalStatus(nextEvents, nextSources))
     setNotConfigured(true)
+    setApiAvailable(false)
     setMode('local-draft')
     setError(null)
     setLoading(false)
@@ -68,6 +71,7 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
       setEvents(eventsPayload.data)
       setSources(sourcesPayload.data)
       setNotConfigured(!statusPayload.data.configured)
+      setApiAvailable(true)
       setMode('server')
       setError(statusPayload.data.configured ? null : statusPayload.data.message || null)
     } catch (caught) {
@@ -76,8 +80,9 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
         setSources([])
         setStatus(summarizeLocalStatus([], []))
         setNotConfigured(true)
+        setApiAvailable(false)
         setMode('server')
-        setError('Booking-email API routes are not implemented on this backend yet.')
+        setError('Booking-email API routes are not available on this server yet.')
       } else {
         setError(caught instanceof Error ? caught.message : 'Could not load booking email inbox.')
       }
@@ -97,7 +102,8 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
     loading,
     error,
     notConfigured,
+    apiAvailable,
     mode,
     reload,
-  }), [error, events, loading, mode, notConfigured, reload, sources, status])
+  }), [apiAvailable, error, events, loading, mode, notConfigured, reload, sources, status])
 }

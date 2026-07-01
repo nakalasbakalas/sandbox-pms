@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { bookingEmailApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { resolveBookingEmailCapabilities } from '@/lib/booking-email-capabilities'
 import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { cn } from '@/lib/utils'
@@ -64,7 +65,7 @@ function formatReceived(value?: string) {
 
 function amountLabel(event: BookingEmailEvent) {
   if (typeof event.amount !== 'number') return event.paymentStatus || 'Amount not extracted'
-  return `${event.currency || 'THB'} ${event.amount.toLocaleString('en-US')}${event.paymentStatus ? ` · ${event.paymentStatus}` : ''}`
+  return `${event.currency || 'THB'} ${event.amount.toLocaleString('en-US')}${event.paymentStatus ? ` - ${event.paymentStatus}` : ''}`
 }
 
 function statusTone(status: BookingEmailEventStatus) {
@@ -75,11 +76,17 @@ function statusTone(status: BookingEmailEventStatus) {
 }
 
 export function BookingInboxView() {
-  const { events, sources, status, loading, error, notConfigured, mode, reload } = useBookingEmailInbox()
+  const { events, sources, status, loading, error, notConfigured, apiAvailable, mode, reload } = useBookingEmailInbox()
   const { navigate } = useNavigation()
   const [activeTab, setActiveTab] = useState<InboxTab>('NEEDS_REVIEW')
   const authToken = null
-  const canUseBackend = SERVER_API_ENABLED && !notConfigured
+  const capabilities = resolveBookingEmailCapabilities({
+    serverApiEnabled: SERVER_API_ENABLED,
+    apiAvailable,
+    mailboxConfigured: !notConfigured,
+  })
+  const canUseBackend = capabilities.canApplyEvents
+  const canSyncMailbox = capabilities.canSyncMailbox
 
   const counts = useMemo(() => ({
     NEEDS_REVIEW: events.filter((event) => event.status === 'NEEDS_REVIEW').length,
@@ -93,16 +100,24 @@ export function BookingInboxView() {
   ), [activeTab, events])
 
   const requireBackend = () => {
-    toast.info('Booking-email backend routes are required before this action can apply PMS changes.')
+    toast.info('Booking-email API routes are required before this action can apply PMS changes.')
+  }
+
+  const requireMailboxConfig = () => {
+    toast.info('Mailbox sync needs server-side Gmail or OAuth credentials before it can fetch new mail.')
   }
 
   const requireAdvancedEditor = () => {
-    toast.info('Detailed edit/link/create workflows need the next booking-email backend and parser editor pass.')
+    toast.info('Detailed edit and link workflows need the parser editor UI pass.')
   }
 
   const handleSync = async () => {
     if (!canUseBackend) {
       requireBackend()
+      return
+    }
+    if (!canSyncMailbox) {
+      requireMailboxConfig()
       return
     }
     try {
@@ -192,17 +207,22 @@ export function BookingInboxView() {
               <div className="flex gap-3">
                 <Plugs className="mt-0.5 h-5 w-5 flex-none" weight="bold" />
                 <div>
-                  <div className="font-semibold">Booking-email backend connection needed</div>
+                  <div className="font-semibold">{capabilities.bannerTitle || 'Booking-email attention needed'}</div>
                   <p className="mt-1 text-sm text-amber-900/80">
-                    {error || status?.message || 'Configure the booking-email routes before staff can sync, approve, or apply email-derived booking events.'}
+                    {error || status?.message || 'Configure booking-email connectivity before staff can sync new mailbox events.'}
                   </p>
+                  {canUseBackend && !canSyncMailbox && (
+                    <p className="mt-1 text-xs text-amber-900/70">
+                      Review, approve, reject, and reprocess actions remain available for events already in the PMS.
+                    </p>
+                  )}
                   <p className="mt-1 text-xs text-amber-900/70">
                     Current mode: {mode === 'local-draft' ? 'local draft data only' : 'server API checked'}.
                   </p>
                 </div>
               </div>
               <Button variant="outline" className="border-amber-300 bg-white/70" onClick={() => setActiveTab('SOURCES')}>
-                View required routes
+                View source settings
               </Button>
             </CardContent>
           </Card>
@@ -233,7 +253,11 @@ export function BookingInboxView() {
                   className="rounded-lg border bg-white p-8"
                   icon={<EnvelopeSimple size={34} weight="thin" />}
                   title={`No ${tabLabels[tab].toLowerCase()} events`}
-                  description={notConfigured ? 'Connect the booking-email backend to populate this queue.' : 'No booking email events currently match this tab.'}
+                  description={!canUseBackend
+                    ? 'Connect the booking-email backend to populate this queue.'
+                    : !canSyncMailbox
+                      ? 'Mailbox sync credentials are missing; no imported events currently match this tab.'
+                      : 'No booking email events currently match this tab.'}
                 />
               ) : (
                 <div className="grid gap-3">
@@ -284,7 +308,12 @@ export function BookingInboxView() {
                   </div>
 
                   <div className="rounded-lg border bg-muted/20 p-3">
-                    <div className="text-sm font-semibold">Required backend routes</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">Backend route contract</div>
+                      <Badge variant="outline" className={apiAvailable ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}>
+                        {apiAvailable ? 'API available' : 'API not available'}
+                      </Badge>
+                    </div>
                     <div className="mt-3 grid gap-1.5 text-xs text-muted-foreground">
                       <code>GET /api/booking-email/status</code>
                       <code>POST /api/booking-email/sync</code>
@@ -341,7 +370,7 @@ function BookingEmailEventCard({
   onOpenReservation: () => void
   onRequireAdvancedEditor: () => void
 }) {
-  const backendTitle = canUseBackend ? undefined : 'Requires booking-email backend routes.'
+  const backendTitle = canUseBackend ? undefined : 'Requires booking-email API routes.'
 
   return (
     <Card className="rounded-lg bg-white py-0 shadow-sm">
