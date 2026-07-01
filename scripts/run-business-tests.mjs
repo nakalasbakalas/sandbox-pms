@@ -856,6 +856,19 @@ assert.equal(redactedReplyCommand.message.includes('guest-secret'), false, 'Hote
 const forbiddenCommand = parseHotelOpsCommand('Cancel all bookings and refund guests.', { now: fixedOpsDate })
 assert.equal(forbiddenCommand.taskType, 'FORBIDDEN', 'Hotel Ops parser blocks destructive booking/refund command')
 assert.equal(evaluateOpsPermission(forbiddenCommand, { id: 'owner', role: 'ADMIN' }).allowed, false, 'Hotel Ops forbidden commands cannot execute')
+const criticalForbiddenCommands = [
+  'Issue a refund for Booking reservation ABC123.',
+  'Change the Booking cancellation policy to non-refundable.',
+  'Update the Expedia payment policy.',
+  'Delete the Agoda listing.',
+  'Run arbitrary browser command on Booking.com.',
+  'Access an unauthorized OTA account.',
+]
+for (const forbiddenText of criticalForbiddenCommands) {
+  const parsedForbidden = parseHotelOpsCommand(forbiddenText, { now: fixedOpsDate })
+  assert.equal(parsedForbidden.taskType, 'FORBIDDEN', `Hotel Ops parser blocks prohibited command: ${forbiddenText}`)
+  assert.equal(evaluateOpsPermission(parsedForbidden, { id: 'owner', role: 'ADMIN' }).allowed, false, `Hotel Ops permission guard blocks prohibited command: ${forbiddenText}`)
+}
 
 const ambiguousRateCommand = parseHotelOpsCommand('Raise Booking price to 3000.', { now: fixedOpsDate })
 assert.equal(ambiguousRateCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser requests clarification for incomplete rate command')

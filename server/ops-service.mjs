@@ -97,9 +97,16 @@ const FORBIDDEN_PATTERNS = [
   'reveal credentials',
   'hide this from logs',
   'delete audit log',
+  'disable audit log',
   'use owner chatgpt account directly',
   'cancel all bookings',
   'refund guests',
+  /\b(issue|send|process|make|create)\s+(a\s+)?refund\b/,
+  /\brefund\s+(guest|reservation|booking|payment)\b/,
+  /\b(change|update|edit|disable|remove)\s+(?:\S+\s+){0,4}(payment|cancellation)\s+polic(?:y|ies)\b/,
+  /\b(delete|remove|disable|deactivate)\s+(?:\S+\s+){0,4}listing\b/,
+  /\b(access|use|login\s+to)\s+.*\b(unauthorized|unapproved|another hotel|not owned)\b/,
+  /\b(arbitrary|manual|direct)\s+browser\s+(command|control|automation|script)\b/,
 ]
 
 const taskInclude = {
@@ -291,7 +298,7 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
     })
   }
 
-  if (FORBIDDEN_PATTERNS.some((pattern) => lower.includes(pattern))) {
+  if (FORBIDDEN_PATTERNS.some((pattern) => (pattern instanceof RegExp ? pattern.test(lower) : lower.includes(pattern)))) {
     return taskWithRule('FORBIDDEN', {
       platform,
       riskLevel: 'FORBIDDEN',
