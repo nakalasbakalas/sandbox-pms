@@ -896,8 +896,12 @@ const queuedScanResult = await submitOpsCommand(
 assert.equal(queuedScanResult.task.status, 'QUEUED', 'Hotel Ops service queues low-risk scan commands')
 assert.equal(opsCommandFixture.tasks.length, 1, 'Hotel Ops service persists one task for a new command')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'COMMAND_RECEIVED'), true, 'Hotel Ops service logs command receipt')
+assert.equal(opsCommandFixture.logs.some((log) => log.action === 'PARSER_OUTPUT'), true, 'Hotel Ops service logs parser output')
+assert.equal(opsCommandFixture.logs.some((log) => log.action === 'VALIDATION_PASSED'), true, 'Hotel Ops service logs validation pass decisions')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'TASK_QUEUED'), true, 'Hotel Ops service logs queueing')
 assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED'), true, 'Hotel Ops service audits command receipt')
+assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_PARSER_OUTPUT' && audit.changes.taskType === 'SCAN_BOOKINGS'), true, 'Hotel Ops service audits parser output')
+assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_VALIDATION_PASSED'), true, 'Hotel Ops service audits validation pass decisions')
 assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION'), true, 'Hotel Ops service audits permission decisions')
 assert.equal(opsCommandFixture.notifications.some((notification) => notification.type === 'TASK_UPDATE'), true, 'Hotel Ops service records queue notifications')
 
@@ -1064,6 +1068,9 @@ const forbiddenServiceResult = await submitOpsCommand(
 )
 assert.equal(forbiddenServiceResult.task.status, 'DENIED', 'Hotel Ops service persists forbidden commands as denied attempts')
 assert.equal(forbiddenFixture.approvals.length, 0, 'Hotel Ops service does not create approvals for forbidden commands')
+assert.equal(forbiddenFixture.logs.some((log) => log.action === 'VALIDATION_FAILED'), true, 'Hotel Ops service logs validation failures for forbidden commands')
+assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_PARSER_OUTPUT' && audit.changes.taskType === 'FORBIDDEN'), true, 'Hotel Ops service audits forbidden parser output')
+assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_VALIDATION_FAILED' && audit.changes.valid === false), true, 'Hotel Ops service audits validation failures for forbidden commands')
 assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION' && audit.changes.allowed === false), true, 'Hotel Ops service audits denied forbidden decisions')
 
 const queuedReadTask = {

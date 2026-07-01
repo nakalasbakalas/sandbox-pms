@@ -559,6 +559,38 @@ export function evaluateOpsPermission(parsedTask, actor, emergencyStop = { enabl
   return decisionFor(parsedTask, actor, emergencyStop)
 }
 
+function validateParsedOpsTask(parsedTask) {
+  if (!TASK_TYPES.has(parsedTask?.taskType)) {
+    return {
+      valid: false,
+      reason: 'Unknown Hotel Ops task type.',
+      missingFields: [],
+    }
+  }
+
+  if (parsedTask.taskType === 'FORBIDDEN') {
+    return {
+      valid: false,
+      reason: parsedTask.rationale || 'The command is prohibited by Hotel Ops policy.',
+      missingFields: [],
+    }
+  }
+
+  if (parsedTask.taskType === 'NO_OP_CLARIFY' || parsedTask.missingFields?.length > 0) {
+    return {
+      valid: false,
+      reason: parsedTask.rationale || 'The command needs clarification before execution.',
+      missingFields: parsedTask.missingFields || [],
+    }
+  }
+
+  return {
+    valid: true,
+    reason: 'Parsed task has the required fields for permission evaluation.',
+    missingFields: [],
+  }
+}
+
 function dateOrNull(key) {
   return key ? new Date(`${key}T00:00:00.000Z`) : null
 }
@@ -995,6 +1027,7 @@ export async function submitOpsCommand(prisma, input, actor) {
   const persistedRawMessage = redactedSensitiveText(rawMessage)
   const sourceChannel = normalizeOpsSourceChannel(input?.sourceChannel || 'web')
   const parsed = parseHotelOpsCommand(rawMessage)
+  const validation = validateParsedOpsTask(parsed)
   const stop = await getEmergencyStop(prisma)
   const decision = decisionFor(parsed, actor, stop)
   const key = normalizeNullableString(input?.idempotencyKey) || idempotencyKey(actor, rawMessage, sourceChannel)
@@ -1044,8 +1077,11 @@ export async function submitOpsCommand(prisma, input, actor) {
 
     await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage: persistedRawMessage })
     await taskLog(tx, task.id, 'PARSER_OUTPUT', 'Command parsed into a controlled task.', actor, parsed)
+    await taskLog(tx, task.id, validation.valid ? 'VALIDATION_PASSED' : 'VALIDATION_FAILED', validation.reason, actor, validation)
     await taskLog(tx, task.id, 'PERMISSION_DECISION', decision.reason, actor, decision)
     await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, parsed })
+    await audit(tx, actor, 'OPS_PARSER_OUTPUT', 'hotelOpsTask', task.id, parsed)
+    await audit(tx, actor, validation.valid ? 'OPS_VALIDATION_PASSED' : 'OPS_VALIDATION_FAILED', 'hotelOpsTask', task.id, validation)
     await audit(tx, actor, 'OPS_PERMISSION_DECISION', 'hotelOpsTask', task.id, decision)
 
     if (status === 'PENDING_APPROVAL') {
