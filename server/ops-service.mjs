@@ -878,6 +878,15 @@ async function finalizeOpsTaskRun(prisma, task, actor, result) {
       data: result.data,
       proofScreenshots,
     })
+    if (proofScreenshots.length > 0) {
+      await audit(tx, actor, 'OPS_PROOF_STORED', 'hotelOpsTask', task.id, {
+        taskType: task.taskType,
+        status,
+        proofCount: proofScreenshots.length,
+        proofKinds: proofScreenshots.map((proof) => proof.kind),
+        redactionStatuses: proofScreenshots.map((proof) => proof.redactionStatus),
+      })
+    }
     await audit(tx, actor, `OPS_TASK_${status}`, 'hotelOpsTask', task.id, { taskType: task.taskType, status, dryRun: true, workerMode: result.workerMode, signed: result.signed })
     await recordOpsNotifications(tx, task.propertyId, {
       type: status === 'NEEDS_HUMAN' ? 'NEEDS_HUMAN' : 'TASK_UPDATE',

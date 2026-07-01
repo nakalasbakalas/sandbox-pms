@@ -900,6 +900,7 @@ assert.equal(executedRateTask.proofScreenshots.every((proof) => proof.redactionS
 assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_STARTED'), true, 'Hotel Ops service logs worker start')
 assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_SUCCEEDED'), true, 'Hotel Ops service logs worker success')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_STARTED'), true, 'Hotel Ops service audits worker start')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofCount > 0), true, 'Hotel Ops service audits persisted worker proof artifacts')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
 assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
 
@@ -915,6 +916,7 @@ assert.equal(failedRateTask.status, 'FAILED', 'Hotel Ops service persists failed
 assert.equal(failedRateTask.errorCode, 'MOCK_SELECTOR_FAILURE', 'Hotel Ops service preserves worker failure error codes')
 assert.equal(failedRateTask.proofScreenshots.some((proof) => proof.kind === 'error'), true, 'Hotel Ops service persists worker error proof screenshots')
 assert.equal(selectorFailureFixture.logs.some((log) => log.action === 'WORKER_FAILED'), true, 'Hotel Ops service logs worker failures')
+assert.equal(selectorFailureFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofKinds.includes('error')), true, 'Hotel Ops service audits failed-worker proof artifacts')
 assert.equal(selectorFailureFixture.audits.some((audit) => audit.action === 'OPS_TASK_FAILED'), true, 'Hotel Ops service audits worker failures')
 
 const humanChallengeFixture = createOpsCommandPrismaFixture()
@@ -929,6 +931,7 @@ assert.equal(humanChallengeTask.status, 'NEEDS_HUMAN', 'Hotel Ops service persis
 assert.equal(humanChallengeTask.errorCode, 'NEEDS_HUMAN_CHALLENGE', 'Hotel Ops service preserves human-challenge error codes')
 assert.equal(humanChallengeTask.proofScreenshots.some((proof) => proof.kind === 'trace'), true, 'Hotel Ops service persists human-challenge trace proof')
 assert.equal(humanChallengeFixture.logs.some((log) => log.action === 'WORKER_NEEDS_HUMAN'), true, 'Hotel Ops service logs human-challenge worker results')
+assert.equal(humanChallengeFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofKinds.includes('trace')), true, 'Hotel Ops service audits human-challenge proof traces')
 assert.equal(humanChallengeFixture.notifications.some((notification) => notification.type === 'NEEDS_HUMAN'), true, 'Hotel Ops service records human-action notifications')
 
 const emergencyFixture = createOpsCommandPrismaFixture()
