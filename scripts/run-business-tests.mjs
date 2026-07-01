@@ -639,6 +639,14 @@ assert.equal(
   false,
   'Hotel Ops worker rejects tampered signed payloads',
 )
+const replayedWorkerRequest = verifyOpsWorkerRequest({
+  body: signedWorkerRequest.body,
+  headers: signedWorkerRequest.headers,
+  secret: 'shared-worker-secret',
+  now: 1_000_001,
+})
+assert.equal(replayedWorkerRequest.statusCode, 401, 'Hotel Ops worker rejects replayed signed requests')
+assert.equal(replayedWorkerRequest.error.includes('nonce'), true, 'Hotel Ops worker replay rejection names the nonce boundary')
 const signedMockWorkerResult = runSignedMockOtaWorkerTask(JSON.parse(signedWorkerRequest.body))
 assert.equal(signedMockWorkerResult.status, 'SUCCEEDED', 'Hotel Ops signed mock worker returns structured result')
 assert.equal(signedMockWorkerResult.data.dryRun, true, 'Hotel Ops signed mock worker stays in dry-run by default')

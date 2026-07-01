@@ -6,6 +6,7 @@ export const OPS_WORKER_TIMESTAMP_HEADER = 'x-ops-worker-timestamp'
 export const OPS_WORKER_NONCE_HEADER = 'x-ops-worker-nonce'
 
 const DEFAULT_MAX_SKEW_MS = 5 * 60 * 1000
+const seenWorkerNonces = new Map()
 const ALLOWED_TASK_TYPES = new Set([
   'READ_RESERVATIONS',
   'READ_GUEST_MESSAGES',
@@ -50,6 +51,21 @@ function workerSignature(secret, timestamp, nonce, body) {
   return createHmac('sha256', secret).update(canonicalPayload(timestamp, nonce, body)).digest('base64url')
 }
 
+function pruneNonceStore(store, now) {
+  for (const [nonce, expiresAt] of store.entries()) {
+    if (expiresAt < now) store.delete(nonce)
+  }
+}
+
+function recordWorkerNonce(nonce, timestamp, now, maxSkewMs, store = seenWorkerNonces) {
+  pruneNonceStore(store, now)
+  if (store.has(nonce)) {
+    return { ok: false, statusCode: 401, error: 'OTA worker request nonce has already been used.' }
+  }
+  store.set(nonce, timestamp + maxSkewMs)
+  return { ok: true }
+}
+
 export function opsWorkerBaseUrl(env = process.env) {
   return normalizeString(env.OTA_WORKER_BASE_URL || env.OTA_WORKER_URL)
 }
@@ -84,7 +100,7 @@ export function signOpsWorkerRequest(body, options = {}) {
   }
 }
 
-export function verifyOpsWorkerRequest({ body, headers, env = process.env, now = Date.now(), maxSkewMs = DEFAULT_MAX_SKEW_MS, secret } = {}) {
+export function verifyOpsWorkerRequest({ body, headers, env = process.env, now = Date.now(), maxSkewMs = DEFAULT_MAX_SKEW_MS, secret, nonceStore = seenWorkerNonces, replayProtection = true } = {}) {
   const sharedSecret = normalizeString(secret) || opsWorkerSecret(env)
   if (!sharedSecret) {
     return { ok: false, statusCode: 503, error: 'OTA worker shared secret is not configured.' }
@@ -107,6 +123,11 @@ export function verifyOpsWorkerRequest({ body, headers, env = process.env, now =
   const actualBuffer = Buffer.from(signature)
   if (expectedBuffer.length !== actualBuffer.length || !timingSafeEqual(expectedBuffer, actualBuffer)) {
     return { ok: false, statusCode: 401, error: 'Invalid OTA worker request signature.' }
+  }
+
+  if (replayProtection) {
+    const nonceDecision = recordWorkerNonce(nonce, timestamp, Number(now), Number(maxSkewMs), nonceStore)
+    if (!nonceDecision.ok) return nonceDecision
   }
 
   return { ok: true }
