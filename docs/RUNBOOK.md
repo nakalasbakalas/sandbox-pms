@@ -50,6 +50,15 @@ OTA credentials must be platform secrets only. Do not commit or log them. Bookin
 
 Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or a future refresh-token flow owned by the app server.
 
+Booking Inbox operators:
+
+1. Use `/booking-inbox` to review imported booking email events.
+2. Use Approve & Apply only when the extracted guest, dates, room type, amount, and reservation match are clear.
+3. Use Edit Parsed Details Then Apply when the parser is close but needs corrected stay, payment, or guest fields.
+4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings.
+5. Enter an operational reason for cancellation email actions.
+6. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
+
 ## Daily Operation
 
 Manager:

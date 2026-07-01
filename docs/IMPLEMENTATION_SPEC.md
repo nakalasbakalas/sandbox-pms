@@ -44,6 +44,18 @@ API routes:
 - `POST /api/ops/scan/run`
 - `POST /api/internal/ops/worker/tasks`
 
+Booking-email API routes:
+
+- `GET /api/booking-email/status`
+- `POST /api/booking-email/sync`
+- `GET /api/booking-email/events`
+- `GET /api/booking-email/events/:id`
+- `POST /api/booking-email/events/:id/approve`
+- `POST /api/booking-email/events/:id/reject`
+- `POST /api/booking-email/events/:id/reprocess`
+- `GET/POST /api/booking-email/sources`
+- `PATCH /api/booking-email/sources/:id`
+
 ## Parser Contract
 
 The current parser is deterministic in `parseHotelOpsCommand`. It outputs the repo type `ParsedHotelOpsTask` with:
@@ -120,6 +132,16 @@ Scheduled scans:
 - cron config is reported but expected to be run by external infrastructure
 - overlapping scheduled runs are skipped
 - scheduler status is exposed through `/api/ops/ota/status`
+
+## Booking Email Inbox
+
+The Booking Inbox is a staff-facing exception queue for email-derived booking events. Existing imported events can be approved, edited and applied, linked to an existing reservation, used to create a reservation, rejected, or reprocessed through `server/pms-service.mjs`.
+
+- Approve uses `apply_parsed` for payment/modification/cancellation-style events and links matched new bookings to avoid duplicate reservations.
+- Edit Parsed Details Then Apply submits corrected `editedDetails` through the same approval route.
+- Link/Create requires an explicit reservation id for linking; unmatched new-booking events can create a reservation from parsed details.
+- Cancellation email actions require an operational reason so the audit trail captures the staff decision.
+- Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials and must not use a pasted mailbox password.
 
 ## Notifications
 

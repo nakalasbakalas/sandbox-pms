@@ -16,16 +16,37 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 import { bookingEmailApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { resolveBookingEmailCapabilities } from '@/lib/booking-email-capabilities'
+import {
+  bookingEmailActionRequiresReason,
+  bookingEmailDefaultApprovalMode,
+  bookingEmailDetailsForm,
+  buildBookingEmailApprovePayload,
+  type BookingEmailApprovalMode,
+  type BookingEmailDetailsForm,
+} from '@/lib/booking-email-workflow'
 import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { cn } from '@/lib/utils'
 import type { BookingEmailEvent, BookingEmailEventStatus } from '@/types/booking-email'
 
 type InboxTab = 'NEEDS_REVIEW' | 'PROCESSED' | 'ERROR' | 'IGNORED' | 'SOURCES'
+
+type BookingEmailActionDialog = {
+  kind: 'edit' | 'link'
+  event: BookingEmailEvent
+  form: BookingEmailDetailsForm
+  mode: BookingEmailApprovalMode
+  reservationId: string
+  reason: string
+}
 
 const tabLabels: Record<InboxTab, string> = {
   NEEDS_REVIEW: 'Needs Review',
@@ -79,6 +100,7 @@ export function BookingInboxView() {
   const { events, sources, status, loading, error, notConfigured, apiAvailable, mode, reload } = useBookingEmailInbox()
   const { navigate } = useNavigation()
   const [activeTab, setActiveTab] = useState<InboxTab>('NEEDS_REVIEW')
+  const [actionDialog, setActionDialog] = useState<BookingEmailActionDialog | null>(null)
   const authToken = null
   const capabilities = resolveBookingEmailCapabilities({
     serverApiEnabled: SERVER_API_ENABLED,
@@ -107,8 +129,56 @@ export function BookingInboxView() {
     toast.info('Mailbox sync needs server-side Gmail or OAuth credentials before it can fetch new mail.')
   }
 
-  const requireAdvancedEditor = () => {
-    toast.info('Detailed edit and link workflows need the parser editor UI pass.')
+  const openEditDialog = (event: BookingEmailEvent) => {
+    setActionDialog({
+      kind: 'edit',
+      event,
+      form: bookingEmailDetailsForm(event),
+      mode: 'apply_parsed',
+      reservationId: event.reservationId || '',
+      reason: '',
+    })
+  }
+
+  const openLinkDialog = (event: BookingEmailEvent) => {
+    setActionDialog({
+      kind: 'link',
+      event,
+      form: bookingEmailDetailsForm(event),
+      mode: event.eventType === 'NEW_BOOKING' && !event.reservationId ? 'create_reservation' : 'link_reservation',
+      reservationId: event.reservationId || '',
+      reason: '',
+    })
+  }
+
+  const updateActionForm = (field: keyof BookingEmailDetailsForm, value: string) => {
+    setActionDialog((current) => current ? { ...current, form: { ...current.form, [field]: value } } : current)
+  }
+
+  const submitActionDialog = async () => {
+    if (!actionDialog) return
+    if (!canUseBackend) {
+      requireBackend()
+      return
+    }
+    if (bookingEmailActionRequiresReason(actionDialog.event) && !actionDialog.reason.trim()) {
+      toast.error('Cancellation email actions require an operational reason.')
+      return
+    }
+    try {
+      const payload = buildBookingEmailApprovePayload({
+        mode: actionDialog.mode,
+        form: actionDialog.form,
+        reservationId: actionDialog.reservationId,
+        reason: actionDialog.reason,
+      })
+      const result = await bookingEmailApi.approveEvent(authToken, actionDialog.event.id, payload)
+      toast.success(result.message || 'Booking email event applied.')
+      setActionDialog(null)
+      await reload()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'Could not apply booking email event.')
+    }
   }
 
   const handleSync = async () => {
@@ -134,8 +204,17 @@ export function BookingInboxView() {
       requireBackend()
       return
     }
+    const requiresReason = bookingEmailActionRequiresReason(event)
+    const reason = requiresReason
+      ? window.prompt('Operational reason for applying this cancellation email?')?.trim()
+      : undefined
+    if (requiresReason && !reason) {
+      toast.error('Cancellation email actions require an operational reason.')
+      return
+    }
+    const mode = bookingEmailDefaultApprovalMode(event)
     try {
-      const payload = await bookingEmailApi.approveEvent(authToken, event.id, { mode: event.reservationId ? 'link_reservation' : 'apply_parsed', reservationId: event.reservationId })
+      const payload = await bookingEmailApi.approveEvent(authToken, event.id, { mode, reservationId: event.reservationId, reason })
       toast.success(payload.message || 'Booking email event applied.')
       await reload()
     } catch (caught) {
@@ -270,7 +349,8 @@ export function BookingInboxView() {
                       onReject={reject}
                       onReprocess={reprocess}
                       onOpenReservation={() => event.reservationId ? navigate('reservations') : requireBackend()}
-                      onRequireAdvancedEditor={requireAdvancedEditor}
+                      onEditDetails={openEditDialog}
+                      onLinkOrCreate={openLinkDialog}
                     />
                   ))}
                 </div>
@@ -333,6 +413,98 @@ export function BookingInboxView() {
           </TabsContent>
         </Tabs>
       </main>
+      <Dialog open={Boolean(actionDialog)} onOpenChange={(open) => !open && setActionDialog(null)}>
+        {actionDialog && (
+          <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>{actionDialog.kind === 'edit' ? 'Edit Parsed Details Then Apply' : 'Link or Create Reservation'}</DialogTitle>
+              <DialogDescription>
+                {actionDialog.kind === 'edit'
+                  ? 'Correct the extracted booking details before applying the email event through the backend service.'
+                  : 'Link this email event to an existing reservation or create a reservation from the extracted details.'}
+              </DialogDescription>
+            </DialogHeader>
+
+            {actionDialog.kind === 'link' && (
+              <div className="grid gap-2">
+                <Label htmlFor="booking-email-action-mode">Action</Label>
+                <select
+                  id="booking-email-action-mode"
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={actionDialog.mode}
+                  onChange={(event) => setActionDialog((current) => current ? { ...current, mode: event.target.value as BookingEmailApprovalMode } : current)}
+                >
+                  <option value="link_reservation">Link existing reservation</option>
+                  {actionDialog.event.eventType === 'NEW_BOOKING' && <option value="create_reservation">Create reservation from parsed details</option>}
+                </select>
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <BookingEmailField label="Guest name" value={actionDialog.form.guestName} onChange={(value) => updateActionForm('guestName', value)} />
+              <BookingEmailField label="Guest email" value={actionDialog.form.guestEmail} onChange={(value) => updateActionForm('guestEmail', value)} />
+              <BookingEmailField label="Guest phone" value={actionDialog.form.guestPhone} onChange={(value) => updateActionForm('guestPhone', value)} />
+              <BookingEmailField label="Channel reference" value={actionDialog.form.channelRef} onChange={(value) => updateActionForm('channelRef', value)} />
+              <BookingEmailField label="Check-in" type="date" value={actionDialog.form.checkIn} onChange={(value) => updateActionForm('checkIn', value)} />
+              <BookingEmailField label="Check-out" type="date" value={actionDialog.form.checkOut} onChange={(value) => updateActionForm('checkOut', value)} />
+              <BookingEmailField label="Room type" value={actionDialog.form.roomType} onChange={(value) => updateActionForm('roomType', value)} />
+              <BookingEmailField label="Adults" type="number" value={actionDialog.form.adults} onChange={(value) => updateActionForm('adults', value)} />
+              <BookingEmailField label="Children" type="number" value={actionDialog.form.children} onChange={(value) => updateActionForm('children', value)} />
+              <BookingEmailField label="Amount" type="number" value={actionDialog.form.amount} onChange={(value) => updateActionForm('amount', value)} />
+              <BookingEmailField label="Currency" value={actionDialog.form.currency} onChange={(value) => updateActionForm('currency', value)} />
+              <BookingEmailField label="Payment status" value={actionDialog.form.paymentStatus} onChange={(value) => updateActionForm('paymentStatus', value)} />
+              <BookingEmailField label="Payment method" value={actionDialog.form.paymentMethod} onChange={(value) => updateActionForm('paymentMethod', value)} />
+              <BookingEmailField label="Payment reference" value={actionDialog.form.paymentReference} onChange={(value) => updateActionForm('paymentReference', value)} />
+              {actionDialog.kind === 'link' && actionDialog.mode === 'link_reservation' && (
+                <BookingEmailField label="Reservation ID" value={actionDialog.reservationId} onChange={(value) => setActionDialog((current) => current ? { ...current, reservationId: value } : current)} />
+              )}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="booking-email-special-requests">Special requests</Label>
+                <Textarea
+                  id="booking-email-special-requests"
+                  value={actionDialog.form.specialRequests}
+                  onChange={(event) => updateActionForm('specialRequests', event.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="booking-email-notes">Notes</Label>
+                <Textarea
+                  id="booking-email-notes"
+                  value={actionDialog.form.notes}
+                  onChange={(event) => updateActionForm('notes', event.target.value)}
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="booking-email-action-reason">Operational reason{actionDialog.event.eventType === 'CANCELLATION' ? ' required' : ''}</Label>
+              <Textarea
+                id="booking-email-action-reason"
+                value={actionDialog.reason}
+                onChange={(event) => setActionDialog((current) => current ? { ...current, reason: event.target.value } : current)}
+                placeholder="Example: Matched OTA cancellation notice to reservation after checking guest name and dates."
+                rows={2}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setActionDialog(null)}>Cancel</Button>
+              <Button onClick={() => void submitActionDialog()}>
+                {actionDialog.kind === 'edit'
+                  ? 'Apply Edited Details'
+                  : actionDialog.mode === 'create_reservation'
+                    ? 'Create Reservation'
+                    : 'Link Reservation'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   )
 }
@@ -360,7 +532,8 @@ function BookingEmailEventCard({
   onReject,
   onReprocess,
   onOpenReservation,
-  onRequireAdvancedEditor,
+  onEditDetails,
+  onLinkOrCreate,
 }: {
   event: BookingEmailEvent
   canUseBackend: boolean
@@ -368,7 +541,8 @@ function BookingEmailEventCard({
   onReject: (event: BookingEmailEvent) => void
   onReprocess: (event: BookingEmailEvent) => void
   onOpenReservation: () => void
-  onRequireAdvancedEditor: () => void
+  onEditDetails: (event: BookingEmailEvent) => void
+  onLinkOrCreate: (event: BookingEmailEvent) => void
 }) {
   const backendTitle = canUseBackend ? undefined : 'Requires booking-email API routes.'
 
@@ -412,11 +586,11 @@ function BookingEmailEventCard({
             <CheckCircle size={16} weight="bold" />
             Approve & Apply
           </Button>
-          <Button variant="outline" className="justify-start gap-1.5" title={backendTitle} disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW'} onClick={onRequireAdvancedEditor}>
+          <Button variant="outline" className="justify-start gap-1.5" title={backendTitle} disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW'} onClick={() => onEditDetails(event)}>
             <ListMagnifyingGlass size={16} weight="bold" />
             Edit Parsed Details Then Apply
           </Button>
-          <Button variant="outline" className="justify-start gap-1.5" title={backendTitle} disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW'} onClick={onRequireAdvancedEditor}>
+          <Button variant="outline" className="justify-start gap-1.5" title={backendTitle} disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW'} onClick={() => onLinkOrCreate(event)}>
             <LinkSimple size={16} weight="bold" />
             Link / Create Reservation
           </Button>
@@ -458,6 +632,31 @@ function EventFact({ label, value }: { label: string; value: string }) {
     <div className="rounded-md border bg-background px-3 py-2">
       <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
       <div className="mt-0.5 truncate font-medium">{value}</div>
+    </div>
+  )
+}
+
+function BookingEmailField({
+  label,
+  value,
+  onChange,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  type?: 'text' | 'date' | 'number'
+}) {
+  const id = `booking-email-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   )
 }

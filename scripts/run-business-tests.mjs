@@ -209,6 +209,7 @@ const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
 const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
 const bookingEmailCapabilities = await importTypeScriptModule(resolve('src/lib/booking-email-capabilities.ts'))
+const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booking-email-workflow.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
@@ -597,6 +598,81 @@ const bookingEmailReady = bookingEmailCapabilities.resolveBookingEmailCapabiliti
 })
 assert.equal(bookingEmailReady.canApplyEvents, true, 'booking-email UI applies events when backend routes are available')
 assert.equal(bookingEmailReady.canSyncMailbox, true, 'booking-email UI syncs mailbox when backend and provider credentials are ready')
+
+const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
+  id: 'email-event-1',
+  source: 'Booking.com',
+  sender: 'booking@example.test',
+  receivedAt: '2026-07-01T08:00:00.000Z',
+  eventType: 'NEW_BOOKING',
+  status: 'NEEDS_REVIEW',
+  guestName: 'Email Guest',
+  checkIn: '2026-07-03',
+  checkOut: '2026-07-05',
+  roomType: 'DELUXE',
+  amount: 4400,
+  currency: 'THB',
+  channelRef: 'OTA-123',
+  parsedDetails: {
+    guestName: 'Parsed Guest',
+    adults: 2,
+    children: 1,
+    specialRequests: 'High floor',
+  },
+})
+assert.equal(bookingEmailForm.guestName, 'Parsed Guest', 'booking-email edit form prefers parsed guest details')
+assert.equal(bookingEmailForm.amount, '4400', 'booking-email edit form falls back to event amount')
+assert.equal(bookingEmailForm.channelRef, 'OTA-123', 'booking-email edit form carries channel reference')
+
+const editedBookingEmailPayload = bookingEmailWorkflow.buildBookingEmailApprovePayload({
+  mode: 'apply_parsed',
+  form: {
+    ...bookingEmailForm,
+    amount: '4500',
+    adults: '2',
+    children: '0',
+    paymentMethod: 'ONLINE',
+    notes: 'Corrected by front desk.',
+  },
+  reason: 'Corrected extracted total before creating reservation.',
+})
+assert.equal(editedBookingEmailPayload.mode, 'apply_parsed', 'booking-email edited details use apply mode')
+assert.equal(editedBookingEmailPayload.editedDetails.amount, 4500, 'booking-email edited details parse amount')
+assert.equal(editedBookingEmailPayload.editedDetails.children, 0, 'booking-email edited details preserve zero children')
+assert.equal(editedBookingEmailPayload.editedDetails.paymentMethod, 'ONLINE', 'booking-email edited details preserve payment method')
+assert.equal(editedBookingEmailPayload.reason, 'Corrected extracted total before creating reservation.', 'booking-email edited apply payload carries audit reason')
+
+assert.throws(
+  () => bookingEmailWorkflow.buildBookingEmailApprovePayload({ mode: 'link_reservation', form: bookingEmailForm, reservationId: ' ' }),
+  /Reservation ID is required/,
+  'booking-email link payload requires a reservation id',
+)
+const linkBookingEmailPayload = bookingEmailWorkflow.buildBookingEmailApprovePayload({
+  mode: 'link_reservation',
+  form: bookingEmailForm,
+  reservationId: 'reservation-1',
+})
+assert.equal(linkBookingEmailPayload.reservationId, 'reservation-1', 'booking-email link payload targets the selected reservation')
+assert.equal(
+  bookingEmailWorkflow.bookingEmailDefaultApprovalMode({ eventType: 'NEW_BOOKING', reservationId: 'reservation-1' }),
+  'link_reservation',
+  'booking-email default approval links matched new bookings instead of creating duplicates',
+)
+assert.equal(
+  bookingEmailWorkflow.bookingEmailDefaultApprovalMode({ eventType: 'PAYMENT_NOTICE', reservationId: 'reservation-1' }),
+  'apply_parsed',
+  'booking-email default approval applies payment notices through reservation-aware parsing',
+)
+assert.equal(
+  bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'CANCELLATION' }),
+  true,
+  'booking-email cancellation actions require an operational reason',
+)
+assert.equal(
+  bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'NEW_BOOKING' }),
+  false,
+  'booking-email non-cancellation actions do not require a cancellation reason',
+)
 
 const notificationDrafts = buildOpsNotificationDrafts({
   id: 'property-1',

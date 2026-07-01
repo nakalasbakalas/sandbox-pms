@@ -13,6 +13,7 @@ Last reviewed: 2026-07-01
 - Hotel Ops AI mode: deterministic controlled parser today, not live OpenAI execution.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
+- Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync still requires server-owned API credentials.
 
 ## Relevant Implementation Files
 
@@ -26,6 +27,7 @@ Last reviewed: 2026-07-01
 - Data model: `prisma/schema.prisma` and `prisma/migrations/20260630133000_hotel_ops_command_center`.
 - UI: `src/components/hotel-ops/HotelOpsCommandCenterView.tsx`.
 - Today action surfacing: `src/components/today/TodayView.tsx`.
+- Booking Inbox UI: `src/components/booking-email/BookingInboxView.tsx`.
 - API client/types: `src/lib/hotel-ops-api-client.ts`, `src/types/hotel-ops.ts`.
 - Business and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`.
 
@@ -35,6 +37,7 @@ Last reviewed: 2026-07-01
 - `/api/ops/commands`, task, approval, notification, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
 - High-risk task approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop mutations require reasons.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
+- Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
 
