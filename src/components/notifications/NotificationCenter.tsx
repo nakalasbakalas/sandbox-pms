@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { 
   Bell, 
   BellRinging,
+  ArrowSquareOut,
   X,
   Check,
   CheckCircle,
@@ -23,15 +24,62 @@ import {
   House
 } from '@phosphor-icons/react'
 import { useNotifications, type Notification, type NotificationPriority, type NotificationType } from '@/hooks/use-notifications'
+import type { UseOpsNotificationsResult } from '@/hooks/use-ops-notifications'
+import { useNavigation } from '@/hooks/use-navigation'
+import type { NavigationRoute } from '@/types/navigation'
 import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 
 interface NotificationCenterProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  localNotifications: ReturnType<typeof useNotifications>
+  opsNotifications: UseOpsNotificationsResult
 }
 
-export function NotificationCenter({ open, onOpenChange }: NotificationCenterProps) {
+const priorityOrder: Record<NotificationPriority, number> = { URGENT: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
+
+function sortNotifications(notifications: Notification[]) {
+  return [...notifications].sort((a, b) => {
+    if (priorityOrder[a.priority] !== priorityOrder[b.priority]) {
+      return priorityOrder[a.priority] - priorityOrder[b.priority]
+    }
+    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  })
+}
+
+function isHotelOpsNotification(notification: Notification) {
+  return notification.metadata?.source === 'hotel-ops'
+}
+
+function routeFromActionUrl(actionUrl?: string): NavigationRoute | null {
+  if (!actionUrl || typeof window === 'undefined') return null
+
+  try {
+    const parsed = new URL(actionUrl, window.location.origin)
+    if (parsed.origin !== window.location.origin) return null
+    const path = parsed.pathname.replace(/^\/+|\/+$/g, '')
+    const routeMap: Record<string, NavigationRoute> = {
+      'ops/chat': 'ops-chat',
+      'ops/approvals': 'ops-approvals',
+      'ops/tasks': 'ops-tasks',
+      'ops/intelligence': 'ops-intelligence',
+      'ops/settings': 'ops-settings',
+      'booking-inbox': 'booking-inbox',
+    }
+    return routeMap[path] || null
+  } catch {
+    return null
+  }
+}
+
+export function NotificationCenter({
+  open,
+  onOpenChange,
+  localNotifications,
+  opsNotifications,
+}: NotificationCenterProps) {
+  const { navigate } = useNavigation()
   const {
     activeNotifications,
     unreadNotifications,
@@ -39,14 +87,51 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
     markAsRead,
     markAllAsRead,
     dismissNotification,
-    clearDismissed,
     clearAll,
     toggleSound,
-  } = useNotifications()
+  } = localNotifications
 
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
 
-  const displayedNotifications = filter === 'unread' ? unreadNotifications : activeNotifications
+  const combinedActiveNotifications = sortNotifications([...activeNotifications, ...opsNotifications.activeNotifications])
+  const combinedUnreadNotifications = sortNotifications([...unreadNotifications, ...opsNotifications.unreadNotifications])
+  const displayedNotifications = filter === 'unread' ? combinedUnreadNotifications : combinedActiveNotifications
+
+  const handleMarkAsRead = (notification: Notification) => {
+    if (isHotelOpsNotification(notification)) {
+      opsNotifications.markAsRead(notification.id)
+    } else {
+      markAsRead(notification.id)
+    }
+  }
+
+  const handleDismiss = (notification: Notification) => {
+    if (isHotelOpsNotification(notification)) {
+      opsNotifications.dismissNotification(notification.id)
+    } else {
+      dismissNotification(notification.id)
+    }
+  }
+
+  const handleMarkAllAsRead = () => {
+    markAllAsRead()
+    opsNotifications.markAllAsRead()
+  }
+
+  const handleClearAll = () => {
+    clearAll()
+    opsNotifications.clearAll()
+  }
+
+  const openNotificationAction = (actionUrl: string) => {
+    const route = routeFromActionUrl(actionUrl)
+    if (route) {
+      navigate(route)
+      onOpenChange(false)
+      return
+    }
+    window.location.assign(actionUrl)
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -58,8 +143,8 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
               <div>
                 <SheetTitle>Notifications</SheetTitle>
                 <SheetDescription className="text-xs mt-1">
-                  {unreadNotifications.length > 0 
-                    ? `${unreadNotifications.length} unread alert${unreadNotifications.length > 1 ? 's' : ''}`
+                  {combinedUnreadNotifications.length > 0
+                    ? `${combinedUnreadNotifications.length} unread alert${combinedUnreadNotifications.length > 1 ? 's' : ''}`
                     : 'All caught up'}
                 </SheetDescription>
               </div>
@@ -73,7 +158,7 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
               onClick={() => setFilter('all')}
               className="flex-1"
             >
-              All ({activeNotifications.length})
+              All ({combinedActiveNotifications.length})
             </Button>
             <Button
               variant={filter === 'unread' ? 'default' : 'outline'}
@@ -81,12 +166,18 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
               onClick={() => setFilter('unread')}
               className="flex-1"
             >
-              Unread ({unreadNotifications.length})
+              Unread ({combinedUnreadNotifications.length})
             </Button>
           </div>
         </SheetHeader>
 
         <ScrollArea className="flex-1 px-6">
+          {opsNotifications.loadError && (
+            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Hotel Ops notifications could not load: {opsNotifications.loadError}
+            </div>
+          )}
+
           {displayedNotifications.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <CheckCircle size={64} className="text-muted-foreground opacity-30 mb-4" />
@@ -103,8 +194,9 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
                 <NotificationCard
                   key={notification.id}
                   notification={notification}
-                  onMarkAsRead={() => markAsRead(notification.id)}
-                  onDismiss={() => dismissNotification(notification.id)}
+                  onMarkAsRead={() => handleMarkAsRead(notification)}
+                  onDismiss={() => handleDismiss(notification)}
+                  onOpenAction={notification.actionUrl ? () => openNotificationAction(notification.actionUrl!) : undefined}
                 />
               ))}
             </div>
@@ -133,22 +225,22 @@ export function NotificationCenter({ open, onOpenChange }: NotificationCenterPro
           <Separator />
 
           <div className="flex gap-2">
-            {unreadNotifications.length > 0 && (
+            {combinedUnreadNotifications.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={markAllAsRead}
+                onClick={handleMarkAllAsRead}
                 className="flex-1"
               >
                 <Check size={16} className="mr-2" />
                 Mark All Read
               </Button>
             )}
-            {activeNotifications.length > 0 && (
+            {combinedActiveNotifications.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={clearAll}
+                onClick={handleClearAll}
                 className="flex-1"
               >
                 <Trash size={16} className="mr-2" />
@@ -166,11 +258,13 @@ interface NotificationCardProps {
   notification: Notification
   onMarkAsRead: () => void
   onDismiss: () => void
+  onOpenAction?: () => void
 }
 
-function NotificationCard({ notification, onMarkAsRead, onDismiss }: NotificationCardProps) {
+function NotificationCard({ notification, onMarkAsRead, onDismiss, onOpenAction }: NotificationCardProps) {
   const Icon = getNotificationIcon(notification.type)
   const priorityConfig = getPriorityConfig(notification.priority)
+  const isOps = isHotelOpsNotification(notification)
 
   return (
     <div
@@ -196,6 +290,11 @@ function NotificationCard({ notification, onMarkAsRead, onDismiss }: Notificatio
                   {notification.roomNumber}
                 </Badge>
               )}
+              {isOps && (
+                <Badge variant="outline" className="text-xs">
+                  Hotel Ops
+                </Badge>
+              )}
             </div>
             {!notification.read && (
               <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0 mt-1" />
@@ -211,6 +310,17 @@ function NotificationCard({ notification, onMarkAsRead, onDismiss }: Notificatio
             </div>
 
             <div className="flex items-center gap-1">
+              {onOpenAction && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onOpenAction}
+                  className="h-7 px-2 text-xs"
+                >
+                  <ArrowSquareOut size={14} className="mr-1" />
+                  {notification.actionLabel || 'Open'}
+                </Button>
+              )}
               {!notification.read && (
                 <Button
                   variant="ghost"
@@ -247,6 +357,7 @@ function getNotificationIcon(type: NotificationType) {
     ROOM_BLOCKED: Warning,
     GUEST_REQUEST: Info,
     SYSTEM_ALERT: Bell,
+    HOTEL_OPS: BellRinging,
   }
   return iconMap[type] || Bell
 }

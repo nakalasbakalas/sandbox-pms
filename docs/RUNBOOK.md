@@ -59,6 +59,12 @@ Booking Inbox operators:
 5. Enter an operational reason for cancellation email actions.
 6. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
+Hotel Ops notification center:
+
+1. In server mode, the notification bell shows backend Hotel Ops notifications for users with Ops permission.
+2. Provider-pending email intents mean the PMS recorded the notification but no mail provider has delivered it yet.
+3. Read/dismiss controls are per-browser convenience state; use `/ops/tasks`, `/ops/approvals`, or `/ops/intelligence` as the operational source of truth.
+
 ## Daily Operation
 
 Manager:

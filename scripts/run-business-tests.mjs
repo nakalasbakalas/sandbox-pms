@@ -210,6 +210,7 @@ const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-au
 const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
 const bookingEmailCapabilities = await importTypeScriptModule(resolve('src/lib/booking-email-capabilities.ts'))
 const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booking-email-workflow.ts'))
+const opsNotificationDisplay = await importTypeScriptModule(resolve('src/lib/ops-notification-display.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
@@ -572,6 +573,45 @@ assert.equal(nullEmailUser.username, 'fd3', 'admin UI null-email payload creates
 assert.equal(nullEmailUser.email, null, 'null-email server user stores null email')
 assert.equal(nullEmailUser.role, 'FRONT_DESK', 'null-email server user role normalizes to backend enum')
 assert.equal(nullEmailUserAudits[0]?.action, 'USER_CREATED', 'null-email server user creation is audited')
+
+const opsEmailNotification = {
+  id: 'ops-notification-email-1',
+  propertyId: 'property-1',
+  taskId: 'task-1',
+  trendAlertId: null,
+  type: 'TASK_UPDATE',
+  channel: 'EMAIL',
+  status: 'PENDING_PROVIDER',
+  recipientRole: null,
+  recipientUserId: null,
+  recipientAddress: 'ops@property.test',
+  title: 'Hotel Ops email pending',
+  summary: 'A Hotel Ops update needs provider delivery.',
+  actionUrl: '/ops/tasks',
+  metadata: null,
+  sentAt: null,
+  createdAt: '2026-06-30T01:00:00.000Z',
+}
+const opsEmailDisplay = opsNotificationDisplay.toHotelOpsNotificationDisplay(opsEmailNotification, {
+  readIds: [],
+  dismissedIds: [],
+})
+assert.equal(opsEmailDisplay.id, 'hotel-ops:ops-notification-email-1', 'Hotel Ops notification display ids are namespaced')
+assert.equal(opsNotificationDisplay.hotelOpsNotificationBackendId(opsEmailDisplay.id), 'ops-notification-email-1', 'Hotel Ops display id maps back to backend id')
+assert.equal(opsEmailDisplay.priority, 'MEDIUM', 'pending provider Hotel Ops email notifications are medium priority')
+assert.equal(opsEmailDisplay.actionRequired, true, 'pending provider Hotel Ops email notifications require action')
+assert.match(opsEmailDisplay.message, /Email delivery is pending provider setup/, 'pending provider Hotel Ops email notifications explain provider setup')
+
+assert.equal(opsNotificationDisplay.hotelOpsNotificationPriority({
+  type: 'APPROVAL_REQUEST',
+  channel: 'IN_APP',
+  status: 'SENT',
+}), 'HIGH', 'Hotel Ops approval requests remain high priority in the notification center')
+assert.equal(opsNotificationDisplay.hotelOpsNotificationPriority({
+  type: 'NEEDS_HUMAN',
+  channel: 'IN_APP',
+  status: 'SENT',
+}), 'URGENT', 'Hotel Ops needs-human notifications remain urgent in the notification center')
 
 const bookingEmailNoApi = bookingEmailCapabilities.resolveBookingEmailCapabilities({
   serverApiEnabled: true,

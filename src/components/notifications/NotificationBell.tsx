@@ -3,12 +3,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Bell, BellRinging } from '@phosphor-icons/react'
 import { useNotifications } from '@/hooks/use-notifications'
+import { useOpsNotifications } from '@/hooks/use-ops-notifications'
 import { NotificationCenter } from './NotificationCenter'
 import { motion, AnimatePresence } from 'framer-motion'
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false)
-  const { unreadCount } = useNotifications()
+  const localNotifications = useNotifications()
+  const opsNotifications = useOpsNotifications()
+  const unreadCount = localNotifications.unreadCount + opsNotifications.unreadCount
 
   return (
     <>
@@ -57,7 +60,12 @@ export function NotificationBell() {
         )}
       </Button>
 
-      <NotificationCenter open={open} onOpenChange={setOpen} />
+      <NotificationCenter
+        open={open}
+        onOpenChange={setOpen}
+        localNotifications={localNotifications}
+        opsNotifications={opsNotifications}
+      />
     </>
   )
 }

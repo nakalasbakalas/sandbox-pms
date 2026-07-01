@@ -11,6 +11,7 @@ export type NotificationType =
   | 'ROOM_BLOCKED'
   | 'GUEST_REQUEST'
   | 'SYSTEM_ALERT'
+  | 'HOTEL_OPS'
 
 export interface Notification {
   id: string
@@ -25,6 +26,7 @@ export interface Notification {
   dismissed: boolean
   actionRequired: boolean
   actionUrl?: string
+  actionLabel?: string
   metadata?: Record<string, any>
 }
 

@@ -152,3 +152,5 @@ Notifications are backend records:
 - `IN_APP` records are available immediately.
 - `EMAIL` records are provider-pending intents unless a real mail provider is configured.
 - Notification text and metadata are sanitized before persistence.
+- The existing notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
+- Read and dismiss actions for Hotel Ops notifications are local browser state only today. A durable server acknowledgment route is not implemented yet.

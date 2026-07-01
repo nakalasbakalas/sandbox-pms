@@ -13,6 +13,7 @@ Last reviewed: 2026-07-01
 - Hotel Ops AI mode: deterministic controlled parser today, not live OpenAI execution.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
+- Staff alert surface: the notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is local UI state until a server acknowledgment route exists.
 - Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync still requires server-owned API credentials.
 
 ## Relevant Implementation Files
@@ -29,6 +30,7 @@ Last reviewed: 2026-07-01
 - Today action surfacing: `src/components/today/TodayView.tsx`.
 - Booking Inbox UI: `src/components/booking-email/BookingInboxView.tsx`.
 - API client/types: `src/lib/hotel-ops-api-client.ts`, `src/types/hotel-ops.ts`.
+- Notification bridge: `src/hooks/use-ops-notifications.ts`, `src/lib/ops-notification-display.ts`, and `src/components/notifications/NotificationCenter.tsx`.
 - Business and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`.
 
 ## Implemented Surface
@@ -39,6 +41,7 @@ Last reviewed: 2026-07-01
 - High-risk task approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop mutations require reasons.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
 - Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.
+- Notification bell/center merges local housekeeping notifications with backend Hotel Ops notifications and keeps provider-pending email intents visible to staff.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
 
@@ -48,6 +51,7 @@ Last reviewed: 2026-07-01
 - Booking.com has a dry-run adapter skeleton with selector TODOs. Real browser writes remain disabled until selector and account-owner proof exists.
 - Agoda, Trip.com, and Expedia currently use the signed mock worker path.
 - Email notifications are recorded as provider-pending intents unless a real provider adapter is configured.
+- Hotel Ops notification read/dismiss state is currently local per browser; durable server acknowledgment remains future backend work.
 - The parser is deterministic and schema-shaped; there is no live OpenAI parser call in production code yet.
 - Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.
 
