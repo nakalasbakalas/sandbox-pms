@@ -8,6 +8,7 @@ import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
 import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
+import { emailOpsCommandIdempotencyKey, emailOpsCommandIntakeStatus, extractEmailOpsCommandText, normalizeEmailOpsSender, parseEmailOpsCommandUserMap, processEmailOpsCommandEvents, resolveEmailOpsCommandEvent } from '../server/email-ops-intake.mjs'
 import { extractLineOpsCommandText, lineOpsCommandIdempotencyKey, lineOpsCommandIntakeStatus, parseLineOpsCommandUserMap, processLineOpsCommandEvents, resolveLineOpsCommandEvent } from '../server/line-ops-intake.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
@@ -1523,6 +1524,63 @@ assert.equal(submittedLineOpsCommand.input.sourceChannel, 'line', 'Hotel Ops LIN
 assert.equal(submittedLineOpsCommand.input.idempotencyKey, 'line:line-message-1', 'Hotel Ops LINE command processing passes retry-safe idempotency key')
 assert.equal(submittedLineOpsCommand.actor.id, 'manager-line-id', 'Hotel Ops LINE command processing submits as the mapped PMS actor')
 
+const emailOpsEnv = {
+  HOTEL_OPS_EMAIL_COMMANDS_ENABLED: 'true',
+  HOTEL_OPS_EMAIL_COMMAND_PREFIX: '/ops',
+  HOTEL_OPS_EMAIL_COMMAND_USER_MAP: JSON.stringify({ 'manager@example.test': 'manager-email' }),
+}
+const emailOpsEvent = {
+  id: 'booking-email-event-1',
+  sourceEmailId: 'gmail-message-1',
+  sender: 'Manager <manager@example.test>',
+  subject: '/ops Check bookings for next weekend.',
+  rawEmailUrl: 'https://mail.google.com/mail/u/0/#inbox/gmail-message-1',
+}
+assert.equal(emailOpsCommandIntakeStatus({}).enabled, false, 'Hotel Ops email command intake is disabled by default')
+assert.equal(emailOpsCommandIntakeStatus(emailOpsEnv).userMapConfigured, true, 'Hotel Ops email command intake reports an allowlist when configured')
+assert.equal(parseEmailOpsCommandUserMap({ HOTEL_OPS_EMAIL_COMMAND_USER_MAP: '{bad-json' }).ok, false, 'Hotel Ops email command user map rejects invalid JSON')
+assert.equal(normalizeEmailOpsSender('Manager <MANAGER@example.test>'), 'manager@example.test', 'Hotel Ops email command sender normalization extracts mailbox addresses')
+assert.equal(extractEmailOpsCommandText(emailOpsEvent, { ...emailOpsEnv, HOTEL_OPS_EMAIL_COMMANDS_ENABLED: 'false' }), null, 'Hotel Ops email command text is ignored until enabled')
+assert.equal(extractEmailOpsCommandText({ ...emailOpsEvent, subject: 'Check bookings for next weekend.' }, emailOpsEnv), null, 'Hotel Ops email command text requires the configured prefix')
+assert.equal(extractEmailOpsCommandText(emailOpsEvent, emailOpsEnv), 'Check bookings for next weekend.', 'Hotel Ops email command text strips the configured prefix')
+assert.equal(extractEmailOpsCommandText({ ...emailOpsEvent, subject: 'Manager request', rawText: '/ops Check arrivals today.' }, emailOpsEnv), 'Check arrivals today.', 'Hotel Ops email command text can be read from the email body when the subject is not prefixed')
+assert.equal(emailOpsCommandIdempotencyKey(emailOpsEvent), 'email:gmail-message-1', 'Hotel Ops email command idempotency uses the source email id')
+const emailOpsPrisma = {
+  user: {
+    findFirst: async ({ where }) => {
+      assert.deepEqual(where.OR, [{ id: 'manager-email' }, { username: 'manager-email' }, { email: 'manager-email' }], 'Hotel Ops email command actor lookup accepts id, username, or email refs')
+      return {
+        id: 'manager-email-id',
+        username: 'manager-email',
+        email: null,
+        firstName: 'Email',
+        lastName: 'Manager',
+        role: 'MANAGER',
+        active: true,
+      }
+    },
+  },
+}
+const resolvedEmailOpsEvent = await resolveEmailOpsCommandEvent(emailOpsPrisma, emailOpsEvent, { env: emailOpsEnv })
+assert.equal(resolvedEmailOpsEvent.status, 'accepted', 'Hotel Ops email command intake accepts allowlisted senders')
+assert.equal(resolvedEmailOpsEvent.actor.id, 'manager-email-id', 'Hotel Ops email command intake maps sender to an active PMS user')
+assert.equal(resolvedEmailOpsEvent.sourceMetadata.sourceEmailEventId, 'booking-email-event-1', 'Hotel Ops email command intake keeps source email event metadata')
+const unmappedEmailOpsEvent = await resolveEmailOpsCommandEvent(emailOpsPrisma, { ...emailOpsEvent, sender: 'stranger@example.test' }, { env: emailOpsEnv })
+assert.equal(unmappedEmailOpsEvent.status, 'skipped', 'Hotel Ops email command intake skips non-allowlisted senders')
+let submittedEmailOpsCommand = null
+const processedEmailOpsEvents = await processEmailOpsCommandEvents(emailOpsPrisma, [emailOpsEvent], {
+  env: emailOpsEnv,
+  submitCommand: async (_prisma, input, actor) => {
+    submittedEmailOpsCommand = { input, actor }
+    return { task: { id: 'email-task-1' }, duplicate: false }
+  },
+})
+assert.equal(processedEmailOpsEvents[0].status, 'accepted', 'Hotel Ops email command processing submits allowlisted commands')
+assert.equal(submittedEmailOpsCommand.input.sourceChannel, 'email', 'Hotel Ops email command processing tags source channel as email')
+assert.equal(submittedEmailOpsCommand.input.idempotencyKey, 'email:gmail-message-1', 'Hotel Ops email command processing passes retry-safe idempotency key')
+assert.equal(submittedEmailOpsCommand.input.sourceMetadata.sourceEmailEventId, 'booking-email-event-1', 'Hotel Ops email command processing passes source email metadata')
+assert.equal(submittedEmailOpsCommand.actor.id, 'manager-email-id', 'Hotel Ops email command processing submits as the mapped PMS actor')
+
 const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')
 assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
@@ -1534,6 +1592,30 @@ assert.equal(evaluateOpsPermission(readAvailabilityCommand, { id: 'viewer', role
 const opsCommandFixture = createOpsCommandPrismaFixture()
 const opsManager = { id: 'manager-ops-test', role: 'MANAGER', name: 'Ops Manager' }
 const opsOwner = { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' }
+const emailSourceFixture = createOpsCommandPrismaFixture()
+await submitOpsCommand(
+  emailSourceFixture.prisma,
+  {
+    message: 'Check bookings for next weekend.',
+    sourceChannel: 'email',
+    idempotencyKey: 'email:gmail-message-source-metadata',
+    sourceMetadata: {
+      sourceEmailEventId: 'booking-email-event-source-metadata',
+      sourceEmailId: 'gmail-message-source-metadata',
+      rawEmailUrl: 'https://mail.google.com/mail/u/0/#inbox/gmail-message-source-metadata',
+      sender: 'manager@example.test',
+    },
+  },
+  opsManager,
+)
+const emailCommandReceipt = emailSourceFixture.logs.find((log) => log.action === 'COMMAND_RECEIVED')
+assert.equal(emailCommandReceipt?.metadata?.sourceChannel, 'email', 'Hotel Ops email commands record source channel in task logs')
+assert.equal(emailCommandReceipt?.metadata?.sourceMetadata?.sourceEmailEventId, 'booking-email-event-source-metadata', 'Hotel Ops email commands link task logs to source email events')
+assert.equal(
+  emailSourceFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED' && audit.changes.sourceMetadata?.sourceEmailId === 'gmail-message-source-metadata'),
+  true,
+  'Hotel Ops email commands link audit records to source email messages',
+)
 const queuedScanResult = await submitOpsCommand(
   opsCommandFixture.prisma,
   { message: 'Check bookings for next weekend.', sourceChannel: 'web', idempotencyKey: 'ops-command-scan-test' },

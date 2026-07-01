@@ -48,7 +48,7 @@ export const bookingEmailApi = {
   },
 
   sync(authToken?: string | null) {
-    return pmsApi<{ ok: true; data: BookingEmailStatus; events?: BookingEmailEvent[]; message?: string }>('/api/booking-email/sync', authToken, {
+    return pmsApi<{ ok: true; data: BookingEmailStatus; events?: BookingEmailEvent[]; hotelOpsCommands?: { enabled: boolean; accepted: number; skipped: number; errors: number }; message?: string }>('/api/booking-email/sync', authToken, {
       method: 'POST',
       body: JSON.stringify({}),
     })

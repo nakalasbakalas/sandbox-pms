@@ -200,6 +200,9 @@ export function BookingInboxView() {
     try {
       const payload = await bookingEmailApi.sync(authToken)
       toast.success(payload.message || 'Booking email sync started.')
+      if (payload.hotelOpsCommands?.accepted) {
+        toast.success(`${payload.hotelOpsCommands.accepted} Hotel Ops command${payload.hotelOpsCommands.accepted === 1 ? '' : 's'} queued from allowlisted email.`)
+      }
       await reload()
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : 'Booking email sync failed.')

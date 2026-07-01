@@ -1645,6 +1645,7 @@ export async function submitOpsCommand(prisma, input, actor) {
   const rawMessage = normalizeText(input?.message || input?.rawMessage)
   const persistedRawMessage = redactedSensitiveText(rawMessage)
   const sourceChannel = normalizeOpsSourceChannel(input?.sourceChannel || 'web')
+  const sourceMetadata = sanitizeOpsMetadata(input?.sourceMetadata || {})
   const { parsed, parserMode, parserFallbackReason } = await parseHotelOpsCommandForSubmission(rawMessage)
   const parserMetadata = {
     ...parsed,
@@ -1699,11 +1700,11 @@ export async function submitOpsCommand(prisma, input, actor) {
       include: taskInclude,
     })
 
-    await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage: persistedRawMessage })
+    await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage: persistedRawMessage, sourceChannel, sourceMetadata })
     await taskLog(tx, task.id, 'PARSER_OUTPUT', 'Command parsed into a controlled task.', actor, parserMetadata)
     await taskLog(tx, task.id, validation.valid ? 'VALIDATION_PASSED' : 'VALIDATION_FAILED', validation.reason, actor, validation)
     await taskLog(tx, task.id, 'PERMISSION_DECISION', decision.reason, actor, decision)
-    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, parsed, parserMode, ...(parserFallbackReason ? { parserFallbackReason } : {}) })
+    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, sourceChannel, sourceMetadata, parsed, parserMode, ...(parserFallbackReason ? { parserFallbackReason } : {}) })
     await audit(tx, actor, 'OPS_PARSER_OUTPUT', 'hotelOpsTask', task.id, parserMetadata)
     await audit(tx, actor, validation.valid ? 'OPS_VALIDATION_PASSED' : 'OPS_VALIDATION_FAILED', 'hotelOpsTask', task.id, validation)
     await audit(tx, actor, 'OPS_PERMISSION_DECISION', 'hotelOpsTask', task.id, decision)

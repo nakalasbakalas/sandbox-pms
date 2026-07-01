@@ -2233,6 +2233,12 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
   return {
     status: await getBookingEmailStatus(prisma),
     events: results.map(bookingEmailEventResponse),
+    opsCommandEvents: results.map((event) => ({
+      ...bookingEmailEventResponse(event),
+      sourceMessageId: event.sourceMessageId || undefined,
+      rawText: event.rawText || undefined,
+      body: event.rawText || undefined,
+    })),
   }
 }
 

@@ -62,6 +62,16 @@ HOTEL_OPS_LINE_COMMAND_USER_MAP={"line-user-id":"manager-username"}
 
 LINE command intake is separate from guest/staff LINE messaging. Only signed LINE webhook events with the configured prefix are considered, and only mapped active PMS users with `create:ops-task` can create Hotel Ops tasks. Confirm `GET /api/line/webhook` reports command intake enabled and the user map configured before relying on LINE commands.
 
+Optional email Hotel Ops command intake from the booking mailbox:
+
+```env
+HOTEL_OPS_EMAIL_COMMANDS_ENABLED=true
+HOTEL_OPS_EMAIL_COMMAND_PREFIX=/ops
+HOTEL_OPS_EMAIL_COMMAND_USER_MAP={"manager@example.com":"manager-username"}
+```
+
+Email command intake runs only after booking-email sync imports messages through the server Gmail OAuth path. A subject or body such as `/ops Check bookings for next weekend` is converted into an Ops task only when the sender email is mapped to an active PMS user with `create:ops-task`. The created task stores source email metadata in task logs and audit records.
+
 Booking Inbox operators:
 
 1. Use `/booking-inbox` to review imported booking email events.

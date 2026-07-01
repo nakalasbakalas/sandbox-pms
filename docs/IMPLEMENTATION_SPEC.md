@@ -94,6 +94,18 @@ Signed LINE webhook traffic can optionally feed manager commands into the same `
 - Accepted LINE commands use the LINE message id as the idempotency key and are tagged with source channel `line`.
 - Parser validation, permission checks, approvals, queueing, notifications, emergency stop, and audit records remain owned by `server/ops-service.mjs`.
 
+## Email Command Intake
+
+Booking mailbox sync can optionally feed allowlisted manager email commands into the same `submitOpsCommand` service.
+
+- The bridge is disabled by default.
+- It only processes synced booking-email events whose subject or body starts with `HOTEL_OPS_EMAIL_COMMAND_PREFIX`, defaulting to `/ops`.
+- `HOTEL_OPS_EMAIL_COMMAND_USER_MAP` must map sender email addresses to existing active PMS user ids, usernames, or emails.
+- The mapped PMS user must have `create:ops-task`; unmapped or under-permissioned email messages remain booking-email records and are skipped for Ops intake.
+- Accepted email commands use the source Gmail/message id as the idempotency key and are tagged with source channel `email`.
+- Task logs and `OPS_COMMAND_RECEIVED` audit records persist source email metadata, including the booking-email event id, source message id, raw email link, and sender when available.
+- This bridge reuses booking-email Gmail OAuth sync and does not introduce a raw mailbox-password path.
+
 ## Permission And Approval Rules
 
 Rules live in `server/ops-service.mjs`.

@@ -20,6 +20,10 @@ import {
 import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
 import { createHotelOpsScanScheduler } from './ops-scheduler.mjs'
 import {
+  emailOpsCommandIntakeStatus,
+  processEmailOpsCommandEvents,
+} from './email-ops-intake.mjs'
+import {
   lineOpsCommandIntakeStatus,
   processLineOpsCommandEvents,
 } from './line-ops-intake.mjs'
@@ -392,6 +396,7 @@ async function healthPayload(deep = false) {
     database: await databaseStatus(deep),
     integrations: {
       lineWebhookConfigured: Boolean(process.env.LINE_CHANNEL_SECRET && process.env.LINE_CHANNEL_ACCESS_TOKEN),
+      hotelOpsEmailCommandIntake: emailOpsCommandIntakeStatus(process.env),
     },
   }
 }
@@ -880,7 +885,22 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/booking-email/sync' && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const result = await syncBookingEmail(db, await readJson(request), user)
-    sendJson(response, 200, { ok: true, data: result.status, events: result.events, message: `Booking email sync processed ${result.events.length} event${result.events.length === 1 ? '' : 's'}.` })
+    const opsCommandResults = await processEmailOpsCommandEvents(db, result.opsCommandEvents || result.events, {
+      env: process.env,
+      submitCommand: submitOpsCommand,
+    })
+    sendJson(response, 200, {
+      ok: true,
+      data: result.status,
+      events: result.events,
+      hotelOpsCommands: {
+        enabled: emailOpsCommandIntakeStatus(process.env).enabled,
+        accepted: opsCommandResults.filter((item) => item.status === 'accepted').length,
+        skipped: opsCommandResults.filter((item) => item.status === 'skipped').length,
+        errors: opsCommandResults.filter((item) => item.status === 'error').length,
+      },
+      message: `Booking email sync processed ${result.events.length} event${result.events.length === 1 ? '' : 's'}.`,
+    })
     return true
   }
 

@@ -6,6 +6,8 @@ Manager commands are untrusted input. They must be parsed, strict-schema validat
 
 LINE-originated manager commands are also untrusted input. The webhook must verify the LINE signature first; the Hotel Ops bridge remains disabled unless explicitly configured, requires the command prefix, requires a LINE user allowlist mapped to an active PMS user, and still checks `create:ops-task` before calling the shared command service.
 
+Email-originated manager commands are untrusted input. Booking mailbox sync may convert prefixed messages into Ops tasks only when email command intake is explicitly enabled, the sender email is allowlisted to an active PMS user, and that user has `create:ops-task`. Source email ids and links are audit metadata, not execution authority.
+
 The parser is not an execution authority. The backend owns parsed-task schema validation, policy, approvals, emergency stop, queueing, worker signing, secrets, audit records, and notifications.
 
 OpenAI Responses parsing is optional and backend-only. Prompt input is redacted before submission, model output is strict-schema validated and backend-policy normalized, and provider failures fall back to deterministic parsing with a redacted reason.
