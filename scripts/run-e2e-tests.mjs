@@ -346,6 +346,15 @@ async function smokeAuthenticatedRoute(page, baseUrl, path) {
   assert.equal(bodyText.includes('Something went wrong'), false, `${path} rendered the error boundary`)
 }
 
+async function assertProtectedRouteAccess(page, baseUrl, path, expectedAccess) {
+  await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+  const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
+  assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
+  assert.equal(bodyText.includes('Something went wrong'), false, `${path} rendered the error boundary`)
+  assert.equal(bodyText.includes('Access restricted'), !expectedAccess, `${path} access state did not match expected role permission`)
+}
+
 async function runBrowserSmokeTests() {
   const port = await availablePort()
   const baseUrl = `http://127.0.0.1:${port}`
@@ -363,6 +372,14 @@ async function runBrowserSmokeTests() {
     try {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
       const { email, password, seed } = browserSmokeSeed()
+      const seedLocalStorage = (storageSeed) => {
+        if (window.localStorage.getItem('__e2e_seeded') === 'true') return
+        window.localStorage.clear()
+        for (const [key, value] of Object.entries(storageSeed)) {
+          window.localStorage.setItem(key, JSON.stringify(value))
+        }
+        window.localStorage.setItem('__e2e_seeded', 'true')
+      }
       await context.addInitScript((storageSeed) => {
         if (window.localStorage.getItem('__e2e_seeded') === 'true') return
         window.localStorage.clear()
@@ -470,11 +487,79 @@ async function runBrowserSmokeTests() {
       setStep('Hotel Ops canonical tab paths')
       await page.goto(`${baseUrl}/ops/chat`, { waitUntil: 'domcontentloaded' })
       await waitVisible(page.getByRole('heading', { name: /hotel ops command center/i }), 'Hotel Ops command center')
-      await page.getByRole('button', { name: /^approvals$/i }).click()
-      await page.waitForURL('**/ops/approvals', { timeout: 10_000 })
-      await page.getByRole('button', { name: /^intelligence$/i }).click()
-      await page.waitForURL('**/ops/intelligence', { timeout: 10_000 })
+      await waitVisible(page.getByText(/manager command/i), 'Hotel Ops chat command form')
+      await waitVisible(page.getByText(/parsed preview/i), 'Hotel Ops parsed preview')
+      await page.goto(`${baseUrl}/ops/approvals`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /pending approvals/i }), 'Hotel Ops approvals tab')
+      await waitVisible(page.getByText(/no hotel ops tasks need approval/i), 'Hotel Ops empty approvals state')
+      await page.goto(`${baseUrl}/ops/tasks`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /task history/i }), 'Hotel Ops task history tab')
+      await page.goto(`${baseUrl}/ops/intelligence`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByRole('heading', { name: /booking intelligence/i }), 'Hotel Ops intelligence tab')
+      await waitVisible(page.getByRole('button', { name: /^run scan$/i }), 'Hotel Ops run scan control')
       await waitVisible(page.getByRole('button', { name: /^ota imbalance demo$/i }), 'Hotel Ops OTA imbalance demo control')
+      await page.goto(`${baseUrl}/ops/settings`, { waitUntil: 'domcontentloaded' })
+      await waitVisible(page.getByText('Emergency Stop', { exact: true }), 'Hotel Ops emergency stop settings')
+      await waitVisible(page.getByText('OTA Worker Status', { exact: true }), 'Hotel Ops worker status settings')
+      await waitVisible(page.getByText('Booking Intelligence Policy', { exact: true }), 'Hotel Ops booking intelligence policy settings')
+
+      const roleAccessCases = [
+        {
+          user: {
+            id: 'e2e-front-desk-user',
+            email: 'frontdesk@property.test',
+            username: 'frontdesk',
+            role: 'front-desk',
+            displayName: 'E2E Front Desk',
+            createdAt: new Date().toISOString(),
+          },
+          cases: [
+            ['/ops/chat', true],
+            ['/ops/tasks', true],
+            ['/ops/intelligence', true],
+            ['/ops/approvals', false],
+            ['/ops/settings', false],
+          ],
+        },
+        {
+          user: {
+            id: 'e2e-housekeeping-user',
+            email: null,
+            username: 'hk-e2e',
+            role: 'housekeeping',
+            displayName: 'E2E Housekeeping',
+            createdAt: new Date().toISOString(),
+          },
+          cases: [
+            ['/ops/tasks', true],
+            ['/ops/intelligence', true],
+            ['/ops/chat', false],
+            ['/ops/approvals', false],
+            ['/ops/settings', false],
+          ],
+        },
+      ]
+
+      for (const roleCase of roleAccessCases) {
+        const roleContext = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+        const roleSeed = {
+          ...seed,
+          'auth:current-user': roleCase.user,
+          'system:users': [roleCase.user, ...(seed['system:users'] || [])],
+        }
+        await roleContext.addInitScript(seedLocalStorage, roleSeed)
+        const rolePage = await roleContext.newPage()
+        rolePage.setDefaultTimeout(30_000)
+        rolePage.setDefaultNavigationTimeout(30_000)
+        try {
+          for (const [path, expectedAccess] of roleCase.cases) {
+            setStep(`role access ${roleCase.user.role} ${path}`)
+            await assertProtectedRouteAccess(rolePage, baseUrl, path, expectedAccess)
+          }
+        } finally {
+          await roleContext.close()
+        }
+      }
 
       assert.deepEqual(errors, [], `browser console/page errors: ${errors.join('\n')}`)
       await context.close()
