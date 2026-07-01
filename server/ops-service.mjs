@@ -1160,6 +1160,19 @@ function canApprove(actor, requiredRole) {
   return requiredRole === 'HOTEL_MANAGER' && role === 'HOTEL_MANAGER'
 }
 
+function isOpsTaskRequester(task, actor) {
+  return Boolean(actor?.id && task?.requesterUserId && task.requesterUserId === actor.id)
+}
+
+function canCancelOpsTask(task, actor) {
+  const role = opsRoleForUser(actor)
+  if (role === 'OWNER') return true
+  if (isOpsTaskRequester(task, actor)) return true
+  const pendingApproval = task?.approvals?.find((item) => item.status === 'PENDING')
+  if (pendingApproval && canApprove(actor, pendingApproval.requiredRole)) return true
+  return !task?.approvalRequired && role === 'HOTEL_MANAGER'
+}
+
 export async function approveOpsTask(prisma, taskId, input, actor) {
   const result = await prisma.$transaction(async (tx) => {
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
@@ -1229,11 +1242,43 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
 }
 
 export async function denyOpsTask(prisma, taskId, input, actor) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
-    if (!['PENDING_APPROVAL', 'DRAFT', 'QUEUED'].includes(task.status)) throw new PmsValidationError('This task can no longer be denied.', 409)
+    if (task.status !== 'PENDING_APPROVAL') {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'DENIAL_REJECTED',
+        'OPS_DENIAL_REJECTED',
+        'Only pending approval tasks can be denied.',
+        actor,
+        { attemptedStatus: task.status },
+      )
+    }
     const approval = task.approvals.find((item) => item.status === 'PENDING')
+    if (!approval) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'DENIAL_REJECTED',
+        'OPS_DENIAL_REJECTED',
+        'No pending approval exists for this task.',
+        actor,
+      )
+    }
+    if (!canApprove(actor, approval.requiredRole)) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'DENIAL_REJECTED',
+        'OPS_DENIAL_REJECTED',
+        `${approval.requiredRole} denial is required.`,
+        actor,
+        { requiredRole: approval.requiredRole },
+        403,
+      )
+    }
     if (approval) {
       await tx.hotelOpsTaskApproval.update({
         where: { id: approval.id },
@@ -1259,13 +1304,27 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
     }, actor)
     return serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude }))
   })
+  if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
+  return result
 }
 
 export async function cancelOpsTask(prisma, taskId, input, actor) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     if (['SUCCEEDED', 'FAILED', 'DENIED', 'CANCELLED'].includes(task.status)) throw new PmsValidationError('This task is already closed.', 409)
+    if (!canCancelOpsTask(task, actor)) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'TASK_CANCEL_REJECTED',
+        'OPS_TASK_CANCEL_REJECTED',
+        'Only the requester, owner, or required approver can cancel this Hotel Ops task.',
+        actor,
+        { requesterUserId: task.requesterUserId, requiredRole: requiredApprovalRoleForTask(task) },
+        403,
+      )
+    }
     const updated = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'CANCELLED' }, include: taskInclude })
     await taskLog(tx, task.id, 'TASK_CANCELLED', 'Hotel Ops task cancelled.', actor, { reason: normalizeNullableString(input?.reason) })
     await audit(tx, actor, 'OPS_TASK_CANCELLED', 'hotelOpsTask', task.id, { reason: normalizeNullableString(input?.reason) })
@@ -1280,6 +1339,8 @@ export async function cancelOpsTask(prisma, taskId, input, actor) {
     }, actor)
     return serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: updated.id }, include: taskInclude }))
   })
+  if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
+  return result
 }
 
 export async function listOpsApprovals(prisma) {

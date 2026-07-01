@@ -123,7 +123,7 @@ export const createRoomTypeSchema = z.object({
 
 export const createUserSchema = z.object({
   username: z.string().min(2, 'Login username is required').optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  email: z.string().email('Invalid email').optional().or(z.literal('')).nullable(),
   password: z.string().min(12, 'Password must be at least 12 characters'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
@@ -139,7 +139,7 @@ export const createUserSchema = z.object({
 
 export const updateUserSchema = z.object({
   username: z.string().min(2, 'Login username is required').optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
+  email: z.string().email('Invalid email').optional().or(z.literal('')).nullable(),
   password: z.string().min(12, 'Password must be at least 12 characters').optional(),
   firstName: z.string().min(1, 'First name is required').optional(),
   lastName: z.string().min(1, 'Last name is required').optional(),

@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -511,6 +511,37 @@ assert.equal(usernameOnlyUser.email, null, 'username-only server user stores nul
 assert.equal(usernameOnlyUser.role, 'HOUSEKEEPING', 'username-only server user role normalizes to backend enum')
 assert.equal(createdAudits[0]?.action, 'USER_CREATED', 'username-only server user creation is audited')
 
+const nullEmailUserAudits = []
+const nullEmailUser = await createUser({
+  user: {
+    findFirst: async (query) => {
+      assert.deepEqual(query.where.OR, [{ username: 'fd3' }], 'null-email user duplicate check does not require email')
+      return null
+    },
+    create: async ({ data }) => ({
+      id: 'user-fd3',
+      createdAt: new Date('2026-06-30T00:00:00.000Z'),
+      ...data,
+    }),
+  },
+  auditLog: {
+    create: async ({ data }) => {
+      nullEmailUserAudits.push(data)
+      return data
+    },
+  },
+}, {
+  username: 'fd3',
+  email: null,
+  password: 'Temporary1234!',
+  displayName: 'Front Desk 3',
+  role: 'front-desk',
+}, { id: 'admin-1', username: 'admin' })
+assert.equal(nullEmailUser.username, 'fd3', 'admin UI null-email payload creates a username-only server user')
+assert.equal(nullEmailUser.email, null, 'null-email server user stores null email')
+assert.equal(nullEmailUser.role, 'FRONT_DESK', 'null-email server user role normalizes to backend enum')
+assert.equal(nullEmailUserAudits[0]?.action, 'USER_CREATED', 'null-email server user creation is audited')
+
 const notificationDrafts = buildOpsNotificationDrafts({
   id: 'property-1',
   reservationAlertEmail: 'ops@property.test',
@@ -994,9 +1025,16 @@ await assert.rejects(
   /OWNER approval is required/,
   'Hotel Ops manager cannot approve send-reply writes',
 )
+await assert.rejects(
+  () => denyOpsTask(sendReplyApprovalFixture.prisma, pendingSendReplyResult.task.id, { reason: 'Manager should not deny owner approval.' }, opsManager),
+  /OWNER denial is required/,
+  'Hotel Ops manager cannot deny owner-required send-reply approvals',
+)
 assert.equal(sendReplyApprovalFixture.approvals[0].status, 'PENDING', 'Hotel Ops manager-rejected send-reply approval remains pending')
 assert.equal(sendReplyApprovalFixture.logs.some((log) => log.action === 'APPROVAL_REJECTED'), true, 'Hotel Ops service logs manager-rejected send-reply approval attempts')
 assert.equal(sendReplyApprovalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REJECTED' && audit.changes.requiredRole === 'OWNER'), true, 'Hotel Ops service audits manager-rejected send-reply approval attempts')
+assert.equal(sendReplyApprovalFixture.logs.some((log) => log.action === 'DENIAL_REJECTED'), true, 'Hotel Ops service logs manager-rejected send-reply denial attempts')
+assert.equal(sendReplyApprovalFixture.audits.some((audit) => audit.action === 'OPS_DENIAL_REJECTED' && audit.changes.requiredRole === 'OWNER'), true, 'Hotel Ops service audits manager-rejected send-reply denial attempts')
 
 const selectorFailureFixture = createOpsCommandPrismaFixture()
 const selectorFailureResult = await submitOpsCommand(
@@ -1090,6 +1128,24 @@ await assert.rejects(
   /Only queued Hotel Ops tasks can run/,
   'Hotel Ops service refuses to execute denied tasks',
 )
+
+const cancelFixture = createOpsCommandPrismaFixture()
+const cancellableScanResult = await submitOpsCommand(
+  cancelFixture.prisma,
+  { message: 'Check bookings for next weekend.', sourceChannel: 'web' },
+  opsManager,
+)
+await assert.rejects(
+  () => cancelOpsTask(cancelFixture.prisma, cancellableScanResult.task.id, { reason: 'Front desk should not cancel manager task.' }, { id: 'front-desk-ops-test', role: 'FRONT_DESK', name: 'Front Desk' }),
+  /Only the requester, owner, or required approver can cancel/,
+  'Hotel Ops service blocks non-requester staff from cancelling another user task',
+)
+assert.equal(cancelFixture.tasks[0].status, 'QUEUED', 'Hotel Ops unauthorized cancellation leaves the task queued')
+assert.equal(cancelFixture.logs.some((log) => log.action === 'TASK_CANCEL_REJECTED'), true, 'Hotel Ops service logs unauthorized cancellation attempts')
+assert.equal(cancelFixture.audits.some((audit) => audit.action === 'OPS_TASK_CANCEL_REJECTED'), true, 'Hotel Ops service audits unauthorized cancellation attempts')
+const cancelledScanTask = await cancelOpsTask(cancelFixture.prisma, cancellableScanResult.task.id, { reason: 'Requester cancelled duplicate scan.' }, opsManager)
+assert.equal(cancelledScanTask.status, 'CANCELLED', 'Hotel Ops service lets the requester cancel an open task')
+assert.equal(cancelFixture.audits.some((audit) => audit.action === 'OPS_TASK_CANCELLED'), true, 'Hotel Ops service audits requester cancellations')
 
 const forbiddenFixture = createOpsCommandPrismaFixture()
 const forbiddenServiceResult = await submitOpsCommand(
