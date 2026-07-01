@@ -31,6 +31,9 @@ import type {
   HotelOpsEmergencyStop,
   HotelOpsNotification,
   HotelOpsOtaStatus,
+  HotelOpsPolicy,
+  HotelOpsTaskPolicyRule,
+  HotelOpsTaskType,
   HotelOpsTask,
   HotelOpsTaskStatus,
   HotelOpsTrendAlert,
@@ -83,6 +86,10 @@ function statusTone(status?: HotelOpsTaskStatus) {
   if (status === 'PENDING_APPROVAL' || status === 'NEEDS_HUMAN') return 'bg-amber-50 text-amber-800 border-amber-200'
   if (status === 'RUNNING' || status === 'QUEUED' || status === 'APPROVED') return 'bg-blue-50 text-blue-700 border-blue-200'
   return 'bg-slate-50 text-slate-700 border-slate-200'
+}
+
+function formatOpsLabel(value: string) {
+  return value.replace(/_/g, ' ')
 }
 
 function notificationTone(notification: HotelOpsNotification) {
@@ -143,6 +150,11 @@ function roomTypeMetric(alert: HotelOpsTrendAlert, key: string) {
     activeReservations: typeof activeReservations === 'number' && Number.isFinite(activeReservations) ? activeReservations : null,
     sellableRooms: typeof sellableRooms === 'number' && Number.isFinite(sellableRooms) ? sellableRooms : null,
   }
+}
+
+function policyRuleEntries(policy: HotelOpsPolicy | null) {
+  if (!policy?.taskRules) return [] as Array<[HotelOpsTaskType, HotelOpsTaskPolicyRule]>
+  return Object.entries(policy.taskRules) as Array<[HotelOpsTaskType, HotelOpsTaskPolicyRule]>
 }
 
 function canOpenProofUrl(url: string) {
@@ -366,6 +378,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
   const [alerts, setAlerts] = useState<HotelOpsTrendAlert[]>([])
   const [emergencyStop, setEmergencyStop] = useState<HotelOpsEmergencyStop | null>(null)
   const [otaStatus, setOtaStatus] = useState<HotelOpsOtaStatus | null>(null)
+  const [opsPolicy, setOpsPolicy] = useState<HotelOpsPolicy | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingReasonAction, setPendingReasonAction] = useState<PendingReasonAction | null>(null)
@@ -387,13 +400,14 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     setLoading(true)
     setError(null)
     try {
-      const [tasksPayload, approvalsPayload, notificationsPayload, alertsPayload, stopPayload, otaPayload] = await Promise.all([
+      const [tasksPayload, approvalsPayload, notificationsPayload, alertsPayload, stopPayload, otaPayload, policyPayload] = await Promise.all([
         hotelOpsApi.listTasks({ limit: 80 }),
         hotelOpsApi.listApprovals(),
         hotelOpsApi.listNotifications({ limit: 20 }),
         hotelOpsApi.listAlerts({ limit: 50 }),
         hotelOpsApi.getEmergencyStop(),
         hotelOpsApi.getOtaStatus(),
+        hotelOpsApi.getPolicy(),
       ])
       setTasks(tasksPayload.data)
       setApprovals(approvalsPayload.data)
@@ -401,6 +415,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       setAlerts(alertsPayload.data)
       setEmergencyStop(stopPayload.data)
       setOtaStatus(otaPayload.data)
+      setOpsPolicy(policyPayload.data)
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Hotel Ops backend is not available.'
       setError(message)
@@ -885,6 +900,58 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     </div>
                   )) || <div className="text-sm text-muted-foreground">OTA status unavailable.</div>}
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-lg"><ShieldWarning /> Permission and Approval Policy</CardTitle>
+                <CardDescription>Backend-enforced task policy, approval roles, emergency-stop coverage, and MVP execution boundaries.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="outline">Policy {opsPolicy?.version || 'unavailable'}</Badge>
+                  <Badge variant={opsPolicy?.defaults.dryRun ? 'secondary' : 'destructive'}>{opsPolicy?.defaults.dryRun ? 'Dry-run required' : 'Dry-run off'}</Badge>
+                  <Badge variant="outline">{opsPolicy?.defaults.timezone || 'Asia/Bangkok'}</Badge>
+                  <Badge variant="outline">{opsPolicy?.defaults.currency || 'THB'}</Badge>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {policyRuleEntries(opsPolicy).map(([taskType, rule]) => (
+                    <div key={taskType} className="rounded border bg-background px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">{formatOpsLabel(taskType)}</span>
+                        <Badge variant={riskTone(rule.riskLevel)}>{rule.riskLevel}</Badge>
+                        {!rule.enabledInMvp && <Badge variant="destructive">MVP disabled</Badge>}
+                        {!rule.execute && <Badge variant="outline">No worker</Badge>}
+                      </div>
+                      <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                        <div>
+                          Approval: <span className="text-foreground">{rule.approvalRequired ? rule.requiredApprovalRole || 'Required' : 'Not required'}</span>
+                        </div>
+                        <div>
+                          Roles: <span className="text-foreground">{rule.allowedRoles.join(', ') || 'None'}</span>
+                        </div>
+                        {(rule.limits?.minRate || rule.limits?.maxRate || rule.limits?.preventClosingAllRooms) && (
+                          <div>
+                            Limits:{' '}
+                            <span className="text-foreground">
+                              {[
+                                rule.limits.minRate ? `min ${rule.limits.minRate}` : null,
+                                rule.limits.maxRate ? `max ${rule.limits.maxRate}` : null,
+                                rule.limits.preventClosingAllRooms ? 'no all-room close' : null,
+                              ].filter(Boolean).join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {opsPolicy && (
+                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Emergency stop blocks {opsPolicy.emergencyStop.blockTaskTypes.map(formatOpsLabel).join(', ')} at {opsPolicy.emergencyStop.checkpoints.map(formatOpsLabel).join(', ')}. Read-only work remains allowed.
+                  </div>
+                )}
               </CardContent>
             </Card>
 

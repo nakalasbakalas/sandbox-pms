@@ -109,6 +109,42 @@ const FORBIDDEN_PATTERNS = [
   /\b(arbitrary|manual|direct)\s+browser\s+(command|control|automation|script)\b/,
 ]
 
+export function getOpsPolicy() {
+  return {
+    version: '2026-07-01',
+    defaults: {
+      timezone: OPS_SCAN_POLICY.timezone,
+      currency: OPS_SCAN_POLICY.currency,
+      dryRun: String(process.env.OTA_DRY_RUN || 'true').toLowerCase() !== 'false',
+    },
+    roles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'],
+    riskLevels: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'FORBIDDEN'],
+    writeTaskTypes: [...WRITE_TASK_TYPES],
+    taskRules: Object.fromEntries(Object.entries(RULES).map(([taskType, rule]) => [
+      taskType,
+      {
+        riskLevel: rule.riskLevel,
+        allowedRoles: [...rule.allowedRoles],
+        approvalRequired: Boolean(rule.approvalRequired),
+        requiredApprovalRole: rule.requiredApprovalRole || null,
+        enabledInMvp: rule.enabledInMvp !== false,
+        execute: rule.execute !== false,
+        limits: {
+          minRate: rule.minRate ?? null,
+          maxRate: rule.maxRate ?? null,
+          preventClosingAllRooms: taskType === 'CLOSE_ROOM',
+        },
+      },
+    ])),
+    emergencyStop: {
+      blockTaskTypes: [...WRITE_TASK_TYPES],
+      allowReadOnly: true,
+      checkpoints: ['command_intake', 'approval', 'queueing', 'worker_execution'],
+    },
+    forbiddenPatterns: FORBIDDEN_PATTERNS.map((pattern) => (typeof pattern === 'string' ? pattern : pattern.source)),
+  }
+}
+
 const taskInclude = {
   approvals: { orderBy: { requestedAt: 'desc' } },
   logs: { orderBy: { createdAt: 'desc' }, take: 20 },

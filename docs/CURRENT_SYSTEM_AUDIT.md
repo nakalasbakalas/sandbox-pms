@@ -35,6 +35,7 @@ Last reviewed: 2026-07-01
 
 - `/ops/chat`, `/ops/approvals`, `/ops/tasks`, `/ops/intelligence`, and `/ops/settings` render through the existing navigation shell.
 - `/api/ops/commands`, task, approval, notification, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
+- `/api/ops/policy` exposes the backend-enforced permission/risk policy for the Settings policy matrix.
 - High-risk task approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop mutations require reasons.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
 - Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.

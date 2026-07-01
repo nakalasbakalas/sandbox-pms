@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1176,6 +1176,15 @@ assert.throws(
   /source channel is not allowed/,
   'Hotel Ops source channel normalization rejects unsupported channels before Prisma writes',
 )
+const opsPolicy = getOpsPolicy()
+assert.equal(opsPolicy.defaults.dryRun, true, 'Hotel Ops exported policy defaults to dry-run mode')
+assert.equal(opsPolicy.taskRules.UPDATE_RATE.requiredApprovalRole, 'OWNER', 'Hotel Ops exported policy shows owner approval for rate changes')
+assert.equal(opsPolicy.taskRules.UPDATE_RATE.limits.minRate, 800, 'Hotel Ops exported policy includes the rate floor')
+assert.equal(opsPolicy.taskRules.UPDATE_RATE.limits.maxRate, 6000, 'Hotel Ops exported policy includes the rate ceiling')
+assert.equal(opsPolicy.taskRules.UPDATE_PHOTOS.enabledInMvp, false, 'Hotel Ops exported policy shows disabled photo updates')
+assert.equal(opsPolicy.taskRules.CLOSE_ROOM.limits.preventClosingAllRooms, true, 'Hotel Ops exported policy shows all-room close protection')
+assert.equal(opsPolicy.emergencyStop.blockTaskTypes.includes('UPDATE_RATE'), true, 'Hotel Ops exported policy includes rate updates in emergency-stop coverage')
+assert.equal(opsPolicy.taskRules.FORBIDDEN.execute, false, 'Hotel Ops exported policy marks forbidden tasks as non-executable')
 const uiCommandKeyA = hotelOpsIdempotency.createHotelOpsCommandIdempotencyKey(' Check bookings  for next weekend. ')
 const uiCommandKeyB = hotelOpsIdempotency.createHotelOpsCommandIdempotencyKey(' Check bookings  for next weekend. ')
 assert.match(uiCommandKeyA, /^ui:check-bookings-for-next-weekend:[a-z0-9-]+$/i, 'Hotel Ops UI command idempotency keys include a safe command hint')

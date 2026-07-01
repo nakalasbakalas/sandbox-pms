@@ -41,6 +41,7 @@ API routes:
 - `POST /api/ops/intelligence/alerts/:id/resolve`
 - `GET/POST /api/ops/emergency-stop`
 - `GET /api/ops/ota/status`
+- `GET /api/ops/policy`
 - `POST /api/ops/scan/run`
 - `POST /api/internal/ops/worker/tasks`
 
@@ -84,6 +85,7 @@ Rules live in `server/ops-service.mjs`.
 - `UPDATE_PHOTOS` is critical and disabled in the MVP.
 - Approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop changes require non-empty operational reasons.
 - Emergency stop blocks write tasks during intake, approval, queueing, and worker execution.
+- The read-only `/api/ops/policy` endpoint serializes the enforced task rules, approval roles, limits, disabled MVP tasks, and emergency-stop coverage for the Settings policy matrix.
 
 ## Queue And Worker
 

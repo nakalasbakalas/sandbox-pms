@@ -86,6 +86,10 @@ Owner or approver:
 
 The scheduler runs as `SYSTEM`, skips overlaps, and redacts credential-like failure text.
 
+## Policy Review
+
+Use `/ops/settings` to review the backend-enforced Permission and Approval Policy before enabling operational workflows. The matrix is read from `/api/ops/policy` and shows risk level, allowed roles, approval role, disabled MVP tasks, rate limits, all-room-close protection, and emergency-stop coverage.
+
 ## Human Challenges
 
 The worker must not bypass CAPTCHA, 2FA, locked-account, or password-expired flows.

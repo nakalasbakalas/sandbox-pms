@@ -501,6 +501,7 @@ async function runBrowserSmokeTests() {
       await page.goto(`${baseUrl}/ops/settings`, { waitUntil: 'domcontentloaded' })
       await waitVisible(page.getByText('Emergency Stop', { exact: true }), 'Hotel Ops emergency stop settings')
       await waitVisible(page.getByText('OTA Worker Status', { exact: true }), 'Hotel Ops worker status settings')
+      await waitVisible(page.getByText('Permission and Approval Policy', { exact: true }), 'Hotel Ops permission policy settings')
       await waitVisible(page.getByText('Booking Intelligence Policy', { exact: true }), 'Hotel Ops booking intelligence policy settings')
 
       const roleAccessCases = [
@@ -710,6 +711,7 @@ assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/a
 assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/resolve')?.methods, ['POST'], 'Hotel Ops alert resolve exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/emergency-stop')?.methods, ['GET', 'POST'], 'Hotel Ops emergency stop exposes read/update methods')
 assert.deepEqual(resolveApiRouteContract('/api/ops/ota/status')?.methods, ['GET'], 'Hotel Ops OTA status exposes read method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/policy')?.methods, ['GET'], 'Hotel Ops policy exposes read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/scan/run')?.methods, ['POST'], 'Hotel Ops scan run exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/internal/ops/worker/tasks')?.methods, ['POST'], 'Hotel Ops internal worker endpoint only accepts signed posts')
 assert.deepEqual(resolveApiRouteContract('/api/reservations')?.methods, ['GET', 'POST'], 'reservations collection exposes read/create methods')

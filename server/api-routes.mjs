@@ -23,6 +23,7 @@ const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/ops\/intelligence\/alerts\/[^/]+\/resolve$/, methods: ['POST'] },
   { pattern: /^\/api\/ops\/emergency-stop$/, methods: ['GET', 'POST'] },
   { pattern: /^\/api\/ops\/ota\/status$/, methods: ['GET'] },
+  { pattern: /^\/api\/ops\/policy$/, methods: ['GET'] },
   { pattern: /^\/api\/ops\/scan\/run$/, methods: ['POST'] },
   { pattern: /^\/api\/internal\/ops\/worker\/tasks$/, methods: ['POST'] },
   { pattern: /^\/api\/today$/, methods: ['GET'] },

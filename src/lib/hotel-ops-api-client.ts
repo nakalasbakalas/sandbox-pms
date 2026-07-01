@@ -4,6 +4,7 @@ import type {
   HotelOpsEmergencyStop,
   HotelOpsNotification,
   HotelOpsOtaStatus,
+  HotelOpsPolicy,
   HotelOpsTask,
   HotelOpsTrendAlert,
 } from '@/types/hotel-ops'
@@ -125,6 +126,10 @@ export const hotelOpsApi = {
 
   getOtaStatus() {
     return apiRequest<{ ok: true; data: HotelOpsOtaStatus }>('/api/ops/ota/status')
+  },
+
+  getPolicy() {
+    return apiRequest<{ ok: true; data: HotelOpsPolicy }>('/api/ops/policy')
   },
 
   runScan(force?: HotelOpsScanForce) {

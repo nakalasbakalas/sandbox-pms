@@ -242,3 +242,36 @@ export type HotelOpsOtaStatus = {
     message?: string
   }>
 }
+
+export type HotelOpsTaskPolicyRule = {
+  riskLevel: RiskLevel
+  allowedRoles: HotelOpsRole[]
+  approvalRequired: boolean
+  requiredApprovalRole?: HotelOpsRole | null
+  enabledInMvp: boolean
+  execute: boolean
+  limits?: {
+    minRate?: number | null
+    maxRate?: number | null
+    preventClosingAllRooms?: boolean
+  }
+}
+
+export type HotelOpsPolicy = {
+  version: string
+  defaults: {
+    timezone: string
+    currency: string
+    dryRun: boolean
+  }
+  roles: HotelOpsRole[]
+  riskLevels: RiskLevel[]
+  writeTaskTypes: HotelOpsTaskType[]
+  taskRules: Record<HotelOpsTaskType, HotelOpsTaskPolicyRule>
+  emergencyStop: {
+    blockTaskTypes: HotelOpsTaskType[]
+    allowReadOnly: boolean
+    checkpoints: string[]
+  }
+  forbiddenPatterns: string[]
+}

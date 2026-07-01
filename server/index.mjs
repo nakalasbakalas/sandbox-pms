@@ -34,6 +34,7 @@ import {
   getEmergencyStop,
   getOpsTask,
   getOtaStatus,
+  getOpsPolicy,
   listOpsNotifications,
   listOpsApprovals,
   listOpsTasks,
@@ -757,6 +758,12 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/ops/ota/status' && request.method === 'GET') {
     requirePermission(user, 'view:ops')
     sendJson(response, 200, { ok: true, data: await getOtaStatus(db, { schedulerStatus: opsScanScheduler?.getStatus() }) })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/policy' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: getOpsPolicy() })
     return true
   }
 
