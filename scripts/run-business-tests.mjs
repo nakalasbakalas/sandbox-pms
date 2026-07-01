@@ -831,6 +831,11 @@ const guestMessagesCommand = parseHotelOpsCommand('Read guest messages from Book
 assert.equal(guestMessagesCommand.taskType, 'READ_GUEST_MESSAGES', 'Hotel Ops parser maps guest message reads to read-only message tasks')
 assert.equal(guestMessagesCommand.riskLevel, 'LOW', 'Hotel Ops guest message reads are low risk')
 
+const draftReplyCommand = parseHotelOpsCommand('Draft Booking guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
+assert.equal(draftReplyCommand.taskType, 'DRAFT_GUEST_REPLY', 'Hotel Ops parser maps draft reply commands')
+assert.equal(evaluateOpsPermission(draftReplyCommand, { id: 'viewer', role: 'VIEWER' }).allowed, false, 'Hotel Ops viewer role cannot create draft reply tasks')
+assert.equal(evaluateOpsPermission(draftReplyCommand, { id: 'contractor', role: 'CONTRACTOR' }).allowed, false, 'Hotel Ops unknown roles default to viewer permissions')
+
 const sendReplyCommand = parseHotelOpsCommand('Send Booking guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
 assert.equal(sendReplyCommand.taskType, 'SEND_GUEST_REPLY', 'Hotel Ops parser maps explicit send reply commands')
 assert.equal(sendReplyCommand.platform, 'booking', 'Hotel Ops send reply parser requires and keeps the target platform')
@@ -875,6 +880,7 @@ assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Ho
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'staff cannot create high-risk Hotel Ops write task')
 assert.equal(evaluateOpsPermission({ ...rateCommand, platform: 'unknown' }, { id: 'manager', role: 'MANAGER' }).allowed, false, 'Hotel Ops permission guard rejects write tasks without a supported platform')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops emergency stop blocks write tasks')
+assert.equal(evaluateOpsPermission(readAvailabilityCommand, { id: 'viewer', role: 'VIEWER' }).allowed, true, 'Hotel Ops viewer role can still create allowed read-only availability checks')
 
 const opsCommandFixture = createOpsCommandPrismaFixture()
 const opsManager = { id: 'manager-ops-test', role: 'MANAGER', name: 'Ops Manager' }

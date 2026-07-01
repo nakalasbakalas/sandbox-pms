@@ -508,7 +508,8 @@ function opsRoleForUser(user) {
   if (role === 'ADMIN') return 'OWNER'
   if (role === 'MANAGER') return 'HOTEL_MANAGER'
   if (role === 'SYSTEM') return 'SYSTEM'
-  if (role) return 'STAFF'
+  if (role === 'VIEWER' || role === 'READ_ONLY') return 'VIEWER'
+  if (['FRONT_DESK', 'HOUSEKEEPING', 'CASHIER', 'CAFE_STAFF', 'STAFF'].includes(role)) return 'STAFF'
   return 'VIEWER'
 }
 
