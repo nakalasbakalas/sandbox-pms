@@ -10,7 +10,7 @@ import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDraf
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
-import { createUser } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, createUser, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -683,6 +683,72 @@ const bookingEmailReady = bookingEmailCapabilities.resolveBookingEmailCapabiliti
 })
 assert.equal(bookingEmailReady.canApplyEvents, true, 'booking-email UI applies events when backend routes are available')
 assert.equal(bookingEmailReady.canSyncMailbox, true, 'booking-email UI syncs mailbox when backend and provider credentials are ready')
+
+assert.deepEqual(
+  bookingEmailGmailCredentialStatus({}),
+  {
+    configured: false,
+    mode: 'missing',
+    hasAccessToken: false,
+    hasRefreshToken: false,
+    userId: 'me',
+  },
+  'booking-email Gmail credential status reports missing credentials without secrets',
+)
+assert.equal(
+  bookingEmailGmailCredentialStatus({
+    BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+    BOOKING_EMAIL_GMAIL_USER_ID: 'booking@sandboxhotel.com',
+  }).mode,
+  'access_token',
+  'booking-email Gmail credential status supports explicit access tokens',
+)
+assert.equal(
+  bookingEmailGmailCredentialStatus({
+    BOOKING_EMAIL_GMAIL_CLIENT_ID: 'client-id',
+    BOOKING_EMAIL_GMAIL_CLIENT_SECRET: 'client-confidential-fixture',
+    BOOKING_EMAIL_GMAIL_REFRESH_TOKEN: 'gmail-refresh-fixture',
+  }).mode,
+  'refresh_token',
+  'booking-email Gmail credential status supports backend refresh-token credentials',
+)
+let gmailRefreshRequestBody = null
+const refreshedGmailToken = await resolveBookingEmailGmailAccessToken({
+  env: {
+    BOOKING_EMAIL_GMAIL_CLIENT_ID: 'client-id',
+    BOOKING_EMAIL_GMAIL_CLIENT_SECRET: 'client-confidential-fixture',
+    BOOKING_EMAIL_GMAIL_REFRESH_TOKEN: 'gmail-refresh-fixture',
+  },
+  fetchImpl: async (url, request) => {
+    assert.equal(String(url), 'https://oauth2.googleapis.com/token', 'booking-email Gmail refresh uses the OAuth token endpoint')
+    gmailRefreshRequestBody = request.body
+    assert.equal(request.method, 'POST', 'booking-email Gmail refresh uses POST')
+    assert.equal(request.headers['content-type'], 'application/x-www-form-urlencoded', 'booking-email Gmail refresh uses form encoding')
+    return new Response(JSON.stringify({ access_token: 'new-gmail-access-fixture', expires_in: 3600, token_type: 'Bearer' }), { status: 200 })
+  },
+})
+assert.equal(refreshedGmailToken, 'new-gmail-access-fixture', 'booking-email Gmail refresh resolves an access token')
+assert.equal(gmailRefreshRequestBody.get('grant_type'), 'refresh_token', 'booking-email Gmail refresh sends refresh grant type')
+assert.equal(gmailRefreshRequestBody.get('refresh_token'), 'gmail-refresh-fixture', 'booking-email Gmail refresh sends the configured refresh token only to Google')
+await assert.rejects(
+  () => resolveBookingEmailGmailAccessToken({
+    env: {
+      BOOKING_EMAIL_GMAIL_CLIENT_ID: 'client-id',
+      BOOKING_EMAIL_GMAIL_CLIENT_SECRET: 'client-confidential-fixture',
+      BOOKING_EMAIL_GMAIL_REFRESH_TOKEN: 'gmail-refresh-fixture',
+    },
+    fetchImpl: async () => new Response(JSON.stringify({
+      error_description: 'invalid refresh_token=gmail-refresh-fixture client_secret=client-confidential-fixture',
+    }), { status: 400 }),
+  }),
+  (error) => {
+    assert.equal(error.message.includes('gmail-refresh-fixture'), false, 'booking-email Gmail refresh errors redact refresh token values')
+    assert.equal(error.message.includes('client-confidential-fixture'), false, 'booking-email Gmail refresh errors redact client secret values')
+    assert.match(error.message, /refresh_token=\[redacted\]/, 'booking-email Gmail refresh error remains actionable after redaction')
+    return true
+  },
+  'booking-email Gmail refresh errors are redacted before surfacing',
+)
 
 const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
   id: 'email-event-1',

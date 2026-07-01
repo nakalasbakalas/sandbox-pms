@@ -359,8 +359,10 @@ async function createRoomStatusLog(tx, room, toStatus, actor, notes) {
 
 const DEFAULT_BOOKING_EMAIL_MAILBOX = 'booking@sandboxhotel.com'
 const BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD = 0.85
+const BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE = 'Gmail API OAuth credentials are not configured for this server.'
 const VALID_BOOKING_EMAIL_STATUSES = ['NEEDS_REVIEW', 'PROCESSED', 'ERROR', 'IGNORED']
 const VALID_BOOKING_EMAIL_EVENT_TYPES = ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE', 'GUEST_MESSAGE', 'UNKNOWN']
+const GMAIL_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const CLIENT_PROVIDER_BY_DB = {
   GMAIL: 'gmail',
   IMAP: 'imap',
@@ -380,8 +382,67 @@ function primaryBookingMailbox() {
   return String(process.env.BOOKING_EMAIL_PRIMARY_MAILBOX || DEFAULT_BOOKING_EMAIL_MAILBOX).trim().toLowerCase()
 }
 
-function bookingEmailGmailAccessToken() {
-  return normalizeNullableString(process.env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN || process.env.GMAIL_ACCESS_TOKEN)
+function bookingEmailGmailAccessToken(env = process.env) {
+  return normalizeNullableString(env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN || env.GMAIL_ACCESS_TOKEN)
+}
+
+function bookingEmailGmailRefreshCredentials(env = process.env) {
+  return {
+    clientId: normalizeNullableString(env.BOOKING_EMAIL_GMAIL_CLIENT_ID || env.GMAIL_CLIENT_ID),
+    clientSecret: normalizeNullableString(env.BOOKING_EMAIL_GMAIL_CLIENT_SECRET || env.GMAIL_CLIENT_SECRET),
+    refreshToken: normalizeNullableString(env.BOOKING_EMAIL_GMAIL_REFRESH_TOKEN || env.GMAIL_REFRESH_TOKEN),
+  }
+}
+
+export function bookingEmailGmailCredentialStatus(env = process.env) {
+  const hasAccessToken = Boolean(bookingEmailGmailAccessToken(env))
+  const refreshCredentials = bookingEmailGmailRefreshCredentials(env)
+  const hasRefreshToken = Boolean(refreshCredentials.clientId && refreshCredentials.clientSecret && refreshCredentials.refreshToken)
+  return {
+    configured: hasAccessToken || hasRefreshToken,
+    mode: hasAccessToken ? 'access_token' : hasRefreshToken ? 'refresh_token' : 'missing',
+    hasAccessToken,
+    hasRefreshToken,
+    userId: normalizeNullableString(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID) || 'me',
+  }
+}
+
+function redactedCredentialMessage(value) {
+  return String(value || '')
+    .replace(/\b(access[_-]?token|refresh[_-]?token|client[_-]?secret|token|secret|password)\b\s*[:=]\s*[^&\s,;}"']+/gi, '$1=[redacted]')
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, 'ya29.[redacted]')
+}
+
+async function refreshBookingEmailGmailAccessToken(env = process.env, fetchImpl = fetch) {
+  const credentials = bookingEmailGmailRefreshCredentials(env)
+  if (!credentials.clientId || !credentials.clientSecret || !credentials.refreshToken) return null
+
+  const response = await fetchImpl(GMAIL_OAUTH_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      client_id: credentials.clientId,
+      client_secret: credentials.clientSecret,
+      refresh_token: credentials.refreshToken,
+      grant_type: 'refresh_token',
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || !payload?.access_token) {
+    const providerMessage = payload?.error_description || payload?.error || 'Gmail OAuth refresh failed.'
+    throw new PmsValidationError(redactedCredentialMessage(providerMessage), response.status || 502)
+  }
+  return String(payload.access_token)
+}
+
+export async function resolveBookingEmailGmailAccessToken(options = {}) {
+  const env = options.env || process.env
+  const accessToken = bookingEmailGmailAccessToken(env)
+  if (accessToken) return accessToken
+  return refreshBookingEmailGmailAccessToken(env, options.fetchImpl || fetch)
 }
 
 function normalizeBookingEmailProvider(provider) {
@@ -561,6 +622,9 @@ function proposedBookingEmailAction(eventType) {
 }
 
 function bookingEmailSourceResponse(source) {
+  const lastError = source.lastError === BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE && bookingEmailGmailCredentialStatus().configured
+    ? null
+    : source.lastError
   return {
     id: source.id,
     name: source.name,
@@ -568,7 +632,7 @@ function bookingEmailSourceResponse(source) {
     enabled: source.enabled,
     mailbox: source.mailbox,
     lastSyncAt: isoOrUndefined(source.lastSyncAt),
-    lastError: source.lastError || undefined,
+    lastError: lastError || undefined,
     autoProcessSafeEvents: source.autoProcessSafeEvents,
     reviewThreshold: source.reviewThreshold,
   }
@@ -613,6 +677,7 @@ function bookingEmailEventResponse(event) {
 async function ensurePrimaryBookingEmailSource(tx) {
   const property = await getProperty(tx)
   const mailbox = primaryBookingMailbox()
+  const credentials = bookingEmailGmailCredentialStatus()
   return tx.bookingEmailSource.upsert({
     where: {
       propertyId_mailbox: {
@@ -624,6 +689,7 @@ async function ensurePrimaryBookingEmailSource(tx) {
       name: 'Primary booking Gmail',
       provider: 'GMAIL',
       enabled: true,
+      ...(credentials.configured ? {} : { lastError: BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE }),
     },
     create: {
       propertyId: property.id,
@@ -634,7 +700,7 @@ async function ensurePrimaryBookingEmailSource(tx) {
       autoProcessSafeEvents: false,
       reviewThreshold: BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD,
       query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
-      lastError: bookingEmailGmailAccessToken() ? null : 'Gmail API credentials are not configured for this server.',
+      lastError: credentials.configured ? null : BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE,
     },
   })
 }
@@ -670,8 +736,8 @@ function collectGmailTextParts(part, output = []) {
   return output
 }
 
-async function fetchGmailJson(url, token) {
-  const response = await fetch(url, {
+async function fetchGmailJson(url, token, fetchImpl = fetch) {
+  const response = await fetchImpl(url, {
     headers: {
       authorization: `Bearer ${token}`,
       accept: 'application/json',
@@ -685,23 +751,24 @@ async function fetchGmailJson(url, token) {
 }
 
 async function fetchGmailEventsForSource(source, options = {}) {
-  const token = bookingEmailGmailAccessToken()
+  const token = await resolveBookingEmailGmailAccessToken(options)
   if (!token) {
-    throw new PmsValidationError('Gmail API credentials are not configured for booking email sync.', 503)
+    throw new PmsValidationError('Gmail API OAuth credentials are not configured for booking email sync.', 503)
   }
-  const userId = encodeURIComponent(process.env.BOOKING_EMAIL_GMAIL_USER_ID || 'me')
+  const env = options.env || process.env
+  const userId = encodeURIComponent(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID || 'me')
   const query = source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
   const maxResults = Math.min(Math.max(Number(options.limit || 10), 1), 50)
   const listUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages`)
   listUrl.searchParams.set('q', query)
   listUrl.searchParams.set('maxResults', String(maxResults))
 
-  const listed = await fetchGmailJson(listUrl, token)
+  const listed = await fetchGmailJson(listUrl, token, options.fetchImpl || fetch)
   const messages = []
   for (const item of listed.messages || []) {
     const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages/${encodeURIComponent(item.id)}`)
     messageUrl.searchParams.set('format', 'full')
-    const message = await fetchGmailJson(messageUrl, token)
+    const message = await fetchGmailJson(messageUrl, token, options.fetchImpl || fetch)
     const rawText = collectGmailTextParts(message.payload).join('\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
     const receivedAt = Number(message.internalDate) ? new Date(Number(message.internalDate)).toISOString() : gmailHeader(message, 'date')
     messages.push({
@@ -2051,17 +2118,19 @@ export async function getBookingEmailStatus(prisma) {
     ])
     const enabledSources = sources.filter((source) => source.enabled)
     const gmailEnabled = enabledSources.some((source) => source.provider === 'GMAIL')
-    const configured = enabledSources.length > 0 && (!gmailEnabled || Boolean(bookingEmailGmailAccessToken()))
+    const gmailCredentials = bookingEmailGmailCredentialStatus()
+    const configured = enabledSources.length > 0 && (!gmailEnabled || gmailCredentials.configured)
     const lastSyncAt = sources.map((source) => source.lastSyncAt).filter(Boolean).sort((a, b) => b - a)[0]
     return {
       configured,
+      credentialMode: gmailEnabled ? gmailCredentials.mode : 'not-required',
       lastSyncAt: isoOrUndefined(lastSyncAt),
       needsReview,
       processedToday,
       errors,
       ignored,
       sources: sources.map(bookingEmailSourceResponse),
-      message: configured ? undefined : `Primary booking mailbox ${primaryBookingMailbox()} is registered, but Gmail API credentials are not configured on the server.`,
+      message: configured ? undefined : `Primary booking mailbox ${primaryBookingMailbox()} is registered, but Gmail API OAuth credentials are not configured on the server.`,
     }
   })
 }
@@ -2133,7 +2202,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
     } catch (error) {
       await prisma.bookingEmailSource.update({
         where: { id: source.id },
-        data: { lastError: error instanceof Error ? error.message : String(error) },
+        data: { lastError: redactedCredentialMessage(error instanceof Error ? error.message : String(error)) },
       })
       throw error
     }

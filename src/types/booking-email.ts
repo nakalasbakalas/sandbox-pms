@@ -76,6 +76,7 @@ export interface BookingEmailSource {
 
 export interface BookingEmailStatus {
   configured: boolean
+  credentialMode?: 'access_token' | 'refresh_token' | 'missing' | 'not-required'
   lastSyncAt?: string
   nextSyncAt?: string
   needsReview: number

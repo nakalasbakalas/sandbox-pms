@@ -14,7 +14,7 @@ Last reviewed: 2026-07-01
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
 - Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is persisted through backend acknowledgment routes.
-- Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync still requires server-owned API credentials.
+- Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync supports backend-owned OAuth access-token or refresh-token credentials.
 
 ## Relevant Implementation Files
 

@@ -157,7 +157,7 @@ The Booking Inbox is a staff-facing exception queue for email-derived booking ev
 - Edit Parsed Details Then Apply submits corrected `editedDetails` through the same approval route.
 - Link/Create requires an explicit reservation id for linking; unmatched new-booking events can create a reservation from parsed details.
 - Cancellation email actions require an operational reason so the audit trail captures the staff decision.
-- Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials and must not use a pasted mailbox password.
+- Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, and must not use a pasted mailbox password.
 
 ## Notifications
 

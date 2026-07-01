@@ -96,6 +96,13 @@ function statusTone(status: BookingEmailEventStatus) {
   return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
+function credentialModeLabel(mode?: string) {
+  if (mode === 'access_token') return 'Gmail access token'
+  if (mode === 'refresh_token') return 'Gmail refresh token'
+  if (mode === 'not-required') return 'No mailbox credential required'
+  return 'Not configured'
+}
+
 export function BookingInboxView() {
   const { events, sources, status, loading, error, notConfigured, apiAvailable, mode, reload } = useBookingEmailInbox()
   const { navigate } = useNavigation()
@@ -297,6 +304,7 @@ export function BookingInboxView() {
                   )}
                   <p className="mt-1 text-xs text-amber-900/70">
                     Current mode: {mode === 'local-draft' ? 'local draft data only' : 'server API checked'}.
+                    {status?.credentialMode ? ` Mailbox credential: ${credentialModeLabel(status.credentialMode)}.` : ''}
                   </p>
                 </div>
               </div>
@@ -367,6 +375,9 @@ export function BookingInboxView() {
                 <div className="grid gap-3 lg:grid-cols-2">
                   <div className="rounded-lg border bg-muted/20 p-3">
                     <div className="text-sm font-semibold">Configured sources</div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Mailbox credential mode: {credentialModeLabel(status?.credentialMode)}
+                    </div>
                     {sources.length === 0 ? (
                       <p className="mt-2 text-sm text-muted-foreground">No mailbox sources are configured in the PMS backend yet.</p>
                     ) : (
