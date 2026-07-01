@@ -58,6 +58,7 @@ Evidence: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`, `server
 - OTA imbalance creates an alert without automatic mutation.
 - Recommendations create approval-gated tasks, not direct execution.
 - Repeated scans update active alerts without duplicate notifications.
+- Every scan persists a durable scan snapshot with occupancy/velocity/source metrics, alert mutation counts, produced alert ids, and an audit link from `OPS_SCAN_RUN`.
 
 Evidence: `scripts/run-business-tests.mjs` and guarded DB E2E.
 

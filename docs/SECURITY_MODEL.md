@@ -74,6 +74,7 @@ Hotel Ops code records audit and task-log evidence for:
 - alert recommendation approval
 - alert acknowledgement or resolution
 - scheduler scan run
+- booking-intelligence scan snapshot creation and alert refresh linkage
 - emergency stop changes
 
 ## Proof Handling

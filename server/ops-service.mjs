@@ -1071,6 +1071,7 @@ function serializeAlert(alert) {
   return {
     id: alert.id,
     hotelId: SANDBOX_RULES.propertyCode,
+    scanSnapshotId: alert.scanSnapshotId || null,
     alertType: alert.alertType,
     severity: alert.severity,
     title: alert.title,
@@ -2408,6 +2409,54 @@ function cancellationMetrics(cancellationLogs, now) {
   }
 }
 
+function buildOpsScanSnapshotMetrics({
+  reservations = [],
+  cancellationLogs = [],
+  sellableRooms = 0,
+  rooms = [],
+  now = new Date(),
+  force,
+} = {}) {
+  const scanNow = dateValue(now)
+  const today = bangkokTodayDate(scanNow)
+  const weekEnd = addUtcDays(today, OPS_SCAN_POLICY.horizonDays)
+  const activeReservations = reservations.filter((reservation) => (
+    ['CONFIRMED', 'CHECKED_IN'].includes(String(reservation.status || '')) && reservationOverlaps(reservation, today, weekEnd)
+  ))
+  const occupancy = sellableRooms > 0 ? activeReservations.length / sellableRooms : 0
+  const velocity = velocityMetrics(activeReservations, scanNow)
+  const cancellation = cancellationMetrics(cancellationLogs, scanNow)
+  const roomTypeOccupancy = roomTypeOccupancyMetrics(activeReservations, rooms)
+  const otaDistribution = otaPlatformDistribution(activeReservations)
+
+  return {
+    windowStart: today,
+    windowEnd: weekEnd,
+    activeReservations: activeReservations.length,
+    sellableRooms,
+    cancellationLogs: cancellationLogs.length,
+    metrics: {
+      generatedAt: scanNow.toISOString(),
+      force: normalizeNullableString(force),
+      policy: {
+        horizonDays: OPS_SCAN_POLICY.horizonDays,
+        highDemandOccupancy: OPS_SCAN_POLICY.highDemandOccupancy,
+        highDemandVelocityRatio: OPS_SCAN_POLICY.highDemandVelocityRatio,
+        lowDemandOccupancy: OPS_SCAN_POLICY.lowDemandOccupancy,
+        cancellationRecentHours: OPS_SCAN_POLICY.cancellationRecentHours,
+        cancellationBaselineDays: OPS_SCAN_POLICY.cancellationBaselineDays,
+      },
+      occupancy,
+      activeReservations: activeReservations.length,
+      sellableRooms,
+      velocity,
+      cancellation,
+      roomTypeOccupancy,
+      otaDistribution,
+    },
+  }
+}
+
 export function buildOpsScanInsights({
   reservations = [],
   cancellationLogs = [],
@@ -2591,7 +2640,7 @@ function trendAlertIdentity(insight = {}) {
   }
 }
 
-async function upsertActiveOpsTrendAlert(prisma, propertyId, insight) {
+async function upsertActiveOpsTrendAlert(prisma, propertyId, insight, scanSnapshotId = null) {
   const identity = trendAlertIdentity(insight)
   const existing = await prisma.hotelOpsTrendAlert.findFirst({
     where: {
@@ -2611,6 +2660,7 @@ async function upsertActiveOpsTrendAlert(prisma, propertyId, insight) {
         summary: insight.summary,
         metrics: insight.metrics,
         recommendedAction: insight.recommendedAction ?? null,
+        scanSnapshotId,
       },
     })
     return { alert: updated, created: false }
@@ -2619,10 +2669,29 @@ async function upsertActiveOpsTrendAlert(prisma, propertyId, insight) {
   const created = await prisma.hotelOpsTrendAlert.create({
     data: {
       propertyId,
+      scanSnapshotId,
       ...insight,
     },
   })
   return { alert: created, created: true }
+}
+
+async function createOpsScanSnapshot(prisma, property, input, actor, snapshotMetrics) {
+  return prisma.hotelOpsScanSnapshot.create({
+    data: {
+      propertyId: property.id,
+      sourceChannel: normalizeOpsSourceChannel(input?.sourceChannel || actor?.sourceChannel || 'system'),
+      triggeredBy: actorLabel(actor),
+      force: normalizeNullableString(input?.force),
+      windowStart: snapshotMetrics.windowStart,
+      windowEnd: snapshotMetrics.windowEnd,
+      scannedAt: input?.now ? dateValue(input.now) : new Date(),
+      activeReservations: snapshotMetrics.activeReservations,
+      sellableRooms: snapshotMetrics.sellableRooms,
+      cancellationLogs: snapshotMetrics.cancellationLogs,
+      metrics: snapshotMetrics.metrics,
+    },
+  })
 }
 
 export async function runOpsScan(prisma, input = {}, actor = { id: 'system', role: 'SYSTEM' }) {
@@ -2666,12 +2735,21 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
     now,
     force: input?.force,
   })
+  const snapshotMetrics = buildOpsScanSnapshotMetrics({
+    reservations,
+    cancellationLogs,
+    sellableRooms: rooms.length,
+    rooms,
+    now,
+    force: input?.force,
+  })
+  const scanSnapshot = await createOpsScanSnapshot(prisma, property, input, actor, snapshotMetrics)
   const alerts = []
   const createdAlerts = []
   let createdCount = 0
   let updatedCount = 0
   for (const insight of insights) {
-    const result = await upsertActiveOpsTrendAlert(prisma, property.id, insight)
+    const result = await upsertActiveOpsTrendAlert(prisma, property.id, insight, scanSnapshot.id)
     alerts.push(result.alert)
     if (result.created) {
       createdCount += 1
@@ -2680,8 +2758,27 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
       updatedCount += 1
     }
   }
+  await prisma.hotelOpsScanSnapshot.update({
+    where: { id: scanSnapshot.id },
+    data: {
+      alertsCreated: createdCount,
+      alertsUpdated: updatedCount,
+      metrics: {
+        ...snapshotMetrics.metrics,
+        insights: insights.map((insight) => ({
+          alertType: insight.alertType,
+          severity: insight.severity,
+          platform: insight.platform,
+          roomType: insight.roomType,
+          recommendation: Boolean(insight.recommendedAction),
+        })),
+        alertIds: alerts.map((alert) => alert.id),
+      },
+    },
+  })
 
   await audit(prisma, actor, 'OPS_SCAN_RUN', 'hotelOpsTrendAlert', alerts[0]?.id || null, {
+    scanSnapshotId: scanSnapshot.id,
     created: createdCount,
     updated: updatedCount,
     activeAlerts: alerts.length,

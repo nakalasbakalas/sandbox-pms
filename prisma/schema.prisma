@@ -39,6 +39,7 @@ model Property {
   hotelOpsTrendAlerts  HotelOpsTrendAlert[]
   hotelOpsEmergencyStop HotelOpsEmergencyStop?
   hotelOpsNotifications HotelOpsNotification[]
+  hotelOpsScanSnapshots HotelOpsScanSnapshot[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -617,6 +618,8 @@ model HotelOpsTrendAlert {
   id                 String                   @id @default(cuid())
   propertyId         String
   property           Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  scanSnapshotId     String?
+  scanSnapshot       HotelOpsScanSnapshot?    @relation(fields: [scanSnapshotId], references: [id], onDelete: SetNull)
   alertType          HotelOpsTrendAlertType
   severity           HotelOpsAlertSeverity
   title              String
@@ -633,7 +636,31 @@ model HotelOpsTrendAlert {
   notifications      HotelOpsNotification[]
 
   @@index([propertyId, status, createdAt])
+  @@index([scanSnapshotId])
   @@index([alertType, severity])
+}
+
+model HotelOpsScanSnapshot {
+  id                 String                 @id @default(cuid())
+  propertyId         String
+  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sourceChannel      HotelOpsSourceChannel  @default(system)
+  triggeredBy        String?
+  force              String?
+  windowStart        DateTime               @db.Date
+  windowEnd          DateTime               @db.Date
+  scannedAt          DateTime               @default(now())
+  activeReservations Int                    @default(0)
+  sellableRooms      Int                    @default(0)
+  cancellationLogs   Int                    @default(0)
+  alertsCreated      Int                    @default(0)
+  alertsUpdated      Int                    @default(0)
+  metrics            Json
+  alerts             HotelOpsTrendAlert[]
+  createdAt          DateTime               @default(now())
+
+  @@index([propertyId, scannedAt])
+  @@index([sourceChannel, scannedAt])
 }
 
 model HotelOpsEmergencyStop {

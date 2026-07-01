@@ -2434,6 +2434,7 @@ assert.notEqual(
 const scanAlertRows = []
 const scanNotifications = []
 const scanAudits = []
+const scanSnapshots = []
 const scanProperty = { id: 'property-scan-1', code: 'SANDBOX', email: null, reservationAlertEmail: null }
 const dateKey = (value) => (value ? new Date(value).toISOString().slice(0, 10) : null)
 const scanPrisma = {
@@ -2448,6 +2449,24 @@ const scanPrisma = {
   },
   reservationLog: {
     findMany: async () => [],
+  },
+  hotelOpsScanSnapshot: {
+    create: async ({ data }) => {
+      const row = {
+        id: `scan-snapshot-${scanSnapshots.length + 1}`,
+        alertsCreated: 0,
+        alertsUpdated: 0,
+        createdAt: new Date('2026-06-30T00:00:00.000Z'),
+        ...data,
+      }
+      scanSnapshots.push(row)
+      return row
+    },
+    update: async ({ where, data }) => {
+      const row = scanSnapshots.find((snapshot) => snapshot.id === where.id)
+      Object.assign(row, data)
+      return row
+    },
   },
   hotelOpsTrendAlert: {
     findFirst: async ({ where }) => scanAlertRows.find((alert) => (
@@ -2497,6 +2516,14 @@ assert.equal(scanAlertRows.length, 1, 'Hotel Ops scan reuses an active alert ins
 assert.equal(firstLowDemandScan[0]?.id, secondLowDemandScan[0]?.id, 'Hotel Ops repeated scan returns the existing active alert')
 assert.equal(scanNotifications.filter((notification) => notification.type === 'TREND_ALERT').length, 1, 'Hotel Ops repeated scan does not re-notify for the same active alert')
 assert.equal(scanAudits.filter((audit) => audit.action === 'OPS_SCAN_RUN').at(-1)?.changes.updated, 1, 'Hotel Ops repeated scan audits alert refresh count')
+assert.equal(scanSnapshots.length, 2, 'Hotel Ops persists a scan snapshot for every booking-intelligence scan')
+assert.equal(scanSnapshots[0].activeReservations, 0, 'Hotel Ops scan snapshot stores active reservation counts')
+assert.equal(scanSnapshots[0].sellableRooms, 10, 'Hotel Ops scan snapshot stores sellable room counts')
+assert.equal(scanSnapshots[0].alertsCreated, 1, 'Hotel Ops scan snapshot records created alert counts')
+assert.equal(scanSnapshots[1].alertsUpdated, 1, 'Hotel Ops repeated scan snapshot records refreshed alert counts')
+assert.equal(scanAlertRows[0].scanSnapshotId, scanSnapshots[1].id, 'Hotel Ops refreshed alert links to the latest scan snapshot')
+assert.equal(scanSnapshots[1].metrics.alertIds.includes(scanAlertRows[0].id), true, 'Hotel Ops scan snapshot stores produced alert ids in metrics')
+assert.equal(scanAudits.filter((audit) => audit.action === 'OPS_SCAN_RUN').at(-1)?.changes.scanSnapshotId, scanSnapshots[1].id, 'Hotel Ops scan audit links to the durable snapshot')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

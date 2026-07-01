@@ -30,6 +30,7 @@ Last reviewed: 2026-07-02
 - Booking.com dry-run adapter skeleton: `server/ota-adapters/booking-com.mjs`.
 - Agoda, Trip.com, and Expedia dry-run adapter skeletons: `server/ota-adapters/platform-skeleton.mjs`.
 - Data model: `prisma/schema.prisma` and `prisma/migrations/20260630133000_hotel_ops_command_center`.
+- Booking-intelligence scan snapshots: `prisma/migrations/20260702064500_hotel_ops_scan_snapshots`.
 - UI: `src/components/hotel-ops/HotelOpsCommandCenterView.tsx`.
 - Today action surfacing: `src/components/today/TodayView.tsx`.
 - Booking Inbox UI: `src/components/booking-email/BookingInboxView.tsx`.
@@ -54,6 +55,7 @@ Last reviewed: 2026-07-02
 - Optional email command intake is prefix-gated, allowlisted by sender email, mapped to an active PMS user, checked for `create:ops-task`, submitted through `submitOpsCommand` with source channel `email`, and linked to source email metadata in task logs/audit.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
+- Each Hotel Ops booking-intelligence scan now persists a durable `HotelOpsScanSnapshot` with scan window, occupancy, booking velocity, cancellation, room-type, OTA distribution, and alert mutation counts. Alerts are linked to the scan snapshot that created or last refreshed them.
 
 ## Current Boundaries
 
@@ -66,6 +68,7 @@ Last reviewed: 2026-07-02
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
 - The parser is deterministic by default and strict-schema validated. An optional OpenAI Responses parser is available only when backend environment flags and `OPENAI_API_KEY` are configured; model output is redacted, schema-validated, policy-normalized, and falls back to deterministic parsing on provider failure.
 - Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.
+- Scan snapshots are PMS-derived operational evidence, not live OTA scrape proof. Live OTA snapshot quality still depends on verified adapter reads or imported booking data.
 
 ## Validation Evidence
 

@@ -958,6 +958,17 @@ try {
     now: '2026-06-30T00:00:00.000Z',
   }, manager)
   assert.equal(scanAlerts.some((alert) => alert.alertType === 'HIGH_DEMAND'), true, 'DB Hotel Ops forced scan creates a high-demand alert')
+  const scanSnapshot = await prisma.hotelOpsScanSnapshot.findFirst({
+    where: {
+      force: 'high-demand',
+      scannedAt: new Date('2026-06-30T00:00:00.000Z'),
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+  assert.ok(scanSnapshot, 'DB Hotel Ops scan persists a durable scan snapshot')
+  assert.equal(scanSnapshot.sellableRooms > 0, true, 'DB Hotel Ops scan snapshot stores sellable room counts')
+  assert.equal(scanSnapshot.alertsCreated + scanSnapshot.alertsUpdated > 0, true, 'DB Hotel Ops scan snapshot stores alert mutation counts')
+  assert.equal(Array.isArray(scanSnapshot.metrics?.alertIds), true, 'DB Hotel Ops scan snapshot stores produced alert ids in metrics')
 
   await setEmergencyStop(prisma, {
     enabled: true,
@@ -996,6 +1007,7 @@ try {
   assert.equal(opsAudits.some((audit) => audit.action === 'OPS_APPROVAL_GRANTED'), true, 'DB Hotel Ops approval is audited')
   assert.equal(opsAudits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'DB Hotel Ops worker success is audited')
   assert.equal(opsAudits.some((audit) => audit.action === 'OPS_SCAN_RUN'), true, 'DB Hotel Ops scan is audited')
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_SCAN_RUN' && audit.changes?.scanSnapshotId === scanSnapshot.id), true, 'DB Hotel Ops scan audit links to the scan snapshot')
   assert.equal(opsAudits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLED'), true, 'DB Hotel Ops emergency stop is audited')
 
   await cancelReservation(prisma, reservation.id, admin, 'CANCELLED', 'E2E cleanup marker').catch(() => undefined)

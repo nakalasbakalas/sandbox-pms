@@ -132,6 +132,7 @@ Owner or approver:
 3. Confirm `/ops/settings` shows scheduler state and next scan time.
 4. Monitor `/ops/intelligence` for alerts.
 5. Treat recommendations as separate approval-gated tasks.
+6. Use scan snapshots as backend evidence for how an alert was produced or refreshed; snapshots are PMS-derived and do not prove live OTA scrape coverage unless live adapter reads are configured and separately verified.
 
 The scheduler runs as `SYSTEM`, skips overlaps, and redacts credential-like failure text.
 

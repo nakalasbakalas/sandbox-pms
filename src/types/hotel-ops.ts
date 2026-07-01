@@ -162,6 +162,7 @@ export type HotelOpsCommandResult = {
 export type HotelOpsTrendAlert = {
   id: string
   hotelId: string
+  scanSnapshotId?: string | null
   alertType:
     | 'HIGH_DEMAND'
     | 'LOW_DEMAND'

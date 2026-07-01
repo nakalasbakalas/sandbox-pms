@@ -141,6 +141,7 @@ The task lifecycle is persisted in Prisma models:
 - `HotelOpsTaskApproval`
 - `HotelOpsTaskLog`
 - `HotelOpsTrendAlert`
+- `HotelOpsScanSnapshot`
 - `HotelOpsEmergencyStop`
 - `HotelOpsNotification`
 
@@ -176,6 +177,8 @@ Worker requests:
 - OTA/platform imbalance
 
 Recommendations create approval-gated tasks and never execute directly.
+
+Every scan persists a `HotelOpsScanSnapshot` before alert upserts. The snapshot records the scan window, actor/source channel, active reservations, sellable rooms, cancellation-log count, occupancy, velocity, cancellation, room-type occupancy, OTA distribution, generated insights, and final created/updated alert counts. Created or refreshed trend alerts link back to the snapshot that produced the current alert metrics.
 
 Scheduled scans:
 
