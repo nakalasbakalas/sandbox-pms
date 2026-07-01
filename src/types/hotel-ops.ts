@@ -200,6 +200,21 @@ export type HotelOpsOtaStatus = {
       timezone: string
       message: string
     }
+    scheduler?: {
+      enabled: boolean
+      started: boolean
+      running: boolean
+      status: 'DISABLED' | 'IDLE' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | string
+      mode?: 'manual' | 'cron' | 'interval' | string
+      intervalMinutes?: number | null
+      startedAt?: string | null
+      lastRunStartedAt?: string | null
+      lastRunAt?: string | null
+      nextRunAt?: string | null
+      lastAlertCount?: number | null
+      lastError?: string | null
+      disabledReason?: string | null
+    }
     thresholds: {
       horizonDays: number
       highDemandOccupancy: number

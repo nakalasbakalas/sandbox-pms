@@ -1511,7 +1511,7 @@ export async function setEmergencyStop(prisma, input, actor) {
   return stop
 }
 
-export async function getOtaStatus(prisma) {
+export async function getOtaStatus(prisma, options = {}) {
   await getProperty(prisma)
   const workerBaseUrlConfigured = Boolean(opsWorkerBaseUrl())
   const workerSecretConfigured = Boolean(opsWorkerSecret())
@@ -1522,7 +1522,7 @@ export async function getOtaStatus(prisma) {
     workerConfigured: signedWorkerConfigured,
     workerBaseUrlConfigured,
     workerSecretConfigured,
-    scanPolicy: getOpsScanPolicy(),
+    scanPolicy: getOpsScanPolicy(process.env, options.schedulerStatus),
     platforms: [
       {
         platform: 'booking',
@@ -1544,7 +1544,7 @@ export async function getOtaStatus(prisma) {
   }
 }
 
-export function getOpsScanPolicy(env = process.env) {
+export function getOpsScanPolicy(env = process.env, schedulerStatus = null) {
   const cron = normalizeNullableString(env.HOTEL_OPS_SCAN_CRON || env.OPS_SCAN_CRON)
   const intervalMinutes = Number(env.HOTEL_OPS_SCAN_INTERVAL_MINUTES || env.OPS_SCAN_INTERVAL_MINUTES)
   const hasInterval = Number.isFinite(intervalMinutes) && intervalMinutes > 0
@@ -1561,7 +1561,7 @@ export function getOpsScanPolicy(env = process.env) {
         : 'No automatic scan schedule is configured; scans run manually or by an external job calling /api/ops/scan/run.',
   }
 
-  return {
+  const policy = {
     schedule,
     thresholds: {
       horizonDays: OPS_SCAN_POLICY.horizonDays,
@@ -1583,6 +1583,26 @@ export function getOpsScanPolicy(env = process.env) {
       currency: OPS_SCAN_POLICY.currency,
     },
   }
+
+  if (schedulerStatus) {
+    policy.scheduler = {
+      enabled: Boolean(schedulerStatus.enabled),
+      started: Boolean(schedulerStatus.started),
+      running: Boolean(schedulerStatus.running),
+      status: schedulerStatus.status || 'UNKNOWN',
+      mode: schedulerStatus.mode || schedule.mode,
+      intervalMinutes: schedulerStatus.intervalMinutes ?? null,
+      startedAt: schedulerStatus.startedAt || null,
+      lastRunStartedAt: schedulerStatus.lastRunStartedAt || null,
+      lastRunAt: schedulerStatus.lastRunAt || null,
+      nextRunAt: schedulerStatus.nextRunAt || null,
+      lastAlertCount: schedulerStatus.lastAlertCount ?? null,
+      lastError: schedulerStatus.lastError || null,
+      disabledReason: schedulerStatus.disabledReason || null,
+    }
+  }
+
+  return policy
 }
 
 function recommendedRateTask(alertType, roomType, start, end) {

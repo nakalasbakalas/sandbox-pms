@@ -18,6 +18,7 @@ import {
   verifyOpsWorkerRequest,
 } from './ops-worker-auth.mjs'
 import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
+import { createHotelOpsScanScheduler } from './ops-scheduler.mjs'
 import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
@@ -101,6 +102,7 @@ const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, ${OPS_WO
 const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
+let opsScanScheduler
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -754,7 +756,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/ops/ota/status' && request.method === 'GET') {
     requirePermission(user, 'view:ops')
-    sendJson(response, 200, { ok: true, data: await getOtaStatus(db) })
+    sendJson(response, 200, { ok: true, data: await getOtaStatus(db, { schedulerStatus: opsScanScheduler?.getStatus() }) })
     return true
   }
 
@@ -1157,10 +1159,16 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, host, () => {
   console.log(`sandbox-hotel-pms listening on http://${host}:${port}`)
+  opsScanScheduler = createHotelOpsScanScheduler({ getPrisma, env: process.env, logger: console })
+  const schedulerStart = opsScanScheduler.start()
+  if (schedulerStart.started) {
+    console.log(`Hotel Ops scan scheduler active every ${schedulerStart.status.intervalMinutes} minute${schedulerStart.status.intervalMinutes === 1 ? '' : 's'}.`)
+  }
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
+    opsScanScheduler?.stop()
     server.close(async () => {
       await prisma?.$disconnect?.()
       process.exit(0)

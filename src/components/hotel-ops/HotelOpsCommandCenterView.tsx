@@ -113,6 +113,12 @@ function formatPercentValue(value?: number) {
   return typeof value === 'number' ? `${Math.round(value * 100)}%` : 'Not set'
 }
 
+function formatDateTimeValue(value?: string | null) {
+  if (!value) return 'Not recorded'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleString()
+}
+
 function numericMetric(alert: HotelOpsTrendAlert, key: string) {
   const value = alert.metrics?.[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : null
@@ -889,6 +895,32 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                 <p className="text-sm text-muted-foreground">
                   {otaStatus?.scanPolicy?.schedule.message || 'Scan policy is not available from the backend yet.'}
                 </p>
+                {otaStatus?.scanPolicy?.scheduler && (
+                  <div className="grid gap-2 text-sm md:grid-cols-3">
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Scheduler state</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.scheduler.started ? 'Running in this server process' : otaStatus.scanPolicy.scheduler.enabled ? 'Configured but not started' : 'Not started'}
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Last scan</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.scheduler.status} - {formatDateTimeValue(otaStatus.scanPolicy.scheduler.lastRunAt)}
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Next action</div>
+                      <div className="text-xs text-muted-foreground">
+                        {otaStatus.scanPolicy.scheduler.lastError
+                          ? otaStatus.scanPolicy.scheduler.lastError
+                          : otaStatus.scanPolicy.scheduler.started
+                            ? `Next scan ${formatDateTimeValue(otaStatus.scanPolicy.scheduler.nextRunAt)}`
+                            : otaStatus.scanPolicy.scheduler.disabledReason || 'Manual scan only'}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {otaStatus?.scanPolicy?.thresholds && (
                   <div className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
                     <div className="rounded border px-3 py-2">

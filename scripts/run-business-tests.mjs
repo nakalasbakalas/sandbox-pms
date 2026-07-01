@@ -5,6 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
+import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
 import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
@@ -683,6 +684,96 @@ assert.equal(cronScanPolicy.schedule.cron, '*/15 * * * *', 'Hotel Ops scan polic
 const intervalScanPolicy = getOpsScanPolicy({ HOTEL_OPS_SCAN_INTERVAL_MINUTES: '30' })
 assert.equal(intervalScanPolicy.schedule.mode, 'interval', 'Hotel Ops scan policy reports configured interval schedule')
 assert.equal(intervalScanPolicy.schedule.intervalMinutes, 30, 'Hotel Ops scan policy exposes interval minutes')
+
+const silentSchedulerLogger = { error: () => undefined }
+const disabledOpsScheduler = createHotelOpsScanScheduler({ env: {}, logger: silentSchedulerLogger })
+assert.equal(disabledOpsScheduler.getStatus().enabled, false, 'Hotel Ops scheduler stays disabled without an interval schedule')
+assert.equal(disabledOpsScheduler.start().started, false, 'Hotel Ops scheduler does not start in manual mode')
+assert.equal((await disabledOpsScheduler.runOnce('unit-test')).skipped, true, 'Hotel Ops scheduler skips manual-only scan runs')
+
+const externalCronOpsScheduler = createHotelOpsScanScheduler({
+  env: { HOTEL_OPS_SCAN_CRON: '*/15 * * * *' },
+  logger: silentSchedulerLogger,
+})
+assert.equal(externalCronOpsScheduler.getStatus().enabled, false, 'Hotel Ops in-process scheduler does not pretend to run cron')
+assert.equal(externalCronOpsScheduler.getStatus().disabledReason, 'external_cron', 'Hotel Ops cron schedule remains an external scheduler contract')
+
+const intervalHandles = []
+const scheduledScanCalls = []
+const intervalOpsScheduler = createHotelOpsScanScheduler({
+  env: { HOTEL_OPS_SCAN_INTERVAL_MINUTES: '15' },
+  getPrisma: async () => ({ fixture: 'ops-prisma' }),
+  runScan: async (prisma, input, actor) => {
+    scheduledScanCalls.push({ prisma, input, actor })
+    return [{ id: 'alert-scheduled-1' }]
+  },
+  logger: silentSchedulerLogger,
+  setIntervalFn: (callback, milliseconds) => {
+    const handle = {
+      callback,
+      milliseconds,
+      unrefCalled: false,
+      unref() {
+        this.unrefCalled = true
+      },
+    }
+    intervalHandles.push(handle)
+    return handle
+  },
+  clearIntervalFn: (handle) => {
+    handle.cleared = true
+  },
+  now: () => new Date('2026-06-30T00:00:00.000Z'),
+})
+const intervalSchedulerStart = intervalOpsScheduler.start()
+assert.equal(intervalSchedulerStart.started, true, 'Hotel Ops interval scheduler starts when interval env is configured')
+assert.equal(intervalHandles[0]?.milliseconds, 15 * 60_000, 'Hotel Ops interval scheduler uses configured interval minutes')
+assert.equal(intervalHandles[0]?.unrefCalled, true, 'Hotel Ops interval scheduler does not keep Node alive by itself')
+const scheduledRun = await intervalOpsScheduler.runOnce('unit-test')
+assert.equal(scheduledRun.skipped, false, 'Hotel Ops interval scheduler can run a scan')
+assert.equal(scheduledScanCalls.length, 1, 'Hotel Ops scheduler invokes scan service once')
+assert.deepEqual(scheduledScanCalls[0].input, { source: 'scheduler', trigger: 'unit-test' }, 'Hotel Ops scheduler tags scan input as scheduled')
+assert.equal(scheduledScanCalls[0].actor.role, 'SYSTEM', 'Hotel Ops scheduler runs scans as the system actor')
+assert.equal(intervalOpsScheduler.getStatus().status, 'SUCCEEDED', 'Hotel Ops scheduler records successful scan status')
+assert.equal(intervalOpsScheduler.getStatus().lastAlertCount, 1, 'Hotel Ops scheduler records alert count')
+intervalOpsScheduler.stop()
+assert.equal(intervalHandles[0]?.cleared, true, 'Hotel Ops scheduler clears its interval on stop')
+
+let releaseOverlapScan
+let overlapScanCount = 0
+const overlapOpsScheduler = createHotelOpsScanScheduler({
+  env: { HOTEL_OPS_SCAN_INTERVAL_MINUTES: '5' },
+  prisma: { fixture: 'overlap-prisma' },
+  runScan: async () => {
+    overlapScanCount += 1
+    return new Promise((resolveScan) => {
+      releaseOverlapScan = () => resolveScan([])
+    })
+  },
+  logger: silentSchedulerLogger,
+})
+const firstOverlapRun = overlapOpsScheduler.runOnce('first')
+await Promise.resolve()
+const skippedOverlapRun = await overlapOpsScheduler.runOnce('second')
+assert.equal(skippedOverlapRun.skipped, true, 'Hotel Ops scheduler skips overlapping scan runs')
+assert.equal(skippedOverlapRun.reason, 'already_running', 'Hotel Ops scheduler reports overlap reason')
+releaseOverlapScan()
+await firstOverlapRun
+assert.equal(overlapScanCount, 1, 'Hotel Ops scheduler prevents duplicate overlapping scan execution')
+
+const failingOpsScheduler = createHotelOpsScanScheduler({
+  env: { HOTEL_OPS_SCAN_INTERVAL_MINUTES: '5' },
+  prisma: { fixture: 'failure-prisma' },
+  runScan: async () => {
+    throw new Error('token=super-secret-value')
+  },
+  logger: silentSchedulerLogger,
+})
+const failedScheduledRun = await failingOpsScheduler.runOnce('failure')
+assert.equal(failedScheduledRun.skipped, false, 'Hotel Ops scheduler reports failed scan attempts')
+assert.equal(failingOpsScheduler.getStatus().status, 'FAILED', 'Hotel Ops scheduler records failed scan status')
+assert.match(failingOpsScheduler.getStatus().lastError, /token=\[redacted\]/, 'Hotel Ops scheduler redacts credential-like failure text')
+assert.equal(failingOpsScheduler.getStatus().lastError.includes('super-secret-value'), false, 'Hotel Ops scheduler does not retain secret-like failure values')
 
 const unauthenticatedBookingAdapter = createBookingComAdapter({
   env: {},
