@@ -854,6 +854,13 @@ const {
   checkOutReservation,
   createReservation,
 } = await import('../server/pms-service.mjs')
+const {
+  approveOpsTask,
+  runOpsScan,
+  runQueuedOpsTask,
+  setEmergencyStop,
+  submitOpsCommand,
+} = await import('../server/ops-service.mjs')
 
 const prisma = createPrismaClient()
 
@@ -906,6 +913,79 @@ try {
 
   const checkedOut = await checkOutReservation(prisma, reservation.id, frontDesk)
   assert.equal(checkedOut.status, 'CHECKED_OUT', 'check-out persists')
+
+  const opsRunId = Date.now()
+  const opsStartedAt = new Date()
+  const queuedScan = await submitOpsCommand(prisma, {
+    message: 'Check bookings for next weekend.',
+    sourceChannel: 'web',
+    idempotencyKey: `db-e2e-scan-${opsRunId}`,
+  }, manager)
+  assert.equal(queuedScan.task.status, 'QUEUED', 'DB Hotel Ops read scan queues without approval')
+  assert.equal(queuedScan.decision.approvalRequired, false, 'DB Hotel Ops read scan does not require owner approval')
+
+  const pendingRate = await submitOpsCommand(prisma, {
+    message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.',
+    sourceChannel: 'web',
+    idempotencyKey: `db-e2e-rate-${opsRunId}`,
+  }, manager)
+  assert.equal(pendingRate.task.status, 'PENDING_APPROVAL', 'DB Hotel Ops rate update waits for owner approval')
+  assert.equal(pendingRate.decision.requiredApprovalRole, 'OWNER', 'DB Hotel Ops high-risk task requires owner approval')
+
+  const approvedRate = await approveOpsTask(prisma, pendingRate.task.id, {
+    notes: 'Disposable DB E2E owner approval for dry-run worker proof.',
+  }, admin)
+  assert.equal(approvedRate.status, 'QUEUED', 'DB Hotel Ops owner approval queues the high-risk task')
+
+  const executedRate = await runQueuedOpsTask(prisma, pendingRate.task.id, admin)
+  assert.equal(executedRate.status, 'SUCCEEDED', 'DB Hotel Ops approved task runs through signed worker')
+  assert.equal(executedRate.proofScreenshots.length > 0, true, 'DB Hotel Ops worker proof persists')
+  assert.equal(executedRate.proofScreenshots.every((proof) => proof.redactionStatus === 'SAFE'), true, 'DB Hotel Ops persisted proof is safe to display')
+
+  const scanAlerts = await runOpsScan(prisma, {
+    force: 'high-demand',
+    now: '2026-06-30T00:00:00.000Z',
+  }, manager)
+  assert.equal(scanAlerts.some((alert) => alert.alertType === 'HIGH_DEMAND'), true, 'DB Hotel Ops forced scan creates a high-demand alert')
+
+  await setEmergencyStop(prisma, {
+    enabled: true,
+    reason: 'Disposable DB E2E verifies write blocking.',
+  }, admin)
+  try {
+    const stoppedRate = await submitOpsCommand(prisma, {
+      message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.',
+      sourceChannel: 'web',
+      idempotencyKey: `db-e2e-rate-stopped-${opsRunId}`,
+    }, manager)
+    assert.equal(stoppedRate.task.status, 'DENIED', 'DB Hotel Ops emergency stop denies write tasks')
+    assert.equal(stoppedRate.decision.blockedByEmergencyStop, true, 'DB Hotel Ops emergency stop decision is explicit')
+  } finally {
+    await setEmergencyStop(prisma, {
+      enabled: false,
+      reason: 'Disposable DB E2E cleanup restores write approvals.',
+    }, admin).catch(() => undefined)
+  }
+
+  const opsAudits = await prisma.auditLog.findMany({
+    where: {
+      createdAt: { gte: opsStartedAt },
+      action: {
+        in: [
+          'OPS_COMMAND_RECEIVED',
+          'OPS_APPROVAL_GRANTED',
+          'OPS_TASK_SUCCEEDED',
+          'OPS_SCAN_RUN',
+          'OPS_EMERGENCY_STOP_ENABLED',
+        ],
+      },
+    },
+  })
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED'), true, 'DB Hotel Ops command receipt is audited')
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_APPROVAL_GRANTED'), true, 'DB Hotel Ops approval is audited')
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'DB Hotel Ops worker success is audited')
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_SCAN_RUN'), true, 'DB Hotel Ops scan is audited')
+  assert.equal(opsAudits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLED'), true, 'DB Hotel Ops emergency stop is audited')
 
   await cancelReservation(prisma, reservation.id, admin, 'CANCELLED', 'E2E cleanup marker').catch(() => undefined)
   console.log('Database workflow e2e passed.')
