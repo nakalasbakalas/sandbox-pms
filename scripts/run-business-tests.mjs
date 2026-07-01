@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, hotelOpsTrendAlertFingerprint, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -59,6 +59,13 @@ function createOpsCommandPrismaFixture() {
         (where?.id && task.id === where.id)
         || (where?.idempotencyKey && task.idempotencyKey === where.idempotencyKey)
       ))),
+      findMany: async ({ where = {}, take } = {}) => {
+        const results = tasks.filter((task) => (
+          (!where.propertyId || task.propertyId === where.propertyId)
+          && (!where.status || task.status === where.status)
+        ))
+        return results.slice(0, take || results.length).map(withTaskRelations)
+      },
       create: async ({ data }) => {
         const task = {
           id: `ops-task-${++taskCounter}`,
@@ -87,6 +94,19 @@ function createOpsCommandPrismaFixture() {
       },
     },
     hotelOpsTaskApproval: {
+      findMany: async ({ where = {} } = {}) => {
+        const propertyId = where.task?.is?.propertyId
+        return approvals
+          .filter((approval) => {
+            const task = tasks.find((item) => item.id === approval.taskId)
+            return (!where.status || approval.status === where.status)
+              && (!propertyId || task?.propertyId === propertyId)
+          })
+          .map((approval) => ({
+            ...approval,
+            task: withTaskRelations(tasks.find((task) => task.id === approval.taskId)),
+          }))
+      },
       create: async ({ data }) => {
         const approval = {
           id: `ops-approval-${++approvalCounter}`,
@@ -130,6 +150,13 @@ function createOpsCommandPrismaFixture() {
     },
     hotelOpsTrendAlert: {
       findUnique: async ({ where }) => trendAlerts.find((alert) => alert.id === where?.id) || null,
+      findMany: async ({ where = {}, take } = {}) => {
+        const results = trendAlerts.filter((alert) => (
+          (!where.propertyId || alert.propertyId === where.propertyId)
+          && (!where.status || alert.status === where.status)
+        ))
+        return results.slice(0, take || results.length)
+      },
       update: async ({ where, data }) => {
         const alert = trendAlerts.find((item) => item.id === where?.id)
         if (!alert) return null
@@ -950,6 +977,7 @@ assert.equal(evaluateOpsPermission(readAvailabilityCommand, { id: 'viewer', role
 
 const opsCommandFixture = createOpsCommandPrismaFixture()
 const opsManager = { id: 'manager-ops-test', role: 'MANAGER', name: 'Ops Manager' }
+const opsOwner = { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' }
 const queuedScanResult = await submitOpsCommand(
   opsCommandFixture.prisma,
   { message: 'Check bookings for next weekend.', sourceChannel: 'web', idempotencyKey: 'ops-command-scan-test' },
@@ -989,7 +1017,35 @@ assert.equal(approvalFixture.approvals[0].requiredRole, 'OWNER', 'Hotel Ops rate
 assert.equal(approvalFixture.notifications.some((notification) => notification.type === 'APPROVAL_REQUEST'), true, 'Hotel Ops service records approval request notifications')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REQUESTED'), true, 'Hotel Ops service audits approval requests')
 
-const opsOwner = { id: 'owner-ops-test', role: 'ADMIN', name: 'Owner' }
+approvalFixture.tasks.push({
+  ...approvalFixture.tasks[0],
+  id: 'foreign-ops-task',
+  propertyId: 'property-foreign',
+  requesterUserId: 'foreign-manager',
+  requesterLabel: 'Foreign Manager',
+  idempotencyKey: 'foreign-property-rate-change',
+  status: 'PENDING_APPROVAL',
+})
+approvalFixture.approvals.push({
+  ...approvalFixture.approvals[0],
+  id: 'foreign-ops-approval',
+  taskId: 'foreign-ops-task',
+})
+const scopedOpsTasks = await listOpsTasks(approvalFixture.prisma)
+assert.equal(scopedOpsTasks.some((task) => task.id === 'foreign-ops-task'), false, 'Hotel Ops task history hides tasks from other properties')
+const scopedOpsApprovals = await listOpsApprovals(approvalFixture.prisma)
+assert.equal(scopedOpsApprovals.some((approval) => approval.taskId === 'foreign-ops-task'), false, 'Hotel Ops approval queue hides approvals from other properties')
+await assert.rejects(
+  () => getOpsTask(approvalFixture.prisma, 'foreign-ops-task'),
+  /Hotel Ops task was not found/,
+  'Hotel Ops task detail rejects tasks from other properties',
+)
+await assert.rejects(
+  () => approveOpsTask(approvalFixture.prisma, 'foreign-ops-task', { notes: 'Should not approve cross-property task.' }, opsOwner),
+  /Hotel Ops task was not found/,
+  'Hotel Ops approval rejects tasks from other properties',
+)
+
 const approvedRateTask = await approveOpsTask(
   approvalFixture.prisma,
   pendingRateResult.task.id,
@@ -1239,6 +1295,15 @@ recommendationFixture.trendAlerts.push({
   createdAt: fixedOpsDate,
   updatedAt: fixedOpsDate,
 })
+recommendationFixture.trendAlerts.push({
+  ...recommendationFixture.trendAlerts[0],
+  id: 'foreign-trend-alert',
+  propertyId: 'property-foreign',
+  status: 'CREATED',
+})
+const scopedTrendAlerts = await listOpsTrendAlerts(recommendationFixture.prisma)
+assert.equal(scopedTrendAlerts.some((alert) => alert.id === 'foreign-trend-alert'), false, 'Hotel Ops intelligence list hides alerts from other properties')
+
 const approvedRecommendationResult = await approveOpsAlertRecommendation(
   recommendationFixture.prisma,
   'trend-alert-high-demand',

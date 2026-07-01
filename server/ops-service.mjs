@@ -908,8 +908,9 @@ export function evaluateOpsTaskRun(task, actor, emergencyStop = { enabled: false
 
 async function prepareOpsTaskRun(prisma, taskId, actor) {
   const result = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
-    if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     const stop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
     const decision = evaluateOpsTaskRun(task, actor, stop || { enabled: false })
     if (!decision.allowed) {
@@ -1135,8 +1136,8 @@ export async function submitOpsCommand(prisma, input, actor) {
 }
 
 export async function listOpsTasks(prisma, filters = {}) {
-  await getProperty(prisma)
-  const where = {}
+  const property = await getProperty(prisma)
+  const where = { propertyId: property.id }
   if (filters.status) where.status = String(filters.status).toUpperCase()
   const take = Math.min(Math.max(Number(filters.limit) || 50, 1), 200)
   const tasks = await prisma.hotelOpsTask.findMany({
@@ -1149,8 +1150,9 @@ export async function listOpsTasks(prisma, filters = {}) {
 }
 
 export async function getOpsTask(prisma, taskId) {
+  const property = await getProperty(prisma)
   const task = await prisma.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
-  if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+  if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
   return serializeTask(task)
 }
 
@@ -1175,8 +1177,9 @@ function canCancelOpsTask(task, actor) {
 
 export async function approveOpsTask(prisma, taskId, input, actor) {
   const result = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
-    if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     if (task.status !== 'PENDING_APPROVAL') {
       return recordBlockedOpsTaskAction(
         tx,
@@ -1243,8 +1246,9 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
 
 export async function denyOpsTask(prisma, taskId, input, actor) {
   const result = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
-    if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     if (task.status !== 'PENDING_APPROVAL') {
       return recordBlockedOpsTaskAction(
         tx,
@@ -1310,8 +1314,9 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
 
 export async function cancelOpsTask(prisma, taskId, input, actor) {
   const result = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
-    if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     if (['SUCCEEDED', 'FAILED', 'DENIED', 'CANCELLED'].includes(task.status)) throw new PmsValidationError('This task is already closed.', 409)
     if (!canCancelOpsTask(task, actor)) {
       return recordBlockedOpsTaskAction(
@@ -1344,8 +1349,9 @@ export async function cancelOpsTask(prisma, taskId, input, actor) {
 }
 
 export async function listOpsApprovals(prisma) {
+  const property = await getProperty(prisma)
   const approvals = await prisma.hotelOpsTaskApproval.findMany({
-    where: { status: 'PENDING' },
+    where: { status: 'PENDING', task: { is: { propertyId: property.id } } },
     include: { task: { include: taskInclude } },
     orderBy: { requestedAt: 'asc' },
   })
@@ -1961,8 +1967,8 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
 }
 
 export async function listOpsTrendAlerts(prisma, filters = {}) {
-  await getProperty(prisma)
-  const where = {}
+  const property = await getProperty(prisma)
+  const where = { propertyId: property.id }
   if (filters.status) where.status = String(filters.status).toUpperCase()
   const alerts = await prisma.hotelOpsTrendAlert.findMany({
     where,
