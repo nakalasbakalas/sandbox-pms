@@ -1045,6 +1045,14 @@ await assert.rejects(
   /Hotel Ops task was not found/,
   'Hotel Ops approval rejects tasks from other properties',
 )
+await assert.rejects(
+  () => approveOpsTask(approvalFixture.prisma, pendingRateResult.task.id, {}, opsOwner),
+  /Approval reason is required/,
+  'Hotel Ops approval requires an audit reason before queueing write tasks',
+)
+assert.equal(approvalFixture.approvals[0].status, 'PENDING', 'Hotel Ops reasonless approval leaves the approval pending')
+assert.equal(approvalFixture.logs.some((log) => log.action === 'APPROVAL_REJECTED' && log.message.includes('Approval reason is required')), true, 'Hotel Ops service logs reasonless approval attempts')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REJECTED' && audit.changes.requiredRole === 'OWNER'), true, 'Hotel Ops service audits reasonless approval attempts')
 
 const approvedRateTask = await approveOpsTask(
   approvalFixture.prisma,
@@ -1054,8 +1062,9 @@ const approvedRateTask = await approveOpsTask(
 )
 assert.equal(approvedRateTask.status, 'QUEUED', 'Hotel Ops approval queues the task for signed worker execution')
 assert.equal(approvalFixture.approvals[0].status, 'APPROVED', 'Hotel Ops approval records the owner decision')
+assert.equal(approvalFixture.approvals[0].notes, 'Approved dry-run rate proof.', 'Hotel Ops approval stores the approval reason')
 assert.equal(approvalFixture.logs.some((log) => log.action === 'APPROVAL_GRANTED'), true, 'Hotel Ops service logs approval grants')
-assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_GRANTED'), true, 'Hotel Ops service audits approval grants')
+assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_GRANTED' && audit.changes.notes === 'Approved dry-run rate proof.'), true, 'Hotel Ops service audits approval grants with the reason')
 
 const executedRateTask = await runQueuedOpsTask(approvalFixture.prisma, pendingRateResult.task.id, opsOwner)
 assert.equal(executedRateTask.status, 'SUCCEEDED', 'Hotel Ops service executes approved mock rate updates successfully')

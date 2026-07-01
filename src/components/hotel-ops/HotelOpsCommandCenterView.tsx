@@ -39,6 +39,7 @@ import type { NavigationRoute } from '@/types/navigation'
 
 type HotelOpsTab = 'chat' | 'approvals' | 'tasks' | 'intelligence' | 'settings'
 type PendingReasonAction =
+  | { kind: 'approve-task'; task: HotelOpsTask }
   | { kind: 'deny-task'; task: HotelOpsTask }
   | { kind: 'cancel-task'; task: HotelOpsTask }
   | { kind: 'resolve-alert'; alert: HotelOpsTrendAlert }
@@ -147,6 +148,15 @@ function reasonActionCopy(action: PendingReasonAction | null) {
       description: 'This action requires an audit reason.',
       placeholder: 'Record the operational reason...',
       confirmLabel: 'Submit',
+      destructive: false,
+    }
+  }
+  if (action.kind === 'approve-task') {
+    return {
+      title: 'Approve Hotel Ops task',
+      description: `${action.task.taskType.replace(/_/g, ' ')} will be queued for signed dry-run worker execution. Record why this change is approved.`,
+      placeholder: 'Example: Owner approved weekend rate change after pickup review.',
+      confirmLabel: 'Approve task',
       destructive: false,
     }
   }
@@ -411,18 +421,13 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
-  const approveTask = async (task: HotelOpsTask) => {
+  const approveTask = (task: HotelOpsTask) => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
       return
     }
-    try {
-      const payload = await hotelOpsApi.approveTask(task.id)
-      toast.success(payload.message || 'Task approved.')
-      await refresh()
-    } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : 'Could not approve task.')
-    }
+    setPendingReasonAction({ kind: 'approve-task', task })
+    setReasonText('')
   }
 
   const denyTask = async (task: HotelOpsTask) => {
@@ -536,7 +541,10 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
     setReasonSubmitting(true)
     try {
-      if (pendingReasonAction.kind === 'deny-task') {
+      if (pendingReasonAction.kind === 'approve-task') {
+        const payload = await hotelOpsApi.approveTask(pendingReasonAction.task.id, reason)
+        toast.success(payload.message || 'Task approved.')
+      } else if (pendingReasonAction.kind === 'deny-task') {
         const payload = await hotelOpsApi.denyTask(pendingReasonAction.task.id, reason)
         toast.success(payload.message || 'Task denied.')
       } else if (pendingReasonAction.kind === 'cancel-task') {

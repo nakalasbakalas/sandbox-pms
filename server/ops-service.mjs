@@ -1180,6 +1180,7 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
     const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    const approvalNotes = normalizeNullableString(input?.notes || input?.reason)
     if (task.status !== 'PENDING_APPROVAL') {
       return recordBlockedOpsTaskAction(
         tx,
@@ -1214,6 +1215,18 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
         403,
       )
     }
+    if (!approvalNotes) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'APPROVAL_REJECTED',
+        'OPS_APPROVAL_REJECTED',
+        'Approval reason is required before queueing a Hotel Ops write task.',
+        actor,
+        { requiredRole: approval.requiredRole },
+        400,
+      )
+    }
     const stop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
     if (stop?.enabled && WRITE_TASK_TYPES.has(task.taskType)) {
       return recordBlockedOpsTaskAction(
@@ -1233,11 +1246,11 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
         status: 'APPROVED',
         decidedAt: new Date(),
         decidedBy: actorLabel(actor),
-        notes: normalizeNullableString(input?.notes),
+        notes: approvalNotes,
       },
     })
-    await taskLog(tx, task.id, 'APPROVAL_GRANTED', 'Hotel Ops task approved.', actor, { notes: normalizeNullableString(input?.notes) })
-    await audit(tx, actor, 'OPS_APPROVAL_GRANTED', 'hotelOpsTask', task.id, { requiredRole: approval.requiredRole })
+    await taskLog(tx, task.id, 'APPROVAL_GRANTED', 'Hotel Ops task approved.', actor, { notes: approvalNotes })
+    await audit(tx, actor, 'OPS_APPROVAL_GRANTED', 'hotelOpsTask', task.id, { requiredRole: approval.requiredRole, notes: approvalNotes })
     return serializeTask(await queueOpsTask(tx, task, actor, 'Approved task queued for signed worker execution.'))
   })
   if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
