@@ -48,6 +48,8 @@ const OPS_SCAN_POLICY = Object.freeze({
   cancellationBaselineDays: 14,
   cancellationSpikeMultiplier: 2,
   weekendVelocityRatio: 1.5,
+  strongRoomOccupancyMin: 0.75,
+  weakRoomOccupancyMax: 0.35,
   otaImbalanceMinimumReservations: 4,
   otaImbalanceDominanceRatio: 0.65,
   highDemandRecommendedRate: 2200,
@@ -1358,6 +1360,8 @@ export function getOpsScanPolicy(env = process.env) {
       cancellationBaselineDays: OPS_SCAN_POLICY.cancellationBaselineDays,
       cancellationSpikeMultiplier: OPS_SCAN_POLICY.cancellationSpikeMultiplier,
       weekendVelocityRatio: OPS_SCAN_POLICY.weekendVelocityRatio,
+      strongRoomOccupancyMin: OPS_SCAN_POLICY.strongRoomOccupancyMin,
+      weakRoomOccupancyMax: OPS_SCAN_POLICY.weakRoomOccupancyMax,
       otaImbalanceMinimumReservations: OPS_SCAN_POLICY.otaImbalanceMinimumReservations,
       otaImbalanceDominanceRatio: OPS_SCAN_POLICY.otaImbalanceDominanceRatio,
       highDemandRecommendedRate: OPS_SCAN_POLICY.highDemandRecommendedRate,
@@ -1397,6 +1401,47 @@ function dominantRoomType(reservations) {
   }
   if (counts.size !== 1) return 'All Rooms'
   return counts.keys().next().value || 'All Rooms'
+}
+
+function roomTypeNameFromRoom(room) {
+  return room?.roomType?.name || room?.roomTypeName || room?.typeName || null
+}
+
+function roomTypeOccupancyMetrics(reservations, rooms) {
+  const inventoryCounts = new Map()
+  for (const room of rooms || []) {
+    if (room?.operationalStatus && room.operationalStatus !== 'AVAILABLE') continue
+    const roomType = roomTypeNameFromRoom(room)
+    if (!roomType) continue
+    inventoryCounts.set(roomType, (inventoryCounts.get(roomType) || 0) + 1)
+  }
+
+  const reservationCounts = new Map()
+  for (const reservation of reservations || []) {
+    const roomType = reservationRoomTypeName(reservation)
+    if (!roomType || !inventoryCounts.has(roomType)) continue
+    reservationCounts.set(roomType, (reservationCounts.get(roomType) || 0) + 1)
+  }
+
+  const metrics = Array.from(inventoryCounts.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .map((roomType) => {
+      const sellableRooms = inventoryCounts.get(roomType) || 0
+      const activeReservations = reservationCounts.get(roomType) || 0
+      return {
+        roomType,
+        activeReservations,
+        sellableRooms,
+        occupancy: sellableRooms > 0 ? activeReservations / sellableRooms : 0,
+      }
+    })
+
+  const byOccupancy = [...metrics].sort((a, b) => b.occupancy - a.occupancy || b.activeReservations - a.activeReservations || a.roomType.localeCompare(b.roomType))
+  return {
+    roomTypes: metrics,
+    strongest: byOccupancy[0] || null,
+    weakest: byOccupancy.at(-1) || null,
+  }
 }
 
 function supportedOtaPlatform(value) {
@@ -1498,6 +1543,7 @@ export function buildOpsScanInsights({
   reservations = [],
   cancellationLogs = [],
   sellableRooms = 0,
+  rooms = [],
   now = new Date(),
   force,
 } = {}) {
@@ -1518,6 +1564,9 @@ export function buildOpsScanInsights({
   const weekendKey = isoDate(weekend)
   const weekendReservations = activeReservations.filter((reservation) => reservationOverlaps(reservation, weekend, weekendEnd))
   const weekendVelocity = velocityMetrics(weekendReservations, scanNow)
+  const roomTypeOccupancy = roomTypeOccupancyMetrics(activeReservations, rooms)
+  const strongestRoomType = roomTypeOccupancy.strongest
+  const weakestRoomType = roomTypeOccupancy.weakest
   const otaDistribution = otaPlatformDistribution(activeReservations)
   const dominantOta = otaDistribution.dominant
   const insights = []
@@ -1586,6 +1635,39 @@ export function buildOpsScanInsights({
         ...weekendVelocity,
       },
       recommendedAction: recommendedRateTask('WEEKEND_SPIKE', dominantRoomType(weekendReservations), weekendKey, weekendKey),
+    })
+  }
+
+  if (
+    (
+      strongestRoomType
+      && weakestRoomType
+      && strongestRoomType.roomType !== weakestRoomType.roomType
+      && strongestRoomType.occupancy >= OPS_SCAN_POLICY.strongRoomOccupancyMin
+      && weakestRoomType.occupancy <= OPS_SCAN_POLICY.weakRoomOccupancyMax
+    )
+    || forceValue === 'room-imbalance'
+  ) {
+    insights.push({
+      alertType: 'ROOM_IMBALANCE',
+      severity: strongestRoomType?.occupancy >= 0.9 ? 'HIGH' : 'MEDIUM',
+      title: 'Room type demand imbalance',
+      summary: strongestRoomType && weakestRoomType
+        ? `${strongestRoomType.roomType} is at ${(strongestRoomType.occupancy * 100).toFixed(0)}% occupancy while ${weakestRoomType.roomType} is at ${(weakestRoomType.occupancy * 100).toFixed(0)}%. Review room-type pricing and upsell options before changing inventory.`
+        : 'Room type demand mix needs review before changing rates or availability.',
+      platform: 'all',
+      roomType: strongestRoomType?.roomType || roomType,
+      dateStart: dateOrNull(start),
+      dateEnd: dateOrNull(end),
+      metrics: {
+        roomTypes: roomTypeOccupancy.roomTypes,
+        strongestRoomType,
+        weakestRoomType,
+        strongRoomOccupancyMin: OPS_SCAN_POLICY.strongRoomOccupancyMin,
+        weakRoomOccupancyMax: OPS_SCAN_POLICY.weakRoomOccupancyMax,
+        horizonDays: OPS_SCAN_POLICY.horizonDays,
+      },
+      recommendedAction: null,
     })
   }
 
@@ -1693,7 +1775,10 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
       },
       include: { roomType: true, sourceEmailEvent: true },
     }),
-    prisma.room.count({ where: { propertyId: property.id, operationalStatus: 'AVAILABLE' } }),
+    prisma.room.findMany({
+      where: { propertyId: property.id, operationalStatus: 'AVAILABLE' },
+      include: { roomType: true },
+    }),
     prisma.reservationLog.findMany({
       where: {
         action: { in: ['CANCELLED', 'NO_SHOW'] },
@@ -1707,7 +1792,8 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
   const insights = buildOpsScanInsights({
     reservations,
     cancellationLogs,
-    sellableRooms: rooms,
+    sellableRooms: rooms.length,
+    rooms,
     now,
     force: input?.force,
   })
@@ -1731,7 +1817,7 @@ export async function runOpsScan(prisma, input = {}, actor = { id: 'system', rol
     updated: updatedCount,
     activeAlerts: alerts.length,
     activeReservations: reservations.length,
-    sellableRooms: rooms,
+    sellableRooms: rooms.length,
     cancellationLogs: cancellationLogs.length,
   })
   for (const alert of createdAlerts) {

@@ -8,7 +8,7 @@ import type {
   HotelOpsTrendAlert,
 } from '@/types/hotel-ops'
 
-export type HotelOpsScanForce = 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike' | 'ota-imbalance'
+export type HotelOpsScanForce = 'high-demand' | 'low-demand' | 'cancellation-spike' | 'weekend-spike' | 'room-imbalance' | 'ota-imbalance'
 
 async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {

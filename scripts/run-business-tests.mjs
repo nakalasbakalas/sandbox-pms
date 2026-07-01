@@ -599,6 +599,8 @@ assert.equal(manualScanPolicy.schedule.mode, 'manual', 'Hotel Ops scan policy re
 assert.equal(manualScanPolicy.schedule.configured, false, 'Hotel Ops scan policy does not fake an automatic schedule')
 assert.equal(manualScanPolicy.thresholds.highDemandOccupancy, 0.7, 'Hotel Ops scan policy exposes high-demand occupancy threshold')
 assert.equal(manualScanPolicy.thresholds.cancellationSpikeMultiplier, 2, 'Hotel Ops scan policy exposes cancellation spike multiplier')
+assert.equal(manualScanPolicy.thresholds.strongRoomOccupancyMin, 0.75, 'Hotel Ops scan policy exposes strong room-type occupancy threshold')
+assert.equal(manualScanPolicy.thresholds.weakRoomOccupancyMax, 0.35, 'Hotel Ops scan policy exposes weak room-type occupancy threshold')
 const cronScanPolicy = getOpsScanPolicy({ HOTEL_OPS_SCAN_CRON: '*/15 * * * *' })
 assert.equal(cronScanPolicy.schedule.mode, 'cron', 'Hotel Ops scan policy reports configured cron schedule')
 assert.equal(cronScanPolicy.schedule.cron, '*/15 * * * *', 'Hotel Ops scan policy exposes cron expression without secrets')
@@ -1095,6 +1097,12 @@ const makeOpsReservation = (id, createdAt, overrides = {}) => ({
   roomType: { name: 'Deluxe Room' },
   ...overrides,
 })
+const makeOpsRoom = (roomType, index, overrides = {}) => ({
+  id: `room-${roomType.toLowerCase().replace(/\s+/g, '-')}-${index}`,
+  operationalStatus: 'AVAILABLE',
+  roomType: { name: roomType },
+  ...overrides,
+})
 const recentDemandReservations = Array.from({ length: 8 }, (_, index) => makeOpsReservation(
   `recent-demand-${index}`,
   index < 2 ? '2026-06-29T12:00:00.000Z' : '2026-06-10T12:00:00.000Z',
@@ -1142,6 +1150,24 @@ const weekendInsights = buildOpsScanInsights({
   now: fixedOpsDate,
 })
 assert.equal(weekendInsights.some((alert) => alert.alertType === 'WEEKEND_SPIKE'), true, 'Hotel Ops scan creates weekend spike alert only when weekend velocity accelerates')
+
+const roomImbalanceInsights = buildOpsScanInsights({
+  reservations: [
+    ...Array.from({ length: 3 }, (_, index) => makeOpsReservation(`deluxe-imbalance-${index}`, '2026-06-10T12:00:00.000Z', { roomType: { name: 'Deluxe Room' } })),
+    makeOpsReservation('standard-imbalance-1', '2026-06-10T12:00:00.000Z', { roomType: { name: 'Standard Room' } }),
+  ],
+  rooms: [
+    ...Array.from({ length: 4 }, (_, index) => makeOpsRoom('Deluxe Room', index)),
+    ...Array.from({ length: 4 }, (_, index) => makeOpsRoom('Standard Room', index)),
+  ],
+  sellableRooms: 8,
+  now: fixedOpsDate,
+})
+const roomImbalanceAlert = roomImbalanceInsights.find((alert) => alert.alertType === 'ROOM_IMBALANCE')
+assert.equal(Boolean(roomImbalanceAlert), true, 'Hotel Ops scan creates room-type imbalance alert when one room type is strong and another is weak')
+assert.equal(roomImbalanceAlert?.metrics?.strongestRoomType?.roomType, 'Deluxe Room', 'Hotel Ops room imbalance identifies the strongest room type')
+assert.equal(roomImbalanceAlert?.metrics?.weakestRoomType?.roomType, 'Standard Room', 'Hotel Ops room imbalance identifies the weakest room type')
+assert.equal(roomImbalanceAlert?.recommendedAction, null, 'Hotel Ops room imbalance is alert-only and does not create an automatic OTA mutation recommendation')
 
 const otaImbalanceInsights = buildOpsScanInsights({
   reservations: [
@@ -1195,7 +1221,7 @@ const scanPrisma = {
     findMany: async () => [],
   },
   room: {
-    count: async () => 10,
+    findMany: async () => Array.from({ length: 10 }, (_, index) => makeOpsRoom('Deluxe Room', index)),
   },
   reservationLog: {
     findMany: async () => [],

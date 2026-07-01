@@ -121,6 +121,21 @@ function stringMetric(alert: HotelOpsTrendAlert, key: string) {
   return typeof value === 'string' ? value : null
 }
 
+function roomTypeMetric(alert: HotelOpsTrendAlert, key: string) {
+  const value = alert.metrics?.[key]
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const metric = value as Record<string, unknown>
+  const occupancy = metric.occupancy
+  const activeReservations = metric.activeReservations
+  const sellableRooms = metric.sellableRooms
+  return {
+    roomType: typeof metric.roomType === 'string' ? metric.roomType : null,
+    occupancy: typeof occupancy === 'number' && Number.isFinite(occupancy) ? occupancy : null,
+    activeReservations: typeof activeReservations === 'number' && Number.isFinite(activeReservations) ? activeReservations : null,
+    sellableRooms: typeof sellableRooms === 'number' && Number.isFinite(sellableRooms) ? sellableRooms : null,
+  }
+}
+
 function canOpenProofUrl(url: string) {
   return /^https?:\/\//i.test(url)
 }
@@ -710,6 +725,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                 <Button variant="outline" onClick={() => void runScan()} disabled={loading}>Run Scan</Button>
                 <Button variant="outline" onClick={() => void runScan('high-demand')} disabled={loading}>High-demand Demo</Button>
                 <Button variant="outline" onClick={() => void runScan('low-demand')} disabled={loading}>Low-demand Demo</Button>
+                <Button variant="outline" onClick={() => void runScan('room-imbalance')} disabled={loading}>Room Imbalance Demo</Button>
                 <Button variant="outline" onClick={() => void runScan('ota-imbalance')} disabled={loading}>OTA Imbalance Demo</Button>
               </div>
             </div>
@@ -751,6 +767,30 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                       {alert.recommendedAction && (
                         <div className="rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                           Recommendation: {alert.recommendedAction.taskType.replace(/_/g, ' ')} · {alert.recommendedAction.roomType || 'room type pending'}
+                        </div>
+                      )}
+                      {alert.alertType === 'ROOM_IMBALANCE' && (
+                        <div className="grid gap-2 rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground sm:grid-cols-2">
+                          {(() => {
+                            const strongest = roomTypeMetric(alert, 'strongestRoomType')
+                            const weakest = roomTypeMetric(alert, 'weakestRoomType')
+                            return (
+                              <>
+                                <div>
+                                  <span className="font-medium text-foreground">Strong room type</span>
+                                  <div>{strongest?.roomType || alert.roomType || 'Not set'}</div>
+                                  <div>{formatPercentValue(strongest?.occupancy ?? undefined)} occupancy</div>
+                                  <div>{strongest?.activeReservations ?? 0} of {strongest?.sellableRooms ?? 0} rooms</div>
+                                </div>
+                                <div>
+                                  <span className="font-medium text-foreground">Weak room type</span>
+                                  <div>{weakest?.roomType || 'Not set'}</div>
+                                  <div>{formatPercentValue(weakest?.occupancy ?? undefined)} occupancy</div>
+                                  <div>{weakest?.activeReservations ?? 0} of {weakest?.sellableRooms ?? 0} rooms</div>
+                                </div>
+                              </>
+                            )
+                          })()}
                         </div>
                       )}
                       {alert.alertType === 'OTA_IMBALANCE' && (
@@ -865,6 +905,12 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                       <div className="font-medium">OTA imbalance</div>
                       <div className="text-xs text-muted-foreground">
                         {otaStatus.scanPolicy.thresholds.otaImbalanceMinimumReservations}+ OTA reservations and {formatPercentValue(otaStatus.scanPolicy.thresholds.otaImbalanceDominanceRatio)} on one platform
+                      </div>
+                    </div>
+                    <div className="rounded border px-3 py-2">
+                      <div className="font-medium">Room imbalance</div>
+                      <div className="text-xs text-muted-foreground">
+                        Strong room type at {formatPercentValue(otaStatus.scanPolicy.thresholds.strongRoomOccupancyMin)} and weak room type at or below {formatPercentValue(otaStatus.scanPolicy.thresholds.weakRoomOccupancyMax)}
                       </div>
                     </div>
                     <div className="rounded border px-3 py-2">
