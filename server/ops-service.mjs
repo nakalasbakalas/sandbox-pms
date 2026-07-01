@@ -1262,6 +1262,7 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
     const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    const reason = normalizeNullableString(input?.reason || input?.notes)
     if (task.status !== 'PENDING_APPROVAL') {
       return recordBlockedOpsTaskAction(
         tx,
@@ -1296,6 +1297,18 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
         403,
       )
     }
+    if (!reason) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'DENIAL_REJECTED',
+        'OPS_DENIAL_REJECTED',
+        'Denial reason is required before closing a Hotel Ops approval task.',
+        actor,
+        { requiredRole: approval.requiredRole },
+        400,
+      )
+    }
     if (approval) {
       await tx.hotelOpsTaskApproval.update({
         where: { id: approval.id },
@@ -1303,19 +1316,19 @@ export async function denyOpsTask(prisma, taskId, input, actor) {
           status: 'DENIED',
           decidedAt: new Date(),
           decidedBy: actorLabel(actor),
-          notes: normalizeNullableString(input?.reason || input?.notes),
+          notes: reason,
         },
       })
     }
     const updated = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'DENIED' }, include: taskInclude })
-    await taskLog(tx, task.id, 'APPROVAL_DENIED', 'Hotel Ops task denied.', actor, { reason: normalizeNullableString(input?.reason || input?.notes) })
-    await audit(tx, actor, 'OPS_APPROVAL_DENIED', 'hotelOpsTask', task.id, { reason: normalizeNullableString(input?.reason || input?.notes) })
+    await taskLog(tx, task.id, 'APPROVAL_DENIED', 'Hotel Ops task denied.', actor, { reason })
+    await audit(tx, actor, 'OPS_APPROVAL_DENIED', 'hotelOpsTask', task.id, { reason })
     await recordOpsNotifications(tx, task.propertyId, {
       type: 'TASK_UPDATE',
       taskId: task.id,
       recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
       title: 'Hotel Ops task denied',
-      summary: normalizeNullableString(input?.reason || input?.notes) || 'The Hotel Ops task was denied before execution.',
+      summary: reason,
       actionPath: '/ops/tasks',
       metadata: { status: 'DENIED', taskType: task.taskType },
     }, actor)
@@ -1330,6 +1343,7 @@ export async function cancelOpsTask(prisma, taskId, input, actor) {
     const property = await getProperty(tx)
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+    const reason = normalizeNullableString(input?.reason || input?.notes)
     if (['SUCCEEDED', 'FAILED', 'DENIED', 'CANCELLED'].includes(task.status)) throw new PmsValidationError('This task is already closed.', 409)
     if (!canCancelOpsTask(task, actor)) {
       return recordBlockedOpsTaskAction(
@@ -1343,15 +1357,27 @@ export async function cancelOpsTask(prisma, taskId, input, actor) {
         403,
       )
     }
+    if (!reason) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'TASK_CANCEL_REJECTED',
+        'OPS_TASK_CANCEL_REJECTED',
+        'Cancellation reason is required before cancelling a Hotel Ops task.',
+        actor,
+        { requesterUserId: task.requesterUserId, requiredRole: requiredApprovalRoleForTask(task) },
+        400,
+      )
+    }
     const updated = await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'CANCELLED' }, include: taskInclude })
-    await taskLog(tx, task.id, 'TASK_CANCELLED', 'Hotel Ops task cancelled.', actor, { reason: normalizeNullableString(input?.reason) })
-    await audit(tx, actor, 'OPS_TASK_CANCELLED', 'hotelOpsTask', task.id, { reason: normalizeNullableString(input?.reason) })
+    await taskLog(tx, task.id, 'TASK_CANCELLED', 'Hotel Ops task cancelled.', actor, { reason })
+    await audit(tx, actor, 'OPS_TASK_CANCELLED', 'hotelOpsTask', task.id, { reason })
     await recordOpsNotifications(tx, task.propertyId, {
       type: 'TASK_UPDATE',
       taskId: task.id,
       recipientUserId: task.requesterUserId === 'system' ? null : task.requesterUserId,
       title: 'Hotel Ops task cancelled',
-      summary: normalizeNullableString(input?.reason) || 'The Hotel Ops task was cancelled before completion.',
+      summary: reason,
       actionPath: '/ops/tasks',
       metadata: { status: 'CANCELLED', taskType: task.taskType },
     }, actor)
@@ -1400,29 +1426,38 @@ export async function getEmergencyStop(prisma) {
 export async function setEmergencyStop(prisma, input, actor) {
   const property = await getProperty(prisma)
   const enabled = Boolean(input?.enabled)
+  const reason = normalizeNullableString(input?.reason || input?.notes)
+  if (!reason) {
+    const stop = await prisma.hotelOpsEmergencyStop.findUnique({ where: { propertyId: property.id } })
+    await audit(prisma, actor, enabled ? 'OPS_EMERGENCY_STOP_ENABLE_REJECTED' : 'OPS_EMERGENCY_STOP_DISABLE_REJECTED', 'hotelOpsEmergencyStop', stop?.id || property.id, {
+      enabled,
+      reason: 'Emergency stop changes require an audit reason.',
+    })
+    throw new PmsValidationError('Emergency stop changes require an audit reason.', 400)
+  }
   const stop = await prisma.hotelOpsEmergencyStop.upsert({
     where: { propertyId: property.id },
     create: {
       propertyId: property.id,
       enabled,
-      reason: normalizeNullableString(input?.reason),
+      reason,
       updatedBy: actorLabel(actor),
     },
     update: {
       enabled,
-      reason: normalizeNullableString(input?.reason),
+      reason,
       updatedBy: actorLabel(actor),
     },
   })
   await audit(prisma, actor, enabled ? 'OPS_EMERGENCY_STOP_ENABLED' : 'OPS_EMERGENCY_STOP_DISABLED', 'hotelOpsEmergencyStop', stop.id, {
     enabled,
-    reason: normalizeNullableString(input?.reason),
+    reason,
   })
   await recordOpsNotifications(prisma, property.id, {
     type: 'EMERGENCY_STOP',
     recipientRole: 'OWNER',
     title: enabled ? 'Hotel Ops emergency stop enabled' : 'Hotel Ops emergency stop disabled',
-    summary: normalizeNullableString(input?.reason) || (enabled ? 'Write tasks are blocked until emergency stop is disabled.' : 'Write tasks can be reviewed and queued again.'),
+    summary: reason,
     actionPath: '/ops/settings',
     metadata: { enabled },
   }, actor)
@@ -1995,8 +2030,17 @@ async function updateOpsAlertStatus(prisma, alertId, status, input, actor) {
   const property = await getProperty(prisma)
   const alert = await prisma.hotelOpsTrendAlert.findUnique({ where: { id: alertId } })
   if (!alert || alert.propertyId !== property.id) throw new PmsValidationError('Hotel Ops alert was not found.', 404)
+  const reason = normalizeNullableString(input?.reason || input?.notes)
   if (alert.status === 'RESOLVED' && status !== 'RESOLVED') {
     throw new PmsValidationError('Resolved Hotel Ops alerts cannot be reopened from this action.', 409)
+  }
+  if (status === 'RESOLVED' && alert.status !== 'RESOLVED' && !reason) {
+    await audit(prisma, actor, 'OPS_ALERT_RESOLVE_REJECTED', 'hotelOpsTrendAlert', alert.id, {
+      alertType: alert.alertType,
+      previousStatus: alert.status,
+      reason: 'Resolution reason is required before closing a Hotel Ops alert.',
+    })
+    throw new PmsValidationError('Resolution reason is required before closing a Hotel Ops alert.', 400)
   }
   if (alert.status === status) return serializeAlert(alert)
 
@@ -2008,7 +2052,7 @@ async function updateOpsAlertStatus(prisma, alertId, status, input, actor) {
     alertType: alert.alertType,
     previousStatus: alert.status,
     status,
-    reason: normalizeNullableString(input?.reason || input?.notes),
+    reason,
   })
   return serializeAlert(updated)
 }

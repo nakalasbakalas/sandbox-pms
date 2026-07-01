@@ -5,7 +5,7 @@ import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1140,6 +1140,13 @@ assert.equal(humanChallengeFixture.audits.some((audit) => audit.action === 'OPS_
 assert.equal(humanChallengeFixture.notifications.some((notification) => notification.type === 'NEEDS_HUMAN'), true, 'Hotel Ops service records human-action notifications')
 
 const emergencyFixture = createOpsCommandPrismaFixture()
+await assert.rejects(
+  () => setEmergencyStop(emergencyFixture.prisma, { enabled: true }, opsOwner),
+  /Emergency stop changes require an audit reason/,
+  'Hotel Ops emergency stop changes require an audit reason',
+)
+assert.equal(emergencyFixture.audits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLE_REJECTED'), true, 'Hotel Ops service audits reasonless emergency-stop attempts')
+assert.equal(emergencyFixture.notifications.length, 0, 'Hotel Ops reasonless emergency-stop attempts do not notify or change operational state')
 await setEmergencyStop(emergencyFixture.prisma, { enabled: true, reason: 'Owner paused OTA writes.' }, opsOwner)
 assert.equal(emergencyFixture.audits.some((audit) => audit.action === 'OPS_EMERGENCY_STOP_ENABLED'), true, 'Hotel Ops service audits emergency stop activation')
 assert.equal(emergencyFixture.notifications.some((notification) => notification.type === 'EMERGENCY_STOP'), true, 'Hotel Ops service records emergency stop notifications')
@@ -1192,6 +1199,15 @@ const deniedRateResult = await submitOpsCommand(
   { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
   opsManager,
 )
+await assert.rejects(
+  () => denyOpsTask(deniedFixture.prisma, deniedRateResult.task.id, {}, opsOwner),
+  /Denial reason is required/,
+  'Hotel Ops denial requires an audit reason before closing a task',
+)
+assert.equal(deniedFixture.tasks[0].status, 'PENDING_APPROVAL', 'Hotel Ops reasonless denial leaves the task pending')
+assert.equal(deniedFixture.approvals[0].status, 'PENDING', 'Hotel Ops reasonless denial leaves the approval pending')
+assert.equal(deniedFixture.logs.some((log) => log.action === 'DENIAL_REJECTED' && log.message.includes('Denial reason is required')), true, 'Hotel Ops service logs reasonless denial attempts')
+assert.equal(deniedFixture.audits.some((audit) => audit.action === 'OPS_DENIAL_REJECTED' && audit.changes.requiredRole === 'OWNER'), true, 'Hotel Ops service audits reasonless denial attempts')
 const deniedRateTask = await denyOpsTask(deniedFixture.prisma, deniedRateResult.task.id, { reason: 'Do not change rates today.' }, opsOwner)
 assert.equal(deniedRateTask.status, 'DENIED', 'Hotel Ops service can deny a pending write task')
 assert.equal(deniedFixture.approvals[0].status, 'DENIED', 'Hotel Ops denial records the approval decision')
@@ -1216,6 +1232,14 @@ await assert.rejects(
 assert.equal(cancelFixture.tasks[0].status, 'QUEUED', 'Hotel Ops unauthorized cancellation leaves the task queued')
 assert.equal(cancelFixture.logs.some((log) => log.action === 'TASK_CANCEL_REJECTED'), true, 'Hotel Ops service logs unauthorized cancellation attempts')
 assert.equal(cancelFixture.audits.some((audit) => audit.action === 'OPS_TASK_CANCEL_REJECTED'), true, 'Hotel Ops service audits unauthorized cancellation attempts')
+await assert.rejects(
+  () => cancelOpsTask(cancelFixture.prisma, cancellableScanResult.task.id, {}, opsManager),
+  /Cancellation reason is required/,
+  'Hotel Ops cancellation requires an audit reason before closing a task',
+)
+assert.equal(cancelFixture.tasks[0].status, 'QUEUED', 'Hotel Ops reasonless cancellation leaves the task queued')
+assert.equal(cancelFixture.logs.some((log) => log.action === 'TASK_CANCEL_REJECTED' && log.message.includes('Cancellation reason is required')), true, 'Hotel Ops service logs reasonless cancellation attempts')
+assert.equal(cancelFixture.audits.some((audit) => audit.action === 'OPS_TASK_CANCEL_REJECTED' && audit.changes.reason.includes('Cancellation reason is required')), true, 'Hotel Ops service audits reasonless cancellation attempts')
 const cancelledScanTask = await cancelOpsTask(cancelFixture.prisma, cancellableScanResult.task.id, { reason: 'Requester cancelled duplicate scan.' }, opsManager)
 assert.equal(cancelledScanTask.status, 'CANCELLED', 'Hotel Ops service lets the requester cancel an open task')
 assert.equal(cancelFixture.audits.some((audit) => audit.action === 'OPS_TASK_CANCELLED'), true, 'Hotel Ops service audits requester cancellations')
@@ -1347,6 +1371,21 @@ assert.equal(recommendationFixture.approvals.length, 1, 'Hotel Ops recommendatio
 assert.equal(recommendationFixture.trendAlerts[0].status, 'RECOMMENDATION_APPROVED', 'Hotel Ops recommendation approval updates alert status')
 assert.equal(recommendationFixture.logs.some((log) => log.action === 'WORKER_STARTED'), false, 'Hotel Ops recommendation approval does not start the worker directly')
 assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RECOMMENDATION_APPROVED' && audit.changes.reason === 'Pickup trend reviewed; prepare a rate task for owner approval.'), true, 'Hotel Ops recommendation approval is audited with the reason')
+await assert.rejects(
+  () => resolveOpsTrendAlert(recommendationFixture.prisma, 'trend-alert-high-demand', {}, opsOwner),
+  /Resolution reason is required/,
+  'Hotel Ops alert resolution requires an audit reason before closing an active alert',
+)
+assert.equal(recommendationFixture.trendAlerts[0].status, 'RECOMMENDATION_APPROVED', 'Hotel Ops reasonless alert resolution leaves alert status unchanged')
+assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RESOLVE_REJECTED'), true, 'Hotel Ops service audits reasonless alert resolution attempts')
+const resolvedRecommendationAlert = await resolveOpsTrendAlert(
+  recommendationFixture.prisma,
+  'trend-alert-high-demand',
+  { reason: 'Recommendation queued; owner will review the generated task.' },
+  opsOwner,
+)
+assert.equal(resolvedRecommendationAlert.status, 'RESOLVED', 'Hotel Ops alert resolution closes the alert when a reason is supplied')
+assert.equal(recommendationFixture.audits.some((audit) => audit.action === 'OPS_ALERT_RESOLVED' && audit.changes.reason === 'Recommendation queued; owner will review the generated task.'), true, 'Hotel Ops alert resolution is audited with the reason')
 
 const slowFullWindowInsights = buildOpsScanInsights({
   reservations: Array.from({ length: 8 }, (_, index) => makeOpsReservation(`slow-demand-${index}`, '2026-06-10T12:00:00.000Z')),
