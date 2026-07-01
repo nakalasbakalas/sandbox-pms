@@ -775,6 +775,21 @@ async function queueOpsTask(tx, task, actor, message = 'Task queued for signed w
   return queued
 }
 
+async function recordBlockedOpsTaskAction(tx, task, logAction, auditAction, message, actor, metadata = {}, statusCode = 409) {
+  await taskLog(tx, task.id, logAction, message, actor, {
+    taskType: task.taskType,
+    status: task.status,
+    ...metadata,
+  })
+  await audit(tx, actor, auditAction, 'hotelOpsTask', task.id, {
+    taskType: task.taskType,
+    status: task.status,
+    reason: message,
+    ...metadata,
+  })
+  return { blocked: true, statusCode, reason: message }
+}
+
 function requiredApprovalRoleForTask(task) {
   return task?.permissionDecision?.requiredApprovalRole
     || task?.approvals?.find((approval) => approval.status === 'APPROVED')?.requiredRole
@@ -813,12 +828,23 @@ export function evaluateOpsTaskRun(task, actor, emergencyStop = { enabled: false
 }
 
 async function prepareOpsTaskRun(prisma, taskId, actor) {
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
     const stop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
     const decision = evaluateOpsTaskRun(task, actor, stop || { enabled: false })
-    if (!decision.allowed) throw new PmsValidationError(decision.reason, decision.statusCode)
+    if (!decision.allowed) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        decision.blockedByEmergencyStop ? 'WORKER_START_BLOCKED' : 'TASK_RUN_REJECTED',
+        decision.blockedByEmergencyStop ? 'OPS_TASK_RUN_BLOCKED' : 'OPS_TASK_RUN_REJECTED',
+        decision.reason,
+        actor,
+        { decision, blockedByEmergencyStop: Boolean(decision.blockedByEmergencyStop) },
+        decision.statusCode,
+      )
+    }
 
     const claimed = await tx.hotelOpsTask.updateMany({
       where: {
@@ -841,6 +867,8 @@ async function prepareOpsTaskRun(prisma, taskId, actor) {
     await audit(tx, actor, 'OPS_TASK_STARTED', 'hotelOpsTask', task.id, { taskType: task.taskType, status: 'RUNNING', dryRun: true, signed: true })
     return running
   })
+  if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
+  return result
 }
 
 async function finalizeOpsTaskRun(prisma, task, actor, result) {
@@ -1050,15 +1078,55 @@ function canApprove(actor, requiredRole) {
 }
 
 export async function approveOpsTask(prisma, taskId, input, actor) {
-  const stop = await getEmergencyStop(prisma)
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
     if (!task) throw new PmsValidationError('Hotel Ops task was not found.', 404)
-    if (task.status !== 'PENDING_APPROVAL') throw new PmsValidationError('Only pending tasks can be approved.', 409)
+    if (task.status !== 'PENDING_APPROVAL') {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'APPROVAL_REJECTED',
+        'OPS_APPROVAL_REJECTED',
+        'Only pending tasks can be approved.',
+        actor,
+        { attemptedStatus: task.status },
+      )
+    }
     const approval = task.approvals.find((item) => item.status === 'PENDING')
-    if (!approval) throw new PmsValidationError('No pending approval exists for this task.', 409)
-    if (!canApprove(actor, approval.requiredRole)) throw new PmsValidationError(`${approval.requiredRole} approval is required.`, 403)
-    if (stop?.enabled && WRITE_TASK_TYPES.has(task.taskType)) throw new PmsValidationError('Emergency stop is enabled for Hotel Ops write tasks.', 409)
+    if (!approval) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'APPROVAL_REJECTED',
+        'OPS_APPROVAL_REJECTED',
+        'No pending approval exists for this task.',
+        actor,
+      )
+    }
+    if (!canApprove(actor, approval.requiredRole)) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'APPROVAL_REJECTED',
+        'OPS_APPROVAL_REJECTED',
+        `${approval.requiredRole} approval is required.`,
+        actor,
+        { requiredRole: approval.requiredRole },
+        403,
+      )
+    }
+    const stop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
+    if (stop?.enabled && WRITE_TASK_TYPES.has(task.taskType)) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'APPROVAL_BLOCKED',
+        'OPS_APPROVAL_BLOCKED',
+        'Emergency stop is enabled for Hotel Ops write tasks.',
+        actor,
+        { requiredRole: approval.requiredRole, blockedByEmergencyStop: true },
+      )
+    }
 
     await tx.hotelOpsTaskApproval.update({
       where: { id: approval.id },
@@ -1073,6 +1141,8 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
     await audit(tx, actor, 'OPS_APPROVAL_GRANTED', 'hotelOpsTask', task.id, { requiredRole: approval.requiredRole })
     return serializeTask(await queueOpsTask(tx, task, actor, 'Approved task queued for signed worker execution.'))
   })
+  if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
+  return result
 }
 
 export async function denyOpsTask(prisma, taskId, input, actor) {

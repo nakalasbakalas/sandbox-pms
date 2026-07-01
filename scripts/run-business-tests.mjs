@@ -968,6 +968,40 @@ assert.equal(stoppedRateResult.task.status, 'DENIED', 'Hotel Ops service denies 
 assert.equal(stoppedRateResult.decision.blockedByEmergencyStop, true, 'Hotel Ops service marks emergency-stop-denied command decisions')
 assert.equal(emergencyFixture.approvals.length, 0, 'Hotel Ops service does not create approvals while emergency stop blocks writes')
 
+const approvalStopFixture = createOpsCommandPrismaFixture()
+const pendingStoppedApproval = await submitOpsCommand(
+  approvalStopFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
+  opsManager,
+)
+await setEmergencyStop(approvalStopFixture.prisma, { enabled: true, reason: 'Owner paused approval queueing.' }, opsOwner)
+await assert.rejects(
+  () => approveOpsTask(approvalStopFixture.prisma, pendingStoppedApproval.task.id, { notes: 'Should not queue while stopped.' }, opsOwner),
+  /Emergency stop is enabled/,
+  'Hotel Ops approval refuses to queue write tasks while emergency stop is active',
+)
+assert.equal(approvalStopFixture.tasks[0].status, 'PENDING_APPROVAL', 'Hotel Ops emergency-stop-blocked approval leaves the task pending')
+assert.equal(approvalStopFixture.approvals[0].status, 'PENDING', 'Hotel Ops emergency-stop-blocked approval leaves the approval pending')
+assert.equal(approvalStopFixture.logs.some((log) => log.action === 'APPROVAL_BLOCKED'), true, 'Hotel Ops service logs emergency-stop-blocked approvals')
+assert.equal(approvalStopFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_BLOCKED' && audit.changes.blockedByEmergencyStop === true), true, 'Hotel Ops service audits emergency-stop-blocked approvals')
+
+const runStopFixture = createOpsCommandPrismaFixture()
+const pendingStoppedRun = await submitOpsCommand(
+  runStopFixture.prisma,
+  { message: 'Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday.', sourceChannel: 'web' },
+  opsManager,
+)
+await approveOpsTask(runStopFixture.prisma, pendingStoppedRun.task.id, { notes: 'Queue before stop.' }, opsOwner)
+await setEmergencyStop(runStopFixture.prisma, { enabled: true, reason: 'Owner paused worker execution.' }, opsOwner)
+await assert.rejects(
+  () => runQueuedOpsTask(runStopFixture.prisma, pendingStoppedRun.task.id, opsOwner),
+  /Emergency stop is enabled/,
+  'Hotel Ops runner refuses queued write tasks while emergency stop is active',
+)
+assert.equal(runStopFixture.tasks[0].status, 'QUEUED', 'Hotel Ops emergency-stop-blocked runner leaves the task queued')
+assert.equal(runStopFixture.logs.some((log) => log.action === 'WORKER_START_BLOCKED'), true, 'Hotel Ops service logs emergency-stop-blocked worker starts')
+assert.equal(runStopFixture.audits.some((audit) => audit.action === 'OPS_TASK_RUN_BLOCKED' && audit.changes.blockedByEmergencyStop === true), true, 'Hotel Ops service audits emergency-stop-blocked worker starts')
+
 const deniedFixture = createOpsCommandPrismaFixture()
 const deniedRateResult = await submitOpsCommand(
   deniedFixture.prisma,
