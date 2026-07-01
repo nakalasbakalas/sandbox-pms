@@ -28,6 +28,19 @@ const TASK_TYPES = new Set(TASK_TYPE_VALUES)
 
 const PLATFORM_VALUES = ['booking', 'agoda', 'expedia', 'trip', 'all', 'unknown']
 const RISK_LEVEL_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'FORBIDDEN']
+const HOTEL_OPS_PARSER_SCHEMA_NAME = 'hotel_ops_parsed_task'
+const DEFAULT_OPENAI_PARSER_MODEL = 'gpt-4.1-mini'
+const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
+
+const HOTEL_OPS_TASK_PARSER_PROMPT = [
+  'You are the Hotel Ops Task Parser for a controlled hotel operations system.',
+  'Convert manager instructions into strict JSON only. You do not execute actions.',
+  'You do not access credentials, browse OTA websites, or reveal secrets.',
+  'Use Asia/Bangkok as the default timezone and THB as the default currency.',
+  'Return NO_OP_CLARIFY when critical fields are missing.',
+  'Return FORBIDDEN for credential requests, security bypass, hidden logging, refunds, payment policy changes, cancellation policy changes, listing deletion, unauthorized accounts, or arbitrary browser control.',
+  'Do not include chain-of-thought. The rationale must be a short operational reason.',
+].join(' ')
 
 const WRITE_TASK_TYPES = new Set([
   'SEND_GUEST_REPLY',
@@ -116,6 +129,23 @@ const FORBIDDEN_PATTERNS = [
   /\b(arbitrary|manual|direct)\s+browser\s+(command|control|automation|script)\b/,
 ]
 
+function truthyEnv(value) {
+  return ['1', 'true', 'yes', 'on', 'openai', 'responses'].includes(String(value || '').trim().toLowerCase())
+}
+
+export function hotelOpsAiParserStatus(env = process.env) {
+  const requested = truthyEnv(env.HOTEL_OPS_AI_PARSER_ENABLED || env.HOTEL_OPS_AI_PARSER)
+  const apiKeyConfigured = Boolean(normalizeNullableString(env.OPENAI_API_KEY))
+  return {
+    mode: requested && apiKeyConfigured ? 'openai_responses' : 'deterministic',
+    requested,
+    configured: requested && apiKeyConfigured,
+    provider: requested ? 'openai_responses' : 'deterministic',
+    model: requested ? normalizeNullableString(env.HOTEL_OPS_AI_MODEL) || DEFAULT_OPENAI_PARSER_MODEL : null,
+    schemaName: HOTEL_OPS_PARSER_SCHEMA_NAME,
+  }
+}
+
 export function getOpsPolicy() {
   return {
     version: '2026-07-01',
@@ -148,6 +178,12 @@ export function getOpsPolicy() {
       allowReadOnly: true,
       checkpoints: ['command_intake', 'approval', 'queueing', 'worker_execution'],
     },
+    parser: {
+      ...hotelOpsAiParserStatus(),
+      strictSchema: true,
+      redactsPromptInput: true,
+      fallback: 'deterministic',
+    },
     forbiddenPatterns: FORBIDDEN_PATTERNS.map((pattern) => (typeof pattern === 'string' ? pattern : pattern.source)),
   }
 }
@@ -178,11 +214,11 @@ const parsedOpsTaskSchema = z.object({
   rate: z.object({
     amount: z.number().finite().nonnegative().nullable(),
     currency: z.string().trim().min(1, 'Rate currency is required.'),
-  }).strict().optional(),
+  }).strict().nullable().optional(),
   availability: z.object({
     rooms: z.number().int().nonnegative().nullable(),
     status: z.enum(['open', 'closed']).nullable(),
-  }).strict().optional(),
+  }).strict().nullable().optional(),
   message: z.string().nullable(),
   riskLevel: z.enum(RISK_LEVEL_VALUES),
   approvalRequired: z.boolean(),
@@ -191,6 +227,68 @@ const parsedOpsTaskSchema = z.object({
   rationale: z.string().trim().min(1, 'Parser rationale is required.'),
 }).strict()
 
+const nullableDateJsonSchema = {
+  anyOf: [
+    { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    { type: 'null' },
+  ],
+}
+
+const parsedOpsTaskJsonSchema = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['taskType', 'platform', 'hotelId', 'roomType', 'dateRange', 'rate', 'availability', 'message', 'riskLevel', 'approvalRequired', 'confidence', 'missingFields', 'rationale'],
+  properties: {
+    taskType: { type: 'string', enum: TASK_TYPE_VALUES },
+    platform: { type: 'string', enum: PLATFORM_VALUES },
+    hotelId: { type: 'string', minLength: 1 },
+    roomType: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }] },
+    dateRange: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['start', 'end'],
+      properties: {
+        start: nullableDateJsonSchema,
+        end: nullableDateJsonSchema,
+      },
+    },
+    rate: {
+      anyOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['amount', 'currency'],
+          properties: {
+            amount: { anyOf: [{ type: 'number', minimum: 0 }, { type: 'null' }] },
+            currency: { type: 'string', minLength: 1 },
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    availability: {
+      anyOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          required: ['rooms', 'status'],
+          properties: {
+            rooms: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+            status: { anyOf: [{ type: 'string', enum: ['open', 'closed'] }, { type: 'null' }] },
+          },
+        },
+        { type: 'null' },
+      ],
+    },
+    message: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    riskLevel: { type: 'string', enum: RISK_LEVEL_VALUES },
+    approvalRequired: { type: 'boolean' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    missingFields: { type: 'array', items: { type: 'string', minLength: 1 } },
+    rationale: { type: 'string', minLength: 1 },
+  },
+})
+
 function schemaIssuePath(issue) {
   return issue.path.length ? issue.path.join('.') : 'task'
 }
@@ -198,6 +296,27 @@ function schemaIssuePath(issue) {
 function parsedTaskSchemaReason(result) {
   const issue = result.error.issues[0]
   return `Parsed task failed schema validation: ${schemaIssuePath(issue)} ${issue.message}`
+}
+
+export function hotelOpsParsedTaskJsonSchema() {
+  return parsedOpsTaskJsonSchema
+}
+
+export function validateParsedOpsTaskShape(parsedTask) {
+  const schemaResult = parsedOpsTaskSchema.safeParse(parsedTask)
+  if (!schemaResult.success) {
+    return {
+      valid: false,
+      reason: parsedTaskSchemaReason(schemaResult),
+      missingFields: [],
+    }
+  }
+  return {
+    valid: true,
+    data: normalizeParsedTaskAgainstPolicy(schemaResult.data),
+    reason: 'Parsed task matches the Hotel Ops task schema.',
+    missingFields: [],
+  }
 }
 
 function actorLabel(actor) {
@@ -215,7 +334,7 @@ function normalizeNullableString(value) {
 
 function redactedSensitiveText(value) {
   return String(value || '')
-    .replace(/\b(password|passcode|secret|token|api[_ -]?key|credential|session)\s*[:=]\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]')
+    .replace(/\b(password|passcode|secret|token|api[_ -]?key|credential|session)\s*(?::|=|\bis\b|\bare\b)\s*("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]')
     .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED_API_KEY]')
 }
 
@@ -233,6 +352,115 @@ function sanitizeOpsMetadata(value, depth = 0) {
     key,
     sensitiveKey(key) ? '[REDACTED]' : sanitizeOpsMetadata(child, depth + 1),
   ]))
+}
+
+function safeParserInput(rawMessage) {
+  return redactedSensitiveText(rawMessage).slice(0, 4000)
+}
+
+function extractOpenAiResponseText(payload) {
+  if (typeof payload?.output_text === 'string') return payload.output_text
+  const chunks = []
+  for (const output of payload?.output || []) {
+    for (const content of output?.content || []) {
+      if (typeof content?.text === 'string') chunks.push(content.text)
+      else if (typeof content?.content === 'string') chunks.push(content.content)
+    }
+  }
+  return chunks.join('\n').trim()
+}
+
+function parseJsonObject(text, label) {
+  try {
+    const parsed = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object')
+    return parsed
+  } catch {
+    throw new PmsValidationError(`${label} did not return a valid JSON object.`, 502)
+  }
+}
+
+function openAiParserBody(rawMessage, model) {
+  return {
+    model,
+    instructions: HOTEL_OPS_TASK_PARSER_PROMPT,
+    input: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: safeParserInput(rawMessage),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: HOTEL_OPS_PARSER_SCHEMA_NAME,
+        strict: true,
+        schema: hotelOpsParsedTaskJsonSchema(),
+      },
+    },
+  }
+}
+
+export async function parseHotelOpsCommandWithOpenAi(rawMessage, options = {}) {
+  const env = options.env || process.env
+  const apiKey = normalizeNullableString(options.apiKey || env.OPENAI_API_KEY)
+  if (!apiKey) throw new PmsValidationError('OpenAI parser is enabled but OPENAI_API_KEY is not configured.', 503)
+  const model = normalizeNullableString(options.model || env.HOTEL_OPS_AI_MODEL) || DEFAULT_OPENAI_PARSER_MODEL
+  const fetchImpl = options.fetchImpl || globalThis.fetch
+  if (typeof fetchImpl !== 'function') throw new PmsValidationError('Fetch is unavailable for the OpenAI parser.', 503)
+
+  const response = await fetchImpl(options.url || OPENAI_RESPONSES_URL, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(openAiParserBody(rawMessage, model)),
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    const message = redactedSensitiveText(payload?.error?.message || payload?.error || `OpenAI parser request failed with HTTP ${response.status}.`)
+    throw new PmsValidationError(message, response.status || 502)
+  }
+
+  const outputText = extractOpenAiResponseText(payload)
+  const parsed = parseJsonObject(outputText, 'OpenAI parser')
+  const shape = validateParsedOpsTaskShape(parsed)
+  if (!shape.valid) throw new PmsValidationError(shape.reason, 502)
+  return {
+    ...shape.data,
+    rationale: redactedSensitiveText(shape.data.rationale),
+  }
+}
+
+export async function parseHotelOpsCommandForSubmission(rawMessage, options = {}) {
+  const env = options.env || process.env
+  const parserStatus = hotelOpsAiParserStatus(env)
+  if (!parserStatus.configured) {
+    return {
+      parsed: parseHotelOpsCommand(rawMessage, options),
+      parserMode: 'deterministic',
+    }
+  }
+
+  try {
+    return {
+      parsed: await parseHotelOpsCommandWithOpenAi(rawMessage, options),
+      parserMode: 'openai_responses',
+    }
+  } catch (error) {
+    return {
+      parsed: parseHotelOpsCommand(rawMessage, options),
+      parserMode: 'deterministic_fallback',
+      parserFallbackReason: redactedSensitiveText(error instanceof Error ? error.message : String(error)),
+    }
+  }
 }
 
 function normalizePlatform(text) {
@@ -360,6 +588,19 @@ function taskWithRule(taskType, overrides = {}) {
     confidence: overrides.confidence ?? 0.78,
     missingFields: overrides.missingFields || [],
     rationale: overrides.rationale || 'Parsed with deterministic Hotel Ops MVP parser.',
+  }
+}
+
+function normalizeParsedTaskAgainstPolicy(parsedTask) {
+  const rule = RULES[parsedTask.taskType] || RULES.FORBIDDEN
+  return {
+    ...parsedTask,
+    hotelId: SANDBOX_RULES.propertyCode,
+    rate: parsedTask.rate || undefined,
+    availability: parsedTask.availability || undefined,
+    riskLevel: rule.riskLevel,
+    approvalRequired: Boolean(rule.approvalRequired),
+    missingFields: Array.isArray(parsedTask.missingFields) ? parsedTask.missingFields : [],
   }
 }
 
@@ -674,16 +915,9 @@ export function evaluateOpsPermission(parsedTask, actor, emergencyStop = { enabl
 }
 
 export function validateParsedOpsTask(parsedTask) {
-  const schemaResult = parsedOpsTaskSchema.safeParse(parsedTask)
-  if (!schemaResult.success) {
-    return {
-      valid: false,
-      reason: parsedTaskSchemaReason(schemaResult),
-      missingFields: [],
-    }
-  }
-
-  const task = schemaResult.data
+  const shape = validateParsedOpsTaskShape(parsedTask)
+  if (!shape.valid) return shape
+  const task = shape.data
 
   if (!TASK_TYPES.has(task.taskType)) {
     return {
@@ -1269,7 +1503,12 @@ export async function submitOpsCommand(prisma, input, actor) {
   const rawMessage = normalizeText(input?.message || input?.rawMessage)
   const persistedRawMessage = redactedSensitiveText(rawMessage)
   const sourceChannel = normalizeOpsSourceChannel(input?.sourceChannel || 'web')
-  const parsed = parseHotelOpsCommand(rawMessage)
+  const { parsed, parserMode, parserFallbackReason } = await parseHotelOpsCommandForSubmission(rawMessage)
+  const parserMetadata = {
+    ...parsed,
+    parserMode,
+    ...(parserFallbackReason ? { parserFallbackReason } : {}),
+  }
   const validation = validateParsedOpsTask(parsed)
   const stop = await getEmergencyStop(prisma)
   const decision = decisionFor(parsed, actor, stop)
@@ -1279,7 +1518,7 @@ export async function submitOpsCommand(prisma, input, actor) {
     const existing = await tx.hotelOpsTask.findUnique({ where: { idempotencyKey: key }, include: taskInclude })
     if (existing) {
       await taskLog(tx, existing.id, 'IDEMPOTENT_REPLAY', 'Duplicate command returned existing task.', actor, { idempotencyKey: key })
-      return { task: serializeTask(existing), parsed, decision: existing.permissionDecision || decision, duplicate: true }
+      return { task: serializeTask(existing), parsed, decision: existing.permissionDecision || decision, parserMode, parserFallbackReason, duplicate: true }
     }
 
     let status = 'DRAFT'
@@ -1319,11 +1558,11 @@ export async function submitOpsCommand(prisma, input, actor) {
     })
 
     await taskLog(tx, task.id, 'COMMAND_RECEIVED', 'Hotel Ops command received.', actor, { rawMessage: persistedRawMessage })
-    await taskLog(tx, task.id, 'PARSER_OUTPUT', 'Command parsed into a controlled task.', actor, parsed)
+    await taskLog(tx, task.id, 'PARSER_OUTPUT', 'Command parsed into a controlled task.', actor, parserMetadata)
     await taskLog(tx, task.id, validation.valid ? 'VALIDATION_PASSED' : 'VALIDATION_FAILED', validation.reason, actor, validation)
     await taskLog(tx, task.id, 'PERMISSION_DECISION', decision.reason, actor, decision)
-    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, parsed })
-    await audit(tx, actor, 'OPS_PARSER_OUTPUT', 'hotelOpsTask', task.id, parsed)
+    await audit(tx, actor, 'OPS_COMMAND_RECEIVED', 'hotelOpsTask', task.id, { rawMessage: persistedRawMessage, parsed, parserMode, ...(parserFallbackReason ? { parserFallbackReason } : {}) })
+    await audit(tx, actor, 'OPS_PARSER_OUTPUT', 'hotelOpsTask', task.id, parserMetadata)
     await audit(tx, actor, validation.valid ? 'OPS_VALIDATION_PASSED' : 'OPS_VALIDATION_FAILED', 'hotelOpsTask', task.id, validation)
     await audit(tx, actor, 'OPS_PERMISSION_DECISION', 'hotelOpsTask', task.id, decision)
 
@@ -1350,14 +1589,14 @@ export async function submitOpsCommand(prisma, input, actor) {
           requiredRole: decision.requiredApprovalRole || 'HOTEL_MANAGER',
         },
       }, actor)
-      return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, duplicate: false }
+      return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, parserMode, parserFallbackReason, duplicate: false }
     }
 
     if (status === 'QUEUED') {
-      return { task: serializeTask(await queueOpsTask(tx, task, actor)), parsed, decision, duplicate: false }
+      return { task: serializeTask(await queueOpsTask(tx, task, actor)), parsed, decision, parserMode, parserFallbackReason, duplicate: false }
     }
 
-    return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, duplicate: false }
+    return { task: serializeTask(await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })), parsed, decision, parserMode, parserFallbackReason, duplicate: false }
   })
 }
 

@@ -93,6 +93,12 @@ function formatOpsLabel(value: string) {
   return value.replace(/_/g, ' ')
 }
 
+function parserModeLabel(value?: string) {
+  if (value === 'openai_responses') return 'OpenAI parser'
+  if (value === 'deterministic_fallback') return 'Deterministic fallback'
+  return 'Deterministic parser'
+}
+
 function notificationTone(notification: HotelOpsNotification) {
   if (notification.type === 'NEEDS_HUMAN' || notification.type === 'EMERGENCY_STOP') return 'border-red-200 bg-red-50 text-red-800'
   if (notification.type === 'APPROVAL_REQUEST' || notification.status === 'PENDING_PROVIDER') return 'border-amber-200 bg-amber-50 text-amber-900'
@@ -749,11 +755,17 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     <div className="flex flex-wrap gap-2">
                       <Badge variant={riskTone(commandResult.parsed.riskLevel)}>{commandResult.parsed.riskLevel}</Badge>
                       <Badge variant={commandResult.decision.allowed ? 'secondary' : 'destructive'}>{commandResult.decision.allowed ? 'Allowed' : 'Blocked'}</Badge>
+                      <Badge variant="outline">{parserModeLabel(commandResult.parserMode)}</Badge>
                       {commandResult.duplicate && <Badge variant="outline">Duplicate replay</Badge>}
                       {commandResult.decision.approvalRequired && <Badge variant="outline">Approval required</Badge>}
                     </div>
                     <div className="font-semibold">{commandResult.parsed.taskType.replace(/_/g, ' ')}</div>
                     <div className="text-muted-foreground">{commandResult.decision.reason}</div>
+                    {commandResult.parserFallbackReason && (
+                      <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Parser fallback: {commandResult.parserFallbackReason}
+                      </div>
+                    )}
                     <TaskCard task={commandResult.task} compact onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} onResolveHuman={resolveHumanAction} />
                   </div>
                 ) : (
@@ -948,6 +960,8 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                   <Badge variant={opsPolicy?.defaults.dryRun ? 'secondary' : 'destructive'}>{opsPolicy?.defaults.dryRun ? 'Dry-run required' : 'Dry-run off'}</Badge>
                   <Badge variant="outline">{opsPolicy?.defaults.timezone || 'Asia/Bangkok'}</Badge>
                   <Badge variant="outline">{opsPolicy?.defaults.currency || 'THB'}</Badge>
+                  <Badge variant={opsPolicy?.parser?.configured ? 'secondary' : 'outline'}>{parserModeLabel(opsPolicy?.parser?.mode)}</Badge>
+                  {opsPolicy?.parser?.requested && !opsPolicy.parser.configured && <Badge variant="outline">AI parser needs backend key</Badge>}
                 </div>
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {policyRuleEntries(opsPolicy).map(([taskType, rule]) => (

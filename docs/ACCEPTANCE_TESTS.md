@@ -19,6 +19,9 @@ This file maps the package acceptance criteria to current repo evidence.
 - Strict parsed-task schema validation
   - Expected: complete parsed tasks pass; impossible dates, out-of-range confidence, and unexpected credential-like fields fail validation before permission decisions.
   - Evidence: `scripts/run-business-tests.mjs`.
+- Optional OpenAI Responses parser path
+  - Expected: backend-only parser requests use redacted command text and strict JSON schema; model output cannot downgrade backend risk/approval policy; malformed model output fails before permission decisions; provider failure falls back to deterministic parsing with a redacted reason.
+  - Evidence: mocked provider coverage in `scripts/run-business-tests.mjs`. This is not live OpenAI provider proof.
 
 ## Permissions
 
@@ -64,6 +67,7 @@ Evidence: `scripts/run-business-tests.mjs` and guarded DB E2E.
 - `/ops/tasks` shows task status, requester, risk, timestamps, logs, notifications, and proof.
 - `/ops/intelligence` shows alert severity and recommendation actions.
 - `/ops/settings` shows emergency stop, OTA worker status, scan policy, scheduler state, and thresholds.
+- `/ops/chat` and `/ops/settings` show parser mode so staff can distinguish deterministic parsing, optional OpenAI parsing, and deterministic fallback.
 
 Evidence: `scripts/run-e2e-tests.mjs`.
 

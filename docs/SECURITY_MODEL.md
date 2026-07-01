@@ -6,6 +6,8 @@ Manager commands are untrusted input. They must be parsed, strict-schema validat
 
 The parser is not an execution authority. The backend owns parsed-task schema validation, policy, approvals, emergency stop, queueing, worker signing, secrets, audit records, and notifications.
 
+OpenAI Responses parsing is optional and backend-only. Prompt input is redacted before submission, model output is strict-schema validated and backend-policy normalized, and provider failures fall back to deterministic parsing with a redacted reason.
+
 The OTA worker accepts only signed, typed tasks. It rejects unknown task types, unknown platforms, unsigned requests, replayed nonces, and credential-shaped payload fields.
 
 OTA websites remain external systems. The worker must not bypass CAPTCHA, 2FA, locked accounts, password-expired flows, rate limits, or platform terms.
@@ -16,6 +18,7 @@ When a task reaches `NEEDS_HUMAN`, automated execution stops. Requeueing require
 
 - No OTA credentials, OpenAI keys, session tokens, or mailbox passwords belong in frontend code.
 - No credentials belong in model prompts, task raw messages, task logs, notifications, proof URLs, screenshots, or final summaries.
+- `OPENAI_API_KEY`, when used for the optional parser, must be a backend environment secret only.
 - Booking.com credentials, when used, must come from backend environment secrets.
 - Booking email sync must use server-side Gmail API credentials or a future refresh-token flow, not a raw mailbox password.
 - Remote worker calls use `OTA_WORKER_BASE_URL` and `OTA_WORKER_SHARED_SECRET`.

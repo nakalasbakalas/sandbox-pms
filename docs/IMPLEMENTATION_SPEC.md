@@ -62,7 +62,9 @@ Booking-email API routes:
 
 ## Parser Contract
 
-The current parser is deterministic in `parseHotelOpsCommand`. It outputs the repo type `ParsedHotelOpsTask` with:
+The default parser is deterministic in `parseHotelOpsCommand`. When `HOTEL_OPS_AI_PARSER_ENABLED` or `HOTEL_OPS_AI_PARSER` is enabled and a backend `OPENAI_API_KEY` exists, `submitOpsCommand` can use the backend-only OpenAI Responses parser before falling back to deterministic parsing if the provider call or model output fails. Frontend code never receives the API key.
+
+Both parser paths output the repo type `ParsedHotelOpsTask` with:
 
 - whitelisted task type
 - platform from `booking`, `agoda`, `trip`, `expedia`, `all`, or `unknown`
@@ -77,6 +79,8 @@ The current parser is deterministic in `parseHotelOpsCommand`. It outputs the re
 - rationale
 
 Forbidden requests, credential requests, 2FA/CAPTCHA bypass attempts, audit-hiding requests, refunds, bulk cancellation, and policy changes are rejected as `FORBIDDEN` or blocked by MVP policy.
+
+OpenAI parser requests send redacted command text, request the strict Hotel Ops task JSON schema, validate the model output with the same backend schema, and then normalize risk, approval requirement, and hotel id against backend policy. Parser mode and fallback reason are included in task logs/audit metadata and surfaced in the `/ops/chat` parsed preview.
 
 ## Permission And Approval Rules
 
@@ -143,7 +147,7 @@ Scheduled scans:
 
 ## Parser Validation
 
-Hotel Ops commands use the deterministic parser in `server/ops-service.mjs`. Parsed task output is strict-schema validated before permission decisions, task persistence, approval routing, or worker queueing. Schema failures are recorded as validation failures and audited through the existing Hotel Ops task log/audit path. This is not a live OpenAI parser integration.
+Hotel Ops commands use `server/ops-service.mjs`. Parsed task output is strict-schema validated before permission decisions, task persistence, approval routing, or worker queueing. Schema failures are recorded as validation failures and audited through the existing Hotel Ops task log/audit path. OpenAI parsing is optional, backend-only, redacted, and never an execution authority.
 
 ## Booking Email Inbox
 

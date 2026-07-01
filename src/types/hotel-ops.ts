@@ -35,6 +35,7 @@ export type HotelOpsTaskStatus =
 export type HotelOpsRole = 'OWNER' | 'HOTEL_MANAGER' | 'STAFF' | 'VIEWER' | 'SYSTEM'
 
 export type HotelOpsApprovalStatus = 'PENDING' | 'APPROVED' | 'DENIED'
+export type HotelOpsParserMode = 'deterministic' | 'openai_responses' | 'deterministic_fallback'
 
 export type DateRange = {
   start: string | null
@@ -153,6 +154,8 @@ export type HotelOpsCommandResult = {
   task: HotelOpsTask
   parsed: ParsedHotelOpsTask
   decision: PermissionDecision
+  parserMode?: HotelOpsParserMode
+  parserFallbackReason?: string
   duplicate?: boolean
 }
 
@@ -276,6 +279,17 @@ export type HotelOpsPolicy = {
     blockTaskTypes: HotelOpsTaskType[]
     allowReadOnly: boolean
     checkpoints: string[]
+  }
+  parser?: {
+    mode: HotelOpsParserMode | 'deterministic'
+    requested: boolean
+    configured: boolean
+    provider: 'deterministic' | 'openai_responses'
+    model?: string | null
+    schemaName: string
+    strictSchema: boolean
+    redactsPromptInput: boolean
+    fallback: 'deterministic'
   }
   forbiddenPatterns: string[]
 }

@@ -75,6 +75,13 @@ Manager:
 4. Use `/ops/tasks` for queue and worker outcomes.
 5. Use `/ops/intelligence` for trend alerts and recommendations.
 
+Parser mode:
+
+- The parser is deterministic by default.
+- To enable backend-only OpenAI Responses parsing, set `HOTEL_OPS_AI_PARSER_ENABLED=true` and configure `OPENAI_API_KEY` as a backend secret.
+- `/ops/chat` shows whether the latest command used deterministic parsing, OpenAI parsing, or deterministic fallback.
+- If the provider call fails or returns malformed output, the backend falls back to deterministic parsing and records the redacted fallback reason in task logs/audit metadata.
+
 Owner or approver:
 
 1. Open `/ops/approvals`.
@@ -94,7 +101,7 @@ The scheduler runs as `SYSTEM`, skips overlaps, and redacts credential-like fail
 
 ## Policy Review
 
-Use `/ops/settings` to review the backend-enforced Permission and Approval Policy before enabling operational workflows. The matrix is read from `/api/ops/policy` and shows risk level, allowed roles, approval role, disabled MVP tasks, rate limits, all-room-close protection, and emergency-stop coverage.
+Use `/ops/settings` to review the backend-enforced Permission and Approval Policy before enabling operational workflows. The matrix is read from `/api/ops/policy` and shows parser mode, risk level, allowed roles, approval role, disabled MVP tasks, rate limits, all-room-close protection, and emergency-stop coverage.
 
 ## Human Challenges
 

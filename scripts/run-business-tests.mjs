@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1172,6 +1172,53 @@ assert.match(invalidConfidenceParsedTask.reason, /confidence/, 'Hotel Ops strict
 const unexpectedSecretFieldParsedTask = validateParsedOpsTask({ ...rateCommand, password: 'never-store-this' })
 assert.equal(unexpectedSecretFieldParsedTask.valid, false, 'Hotel Ops strict parser schema rejects unexpected credential-like parser fields')
 assert.match(unexpectedSecretFieldParsedTask.reason, /password/, 'Hotel Ops strict parser schema identifies unrecognized parser fields')
+assert.equal(hotelOpsAiParserStatus({ HOTEL_OPS_AI_PARSER_ENABLED: 'true' }).configured, false, 'Hotel Ops AI parser is not configured without a backend OpenAI key')
+assert.equal(hotelOpsAiParserStatus({ HOTEL_OPS_AI_PARSER_ENABLED: 'true', OPENAI_API_KEY: 'test-key' }).mode, 'openai_responses', 'Hotel Ops AI parser status reports configured OpenAI Responses mode')
+let openAiParserRequestBody = ''
+const openAiParsedCommand = await parseHotelOpsCommandWithOpenAi('Change Agoda Deluxe Room to 2,200 THB 2026-07-03 to 2026-07-04 password is redaction-marker', {
+  apiKey: 'unit-test-value',
+  model: 'gpt-test-parser',
+  fetchImpl: async (url, request) => {
+    assert.equal(url, 'https://api.openai.com/v1/responses', 'Hotel Ops AI parser uses the OpenAI Responses endpoint')
+    assert.equal(request.headers.authorization, 'Bearer unit-test-value', 'Hotel Ops AI parser sends the API key only in the backend authorization header')
+    openAiParserRequestBody = request.body
+    assert.equal(openAiParserRequestBody.includes('redaction-marker'), false, 'Hotel Ops AI parser redacts credential-like command text before model submission')
+    assert.equal(openAiParserRequestBody.includes('json_schema'), true, 'Hotel Ops AI parser requests strict JSON schema output')
+    return new Response(JSON.stringify({
+      output_text: JSON.stringify({
+        ...rateCommand,
+        hotelId: 'model-hallucinated-hotel',
+        riskLevel: 'LOW',
+        approvalRequired: false,
+        rationale: 'Model parsed the requested rate update.',
+      }),
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  },
+})
+assert.equal(openAiParsedCommand.taskType, 'UPDATE_RATE', 'Hotel Ops AI parser returns parsed task objects from model JSON')
+assert.equal(openAiParsedCommand.hotelId, 'SANDBOX', 'Hotel Ops AI parser normalizes model hotel id to the backend property code')
+assert.equal(openAiParsedCommand.riskLevel, 'HIGH', 'Hotel Ops AI parser output cannot downgrade backend risk policy')
+assert.equal(openAiParsedCommand.approvalRequired, true, 'Hotel Ops AI parser output cannot bypass backend approval policy')
+await assert.rejects(
+  () => parseHotelOpsCommandWithOpenAi('Change Agoda Deluxe Room to 2,200 THB 2026-07-03 to 2026-07-04.', {
+    apiKey: 'unit-test-value',
+    fetchImpl: async () => new Response(JSON.stringify({
+      output_text: JSON.stringify({ ...rateCommand, confidence: 2 }),
+    }), { status: 200, headers: { 'content-type': 'application/json' } }),
+  }),
+  /Parsed task failed schema validation/,
+  'Hotel Ops AI parser rejects malformed model output before permission decisions',
+)
+const parserFallbackCommand = await parseHotelOpsCommandForSubmission('Check bookings for next weekend.', {
+  env: { HOTEL_OPS_AI_PARSER_ENABLED: 'true', OPENAI_API_KEY: 'unit-test-value' },
+  fetchImpl: async () => {
+    throw new Error('provider failed token=redaction-marker')
+  },
+  now: fixedOpsDate,
+})
+assert.equal(parserFallbackCommand.parserMode, 'deterministic_fallback', 'Hotel Ops command parser falls back to deterministic parsing when the AI provider fails')
+assert.equal(parserFallbackCommand.parsed.taskType, 'SCAN_BOOKINGS', 'Hotel Ops deterministic fallback still returns a controlled parsed task')
+assert.equal(parserFallbackCommand.parserFallbackReason.includes('redaction-marker'), false, 'Hotel Ops parser fallback reason redacts credential-like provider errors')
 
 const scanCommand = parseHotelOpsCommand('Check bookings for next weekend.', { now: fixedOpsDate })
 assert.equal(['READ_RESERVATIONS', 'SCAN_BOOKINGS'].includes(scanCommand.taskType), true, 'Hotel Ops parser maps booking checks to read-only tasks')
@@ -1303,9 +1350,11 @@ const queuedScanResult = await submitOpsCommand(
   opsManager,
 )
 assert.equal(queuedScanResult.task.status, 'QUEUED', 'Hotel Ops service queues low-risk scan commands')
+assert.equal(queuedScanResult.parserMode, 'deterministic', 'Hotel Ops command result reports deterministic parser mode when AI parser is not configured')
 assert.equal(opsCommandFixture.tasks.length, 1, 'Hotel Ops service persists one task for a new command')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'COMMAND_RECEIVED'), true, 'Hotel Ops service logs command receipt')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'PARSER_OUTPUT'), true, 'Hotel Ops service logs parser output')
+assert.equal(opsCommandFixture.logs.find((log) => log.action === 'PARSER_OUTPUT')?.metadata?.parserMode, 'deterministic', 'Hotel Ops parser output log records parser mode')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'VALIDATION_PASSED'), true, 'Hotel Ops service logs validation pass decisions')
 assert.equal(opsCommandFixture.logs.some((log) => log.action === 'TASK_QUEUED'), true, 'Hotel Ops service logs queueing')
 assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED'), true, 'Hotel Ops service audits command receipt')
