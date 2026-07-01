@@ -24,6 +24,7 @@ import { useNavigation } from '@/hooks/use-navigation'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 import { hotelOpsApi } from '@/lib/hotel-ops-api-client'
 import type { HotelOpsScanForce } from '@/lib/hotel-ops-api-client'
+import { createHotelOpsCommandIdempotencyKey } from '@/lib/hotel-ops-idempotency'
 import type {
   HotelOpsApproval,
   HotelOpsCommandResult,
@@ -106,7 +107,7 @@ function formatTaskSummary(task: HotelOpsTask) {
     formatDateRange(task),
     task.rate?.amount ? `${task.rate.amount.toLocaleString()} ${task.rate.currency}` : null,
   ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : task.rationale
+  return parts.length > 0 ? parts.join(' - ') : task.rationale
 }
 
 function formatPercentValue(value?: number) {
@@ -357,6 +358,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
   const { currentRoute, navigate } = useNavigation()
   const activeTab = routeTab || routeTabs[currentRoute] || 'chat'
   const [command, setCommand] = useState(exampleCommands[0])
+  const [commandIdempotencyKey, setCommandIdempotencyKey] = useState(() => createHotelOpsCommandIdempotencyKey(exampleCommands[0]))
   const [commandResult, setCommandResult] = useState<HotelOpsCommandResult | null>(null)
   const [tasks, setTasks] = useState<HotelOpsTask[]>([])
   const [approvals, setApprovals] = useState<HotelOpsApproval[]>([])
@@ -411,6 +413,11 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     void refresh()
   }, [])
 
+  const updateCommandDraft = (value: string) => {
+    setCommand(value)
+    setCommandIdempotencyKey(createHotelOpsCommandIdempotencyKey(value))
+  }
+
   const submitCommand = async () => {
     if (!command.trim()) {
       toast.error('Enter a Hotel Ops command.')
@@ -424,9 +431,10 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     setLoading(true)
     setError(null)
     try {
-      const payload = await hotelOpsApi.submitCommand(command)
+      const payload = await hotelOpsApi.submitCommand(command, 'web', commandIdempotencyKey)
       setCommandResult(payload.data)
-      toast.success(payload.message || 'Command accepted.')
+      toast.success(payload.data.duplicate ? 'Duplicate command returned existing task.' : payload.message || 'Command accepted.')
+      setCommandIdempotencyKey(createHotelOpsCommandIdempotencyKey(command))
       await refresh()
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'Could not submit command.'
@@ -664,13 +672,13 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
               <CardContent className="space-y-4">
                 <Textarea
                   value={command}
-                  onChange={(event) => setCommand(event.target.value)}
+                  onChange={(event) => updateCommandDraft(event.target.value)}
                   className="min-h-32"
                   placeholder="Example: Change Agoda Deluxe Room to 2,200 THB this Friday and Saturday."
                 />
                 <div className="flex flex-wrap gap-2">
                   {exampleCommands.map((example) => (
-                    <Button key={example} variant="outline" size="sm" onClick={() => setCommand(example)}>
+                    <Button key={example} variant="outline" size="sm" onClick={() => updateCommandDraft(example)}>
                       {example}
                     </Button>
                   ))}
@@ -692,6 +700,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     <div className="flex flex-wrap gap-2">
                       <Badge variant={riskTone(commandResult.parsed.riskLevel)}>{commandResult.parsed.riskLevel}</Badge>
                       <Badge variant={commandResult.decision.allowed ? 'secondary' : 'destructive'}>{commandResult.decision.allowed ? 'Allowed' : 'Blocked'}</Badge>
+                      {commandResult.duplicate && <Badge variant="outline">Duplicate replay</Badge>}
                       {commandResult.decision.approvalRequired && <Badge variant="outline">Approval required</Badge>}
                     </div>
                     <div className="font-semibold">{commandResult.parsed.taskType.replace(/_/g, ' ')}</div>
@@ -788,7 +797,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                       </div>
                       {alert.recommendedAction && (
                         <div className="rounded border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                          Recommendation: {alert.recommendedAction.taskType.replace(/_/g, ' ')} · {alert.recommendedAction.roomType || 'room type pending'}
+                          Recommendation: {alert.recommendedAction.taskType.replace(/_/g, ' ')} - {alert.recommendedAction.roomType || 'room type pending'}
                         </div>
                       )}
                       {alert.alertType === 'ROOM_IMBALANCE' && (

@@ -207,6 +207,7 @@ const assistantIntents = await importTypeScriptModule(resolve('src/lib/assistant
 const assistantTools = await importTypeScriptModule(resolve('src/lib/assistant/tools.ts'))
 const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
+const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
@@ -1065,6 +1066,11 @@ assert.throws(
   /source channel is not allowed/,
   'Hotel Ops source channel normalization rejects unsupported channels before Prisma writes',
 )
+const uiCommandKeyA = hotelOpsIdempotency.createHotelOpsCommandIdempotencyKey(' Check bookings  for next weekend. ')
+const uiCommandKeyB = hotelOpsIdempotency.createHotelOpsCommandIdempotencyKey(' Check bookings  for next weekend. ')
+assert.match(uiCommandKeyA, /^ui:check-bookings-for-next-weekend:[a-z0-9-]+$/i, 'Hotel Ops UI command idempotency keys include a safe command hint')
+assert.notEqual(uiCommandKeyA, uiCommandKeyB, 'Hotel Ops UI command idempotency keys are per-submit tokens')
+assert.equal(uiCommandKeyA.includes('  '), false, 'Hotel Ops UI command idempotency keys normalize whitespace')
 
 const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')

@@ -36,10 +36,10 @@ function query(filters: Record<string, string | number | null | undefined> = {})
 }
 
 export const hotelOpsApi = {
-  submitCommand(message: string, sourceChannel = 'web') {
+  submitCommand(message: string, sourceChannel = 'web', idempotencyKey?: string) {
     return apiRequest<{ ok: true; data: HotelOpsCommandResult; message?: string }>('/api/ops/commands', {
       method: 'POST',
-      body: JSON.stringify({ message, sourceChannel }),
+      body: JSON.stringify({ message, sourceChannel, idempotencyKey }),
     })
   },
 
