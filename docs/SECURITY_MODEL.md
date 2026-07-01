@@ -15,6 +15,7 @@ OTA websites remain external systems. The worker must not bypass CAPTCHA, 2FA, l
 - No OTA credentials, OpenAI keys, session tokens, or mailbox passwords belong in frontend code.
 - No credentials belong in model prompts, task raw messages, task logs, notifications, proof URLs, screenshots, or final summaries.
 - Booking.com credentials, when used, must come from backend environment secrets.
+- Booking email sync must use server-side Gmail API credentials or a future refresh-token flow, not a raw mailbox password.
 - Remote worker calls use `OTA_WORKER_BASE_URL` and `OTA_WORKER_SHARED_SECRET`.
 - Scheduled scans must not log credentials on failure.
 
