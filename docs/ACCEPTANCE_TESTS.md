@@ -38,6 +38,7 @@ Evidence: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`, and gua
 ## Executor
 
 - Approved mock `UPDATE_RATE` completes and stores safe proof.
+- Agoda, Trip.com, and Expedia dry-run skeleton adapters return platform-specific proof placeholders and preserve selector-failure and human-challenge paths.
 - Selector failure marks task `FAILED` and stores error proof.
 - 2FA/CAPTCHA marks task `NEEDS_HUMAN` and creates a human-action notification.
 - Authorized human-action resolution requires a reason, rejects under-authorized actors, and requeues the task without bypassing the challenge.

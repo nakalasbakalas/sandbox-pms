@@ -46,7 +46,7 @@ HOTEL_OPS_SCAN_INTERVAL_MINUTES=15
 
 Cron expressions can be stored with `HOTEL_OPS_SCAN_CRON`, but cron execution must be provided by external infrastructure calling `POST /api/ops/scan/run`.
 
-OTA credentials must be platform secrets only. Do not commit or log them. Booking.com adapter secrets are read from `BOOKING_COM_USERNAME` and `BOOKING_COM_PASSWORD`, with `BOOKING_USERNAME` and `BOOKING_PASSWORD` kept as compatibility aliases.
+OTA credentials must be platform secrets only. Do not commit or log them. Booking.com adapter secrets are read from `BOOKING_COM_USERNAME` and `BOOKING_COM_PASSWORD`, with `BOOKING_USERNAME` and `BOOKING_PASSWORD` kept as compatibility aliases. Optional Agoda, Trip.com, and Expedia skeletons report credential status from `AGODA_USERNAME` / `AGODA_PASSWORD`, `TRIP_COM_USERNAME` / `TRIP_COM_PASSWORD`, and `EXPEDIA_USERNAME` / `EXPEDIA_PASSWORD`. Those adapters still run as dry-run skeletons; real browser reads or writes need verified selectors, safe test-date proof, and account-owner approval.
 
 Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`.
 

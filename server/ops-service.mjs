@@ -5,6 +5,7 @@ import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-doma
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
 import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
+import { otaPlatformSkeletonStatuses } from './ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, resolveBookingEmailGmailAccessToken } from './pms-service.mjs'
 
 const TASK_TYPE_VALUES = [
@@ -2164,14 +2165,7 @@ export async function getOtaStatus(prisma, options = {}) {
           ? 'Booking.com adapter skeleton is available for signed dry-run tasks. Real browser writes remain disabled until selectors are verified.'
           : 'Booking.com adapter skeleton is installed, but server-side Booking.com credentials are not configured.',
       },
-      ...['agoda', 'trip', 'expedia'].map((platform) => ({
-        platform,
-        configured: false,
-        status: signedWorkerConfigured ? 'signed-mock-ready' : 'mock-dry-run',
-        message: signedWorkerConfigured
-          ? 'Signed worker boundary is configured; this platform still uses MockOtaBot until its adapter is implemented.'
-          : 'MVP uses MockOtaBot/dry-run until OTA credentials and Playwright selectors are verified.',
-      })),
+      ...otaPlatformSkeletonStatuses({ env: process.env, signedWorkerConfigured }),
     ],
   }
 }

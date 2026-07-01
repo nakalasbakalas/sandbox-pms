@@ -160,7 +160,8 @@ Worker requests:
 ## OTA Adapters
 
 - Booking.com: dry-run adapter skeleton with typed methods and human-challenge handling.
-- Agoda, Trip.com, Expedia: signed mock worker fallback.
+- Agoda, Trip.com, Expedia: explicit dry-run adapter skeletons with typed read/write placeholders, proof placeholders, selector-failure paths, and human-challenge handling.
+- Unknown or all-platform tasks: signed mock worker fallback.
 - Real browser writes are not enabled until selectors, proof capture, account-owner consent, and safe test dates are verified.
 
 ## Booking Intelligence

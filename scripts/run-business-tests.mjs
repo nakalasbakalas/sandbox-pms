@@ -15,6 +15,7 @@ import { extractWhatsAppOpsCommandText, extractWhatsAppWebhookMessages, normaliz
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
+import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, createUser, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 
 function createOpsCommandPrismaFixture() {
@@ -1204,6 +1205,85 @@ assert.equal(bookingSendReply.status, 'SUCCEEDED', 'Booking.com adapter supports
 assert.equal(bookingSendReply.proofScreenshots.length, 2, 'Booking.com send guest reply records before/after proof placeholders')
 assert.equal(JSON.stringify(bookingSendReply).includes('guest-secret'), false, 'Booking.com send reply dry-run result redacts credential-like message text')
 
+const skeletonStatuses = otaPlatformSkeletonStatuses({ env: {}, signedWorkerConfigured: true })
+assert.deepEqual(
+  skeletonStatuses.map((item) => item.platform),
+  ['agoda', 'trip', 'expedia'],
+  'Hotel Ops exposes explicit dry-run adapter skeletons for Agoda, Trip.com, and Expedia',
+)
+assert.equal(
+  skeletonStatuses.every((item) => item.status === 'adapter-skeleton-credentials-needed'),
+  true,
+  'Non-Booking OTA skeletons report credential/setup status instead of generic mock readiness',
+)
+
+const agodaAdapter = createOtaPlatformSkeletonAdapter('agoda', { now: '2026-06-30T00:00:00.000Z' })
+const agodaHealth = await agodaAdapter.healthCheck()
+assert.equal(agodaHealth.platform, 'agoda', 'Agoda adapter skeleton reports its platform')
+assert.equal(agodaHealth.authenticated, false, 'Agoda adapter skeleton does not pretend credentials are configured')
+const agodaDryRunRate = await agodaAdapter.updateRate({
+  taskId: 'agoda-task-1',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  amount: 2200,
+  currency: 'THB',
+  dryRun: true,
+})
+assert.equal(agodaDryRunRate.changed, false, 'Agoda dry-run rate update does not mutate OTA state')
+assert.equal(agodaDryRunRate.proofScreenshots.length, 2, 'Agoda dry-run write records before/after proof placeholders')
+await assert.rejects(
+  () => agodaAdapter.updateRate({
+    taskId: 'agoda-task-2',
+    roomType: 'Deluxe Room',
+    dateStart: '2026-07-03',
+    dateEnd: '2026-07-04',
+    amount: 2200,
+    currency: 'THB',
+    dryRun: false,
+  }),
+  /Agoda real browser writes are not implemented/,
+  'Agoda adapter skeleton rejects non-dry-run writes until selectors are verified',
+)
+const agodaSkeletonTask = await executeOtaPlatformSkeletonTask({
+  taskId: 'agoda-task-3',
+  taskType: 'UPDATE_RATE',
+  platform: 'agoda',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  rate: { amount: 2200, currency: 'THB' },
+  dryRun: true,
+})
+assert.equal(agodaSkeletonTask.status, 'SUCCEEDED', 'Agoda adapter skeleton executes signed dry-run tasks')
+assert.equal(agodaSkeletonTask.data.adapterMode, 'platform-skeleton', 'Agoda adapter skeleton labels worker results')
+const tripSelectorFailure = await executeOtaPlatformSkeletonTask({
+  taskId: 'trip-task-1',
+  taskType: 'UPDATE_RATE',
+  platform: 'trip',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  rate: { amount: 2200, currency: 'THB' },
+  dryRun: true,
+  mockScenario: 'selector_failure',
+})
+assert.equal(tripSelectorFailure.status, 'FAILED', 'Trip.com adapter skeleton preserves selector-failure test path')
+assert.equal(tripSelectorFailure.errorCode, 'MOCK_SELECTOR_FAILURE', 'Trip.com adapter skeleton preserves selector-failure error code')
+const expediaHumanChallenge = await executeOtaPlatformSkeletonTask({
+  taskId: 'expedia-task-1',
+  taskType: 'UPDATE_RATE',
+  platform: 'expedia',
+  roomType: 'Deluxe Room',
+  dateStart: '2026-07-03',
+  dateEnd: '2026-07-04',
+  rate: { amount: 2200, currency: 'THB' },
+  dryRun: true,
+  mockScenario: 'human_challenge',
+})
+assert.equal(expediaHumanChallenge.status, 'NEEDS_HUMAN', 'Expedia adapter skeleton preserves human-challenge test path')
+assert.equal(expediaHumanChallenge.errorCode, 'NEEDS_HUMAN_CHALLENGE', 'Expedia adapter skeleton preserves human-challenge error code')
+
 const workerTask = {
   id: 'ops-task-1',
   taskType: 'UPDATE_RATE',
@@ -1864,7 +1944,7 @@ assert.equal(approvalFixture.logs.some((log) => log.action === 'WORKER_SUCCEEDED
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_STARTED'), true, 'Hotel Ops service audits worker start')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofCount > 0), true, 'Hotel Ops service audits persisted worker proof artifacts')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
-assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
+assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('Dry run: would update Agoda')), true, 'Hotel Ops service records platform adapter execution result notifications')
 
 const unsafeProofFixture = createOpsCommandPrismaFixture()
 const unsafeProofResult = await submitOpsCommand(

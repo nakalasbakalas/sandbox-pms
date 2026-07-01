@@ -28,6 +28,7 @@ Last reviewed: 2026-07-02
 - Worker signing/replay protection: `server/ops-worker-auth.mjs`.
 - OTA adapter boundary: `server/ota-adapters/index.mjs`.
 - Booking.com dry-run adapter skeleton: `server/ota-adapters/booking-com.mjs`.
+- Agoda, Trip.com, and Expedia dry-run adapter skeletons: `server/ota-adapters/platform-skeleton.mjs`.
 - Data model: `prisma/schema.prisma` and `prisma/migrations/20260630133000_hotel_ops_command_center`.
 - UI: `src/components/hotel-ops/HotelOpsCommandCenterView.tsx`.
 - Today action surfacing: `src/components/today/TodayView.tsx`.
@@ -58,8 +59,9 @@ Last reviewed: 2026-07-02
 
 - No raw OTA credentials are exposed to frontend, prompts, task records, notifications, or proof artifacts.
 - Booking.com has a dry-run adapter skeleton with selector TODOs. Real browser writes remain disabled until selector and account-owner proof exists.
+- Agoda, Trip.com, and Expedia have explicit dry-run adapter skeletons with platform-specific credential status, proof placeholders, and selector-failure/human-challenge paths. Real browser reads and writes remain disabled until selectors and account-owner proof exist.
 - CAPTCHA, 2FA, locked-account, and password-expired challenges are not bypassed; staff can only record authorized human completion and requeue through the audited backend flow.
-- Agoda, Trip.com, and Expedia currently use the signed mock worker path.
+- Unknown or all-platform OTA tasks still use the signed mock worker fallback.
 - Email notifications are recorded as provider-pending intents by default. When `HOTEL_OPS_EMAIL_DELIVERY_ENABLED=true` and backend Gmail OAuth credentials are configured, Hotel Ops email notifications are sent through Gmail API and persisted as `SENT` or `FAILED`.
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
 - The parser is deterministic by default and strict-schema validated. An optional OpenAI Responses parser is available only when backend environment flags and `OPENAI_API_KEY` are configured; model output is redacted, schema-validated, policy-normalized, and falls back to deterministic parsing on provider failure.

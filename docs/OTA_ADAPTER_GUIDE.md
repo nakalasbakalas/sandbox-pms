@@ -7,7 +7,8 @@ The AI and manager UI never control the browser directly. They create controlled
 Current dispatch:
 
 - `server/ota-adapters/index.mjs` routes Booking.com tasks to the Booking.com adapter.
-- Non-Booking platforms use the signed mock worker fallback.
+- Agoda, Trip.com, and Expedia route to explicit dry-run adapter skeletons in `server/ota-adapters/platform-skeleton.mjs`.
+- Unknown or all-platform tasks use the signed mock worker fallback.
 - All worker execution is dry-run unless explicitly and safely changed later.
 
 ## Booking.com Adapter
@@ -30,6 +31,28 @@ Not complete:
 - persistent browser session management
 - real write execution
 - external screenshot storage
+- production account-owner verification
+
+## Agoda, Trip.com, And Expedia Skeletons
+
+File: `server/ota-adapters/platform-skeleton.mjs`
+
+Implemented:
+
+- platform-specific health and credential status
+- read reservations, guest messages, rates, and availability dry-run methods
+- dry-run rate, availability, open/close room, description, draft reply, and send reply methods
+- safe proof placeholders
+- selector-failure and human-challenge test paths
+- non-dry-run write rejection with platform-specific staff messages
+
+Not complete:
+
+- verified live selectors
+- persistent browser sessions
+- provider-specific 2FA/CAPTCHA handling
+- real browser reads or writes
+- external proof storage
 - production account-owner verification
 
 ## Adding A Platform
