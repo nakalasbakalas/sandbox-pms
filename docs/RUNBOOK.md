@@ -50,6 +50,18 @@ OTA credentials must be platform secrets only. Do not commit or log them. Bookin
 
 Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`.
 
+Optional LINE Hotel Ops command intake:
+
+```env
+LINE_CHANNEL_SECRET=...
+LINE_CHANNEL_ACCESS_TOKEN=...
+HOTEL_OPS_LINE_COMMANDS_ENABLED=true
+HOTEL_OPS_LINE_COMMAND_PREFIX=/ops
+HOTEL_OPS_LINE_COMMAND_USER_MAP={"line-user-id":"manager-username"}
+```
+
+LINE command intake is separate from guest/staff LINE messaging. Only signed LINE webhook events with the configured prefix are considered, and only mapped active PMS users with `create:ops-task` can create Hotel Ops tasks. Confirm `GET /api/line/webhook` reports command intake enabled and the user map configured before relying on LINE commands.
+
 Booking Inbox operators:
 
 1. Use `/booking-inbox` to review imported booking email events.

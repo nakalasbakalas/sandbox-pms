@@ -20,6 +20,10 @@ import {
 import { executeSignedOtaWorkerTask } from './ota-adapters/index.mjs'
 import { createHotelOpsScanScheduler } from './ops-scheduler.mjs'
 import {
+  lineOpsCommandIntakeStatus,
+  processLineOpsCommandEvents,
+} from './line-ops-intake.mjs'
+import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
   getIcalFeedByToken,
@@ -455,9 +459,16 @@ async function serveStatic(request, response) {
 
 async function handleLineWebhook(request, response) {
   if (request.method === 'GET') {
+    const opsCommandIntake = lineOpsCommandIntakeStatus(process.env)
     sendJson(response, 200, {
       ok: true,
       configured: Boolean(process.env.LINE_CHANNEL_SECRET && process.env.LINE_CHANNEL_ACCESS_TOKEN),
+      hotelOpsCommandIntake: {
+        enabled: opsCommandIntake.enabled,
+        prefix: opsCommandIntake.prefix,
+        userMapConfigured: opsCommandIntake.userMapConfigured,
+        userMapError: opsCommandIntake.userMapError,
+      },
     })
     return
   }
@@ -514,7 +525,21 @@ async function handleLineWebhook(request, response) {
     })
   }
 
-  sendJson(response, 200, { ok: true, received: events.length })
+  const opsCommandResults = await processLineOpsCommandEvents(db, events, {
+    env: process.env,
+    submitCommand: submitOpsCommand,
+  })
+  const opsAccepted = opsCommandResults.filter((result) => result.status === 'accepted').length
+
+  sendJson(response, 200, {
+    ok: true,
+    received: events.length,
+    hotelOpsCommands: {
+      enabled: lineOpsCommandIntakeStatus(process.env).enabled,
+      accepted: opsAccepted,
+      skipped: opsCommandResults.filter((result) => result.status === 'skipped').length,
+    },
+  })
 }
 
 async function handleApi(request, response, url) {

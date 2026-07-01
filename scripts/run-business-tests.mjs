@@ -8,6 +8,7 @@ import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
 import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
+import { extractLineOpsCommandText, lineOpsCommandIdempotencyKey, lineOpsCommandIntakeStatus, parseLineOpsCommandUserMap, processLineOpsCommandEvents, resolveLineOpsCommandEvent } from '../server/line-ops-intake.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1470,6 +1471,57 @@ const uiCommandKeyB = hotelOpsIdempotency.createHotelOpsCommandIdempotencyKey(' 
 assert.match(uiCommandKeyA, /^ui:check-bookings-for-next-weekend:[a-z0-9-]+$/i, 'Hotel Ops UI command idempotency keys include a safe command hint')
 assert.notEqual(uiCommandKeyA, uiCommandKeyB, 'Hotel Ops UI command idempotency keys are per-submit tokens')
 assert.equal(uiCommandKeyA.includes('  '), false, 'Hotel Ops UI command idempotency keys normalize whitespace')
+
+const lineOpsEnv = {
+  HOTEL_OPS_LINE_COMMANDS_ENABLED: 'true',
+  HOTEL_OPS_LINE_COMMAND_PREFIX: '/ops',
+  HOTEL_OPS_LINE_COMMAND_USER_MAP: JSON.stringify({ 'line-user-1': 'manager-line' }),
+}
+const lineOpsEvent = {
+  source: { userId: 'line-user-1', type: 'user' },
+  message: { id: 'line-message-1', type: 'text', text: '/ops Check bookings for next weekend.' },
+  timestamp: fixedOpsDate.getTime(),
+}
+assert.equal(lineOpsCommandIntakeStatus({}).enabled, false, 'Hotel Ops LINE command intake is disabled by default')
+assert.equal(lineOpsCommandIntakeStatus(lineOpsEnv).userMapConfigured, true, 'Hotel Ops LINE command intake reports an allowlist when configured')
+assert.equal(parseLineOpsCommandUserMap({ HOTEL_OPS_LINE_COMMAND_USER_MAP: '{bad-json' }).ok, false, 'Hotel Ops LINE command user map rejects invalid JSON')
+assert.equal(extractLineOpsCommandText(lineOpsEvent, { ...lineOpsEnv, HOTEL_OPS_LINE_COMMANDS_ENABLED: 'false' }), null, 'Hotel Ops LINE command text is ignored until enabled')
+assert.equal(extractLineOpsCommandText({ ...lineOpsEvent, message: { ...lineOpsEvent.message, text: 'Check bookings for next weekend.' } }, lineOpsEnv), null, 'Hotel Ops LINE command text requires the configured prefix')
+assert.equal(extractLineOpsCommandText(lineOpsEvent, lineOpsEnv), 'Check bookings for next weekend.', 'Hotel Ops LINE command text strips the configured prefix')
+assert.equal(lineOpsCommandIdempotencyKey(lineOpsEvent), 'line:line-message-1', 'Hotel Ops LINE command idempotency uses the LINE message id')
+const lineOpsPrisma = {
+  user: {
+    findFirst: async ({ where }) => {
+      assert.deepEqual(where.OR, [{ id: 'manager-line' }, { username: 'manager-line' }, { email: 'manager-line' }], 'Hotel Ops LINE command actor lookup accepts id, username, or email refs')
+      return {
+        id: 'manager-line-id',
+        username: 'manager-line',
+        email: null,
+        firstName: 'Line',
+        lastName: 'Manager',
+        role: 'MANAGER',
+        active: true,
+      }
+    },
+  },
+}
+const resolvedLineOpsEvent = await resolveLineOpsCommandEvent(lineOpsPrisma, lineOpsEvent, { env: lineOpsEnv })
+assert.equal(resolvedLineOpsEvent.status, 'accepted', 'Hotel Ops LINE command intake accepts allowlisted users')
+assert.equal(resolvedLineOpsEvent.actor.id, 'manager-line-id', 'Hotel Ops LINE command intake maps LINE user to an active PMS user')
+const unmappedLineOpsEvent = await resolveLineOpsCommandEvent(lineOpsPrisma, { ...lineOpsEvent, source: { userId: 'unknown-line-user' } }, { env: lineOpsEnv })
+assert.equal(unmappedLineOpsEvent.status, 'skipped', 'Hotel Ops LINE command intake skips non-allowlisted LINE users')
+let submittedLineOpsCommand = null
+const processedLineOpsEvents = await processLineOpsCommandEvents(lineOpsPrisma, [lineOpsEvent], {
+  env: lineOpsEnv,
+  submitCommand: async (_prisma, input, actor) => {
+    submittedLineOpsCommand = { input, actor }
+    return { task: { id: 'line-task-1' }, duplicate: false }
+  },
+})
+assert.equal(processedLineOpsEvents[0].status, 'accepted', 'Hotel Ops LINE command processing submits allowlisted commands')
+assert.equal(submittedLineOpsCommand.input.sourceChannel, 'line', 'Hotel Ops LINE command processing tags source channel as line')
+assert.equal(submittedLineOpsCommand.input.idempotencyKey, 'line:line-message-1', 'Hotel Ops LINE command processing passes retry-safe idempotency key')
+assert.equal(submittedLineOpsCommand.actor.id, 'manager-line-id', 'Hotel Ops LINE command processing submits as the mapped PMS actor')
 
 const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')

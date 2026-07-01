@@ -47,6 +47,7 @@ API routes:
 - `GET /api/ops/policy`
 - `POST /api/ops/scan/run`
 - `POST /api/internal/ops/worker/tasks`
+- `GET/POST /api/line/webhook` for signed LINE messaging and optional Hotel Ops command intake
 
 Booking-email API routes:
 
@@ -81,6 +82,17 @@ Both parser paths output the repo type `ParsedHotelOpsTask` with:
 Forbidden requests, credential requests, 2FA/CAPTCHA bypass attempts, audit-hiding requests, refunds, bulk cancellation, and policy changes are rejected as `FORBIDDEN` or blocked by MVP policy.
 
 OpenAI parser requests send redacted command text, request the strict Hotel Ops task JSON schema, validate the model output with the same backend schema, and then normalize risk, approval requirement, and hotel id against backend policy. Parser mode and fallback reason are included in task logs/audit metadata and surfaced in the `/ops/chat` parsed preview.
+
+## LINE Command Intake
+
+Signed LINE webhook traffic can optionally feed manager commands into the same `submitOpsCommand` backend service used by `/api/ops/commands`.
+
+- The bridge is disabled by default.
+- It only processes text messages that start with `HOTEL_OPS_LINE_COMMAND_PREFIX`, defaulting to `/ops`.
+- `HOTEL_OPS_LINE_COMMAND_USER_MAP` must map LINE source user ids to existing active PMS user ids, usernames, or emails.
+- The mapped PMS user must have `create:ops-task`; unmapped or under-permissioned LINE messages stay as normal LINE message records and are skipped for Ops intake.
+- Accepted LINE commands use the LINE message id as the idempotency key and are tagged with source channel `line`.
+- Parser validation, permission checks, approvals, queueing, notifications, emergency stop, and audit records remain owned by `server/ops-service.mjs`.
 
 ## Permission And Approval Rules
 
