@@ -1052,6 +1052,13 @@ assert.equal(allRoomsRateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser acce
 assert.equal(allRoomsRateCommand.platform, 'all', 'Hotel Ops parser accepts explicit all-channel writes')
 assert.equal(allRoomsRateCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room target')
 
+const allRoomsCloseCommand = parseHotelOpsCommand('Close all channels all rooms 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
+assert.equal(allRoomsCloseCommand.taskType, 'CLOSE_ROOM', 'Hotel Ops parser can recognize all-room close requests')
+assert.equal(allRoomsCloseCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room close targets')
+const allRoomsCloseDecision = evaluateOpsPermission(allRoomsCloseCommand, { id: 'owner', role: 'ADMIN' })
+assert.equal(allRoomsCloseDecision.allowed, false, 'Hotel Ops permission guard blocks full-property close requests')
+assert.equal(allRoomsCloseDecision.approvalRequired, false, 'Hotel Ops full-property close requests are not approval-queueable')
+
 const photoUpdateCommand = parseHotelOpsCommand('Update Booking listing photos.', { now: fixedOpsDate })
 assert.equal(photoUpdateCommand.taskType, 'UPDATE_PHOTOS', 'Hotel Ops parser maps photo changes to the critical disabled photo task')
 assert.equal(photoUpdateCommand.platform, 'booking', 'Hotel Ops photo parser detects the target platform')
@@ -1121,6 +1128,17 @@ assert.equal(approvalFixture.approvals.length, 1, 'Hotel Ops service creates an 
 assert.equal(approvalFixture.approvals[0].requiredRole, 'OWNER', 'Hotel Ops rate updates require owner approval')
 assert.equal(approvalFixture.notifications.some((notification) => notification.type === 'APPROVAL_REQUEST'), true, 'Hotel Ops service records approval request notifications')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REQUESTED'), true, 'Hotel Ops service audits approval requests')
+
+const allRoomsCloseFixture = createOpsCommandPrismaFixture()
+const allRoomsCloseResult = await submitOpsCommand(
+  allRoomsCloseFixture.prisma,
+  { message: 'Close all channels all rooms 2026-07-03 to 2026-07-04.', sourceChannel: 'web' },
+  opsOwner,
+)
+assert.equal(allRoomsCloseResult.task.status, 'DENIED', 'Hotel Ops service denies all-room close commands')
+assert.equal(allRoomsCloseResult.decision.allowed, false, 'Hotel Ops all-room close command returns a blocked decision')
+assert.equal(allRoomsCloseFixture.approvals.length, 0, 'Hotel Ops service does not create approvals for all-room close commands')
+assert.equal(allRoomsCloseFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION' && audit.changes.reason.includes('Closing all rooms')), true, 'Hotel Ops service audits all-room close policy decisions')
 
 approvalFixture.tasks.push({
   ...approvalFixture.tasks[0],

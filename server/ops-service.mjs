@@ -282,6 +282,10 @@ function writeTaskNeedsPlatform(platform) {
   return !platform || platform === 'unknown'
 }
 
+function targetsAllRooms(roomType) {
+  return String(roomType || '').trim().toLowerCase() === 'all rooms'
+}
+
 export function parseHotelOpsCommand(rawMessage, options = {}) {
   const message = normalizeText(rawMessage)
   const lower = message.toLowerCase()
@@ -557,6 +561,15 @@ function decisionFor(parsedTask, actor, emergencyStop) {
     const amount = Number(parsedTask.rate?.amount)
     if (!Number.isFinite(amount) || amount < rule.minRate || amount > rule.maxRate) {
       return { allowed: false, approvalRequired: true, requiredApprovalRole: 'OWNER', riskLevel: rule.riskLevel, reason: `Rate must be between ${rule.minRate} and ${rule.maxRate} THB.` }
+    }
+  }
+  if (parsedTask.taskType === 'CLOSE_ROOM' && targetsAllRooms(parsedTask.roomType)) {
+    return {
+      allowed: false,
+      approvalRequired: false,
+      requiredApprovalRole: rule.requiredApprovalRole,
+      riskLevel: rule.riskLevel,
+      reason: 'Closing all rooms is blocked by Hotel Ops policy. Target a specific room type or use emergency stop for a full pause.',
     }
   }
   if (parsedTask.taskType === 'NO_OP_CLARIFY') {
