@@ -3,6 +3,7 @@ import { useKV } from '@github/spark/hooks'
 import { format } from 'date-fns'
 import {
   Bed,
+  Brain,
   Broom,
   CalendarBlank,
   CurrencyCircleDollar,
@@ -22,8 +23,11 @@ import { MoneyDisplay } from '@/components/ui/money-display'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useNavigation } from '@/hooks/use-navigation'
+import { useAuth } from '@/hooks/use-auth'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
+import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
+import { hotelOpsApi } from '@/lib/hotel-ops-api-client'
 import { formatBangkokDate, formatBangkokTime, useI18n } from '@/lib/i18n'
 import { SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
 import { getOperationalRoomStatus, isRoomReadyForArrival } from '@/lib/hotel/rooms'
@@ -31,6 +35,7 @@ import { cn } from '@/lib/utils'
 import type { PropertySetup } from '@/types/onboarding'
 import type { NavigationRoute } from '@/types/navigation'
 import type { BookingEmailEvent } from '@/types/booking-email'
+import type { HotelOpsApproval, HotelOpsNotification, HotelOpsTrendAlert } from '@/types/hotel-ops'
 
 interface UnassignedReservation {
   id: string
@@ -74,6 +79,10 @@ function buildActionQueue(
   rooms: BoardRoomCard[],
   unassignedReservations: UnassignedReservation[],
   emailEvents: BookingEmailEvent[],
+  opsApprovals: HotelOpsApproval[],
+  opsNotifications: HotelOpsNotification[],
+  opsAlerts: HotelOpsTrendAlert[],
+  canApproveOps: boolean,
   inputDate: string,
   t: ReturnType<typeof useI18n>['t'],
 ): ActionItem[] {
@@ -89,6 +98,55 @@ function buildActionQueue(
       statusGroup: 'reservation',
       status: event.status === 'ERROR' ? 'blocked' : 'pending',
       amount: event.amount,
+    }))
+
+  const opsApprovalActions = canApproveOps
+    ? opsApprovals
+      .slice(0, 3)
+      .map<ActionItem>((approval) => {
+        const task = approval.task
+        return {
+          id: `ops-approval-${approval.id}`,
+          label: task?.taskType?.replace(/_/g, ' ') || 'Hotel Ops approval',
+          detail: `${task?.platform || 'Hotel Ops'} - ${task?.riskLevel || approval.requiredRole} - ${task?.requesterLabel || 'Requester'} needs approval`,
+          route: 'ops-approvals',
+          actionLabel: 'Review approval',
+          statusGroup: 'reservation',
+          status: 'pending',
+        }
+      })
+    : []
+
+  const opsNotificationActions = opsNotifications
+    .filter((notification) =>
+      notification.type === 'NEEDS_HUMAN' ||
+      notification.status === 'FAILED' ||
+      (notification.channel === 'EMAIL' && notification.status === 'PENDING_PROVIDER') ||
+      (!canApproveOps && notification.type === 'APPROVAL_REQUEST')
+    )
+    .slice(0, 3)
+    .map<ActionItem>((notification) => ({
+      id: `ops-notification-${notification.id}`,
+      label: notification.title || 'Hotel Ops notice',
+      detail: `${notification.channel.replace(/_/g, ' ')} - ${notification.status.replace(/_/g, ' ')} - ${notification.summary}`,
+      route: notification.type === 'APPROVAL_REQUEST' && canApproveOps ? 'ops-approvals' : 'ops-tasks',
+      actionLabel: notification.type === 'NEEDS_HUMAN' ? 'Handle task' : 'Open Ops',
+      statusGroup: 'reservation',
+      status: notification.type === 'NEEDS_HUMAN' || notification.status === 'FAILED' ? 'no_show' : 'pending',
+    }))
+
+  const opsAlertActions = opsAlerts
+    .filter((alert) => alert.status !== 'RESOLVED')
+    .filter((alert) => alert.recommendedAction || alert.severity === 'HIGH' || alert.severity === 'CRITICAL')
+    .slice(0, 3)
+    .map<ActionItem>((alert) => ({
+      id: `ops-alert-${alert.id}`,
+      label: alert.title,
+      detail: `${alert.alertType.replace(/_/g, ' ')} - ${alert.severity} - ${alert.summary}`,
+      route: 'ops-intelligence',
+      actionLabel: alert.recommendedAction ? 'Review recommendation' : 'Review alert',
+      statusGroup: 'reservation',
+      status: alert.severity === 'CRITICAL' ? 'no_show' : 'pending',
     }))
 
   const unassignedActions = unassignedReservations
@@ -144,22 +202,76 @@ function buildActionQueue(
       status: 'dirty',
     }))
 
-  return [...emailActions, ...unassignedActions, ...arrivalActions, ...departureActions, ...housekeepingActions].slice(0, 12)
+  return [
+    ...emailActions,
+    ...opsApprovalActions,
+    ...opsNotificationActions,
+    ...opsAlertActions,
+    ...unassignedActions,
+    ...arrivalActions,
+    ...departureActions,
+    ...housekeepingActions,
+  ].slice(0, 12)
 }
 
 export function TodayView() {
   const { t, language } = useI18n()
   const { navigate } = useNavigation()
+  const { hasAnyPermission } = useAuth()
   const { rooms } = useRoomSync()
   const { events: bookingEmailEvents, status: bookingEmailStatus, notConfigured: bookingEmailNotConfigured } = useBookingEmailInbox()
   const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const [selectedDate, setSelectedDate] = useState(() => toInputDate(new Date()))
   const [lastUpdated, setLastUpdated] = useState(() => new Date())
+  const [opsApprovals, setOpsApprovals] = useState<HotelOpsApproval[]>([])
+  const [opsNotifications, setOpsNotifications] = useState<HotelOpsNotification[]>([])
+  const [opsAlerts, setOpsAlerts] = useState<HotelOpsTrendAlert[]>([])
+  const [opsLoadError, setOpsLoadError] = useState<string | null>(null)
+  const canViewOps = SERVER_AUTH_ENABLED && hasAnyPermission(['view:ops'])
+  const canApproveOps = SERVER_AUTH_ENABLED && hasAnyPermission(['approve:ops-task'])
 
   useEffect(() => {
     setLastUpdated(new Date())
-  }, [rooms, unassignedReservations, selectedDate])
+  }, [opsAlerts, opsApprovals, opsNotifications, rooms, unassignedReservations, selectedDate])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!canViewOps) {
+      setOpsApprovals([])
+      setOpsNotifications([])
+      setOpsAlerts([])
+      setOpsLoadError(null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    async function loadHotelOpsActions() {
+      try {
+        const [notificationsPayload, alertsPayload, approvalsPayload] = await Promise.all([
+          hotelOpsApi.listNotifications({ limit: 20 }),
+          hotelOpsApi.listAlerts({ limit: 20 }),
+          canApproveOps ? hotelOpsApi.listApprovals() : Promise.resolve({ ok: true as const, data: [] as HotelOpsApproval[] }),
+        ])
+        if (cancelled) return
+        setOpsNotifications(notificationsPayload.data)
+        setOpsAlerts(alertsPayload.data)
+        setOpsApprovals(approvalsPayload.data)
+        setOpsLoadError(null)
+      } catch (error) {
+        if (cancelled) return
+        setOpsLoadError(error instanceof Error ? error.message : 'Hotel Ops actions could not be loaded.')
+      }
+    }
+
+    void loadHotelOpsActions()
+
+    return () => {
+      cancelled = true
+    }
+  }, [canApproveOps, canViewOps])
 
   const operationalRooms = rooms
 
@@ -176,6 +288,10 @@ export function TodayView() {
     const outOfOrder = operationalRooms.filter((room) => room.operationalStatus === 'OUT_OF_ORDER' || room.operationalStatus === 'OUT_OF_SERVICE' || room.operationalStatus === 'BLOCKED')
     const earlyArrivals = arrivals.filter((room) => room.checkIn && new Date(room.checkIn).getHours() < 14)
     const lateCheckouts = departures.filter((room) => room.checkOut && new Date(room.checkOut).getHours() > 11)
+    const opsNeedsHuman = opsNotifications.filter((notification) => notification.type === 'NEEDS_HUMAN' || notification.status === 'FAILED')
+    const opsProviderPending = opsNotifications.filter((notification) => notification.channel === 'EMAIL' && notification.status === 'PENDING_PROVIDER')
+    const opsActiveAlerts = opsAlerts.filter((alert) => alert.status !== 'RESOLVED')
+    const opsHighAlerts = opsActiveAlerts.filter((alert) => alert.severity === 'HIGH' || alert.severity === 'CRITICAL')
 
     return {
       arrivals,
@@ -192,12 +308,27 @@ export function TodayView() {
       earlyArrivals,
       lateCheckouts,
       noShows: 0,
+      opsApprovals: opsApprovals.length,
+      opsNeedsHuman,
+      opsProviderPending,
+      opsActiveAlerts,
+      opsHighAlerts,
     }
-  }, [bookingEmailEvents, operationalRooms, selectedDate, unassignedReservations])
+  }, [bookingEmailEvents, operationalRooms, opsAlerts, opsApprovals.length, opsNotifications, selectedDate, unassignedReservations])
 
   const actionQueue = useMemo(
-    () => buildActionQueue(operationalRooms, unassignedReservations, bookingEmailEvents, selectedDate, t),
-    [bookingEmailEvents, operationalRooms, selectedDate, t, unassignedReservations],
+    () => buildActionQueue(
+      operationalRooms,
+      unassignedReservations,
+      bookingEmailEvents,
+      opsApprovals,
+      opsNotifications,
+      opsAlerts,
+      canApproveOps,
+      selectedDate,
+      t,
+    ),
+    [bookingEmailEvents, canApproveOps, operationalRooms, opsAlerts, opsApprovals, opsNotifications, selectedDate, t, unassignedReservations],
   )
 
   const metricCards = [
@@ -210,6 +341,7 @@ export function TodayView() {
     { label: t('today.paymentIssues'), value: metrics.paymentIssues.length, icon: CurrencyCircleDollar, tone: 'text-rose-700 bg-rose-50 border-rose-100' },
     { label: t('today.unassigned'), value: metrics.unassigned.length, icon: Warning, tone: 'text-yellow-800 bg-yellow-50 border-yellow-100' },
     { label: 'Booking emails', value: metrics.emailNeedsReview.length + metrics.emailErrors.length, icon: EnvelopeSimple, tone: 'text-fuchsia-800 bg-fuchsia-50 border-fuchsia-100' },
+    { label: 'Hotel Ops', value: metrics.opsApprovals + metrics.opsNeedsHuman.length + metrics.opsHighAlerts.length, icon: Brain, tone: 'text-violet-800 bg-violet-50 border-violet-100' },
     { label: 'Out of order', value: metrics.outOfOrder.length, icon: Warning, tone: 'text-slate-800 bg-slate-50 border-slate-200' },
   ]
 
@@ -334,6 +466,12 @@ export function TodayView() {
                   <EnvelopeSimple size={16} weight="bold" />
                   Booking Inbox
                 </Button>
+                {canViewOps && (
+                  <Button variant="outline" className="justify-start" onClick={() => navigate('ops-chat')}>
+                    <Brain size={16} weight="bold" />
+                    Hotel Ops
+                  </Button>
+                )}
                 <Button variant="outline" className="justify-start" onClick={() => navigate('reservations')}>
                   <CalendarBlank size={16} weight="bold" />
                   {t('today.createReservation')}
@@ -351,6 +489,20 @@ export function TodayView() {
                 <WatchItem label={t('today.noShows')} value={metrics.noShows} />
                 <WatchItem label="Email processing errors" value={metrics.emailErrors.length} />
                 <WatchItem label="Mailbox not configured" value={bookingEmailNotConfigured && !bookingEmailStatus?.configured ? 1 : 0} />
+                {canViewOps && (
+                  <>
+                    <WatchItem label="Hotel Ops approvals" value={metrics.opsApprovals} />
+                    <WatchItem label="Ops needs human" value={metrics.opsNeedsHuman.length} />
+                    <WatchItem label="Ops high alerts" value={metrics.opsHighAlerts.length} />
+                    <WatchItem label="Ops email provider pending" value={metrics.opsProviderPending.length} />
+                    <WatchItem label="Ops load issue" value={opsLoadError ? 1 : 0} />
+                  </>
+                )}
+                {opsLoadError && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Hotel Ops: {opsLoadError}
+                  </div>
+                )}
                 <div className="rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
                   {t('common.taxInclusive')} · Asia/Bangkok · 24-hour time
                 </div>
