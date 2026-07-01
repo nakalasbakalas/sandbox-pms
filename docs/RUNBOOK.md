@@ -63,7 +63,7 @@ Hotel Ops notification center:
 
 1. In server mode, the shared header notification bell shows backend Hotel Ops notifications for users with Ops permission.
 2. Provider-pending email intents mean the PMS recorded the notification but no mail provider has delivered it yet.
-3. Read/dismiss controls are per-browser convenience state; use `/ops/tasks`, `/ops/approvals`, or `/ops/intelligence` as the operational source of truth.
+3. Read/dismiss controls persist server-side acknowledgment records and audit entries; provider delivery status stays unchanged.
 
 ## Daily Operation
 

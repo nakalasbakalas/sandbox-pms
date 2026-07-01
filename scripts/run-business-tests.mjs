@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -146,6 +146,25 @@ function createOpsCommandPrismaFixture() {
       create: async ({ data }) => {
         const notification = { id: `ops-notification-${++notificationCounter}`, createdAt: now(), ...data }
         notifications.push(notification)
+        return notification
+      },
+      findUnique: async ({ where }) => notifications.find((notification) => notification.id === where?.id) || null,
+      findMany: async ({ where = {}, take } = {}) => {
+        const results = notifications.filter((notification) => (
+          (!where.propertyId || notification.propertyId === where.propertyId)
+          && (!where.status || notification.status === where.status)
+          && (!where.channel || notification.channel === where.channel)
+          && (
+            where.dismissedAt === undefined
+            || (where.dismissedAt === null ? !notification.dismissedAt : Boolean(notification.dismissedAt))
+          )
+        ))
+        return results.slice(0, take || results.length)
+      },
+      update: async ({ where, data }) => {
+        const notification = notifications.find((item) => item.id === where?.id)
+        if (!notification) return null
+        Object.assign(notification, data)
         return notification
       },
     },
@@ -612,6 +631,32 @@ assert.equal(opsNotificationDisplay.hotelOpsNotificationPriority({
   channel: 'IN_APP',
   status: 'SENT',
 }), 'URGENT', 'Hotel Ops needs-human notifications remain urgent in the notification center')
+
+const notificationAckFixture = createOpsCommandPrismaFixture()
+const opsNotificationToAck = await notificationAckFixture.prisma.hotelOpsNotification.create({
+  data: {
+    propertyId: 'property-ops-test',
+    type: 'TASK_UPDATE',
+    channel: 'IN_APP',
+    status: 'SENT',
+    title: 'Hotel Ops task update',
+    summary: 'A task moved forward.',
+    actionUrl: '/ops/tasks',
+  },
+})
+const readOpsNotice = await readOpsNotification(notificationAckFixture.prisma, opsNotificationToAck.id, { id: 'manager', role: 'MANAGER', username: 'manager' })
+assert.equal(Boolean(readOpsNotice.readAt), true, 'Hotel Ops notification read state is persisted by the backend')
+assert.equal(readOpsNotice.readBy, 'manager', 'Hotel Ops notification read actor is persisted')
+await readOpsNotification(notificationAckFixture.prisma, opsNotificationToAck.id, { id: 'manager', role: 'MANAGER', username: 'manager' })
+assert.equal(notificationAckFixture.audits.filter((audit) => audit.action === 'OPS_NOTIFICATION_READ').length, 1, 'Hotel Ops duplicate read acknowledgments do not create duplicate audit mutations')
+const dismissedOpsNotice = await dismissOpsNotification(notificationAckFixture.prisma, opsNotificationToAck.id, { id: 'owner', role: 'ADMIN', username: 'owner' })
+assert.equal(Boolean(dismissedOpsNotice.dismissedAt), true, 'Hotel Ops notification dismiss state is persisted by the backend')
+assert.equal(dismissedOpsNotice.dismissedBy, 'owner', 'Hotel Ops notification dismiss actor is persisted')
+assert.equal(notificationAckFixture.audits.some((audit) => audit.action === 'OPS_NOTIFICATION_DISMISSED'), true, 'Hotel Ops notification dismiss is audited')
+const activeOpsNotifications = await listOpsNotifications(notificationAckFixture.prisma, { dismissed: false })
+const dismissedOpsNotifications = await listOpsNotifications(notificationAckFixture.prisma, { dismissed: true })
+assert.equal(activeOpsNotifications.some((notification) => notification.id === opsNotificationToAck.id), false, 'Hotel Ops dismissed notifications are excluded from active notification lists')
+assert.equal(dismissedOpsNotifications.some((notification) => notification.id === opsNotificationToAck.id), true, 'Hotel Ops dismissed notifications remain queryable for audit review')
 
 const bookingEmailNoApi = bookingEmailCapabilities.resolveBookingEmailCapabilities({
   serverApiEnabled: true,

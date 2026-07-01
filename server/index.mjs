@@ -31,6 +31,7 @@ import {
   approveOpsTask,
   cancelOpsTask,
   denyOpsTask,
+  dismissOpsNotification,
   getEmergencyStop,
   getOpsTask,
   getOtaStatus,
@@ -39,6 +40,7 @@ import {
   listOpsApprovals,
   listOpsTasks,
   listOpsTrendAlerts,
+  readOpsNotification,
   resolveOpsTrendAlert,
   runQueuedOpsTask,
   runOpsScan,
@@ -704,9 +706,24 @@ async function handleApi(request, response, url) {
       data: await listOpsNotifications(db, {
         status: url.searchParams.get('status'),
         channel: url.searchParams.get('channel'),
+        dismissed: url.searchParams.get('dismissed'),
         limit: url.searchParams.get('limit'),
       }),
     })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/notifications\/(?<id>[^/]+)\/read$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: await readOpsNotification(db, opsParams.id, user), message: 'Hotel Ops notification marked read.' })
+    return true
+  }
+
+  opsParams = routeParam(url.pathname, /^\/api\/ops\/notifications\/(?<id>[^/]+)\/dismiss$/)
+  if (opsParams && request.method === 'POST') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, { ok: true, data: await dismissOpsNotification(db, opsParams.id, user), message: 'Hotel Ops notification dismissed.' })
     return true
   }
 

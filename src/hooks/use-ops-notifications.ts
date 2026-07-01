@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useKV } from '@github/spark/hooks'
 import { useAuth } from '@/hooks/use-auth'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 import { hotelOpsApi } from '@/lib/hotel-ops-api-client'
@@ -10,10 +9,6 @@ import {
 import type { Notification } from '@/hooks/use-notifications'
 import type { HotelOpsNotification } from '@/types/hotel-ops'
 
-function uniqueIds(ids: string[]) {
-  return Array.from(new Set(ids.filter(Boolean)))
-}
-
 export type UseOpsNotificationsResult = {
   notifications: Notification[]
   activeNotifications: Notification[]
@@ -22,10 +17,10 @@ export type UseOpsNotificationsResult = {
   loading: boolean
   loadError: string | null
   refresh: () => Promise<void>
-  markAsRead: (notificationId: string) => void
-  markAllAsRead: () => void
-  dismissNotification: (notificationId: string) => void
-  clearAll: () => void
+  markAsRead: (notificationId: string) => Promise<void>
+  markAllAsRead: () => Promise<void>
+  dismissNotification: (notificationId: string) => Promise<void>
+  clearAll: () => Promise<void>
 }
 
 export function useOpsNotifications(): UseOpsNotificationsResult {
@@ -34,8 +29,6 @@ export function useOpsNotifications(): UseOpsNotificationsResult {
   const [serverNotifications, setServerNotifications] = useState<HotelOpsNotification[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [readIds, setReadIds] = useKV<string[]>('hotel-ops-notification-read-ids', [])
-  const [dismissedIds, setDismissedIds] = useKV<string[]>('hotel-ops-notification-dismissed-ids', [])
 
   const refresh = useCallback(async () => {
     if (!canLoadOpsNotifications) {
@@ -46,7 +39,7 @@ export function useOpsNotifications(): UseOpsNotificationsResult {
 
     setLoading(true)
     try {
-      const payload = await hotelOpsApi.listNotifications({ limit: 30 })
+      const payload = await hotelOpsApi.listNotifications({ dismissed: false, limit: 30 })
       setServerNotifications(payload.data)
       setLoadError(null)
     } catch (error) {
@@ -60,12 +53,15 @@ export function useOpsNotifications(): UseOpsNotificationsResult {
     void refresh()
   }, [refresh])
 
+  const replaceNotification = useCallback((updatedNotification: HotelOpsNotification) => {
+    setServerNotifications((current) => current.map((notification) =>
+      notification.id === updatedNotification.id ? updatedNotification : notification
+    ))
+  }, [])
+
   const notifications = useMemo(
-    () => serverNotifications.map((notification) => toHotelOpsNotificationDisplay(notification, {
-      readIds: readIds || [],
-      dismissedIds: dismissedIds || [],
-    })),
-    [dismissedIds, readIds, serverNotifications],
+    () => serverNotifications.map((notification) => toHotelOpsNotificationDisplay(notification)),
+    [serverNotifications],
   )
 
   const activeNotifications = useMemo(
@@ -78,26 +74,59 @@ export function useOpsNotifications(): UseOpsNotificationsResult {
     [activeNotifications],
   )
 
-  const markAsRead = useCallback((notificationId: string) => {
+  const markAsRead = useCallback(async (notificationId: string) => {
     const backendId = hotelOpsNotificationBackendId(notificationId)
-    setReadIds((current) => uniqueIds([...(current || []), backendId]))
-  }, [setReadIds])
+    try {
+      const payload = await hotelOpsApi.readNotification(backendId)
+      replaceNotification(payload.data)
+      setLoadError(null)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Hotel Ops notification could not be marked read.')
+    }
+  }, [replaceNotification])
 
-  const markAllAsRead = useCallback(() => {
-    setReadIds((current) => uniqueIds([...(current || []), ...serverNotifications.map((notification) => notification.id)]))
-  }, [serverNotifications, setReadIds])
+  const markAllAsRead = useCallback(async () => {
+    const unreadIds = serverNotifications
+      .filter((notification) => !notification.readAt && !notification.dismissedAt)
+      .map((notification) => notification.id)
+    if (unreadIds.length === 0) return
+    try {
+      const payloads = await Promise.all(unreadIds.map((notificationId) => hotelOpsApi.readNotification(notificationId)))
+      setServerNotifications((current) => current.map((notification) => {
+        const updated = payloads.find((payload) => payload.data.id === notification.id)?.data
+        return updated || notification
+      }))
+      setLoadError(null)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Hotel Ops notifications could not be marked read.')
+    }
+  }, [serverNotifications])
 
-  const dismissNotification = useCallback((notificationId: string) => {
+  const dismissNotification = useCallback(async (notificationId: string) => {
     const backendId = hotelOpsNotificationBackendId(notificationId)
-    setReadIds((current) => uniqueIds([...(current || []), backendId]))
-    setDismissedIds((current) => uniqueIds([...(current || []), backendId]))
-  }, [setDismissedIds, setReadIds])
+    try {
+      const payload = await hotelOpsApi.dismissNotification(backendId)
+      replaceNotification(payload.data)
+      setLoadError(null)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Hotel Ops notification could not be dismissed.')
+    }
+  }, [replaceNotification])
 
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
     const activeIds = activeNotifications.map((notification) => hotelOpsNotificationBackendId(notification.id))
-    setReadIds((current) => uniqueIds([...(current || []), ...activeIds]))
-    setDismissedIds((current) => uniqueIds([...(current || []), ...activeIds]))
-  }, [activeNotifications, setDismissedIds, setReadIds])
+    if (activeIds.length === 0) return
+    try {
+      const payloads = await Promise.all(activeIds.map((notificationId) => hotelOpsApi.dismissNotification(notificationId)))
+      setServerNotifications((current) => current.map((notification) => {
+        const updated = payloads.find((payload) => payload.data.id === notification.id)?.data
+        return updated || notification
+      }))
+      setLoadError(null)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Hotel Ops notifications could not be dismissed.')
+    }
+  }, [activeNotifications])
 
   return {
     notifications,

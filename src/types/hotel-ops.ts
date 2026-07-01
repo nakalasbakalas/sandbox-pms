@@ -122,6 +122,10 @@ export type HotelOpsNotification = {
   actionUrl?: string | null
   metadata?: unknown
   sentAt?: string | null
+  readAt?: string | null
+  readBy?: string | null
+  dismissedAt?: string | null
+  dismissedBy?: string | null
   createdAt: string
 }
 

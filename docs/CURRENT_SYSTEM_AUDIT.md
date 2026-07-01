@@ -13,7 +13,7 @@ Last reviewed: 2026-07-01
 - Hotel Ops AI mode: deterministic controlled parser today, not live OpenAI execution.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
-- Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is local UI state until a server acknowledgment route exists.
+- Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is persisted through backend acknowledgment routes.
 - Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync still requires server-owned API credentials.
 
 ## Relevant Implementation Files
@@ -36,7 +36,7 @@ Last reviewed: 2026-07-01
 ## Implemented Surface
 
 - `/ops/chat`, `/ops/approvals`, `/ops/tasks`, `/ops/intelligence`, and `/ops/settings` render through the existing navigation shell.
-- `/api/ops/commands`, task, approval, notification, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
+- `/api/ops/commands`, task, approval, notification read/dismiss, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
 - `/api/ops/policy` exposes the backend-enforced permission/risk policy for the Settings policy matrix.
 - High-risk task approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop mutations require reasons.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
@@ -51,7 +51,7 @@ Last reviewed: 2026-07-01
 - Booking.com has a dry-run adapter skeleton with selector TODOs. Real browser writes remain disabled until selector and account-owner proof exists.
 - Agoda, Trip.com, and Expedia currently use the signed mock worker path.
 - Email notifications are recorded as provider-pending intents unless a real provider adapter is configured.
-- Hotel Ops notification read/dismiss state is currently local per browser; durable server acknowledgment remains future backend work.
+- Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
 - The parser is deterministic and schema-shaped; there is no live OpenAI parser call in production code yet.
 - Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.
 

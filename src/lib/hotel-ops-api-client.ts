@@ -27,7 +27,7 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
   return payload as T
 }
 
-function query(filters: Record<string, string | number | null | undefined> = {}) {
+function query(filters: Record<string, string | number | boolean | null | undefined> = {}) {
   const params = new URLSearchParams()
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') params.set(key, String(value))
@@ -84,8 +84,22 @@ export const hotelOpsApi = {
     return apiRequest<{ ok: true; data: HotelOpsApproval[] }>('/api/ops/approvals')
   },
 
-  listNotifications(filters: { status?: string; channel?: string; limit?: number } = {}) {
+  listNotifications(filters: { status?: string; channel?: string; dismissed?: boolean; limit?: number } = {}) {
     return apiRequest<{ ok: true; data: HotelOpsNotification[] }>(`/api/ops/notifications${query(filters)}`)
+  },
+
+  readNotification(notificationId: string) {
+    return apiRequest<{ ok: true; data: HotelOpsNotification; message?: string }>(`/api/ops/notifications/${encodeURIComponent(notificationId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+  },
+
+  dismissNotification(notificationId: string) {
+    return apiRequest<{ ok: true; data: HotelOpsNotification; message?: string }>(`/api/ops/notifications/${encodeURIComponent(notificationId)}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
   },
 
   listAlerts(filters: { status?: string; limit?: number } = {}) {

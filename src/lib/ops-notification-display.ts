@@ -53,6 +53,8 @@ export function toHotelOpsNotificationDisplay(
   const backendId = notification.id
   const readIds = options.readIds || []
   const dismissedIds = options.dismissedIds || []
+  const read = Boolean(notification.readAt) || readIds.includes(backendId)
+  const dismissed = Boolean(notification.dismissedAt) || dismissedIds.includes(backendId)
 
   return {
     id: hotelOpsNotificationDisplayId(backendId),
@@ -61,8 +63,8 @@ export function toHotelOpsNotificationDisplay(
     title: notification.title,
     message: hotelOpsNotificationMessage(notification),
     timestamp: new Date(notification.createdAt),
-    read: readIds.includes(backendId),
-    dismissed: dismissedIds.includes(backendId),
+    read,
+    dismissed,
     actionRequired: hotelOpsNotificationActionRequired(notification),
     actionUrl: notification.actionUrl || undefined,
     actionLabel: 'Open Ops',

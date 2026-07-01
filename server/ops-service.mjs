@@ -734,6 +734,10 @@ function serializeNotification(notification) {
     actionUrl: notification.actionUrl,
     metadata: notification.metadata,
     sentAt: notification.sentAt?.toISOString?.() || notification.sentAt,
+    readAt: notification.readAt?.toISOString?.() || notification.readAt || null,
+    readBy: notification.readBy || null,
+    dismissedAt: notification.dismissedAt?.toISOString?.() || notification.dismissedAt || null,
+    dismissedBy: notification.dismissedBy || null,
     createdAt: notification.createdAt?.toISOString?.() || notification.createdAt,
   }
 }
@@ -1501,12 +1505,83 @@ export async function listOpsNotifications(prisma, filters = {}) {
   const where = { propertyId: property.id }
   if (filters.status) where.status = String(filters.status).toUpperCase()
   if (filters.channel) where.channel = String(filters.channel).toUpperCase()
+  if (filters.dismissed !== undefined && filters.dismissed !== null && filters.dismissed !== '') {
+    const dismissed = String(filters.dismissed).toLowerCase() === 'true'
+    where.dismissedAt = dismissed ? { not: null } : null
+  }
   const notifications = await prisma.hotelOpsNotification.findMany({
     where,
     orderBy: { createdAt: 'desc' },
     take: Math.min(Math.max(Number(filters.limit) || 50, 1), 200),
   })
   return notifications.map(serializeNotification)
+}
+
+async function getOpsNotificationForProperty(tx, notificationId) {
+  const property = await getProperty(tx)
+  const notification = await tx.hotelOpsNotification.findUnique({ where: { id: notificationId } })
+  if (!notification || notification.propertyId !== property.id) {
+    throw new PmsValidationError('Hotel Ops notification was not found.', 404)
+  }
+  return notification
+}
+
+export async function readOpsNotification(prisma, notificationId, actor) {
+  return prisma.$transaction(async (tx) => {
+    const notification = await getOpsNotificationForProperty(tx, notificationId)
+    if (notification.readAt) return serializeNotification(notification)
+
+    const updated = await tx.hotelOpsNotification.update({
+      where: { id: notification.id },
+      data: {
+        readAt: new Date(),
+        readBy: actorLabel(actor),
+      },
+    })
+    if (updated.taskId) {
+      await taskLog(tx, updated.taskId, 'NOTIFICATION_READ', `Hotel Ops notification read: ${updated.title}`, actor, {
+        notificationId: updated.id,
+      })
+    }
+    await audit(tx, actor, 'OPS_NOTIFICATION_READ', 'hotelOpsNotification', updated.id, {
+      notificationId: updated.id,
+      type: updated.type,
+      channel: updated.channel,
+    })
+    return serializeNotification(updated)
+  })
+}
+
+export async function dismissOpsNotification(prisma, notificationId, actor) {
+  return prisma.$transaction(async (tx) => {
+    const notification = await getOpsNotificationForProperty(tx, notificationId)
+    if (notification.dismissedAt) return serializeNotification(notification)
+
+    const now = new Date()
+    const actorName = actorLabel(actor)
+    const updated = await tx.hotelOpsNotification.update({
+      where: { id: notification.id },
+      data: {
+        readAt: notification.readAt || now,
+        readBy: notification.readBy || actorName,
+        dismissedAt: now,
+        dismissedBy: actorName,
+      },
+    })
+    if (updated.taskId) {
+      await taskLog(tx, updated.taskId, 'NOTIFICATION_DISMISSED', `Hotel Ops notification dismissed: ${updated.title}`, actor, {
+        notificationId: updated.id,
+        readImplied: !notification.readAt,
+      })
+    }
+    await audit(tx, actor, 'OPS_NOTIFICATION_DISMISSED', 'hotelOpsNotification', updated.id, {
+      notificationId: updated.id,
+      type: updated.type,
+      channel: updated.channel,
+      readImplied: !notification.readAt,
+    })
+    return serializeNotification(updated)
+  })
 }
 
 export async function getEmergencyStop(prisma) {

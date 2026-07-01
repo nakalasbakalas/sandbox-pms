@@ -666,9 +666,14 @@ model HotelOpsNotification {
   actionUrl        String?
   metadata         Json?
   sentAt           DateTime?
+  readAt           DateTime?
+  readBy           String?
+  dismissedAt      DateTime?
+  dismissedBy      String?
   createdAt        DateTime                     @default(now())
 
   @@index([propertyId, status, createdAt])
+  @@index([propertyId, dismissedAt, createdAt])
   @@index([taskId, createdAt])
   @@index([trendAlertId, createdAt])
   @@index([type, channel])

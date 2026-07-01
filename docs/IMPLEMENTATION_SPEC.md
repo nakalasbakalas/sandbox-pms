@@ -35,6 +35,8 @@ API routes:
 - `POST /api/ops/tasks/:id/run`
 - `GET /api/ops/approvals`
 - `GET /api/ops/notifications`
+- `POST /api/ops/notifications/:id/read`
+- `POST /api/ops/notifications/:id/dismiss`
 - `GET /api/ops/intelligence/alerts`
 - `POST /api/ops/intelligence/alerts/:id/approve-recommendation`
 - `POST /api/ops/intelligence/alerts/:id/acknowledge`
@@ -153,4 +155,4 @@ Notifications are backend records:
 - `EMAIL` records are provider-pending intents unless a real mail provider is configured.
 - Notification text and metadata are sanitized before persistence.
 - The shared PMS header notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
-- Read and dismiss actions for Hotel Ops notifications are local browser state only today. A durable server acknowledgment route is not implemented yet.
+- Read and dismiss actions call backend acknowledgment routes, persist actor/timestamp fields, and create audit records. This acknowledgment state is separate from provider delivery status.
