@@ -519,6 +519,27 @@ assert.equal(notificationDrafts[1].channel, 'EMAIL', 'Hotel Ops notification rec
 assert.equal(notificationDrafts[1].status, 'PENDING_PROVIDER', 'Hotel Ops does not fake email delivery without a provider')
 assert.equal(notificationDrafts[1].recipientAddress, 'ops@property.test', 'Hotel Ops email intent targets the property alert email')
 
+const redactedNotificationDrafts = buildOpsNotificationDrafts({
+  id: 'property-1',
+  reservationAlertEmail: null,
+}, {
+  type: 'TASK_UPDATE',
+  taskId: 'task-secret',
+  title: 'password=title-secret',
+  summary: 'Worker response token=summary-secret',
+  metadata: {
+    apiKey: 'metadata-secret',
+    nested: {
+      password: 'nested-secret',
+      note: 'safe note',
+    },
+  },
+})
+assert.equal(JSON.stringify(redactedNotificationDrafts).includes('title-secret'), false, 'Hotel Ops notifications redact credential-like title text')
+assert.equal(JSON.stringify(redactedNotificationDrafts).includes('summary-secret'), false, 'Hotel Ops notifications redact credential-like summary text')
+assert.equal(JSON.stringify(redactedNotificationDrafts).includes('metadata-secret'), false, 'Hotel Ops notifications redact credential-like metadata values')
+assert.equal(redactedNotificationDrafts[0].metadata.nested.note, 'safe note', 'Hotel Ops notification metadata keeps safe operational context')
+
 const signedWorkerBody = {
   taskId: 'task-1',
   taskType: 'UPDATE_RATE',

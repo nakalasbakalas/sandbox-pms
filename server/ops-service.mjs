@@ -651,8 +651,8 @@ function notificationEmailAddress(property) {
 
 export function buildOpsNotificationDrafts(property, input = {}) {
   const actionUrl = appActionUrl(input.actionPath || '/ops/tasks')
-  const title = normalizeText(input.title)
-  const summary = normalizeText(input.summary)
+  const title = redactedSensitiveText(normalizeText(input.title))
+  const summary = redactedSensitiveText(normalizeText(input.summary))
   if (!title || !summary) throw new PmsValidationError('Notification title and summary are required.')
 
   const shared = {
@@ -665,7 +665,7 @@ export function buildOpsNotificationDrafts(property, input = {}) {
     title,
     summary,
     actionUrl,
-    metadata: input.metadata || undefined,
+    metadata: input.metadata ? sanitizeOpsMetadata(input.metadata) : undefined,
   }
 
   const drafts = [{
