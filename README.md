@@ -86,6 +86,15 @@ Primary runbooks:
 - [docs/disaster-recovery.md](docs/disaster-recovery.md)
 - [docs/upstream-waf-rate-limit.md](docs/upstream-waf-rate-limit.md)
 
+Hotel Ops command-center docs:
+
+- [docs/CURRENT_SYSTEM_AUDIT.md](docs/CURRENT_SYSTEM_AUDIT.md)
+- [docs/IMPLEMENTATION_SPEC.md](docs/IMPLEMENTATION_SPEC.md)
+- [docs/RUNBOOK.md](docs/RUNBOOK.md)
+- [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md)
+- [docs/OTA_ADAPTER_GUIDE.md](docs/OTA_ADAPTER_GUIDE.md)
+- [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md)
+
 Before launch sign-off, the live proof register must record current production-secret metadata with values redacted, rollback owner and deputy, database recovery owner, latest known-good deploy ID, backup/restore evidence, WAF/rate-limit rule IDs, production user/role proof, and accepted deferrals.
 
 ## License
