@@ -443,6 +443,15 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
     })
   }
 
+  if (/(add|delete|remove|replace|upload|update|change).*(photo|photos|image|images|picture|pictures|gallery)/.test(lower)) {
+    return taskWithRule('UPDATE_PHOTOS', {
+      platform,
+      roomType,
+      rationale: 'Photo and gallery changes are critical and disabled in the MVP.',
+      confidence: 0.76,
+    })
+  }
+
   if (/(update|change|rewrite).*(description|listing)/.test(lower)) {
     const description = parseMessagePayload(message)
     if (writeTaskNeedsPlatform(platform)) {

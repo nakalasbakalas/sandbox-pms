@@ -871,6 +871,14 @@ assert.equal(allRoomsRateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser acce
 assert.equal(allRoomsRateCommand.platform, 'all', 'Hotel Ops parser accepts explicit all-channel writes')
 assert.equal(allRoomsRateCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room target')
 
+const photoUpdateCommand = parseHotelOpsCommand('Update Booking listing photos.', { now: fixedOpsDate })
+assert.equal(photoUpdateCommand.taskType, 'UPDATE_PHOTOS', 'Hotel Ops parser maps photo changes to the critical disabled photo task')
+assert.equal(photoUpdateCommand.platform, 'booking', 'Hotel Ops photo parser detects the target platform')
+assert.equal(photoUpdateCommand.riskLevel, 'CRITICAL', 'Hotel Ops photo updates are critical risk')
+const photoUpdateDecision = evaluateOpsPermission(photoUpdateCommand, { id: 'owner', role: 'ADMIN' })
+assert.equal(photoUpdateDecision.allowed, false, 'Hotel Ops permission guard blocks disabled photo changes in the MVP')
+assert.equal(photoUpdateDecision.requiredApprovalRole, 'OWNER', 'Hotel Ops disabled photo changes still identify owner approval role')
+
 assert.equal(normalizeOpsSourceChannel('LINE'), 'line', 'Hotel Ops source channel normalization accepts known channels case-insensitively')
 assert.throws(
   () => normalizeOpsSourceChannel('browser-extension'),
@@ -1072,6 +1080,18 @@ assert.equal(forbiddenFixture.logs.some((log) => log.action === 'VALIDATION_FAIL
 assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_PARSER_OUTPUT' && audit.changes.taskType === 'FORBIDDEN'), true, 'Hotel Ops service audits forbidden parser output')
 assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_VALIDATION_FAILED' && audit.changes.valid === false), true, 'Hotel Ops service audits validation failures for forbidden commands')
 assert.equal(forbiddenFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION' && audit.changes.allowed === false), true, 'Hotel Ops service audits denied forbidden decisions')
+
+const disabledPhotoFixture = createOpsCommandPrismaFixture()
+const disabledPhotoResult = await submitOpsCommand(
+  disabledPhotoFixture.prisma,
+  { message: 'Update Booking listing photos.', sourceChannel: 'web' },
+  opsOwner,
+)
+assert.equal(disabledPhotoResult.task.taskType, 'UPDATE_PHOTOS', 'Hotel Ops service persists disabled photo commands as typed critical tasks')
+assert.equal(disabledPhotoResult.task.status, 'DENIED', 'Hotel Ops service denies disabled photo commands instead of queueing them')
+assert.equal(disabledPhotoFixture.approvals.length, 0, 'Hotel Ops service does not create approvals for disabled MVP photo changes')
+assert.equal(disabledPhotoFixture.audits.some((audit) => audit.action === 'OPS_PARSER_OUTPUT' && audit.changes.taskType === 'UPDATE_PHOTOS'), true, 'Hotel Ops service audits disabled photo parser output')
+assert.equal(disabledPhotoFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION' && audit.changes.reason.includes('not enabled in the MVP')), true, 'Hotel Ops service audits disabled MVP photo decisions')
 
 const queuedReadTask = {
   taskType: 'READ_RESERVATIONS',
