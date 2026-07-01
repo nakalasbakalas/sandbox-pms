@@ -831,12 +831,17 @@ const guestMessagesCommand = parseHotelOpsCommand('Read guest messages from Book
 assert.equal(guestMessagesCommand.taskType, 'READ_GUEST_MESSAGES', 'Hotel Ops parser maps guest message reads to read-only message tasks')
 assert.equal(guestMessagesCommand.riskLevel, 'LOW', 'Hotel Ops guest message reads are low risk')
 
-const sendReplyCommand = parseHotelOpsCommand('Send guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
+const sendReplyCommand = parseHotelOpsCommand('Send Booking guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
 assert.equal(sendReplyCommand.taskType, 'SEND_GUEST_REPLY', 'Hotel Ops parser maps explicit send reply commands')
+assert.equal(sendReplyCommand.platform, 'booking', 'Hotel Ops send reply parser requires and keeps the target platform')
 assert.equal(sendReplyCommand.approvalRequired, true, 'Hotel Ops send reply tasks require approval')
 assert.equal(sendReplyCommand.message, 'Late check-in is confirmed.', 'Hotel Ops parser extracts structured guest reply text')
 
-const redactedReplyCommand = parseHotelOpsCommand('Send guest reply: password=guest-secret', { now: fixedOpsDate })
+const missingPlatformReplyCommand = parseHotelOpsCommand('Send guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
+assert.equal(missingPlatformReplyCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser asks for platform before send-reply writes')
+assert.equal(missingPlatformReplyCommand.missingFields.includes('platform'), true, 'Hotel Ops send-reply write asks for platform')
+
+const redactedReplyCommand = parseHotelOpsCommand('Send Booking guest reply: password=guest-secret', { now: fixedOpsDate })
 assert.equal(redactedReplyCommand.message.includes('guest-secret'), false, 'Hotel Ops parser redacts credential-like text from structured messages')
 
 const forbiddenCommand = parseHotelOpsCommand('Cancel all bookings and refund guests.', { now: fixedOpsDate })
@@ -848,8 +853,13 @@ assert.equal(ambiguousRateCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser r
 assert.equal(ambiguousRateCommand.missingFields.includes('dateRange'), true, 'Hotel Ops incomplete rate command asks for dates')
 assert.equal(ambiguousRateCommand.missingFields.includes('roomType'), true, 'Hotel Ops incomplete rate command asks for room type')
 
-const allRoomsRateCommand = parseHotelOpsCommand('Set all rooms to 2,200 THB 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
+const missingPlatformRateCommand = parseHotelOpsCommand('Set Deluxe Room to 2,200 THB 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
+assert.equal(missingPlatformRateCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser asks for platform before rate writes')
+assert.equal(missingPlatformRateCommand.missingFields.includes('platform'), true, 'Hotel Ops incomplete rate write asks for platform')
+
+const allRoomsRateCommand = parseHotelOpsCommand('Set all channels all rooms to 2,200 THB 2026-07-03 to 2026-07-04.', { now: fixedOpsDate })
 assert.equal(allRoomsRateCommand.taskType, 'UPDATE_RATE', 'Hotel Ops parser accepts all-room recommendation tasks')
+assert.equal(allRoomsRateCommand.platform, 'all', 'Hotel Ops parser accepts explicit all-channel writes')
 assert.equal(allRoomsRateCommand.roomType, 'All Rooms', 'Hotel Ops parser preserves all-room target')
 
 assert.equal(normalizeOpsSourceChannel('LINE'), 'line', 'Hotel Ops source channel normalization accepts known channels case-insensitively')
@@ -863,6 +873,7 @@ const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')
 assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'front-desk', role: 'FRONT_DESK' }).allowed, false, 'staff cannot create high-risk Hotel Ops write task')
+assert.equal(evaluateOpsPermission({ ...rateCommand, platform: 'unknown' }, { id: 'manager', role: 'MANAGER' }).allowed, false, 'Hotel Ops permission guard rejects write tasks without a supported platform')
 assert.equal(evaluateOpsPermission(rateCommand, { id: 'owner', role: 'ADMIN' }, { enabled: true }).blockedByEmergencyStop, true, 'Hotel Ops emergency stop blocks write tasks')
 
 const opsCommandFixture = createOpsCommandPrismaFixture()

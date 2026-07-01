@@ -269,6 +269,10 @@ function taskWithRule(taskType, overrides = {}) {
   }
 }
 
+function writeTaskNeedsPlatform(platform) {
+  return !platform || platform === 'unknown'
+}
+
 export function parseHotelOpsCommand(rawMessage, options = {}) {
   const message = normalizeText(rawMessage)
   const lower = message.toLowerCase()
@@ -349,6 +353,7 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
   if (/(set|update|change|adjust).*(availability|inventory|rooms?\s+available)/.test(lower)) {
     const availabilityRooms = parseAvailabilityRooms(message)
     const missingFields = []
+    if (writeTaskNeedsPlatform(platform)) missingFields.push('platform')
     if (!roomType) missingFields.push('roomType')
     if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
     if (availabilityRooms === null) missingFields.push('availability.rooms')
@@ -359,7 +364,7 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
         dateRange,
         availability: availabilityRooms === null ? undefined : { rooms: availabilityRooms, status: availabilityRooms === 0 ? 'closed' : 'open' },
         missingFields,
-        rationale: 'Availability changes need room type, dates, and rooms available before approval.',
+        rationale: 'Availability changes need platform, room type, dates, and rooms available before approval.',
         confidence: 0.7,
       })
     }
@@ -375,10 +380,11 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
 
   if (/(close|stop sell|block).*(room|availability)|closeout/.test(lower)) {
     const missingFields = []
+    if (writeTaskNeedsPlatform(platform)) missingFields.push('platform')
     if (!roomType) missingFields.push('roomType')
     if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
     if (missingFields.length > 0) {
-      return taskWithRule('NO_OP_CLARIFY', { platform, roomType, dateRange, missingFields, rationale: 'Closing rooms needs room type and dates.' })
+      return taskWithRule('NO_OP_CLARIFY', { platform, roomType, dateRange, missingFields, rationale: 'Closing rooms needs platform, room type, and dates.' })
     }
     return taskWithRule('CLOSE_ROOM', {
       platform,
@@ -392,10 +398,11 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
 
   if (/(open|reopen).*(room|availability)/.test(lower)) {
     const missingFields = []
+    if (writeTaskNeedsPlatform(platform)) missingFields.push('platform')
     if (!roomType) missingFields.push('roomType')
     if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
     if (missingFields.length > 0) {
-      return taskWithRule('NO_OP_CLARIFY', { platform, roomType, dateRange, missingFields, rationale: 'Opening rooms needs room type and dates.' })
+      return taskWithRule('NO_OP_CLARIFY', { platform, roomType, dateRange, missingFields, rationale: 'Opening rooms needs platform, room type, and dates.' })
     }
     return taskWithRule('OPEN_ROOM', {
       platform,
@@ -409,6 +416,7 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
 
   if (/(change|raise|increase|decrease|set|update).*(rate|price)|\bprice\b|\bthb\b|฿/.test(lower)) {
     const missingFields = []
+    if (writeTaskNeedsPlatform(platform)) missingFields.push('platform')
     if (!roomType) missingFields.push('roomType')
     if (!dateRange.start || !dateRange.end) missingFields.push('dateRange')
     if (!rate.amount) missingFields.push('rate.amount')
@@ -419,7 +427,7 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
         dateRange,
         rate,
         missingFields,
-        rationale: 'Rate changes need room type, date range, and amount before approval.',
+        rationale: 'Rate changes need platform, room type, date range, and amount before approval.',
         confidence: 0.72,
       })
     }
@@ -435,6 +443,14 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
 
   if (/(update|change|rewrite).*(description|listing)/.test(lower)) {
     const description = parseMessagePayload(message)
+    if (writeTaskNeedsPlatform(platform)) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        missingFields: ['platform'],
+        rationale: 'Listing description updates need a target OTA platform before owner review.',
+        confidence: 0.62,
+      })
+    }
     if (!description) {
       return taskWithRule('NO_OP_CLARIFY', {
         platform,
@@ -454,6 +470,15 @@ export function parseHotelOpsCommand(rawMessage, options = {}) {
   if (/(message|reply|guest)/.test(lower)) {
     const replyMessage = parseMessagePayload(message)
     const wantsSend = /\bsend\b/.test(lower)
+    if (wantsSend && writeTaskNeedsPlatform(platform)) {
+      return taskWithRule('NO_OP_CLARIFY', {
+        platform,
+        message: replyMessage ? redactedSensitiveText(replyMessage) : null,
+        missingFields: ['platform'],
+        rationale: 'Sending guest replies needs a target OTA platform before approval.',
+        confidence: 0.58,
+      })
+    }
     if (wantsSend && !replyMessage) {
       return taskWithRule('NO_OP_CLARIFY', {
         platform,
@@ -499,6 +524,9 @@ function decisionFor(parsedTask, actor, emergencyStop) {
   }
   if (rule.enabledInMvp === false) {
     return { allowed: false, approvalRequired: true, requiredApprovalRole: rule.requiredApprovalRole, riskLevel: rule.riskLevel, reason: `${parsedTask.taskType} is not enabled in the MVP.` }
+  }
+  if (WRITE_TASK_TYPES.has(parsedTask.taskType) && writeTaskNeedsPlatform(parsedTask.platform)) {
+    return { allowed: false, approvalRequired: rule.approvalRequired, requiredApprovalRole: rule.requiredApprovalRole, riskLevel: rule.riskLevel, reason: `${parsedTask.taskType} requires a supported OTA platform before approval.` }
   }
   if (emergencyStop?.enabled && WRITE_TASK_TYPES.has(parsedTask.taskType)) {
     return { allowed: false, approvalRequired: rule.approvalRequired, requiredApprovalRole: rule.requiredApprovalRole, riskLevel: rule.riskLevel, reason: 'Emergency stop is enabled for Hotel Ops write tasks.', blockedByEmergencyStop: true }
