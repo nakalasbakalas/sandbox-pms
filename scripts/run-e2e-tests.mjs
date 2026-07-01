@@ -417,6 +417,10 @@ async function runBrowserSmokeTests() {
       await page.getByLabel(/password/i).fill(password)
       await page.getByRole('button', { name: /^sign in$/i }).click()
       await waitVisible(page.getByRole('heading', { name: /^today$/i }), 'Today view after login')
+      await waitVisible(page.getByRole('button', { name: /notifications/i }), 'global notification center button')
+      await page.getByRole('button', { name: /notifications/i }).click()
+      await waitVisible(page.getByRole('heading', { name: /^notifications$/i }), 'global notification center sheet')
+      await page.keyboard.press('Escape')
 
       const legacyToken = await page.evaluate(() => window.localStorage.getItem(['auth', 'pms-token'].join(':')))
       assert.equal(legacyToken, null, 'browser login does not write a JavaScript-readable session token')

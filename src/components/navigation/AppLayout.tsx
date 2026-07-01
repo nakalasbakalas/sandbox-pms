@@ -11,6 +11,7 @@ import { DensityToggle } from './DensityToggle'
 import { UserProfileMenu } from './UserProfileMenu'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { FrontDeskAssistantButton } from '@/components/front-desk-assistant/FrontDeskAssistantButton'
+import { NotificationBell } from '@/components/notifications/NotificationBell'
 import { useNavigation } from '@/hooks/use-navigation'
 import { cn } from '@/lib/utils'
 
@@ -35,6 +36,8 @@ export function AppLayout({ children, onOpenShortcuts }: AppLayoutProps) {
             <FrontDeskAssistantButton />
             <div className="h-5 w-px bg-border/40" />
             <UserProfileMenu />
+            <div className="h-5 w-px bg-border/40" />
+            <NotificationBell />
             <div className="h-5 w-px bg-border/40" />
             <LanguageSwitcher />
             <div className="h-5 w-px bg-border/40" />

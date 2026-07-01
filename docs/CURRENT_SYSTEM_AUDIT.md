@@ -13,7 +13,7 @@ Last reviewed: 2026-07-01
 - Hotel Ops AI mode: deterministic controlled parser today, not live OpenAI execution.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
 - Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
-- Staff alert surface: the notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is local UI state until a server acknowledgment route exists.
+- Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is local UI state until a server acknowledgment route exists.
 - Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync still requires server-owned API credentials.
 
 ## Relevant Implementation Files
