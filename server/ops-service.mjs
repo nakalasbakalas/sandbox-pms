@@ -73,7 +73,7 @@ const RULES = {
   READ_RESERVATIONS: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'], approvalRequired: false },
   READ_GUEST_MESSAGES: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'SYSTEM'], approvalRequired: false },
   DRAFT_GUEST_REPLY: { riskLevel: 'MEDIUM', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF'], approvalRequired: false },
-  SEND_GUEST_REPLY: { riskLevel: 'HIGH', allowedRoles: ['OWNER', 'HOTEL_MANAGER'], approvalRequired: true, requiredApprovalRole: 'HOTEL_MANAGER' },
+  SEND_GUEST_REPLY: { riskLevel: 'HIGH', allowedRoles: ['OWNER', 'HOTEL_MANAGER'], approvalRequired: true, requiredApprovalRole: 'OWNER' },
   READ_RATES: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'], approvalRequired: false },
   UPDATE_RATE: { riskLevel: 'HIGH', allowedRoles: ['OWNER', 'HOTEL_MANAGER'], approvalRequired: true, requiredApprovalRole: 'OWNER', minRate: 800, maxRate: 6000 },
   READ_AVAILABILITY: { riskLevel: 'LOW', allowedRoles: ['OWNER', 'HOTEL_MANAGER', 'STAFF', 'VIEWER', 'SYSTEM'], approvalRequired: false },

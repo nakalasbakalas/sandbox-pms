@@ -841,6 +841,8 @@ assert.equal(sendReplyCommand.taskType, 'SEND_GUEST_REPLY', 'Hotel Ops parser ma
 assert.equal(sendReplyCommand.platform, 'booking', 'Hotel Ops send reply parser requires and keeps the target platform')
 assert.equal(sendReplyCommand.approvalRequired, true, 'Hotel Ops send reply tasks require approval')
 assert.equal(sendReplyCommand.message, 'Late check-in is confirmed.', 'Hotel Ops parser extracts structured guest reply text')
+const sendReplyDecision = evaluateOpsPermission(sendReplyCommand, { id: 'manager', role: 'MANAGER' })
+assert.equal(sendReplyDecision.requiredApprovalRole, 'OWNER', 'Hotel Ops send-reply writes require owner approval by default')
 
 const missingPlatformReplyCommand = parseHotelOpsCommand('Send guest reply: Late check-in is confirmed.', { now: fixedOpsDate })
 assert.equal(missingPlatformReplyCommand.taskType, 'NO_OP_CLARIFY', 'Hotel Ops parser asks for platform before send-reply writes')
@@ -941,6 +943,23 @@ assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_S
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofCount > 0), true, 'Hotel Ops service audits persisted worker proof artifacts')
 assert.equal(approvalFixture.audits.some((audit) => audit.action === 'OPS_TASK_SUCCEEDED'), true, 'Hotel Ops service audits worker success')
 assert.equal(approvalFixture.notifications.some((notification) => notification.summary.includes('signed mock worker accepted UPDATE_RATE')), true, 'Hotel Ops service records execution result notifications')
+
+const sendReplyApprovalFixture = createOpsCommandPrismaFixture()
+const pendingSendReplyResult = await submitOpsCommand(
+  sendReplyApprovalFixture.prisma,
+  { message: 'Send Booking guest reply: Late check-in is confirmed.', sourceChannel: 'web' },
+  opsManager,
+)
+assert.equal(pendingSendReplyResult.task.status, 'PENDING_APPROVAL', 'Hotel Ops service holds send-reply writes for approval')
+assert.equal(sendReplyApprovalFixture.approvals[0].requiredRole, 'OWNER', 'Hotel Ops send-reply approval requires owner role')
+await assert.rejects(
+  () => approveOpsTask(sendReplyApprovalFixture.prisma, pendingSendReplyResult.task.id, { notes: 'Manager should not approve send reply.' }, opsManager),
+  /OWNER approval is required/,
+  'Hotel Ops manager cannot approve send-reply writes',
+)
+assert.equal(sendReplyApprovalFixture.approvals[0].status, 'PENDING', 'Hotel Ops manager-rejected send-reply approval remains pending')
+assert.equal(sendReplyApprovalFixture.logs.some((log) => log.action === 'APPROVAL_REJECTED'), true, 'Hotel Ops service logs manager-rejected send-reply approval attempts')
+assert.equal(sendReplyApprovalFixture.audits.some((audit) => audit.action === 'OPS_APPROVAL_REJECTED' && audit.changes.requiredRole === 'OWNER'), true, 'Hotel Ops service audits manager-rejected send-reply approval attempts')
 
 const selectorFailureFixture = createOpsCommandPrismaFixture()
 const selectorFailureResult = await submitOpsCommand(
