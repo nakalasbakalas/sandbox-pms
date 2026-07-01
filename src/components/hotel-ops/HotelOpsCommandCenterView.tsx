@@ -46,6 +46,7 @@ type PendingReasonAction =
   | { kind: 'approve-task'; task: HotelOpsTask }
   | { kind: 'deny-task'; task: HotelOpsTask }
   | { kind: 'cancel-task'; task: HotelOpsTask }
+  | { kind: 'resolve-human'; task: HotelOpsTask }
   | { kind: 'approve-recommendation'; alert: HotelOpsTrendAlert }
   | { kind: 'resolve-alert'; alert: HotelOpsTrendAlert }
   | { kind: 'emergency-stop'; enabled: boolean }
@@ -198,6 +199,15 @@ function reasonActionCopy(action: PendingReasonAction | null) {
       destructive: true,
     }
   }
+  if (action.kind === 'resolve-human') {
+    return {
+      title: 'Record human action',
+      description: `${action.task.taskType.replace(/_/g, ' ')} will be requeued after an authorized person has completed the required OTA challenge or account step.`,
+      placeholder: 'Example: Owner completed Booking.com 2FA in the approved session.',
+      confirmLabel: 'Requeue task',
+      destructive: false,
+    }
+  }
   if (action.kind === 'approve-recommendation') {
     return {
       title: 'Queue recommendation',
@@ -242,6 +252,7 @@ function TaskCard({
   onDeny,
   onCancel,
   onRun,
+  onResolveHuman,
   compact = false,
 }: {
   task: HotelOpsTask
@@ -249,6 +260,7 @@ function TaskCard({
   onDeny?: (task: HotelOpsTask) => void
   onCancel?: (task: HotelOpsTask) => void
   onRun?: (task: HotelOpsTask) => void
+  onResolveHuman?: (task: HotelOpsTask) => void
   compact?: boolean
 }) {
   return (
@@ -281,6 +293,12 @@ function TaskCard({
               <Button size="sm" onClick={() => onRun(task)}>
                 <PlayCircle className="mr-2" />
                 Run
+              </Button>
+            )}
+            {task.status === 'NEEDS_HUMAN' && onResolveHuman && (
+              <Button size="sm" onClick={() => onResolveHuman(task)}>
+                <CheckCircle className="mr-2" />
+                Human done
               </Button>
             )}
             {['DRAFT', 'PENDING_APPROVAL', 'QUEUED', 'APPROVED'].includes(task.status) && onCancel && (
@@ -501,6 +519,15 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     }
   }
 
+  const resolveHumanAction = async (task: HotelOpsTask) => {
+    if (!SERVER_AUTH_ENABLED) {
+      toast.error('Hotel Ops backend is not connected.')
+      return
+    }
+    setPendingReasonAction({ kind: 'resolve-human', task })
+    setReasonText('')
+  }
+
   const runScan = async (force?: HotelOpsScanForce) => {
     if (!SERVER_AUTH_ENABLED) {
       toast.error('Hotel Ops backend is not connected.')
@@ -576,13 +603,20 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     try {
       if (pendingReasonAction.kind === 'approve-task') {
         const payload = await hotelOpsApi.approveTask(pendingReasonAction.task.id, reason)
+        setCommandResult((current) => current?.task.id === payload.data.id ? { ...current, task: payload.data } : current)
         toast.success(payload.message || 'Task approved.')
       } else if (pendingReasonAction.kind === 'deny-task') {
         const payload = await hotelOpsApi.denyTask(pendingReasonAction.task.id, reason)
+        setCommandResult((current) => current?.task.id === payload.data.id ? { ...current, task: payload.data } : current)
         toast.success(payload.message || 'Task denied.')
       } else if (pendingReasonAction.kind === 'cancel-task') {
         const payload = await hotelOpsApi.cancelTask(pendingReasonAction.task.id, reason)
+        setCommandResult((current) => current?.task.id === payload.data.id ? { ...current, task: payload.data } : current)
         toast.success(payload.message || 'Task cancelled.')
+      } else if (pendingReasonAction.kind === 'resolve-human') {
+        const payload = await hotelOpsApi.resolveHumanAction(pendingReasonAction.task.id, reason)
+        setCommandResult((current) => current?.task.id === payload.data.id ? { ...current, task: payload.data } : current)
+        toast.success(payload.message || 'Human action recorded.')
       } else if (pendingReasonAction.kind === 'approve-recommendation') {
         const payload = await hotelOpsApi.approveRecommendation(pendingReasonAction.alert.id, reason)
         toast.success(payload.message || 'Recommendation queued.')
@@ -720,7 +754,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                     </div>
                     <div className="font-semibold">{commandResult.parsed.taskType.replace(/_/g, ' ')}</div>
                     <div className="text-muted-foreground">{commandResult.decision.reason}</div>
-                    <TaskCard task={commandResult.task} compact onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />
+                    <TaskCard task={commandResult.task} compact onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} onResolveHuman={resolveHumanAction} />
                   </div>
                 ) : (
                   <div className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">
@@ -741,7 +775,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             {pendingApprovalTasks.length === 0 ? (
               <Card className="rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No Hotel Ops tasks need approval.</CardContent></Card>
             ) : (
-              pendingApprovalTasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />)
+              pendingApprovalTasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} onResolveHuman={resolveHumanAction} />)
             )}
           </section>
         )}
@@ -755,7 +789,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
             {tasks.length === 0 ? (
               <Card className="rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No Hotel Ops tasks recorded yet.</CardContent></Card>
             ) : (
-              tasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} />)
+              tasks.map((task) => <TaskCard key={task.id} task={task} onApprove={approveTask} onDeny={denyTask} onCancel={cancelTask} onRun={runTask} onResolveHuman={resolveHumanAction} />)
             )}
           </section>
         )}

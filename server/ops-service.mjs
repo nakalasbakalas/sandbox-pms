@@ -933,10 +933,10 @@ function fallbackProofKindForTaskRun(status, task) {
   return WRITE_TASK_TYPES.has(task?.taskType) ? 'after' : 'trace'
 }
 
-async function queueOpsTask(tx, task, actor, message = 'Task queued for signed worker execution.') {
+async function queueOpsTask(tx, task, actor, message = 'Task queued for signed worker execution.', extraData = {}) {
   const queued = task.status === 'QUEUED'
     ? await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
-    : await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'QUEUED' }, include: taskInclude })
+    : await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'QUEUED', ...extraData }, include: taskInclude })
   await taskLog(tx, task.id, 'TASK_QUEUED', message, actor, { dryRun: true, signed: true })
   await audit(tx, actor, 'OPS_TASK_QUEUED', 'hotelOpsTask', task.id, { taskType: task.taskType, status: 'QUEUED', dryRun: true, signed: true })
   await recordOpsNotifications(tx, task.propertyId, {
@@ -1136,6 +1136,72 @@ export async function runQueuedOpsTask(prisma, taskId, actor) {
   }
 
   return serializeTask(await finalizeOpsTaskRun(prisma, task, actor, result))
+}
+
+export async function resolveOpsHumanAction(prisma, taskId, input, actor) {
+  const result = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const task = await tx.hotelOpsTask.findUnique({ where: { id: taskId }, include: taskInclude })
+    if (!task || task.propertyId !== property.id) throw new PmsValidationError('Hotel Ops task was not found.', 404)
+
+    const reason = normalizeNullableString(input?.reason || input?.notes)
+    if (task.status !== 'NEEDS_HUMAN') {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'HUMAN_RESOLUTION_REJECTED',
+        'OPS_HUMAN_RESOLUTION_REJECTED',
+        'Only Hotel Ops tasks waiting on human action can be requeued.',
+        actor,
+        { attemptedStatus: task.status },
+      )
+    }
+    if (!reason) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        'HUMAN_RESOLUTION_REJECTED',
+        'OPS_HUMAN_RESOLUTION_REJECTED',
+        'Human-action completion requires an operational reason before requeueing.',
+        actor,
+        { errorCode: task.errorCode },
+        400,
+      )
+    }
+
+    const runDecision = evaluateOpsTaskRun({ ...task, status: 'QUEUED' }, actor, await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } }) || { enabled: false })
+    if (!runDecision.allowed) {
+      return recordBlockedOpsTaskAction(
+        tx,
+        task,
+        runDecision.blockedByEmergencyStop ? 'HUMAN_RESOLUTION_BLOCKED' : 'HUMAN_RESOLUTION_REJECTED',
+        runDecision.blockedByEmergencyStop ? 'OPS_HUMAN_RESOLUTION_BLOCKED' : 'OPS_HUMAN_RESOLUTION_REJECTED',
+        runDecision.reason,
+        actor,
+        { decision: runDecision, blockedByEmergencyStop: Boolean(runDecision.blockedByEmergencyStop) },
+        runDecision.statusCode,
+      )
+    }
+
+    const safeReason = redactedSensitiveText(reason)
+    await taskLog(tx, task.id, 'HUMAN_ACTION_RECORDED', 'Authorized human action was recorded for this Hotel Ops task.', actor, {
+      reason: safeReason,
+      previousErrorCode: task.errorCode,
+    })
+    await audit(tx, actor, 'OPS_HUMAN_ACTION_RECORDED', 'hotelOpsTask', task.id, {
+      taskType: task.taskType,
+      previousStatus: task.status,
+      reason: safeReason,
+      previousErrorCode: task.errorCode,
+    })
+    return serializeTask(await queueOpsTask(tx, task, actor, 'Human action recorded; task requeued for signed worker execution.', {
+      executionSummary: 'Human action recorded; task requeued for signed worker execution.',
+      errorCode: null,
+      errorMessage: null,
+    }))
+  })
+  if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
+  return result
 }
 
 export async function submitOpsCommand(prisma, input, actor) {

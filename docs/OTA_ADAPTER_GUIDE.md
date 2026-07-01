@@ -52,6 +52,7 @@ Do not add credentials to payloads. Adapters must read credentials only from bac
 - Validate all required fields before opening any browser session.
 - Default to dry-run.
 - Return `NEEDS_HUMAN` for CAPTCHA, 2FA, locked account, or password-expired flows.
+- Do not retry a `NEEDS_HUMAN` task until an authorized PMS actor records the completed human step and the backend requeues it.
 - Return structured `FAILED` results with safe error messages for selector or platform failures.
 - Capture before/after or trace proof for write-like tasks.
 - Redact credential-like values from summaries, metadata, and proof references.
@@ -93,3 +94,5 @@ When security challenge handling is required, return:
   "proofScreenshots": []
 }
 ```
+
+After the authorized person completes the challenge, staff should use the PMS `Human done` action with an operational reason. That records audit evidence and requeues the task; it does not bypass the challenge or run the worker automatically.

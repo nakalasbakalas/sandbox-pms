@@ -34,6 +34,7 @@ Evidence: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`, and gua
 - Approved mock `UPDATE_RATE` completes and stores safe proof.
 - Selector failure marks task `FAILED` and stores error proof.
 - 2FA/CAPTCHA marks task `NEEDS_HUMAN` and creates a human-action notification.
+- Authorized human-action resolution requires a reason, rejects under-authorized actors, and requeues the task without bypassing the challenge.
 - Dry-run mode returns planned actions without changing OTA state.
 - Unknown task types are rejected before worker call.
 - Unsigned and replayed worker requests are rejected.

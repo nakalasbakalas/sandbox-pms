@@ -106,7 +106,8 @@ When a challenge appears:
 2. Store safe trace proof.
 3. Notify owner or manager.
 4. Let an authorized person complete the challenge outside automated bypass.
-5. Resume only when account policy and session state allow it.
+5. Record the completion reason from `/ops/tasks` using the `Human done` action.
+6. Resume only when account policy and session state allow it; the backend requeues the task and staff must run it explicitly.
 
 ## Validation Ladder
 

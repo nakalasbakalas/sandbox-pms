@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1518,6 +1518,28 @@ assert.equal(humanChallengeTask.proofScreenshots.some((proof) => proof.kind === 
 assert.equal(humanChallengeFixture.logs.some((log) => log.action === 'WORKER_NEEDS_HUMAN'), true, 'Hotel Ops service logs human-challenge worker results')
 assert.equal(humanChallengeFixture.audits.some((audit) => audit.action === 'OPS_PROOF_STORED' && audit.changes.proofKinds.includes('trace')), true, 'Hotel Ops service audits human-challenge proof traces')
 assert.equal(humanChallengeFixture.notifications.some((notification) => notification.type === 'NEEDS_HUMAN'), true, 'Hotel Ops service records human-action notifications')
+await assert.rejects(
+  () => resolveOpsHumanAction(humanChallengeFixture.prisma, humanChallengeTask.id, {}, opsOwner),
+  /Human-action completion requires an operational reason/,
+  'Hotel Ops human-action resolution requires an audit reason before requeueing',
+)
+await assert.rejects(
+  () => resolveOpsHumanAction(humanChallengeFixture.prisma, humanChallengeTask.id, { reason: 'Manager says the challenge is done.' }, opsManager),
+  /OWNER must run this approved Hotel Ops task/,
+  'Hotel Ops manager cannot requeue an owner-required human-challenge task',
+)
+const requeuedHumanTask = await resolveOpsHumanAction(
+  humanChallengeFixture.prisma,
+  humanChallengeTask.id,
+  { reason: 'Owner completed the OTA challenge in the approved session.' },
+  opsOwner,
+)
+assert.equal(requeuedHumanTask.status, 'QUEUED', 'Hotel Ops authorized human-action resolution requeues the task')
+assert.equal(requeuedHumanTask.errorCode, null, 'Hotel Ops human-action requeue clears the stale worker error code')
+assert.equal(humanChallengeFixture.logs.some((log) => log.action === 'HUMAN_ACTION_RECORDED'), true, 'Hotel Ops service logs human-action resolution')
+assert.equal(humanChallengeFixture.audits.some((audit) => audit.action === 'OPS_HUMAN_ACTION_RECORDED'), true, 'Hotel Ops service audits human-action resolution')
+assert.equal(humanChallengeFixture.audits.filter((audit) => audit.action === 'OPS_HUMAN_RESOLUTION_REJECTED').length, 2, 'Hotel Ops rejected human-action attempts are audited')
+assert.equal(humanChallengeFixture.notifications.some((notification) => notification.type === 'TASK_UPDATE' && notification.metadata?.status === 'QUEUED'), true, 'Hotel Ops human-action requeue records a task-update notification')
 
 const emergencyFixture = createOpsCommandPrismaFixture()
 await assert.rejects(

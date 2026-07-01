@@ -33,6 +33,7 @@ API routes:
 - `POST /api/ops/tasks/:id/deny`
 - `POST /api/ops/tasks/:id/cancel`
 - `POST /api/ops/tasks/:id/run`
+- `POST /api/ops/tasks/:id/resolve-human`
 - `GET /api/ops/approvals`
 - `GET /api/ops/notifications`
 - `POST /api/ops/notifications/:id/read`
@@ -86,6 +87,7 @@ Rules live in `server/ops-service.mjs`.
 - Owner approval is required for rate, availability, open/close room, listing update, and photo-class tasks.
 - `UPDATE_PHOTOS` is critical and disabled in the MVP.
 - Approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop changes require non-empty operational reasons.
+- `NEEDS_HUMAN` task resolution requires a non-empty reason and reuses backend run-permission and emergency-stop checks before requeueing.
 - Emergency stop blocks write tasks during intake, approval, queueing, and worker execution.
 - The read-only `/api/ops/policy` endpoint serializes the enforced task rules, approval roles, limits, disabled MVP tasks, and emergency-stop coverage for the Settings policy matrix.
 
@@ -101,6 +103,8 @@ The task lifecycle is persisted in Prisma models:
 - `HotelOpsNotification`
 
 Queued tasks run through `runQueuedOpsTask`, which rechecks permissions and emergency-stop state before calling the signed worker boundary.
+
+Tasks that return `NEEDS_HUMAN` stay stopped until an authorized actor records that the required human OTA challenge or account step was completed. The backend then clears stale worker error fields, writes audit/log evidence, and requeues the task for an explicit later run.
 
 Worker requests:
 

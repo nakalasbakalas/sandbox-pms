@@ -708,6 +708,7 @@ assert.deepEqual(resolveApiRouteContract('/api/ops/tasks')?.methods, ['GET'], 'H
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1')?.methods, ['GET'], 'Hotel Ops task detail exposes read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/approve')?.methods, ['POST'], 'Hotel Ops approve endpoint only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/run')?.methods, ['POST'], 'Hotel Ops queued task runner only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/ops/tasks/task-1/resolve-human')?.methods, ['POST'], 'Hotel Ops human-action resolution only allows POST')
 assert.deepEqual(resolveApiRouteContract('/api/ops/approvals')?.methods, ['GET'], 'Hotel Ops approvals expose read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/notifications')?.methods, ['GET'], 'Hotel Ops notifications expose read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/notifications/notification-1/read')?.methods, ['POST'], 'Hotel Ops notification read acknowledgment exposes mutation method')

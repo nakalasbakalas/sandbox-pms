@@ -80,6 +80,13 @@ export const hotelOpsApi = {
     })
   },
 
+  resolveHumanAction(taskId: string, reason?: string) {
+    return apiRequest<{ ok: true; data: HotelOpsTask; message?: string }>(`/api/ops/tasks/${encodeURIComponent(taskId)}/resolve-human`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    })
+  },
+
   listApprovals() {
     return apiRequest<{ ok: true; data: HotelOpsApproval[] }>('/api/ops/approvals')
   },

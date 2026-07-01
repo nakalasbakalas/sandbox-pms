@@ -36,9 +36,10 @@ Last reviewed: 2026-07-01
 ## Implemented Surface
 
 - `/ops/chat`, `/ops/approvals`, `/ops/tasks`, `/ops/intelligence`, and `/ops/settings` render through the existing navigation shell.
-- `/api/ops/commands`, task, approval, notification read/dismiss, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
+- `/api/ops/commands`, task, approval, human-action resolution, notification read/dismiss, intelligence, emergency-stop, OTA-status, and scan-run routes are implemented.
 - `/api/ops/policy` exposes the backend-enforced permission/risk policy for the Settings policy matrix.
 - High-risk task approval, denial, cancellation, alert recommendation, alert resolution, and emergency-stop mutations require reasons.
+- `NEEDS_HUMAN` task resolution requires an operational reason, reuses backend run-permission and emergency-stop checks, and requeues only after authorized human action is recorded.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
 - Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.
 - Notification bell/center merges local housekeeping notifications with backend Hotel Ops notifications and keeps provider-pending email intents visible to staff.
@@ -49,6 +50,7 @@ Last reviewed: 2026-07-01
 
 - No raw OTA credentials are exposed to frontend, prompts, task records, notifications, or proof artifacts.
 - Booking.com has a dry-run adapter skeleton with selector TODOs. Real browser writes remain disabled until selector and account-owner proof exists.
+- CAPTCHA, 2FA, locked-account, and password-expired challenges are not bypassed; staff can only record authorized human completion and requeue through the audited backend flow.
 - Agoda, Trip.com, and Expedia currently use the signed mock worker path.
 - Email notifications are recorded as provider-pending intents unless a real provider adapter is configured.
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.

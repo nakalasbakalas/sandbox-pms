@@ -10,6 +10,8 @@ The OTA worker accepts only signed, typed tasks. It rejects unknown task types, 
 
 OTA websites remain external systems. The worker must not bypass CAPTCHA, 2FA, locked accounts, password-expired flows, rate limits, or platform terms.
 
+When a task reaches `NEEDS_HUMAN`, automated execution stops. Requeueing requires an authorized actor, a non-empty operational reason, and the same run-permission and emergency-stop checks used before worker execution.
+
 ## Credential Handling
 
 - No OTA credentials, OpenAI keys, session tokens, or mailbox passwords belong in frontend code.
@@ -58,6 +60,7 @@ Hotel Ops code records audit and task-log evidence for:
 - task queued
 - worker started
 - worker success, failure, or human challenge
+- human-action completion and rejected human-action resolution attempts
 - alert recommendation approval
 - alert acknowledgement or resolution
 - scheduler scan run
