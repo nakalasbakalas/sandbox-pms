@@ -63,7 +63,9 @@ Hotel Ops notification center:
 
 1. In server mode, the shared header notification bell shows backend Hotel Ops notifications for users with Ops permission.
 2. Provider-pending email intents mean the PMS recorded the notification but no mail provider has delivered it yet.
-3. Read/dismiss controls persist server-side acknowledgment records and audit entries; provider delivery status stays unchanged.
+3. To enable backend Gmail delivery, set `HOTEL_OPS_EMAIL_DELIVERY_ENABLED=true`, `HOTEL_OPS_EMAIL_PROVIDER=gmail`, and backend Gmail OAuth credentials. Do not use a mailbox password.
+4. Gmail delivery changes email notification status to `SENT` or `FAILED`; failures keep redacted provider error metadata for staff review.
+5. Read/dismiss controls persist server-side acknowledgment records and audit entries; provider delivery status stays unchanged.
 
 ## Daily Operation
 

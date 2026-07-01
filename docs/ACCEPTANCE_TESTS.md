@@ -75,6 +75,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 
 - API keys and OTA credentials are not returned to the browser.
 - Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, and refresh failures redact token/client-secret values.
+- Hotel Ops Gmail email delivery is opt-in, backend-only, updates notification status to `SENT` or `FAILED`, and redacts provider failures.
 - Worker payloads reject credential-shaped fields.
 - Notifications and metadata redact credential-like text.
 - Worker proof is normalized and unsafe proof links are blocked.

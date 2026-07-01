@@ -1,12 +1,13 @@
 /* global console, process, Response */
 import assert from 'node:assert/strict'
+import { Buffer } from 'node:buffer'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -187,7 +188,7 @@ function createOpsCommandPrismaFixture() {
     $transaction: async (callback) => callback(prisma),
   }
 
-  return { prisma, tasks, approvals, logs, audits, notifications, trendAlerts }
+  return { prisma, property, tasks, approvals, logs, audits, notifications, trendAlerts }
 }
 
 async function importTypeScriptModule(path) {
@@ -843,6 +844,77 @@ assert.equal(notificationDrafts[1].channel, 'EMAIL', 'Hotel Ops notification rec
 assert.equal(notificationDrafts[1].status, 'PENDING_PROVIDER', 'Hotel Ops does not fake email delivery without a provider')
 assert.equal(notificationDrafts[1].recipientAddress, 'ops@property.test', 'Hotel Ops email intent targets the property alert email')
 
+const opsEmailProviderDisabled = hotelOpsEmailProviderStatus({})
+assert.equal(opsEmailProviderDisabled.provider, 'record_only', 'Hotel Ops email provider is record-only unless explicitly enabled')
+assert.equal(opsEmailProviderDisabled.configured, false, 'Hotel Ops email provider is not configured by default')
+const opsEmailProviderNamedButDisabled = hotelOpsEmailProviderStatus({
+  HOTEL_OPS_EMAIL_DELIVERY_ENABLED: 'false',
+  HOTEL_OPS_EMAIL_PROVIDER: 'gmail',
+  BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+})
+assert.equal(opsEmailProviderNamedButDisabled.provider, 'record_only', 'Hotel Ops email provider name does not enable delivery by itself')
+assert.equal(opsEmailProviderNamedButDisabled.configured, false, 'Hotel Ops email delivery remains disabled until explicitly enabled')
+const opsEmailProviderReady = hotelOpsEmailProviderStatus({
+  HOTEL_OPS_EMAIL_DELIVERY_ENABLED: 'true',
+  BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+  HOTEL_OPS_EMAIL_FROM: 'ops@sandboxhotel.test',
+})
+assert.equal(opsEmailProviderReady.provider, 'gmail_api', 'Hotel Ops email provider uses Gmail API when explicitly enabled')
+assert.equal(opsEmailProviderReady.configured, true, 'Hotel Ops email provider reports configured with backend Gmail credentials')
+let gmailSendRequestBody = null
+const gmailSendResult = await sendOpsEmailNotification({
+  id: 'ops-notification-email-send',
+  channel: 'EMAIL',
+  status: 'PENDING_PROVIDER',
+  recipientAddress: 'ops@property.test',
+  title: 'Hotel Ops approval required',
+  summary: 'Rate update needs owner approval. token=summary-fixture',
+  actionUrl: '/ops/approvals',
+}, {
+  env: {
+    HOTEL_OPS_EMAIL_DELIVERY_ENABLED: 'true',
+    BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+    HOTEL_OPS_EMAIL_FROM: 'ops@sandboxhotel.test',
+  },
+  fetchImpl: async (url, request) => {
+    assert.equal(String(url), 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send', 'Hotel Ops Gmail sender uses Gmail send endpoint')
+    assert.equal(request.method, 'POST', 'Hotel Ops Gmail sender uses POST')
+    assert.equal(request.headers.authorization, 'Bearer gmail-access-fixture', 'Hotel Ops Gmail sender authenticates with backend token')
+    gmailSendRequestBody = JSON.parse(request.body)
+    const decoded = Buffer.from(gmailSendRequestBody.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+    assert.match(decoded, /To: ops@property\.test/, 'Hotel Ops Gmail message targets alert address')
+    assert.match(decoded, /Subject: Hotel Ops approval required/, 'Hotel Ops Gmail message carries notification title')
+    assert.equal(decoded.includes('summary-fixture'), false, 'Hotel Ops Gmail message redacts credential-like summary values')
+    return new Response(JSON.stringify({ id: 'gmail-message-id', threadId: 'gmail-thread-id' }), { status: 200 })
+  },
+})
+assert.equal(gmailSendRequestBody.raw.length > 20, true, 'Hotel Ops Gmail sender submits a raw RFC 5322 message')
+assert.equal(gmailSendResult.messageId, 'gmail-message-id', 'Hotel Ops Gmail sender returns provider message id')
+await assert.rejects(
+  () => sendOpsEmailNotification({
+    id: 'ops-notification-email-fail',
+    channel: 'EMAIL',
+    status: 'PENDING_PROVIDER',
+    recipientAddress: 'ops@property.test',
+    title: 'Hotel Ops delivery failure',
+    summary: 'Delivery failure should redact provider details.',
+    actionUrl: '/ops/tasks',
+  }, {
+    env: {
+      HOTEL_OPS_EMAIL_DELIVERY_ENABLED: 'true',
+      BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+      HOTEL_OPS_EMAIL_FROM: 'ops@sandboxhotel.test',
+    },
+    fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'Gmail send failed token=send-fixture' } }), { status: 500 }),
+  }),
+  (error) => {
+    assert.equal(error.message.includes('send-fixture'), false, 'Hotel Ops Gmail provider failure redacts token-like values')
+    assert.match(error.message, /token=\[REDACTED\]/, 'Hotel Ops Gmail provider failure remains actionable after redaction')
+    return true
+  },
+  'Hotel Ops Gmail sender redacts provider failures',
+)
+
 const redactedNotificationDrafts = buildOpsNotificationDrafts({
   id: 'property-1',
   reservationAlertEmail: null,
@@ -1428,6 +1500,37 @@ assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_PARS
 assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_VALIDATION_PASSED'), true, 'Hotel Ops service audits validation pass decisions')
 assert.equal(opsCommandFixture.audits.some((audit) => audit.action === 'OPS_PERMISSION_DECISION'), true, 'Hotel Ops service audits permission decisions')
 assert.equal(opsCommandFixture.notifications.some((notification) => notification.type === 'TASK_UPDATE'), true, 'Hotel Ops service records queue notifications')
+
+const originalHotelOpsEmailEnv = {
+  HOTEL_OPS_EMAIL_DELIVERY_ENABLED: process.env.HOTEL_OPS_EMAIL_DELIVERY_ENABLED,
+  BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: process.env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN,
+  HOTEL_OPS_EMAIL_FROM: process.env.HOTEL_OPS_EMAIL_FROM,
+}
+const originalHotelOpsEmailFetch = globalThis.fetch
+try {
+  process.env.HOTEL_OPS_EMAIL_DELIVERY_ENABLED = 'true'
+  process.env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN = 'gmail-access-fixture'
+  process.env.HOTEL_OPS_EMAIL_FROM = 'ops@sandboxhotel.test'
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: 'service-gmail-message-id' }), { status: 200 })
+  const emailDeliveryFixture = createOpsCommandPrismaFixture()
+  emailDeliveryFixture.property.reservationAlertEmail = 'ops@property.test'
+  await submitOpsCommand(
+    emailDeliveryFixture.prisma,
+    { message: 'Check bookings for next weekend.', sourceChannel: 'web', idempotencyKey: 'ops-command-email-delivery-test' },
+    opsManager,
+  )
+  const serviceEmailNotification = emailDeliveryFixture.notifications.find((notification) => notification.channel === 'EMAIL')
+  assert.equal(serviceEmailNotification?.status, 'SENT', 'Hotel Ops service marks email notification sent when Gmail provider succeeds')
+  assert.equal(serviceEmailNotification?.metadata?.emailDelivery?.messageId, 'service-gmail-message-id', 'Hotel Ops service stores Gmail delivery proof metadata')
+} finally {
+  if (originalHotelOpsEmailEnv.HOTEL_OPS_EMAIL_DELIVERY_ENABLED === undefined) delete process.env.HOTEL_OPS_EMAIL_DELIVERY_ENABLED
+  else process.env.HOTEL_OPS_EMAIL_DELIVERY_ENABLED = originalHotelOpsEmailEnv.HOTEL_OPS_EMAIL_DELIVERY_ENABLED
+  if (originalHotelOpsEmailEnv.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN === undefined) delete process.env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN
+  else process.env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN = originalHotelOpsEmailEnv.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN
+  if (originalHotelOpsEmailEnv.HOTEL_OPS_EMAIL_FROM === undefined) delete process.env.HOTEL_OPS_EMAIL_FROM
+  else process.env.HOTEL_OPS_EMAIL_FROM = originalHotelOpsEmailEnv.HOTEL_OPS_EMAIL_FROM
+  globalThis.fetch = originalHotelOpsEmailFetch
+}
 
 const duplicateScanResult = await submitOpsCommand(
   opsCommandFixture.prisma,

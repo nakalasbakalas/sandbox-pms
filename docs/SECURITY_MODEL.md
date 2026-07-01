@@ -21,6 +21,7 @@ When a task reaches `NEEDS_HUMAN`, automated execution stops. Requeueing require
 - `OPENAI_API_KEY`, when used for the optional parser, must be a backend environment secret only.
 - Booking.com credentials, when used, must come from backend environment secrets.
 - Booking email sync must use server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, not a raw mailbox password.
+- Hotel Ops Gmail email delivery is backend-only and opt-in; it must use backend Gmail OAuth credentials and must redact provider failures before persistence.
 - Remote worker calls use `OTA_WORKER_BASE_URL` and `OTA_WORKER_SHARED_SECRET`.
 - Scheduled scans must not log credentials on failure.
 

@@ -165,6 +165,8 @@ Notifications are backend records:
 
 - `IN_APP` records are available immediately.
 - `EMAIL` records are provider-pending intents unless a real mail provider is configured.
+- Optional Gmail API delivery is backend-only and opt-in through `HOTEL_OPS_EMAIL_DELIVERY_ENABLED=true`; it uses backend Gmail OAuth access-token or refresh-token credentials.
+- Successful delivery updates the email notification to `SENT` with provider message metadata; provider failures update it to `FAILED` with redacted error metadata.
 - Notification text and metadata are sanitized before persistence.
 - The shared PMS header notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
 - Read and dismiss actions call backend acknowledgment routes, persist actor/timestamp fields, and create audit records. This acknowledgment state is separate from provider delivery status.

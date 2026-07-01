@@ -1,9 +1,11 @@
+import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
 import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
+import { bookingEmailGmailCredentialStatus, resolveBookingEmailGmailAccessToken } from './pms-service.mjs'
 
 const TASK_TYPE_VALUES = [
   'READ_RESERVATIONS',
@@ -31,6 +33,7 @@ const RISK_LEVEL_VALUES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'FORBIDDEN']
 const HOTEL_OPS_PARSER_SCHEMA_NAME = 'hotel_ops_parsed_task'
 const DEFAULT_OPENAI_PARSER_MODEL = 'gpt-4.1-mini'
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses'
+const GMAIL_SEND_URL_BASE = 'https://gmail.googleapis.com/gmail/v1/users'
 
 const HOTEL_OPS_TASK_PARSER_PROMPT = [
   'You are the Hotel Ops Task Parser for a controlled hotel operations system.',
@@ -75,6 +78,8 @@ const OPS_SCAN_POLICY = Object.freeze({
   lowDemandRecommendedRate: 1300,
   currency: 'THB',
 })
+
+const DEFAULT_HOTEL_OPS_EMAIL_FROM = 'booking@sandboxhotel.com'
 
 const RESERVATION_SOURCE_PLATFORM = Object.freeze({
   BOOKING_COM: 'booking',
@@ -133,6 +138,26 @@ function truthyEnv(value) {
   return ['1', 'true', 'yes', 'on', 'openai', 'responses'].includes(String(value || '').trim().toLowerCase())
 }
 
+function hotelOpsEmailDeliveryRequested(env = process.env) {
+  return truthyEnv(env.HOTEL_OPS_EMAIL_DELIVERY_ENABLED || env.OPS_EMAIL_DELIVERY_ENABLED)
+}
+
+function hotelOpsEmailSender(env = process.env) {
+  return normalizeNullableString(env.HOTEL_OPS_EMAIL_FROM || env.OPS_EMAIL_FROM || env.BOOKING_EMAIL_PRIMARY_MAILBOX) || DEFAULT_HOTEL_OPS_EMAIL_FROM
+}
+
+export function hotelOpsEmailProviderStatus(env = process.env) {
+  const requested = hotelOpsEmailDeliveryRequested(env)
+  const gmailCredentials = bookingEmailGmailCredentialStatus(env)
+  return {
+    provider: requested ? 'gmail_api' : 'record_only',
+    requested,
+    configured: requested && gmailCredentials.configured,
+    credentialMode: requested ? gmailCredentials.mode : 'not-required',
+    sender: requested ? hotelOpsEmailSender(env) : null,
+  }
+}
+
 export function hotelOpsAiParserStatus(env = process.env) {
   const requested = truthyEnv(env.HOTEL_OPS_AI_PARSER_ENABLED || env.HOTEL_OPS_AI_PARSER)
   const apiKeyConfigured = Boolean(normalizeNullableString(env.OPENAI_API_KEY))
@@ -183,6 +208,10 @@ export function getOpsPolicy() {
       strictSchema: true,
       redactsPromptInput: true,
       fallback: 'deterministic',
+    },
+    notifications: {
+      email: hotelOpsEmailProviderStatus(),
+      defaultChannelStatus: 'PENDING_PROVIDER',
     },
     forbiddenPatterns: FORBIDDEN_PATTERNS.map((pattern) => (typeof pattern === 'string' ? pattern : pattern.source)),
   }
@@ -1075,6 +1104,118 @@ function notificationEmailAddress(property) {
   return normalizeNullableString(property?.reservationAlertEmail || property?.email)
 }
 
+function safeEmailHeader(value) {
+  return normalizeText(value).replace(/[\r\n]+/g, ' ').slice(0, 240)
+}
+
+function base64Url(value) {
+  return Buffer.from(value, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+function notificationMetadataObject(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {}
+  return metadata
+}
+
+function emailTextForNotification(notification) {
+  const lines = [
+    safeEmailHeader(notification.title),
+    '',
+    redactedSensitiveText(notification.summary),
+  ]
+  if (notification.actionUrl) {
+    lines.push('', `Open in PMS: ${redactedSensitiveText(notification.actionUrl)}`)
+  }
+  return lines.join('\n')
+}
+
+function rawGmailMessage(notification, env = process.env) {
+  const to = safeEmailHeader(notification.recipientAddress)
+  if (!to) throw new PmsValidationError('Hotel Ops email notification needs a recipient address.')
+  const from = safeEmailHeader(hotelOpsEmailSender(env))
+  const subject = safeEmailHeader(notification.title)
+  const body = emailTextForNotification(notification)
+  return base64Url([
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    body,
+  ].join('\r\n'))
+}
+
+export async function sendOpsEmailNotification(notification, options = {}) {
+  const env = options.env || process.env
+  const provider = hotelOpsEmailProviderStatus(env)
+  if (!provider.configured) {
+    throw new PmsValidationError('Hotel Ops Gmail email provider is not configured.', 503)
+  }
+
+  const fetchImpl = options.fetchImpl || fetch
+  const token = await resolveBookingEmailGmailAccessToken({ env, fetchImpl })
+  const userId = encodeURIComponent(env.HOTEL_OPS_GMAIL_USER_ID || env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID || 'me')
+  const response = await fetchImpl(`${GMAIL_SEND_URL_BASE}/${userId}/messages/send`, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ raw: rawGmailMessage(notification, env) }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new PmsValidationError(redactedSensitiveText(payload?.error?.message || payload?.error || `Gmail send failed with HTTP ${response.status}.`), response.status || 502)
+  }
+  return {
+    provider: provider.provider,
+    messageId: payload?.id || payload?.message?.id || null,
+    threadId: payload?.threadId || null,
+  }
+}
+
+async function deliverOpsEmailNotification(tx, notification) {
+  if (notification.channel !== 'EMAIL') return notification
+  const provider = hotelOpsEmailProviderStatus()
+  if (!provider.configured) return notification
+
+  try {
+    const delivery = await sendOpsEmailNotification(notification)
+    return tx.hotelOpsNotification.update({
+      where: { id: notification.id },
+      data: {
+        status: 'SENT',
+        sentAt: new Date(),
+        metadata: sanitizeOpsMetadata({
+          ...notificationMetadataObject(notification.metadata),
+          emailDelivery: delivery,
+        }),
+      },
+    })
+  } catch (error) {
+    return tx.hotelOpsNotification.update({
+      where: { id: notification.id },
+      data: {
+        status: 'FAILED',
+        metadata: sanitizeOpsMetadata({
+          ...notificationMetadataObject(notification.metadata),
+          emailDelivery: {
+            provider: provider.provider,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        }),
+      },
+    })
+  }
+}
+
 export function buildOpsNotificationDrafts(property, input = {}) {
   const actionUrl = appActionUrl(input.actionPath || '/ops/tasks')
   const title = redactedSensitiveText(normalizeText(input.title))
@@ -1120,7 +1261,8 @@ async function recordOpsNotifications(tx, propertyId, input, actor) {
   if (!property) return []
   const created = []
   for (const draft of buildOpsNotificationDrafts(property, input)) {
-    created.push(await tx.hotelOpsNotification.create({ data: draft }))
+    const notification = await tx.hotelOpsNotification.create({ data: draft })
+    created.push(await deliverOpsEmailNotification(tx, notification))
   }
   if (input.taskId) {
     await taskLog(tx, input.taskId, 'NOTIFICATION_RECORDED', input.title, actor, {

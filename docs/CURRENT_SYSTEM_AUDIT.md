@@ -1,6 +1,6 @@
 # Current System Audit - Hotel Ops AI Command Center
 
-Last reviewed: 2026-07-01
+Last reviewed: 2026-07-02
 
 ## Repository Overview
 
@@ -12,7 +12,7 @@ Last reviewed: 2026-07-01
 - Deployment: Render-oriented server build with local and GitHub CI launch checks.
 - Hotel Ops AI mode: deterministic controlled parser by default, with optional backend-only OpenAI Responses parsing when explicitly configured; all parsed tasks are strict-schema validated before permission decisions.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
-- Booking intelligence: backend scan engine creates trend alerts and in-app/email-intent notifications.
+- Booking intelligence: backend scan engine creates trend alerts and in-app/email notifications; email delivery stays provider-pending unless the backend Gmail provider is explicitly enabled and configured.
 - Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is persisted through backend acknowledgment routes.
 - Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync supports backend-owned OAuth access-token or refresh-token credentials.
 
@@ -42,7 +42,7 @@ Last reviewed: 2026-07-01
 - `NEEDS_HUMAN` task resolution requires an operational reason, reuses backend run-permission and emergency-stop checks, and requeues only after authorized human action is recorded.
 - Worker requests are signed, nonce-protected, credential-field rejected, and dry-run by default.
 - Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.
-- Notification bell/center merges local housekeeping notifications with backend Hotel Ops notifications and keeps provider-pending email intents visible to staff.
+- Notification bell/center merges local housekeeping notifications with backend Hotel Ops notifications and keeps provider-pending or failed email delivery records visible to staff.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
 
@@ -52,7 +52,7 @@ Last reviewed: 2026-07-01
 - Booking.com has a dry-run adapter skeleton with selector TODOs. Real browser writes remain disabled until selector and account-owner proof exists.
 - CAPTCHA, 2FA, locked-account, and password-expired challenges are not bypassed; staff can only record authorized human completion and requeue through the audited backend flow.
 - Agoda, Trip.com, and Expedia currently use the signed mock worker path.
-- Email notifications are recorded as provider-pending intents unless a real provider adapter is configured.
+- Email notifications are recorded as provider-pending intents by default. When `HOTEL_OPS_EMAIL_DELIVERY_ENABLED=true` and backend Gmail OAuth credentials are configured, Hotel Ops email notifications are sent through Gmail API and persisted as `SENT` or `FAILED`.
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
 - The parser is deterministic by default and strict-schema validated. An optional OpenAI Responses parser is available only when backend environment flags and `OPENAI_API_KEY` are configured; model output is redacted, schema-validated, policy-normalized, and falls back to deterministic parsing on provider failure.
 - Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.

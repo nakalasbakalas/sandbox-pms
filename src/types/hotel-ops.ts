@@ -291,5 +291,15 @@ export type HotelOpsPolicy = {
     redactsPromptInput: boolean
     fallback: 'deterministic'
   }
+  notifications?: {
+    email: {
+      provider: 'record_only' | 'gmail_api'
+      requested: boolean
+      configured: boolean
+      credentialMode: 'access_token' | 'refresh_token' | 'missing' | 'not-required'
+      sender?: string | null
+    }
+    defaultChannelStatus: 'PENDING_PROVIDER' | string
+  }
   forbiddenPatterns: string[]
 }

@@ -99,6 +99,18 @@ function parserModeLabel(value?: string) {
   return 'Deterministic parser'
 }
 
+function emailProviderLabel(value?: string) {
+  if (value === 'gmail_api') return 'Gmail email provider'
+  return 'Email intent records'
+}
+
+function credentialModeLabel(value?: string) {
+  if (value === 'access_token') return 'access token'
+  if (value === 'refresh_token') return 'refresh token'
+  if (value === 'missing') return 'credentials missing'
+  return 'not required'
+}
+
 function notificationTone(notification: HotelOpsNotification) {
   if (notification.type === 'NEEDS_HUMAN' || notification.type === 'EMERGENCY_STOP') return 'border-red-200 bg-red-50 text-red-800'
   if (notification.type === 'APPROVAL_REQUEST' || notification.status === 'PENDING_PROVIDER') return 'border-amber-200 bg-amber-50 text-amber-900'
@@ -962,6 +974,12 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                   <Badge variant="outline">{opsPolicy?.defaults.currency || 'THB'}</Badge>
                   <Badge variant={opsPolicy?.parser?.configured ? 'secondary' : 'outline'}>{parserModeLabel(opsPolicy?.parser?.mode)}</Badge>
                   {opsPolicy?.parser?.requested && !opsPolicy.parser.configured && <Badge variant="outline">AI parser needs backend key</Badge>}
+                  <Badge variant={opsPolicy?.notifications?.email.configured ? 'secondary' : 'outline'}>
+                    {emailProviderLabel(opsPolicy?.notifications?.email.provider)}
+                  </Badge>
+                  <Badge variant={opsPolicy?.notifications?.email.requested && !opsPolicy.notifications.email.configured ? 'destructive' : 'outline'}>
+                    Email {credentialModeLabel(opsPolicy?.notifications?.email.credentialMode)}
+                  </Badge>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {policyRuleEntries(opsPolicy).map(([taskType, rule]) => (

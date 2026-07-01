@@ -25,7 +25,7 @@ Staff must use controlled PMS interfaces with authentication, roles, approvals, 
 - No CAPTCHA or 2FA bypass.
 - No credential exposure in frontend code, prompts, logs, screenshots, notifications, docs, or commits.
 - Do not store pasted mailbox/admin passwords in repo files, skills, memory, logs, screenshots, or final summaries.
-- Booking email intake uses `booking@sandboxhotel.com` as the primary mailbox, but server sync requires Gmail API credentials or a future refresh-token flow, not a raw mailbox password.
+- Booking email intake uses `booking@sandboxhotel.com` as the primary mailbox, but server sync requires backend Gmail API credentials: either an access token or OAuth refresh-token credentials, not a raw mailbox password.
 - Admin-created staff login users may be username-only. Email may be null, username must be unique, and the normal password policy still applies.
 - High-risk booking, payment, OTA, or Hotel Ops write actions require approval unless an explicit backend policy safely pre-approves them.
 - Destructive, ambiguous, denial, cancellation, alert-resolution, emergency-stop, and booking-changing actions require an operational reason and audit evidence.
