@@ -1,4 +1,4 @@
-export type MessageChannel = 'LINE' | 'EMAIL' | 'SMS'
+export type MessageChannel = 'LINE' | 'EMAIL' | 'SMS' | 'WHATSAPP'
 export type MessageStatus = 'DRAFT' | 'SCHEDULED' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'
 export type MessageType = 'BOOKING_CONFIRMATION' | 'PAYMENT_REMINDER' | 'PRE_ARRIVAL' | 'CHECK_IN_READY' | 'IN_STAY' | 'POST_STAY' | 'CUSTOM'
 export type RecipientType = 'GUEST' | 'STAFF' | 'GROUP'

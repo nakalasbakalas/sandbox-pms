@@ -28,6 +28,7 @@ Staff must use controlled PMS interfaces with authentication, roles, approvals, 
 - Booking email intake uses `booking@sandboxhotel.com` as the primary mailbox, but server sync requires backend Gmail API credentials: either an access token or OAuth refresh-token credentials, not a raw mailbox password.
 - Admin-created staff login users may be username-only. Email may be null, username must be unique, and the normal password policy still applies.
 - LINE Hotel Ops command intake must remain opt-in, signed-webhook-only, prefix-gated, allowlisted by LINE source user id, mapped to active PMS users, and submitted through `server/ops-service.mjs`.
+- WhatsApp Hotel Ops command intake must remain opt-in, signed-webhook-only, prefix-gated, allowlisted by sender phone/id, mapped to active PMS users, linked to source message metadata, and submitted through `server/ops-service.mjs`.
 - Email Hotel Ops command intake must remain opt-in, booking-sync-only, prefix-gated, allowlisted by sender email, mapped to active PMS users, linked to source email metadata, and submitted through `server/ops-service.mjs`.
 - High-risk booking, payment, OTA, or Hotel Ops write actions require approval unless an explicit backend policy safely pre-approves them.
 - Destructive, ambiguous, denial, cancellation, alert-resolution, emergency-stop, and booking-changing actions require an operational reason and audit evidence.

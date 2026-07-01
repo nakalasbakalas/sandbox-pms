@@ -66,6 +66,7 @@ export function CommunicationCenterView() {
       LINE: (messages || []).filter(m => m.channel === 'LINE').length,
       EMAIL: (messages || []).filter(m => m.channel === 'EMAIL').length,
       SMS: (messages || []).filter(m => m.channel === 'SMS').length,
+      WHATSAPP: (messages || []).filter(m => m.channel === 'WHATSAPP').length,
     },
     byType: {} as Record<MessageType, number>,
     deliveryRate: 0
@@ -398,6 +399,7 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
               </SelectItem>
               <SelectItem value="EMAIL">Email</SelectItem>
               <SelectItem value="SMS">SMS</SelectItem>
+              <SelectItem value="WHATSAPP">WhatsApp</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -423,12 +425,13 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
 
         <div>
           <Label>
-            {channel === 'LINE' ? 'LINE ID' : channel === 'EMAIL' ? 'Email Address' : 'Phone Number'}
+            {channel === 'LINE' ? 'LINE ID' : channel === 'EMAIL' ? 'Email Address' : channel === 'WHATSAPP' ? 'WhatsApp Number' : 'Phone Number'}
           </Label>
           <Input
             placeholder={
               channel === 'LINE' ? 'Guest LINE ID' :
               channel === 'EMAIL' ? 'Guest email address' :
+              channel === 'WHATSAPP' ? 'Guest WhatsApp number' :
               'Guest phone number'
             }
             value={recipientContact}
@@ -552,6 +555,7 @@ function ChannelBadge({ channel }: ChannelBadgeProps) {
     LINE: { label: 'LINE', className: 'bg-green-500 text-white' },
     EMAIL: { label: 'Email', className: 'bg-blue-500 text-white' },
     SMS: { label: 'SMS', className: 'bg-purple-500 text-white' },
+    WHATSAPP: { label: 'WhatsApp', className: 'bg-emerald-500 text-white' },
   }
 
   const { label, className } = config[channel]

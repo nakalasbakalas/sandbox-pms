@@ -28,6 +28,13 @@ import {
   processLineOpsCommandEvents,
 } from './line-ops-intake.mjs'
 import {
+  extractWhatsAppWebhookMessages,
+  processWhatsAppOpsCommandEvents,
+  verifyWhatsAppWebhookSignature,
+  whatsAppOpsCommandIntakeStatus,
+  whatsAppWebhookStatus,
+} from './whatsapp-ops-intake.mjs'
+import {
   configureIcalFeedChannel,
   deactivateIcalFeedChannel,
   getIcalFeedByToken,
@@ -396,7 +403,9 @@ async function healthPayload(deep = false) {
     database: await databaseStatus(deep),
     integrations: {
       lineWebhookConfigured: Boolean(process.env.LINE_CHANNEL_SECRET && process.env.LINE_CHANNEL_ACCESS_TOKEN),
+      whatsappWebhookConfigured: whatsAppWebhookStatus(process.env).appSecretConfigured,
       hotelOpsEmailCommandIntake: emailOpsCommandIntakeStatus(process.env),
+      hotelOpsWhatsAppCommandIntake: whatsAppOpsCommandIntakeStatus(process.env),
     },
   }
 }
@@ -543,6 +552,124 @@ async function handleLineWebhook(request, response) {
       enabled: lineOpsCommandIntakeStatus(process.env).enabled,
       accepted: opsAccepted,
       skipped: opsCommandResults.filter((result) => result.status === 'skipped').length,
+    },
+  })
+}
+
+function sendPlainText(response, statusCode, body) {
+  response.writeHead(statusCode, securityHeaders({
+    'content-type': 'text/plain; charset=utf-8',
+  }))
+  response.end(String(body ?? ''))
+}
+
+function whatsAppMessageDeliveredAt(event = {}) {
+  const timestamp = Number(event.timestamp)
+  if (!Number.isFinite(timestamp)) return new Date()
+  const milliseconds = timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp
+  const date = new Date(milliseconds)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+async function handleWhatsAppWebhook(request, response, url) {
+  if (request.method === 'GET') {
+    const mode = url.searchParams.get('hub.mode')
+    const token = url.searchParams.get('hub.verify_token')
+    const challenge = url.searchParams.get('hub.challenge')
+    if (mode === 'subscribe') {
+      const expectedToken = process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN
+      if (!expectedToken) {
+        sendJson(response, 503, { ok: false, error: 'WHATSAPP_WEBHOOK_VERIFY_TOKEN is not configured.' })
+        return
+      }
+      if (token !== expectedToken) {
+        sendJson(response, 403, { ok: false, error: 'Invalid WhatsApp webhook verify token.' })
+        return
+      }
+      sendPlainText(response, 200, challenge || '')
+      return
+    }
+
+    const webhook = whatsAppWebhookStatus(process.env)
+    const opsCommandIntake = whatsAppOpsCommandIntakeStatus(process.env)
+    sendJson(response, 200, {
+      ok: true,
+      configured: webhook.appSecretConfigured && webhook.verifyTokenConfigured,
+      webhook,
+      hotelOpsCommandIntake: {
+        enabled: opsCommandIntake.enabled,
+        prefix: opsCommandIntake.prefix,
+        userMapConfigured: opsCommandIntake.userMapConfigured,
+        userMapError: opsCommandIntake.userMapError,
+      },
+    })
+    return
+  }
+
+  if (request.method !== 'POST') {
+    sendJson(response, 405, { ok: false, error: 'Method not allowed' })
+    return
+  }
+
+  const rawBody = await readRawBody(request)
+  const signatureCheck = verifyWhatsAppWebhookSignature(rawBody, request.headers['x-hub-signature-256'], process.env)
+  if (!signatureCheck.ok) {
+    sendJson(response, signatureCheck.statusCode || 401, { ok: false, error: signatureCheck.error || 'Invalid WhatsApp webhook signature.' })
+    return
+  }
+
+  let payload
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'))
+  } catch {
+    sendJson(response, 400, { ok: false, error: 'Webhook body must be valid JSON.' })
+    return
+  }
+
+  const events = extractWhatsAppWebhookMessages(payload)
+  const db = await getPrisma()
+  const property = await db.property.findUnique({ where: { code: 'SANDBOX' } })
+  if (!property) {
+    sendJson(response, 503, { ok: false, error: 'Property setup has not been completed yet.' })
+    return
+  }
+
+  if (events.length > 0) {
+    await db.message.createMany({
+      data: events.map((event) => ({
+        propertyId: property.id,
+        recipientId: event.senderId,
+        recipientType: 'WHATSAPP_WEBHOOK',
+        channel: 'WHATSAPP',
+        body: event.text || event.type || 'WhatsApp webhook event',
+        status: 'DELIVERED',
+        deliveredAt: whatsAppMessageDeliveredAt(event),
+        metadata: {
+          provider: event.provider,
+          messageId: event.messageId,
+          senderId: event.senderId,
+          contactName: event.contactName,
+          metadataPhoneNumberId: event.metadataPhoneNumberId,
+          raw: event.raw,
+        },
+      })),
+    })
+  }
+
+  const opsCommandResults = await processWhatsAppOpsCommandEvents(db, events, {
+    env: process.env,
+    submitCommand: submitOpsCommand,
+  })
+  const opsAccepted = opsCommandResults.filter((result) => result.status === 'accepted').length
+
+  sendJson(response, 200, {
+    ok: true,
+    received: events.length,
+    hotelOpsCommands: {
+      enabled: whatsAppOpsCommandIntakeStatus(process.env).enabled,
+      accepted: opsAccepted,
+      skipped: opsCommandResults.filter((result) => result.status === 'skipped').length,
+      errors: opsCommandResults.filter((result) => result.status === 'error').length,
     },
   })
 }
@@ -1203,6 +1330,11 @@ const server = createServer(async (request, response) => {
 
     if (url.pathname === '/api/line/webhook') {
       await handleLineWebhook(request, response)
+      return
+    }
+
+    if (url.pathname === '/api/whatsapp/webhook') {
+      await handleWhatsAppWebhook(request, response, url)
       return
     }
 

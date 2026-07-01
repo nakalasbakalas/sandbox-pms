@@ -19,7 +19,7 @@ export type ReservationAction = 'CREATED' | 'MODIFIED' | 'CANCELLED' | 'CHECKED_
 export type RateAdjustmentType = 'PERCENTAGE' | 'FIXED_DELTA' | 'LONG_STAY_DISCOUNT'
 export type ChannelProvider = 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
 export type ChannelSyncType = 'RESERVATION_PULL' | 'INVENTORY_PUSH' | 'RATE_PUSH' | 'RESTRICTION_PUSH'
-export type MessageChannel = 'EMAIL' | 'LINE' | 'SMS'
+export type MessageChannel = 'EMAIL' | 'LINE' | 'SMS' | 'WHATSAPP'
 export type MessageStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'FAILED'
 
 export interface Property {

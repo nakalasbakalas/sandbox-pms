@@ -934,6 +934,7 @@ enum MessageChannel {
   LINE
   EMAIL
   SMS
+  WHATSAPP
 }
 
 enum MessageStatus {

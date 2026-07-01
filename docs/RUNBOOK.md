@@ -62,6 +62,18 @@ HOTEL_OPS_LINE_COMMAND_USER_MAP={"line-user-id":"manager-username"}
 
 LINE command intake is separate from guest/staff LINE messaging. Only signed LINE webhook events with the configured prefix are considered, and only mapped active PMS users with `create:ops-task` can create Hotel Ops tasks. Confirm `GET /api/line/webhook` reports command intake enabled and the user map configured before relying on LINE commands.
 
+Optional WhatsApp Hotel Ops command intake:
+
+```env
+WHATSAPP_WEBHOOK_APP_SECRET=...
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=...
+HOTEL_OPS_WHATSAPP_COMMANDS_ENABLED=true
+HOTEL_OPS_WHATSAPP_COMMAND_PREFIX=/ops
+HOTEL_OPS_WHATSAPP_COMMAND_USER_MAP={"66812345678":"manager-username"}
+```
+
+WhatsApp command intake is inbound-only and separate from guest/staff outbound messaging. Configure the Meta webhook URL as `https://<host>/api/whatsapp/webhook`. Only `x-hub-signature-256` verified messages with the configured prefix are considered, and only mapped active PMS users with `create:ops-task` can create Hotel Ops tasks. Confirm `GET /api/whatsapp/webhook` reports the webhook secret, verify token, command intake, and user map configured before relying on WhatsApp commands.
+
 Optional email Hotel Ops command intake from the booking mailbox:
 
 ```env

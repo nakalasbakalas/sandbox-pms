@@ -16,6 +16,7 @@ Last reviewed: 2026-07-02
 - Staff alert surface: the shared PMS header notification bell can include backend Hotel Ops notifications for users with Ops permission; read/dismiss state is persisted through backend acknowledgment routes.
 - Booking email intake: backend routes exist for status, sync, events, approve/reject/reprocess, and sources; Gmail mailbox sync supports backend-owned OAuth access-token or refresh-token credentials.
 - LINE command intake: signed LINE webhooks can optionally convert prefixed, allowlisted staff messages into Hotel Ops commands through the same backend task service; this is disabled by default.
+- WhatsApp command intake: signed Meta WhatsApp webhooks can optionally convert prefixed, allowlisted staff messages into Hotel Ops commands through the same backend task service; this is disabled by default.
 - Email command intake: booking mailbox sync can optionally convert prefixed, allowlisted sender messages into Hotel Ops commands through the same backend task service; this is disabled by default.
 
 ## Relevant Implementation Files
@@ -48,6 +49,7 @@ Last reviewed: 2026-07-02
 - Booking Inbox edit, link, create, approve, reject, and reprocess actions call backend booking-email routes. Edited parser details are submitted as approval payloads, matched new bookings link instead of creating duplicates, and cancellation email actions require an operational reason.
 - Notification bell/center merges local housekeeping notifications with backend Hotel Ops notifications and keeps provider-pending or failed email delivery records visible to staff.
 - Optional LINE command intake is prefix-gated, allowlisted by LINE source user id, mapped to an active PMS user, checked for `create:ops-task`, and submitted through `submitOpsCommand` with LINE message idempotency.
+- Optional WhatsApp command intake is prefix-gated, HMAC signature-verified, allowlisted by sender phone/id, mapped to an active PMS user, checked for `create:ops-task`, submitted through `submitOpsCommand` with source channel `whatsapp`, and linked to source message metadata in task logs/audit.
 - Optional email command intake is prefix-gated, allowlisted by sender email, mapped to an active PMS user, checked for `create:ops-task`, submitted through `submitOpsCommand` with source channel `email`, and linked to source email metadata in task logs/audit.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.

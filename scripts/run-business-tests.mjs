@@ -1,6 +1,7 @@
 /* global console, process, Response */
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
+import { createHmac } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,6 +11,7 @@ import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
 import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
 import { emailOpsCommandIdempotencyKey, emailOpsCommandIntakeStatus, extractEmailOpsCommandText, normalizeEmailOpsSender, parseEmailOpsCommandUserMap, processEmailOpsCommandEvents, resolveEmailOpsCommandEvent } from '../server/email-ops-intake.mjs'
 import { extractLineOpsCommandText, lineOpsCommandIdempotencyKey, lineOpsCommandIntakeStatus, parseLineOpsCommandUserMap, processLineOpsCommandEvents, resolveLineOpsCommandEvent } from '../server/line-ops-intake.mjs'
+import { extractWhatsAppOpsCommandText, extractWhatsAppWebhookMessages, normalizeWhatsAppOpsSender, parseWhatsAppOpsCommandUserMap, processWhatsAppOpsCommandEvents, resolveWhatsAppOpsCommandEvent, verifyWhatsAppWebhookSignature, whatsAppOpsCommandIdempotencyKey, whatsAppOpsCommandIntakeStatus, whatsAppWebhookStatus } from '../server/whatsapp-ops-intake.mjs'
 import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-worker-client.mjs'
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
@@ -1581,6 +1583,89 @@ assert.equal(submittedEmailOpsCommand.input.idempotencyKey, 'email:gmail-message
 assert.equal(submittedEmailOpsCommand.input.sourceMetadata.sourceEmailEventId, 'booking-email-event-1', 'Hotel Ops email command processing passes source email metadata')
 assert.equal(submittedEmailOpsCommand.actor.id, 'manager-email-id', 'Hotel Ops email command processing submits as the mapped PMS actor')
 
+const whatsappOpsEnv = {
+  HOTEL_OPS_WHATSAPP_COMMANDS_ENABLED: 'true',
+  HOTEL_OPS_WHATSAPP_COMMAND_PREFIX: '/ops',
+  HOTEL_OPS_WHATSAPP_COMMAND_USER_MAP: JSON.stringify({ '+66 81 234 5678': 'manager-whatsapp' }),
+  WHATSAPP_WEBHOOK_APP_SECRET: 'whatsapp-webhook-secret',
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: 'verify-token',
+}
+const whatsappPayload = {
+  entry: [{
+    changes: [{
+      value: {
+        metadata: {
+          phone_number_id: 'phone-number-id-1',
+          display_phone_number: '+66 99 000 0000',
+        },
+        contacts: [{
+          wa_id: '66812345678',
+          profile: { name: 'WhatsApp Manager' },
+        }],
+        messages: [{
+          id: 'wamid.message-1',
+          from: '66812345678',
+          timestamp: '1782945600',
+          type: 'text',
+          text: { body: '/ops Check bookings for next weekend.' },
+        }],
+      },
+    }],
+  }],
+}
+const whatsappMessages = extractWhatsAppWebhookMessages(whatsappPayload)
+const whatsappOpsEvent = whatsappMessages[0]
+const whatsappBody = Buffer.from(JSON.stringify(whatsappPayload))
+const whatsappSignature = `sha256=${createHmac('sha256', whatsappOpsEnv.WHATSAPP_WEBHOOK_APP_SECRET).update(whatsappBody).digest('hex')}`
+assert.equal(whatsAppOpsCommandIntakeStatus({}).enabled, false, 'Hotel Ops WhatsApp command intake is disabled by default')
+assert.equal(whatsAppWebhookStatus(whatsappOpsEnv).appSecretConfigured, true, 'WhatsApp webhook status reports configured signing secret')
+assert.equal(whatsAppOpsCommandIntakeStatus(whatsappOpsEnv).userMapConfigured, true, 'Hotel Ops WhatsApp command intake reports an allowlist when configured')
+assert.equal(parseWhatsAppOpsCommandUserMap({ HOTEL_OPS_WHATSAPP_COMMAND_USER_MAP: '{bad-json' }).ok, false, 'Hotel Ops WhatsApp command user map rejects invalid JSON')
+assert.equal(normalizeWhatsAppOpsSender('whatsapp:+66 81-234-5678'), '66812345678', 'Hotel Ops WhatsApp sender normalization handles WhatsApp phone refs')
+assert.equal(whatsappMessages.length, 1, 'WhatsApp webhook extraction reads Meta text messages')
+assert.equal(whatsappOpsEvent.contactName, 'WhatsApp Manager', 'WhatsApp webhook extraction keeps contact name metadata')
+assert.equal(extractWhatsAppOpsCommandText(whatsappOpsEvent, { ...whatsappOpsEnv, HOTEL_OPS_WHATSAPP_COMMANDS_ENABLED: 'false' }), null, 'Hotel Ops WhatsApp command text is ignored until enabled')
+assert.equal(extractWhatsAppOpsCommandText({ ...whatsappOpsEvent, text: 'Check bookings for next weekend.' }, whatsappOpsEnv), null, 'Hotel Ops WhatsApp command text requires the configured prefix')
+assert.equal(extractWhatsAppOpsCommandText(whatsappOpsEvent, whatsappOpsEnv), 'Check bookings for next weekend.', 'Hotel Ops WhatsApp command text strips the configured prefix')
+assert.equal(whatsAppOpsCommandIdempotencyKey(whatsappOpsEvent), 'whatsapp:wamid.message-1', 'Hotel Ops WhatsApp command idempotency uses the WhatsApp message id')
+assert.equal(verifyWhatsAppWebhookSignature(whatsappBody, whatsappSignature, whatsappOpsEnv).ok, true, 'WhatsApp webhook signature verifies with the configured app secret')
+assert.equal(verifyWhatsAppWebhookSignature(whatsappBody, 'sha256=bad', whatsappOpsEnv).ok, false, 'WhatsApp webhook rejects invalid signatures')
+const whatsappOpsPrisma = {
+  user: {
+    findFirst: async ({ where }) => {
+      assert.deepEqual(where.OR, [{ id: 'manager-whatsapp' }, { username: 'manager-whatsapp' }, { email: 'manager-whatsapp' }], 'Hotel Ops WhatsApp command actor lookup accepts id, username, or email refs')
+      return {
+        id: 'manager-whatsapp-id',
+        username: 'manager-whatsapp',
+        email: null,
+        firstName: 'WhatsApp',
+        lastName: 'Manager',
+        role: 'MANAGER',
+        active: true,
+      }
+    },
+  },
+}
+const resolvedWhatsAppOpsEvent = await resolveWhatsAppOpsCommandEvent(whatsappOpsPrisma, whatsappOpsEvent, { env: whatsappOpsEnv })
+assert.equal(resolvedWhatsAppOpsEvent.status, 'accepted', 'Hotel Ops WhatsApp command intake accepts allowlisted senders')
+assert.equal(resolvedWhatsAppOpsEvent.actor.id, 'manager-whatsapp-id', 'Hotel Ops WhatsApp command intake maps sender to an active PMS user')
+assert.equal(resolvedWhatsAppOpsEvent.sourceMetadata.whatsAppMessageId, 'wamid.message-1', 'Hotel Ops WhatsApp command intake keeps source message metadata')
+const unmappedWhatsAppOpsEvent = await resolveWhatsAppOpsCommandEvent(whatsappOpsPrisma, { ...whatsappOpsEvent, senderId: '66800000000' }, { env: whatsappOpsEnv })
+assert.equal(unmappedWhatsAppOpsEvent.status, 'skipped', 'Hotel Ops WhatsApp command intake skips non-allowlisted senders')
+let submittedWhatsAppOpsCommand = null
+const processedWhatsAppOpsEvents = await processWhatsAppOpsCommandEvents(whatsappOpsPrisma, [whatsappOpsEvent], {
+  env: whatsappOpsEnv,
+  submitCommand: async (_prisma, input, actor) => {
+    submittedWhatsAppOpsCommand = { input, actor }
+    return { task: { id: 'whatsapp-task-1' }, duplicate: false }
+  },
+})
+assert.equal(processedWhatsAppOpsEvents[0].status, 'accepted', 'Hotel Ops WhatsApp command processing submits allowlisted commands')
+assert.equal(submittedWhatsAppOpsCommand.input.sourceChannel, 'whatsapp', 'Hotel Ops WhatsApp command processing tags source channel as whatsapp')
+assert.equal(submittedWhatsAppOpsCommand.input.idempotencyKey, 'whatsapp:wamid.message-1', 'Hotel Ops WhatsApp command processing passes retry-safe idempotency key')
+assert.equal(submittedWhatsAppOpsCommand.input.sourceMetadata.whatsAppMessageId, 'wamid.message-1', 'Hotel Ops WhatsApp command processing passes source message metadata')
+assert.equal(submittedWhatsAppOpsCommand.actor.id, 'manager-whatsapp-id', 'Hotel Ops WhatsApp command processing submits as the mapped PMS actor')
+
 const managerDecision = evaluateOpsPermission(rateCommand, { id: 'manager', role: 'MANAGER' })
 assert.equal(managerDecision.allowed, true, 'Hotel manager can submit high-risk Hotel Ops task')
 assert.equal(managerDecision.approvalRequired, true, 'Hotel manager high-risk Hotel Ops task still needs owner approval')
@@ -1615,6 +1700,28 @@ assert.equal(
   emailSourceFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED' && audit.changes.sourceMetadata?.sourceEmailId === 'gmail-message-source-metadata'),
   true,
   'Hotel Ops email commands link audit records to source email messages',
+)
+const whatsappSourceFixture = createOpsCommandPrismaFixture()
+const whatsappSourcePrisma = {
+  ...whatsappSourceFixture.prisma,
+  user: {
+    findFirst: async () => opsManager,
+  },
+}
+await processWhatsAppOpsCommandEvents(whatsappSourcePrisma, [whatsappOpsEvent], {
+  env: {
+    ...whatsappOpsEnv,
+    HOTEL_OPS_WHATSAPP_COMMAND_USER_MAP: JSON.stringify({ '66812345678': opsManager.id }),
+  },
+  submitCommand: submitOpsCommand,
+})
+const whatsappCommandReceipt = whatsappSourceFixture.logs.find((log) => log.action === 'COMMAND_RECEIVED')
+assert.equal(whatsappCommandReceipt?.metadata?.sourceChannel, 'whatsapp', 'Hotel Ops WhatsApp commands record source channel in task logs')
+assert.equal(whatsappCommandReceipt?.metadata?.sourceMetadata?.whatsAppMessageId, 'wamid.message-1', 'Hotel Ops WhatsApp commands link task logs to source WhatsApp messages')
+assert.equal(
+  whatsappSourceFixture.audits.some((audit) => audit.action === 'OPS_COMMAND_RECEIVED' && audit.changes.sourceMetadata?.whatsAppMessageId === 'wamid.message-1'),
+  true,
+  'Hotel Ops WhatsApp commands link audit records to source WhatsApp messages',
 )
 const queuedScanResult = await submitOpsCommand(
   opsCommandFixture.prisma,

@@ -1,5 +1,7 @@
 const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/health$/, methods: ['GET'] },
+  { pattern: /^\/api\/line\/webhook$/, methods: ['GET', 'POST'] },
+  { pattern: /^\/api\/whatsapp\/webhook$/, methods: ['GET', 'POST'] },
   { pattern: /^\/api\/auth\/login$/, methods: ['POST'] },
   { pattern: /^\/api\/auth\/logout$/, methods: ['POST'] },
   { pattern: /^\/api\/auth\/me$/, methods: ['GET'] },

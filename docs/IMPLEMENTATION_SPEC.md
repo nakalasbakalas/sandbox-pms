@@ -48,6 +48,7 @@ API routes:
 - `POST /api/ops/scan/run`
 - `POST /api/internal/ops/worker/tasks`
 - `GET/POST /api/line/webhook` for signed LINE messaging and optional Hotel Ops command intake
+- `GET/POST /api/whatsapp/webhook` for Meta WhatsApp webhook verification, signed inbound messages, and optional Hotel Ops command intake
 
 Booking-email API routes:
 
@@ -93,6 +94,19 @@ Signed LINE webhook traffic can optionally feed manager commands into the same `
 - The mapped PMS user must have `create:ops-task`; unmapped or under-permissioned LINE messages stay as normal LINE message records and are skipped for Ops intake.
 - Accepted LINE commands use the LINE message id as the idempotency key and are tagged with source channel `line`.
 - Parser validation, permission checks, approvals, queueing, notifications, emergency stop, and audit records remain owned by `server/ops-service.mjs`.
+
+## WhatsApp Command Intake
+
+Meta WhatsApp Cloud API webhook traffic can optionally feed manager commands into the same `submitOpsCommand` backend service used by `/api/ops/commands`.
+
+- The bridge is disabled by default.
+- `GET /api/whatsapp/webhook` supports Meta webhook verification with `WHATSAPP_WEBHOOK_VERIFY_TOKEN` and reports safe configuration status when called without a verification challenge.
+- `POST /api/whatsapp/webhook` requires a valid `x-hub-signature-256` HMAC using `WHATSAPP_WEBHOOK_APP_SECRET`.
+- It only processes extracted text messages that start with `HOTEL_OPS_WHATSAPP_COMMAND_PREFIX`, defaulting to `/ops`.
+- `HOTEL_OPS_WHATSAPP_COMMAND_USER_MAP` must map sender phone/id values to existing active PMS user ids, usernames, or emails.
+- The mapped PMS user must have `create:ops-task`; unmapped or under-permissioned WhatsApp messages remain normal message records and are skipped for Ops intake.
+- Accepted WhatsApp commands use the WhatsApp message id as the idempotency key, are tagged with source channel `whatsapp`, and persist source message metadata in task logs and audit records.
+- Outbound WhatsApp delivery is not implemented by this bridge; live provider setup remains a separate integration.
 
 ## Email Command Intake
 

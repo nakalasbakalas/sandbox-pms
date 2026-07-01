@@ -701,6 +701,8 @@ assert.equal(canPerformAction(manager, 'edit:rates'), true, 'manager server perm
 assert.equal(canPerformAction(frontDesk, 'send:guest-messages'), true, 'front desk server permissions match guest messaging UI access')
 assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekeeping cannot process payments')
 assert.deepEqual(resolveApiRouteContract('/api/auth/login')?.methods, ['POST'], 'auth login only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/line/webhook')?.methods, ['GET', 'POST'], 'LINE webhook exposes status and signed delivery methods')
+assert.deepEqual(resolveApiRouteContract('/api/whatsapp/webhook')?.methods, ['GET', 'POST'], 'WhatsApp webhook exposes verification/status and signed delivery methods')
 assert.deepEqual(resolveApiRouteContract('/api/users')?.methods, ['GET', 'POST'], 'user collection exposes admin read/create methods')
 assert.deepEqual(resolveApiRouteContract('/api/users/user-1')?.methods, ['PATCH', 'DELETE'], 'user detail exposes admin update/deactivate methods')
 assert.deepEqual(resolveApiRouteContract('/api/ops/commands')?.methods, ['POST'], 'Hotel Ops command endpoint accepts command posts')
