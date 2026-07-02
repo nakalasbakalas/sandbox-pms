@@ -17,6 +17,7 @@
         "test:e2e": "node scripts/run-e2e-tests.mjs",
         "test:e2e:db": "node scripts/run-e2e-tests.mjs",
         "launch:check": "node scripts/launch-check.mjs",
+        "launch:evidence": "node scripts/collect-launch-evidence.mjs",
         "live:check": "node scripts/live-readiness-check.mjs",
         "security:hash-password": "node scripts/hash-password.mjs",
         "prod:credentials": "node scripts/generate-production-credentials.mjs",
