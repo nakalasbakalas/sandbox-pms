@@ -8,6 +8,7 @@ Verdict: not launch-signed-off. The local branch is now fast-forwarded to `origi
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
+| Slice 5H - draft PR review path | Completed; review path open | [2026-07-02-slice-5h-draft-pr-review-path.md](evidence/2026-07-02-slice-5h-draft-pr-review-path.md) |
 | Slice 5G - focused publishable changeset | Completed locally | [2026-07-02-slice-5g-focused-publishable-changeset.md](evidence/2026-07-02-slice-5g-focused-publishable-changeset.md) |
 | Slice 5F - current-checkout launch check after origin sync | Completed locally | [2026-07-02-slice-5f-current-checkout-launch-check-after-sync.md](evidence/2026-07-02-slice-5f-current-checkout-launch-check-after-sync.md) |
 | Slice 5E - origin sync and deploy boundary | Completed; deploy still blocked | [2026-07-02-slice-5e-origin-sync-deploy-boundary.md](evidence/2026-07-02-slice-5e-origin-sync-deploy-boundary.md) |
@@ -33,10 +34,10 @@ Verdict: not launch-signed-off. The local branch is now fast-forwarded to `origi
 | DB-mutating E2E workflow | Green locally for current checkout before sync | Guarded local E2E prep and `npm.cmd run test:e2e:db` passed with `ALLOW_DB_E2E=true` against `sandbox_hotel_e2e` on `localhost:55432`. This is local disposable proof, not production proof; rerun if deployable code changes. |
 | Real production room inventory | Blocked by tooling | Slice 5C attempted a read-only aggregate query through Render CLI. The local `psql` PATH issue was fixed for that process, but `render psql` returned empty output even for `select 1` and a deliberately invalid read query, so no production inventory proof was recorded. |
 | Live unauthenticated protected API denial | Representative endpoints green | Live probes without credentials returned `401 Authentication is required` for representative protected reads and writes. |
-| Live first-run setup completion gate | Blocked by live behavior | Slice 5D confirmed `GET /api/setup/status` reports `needsSetup=false` and `hasUsers=true`, but unauthenticated `POST /api/setup/complete` with empty JSON still returns setup-payload validation (`400 Add at least one room type.`). The hardening is isolated on local branch `codex/setup-gate-launch-proof`, but it is not deployed. |
+| Live first-run setup completion gate | Blocked by live behavior | Slice 5D confirmed `GET /api/setup/status` reports `needsSetup=false` and `hasUsers=true`, but unauthenticated `POST /api/setup/complete` with empty JSON still returns setup-payload validation (`400 Add at least one room type.`). The hardening is in draft PR #150, but it is not deployed. |
 | Render production service metadata | Refreshed read-only | Long-term service `sandbox-hotel-pms-v43m` is live on `7adcc01c...`; alternate `sandbox-hotel-pms` is live on `7adcc01c...`; launch service `sandbox-hotel-pms-launch` is live on `5f5b5416...`. |
 | Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest completed run. This is local worktree proof, not provider secret inventory or rotation proof. |
-| Live deploy drift | Open | Local `origin/main` is `f5b0849...`; long-term live service and alternate service are still on `7adcc01c...`. The setup-gate hardening is isolated on local branch `codex/setup-gate-launch-proof`; deploying `origin/main` alone would not close the setup-gate blocker. |
+| Live deploy drift | Open | Local `origin/main` is `f5b0849...`; long-term live service and alternate service are still on `7adcc01c...`. The setup-gate hardening is in draft PR #150; deploying `origin/main` alone would not close the setup-gate blocker. |
 | Audit threshold | High threshold green in Slice 5F | `launch:check` passed `npm.cmd audit --audit-level=high`; npm reported one moderate `js-yaml` advisory below the high threshold. |
 
 ## Remaining P0 Blockers
@@ -51,4 +52,4 @@ Verdict: not launch-signed-off. The local branch is now fast-forwarded to `origi
 
 ## Next Recommended Slice
 
-Push/review the focused `codex/setup-gate-launch-proof` changeset, deploy the exact reviewed commit to `sandbox-hotel-pms-v43m` only after approval, and rerun the setup-complete unauthenticated probe against `https://book.sandboxhotel.com`.
+Wait for PR #150 review/CI status or inspect GitHub checks. After approval, deploy the exact reviewed commit to `sandbox-hotel-pms-v43m` and rerun the setup-complete unauthenticated probe against `https://book.sandboxhotel.com`.
