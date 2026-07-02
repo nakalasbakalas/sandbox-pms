@@ -1,9 +1,69 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-02.
-Latest external provider evidence refresh: 2026-07-02T06:33Z.
+Latest external provider evidence refresh: 2026-07-02T08:00Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-02T08:00Z PR And Live Setup-Gate Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: GitHub PR metadata, Render deploy metadata, and unauthenticated public setup probes. No deploy, restart, SSH session, database shell, production database mutation, DB-mutating E2E, credentialed login, or secret-value access was performed.
+- PR #150 remains `OPEN`, `isDraft=true`, merge state `CLEAN`, with no review approval recorded. Head is `75810c3fbcf73d6f8a790a607beb3bb3b0bf69a0`; base `main` is `f5b0849037a55e2c99a3d781d742ba85d2384d8c`.
+- `gh pr checks 150 --repo nakalasbakalas/sandbox-pms` reported `Install, test, build, and launch-check` passed in 6m29s.
+- `origin/codex/setup-gate-launch-proof` remains `75810c3fbcf73d6f8a790a607beb3bb3b0bf69a0`; `origin/main` remains `f5b0849037a55e2c99a3d781d742ba85d2384d8c`.
+- Long-term custom-domain service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) remains live on deploy `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- Alternate service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) remains live on deploy `dep-d8ekph4p3tds738mdp6g`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`.
+- `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, production environment, and database configured/OK.
+- `GET https://book.sandboxhotel.com/api/setup/status` returned `200` with `needsSetup=false`, `hasProperty=true`, and `hasUsers=true`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `400` and `Add at least one room type.`, so the public service still reaches setup payload validation instead of the PR #150 completed-setup rejection.
+- Canonical evidence: `docs/launch/evidence/2026-07-02-slice-5s-pr-live-setup-refresh.md`.
+
+Still not proven by this refresh:
+
+- Current setup-gate hardening on the public site.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Secret key inventory and rotation timestamps.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
+
+## 2026-07-02T07:14Z Read-Only Render And Setup-Gate Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Render CLI v2.13.0 is authenticated as `nakalastravels@gmail.com`.
+- PR #150 remains open, draft, mergeable, and green for head `75810c3fbcf73d6f8a790a607beb3bb3b0bf69a0`.
+- `npm.cmd run render:validate` passed with Render Blueprint validation `valid: true`.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured.
+- Long-term custom-domain service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) remains live on deploy `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- Alternate service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) remains live on deploy `dep-d8ekph4p3tds738mdp6g`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`.
+- Launch service `sandbox-hotel-pms-launch` (`srv-d8clkqho3t8c73a1eldg`) remains live on deploy `dep-d8oh74m47okc739vhq2g`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`. It is not treated as the custom-domain production target in this proof.
+- `GET https://book.sandboxhotel.com/api/setup/status` returned `200` with `needsSetup=false`, `hasProperty=true`, and `hasUsers=true`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `400` and `Add at least one room type.`, so the public service still reaches setup payload validation instead of the PR #150 completed-setup rejection.
+- No deploy, restart, SSH session, database shell, production mutation, or paid resource action was run. No production secret values, database URLs, tokens, cookies, or passwords were requested or recorded.
+
+Still not proven by this refresh:
+
+- Current setup-gate hardening on the public site.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Secret key inventory and rotation timestamps.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
+
+## 2026-07-02T07:20Z Production Room Inventory Proof Attempt
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Render PostgreSQL `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) is available and not suspended, but this proves only database resource status.
+- Non-interactive Render CLI `psql` remains inconclusive: `select 1 as probe;` returned no output for both datastore name and datastore id, and a deliberately invalid read query also returned empty output.
+- Unauthenticated `GET https://book.sandboxhotel.com/api/rooms` returned `401 Authentication is required`.
+- Unauthenticated `GET https://book.sandboxhotel.com/api/today` returned `401 Authentication is required`.
+- No production room inventory counts were recorded. No deploy, restart, SSH session, database mutation, DB-mutating E2E against production, or secret-value access was performed.
+
+Still not proven by this refresh:
+
+- Current production room inventory configured through onboarding/import.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Secret key inventory and rotation timestamps.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
 
 ## 2026-07-02 Origin Sync And Deploy Boundary
 
@@ -86,6 +146,43 @@ Still not proven by this refresh:
 - Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner.
 - Upstream Cloudflare/WAF rule IDs and thresholds.
 - Live LINE, OTA API, PromptPay, card gateway, or other payment-provider send/charge evidence.
+
+## 2026-07-02T14:34+07:00 Auth/RBAC Unauthenticated Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: read-only/unauthenticated HTTP probes plus Render CLI service inventory. No production credentials, cookies, session tokens, database URLs, or secret values were supplied.
+- `render whoami -o json` and `render services -o json` succeeded through the configured Render CLI session; the service inventory included Sandbox PMS services and did not print raw connection strings or secret values.
+- Node `fetch` probes against `https://book.sandboxhotel.com` returned `401 Authentication is required.` for unauthenticated `GET /api/auth/me`, `GET /api/rooms`, `GET /api/reservations`, `POST /api/reservations`, `POST /api/payments`, `GET /api/users`, `GET /api/settings/room-setup`, and `POST /api/ops/commands`.
+- Unauthenticated `POST /api/auth/logout` returned `200 ok=true`, which only proves the endpoint can clear a session cookie; it is not credentialed production logout proof.
+- Canonical evidence: `docs/launch/evidence/AUTH_RBAC_PROOF.md`.
+
+Still not proven by this refresh:
+
+- Approved production user list.
+- Credentialed production login/logout.
+- Role-by-role production route/API access and denial.
+- Bootstrap/setup-token removal or rotation evidence.
+
+## 2026-07-02T14:41+07:00 Secret, Recovery, Rollback, And WAF Posture Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: read-only Render CLI metadata, non-destructive public-edge probes, and `npm.cmd run live:check`. No deploy, restart, SSH session, database shell, production mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
+- `render workspaces -o json` confirmed workspace `My Workspace` (`tea-d6n8kq14tr6s738stj5g`).
+- `render projects -o json` confirmed project `My project` (`prj-d6nm1vdm5p6s7398qg70`).
+- `render environments prj-d6nm1vdm5p6s7398qg70 -o json` confirmed environment `Production` (`evm-d6nm1vdm5p6s7398qg7g`) with `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`.
+- `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` confirmed the long-term custom-domain service current live deploy is `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` returned one observed instance id `srv-d6ns31h4tr6s73c9i8g0-2brwp`.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured unless `LIVE_REQUIRE_LINE=true`.
+- Non-destructive public-edge probes against `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404`; `/healthz?deep=1` returned `200`. Each response exposed Cloudflare and Render headers, proving the edge path but not customer-owned WAF/rate-limit rule configuration.
+- Canonical evidence: `docs/launch/evidence/WAF_PROVIDER_POSTURE.md`.
+
+Still not proven by this refresh:
+
+- Redacted Render secret key inventory or rotation timestamps.
+- Owner confirmation for production secret custody and cleanup decisions for legacy/compatibility keys.
+- Named rollback owner, rollback deputy, and database recovery owner.
+- Current recovery point/retention proof from Render dashboard/API.
+- Upstream WAF/rate-limit rule IDs, thresholds, protected hostnames, and owner-approved non-destructive rate-limit test result.
 
 ## 2026-06-07 Disposable Restore Test
 
