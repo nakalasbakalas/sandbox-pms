@@ -1,74 +1,54 @@
-# Current Launch Status Index
+# Launch Current Status Index
 
-Last updated: 2026-07-02
+Status date: 2026-07-02.
 
-This index is the current launch-readiness pointer for `nakalasbakalas/sandbox-pms`. It exists to prevent older launch-hardening, completion, or proof documents from overstating production readiness. If another document says a gate passed on an older date, prefer this file until fresh evidence is captured under `docs/launch/evidence/`.
+Verdict: not launch-signed-off. The local branch is now fast-forwarded to `origin/main` at `f5b0849037a55e2c99a3d781d742ba85d2384d8c`, but the setup-completion hardening remains an uncommitted local working-tree change. Production/account-owner P0 proof remains open.
 
-## Current summary
+## Latest Slice
 
-- Reported checklist progress from operator context: 38 of 71 items complete.
-- Current readiness: not ready for final launch sign-off.
-- Latest operator report: current-checkout `npm.cmd run launch:check` is not green because `db:doctor` reported configured DB migrate-status failures/unavailability, and DB-mutating E2E is blocked without `ALLOW_DB_E2E=true`.
-- Existing repo docs contain useful June 2026 evidence, but they still list production users, room inventory, role-by-role access, current secrets/rotation metadata, rollback ownership, WAF/rate-limit proof, and live provider evidence as not proven.
-
-## Source of truth files
-
-| File | Purpose |
-| --- | --- |
-| `LAUNCH_CHECKLIST.md` | Repo launch checklist and final sign-off source of truth |
-| `README.md` | Public current-launch-status summary and command list |
-| `docs/launch-scope-decisions.md` | Provider, user, room inventory, DB E2E, rollback, and WAF go/no-go boundaries |
-| `docs/live-environment-proof.md` | Existing live environment proof register and still-not-proven list |
-| `docs/launch/CODEX_LAUNCH_FINISH_PACKET.md` | Bounded Codex execution packet with one-slice-at-a-time instructions |
-| `docs/launch/LAUNCH_PROOF_MATRIX.md` | P0/P1/P2 proof matrix and artifact map |
-| `docs/launch/evidence/` | Fresh redacted launch evidence outputs and manual proof artifacts |
-
-## Required proof artifacts
-
-| Artifact | Required before sign-off? | Current status |
+| Slice | Status | Evidence |
 | --- | --- | --- |
-| `docs/launch/evidence/LAUNCH_GATE_RESULTS.md` | Yes | missing |
-| `docs/launch/evidence/DB_DOCTOR_RESULTS.md` | Yes | missing |
-| `docs/launch/evidence/AUTH_RBAC_PROOF.md` | Yes | missing |
-| `docs/launch/evidence/ROOM_INVENTORY_PROOF.md` | Yes | missing |
-| `docs/launch/evidence/HOTEL_WORKFLOW_PROOF.md` | Yes | missing |
-| `docs/launch/evidence/DB_E2E_POSTURE.md` | Yes | missing |
-| `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md` | Yes | missing |
-| `docs/launch/evidence/WAF_PROVIDER_POSTURE.md` | Before guest-facing launch or formal defer | missing |
-| `docs/launch/evidence/BROWSER_E2E_STABILITY.md` | Before guest-facing launch or formal defer | missing |
-| `docs/launch/evidence/LOCALIZATION_TABLET_ACCEPTANCE.md` | Before guest-facing launch or formal defer | missing |
+| Slice 5G - focused publishable changeset | Completed locally | [2026-07-02-slice-5g-focused-publishable-changeset.md](evidence/2026-07-02-slice-5g-focused-publishable-changeset.md) |
+| Slice 5F - current-checkout launch check after origin sync | Completed locally | [2026-07-02-slice-5f-current-checkout-launch-check-after-sync.md](evidence/2026-07-02-slice-5f-current-checkout-launch-check-after-sync.md) |
+| Slice 5E - origin sync and deploy boundary | Completed; deploy still blocked | [2026-07-02-slice-5e-origin-sync-deploy-boundary.md](evidence/2026-07-02-slice-5e-origin-sync-deploy-boundary.md) |
+| Slice 5D - live deploy drift and setup-gate reprobe | Completed; blocker confirmed | [2026-07-02-slice-5d-live-deploy-drift-reprobe.md](evidence/2026-07-02-slice-5d-live-deploy-drift-reprobe.md) |
+| Slice 5C - Render room inventory proof attempt | Completed; proof still blocked | [2026-07-02-slice-5c-render-room-inventory-proof-attempt.md](evidence/2026-07-02-slice-5c-render-room-inventory-proof-attempt.md) |
+| Slice 5B - current-checkout launch check refresh | Completed locally | [2026-07-02-slice-5b-current-checkout-launch-check.md](evidence/2026-07-02-slice-5b-current-checkout-launch-check.md) |
+| Slice 5A - local secret hygiene evidence | Completed locally | [2026-07-02-slice-5a-local-secret-hygiene.md](evidence/2026-07-02-slice-5a-local-secret-hygiene.md) |
+| Slice 4 - launch packet and evidence-command restoration | Completed locally | [2026-07-02-slice-4-launch-packet-evidence-command.md](evidence/2026-07-02-slice-4-launch-packet-evidence-command.md) |
+| Slice 3 - read-only live Render metadata refresh | Completed with external proof gaps | [2026-07-02-slice-3-live-render-proof.md](evidence/2026-07-02-slice-3-live-render-proof.md) |
+| Slice 2 - live unauthenticated auth denial and setup-gate hardening | Partial; live blocker found | [2026-07-02-slice-2-auth-unauthenticated.md](evidence/2026-07-02-slice-2-auth-unauthenticated.md) |
+| Slice 1 - guarded DB-mutating E2E posture | Completed locally with caveats | [2026-07-02-slice-1-db-e2e.md](evidence/2026-07-02-slice-1-db-e2e.md) |
+| Slice 0 - fresh local evidence and launch-gate unblock | Completed locally with caveats | [2026-07-02-slice-0-validation.md](evidence/2026-07-02-slice-0-validation.md) |
 
-## Open P0 blockers
+## Current Gate Status
 
-- Production users and secure access path proof.
-- Production room inventory proof.
-- Core hotel workflow acceptance proof.
-- DB-mutating E2E posture decision and proof.
-- Secret hygiene, rotation metadata, ownership, rollback/deputy/database recovery proof.
-- Current-checkout `npm run launch:check` repair/rerun.
-- Live production secret and recovery evidence refresh.
+| Area | Current status | Notes |
+| --- | --- | --- |
+| Launch packet files | Present on `origin/main`; locally updated | `origin/main` now contains the launch packet docs from PR #149. Local status/proof docs have been updated with Slice 5A-5E evidence. |
+| `launch:evidence` script | Green locally | Local `package.json` keeps `launch:evidence` pointed at `scripts/launch-evidence.mjs` so the evidence inventory and secret-hygiene gate still runs. Upstream `scripts/collect-launch-evidence.mjs` remains available as a snapshot helper. |
+| Local database migration state | Green after remediation | `npm.cmd run db:migrate` applied `20260702053000_add_whatsapp_message_channel` and `20260702064500_hotel_ops_scan_snapshots` to `sandbox_hotel_dev`; guarded `npm.cmd run db:e2e:ready` applied and seeded local `sandbox_hotel_e2e`. |
+| Current-checkout `launch:check` | Green locally after origin sync | Slice 5F reran `npm.cmd run launch:check` on local `main` fast-forwarded to `origin/main` at `f5b0849...` with the local launch/setup-gate changes reapplied. |
+| Live health check | Green | Slice 5D refreshed `npm.cmd run live:check` against the custom domain, `sandbox-hotel-pms.onrender.com`, and `sandbox-hotel-pms-v43m.onrender.com`. |
+| DB-mutating E2E workflow | Green locally for current checkout before sync | Guarded local E2E prep and `npm.cmd run test:e2e:db` passed with `ALLOW_DB_E2E=true` against `sandbox_hotel_e2e` on `localhost:55432`. This is local disposable proof, not production proof; rerun if deployable code changes. |
+| Real production room inventory | Blocked by tooling | Slice 5C attempted a read-only aggregate query through Render CLI. The local `psql` PATH issue was fixed for that process, but `render psql` returned empty output even for `select 1` and a deliberately invalid read query, so no production inventory proof was recorded. |
+| Live unauthenticated protected API denial | Representative endpoints green | Live probes without credentials returned `401 Authentication is required` for representative protected reads and writes. |
+| Live first-run setup completion gate | Blocked by live behavior | Slice 5D confirmed `GET /api/setup/status` reports `needsSetup=false` and `hasUsers=true`, but unauthenticated `POST /api/setup/complete` with empty JSON still returns setup-payload validation (`400 Add at least one room type.`). The hardening is isolated on local branch `codex/setup-gate-launch-proof`, but it is not deployed. |
+| Render production service metadata | Refreshed read-only | Long-term service `sandbox-hotel-pms-v43m` is live on `7adcc01c...`; alternate `sandbox-hotel-pms` is live on `7adcc01c...`; launch service `sandbox-hotel-pms-launch` is live on `5f5b5416...`. |
+| Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest completed run. This is local worktree proof, not provider secret inventory or rotation proof. |
+| Live deploy drift | Open | Local `origin/main` is `f5b0849...`; long-term live service and alternate service are still on `7adcc01c...`. The setup-gate hardening is isolated on local branch `codex/setup-gate-launch-proof`; deploying `origin/main` alone would not close the setup-gate blocker. |
+| Audit threshold | High threshold green in Slice 5F | `launch:check` passed `npm.cmd audit --audit-level=high`; npm reported one moderate `js-yaml` advisory below the high threshold. |
 
-## Open P1 blockers
+## Remaining P0 Blockers
 
-- Upstream WAF/rate-limit rule IDs, thresholds, protected hostnames, and non-destructive test result.
-- Provider posture decisions for LINE, OTA automation, and payments are not launch-ready unless explicitly accepted as manual/disabled/deferred.
-- Browser cold-start/page.goto instability must be fixed or documented if it reproduces.
-- Thai/English localization and tablet/manual operations acceptance proof.
+- Production users/auth/RBAC/logout/unauthorized-access proof is still not recorded for the target environment.
+- Live first-run setup completion gate needs the local hardening published, deployed, and reprobed.
+- Real production room inventory proof is still not recorded; the Render CLI `psql` path did not return usable query output in Slice 5C.
+- Core hotel workflow proof is still not recorded for staging or controlled production-like acceptance.
+- Production secret hygiene, secret rotation metadata, and recovery ownership proof remain external/account-owner evidence gaps.
+- Live secret values were not accessed; secret key inventory/rotation timestamps remain dashboard/API evidence gaps.
+- Rollback owner/deputy, database recovery owner, and WAF/rate-limit rule evidence remain unproven.
 
-## Recommended next Codex slice
+## Next Recommended Slice
 
-Start with Slice 0 from `docs/launch/CODEX_LAUNCH_FINISH_PACKET.md`:
-
-1. Run `npm run launch:evidence`.
-2. Run non-destructive checks.
-3. Create/update `docs/launch/evidence/LAUNCH_GATE_RESULTS.md` and `docs/launch/evidence/DB_DOCTOR_RESULTS.md`.
-4. Update this index with proved/blocked/deferred status.
-
-## Do not mark ready until
-
-- All P0 proof artifacts exist and are current.
-- `npm run launch:check` passes in the intended environment.
-- DB-mutating E2E posture is recorded and safe.
-- Real room inventory is proved.
-- Live secret/recovery evidence is verified with redacted outputs.
-- P1 items are complete or formally deferred with owner/date.
+Push/review the focused `codex/setup-gate-launch-proof` changeset, deploy the exact reviewed commit to `sandbox-hotel-pms-v43m` only after approval, and rerun the setup-complete unauthenticated probe against `https://book.sandboxhotel.com`.

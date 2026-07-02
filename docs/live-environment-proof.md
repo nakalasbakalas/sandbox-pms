@@ -1,9 +1,71 @@
 # Live Environment Proof Register
 
-Latest validation refresh: 2026-06-15.
-Latest external provider evidence refresh: 2026-06-07T15:57Z.
+Latest validation refresh: 2026-07-02.
+Latest external provider evidence refresh: 2026-07-02T06:33Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-02 Origin Sync And Deploy Boundary
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- `git fetch origin` updated `origin/main` to `f5b0849037a55e2c99a3d781d742ba85d2384d8c`, merging PR #149 from `launch-finish-packet-20260702`.
+- Local `main` was fast-forwarded to `origin/main` at `f5b0849037a55e2c99a3d781d742ba85d2384d8c`, and the dirty launch evidence/code work was reapplied.
+- The setup-completion hardening in `server/pms-service.mjs` and its regression coverage in `scripts/run-business-tests.mjs` remain local working-tree changes, not committed in `origin/main`.
+- Long-term custom-domain service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) remains live on deploy `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- Alternate service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) remains live on deploy `dep-d8ekph4p3tds738mdp6g`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`.
+- Launch service `sandbox-hotel-pms-launch` (`srv-d8clkqho3t8c73a1eldg`) is live on deploy `dep-d8oh74m47okc739vhq2g`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`. It is not treated as the custom-domain production target in this proof.
+- The Render deploy command was inspected but not run. The long-term service deployment path is production-sensitive because `render.yaml` defines predeploy as `npm run db:migrate && npm run db:seed`.
+- No deploy, restart, SSH session, database shell, production mutation, or paid resource action was run. No production secret values, database URLs, tokens, cookies, or passwords were requested or recorded.
+
+Still not proven by this refresh:
+
+- Current setup-gate hardening on the public site.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Secret key inventory and rotation timestamps.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
+
+## 2026-07-02T06:33Z Live Deploy Drift And Setup-Gate Reprobe
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Local `HEAD` and `origin/main` were both `2ba7410e4684697237bf14980544a4084775821c`.
+- Long-term custom-domain service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) latest deploy was still `dep-d8i4q3favr4c73afbrg0`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- Alternate service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) latest deploy was still `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`.
+- Public host validation passed for `https://book.sandboxhotel.com`, `https://sandbox-hotel-pms.onrender.com`, and `https://sandbox-hotel-pms-v43m.onrender.com` using `LIVE_EXTRA_URLS=... npm.cmd run live:check`; all three reported `lineWebhookConfigured=false`, which remains optional unless LINE is required.
+- `GET https://book.sandboxhotel.com/api/setup/status` returned `200` with `needsSetup=false`, `hasProperty=true`, `hasUsers=true`, and `propertyName=SANDBOX HOTEL`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `400` and `Add at least one room type.`, so the live public service still reaches setup payload validation instead of rejecting completed setup before validation.
+- This refresh confirms live deploy drift remains open and the current-checkout setup-gate hardening is not proven live.
+- No deploy, restart, SSH session, database shell, production mutation, or paid resource action was run. No production secret values, database URLs, tokens, cookies, or passwords were requested or recorded.
+
+Still not proven by this refresh:
+
+- Current-checkout setup-gate hardening on the public site.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Secret key inventory and rotation timestamps.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
+
+## 2026-07-02 Read-Only Render And Live Host Refresh
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Render CLI v2.13.0 is authenticated as `nakalastravels@gmail.com` in team workspace `My Workspace` (`tea-d6n8kq14tr6s738stj5g`).
+- Public host validation passed for `https://book.sandboxhotel.com`, `https://sandbox-hotel-pms.onrender.com`, and `https://sandbox-hotel-pms-v43m.onrender.com` using `LIVE_EXTRA_URLS=... npm.cmd run live:check`; all three reported `lineWebhookConfigured=false`, which remains optional unless LINE is required.
+- Long-term custom-domain service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) is not suspended and is live on deploy `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6` (`Improve board folio workflow and smoke checks`), finished `2026-06-06T16:39:42Z`.
+- Alternate service `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`) is not suspended and is live on deploy `dep-d8ekph4p3tds738mdp6g`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20Z`.
+- Local `origin/main` at the time of this refresh is `2ba7410e4684697237bf14980544a4084775821c`, so both live services lag the current repo and do not include the current-checkout setup-gate hardening.
+- Managed production PostgreSQL `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) is `available`, primary, PostgreSQL 17, region `oregon`, plan `basic_256mb`, 15 GB disk, and not suspended.
+- Render project environment `Production` (`evm-d6nm1vdm5p6s7398qg7g`) reports `protectedStatus=unprotected`, network isolation disabled, and IP allow list `0.0.0.0/0`.
+- No deploy, restart, SSH session, database shell, or paid resource action was run. No production secret values, database URLs, tokens, cookies, or passwords were requested or recorded.
+
+Still not proven by this refresh:
+
+- Secret key inventory and rotation timestamps; the CLI commands used for this refresh did not expose those metadata fields safely.
+- Approved production user list and role-by-role access matrix against the target environment.
+- Current production room inventory configured through onboarding/import.
+- Named rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner with access proof.
+- Upstream Cloudflare/WAF rule IDs and thresholds.
+- Live LINE, OTA API, PromptPay, card gateway, or other payment-provider send/charge evidence.
+- Current-checkout setup-gate hardening on the public site; live services are on older deploys.
 
 ## 2026-06-15 Local And Live Validation Refresh
 
