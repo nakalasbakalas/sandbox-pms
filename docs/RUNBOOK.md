@@ -95,21 +95,27 @@ Booking Inbox operators:
 
 Historical booking mailbox capture:
 
-1. Confirm backend Gmail OAuth credentials are configured; do not use or store a raw mailbox password.
-2. Dry-run a bounded historical scan first:
+1. Check current PMS capture state without scanning Gmail:
+
+```powershell
+npm.cmd run booking-email:proof
+```
+
+2. Confirm backend Gmail OAuth credentials are configured; do not use or store a raw mailbox password.
+3. Dry-run a bounded historical scan first:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250
 ```
 
-3. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
-4. If the preview looks correct, import the same bounded set as Booking Inbox review events:
+4. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
+5. If the preview looks correct, import the same bounded set as Booking Inbox review events:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-5. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+6. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
 Hotel Ops notification center:
 
