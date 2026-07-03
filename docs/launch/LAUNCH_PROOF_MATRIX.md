@@ -2,7 +2,7 @@
 
 Status date: 2026-07-03.
 
-Verdict: not launch-signed-off. Slice 5BE confirms current commit `ad2b7267d7ac625708b935fa058361e86dfa09fb` is deployed to the public Render service and reprobed through the Cloudflare-fronted custom domain; the setup-gate deploy/reprobe blocker is closed. Slice 5BE adds redacted Render Gmail OAuth status tooling and confirms current credential paths are still not ready. Owner/provider proof is still missing for production auth/RBAC, room inventory source, workflow acceptance, secret inventory, recovery ownership, latest recovery point, WAF/rate-limit rules, and booking-email OAuth/backfill if required. This matrix separates local proof from open production/account-owner proof. Do not treat this file as proof by itself; each row must link to command output, redacted provider metadata, or manual acceptance evidence.
+Verdict: not launch-signed-off. Slice 5BE confirms deployed status-tool commit `ad2b7267d7ac625708b935fa058361e86dfa09fb` is live on the public Render service and reprobed through the Cloudflare-fronted custom domain; the setup-gate deploy/reprobe blocker is closed. Slice 5BE adds redacted Render Gmail OAuth status tooling and confirms current credential paths are still not ready. Owner/provider proof is still missing for production auth/RBAC, room inventory source, workflow acceptance, secret inventory, recovery ownership, latest recovery point, WAF/rate-limit rules, and booking-email OAuth/backfill if required. This matrix separates local proof from open production/account-owner proof. Do not treat this file as proof by itself; each row must link to command output, redacted provider metadata, or manual acceptance evidence.
 
 ## P0 Matrix
 

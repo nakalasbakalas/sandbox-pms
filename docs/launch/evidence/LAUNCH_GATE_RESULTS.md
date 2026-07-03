@@ -2,7 +2,7 @@
 
 Status date: 2026-07-03.
 
-Verdict: current-checkout launch gate is green in CI, with focused local checks also green. Slice 5BE GitHub Actions run `28671225263` passed `Install, test, build, and launch-check` for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`, and Slice 5BE deployed that commit to the custom-domain Render service. This proves engineering gate health for the current checkout, not production/account-owner launch sign-off.
+Verdict: the deployed status-tool commit is green in CI, with focused local checks also green. Slice 5BE GitHub Actions run `28671225263` passed `Install, test, build, and launch-check` for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`, and Slice 5BE deployed that commit to the custom-domain Render service. This proves engineering gate health for the deployed runtime commit, not production/account-owner launch sign-off.
 
 Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BE records deploy/probe evidence for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`.
 
