@@ -140,6 +140,14 @@ ALLOW_PROD_ROOM_ONBOARDING=true
 
 The import validates the property, room types, room numbers, floors, operational statuses, and housekeeping statuses before writing. It upserts by property and room number, and it does not create bookings, guests, invoices, payments, or demo operational data. Use `ops/rooms.example.json` as the file shape.
 
+After onboarding or importing rooms, generate redacted aggregate proof:
+
+```bash
+npm run rooms:proof
+```
+
+The proof command is read-only and omits room numbers, guests, users, payments, reservations, and raw database URLs. It reports aggregate counts by room type key, operational status, and current status. Use `-- --include-room-type-labels` only when the operations owner approves exposing room-type labels in launch evidence.
+
 ## Render Deployment
 
 Render production provides `DATABASE_URL` through the managed PostgreSQL binding in `render.yaml`. The production web service should be connected to `https://github.com/nakalasbakalas/sandbox-pms`.

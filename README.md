@@ -74,6 +74,14 @@ Against a production-like database URL, the room import also requires:
 ALLOW_PROD_ROOM_ONBOARDING=true
 ```
 
+Generate redacted aggregate room-inventory proof after import/onboarding:
+
+```bash
+npm run rooms:proof
+```
+
+Use `-- --include-room-type-labels` only when the operations owner approves exposing room-type labels in evidence. The proof output is counts-only; it omits room numbers, guests, users, payments, reservations, and raw database URLs. It still needs owner/import confirmation before production room inventory is launch-signed-off.
+
 Real staff users must be approved and configured through hash-only `SEED_USERS_JSON`, a setup-token flow, or an explicitly reviewed bootstrap path. Staff accounts can be username-only when email is not available. Do not commit plaintext credentials.
 
 ## Production Operations

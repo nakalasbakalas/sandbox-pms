@@ -33,6 +33,7 @@
         "db:ready": "npm run db:generate && npm run db:migrate && npm run db:seed",
         "real-data:import": "node scripts/import-real-property-data.mjs",
         "rooms:import": "node scripts/import-rooms.mjs",
+        "rooms:proof": "node scripts/prove-room-inventory.mjs",
         "render:validate": "render blueprints validate",
         "optimize": "vite optimize",
         "preview": "vite preview"

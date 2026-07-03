@@ -1,11 +1,23 @@
 # Room Inventory Proof
 
 Date: 2026-07-02T07:20Z.
-Latest update: 2026-07-03T11:25+07:00.
+Latest update: 2026-07-03T17:45+07:00.
 
 Verdict: blocked. Real production room inventory is still not proved for launch sign-off.
 
 This file is the canonical Slice 3 evidence record for production room inventory. It records only non-secret command output and read-only probes. It does not contain room numbers, guest data, user data, database URLs, tokens, passwords, cookies, or raw secret values.
+
+## 2026-07-03 Slice 5BA Helper Update
+
+Slice 5BA adds a read-only aggregate proof helper:
+
+```powershell
+npm run rooms:proof
+```
+
+The helper uses the configured `DATABASE_URL`, queries only aggregate room counts, and omits room numbers, guests, reservations, users, payments, and raw database URLs. By default, room-type labels are redacted to stable `ROOM_TYPE_XX` keys; use `-- --include-room-type-labels` only with operations-owner approval.
+
+This helper is intended to replace the unreliable Render CLI `psql` proof path. It does not close this P0 by itself because production inventory still needs current output from the approved target plus owner/import evidence showing the room set is real and not fake seed/demo data.
 
 ## Required Proof To Close
 
@@ -121,6 +133,7 @@ No current command output proves real production room inventory. The Render data
 
 This P0 remains blocked until one of these approved evidence paths is available:
 
+- `npm run rooms:proof` run against the approved production/staging target, with output captured in redacted launch evidence and matched to owner/import confirmation.
 - Render MCP `query_render_postgres`, Render API query tooling, or another reliable non-interactive query path that returns redacted aggregate room counts and expected errors.
 - Render dashboard connection details used locally without printing the raw URL, with output limited to aggregate counts.
 - A redacted Render/dashboard/export proof of room types, room counts, and status distribution.
