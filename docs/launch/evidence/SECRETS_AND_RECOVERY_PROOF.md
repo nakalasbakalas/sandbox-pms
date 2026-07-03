@@ -9,12 +9,13 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, an
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest run. |
-| Production service resource | Partially proven | [2026-07-03-slice-5ay-housekeeping-sync.md](2026-07-03-slice-5ay-housekeeping-sync.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93nr7nlk1mc739ldujg` for merge commit `a01838a956f24164167ba7f91a7620a37de7f36d`. |
+| Production service resource | Partially proven | [2026-07-03-slice-5bd-current-deploy-sync.md](2026-07-03-slice-5bd-current-deploy-sync.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93t86hkh4rs73e0io4g` for commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`. |
 | Production database resource | Partially proven | [2026-07-03-slice-5av-secrets-recovery-waf-refresh.md](2026-07-03-slice-5av-secrets-recovery-waf-refresh.md) confirms `sandbox-hotel-pms-db-v43m` is available, plan `basic_256mb`, region `oregon`. |
 | Render Production environment posture | Open/risk remains | Slice 5AV confirms `Production` reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`. This is not WAF/rate-limit rule proof. |
 | Public deep health | Green as runtime health | `GET /healthz?deep=1` returned `200`, database configured, database OK, `server=cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` during the Slice 5AY refresh. |
 | Disposable restore test | Historical pass | `docs/live-environment-proof.md` records a disposable Render Postgres restore test that passed on 2026-06-07 and deleted the temporary database afterward. |
 | Render CLI env-var/secret metadata | Not available through this CLI path | Slice 5AV confirmed `render --help` exposes no top-level env-var/secret-manager command; `render services --help` exposes only `create` and `instances`; `render services env --help` returned services help only; `render ea --help` exposes object storage only. No safe CLI secret inventory or rotation metadata command was exposed in this session. |
+| Booking-email Gmail OAuth env-var metadata | Open/missing | Slice 5BD used Render API direct env-var lookups and found the booking-email Gmail OAuth env-var names and fallback `GMAIL_*` names missing on `sandbox-hotel-pms-v43m`. No values were requested or printed. |
 | Render CLI backup/recovery metadata | Not available through this CLI path | `render backups --help` returned `unknown command "backups" for "render"`; no safe CLI recovery-point or retention metadata command was exposed in this session. |
 | Recovery/rollback owners | Open | `docs/disaster-recovery.md` still lists primary rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner as `TBD`. |
 

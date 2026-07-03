@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BB records Booking Email capture state: the source exists, Gmail OAuth is missing, and there are zero production booking-email events. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BD confirms current `origin/main` commit `163d49c2ff58eef5447e93f07d42babbf3b59d58` is live on Render deploy `dep-d93t86hkh4rs73e0io4g`, public deep health is green, and unauthenticated setup-complete still returns the intended production-disabled `403`. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BD also reconfirms Booking Email capture remains blocked: backend Gmail OAuth env vars are missing, proof job succeeds, and dry-run backfill fails before capture. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -86,13 +86,25 @@ Required evidence to close:
 
 ## Live Setup-Completion Hardening
 
-Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; current Render deploy `dep-d93ordnaqgkc73cd2ke0` is live on `sandbox-hotel-pms-v43m`, serving commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
+Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; Slice 5BD confirms current Render deploy `dep-d93t86hkh4rs73e0io4g` is live on `sandbox-hotel-pms-v43m`, serving commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
 
 Maintenance evidence for future setup/auth route deploys:
 
 - Deploy record with deploy ID and commit SHA.
 - Public reprobe against `https://book.sandboxhotel.com/api/setup/complete` showing completed setup is rejected before setup payload validation.
 - No production secrets or payloads recorded.
+
+## Booking Email Capture And Backfill
+
+Current status: open. Slice 5BD confirms the source/backend tooling is deployed, but Render is still missing the backend Gmail OAuth env vars. Production `booking-email:proof` job `job-d93t9me7r5hc73dohjag` succeeded; production dry-run backfill job `job-d93t9mdaeets73ehrus0` failed while Gmail OAuth remained unconfigured.
+
+Required evidence to close:
+
+| Required proof | Accepted redacted format | Must not include |
+| --- | --- | --- |
+| Gmail OAuth configured on Render | Key-name status only showing `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`, and optional `BOOKING_EMAIL_GMAIL_USER_ID` configured. | Client secret, refresh token, access token, OAuth consent screenshots containing secrets. |
+| Historical dry-run backfill | Redacted aggregate output from `npm run booking-email:backfill -- --all-past --limit 250` showing scanned count, existing/new candidates, event type mix, and confidence distribution. | Message IDs, senders, recipients, subjects, raw email text, guest/payment data. |
+| Review-only import if accepted | Confirmed import job ID and aggregate event counts; staff still review in `/booking-inbox`. | Raw email contents, credentials, production mutation payloads. |
 
 ## Secrets, Recovery, Rollback, WAF
 

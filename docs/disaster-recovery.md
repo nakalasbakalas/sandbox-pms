@@ -7,7 +7,7 @@ This document defines the owner actions required before production launch sign-o
 - Production database: Render PostgreSQL `sandbox-hotel-pms-db-v43m`.
 - Public runtime: `https://book.sandboxhotel.com`.
 - Long-term production Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
-- Latest health-checked live deploy: `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished at 2026-06-06T16:39:42.109323Z, refreshed on 2026-07-03 with direct `GET /healthz?deep=1`.
+- Latest health-checked live deploy: `dep-d93t86hkh4rs73e0io4g`, commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`, finished at 2026-07-03T15:26:55Z, refreshed on 2026-07-03 with direct `GET /healthz?deep=1`.
 - Render Postgres point-in-time recovery status: `AVAILABLE`, with recovery starting at 2026-06-03T21:59:41Z during the 2026-06-07 provider check.
 - Disposable restore test: passed on 2026-06-07 using temporary restored database `dpg-d8ip6rdckfvc73c2qirg-a`, then deleted.
 - Automated public health check: `npm run live:check`.
