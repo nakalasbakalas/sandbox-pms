@@ -1,14 +1,16 @@
 # Current Checkout Launch Gate Results
 
-Status date: 2026-07-02.
+Status date: 2026-07-03.
 
-Verdict: current-checkout local launch gate is green. This proves local engineering gate health for the current checkout, not production/account-owner launch sign-off.
+Verdict: current-checkout local launch gate is green. Slice 5AV reran `npm.cmd run launch:check` after the Slice 5AV evidence/status updates and it passed. This proves local engineering gate health for the current checkout, not production/account-owner launch sign-off.
+
+Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`.
 
 ## Scope
 
 - Branch: `codex/setup-gate-launch-proof`.
-- Commit: `75810c3fbcf73d6f8a790a607beb3bb3b0bf69a0`.
-- Worktree: dirty with launch evidence/status docs and unrelated pre-existing `.env.example` plus `server/ota-adapters/booking-com.mjs` changes.
+- Commit: `fbc303136253a9785446d601d5532b6efc523b8f`.
+- Worktree: dirty with launch evidence/status docs through Slice 5AV at command time, plus unrelated pre-existing `.env.example` and `server/ota-adapters/booking-com.mjs` changes.
 - Production posture: no deploy, restart, SSH session, production database shell, production mutation, DB-mutating E2E against production, or secret-value access was performed.
 - DB-mutating E2E posture: not run by `launch:check`; the gate confirmed it remains blocked unless `ALLOW_DB_E2E=true`.
 
@@ -16,14 +18,19 @@ Verdict: current-checkout local launch gate is green. This proves local engineer
 
 | Command | Result | Notes |
 | --- | --- | --- |
-| `npm.cmd run launch:check` | Passed | Completed all launch-check subcommands in the current checkout. |
+| `npm.cmd run launch:check` | Failed/inconclusive | First Slice 5AT attempt hit the 5-minute tool timeout before returning command output. |
+| `npm.cmd run launch:check` | Failed | Second Slice 5AT attempt reached non-mutating `test:e2e` and failed with `page.waitForFunction: Timeout 20000ms exceeded` in `assertProtectedRouteAccess` at `scripts/run-e2e-tests.mjs:351`. |
+| PowerShell-managed `npm.cmd run test:e2e` | Passed | Direct non-mutating E2E retry passed in about 292 seconds and did not run DB-mutating workflow E2E. |
+| `npm.cmd run launch:check` | Passed | Final Slice 5AT retry completed all launch-check subcommands in the current checkout on 2026-07-03 after Slice 5AT docs/evidence updates. |
+| `npm.cmd run launch:check` | Passed | Follow-up rerun after final Slice 5AT evidence wording/link edits passed in the current checkout. |
+| `npm.cmd run launch:check` | Passed | Slice 5AV rerun after secrets/recovery/WAF evidence/status updates completed all launch-check subcommands in the current checkout. |
 
 ## Launch Check Subcommands
 
 | Subcommand | Result | Evidence Summary |
 | --- | --- | --- |
 | `npm.cmd run db:generate` | Passed | Prisma Client v6.19.3 generated successfully. |
-| `npm.cmd run db:doctor` | Passed | `DATABASE_URL` and `E2E_DATABASE_URL` were configured to local `localhost:55432` databases; connectivity and migrate status were ok for both. The script redacted the password in URL output. |
+| `npm.cmd run db:doctor` | Passed | `DATABASE_URL` and `E2E_DATABASE_URL` were configured to local `localhost:55432` databases; connectivity and migrate status were ok for both. The script redacted the password in URL output. DB-mutating E2E remained blocked because `ALLOW_DB_E2E=true` was not set. |
 | `npm.cmd run lint` | Passed | ESLint completed without reported errors. |
 | `npm.cmd run typecheck` | Passed | `tsc -b --noEmit` completed successfully. |
 | `npm.cmd test` | Passed | Business rule tests passed. |
@@ -34,7 +41,9 @@ Verdict: current-checkout local launch gate is green. This proves local engineer
 
 ## Evidence Decision
 
-The current checkout passes the authoritative local launch gate after the Slice 5I-5O evidence and status updates. This supports current local engineering readiness.
+The current checkout passes the authoritative local launch gate after the Slice 5AV evidence/status updates. Slice 5AT observed non-mutating E2E timeout/latency before the final pass; no gate was weakened and no production mutation was performed.
+
+Post-merge update: Slice 5AY later confirmed PR #150 merged into `origin/main` as `a01838a956f24164167ba7f91a7620a37de7f36d`, deployed live on Render deploy `dep-d93nr7nlk1mc739ldujg`, and passed the public setup-complete reprobe. This file remains the point-in-time local launch-gate record for commit `fbc3031...`; rerun the launch gate for later code changes before release claims.
 
 This does not close launch sign-off because several P0 items require live/account-owner proof:
 
@@ -48,4 +57,4 @@ This does not close launch sign-off because several P0 items require live/accoun
 
 ## Next Recommended Slice
 
-Capture account-owner proof for production auth/RBAC, room inventory, secrets, recovery ownership, and WAF/rate-limit rules. If owner-gated proof is not available, review/approve PR #150, deploy the exact reviewed commit to `sandbox-hotel-pms-v43m`, and rerun the setup-complete unauthenticated probe.
+Capture account-owner proof for production auth/RBAC, room inventory, secrets, recovery ownership, and WAF/rate-limit rules. Rerun `npm.cmd run launch:check` before release if code, dependency, migration, or environment assumptions change.

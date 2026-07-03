@@ -1,8 +1,19 @@
 # Hotel PMS Launch Checklist
 
-Checked command-based items reflect evidence recorded through 2026-06-15 in `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, or role-by-role manual sign-off remain unchecked until proven.
+Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off remain unchecked until proven.
 
-## 2026-06-15 Validation Evidence
+## 2026-07-03 Current Evidence Refresh
+
+- [x] `npm.cmd run launch:check` passes in the current checkout at commit `fbc303136253a9785446d601d5532b6efc523b8f` after Slice 5AV evidence/status updates; see `docs/launch/evidence/2026-07-03-slice-5av-secrets-recovery-waf-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
+- [x] Slice 5AT non-destructive baseline validation passes in the current checkout, including `launch:evidence`, `db:doctor`, typecheck, lint, tests, build, production preflight, Render Blueprint validation, live readiness, and whitespace checks; see `docs/launch/evidence/2026-07-03-slice-5at-baseline-validation-refresh.md` and `docs/launch/evidence/DB_DOCTOR_RESULTS.md`.
+- [x] Guarded local disposable DB-mutating E2E passes with `ALLOW_DB_E2E=true` against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/DB_E2E_POSTURE.md`.
+- [x] Guarded local core workflow DB E2E passes against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/2026-07-03-slice-5aj-core-workflow-local-db-refresh.md`.
+- [x] Local repository/evidence secret hygiene scan passes through `npm.cmd run launch:evidence`; see `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md`.
+- [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest live proof refresh.
+- [x] PR #150 setup-gate hardening is merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AY confirmed merge commit `a01838a956f24164167ba7f91a7620a37de7f36d` is live on Render deploy `dep-d93nr7nlk1mc739ldujg`, and unauthenticated setup-complete now returns the intended production-disabled `403`.
+- [ ] Production/account-owner proof is complete for users/auth/RBAC/logout, real room inventory, workflow acceptance, live secret inventory/rotation, recovery ownership, and WAF/rate-limit rules. Slice 5AV reconfirmed safe Render/live metadata only; live secret inventory, recovery owners, recovery-point proof, and WAF/rate-limit rule IDs remain open.
+
+## Historical 2026-06-15 Validation Evidence
 
 - [x] `npm.cmd run typecheck` passes.
 - [x] `npm.cmd run lint` passes.
@@ -13,7 +24,7 @@ Checked command-based items reflect evidence recorded through 2026-06-15 in `doc
 - [x] `npm.cmd run render:validate` passes.
 - [x] `npm.cmd run live:check` passes against `https://book.sandboxhotel.com` and reports `lineWebhookConfigured=false`.
 - [x] `npm.cmd run launch:check` passes.
-- [x] `npm.cmd audit --audit-level=high` returns zero vulnerabilities.
+- [x] `npm.cmd audit --audit-level=high` passes the high-severity threshold.
 - [x] Guarded local disposable DB E2E passes with `ALLOW_DB_E2E=true` and `E2E_DATABASE_URL` pointed at `localhost:55432/sandbox_hotel_e2e`.
 
 Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mutating E2E, rollback, and WAF ownership are tracked in `docs/launch-scope-decisions.md`.
@@ -82,7 +93,7 @@ Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mu
 - [x] HTTPS/domain is configured.
 - [x] The public domain points to the intended Render service and matches `APP_URL` and `ALLOWED_ORIGINS`.
 - [x] Backup and restore plan is documented for the database.
-- [x] Latest database backup/recovery point is verified in Render.
+- [ ] Latest database backup/recovery point and retention window are freshly verified in Render for launch sign-off.
 - [x] A restore test has passed against a disposable database.
 - [x] Rollback plan exists for app and database migrations.
 - [ ] Rollback owner and deputy are named and have Render dashboard access.
@@ -94,4 +105,5 @@ Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mu
 - [x] `npm run build` passes.
 - [x] `npm run launch:check` passes.
 - [x] `npm run db:e2e:ready` passes against a disposable/staging E2E database.
-- [x] Database-mutating E2E tests have passed against staging with `ALLOW_DB_E2E=true` and a non-production `E2E_DATABASE_URL`.
+- [x] Database-mutating E2E tests have passed against a local disposable database with `ALLOW_DB_E2E=true` and a non-production `E2E_DATABASE_URL`.
+- [ ] If required by the launch owner, database-mutating E2E tests have passed against an approved staging database with `ALLOW_DB_E2E=true`.

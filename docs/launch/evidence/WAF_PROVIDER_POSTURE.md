@@ -1,8 +1,8 @@
 # Secret, Recovery, Rollback, and WAF Provider Posture
 
-Status date: 2026-07-02.
+Status date: 2026-07-03.
 
-Verdict: partial/open. This slice refreshed safe Render and public-edge metadata and corrected the current rollback deploy reference, but it does not close the P0. Secret rotation metadata, named recovery/rollback owners, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5AY, but this does not close the P0. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
 
 ## Scope
 
@@ -11,27 +11,82 @@ Verdict: partial/open. This slice refreshed safe Render and public-edge metadata
 - Commands were read-only. No deploy, restart, SSH session, database shell, production mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
 - No production secrets, raw database URLs, tokens, passwords, cookies, or screenshots were recorded.
 
+## 2026-07-03 Slice 5AV Refresh
+
+Slice 5AV adds `2026-07-03-slice-5av-secrets-recovery-waf-refresh.md` and refreshes the current read-only provider/public posture:
+
+- `tool_search` exposed no callable Render MCP service, database, secret, backup, or WAF/rate-limit tooling in this session.
+- `render --version` returned Render CLI `v2.13.0`; the CLI reported a newer version is available.
+- `render --help` and targeted command help checks still exposed no top-level env-var, secret-manager, backup, recovery, WAF, or rate-limit command.
+- `render workspaces -o json`, `render projects -o json`, and `render environments prj-d6nm1vdm5p6s7398qg70 -o json` confirmed workspace `My Workspace`, project `My project`, and a `Production` environment with `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`.
+- Sanitized `render services -o json` review confirmed the target web service is not suspended and the target Postgres resource remains `available`.
+- `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` confirmed the latest live custom-domain service deploy remains `dep-d8i4q3favr4c73afbrg0`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`.
+- Direct public `GET /healthz?deep=1` returned `200`, database configured, database OK, `server=cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render`.
+- Non-destructive probes for `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare response headers.
+- `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning; `npm.cmd run live:check` passed.
+
+This refresh does not change the WAF/rate-limit boundary: public edge headers and 404 probes prove routing/denial behavior for selected paths, not customer-owned WAF or rate-limit rule configuration.
+
+## 2026-07-03 Slice 5AY Update
+
+Slice 5AY adds `2026-07-03-slice-5ay-housekeeping-sync.md` and refreshes the custom-domain service deploy and public edge health:
+
+- `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` confirmed the latest live custom-domain service deploy is `dep-d93nr7nlk1mc739ldujg`, status `live`, commit `a01838a956f24164167ba7f91a7620a37de7f36d`, finished `2026-07-03T09:17:54Z`.
+- `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` confirmed observed instance `srv-d6ns31h4tr6s73c9i8g0-8wxvc`, created `2026-07-03T09:17:22Z`.
+- Direct public `GET /healthz?deep=1` returned `200`, database configured, database OK, `server=cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render`.
+- Direct public setup-complete reprobe returned the intended production-disabled `403`.
+
+This update proves the setup-gate hardening is live on the Cloudflare-fronted Render service. It still does not prove customer-owned WAF/rate-limit rule configuration.
+
+## 2026-07-03 Slice 5AR Refresh
+
+Slice 5AR adds `2026-07-03-slice-5ar-secrets-recovery-waf-refresh.md` and reconfirms the available Render CLI path still cannot safely expose env-var key inventory, secret rotation metadata, backup/recovery-point metadata, or WAF/rate-limit rule IDs:
+
+- `render --help` lists no top-level env-var, secret-manager, backup, recovery, or WAF/rate-limit command.
+- `render services --help` lists only `create` and `instances`.
+- `render services env --help` returned services help only, not an env-var inventory subcommand.
+- `render backups --help` returned `unknown command "backups" for "render"`.
+- `render ea --help` exposes object storage only in this session.
+- Sanitized `render services -o json` review confirmed the target service and database are not suspended, and the production database remains `available`.
+- Public `GET /healthz?deep=1` returned `200`, production environment, and database OK at `2026-07-03T02:33:24.710Z`.
+
+This refresh does not change the WAF/rate-limit boundary: public edge headers and 404 probes prove routing behavior, not customer-owned WAF or rate-limit rule configuration.
+
+## 2026-07-03 Slice 5AC Refresh
+
+Slice 5AC adds `SECRETS_AND_RECOVERY_PROOF.md` and confirms the available Render CLI path still cannot safely expose env-var key inventory or rotation metadata:
+
+- `render env --help` returned `unknown command "env"`.
+- `render ea --help` exposed only object-storage early-access commands in this session.
+- Sanitized `render services -o json` selection confirmed the target service and database are not suspended, and the production database remains `available`.
+- Public `GET /healthz?deep=1` returned `200`, production environment, and database OK at `2026-07-03T00:43:45.079Z`.
+
+This refresh does not change the WAF/rate-limit boundary: public edge headers and 404 probes prove routing behavior, not customer-owned WAF or rate-limit rule configuration.
+
 ## Commands And Results
 
 | Command | Result | Evidence Summary |
 | --- | --- | --- |
-| `render workspaces -o json` | Passed | Confirmed CLI workspace `My Workspace` (`tea-d6n8kq14tr6s738stj5g`). |
-| `render projects -o json` | Passed | Confirmed project `My project` (`prj-d6nm1vdm5p6s7398qg70`). |
-| `render environments prj-d6nm1vdm5p6s7398qg70 -o json` | Passed | Environment `Production` (`evm-d6nm1vdm5p6s7398qg7g`) reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`. |
-| `render services -o json` | Passed | Confirmed target service and datastore metadata without secret values. |
-| `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Long-term service has one observed instance id `srv-d6ns31h4tr6s73c9i8g0-2brwp`, created `2026-06-06T16:39:10Z`. |
-| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d8i4q3favr4c73afbrg0`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-06T16:39:42.109323Z`. |
+| `render workspaces -o json` | Passed | Confirmed CLI workspace `My Workspace` (`tea-d6n8kq14tr6s738stj5g`); latest refresh Slice 5AV. |
+| `render projects -o json` | Passed | Confirmed project `My project` (`prj-d6nm1vdm5p6s7398qg70`); latest refresh Slice 5AV. |
+| `render environments prj-d6nm1vdm5p6s7398qg70 -o json` | Passed; risk remains | Environment `Production` (`evm-d6nm1vdm5p6s7398qg7g`) reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`; latest refresh Slice 5AV. |
+| `render services --help` / `render services env --help` / `render backups --help` / `render ea --help` | Mixed; no usable secret/recovery command | Slice 5AV found no service env-var inventory, backup/recovery-point, or WAF/rate-limit command exposed by the current CLI. `render backups --help` failed as an unsupported command. |
+| `render services -o json` | Passed | Confirmed target service and datastore metadata without secret values; latest refresh Slice 5AV. |
+| `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Long-term service has one observed instance id `srv-d6ns31h4tr6s73c9i8g0-8wxvc`, created `2026-07-03T09:17:22Z` in the latest Slice 5AY refresh. |
+| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d93nr7nlk1mc739ldujg`, status `live`, commit `a01838a956f24164167ba7f91a7620a37de7f36d`, finished `2026-07-03T09:17:54Z`. |
 | `render deploys list srv-d8bchr1akrks73disaog -o json` | Passed | Alternate service deploy is `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`. |
 | `render deploys list srv-d8clkqho3t8c73a1eldg -o json` | Passed | Launch service deploy is `dep-d8oh74m47okc739vhq2g`, status `live`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`; this is not the custom-domain production target. |
-| Node `fetch` public-edge probes | Passed | `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404`; `/healthz?deep=1` returned `200`. Each response exposed Cloudflare and Render edge headers. |
-| `npm.cmd run live:check` | Passed | Public health/deep-health passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured unless `LIVE_REQUIRE_LINE=true`. |
+| Public-edge probes | Passed | Slice 5AV direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare response headers. |
+| `npm.cmd run prod:preflight` | Passed with warning | Production preflight passed; LINE credentials remain unconfigured and live LINE messaging remains disabled. |
+| `npm.cmd run live:check` | Passed | Public health/deep-health passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured unless `LIVE_REQUIRE_LINE=true`. Latest Slice 5AV run resolved `book.sandboxhotel.com` to `216.24.57.9`. |
 
 ## Current Provider Posture
 
 - Long-term custom-domain Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
-- Current live deploy for that service: `dep-d8i4q3favr4c73afbrg0`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`.
-- Render PostgreSQL target remains `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) with status `available`, primary role, PostgreSQL 17, region `oregon`, plan `basic_256mb`, disk 15 GB, and not suspended as reported by safe service metadata.
-- Public edge responses include Cloudflare and Render headers, but this proves routing only. It does not prove customer-owned Cloudflare zone control, managed WAF rules, rule IDs, thresholds, or rate-limit behavior.
+- Current live deploy for that service: `dep-d93nr7nlk1mc739ldujg`, commit `a01838a956f24164167ba7f91a7620a37de7f36d`.
+- Render PostgreSQL target remains `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) with status `available`, region `oregon`, and plan `basic_256mb` as reported by safe service metadata.
+- Render Production environment metadata reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`.
+- Public edge responses prove routing/denial behavior only. They do not prove customer-owned Cloudflare zone control, managed WAF rules, rule IDs, thresholds, or rate-limit behavior.
 
 ## Secret Evidence Boundary
 
@@ -67,11 +122,11 @@ Non-destructive public probes:
 
 | Path | Status | Edge Evidence |
 | --- | ---: | --- |
-| `/.env` | 404 | Cloudflare and Render headers present |
-| `/wp-login.php` | 404 | Cloudflare and Render headers present |
-| `/phpmyadmin/` | 404 | Cloudflare and Render headers present |
-| `/vendor/` | 404 | Cloudflare and Render headers present |
-| `/healthz?deep=1` | 200 | Cloudflare and Render headers present |
+| `/.env` | 404 | Cloudflare response headers present |
+| `/wp-login.php` | 404 | Cloudflare response headers present |
+| `/phpmyadmin/` | 404 | Cloudflare response headers present |
+| `/vendor/` | 404 | Cloudflare response headers present |
+| `/healthz?deep=1` | 200 | Cloudflare response headers and Render origin header present |
 
 Still required:
 

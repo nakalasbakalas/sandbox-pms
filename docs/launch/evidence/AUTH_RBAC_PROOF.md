@@ -1,8 +1,8 @@
 # Auth, RBAC, Logout, and Unauthorized Access Proof
 
-Status date: 2026-07-02.
+Status date: 2026-07-03.
 
-Verdict: partial. Local auth/RBAC behavior and live unauthenticated API denial are proven for this checkout/public target, but the production users/auth/RBAC/logout P0 is not closed. There is still no redacted approved production user list, credentialed production login/logout proof, role-by-role production matrix, or bootstrap/temporary-access removal proof.
+Verdict: partial. Slice 5AI refreshed local auth/RBAC behavior, live unauthenticated API denial, and representative live protected-page login gating for this checkout/public target, but the production users/auth/RBAC/logout P0 is not closed. There is still no redacted approved production user list, credentialed production login/logout proof, role-by-role production matrix, underprivileged-role denial proof, or bootstrap/temporary-access removal proof.
 
 ## Scope
 
@@ -15,7 +15,7 @@ Verdict: partial. Local auth/RBAC behavior and live unauthenticated API denial a
 
 Command: `npm.cmd test`
 
-Result: pass.
+Latest result: pass on 2026-07-03.
 
 Observed output:
 
@@ -32,7 +32,7 @@ Relevant assertions covered by the business tests include:
 
 Command: `npm.cmd run test:e2e`
 
-Result: pass.
+Latest result: pass on retry on 2026-07-03. The first Slice 5AI attempt timed out after about 184 seconds and produced no usable proof output; the orphaned validation processes started by that attempt were identified and stopped before retrying.
 
 Observed output:
 
@@ -56,7 +56,7 @@ Relevant assertions covered by the non-mutating E2E smoke include:
 
 Command: Node `fetch` probe against `https://book.sandboxhotel.com` without credentials or cookies.
 
-Result: pass.
+Latest result: pass on 2026-07-03.
 
 | Method | Path | Status | Response |
 | --- | --- | ---: | --- |
@@ -75,6 +75,32 @@ Interpretation:
 - Live protected reads and mutations rejected unauthenticated callers with `401 Authentication is required.`.
 - The unauthenticated `/api/auth/logout` response only proves the endpoint is callable to clear a session cookie. It does not prove credentialed production logout for an approved production user.
 
+## Live Unauthenticated Protected Page Evidence
+
+Command: headless Playwright probe against `https://book.sandboxhotel.com` with empty browser storage state.
+
+Latest result: pass for representative deployed protected pages on 2026-07-03.
+
+| Path | Status | Result |
+| --- | ---: | --- |
+| `/` | 200 | Login form visible; one password input; no protected workspace terms observed. |
+| `/rooms` | 200 | Login form visible; one password input; no room/workspace terms observed. |
+| `/reservations` | 200 | Login form visible; one password input; no reservation/workspace terms observed. |
+| `/cashier` | 200 | Login form visible; one password input; no cashier/payment/folio terms observed. |
+| `/housekeeping` | 200 | Login form visible; one password input; no housekeeping-board terms observed. |
+| `/settings` | 200 | Login form visible; one password input; no settings/workspace terms observed. |
+| `/user-management` | 200 | Login form visible; one password input; no user-management terms observed. |
+
+Route drift:
+
+- `/ops/settings` returned `200` but rendered `Page not found`, so it is not counted as protected-page access proof for the older live deploy.
+- The live login label is still `Email address`, while the current checkout uses username-first copy. This is deploy-drift evidence, not a failure of unauthenticated page gating.
+
+Canonical evidence:
+
+- `docs/launch/evidence/2026-07-03-slice-5ai-auth-rbac-unauth-refresh.md`
+- `docs/launch/evidence/2026-07-02-slice-5z-live-protected-page-gate.md`
+
 ## Implementation Checks Used For Interpretation
 
 - `server/index.mjs` has `requireUser()` behind protected API routes and raises `401 Authentication is required.` when the session cookie is missing or invalid.
@@ -92,6 +118,6 @@ An initial PowerShell probe using `[System.Net.Http.HttpClient]` failed because 
 - Credentialed production login proof for each required role, without recording credentials or cookies.
 - Credentialed production logout/session-clearing proof for at least one approved production user.
 - Production role matrix proof showing intended access and denial for admin/manager/front desk/housekeeping/cashier/cafe roles as applicable.
-- Protected production page denial proof for an underprivileged role.
+- Protected production page denial proof for an underprivileged role; unauthenticated representative page-gating proof is now recorded separately.
 - Protected production API mutation denial proof for an underprivileged role.
 - Bootstrap/setup-token/temporary access removal or rotation evidence.

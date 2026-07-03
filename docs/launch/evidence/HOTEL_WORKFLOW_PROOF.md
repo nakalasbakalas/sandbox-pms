@@ -1,18 +1,25 @@
 # Hotel Workflow Proof
 
-Date: 2026-07-02T07:26Z.
+Last refreshed: 2026-07-03T08:40+07:00.
 
-Verdict: partial. Core hotel workflow logic and guarded DB workflow E2E passed in the current checkout against a local disposable E2E database. This is not production, staging, or account-owner manual acceptance proof.
+Verdict: partial. Core hotel workflow logic and guarded DB workflow E2E passed in the current checkout against a local disposable E2E database. This is not production, staging, real room inventory, or account-owner manual acceptance proof.
 
 This slice did not deploy, restart, SSH, open a production database shell, mutate production data, run DB-mutating E2E against production, or access secret values.
+
+## Latest Evidence
+
+| Date | Slice | Result | Evidence |
+| --- | --- | --- | --- |
+| 2026-07-03 | Slice 5AJ - core workflow local DB refresh | Passed locally with `ALLOW_DB_E2E=true` against local disposable `sandbox_hotel_e2e`. | [2026-07-03-slice-5aj-core-workflow-local-db-refresh.md](2026-07-03-slice-5aj-core-workflow-local-db-refresh.md) |
+| 2026-07-02 | Slice 5M - core hotel workflow local proof | Passed locally with caveats. | This file |
 
 ## Commands
 
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm.cmd test` | Passed | `Business rule tests passed`. Covers room assignment, check-in/out guards, payment summaries, housekeeping transitions, role/action guards, and audit-oriented service behavior. |
-| `$env:ALLOW_DB_E2E='true'; $env:E2E_DATABASE_URL='postgresql://sandbox:***@localhost:55432/sandbox_hotel_e2e?schema=public'; npm.cmd run db:e2e:ready` | Passed | Prepared local disposable E2E database. Prisma generated, 11 migrations found, no pending migrations, seed ran in `e2e` mode, and local/e2e room inventory plus one database user were seeded. |
-| `$env:ALLOW_DB_E2E='true'; $env:E2E_DATABASE_URL='postgresql://sandbox:***@localhost:55432/sandbox_hotel_e2e?schema=public'; npm.cmd run test:e2e:db` | Passed | Documentation link smoke, internal worker route smoke, Playwright browser smoke, guarded E2E database prepare/seed, and database workflow E2E passed. Output ended with `Database workflow e2e passed.` |
+| `$env:ALLOW_DB_E2E='true'; $env:E2E_DATABASE_URL='postgresql://sandbox:***@localhost:55432/sandbox_hotel_e2e?schema=public'; npm.cmd run db:e2e:ready` | Passed on 2026-07-03 | Prepared local disposable E2E database. Prisma generated, 11 migrations found, no pending migrations, seed ran in `e2e` mode, and local/e2e room inventory plus one database user were seeded. |
+| `$env:ALLOW_DB_E2E='true'; $env:E2E_DATABASE_URL='postgresql://sandbox:***@localhost:55432/sandbox_hotel_e2e?schema=public'; npm.cmd run test:e2e:db` | Passed on 2026-07-03 | Documentation link smoke, internal worker route smoke, Playwright browser smoke, guarded E2E database prepare/seed, and database workflow E2E passed. Output ended with `Database workflow e2e passed.` |
 
 The E2E database URL used `localhost:55432/sandbox_hotel_e2e` and was redacted in command output. No production database URL was used.
 
@@ -34,7 +41,7 @@ The E2E database URL used `localhost:55432/sandbox_hotel_e2e` and was redacted i
 
 ## Evidence Decision
 
-This closes a local/disposable proof gap for the core backend workflow path in the current checkout. It does not close the P0 launch blocker by itself because the launch packet asks for operational acceptance evidence, and this run did not verify the workflow against staging, controlled production-like data, or account-owner manual acceptance.
+This keeps the local/disposable proof current for the core backend workflow path in the current checkout. It does not close the P0 launch blocker by itself because the launch packet asks for operational acceptance evidence, and this run did not verify the workflow against staging, controlled production-like data, real production inventory, production users, or account-owner manual acceptance.
 
 ## Remaining P0 Blockers
 

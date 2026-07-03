@@ -1,12 +1,12 @@
 import { PmsValidationError, stayDates } from '../pms-domain.mjs'
 
 const BOOKING_COM_SELECTORS = {
-  loginEmail: 'TODO: stable Booking.com email input selector',
-  loginPassword: 'TODO: stable Booking.com password input selector',
-  twoFactorChallenge: 'TODO: stable Booking.com 2FA challenge selector',
-  captchaChallenge: 'TODO: stable Booking.com CAPTCHA challenge selector',
-  ratesCalendar: 'TODO: stable Booking.com rates calendar selector',
-  availabilityCalendar: 'TODO: stable Booking.com availability calendar selector',
+  loginEmail: 'BOOKING_COM_LOGIN_EMAIL_SELECTOR',
+  loginPassword: 'BOOKING_COM_LOGIN_PASSWORD_SELECTOR',
+  twoFactorChallenge: 'BOOKING_COM_2FA_CHALLENGE_SELECTOR',
+  captchaChallenge: 'BOOKING_COM_CAPTCHA_CHALLENGE_SELECTOR',
+  ratesCalendar: 'BOOKING_COM_RATES_CALENDAR_SELECTOR',
+  availabilityCalendar: 'BOOKING_COM_AVAILABILITY_CALENDAR_SELECTOR',
 }
 
 function normalizeString(value) {
@@ -26,6 +26,26 @@ function envFlag(env, name) {
 
 function nowIso(options = {}) {
   return (options.now ? new Date(options.now) : new Date()).toISOString()
+}
+
+function bookingComSelectors(env = process.env) {
+  const selectors = {}
+  for (const [key, envKey] of Object.entries(BOOKING_COM_SELECTORS)) {
+    selectors[key] = normalizeString(env[envKey])
+  }
+  return selectors
+}
+
+function bookingComSelectorsConfigured(env = process.env) {
+  const selectors = bookingComSelectors(env)
+  const missing = Object.entries(selectors)
+    .filter(([, selector]) => !selector)
+    .map(([name]) => name)
+  return {
+    configured: missing.length === 0,
+    missing,
+    selectors,
+  }
 }
 
 function bookingUsername(env = process.env) {
@@ -99,12 +119,26 @@ function assertDryRunOnly(operation, dryRun) {
 
 function bookingComAuthState(env) {
   const challenge = forcedHumanReason(env)
+  const selectorState = bookingComSelectorsConfigured(env)
   if (challenge) {
     return {
       authenticated: false,
       requiresHuman: true,
       reason: challenge,
       message: `Booking.com requires human ${challenge} handling. No bypass attempted.`,
+      selectorState,
+    }
+  }
+
+  if (envFlag(env, 'OTA_ENABLE_REAL_BROWSER_WRITES')) {
+    if (!selectorState.configured) {
+      return {
+        authenticated: false,
+        requiresHuman: true,
+        reason: 'SELECTORS_NOT_CONFIGURED',
+        message: 'Booking.com real-browser writes are enabled but selectors are not fully configured.',
+        selectorState,
+      }
     }
   }
 
@@ -114,6 +148,7 @@ function bookingComAuthState(env) {
       requiresHuman: true,
       reason: 'UNKNOWN',
       message: 'Booking.com credentials are not configured in the server environment.',
+      selectorState,
     }
   }
 
@@ -121,6 +156,7 @@ function bookingComAuthState(env) {
     authenticated: true,
     requiresHuman: false,
     message: 'Booking.com dry-run adapter is ready. Real browser selectors are still gated.',
+    selectorState,
   }
 }
 
@@ -138,6 +174,7 @@ export function createBookingComAdapter(options = {}) {
 
     async healthCheck() {
       const auth = bookingComAuthState(env)
+      const selectorState = bookingComSelectorsConfigured(env)
       return {
         platform: 'booking',
         ok: auth.authenticated,
@@ -148,6 +185,8 @@ export function createBookingComAdapter(options = {}) {
         selectors: {
           status: 'skeleton',
           names: Object.keys(BOOKING_COM_SELECTORS),
+          configured: selectorState.configured,
+          missingSelectors: selectorState.missing,
         },
       }
     },

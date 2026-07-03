@@ -1,6 +1,6 @@
 # P0 Owner Proof Handoff
 
-Status date: 2026-07-02.
+Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
@@ -84,13 +84,12 @@ Required evidence to close:
 
 ## Live Setup-Completion Hardening
 
-Current status: open. PR #150 is green but not deployed to the custom-domain production service.
+Current status: closed for the current public deploy. Slice 5AY records PR #150 merged into `origin/main` as `a01838a956f24164167ba7f91a7620a37de7f36d`, Render deploy `dep-d93nr7nlk1mc739ldujg` live on `sandbox-hotel-pms-v43m`, and unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returning the intended production-disabled `403`.
 
-Required evidence to close:
+Maintenance evidence for future setup/auth route deploys:
 
-- PR #150 reviewed/approved, or exact commit `75810c3fbcf73d6f8a790a607beb3bb3b0bf69a0` explicitly approved for deployment.
-- Deploy to `sandbox-hotel-pms-v43m` records deploy ID and commit SHA.
-- Public reprobe against `https://book.sandboxhotel.com/api/setup/complete` shows completed setup is rejected before setup payload validation.
+- Deploy record with deploy ID and commit SHA.
+- Public reprobe against `https://book.sandboxhotel.com/api/setup/complete` showing completed setup is rejected before setup payload validation.
 - No production secrets or payloads recorded.
 
 ## Secrets, Recovery, Rollback, WAF
@@ -118,5 +117,4 @@ The fastest path to launch sign-off now requires owner-supplied proof or explici
 - real production inventory,
 - credentialed production workflow acceptance,
 - secret rotation and recovery ownership,
-- upstream WAF/rate-limit configuration, or
-- deployment and reprobe of PR #150 setup-completion hardening.
+- upstream WAF/rate-limit configuration.
