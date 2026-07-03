@@ -48,7 +48,7 @@ Cron expressions can be stored with `HOTEL_OPS_SCAN_CRON`, but cron execution mu
 
 OTA credentials must be platform secrets only. Do not commit or log them. Booking.com adapter secrets are read from `BOOKING_COM_USERNAME` and `BOOKING_COM_PASSWORD`, with `BOOKING_USERNAME` and `BOOKING_PASSWORD` kept as compatibility aliases. Optional Agoda, Trip.com, and Expedia skeletons report credential status from `AGODA_USERNAME` / `AGODA_PASSWORD`, `TRIP_COM_USERNAME` / `TRIP_COM_PASSWORD`, and `EXPEDIA_USERNAME` / `EXPEDIA_PASSWORD`. Those adapters still run as dry-run skeletons; real browser reads or writes need verified selectors, safe test-date proof, and account-owner approval.
 
-Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`.
+Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`. For Render, prefer the durable refresh-token tuple and use `npm.cmd run render:gmail-oauth` as a dry-run before applying any env-var changes.
 
 Optional LINE Hotel Ops command intake:
 
@@ -101,21 +101,35 @@ Historical booking mailbox capture:
 npm.cmd run booking-email:proof
 ```
 
-2. Confirm backend Gmail OAuth credentials are configured; do not use or store a raw mailbox password.
-3. Dry-run a bounded historical scan first:
+2. Confirm backend Gmail OAuth credentials are configured; do not use or store a raw mailbox password. To prepare Render env-var updates from a local process environment without printing values, first run:
+
+```powershell
+npm.cmd run render:gmail-oauth
+```
+
+3. After the required local process env vars are present, apply them to the custom-domain Render service only from a secure shell:
+
+```powershell
+npm.cmd run render:gmail-oauth -- --apply --use-render-cli-token
+```
+
+Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API key is available. The helper updates only the known booking-email Gmail keys and omits all values from output.
+
+4. Redeploy the Render service so the new env vars reach runtime.
+5. Dry-run a bounded historical scan first:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250
 ```
 
-4. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
-5. If the preview looks correct, import the same bounded set as Booking Inbox review events:
+6. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
+7. If the preview looks correct, import the same bounded set as Booking Inbox review events:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-6. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+8. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
 Hotel Ops notification center:
 

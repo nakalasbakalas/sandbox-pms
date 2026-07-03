@@ -34,6 +34,7 @@
         "real-data:import": "node scripts/import-real-property-data.mjs",
         "booking-email:backfill": "node scripts/booking-email-backfill.mjs",
         "booking-email:proof": "node scripts/prove-booking-email-capture.mjs",
+        "render:gmail-oauth": "node scripts/configure-render-gmail-oauth.mjs",
         "rooms:import": "node scripts/import-rooms.mjs",
         "rooms:proof": "node scripts/prove-room-inventory.mjs",
         "render:validate": "render blueprints validate",

@@ -77,6 +77,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 
 - API keys and OTA credentials are not returned to the browser.
 - Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, and refresh failures redact token/client-secret values.
+- Render Gmail OAuth env sync dry-run reports missing/present booking-email Gmail keys without values, and apply mode updates only the approved booking-email Gmail env-var keys.
 - Booking-email capture proof reports aggregate current PMS email-event counts without message ids, sender/recipient, subject, raw body, guest, payment, or credential data.
 - Booking-email historical backfill dry-run fetches bounded Gmail pages, reports redacted aggregate parser counts, and does not write PMS records.
 - Booking-email historical backfill with `--confirm` imports Booking Email Events for `/booking-inbox` review only; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
