@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BD confirms current `origin/main` commit `163d49c2ff58eef5447e93f07d42babbf3b59d58` is live on Render deploy `dep-d93t86hkh4rs73e0io4g`, public deep health is green, and unauthenticated setup-complete still returns the intended production-disabled `403`. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BD also reconfirms Booking Email capture remains blocked: backend Gmail OAuth env vars are missing, proof job succeeds, and dry-run backfill fails before capture. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BD confirms current `origin/main` commit `163d49c2ff58eef5447e93f07d42babbf3b59d58` is live on Render deploy `dep-d93t86hkh4rs73e0io4g`, public deep health is green, and unauthenticated setup-complete still returns the intended production-disabled `403`. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BE adds a reusable redacted Render Gmail OAuth status command and reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, proof job succeeds, and dry-run backfill fails before capture. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -96,13 +96,13 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: open. Slice 5BD confirms the source/backend tooling is deployed, but Render is still missing the backend Gmail OAuth env vars. Production `booking-email:proof` job `job-d93t9me7r5hc73dohjag` succeeded; production dry-run backfill job `job-d93t9mdaeets73ehrus0` failed while Gmail OAuth remained unconfigured.
+Current status: open. Slice 5BE confirms the source/backend tooling is deployed and adds a redacted Render status command, but all supported backend Gmail credential paths still report `ready=false`. Production `booking-email:proof` job `job-d93t9me7r5hc73dohjag` succeeded; production dry-run backfill job `job-d93t9mdaeets73ehrus0` failed while Gmail OAuth remained unconfigured.
 
 Required evidence to close:
 
 | Required proof | Accepted redacted format | Must not include |
 | --- | --- | --- |
-| Gmail OAuth configured on Render | Key-name status only showing `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`, and optional `BOOKING_EMAIL_GMAIL_USER_ID` configured. | Client secret, refresh token, access token, OAuth consent screenshots containing secrets. |
+| Gmail OAuth configured on Render | Key-name status only from `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` showing one supported backend credential path `ready=true`. | Client secret, refresh token, access token, OAuth consent screenshots containing secrets. |
 | Historical dry-run backfill | Redacted aggregate output from `npm run booking-email:backfill -- --all-past --limit 250` showing scanned count, existing/new candidates, event type mix, and confidence distribution. | Message IDs, senders, recipients, subjects, raw email text, guest/payment data. |
 | Review-only import if accepted | Confirmed import job ID and aggregate event counts; staff still review in `/booking-inbox`. | Raw email contents, credentials, production mutation payloads. |
 

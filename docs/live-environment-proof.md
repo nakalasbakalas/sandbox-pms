@@ -14,6 +14,7 @@ This register records point-in-time external evidence gathered from the live Ren
 - Direct `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured and OK, `Server: cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` at `2026-07-03T15:27:45.025Z`.
 - Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
 - Render API returned missing (`404`) for the booking-email Gmail OAuth env-var names and fallback `GMAIL_*` names; no values were printed.
+- Follow-up Slice 5BE added `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token`; the command currently reports `ready=false` for booking-specific and fallback Gmail credential paths, with values omitted.
 - Local `npm.cmd run render:gmail-oauth` reported missing required `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`; values were omitted.
 - Render one-off job `job-d93t9me7r5hc73dohjag` ran `npm run booking-email:proof` and succeeded.
 - Render one-off job `job-d93t9mdaeets73ehrus0` ran `npm run booking-email:backfill -- --all-past --limit 250` and failed while Gmail OAuth remained unconfigured.

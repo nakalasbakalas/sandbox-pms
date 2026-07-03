@@ -35,6 +35,7 @@
         "booking-email:backfill": "node scripts/booking-email-backfill.mjs",
         "booking-email:proof": "node scripts/prove-booking-email-capture.mjs",
         "render:gmail-oauth": "node scripts/configure-render-gmail-oauth.mjs",
+        "render:gmail-oauth:status": "node scripts/configure-render-gmail-oauth.mjs --status",
         "rooms:import": "node scripts/import-rooms.mjs",
         "rooms:proof": "node scripts/prove-room-inventory.mjs",
         "render:validate": "render blueprints validate",

@@ -17,6 +17,50 @@ const OPTIONAL_KEYS = [
   'BOOKING_EMAIL_GMAIL_USER_ID',
 ]
 
+const STATUS_KEYS = [
+  'BOOKING_EMAIL_PRIMARY_MAILBOX',
+  'BOOKING_EMAIL_GMAIL_USER_ID',
+  'BOOKING_EMAIL_GMAIL_ACCESS_TOKEN',
+  'BOOKING_EMAIL_GMAIL_CLIENT_ID',
+  'BOOKING_EMAIL_GMAIL_CLIENT_SECRET',
+  'BOOKING_EMAIL_GMAIL_REFRESH_TOKEN',
+  'GMAIL_ACCESS_TOKEN',
+  'GMAIL_CLIENT_ID',
+  'GMAIL_CLIENT_SECRET',
+  'GMAIL_REFRESH_TOKEN',
+]
+
+const CREDENTIAL_OPTIONS = [
+  {
+    name: 'booking-specific refresh-token tuple',
+    keys: [
+      'BOOKING_EMAIL_GMAIL_CLIENT_ID',
+      'BOOKING_EMAIL_GMAIL_CLIENT_SECRET',
+      'BOOKING_EMAIL_GMAIL_REFRESH_TOKEN',
+    ],
+  },
+  {
+    name: 'booking-specific access token',
+    keys: [
+      'BOOKING_EMAIL_GMAIL_ACCESS_TOKEN',
+    ],
+  },
+  {
+    name: 'fallback refresh-token tuple',
+    keys: [
+      'GMAIL_CLIENT_ID',
+      'GMAIL_CLIENT_SECRET',
+      'GMAIL_REFRESH_TOKEN',
+    ],
+  },
+  {
+    name: 'fallback access token',
+    keys: [
+      'GMAIL_ACCESS_TOKEN',
+    ],
+  },
+]
+
 function argValue(name) {
   const index = process.argv.indexOf(name)
   if (index < 0) return undefined
@@ -139,9 +183,83 @@ async function putRenderEnvVar({ token, serviceId: targetServiceId, key, value }
   return { key, status: response.status, updated: true }
 }
 
+async function getRenderEnvVarStatus({ token, serviceId: targetServiceId, key }) {
+  const response = await fetch(`${RENDER_API_BASE}/services/${encodeURIComponent(targetServiceId)}/env-vars/${encodeURIComponent(key)}`, {
+    method: 'GET',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (response.status === 404) {
+    return {
+      key,
+      exists: false,
+      httpStatus: response.status,
+      valuePrinted: false,
+    }
+  }
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    const providerMessage = body?.message || body?.error || response.statusText || 'Render API request failed.'
+    fail(`Render env lookup failed for ${key}: ${response.status} ${String(providerMessage).slice(0, 160)}`)
+  }
+
+  return {
+    key,
+    exists: true,
+    httpStatus: response.status,
+    valuePrinted: false,
+  }
+}
+
 async function main() {
   const apply = hasFlag('--apply')
+  const status = hasFlag('--status') || hasFlag('--check-render')
   const targetServiceId = serviceId()
+  if (status) {
+    const auth = renderBearerToken()
+    const output = {
+      generatedAt: new Date().toISOString(),
+      purpose: 'safe Render Gmail OAuth env-var status',
+      mode: 'status',
+      serviceId: targetServiceId,
+      redaction: {
+        values: 'omitted',
+        renderAuthToken: 'omitted',
+      },
+    }
+
+    if (!auth) {
+      console.log(JSON.stringify(output, null, 2))
+      fail('Render API auth is required for --status. Set RENDER_API_KEY or pass --use-render-cli-token from an authenticated Render CLI session.')
+    }
+
+    output.renderAuthSource = auth.source
+    output.renderEnvVars = []
+    for (const key of STATUS_KEYS) {
+      output.renderEnvVars.push(await getRenderEnvVarStatus({
+        token: auth.token,
+        serviceId: targetServiceId,
+        key,
+      }))
+    }
+
+    const existingKeys = new Set(output.renderEnvVars.filter((item) => item.exists).map((item) => item.key))
+    output.credentialOptions = CREDENTIAL_OPTIONS.map((option) => ({
+      name: option.name,
+      ready: option.keys.every((key) => existingKeys.has(key)),
+      keys: option.keys,
+    }))
+    output.ready = output.credentialOptions.some((option) => option.ready)
+
+    console.log(JSON.stringify(output, null, 2))
+    if (!output.ready && hasFlag('--require-ready')) fail('Render Gmail OAuth credentials are not ready.')
+    return
+  }
+
   const variables = plannedVariables()
   const missingRequired = variables.filter((variable) => variable.required && !variable.value)
   const output = {
