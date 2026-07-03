@@ -8,7 +8,7 @@ This register records point-in-time external evidence gathered from the live Ren
 ## 2026-07-03T15:28Z Current Deploy Sync After Gmail OAuth Helper
 
 - Tester: Codex in local checkout `D:\sandbox-pms`.
-- Scope: deploy the current green commit, run public health/setup probes, verify booking-email proof/backfill job status, and recheck Gmail OAuth credential absence. No secret values, credentialed login, production database shell, production mutation, WAF mutation, provider setting change, or screenshot capture was performed.
+- Scope: deploy the current green application/helper commit, run public health/setup probes, verify booking-email proof/backfill job status, and recheck Gmail OAuth credential absence. No secret values, credentialed login, production database shell, production mutation, WAF mutation, provider setting change, or screenshot capture was performed.
 - GitHub Actions CI run `28669196029` passed for commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`.
 - Render deploy `dep-d93t86hkh4rs73e0io4g` is live on `sandbox-hotel-pms-v43m`, serving commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`, finished `2026-07-03T15:26:55Z`.
 - Direct `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured and OK, `Server: cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` at `2026-07-03T15:27:45.025Z`.

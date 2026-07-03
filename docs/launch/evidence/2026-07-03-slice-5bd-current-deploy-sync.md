@@ -4,7 +4,7 @@ Date: 2026-07-03
 
 ## Verdict
 
-Current `origin/main` is deployed and publicly healthy on the custom-domain Render service. The setup-complete production gate still returns the intended `403`. Booking-email capture remains blocked because backend Gmail OAuth env vars are still missing.
+Current green application/helper commit `163d49c2ff58eef5447e93f07d42babbf3b59d58` is deployed and publicly healthy on the custom-domain Render service. The setup-complete production gate still returns the intended `403`. Booking-email capture remains blocked because backend Gmail OAuth env vars are still missing.
 
 ## Target
 
@@ -32,7 +32,7 @@ Current `origin/main` is deployed and publicly healthy on the custom-domain Rend
 
 ## Current Decision
 
-The app, repo, and Render deploy are synced to the current green commit. Engineering deployment drift is closed for this slice.
+The app runtime and Render deploy are synced to the current green application/helper commit. Later evidence-only commits may advance `origin/main` without changing runtime behavior; verify the exact current deployed commit with Render before owner sign-off. Engineering deployment drift is closed for the application/helper changes covered by this slice.
 
 The booking-email capture blocker remains open until the owner adds the durable backend Gmail OAuth refresh-token tuple securely to Render:
 
