@@ -3,7 +3,7 @@
 Date: 2026-07-02T07:20Z.
 Latest update: 2026-07-03T17:45+07:00.
 
-Verdict: blocked. Real production room inventory is still not proved for launch sign-off.
+Verdict: partial. Production aggregate room counts are now recorded through Slice 5BA, but real production room inventory is still not launch-signed-off because source-owner/import proof and not-fake-seed confirmation remain open.
 
 This file is the canonical Slice 3 evidence record for production room inventory. It records only non-secret command output and read-only probes. It does not contain room numbers, guest data, user data, database URLs, tokens, passwords, cookies, or raw secret values.
 
@@ -17,7 +17,19 @@ npm run rooms:proof
 
 The helper uses the configured `DATABASE_URL`, queries only aggregate room counts, and omits room numbers, guests, reservations, users, payments, and raw database URLs. By default, room-type labels are redacted to stable `ROOM_TYPE_XX` keys; use `-- --include-room-type-labels` only with operations-owner approval.
 
-This helper is intended to replace the unreliable Render CLI `psql` proof path. It does not close this P0 by itself because production inventory still needs current output from the approved target plus owner/import evidence showing the room set is real and not fake seed/demo data.
+This helper replaces the unreliable Render CLI `psql` proof path. It does not close this P0 by itself because production inventory still needs owner/import evidence showing the room set is real and not fake seed/demo data.
+
+Slice 5BA deployed commit `527e231e3821eda6f70fdf1d3436e81bb098b0d7` to Render deploy `dep-d93pe7hkh4rs73dp5bcg`, then ran one-off job `job-d93pfr6q1p3s73a2ufh0` with `npm run rooms:proof`. The job succeeded and returned production aggregate counts only:
+
+- property code `SANDBOX`
+- `2` room types
+- `33` total rooms
+- `33` operationally available rooms
+- `0` inactive rooms
+- current status distribution: `VACANT_CLEAN=32`, `OCCUPIED_CLEAN=1`, all other tracked current statuses `0`
+- redacted room-type buckets: `ROOM_TYPE_01=17`, `ROOM_TYPE_02=16`
+
+The proof output omitted room numbers, guest data, reservation data, user data, payment data, and raw database URLs. The deploy predeploy logs also show prod-safe seed skipped room inventory, so the deploy itself did not create these room rows.
 
 ## Required Proof To Close
 
@@ -133,7 +145,7 @@ No current command output proves real production room inventory. The Render data
 
 This P0 remains blocked until one of these approved evidence paths is available:
 
-- `npm run rooms:proof` run against the approved production/staging target, with output captured in redacted launch evidence and matched to owner/import confirmation.
+- Owner/import confirmation matching the Slice 5BA production aggregate counts and proving the rows came from the approved real room source, not fake seed/demo data.
 - Render MCP `query_render_postgres`, Render API query tooling, or another reliable non-interactive query path that returns redacted aggregate room counts and expected errors.
 - Render dashboard connection details used locally without printing the raw URL, with output limited to aggregate counts.
 - A redacted Render/dashboard/export proof of room types, room counts, and status distribution.

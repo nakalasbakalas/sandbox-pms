@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. The same intake did not supply the redacted production user table, credentialed role proof, room inventory counts, local-only workflow acceptance decision, secret inventory, recovery owners, or WAF/rate-limit rule metadata needed to close the remaining P0s.
+Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof, the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, or WAF/rate-limit rule metadata needed to close the remaining P0s.
 
 ## Non-Negotiable Redaction Rules
 
@@ -40,7 +40,7 @@ Required evidence to close:
 
 ## Real Production Room Inventory
 
-Current status: open. `ROOM_INVENTORY_PROOF.md` proves the live endpoints are protected and the Render database exists; it does not prove room inventory rows/counts.
+Current status: partial. `ROOM_INVENTORY_PROOF.md` now records production aggregate room counts from Slice 5BA, but it does not prove owner-approved source of truth or that the rows are not fake seed/demo inventory.
 
 Required evidence to close:
 

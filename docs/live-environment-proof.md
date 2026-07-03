@@ -1,9 +1,30 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-03T10:34Z.
+Latest external provider evidence refresh: 2026-07-03T11:07Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-03T11:07Z Room Inventory Proof Helper Deploy And Job
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy the counts-only room inventory proof helper and run it as a Render one-off job. No production database mutation, credentialed login, room-number export, guest data, user data, payment data, raw database URL, secret-value access, WAF mutation, or provider setting change was performed.
+- GitHub Actions CI run `28656054381`, job `84985283168`, passed for commit `527e231e3821eda6f70fdf1d3436e81bb098b0d7`, including launch gate.
+- Render deploy `dep-d93pe7hkh4rs73dp5bcg` is live on `sandbox-hotel-pms-v43m`, serving commit `527e231e3821eda6f70fdf1d3436e81bb098b0d7`.
+- Deploy predeploy ran `npm run db:migrate && npm run db:seed`; migrations had no pending migrations, prod-safe seed ran, and prod-safe seed skipped room inventory.
+- Render one-off job `job-d93pfr6q1p3s73a2ufh0` ran `npm run rooms:proof` and succeeded.
+- The job reported production target `sandbox_hotel_pms`, schema `pms_v2`, host id `dpg-d6ns2d94tr6s73c9hve0-a`; no raw database URL was printed.
+- Aggregate output: property code `SANDBOX`, `2` room types, `33` total rooms, `33` operationally available rooms, `0` inactive rooms, current statuses `VACANT_CLEAN=32` and `OCCUPIED_CLEAN=1`, with all other tracked current statuses `0`.
+- Redacted room-type buckets: `ROOM_TYPE_01=17`, `ROOM_TYPE_02=16`.
+- The job output omitted room numbers, guest data, reservation data, user data, payment data, and raw database URL. Room-type labels were redacted because `--include-room-type-labels` was not used.
+- Canonical evidence: `docs/launch/evidence/2026-07-03-slice-5ba-room-inventory-proof-helper.md` and `docs/launch/evidence/ROOM_INVENTORY_PROOF.md`.
+
+Still not proven by this refresh:
+
+- Owner/import source-of-truth evidence proving these rows are the approved real room inventory and not fake seed/demo data.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-03T10:34Z Owner Response Intake And Setup-Gate Reprobe
 
