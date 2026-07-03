@@ -22,6 +22,7 @@
         "security:hash-password": "node scripts/hash-password.mjs",
         "prod:credentials": "node scripts/generate-production-credentials.mjs",
         "prod:preflight": "node scripts/production-preflight.mjs",
+        "public-edge:proof": "node scripts/prove-public-edge-posture.mjs",
         "db:up": "docker compose -f docker-compose.db.yml up -d",
         "db:down": "docker compose -f docker-compose.db.yml down",
         "db:doctor": "node scripts/db-doctor.mjs",

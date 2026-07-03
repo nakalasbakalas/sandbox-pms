@@ -137,7 +137,15 @@ npm.cmd run booking-email:backfill -- --all-past --limit 250
 npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-8. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+9. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+
+Public edge posture proof:
+
+```powershell
+npm.cmd run public-edge:proof
+```
+
+This command is read-only and sends no cookies or authorization headers. It records DNS availability, selected public response statuses, Cloudflare/Render header presence, and bounded health fields while omitting response bodies. Treat it as public-edge routing evidence only; it does not prove Cloudflare account ownership, WAF rule IDs, rate-limit thresholds, or an owner-approved rate-limit test.
 
 Hotel Ops notification center:
 
