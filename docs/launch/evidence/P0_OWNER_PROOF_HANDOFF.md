@@ -4,6 +4,8 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
+Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. The same intake did not supply the redacted production user table, credentialed role proof, room inventory counts, local-only workflow acceptance decision, secret inventory, recovery owners, or WAF/rate-limit rule metadata needed to close the remaining P0s.
+
 ## Non-Negotiable Redaction Rules
 
 - Do not paste passwords, session cookies, bearer tokens, API keys, raw database URLs, private keys, recovery URLs, or screenshots containing those values.
@@ -84,7 +86,7 @@ Required evidence to close:
 
 ## Live Setup-Completion Hardening
 
-Current status: closed for the current public deploy. Slice 5AY records PR #150 merged into `origin/main` as `a01838a956f24164167ba7f91a7620a37de7f36d`, Render deploy `dep-d93nr7nlk1mc739ldujg` live on `sandbox-hotel-pms-v43m`, and unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returning the intended production-disabled `403`.
+Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; current Render deploy `dep-d93ordnaqgkc73cd2ke0` is live on `sandbox-hotel-pms-v43m`, serving commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
 
 Maintenance evidence for future setup/auth route deploys:
 

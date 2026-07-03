@@ -1,9 +1,29 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-03T09:29Z.
+Latest external provider evidence refresh: 2026-07-03T10:34Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-03T10:34Z Owner Response Intake And Setup-Gate Reprobe
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: owner-response intake, Render deploy metadata, public health/setup probes, and issue-closure classification. No production credentialed login, database shell, production database mutation, secret-value access, WAF mutation, provider setting change, or screenshot capture was performed.
+- Owner response: PR #150 or exact reviewed commit `fbc303136253a9785446d601d5532b6efc523b8f` is approved for deployment to `sandbox-hotel-pms-v43m`.
+- Current live deploy: `dep-d93ordnaqgkc73cd2ke0`, serving commit `1c493116b7eb84ab010097903ff641cd526d8cb6`, status `live`.
+- Prior deploy `dep-d93oli7aqgkc73ccodv0` is deactivated; PR #150 merge deploy `dep-d93nr7nlk1mc739ldujg` is deactivated but its setup-gate hardening remains included in the current live commit.
+- Direct `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured and OK, `Server: cloudflare`, `CF-RAY` present, and `x-render-origin-server: Render`.
+- `GET https://book.sandboxhotel.com/api/setup/status` returned `200` with `needsSetup=false`, `hasProperty=true`, `hasUsers=true`, `propertyName=SANDBOX HOTEL`, and `setupTokenRequired=false`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- This closes the setup-gate deployment/reprobe blocker for the current public deploy.
+- Canonical evidence: `docs/launch/evidence/2026-07-03-slice-5az-owner-response-intake.md`.
+
+Still not proven by this refresh:
+
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Current production room inventory counts and approved source-of-truth confirmation.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-03T09:29Z Housekeeping Sync And Live Setup-Gate Reprobe
 

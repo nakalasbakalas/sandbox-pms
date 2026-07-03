@@ -10,8 +10,8 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 - [x] Guarded local core workflow DB E2E passes against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/2026-07-03-slice-5aj-core-workflow-local-db-refresh.md`.
 - [x] Local repository/evidence secret hygiene scan passes through `npm.cmd run launch:evidence`; see `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md`.
 - [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest live proof refresh.
-- [x] PR #150 setup-gate hardening is merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AY confirmed merge commit `a01838a956f24164167ba7f91a7620a37de7f36d` is live on Render deploy `dep-d93nr7nlk1mc739ldujg`, and unauthenticated setup-complete now returns the intended production-disabled `403`.
-- [ ] Production/account-owner proof is complete for users/auth/RBAC/logout, real room inventory, workflow acceptance, live secret inventory/rotation, recovery ownership, and WAF/rate-limit rules. Slice 5AV reconfirmed safe Render/live metadata only; live secret inventory, recovery owners, recovery-point proof, and WAF/rate-limit rule IDs remain open.
+- [x] PR #150 setup-gate hardening is owner-approved, merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AZ confirmed the current live Render deploy `dep-d93ordnaqgkc73cd2ke0` serves commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated setup-complete returns the intended production-disabled `403`.
+- [ ] Production/account-owner proof is complete for users/auth/RBAC/logout, real room inventory, workflow acceptance, live secret inventory/rotation, recovery ownership, and WAF/rate-limit rules. Slice 5AZ recorded the latest owner-response intake; it supplies setup-gate approval only, while the other sections remain proof requests.
 
 ## Historical 2026-06-15 Validation Evidence
 
