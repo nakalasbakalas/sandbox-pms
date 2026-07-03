@@ -50,6 +50,18 @@ Slice 5BD adds `2026-07-03-slice-5bd-current-deploy-sync.md` and refreshes the c
 
 This update keeps app/deploy status current. It still does not prove customer-owned WAF/rate-limit rule configuration.
 
+## 2026-07-03 Slice 5BE Update
+
+Slice 5BE adds `2026-07-03-slice-5be-gmail-oauth-status-tool.md` and refreshes the custom-domain service deploy after the redacted Render Gmail OAuth status command landed:
+
+- `render deploys create srv-d6ns31h4tr6s73c9i8g0 --commit ad2b7267d7ac625708b935fa058361e86dfa09fb --wait --confirm --output json` deployed exact commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`.
+- `render deploys list srv-d6ns31h4tr6s73c9i8g0 --output json` confirmed latest live deploy `dep-d93tr24vikkc73b3quug`, status `live`, commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`, finished `2026-07-03T16:07:00Z`.
+- Direct public `GET /healthz?deep=1` returned `200`, database configured, database OK, `server=cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render`.
+- Direct public setup-complete reprobe returned the intended production-disabled `403`.
+- `npm.cmd run live:check` and `npm.cmd run prod:preflight` passed; preflight still warns that LINE credentials are not configured.
+
+This update keeps app/deploy status current. It still does not prove customer-owned WAF/rate-limit rule configuration.
+
 ## 2026-07-03 Slice 5AR Refresh
 
 Slice 5AR adds `2026-07-03-slice-5ar-secrets-recovery-waf-refresh.md` and reconfirms the available Render CLI path still cannot safely expose env-var key inventory, secret rotation metadata, backup/recovery-point metadata, or WAF/rate-limit rule IDs:
@@ -85,7 +97,7 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 | `render services --help` / `render services env --help` / `render backups --help` / `render ea --help` | Mixed; no usable secret/recovery command | Slice 5AV found no service env-var inventory, backup/recovery-point, or WAF/rate-limit command exposed by the current CLI. `render backups --help` failed as an unsupported command. |
 | `render services -o json` | Passed | Confirmed target service and datastore metadata without secret values; latest refresh Slice 5AV. |
 | `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Long-term service has one observed instance id `srv-d6ns31h4tr6s73c9i8g0-8wxvc`, created `2026-07-03T09:17:22Z` in the latest Slice 5AY refresh. |
-| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d93t86hkh4rs73e0io4g`, status `live`, commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`, finished `2026-07-03T15:26:55Z`. |
+| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d93tr24vikkc73b3quug`, status `live`, commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`, finished `2026-07-03T16:07:00Z`. |
 | `render deploys list srv-d8bchr1akrks73disaog -o json` | Passed | Alternate service deploy is `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`. |
 | `render deploys list srv-d8clkqho3t8c73a1eldg -o json` | Passed | Launch service deploy is `dep-d8oh74m47okc739vhq2g`, status `live`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`; this is not the custom-domain production target. |
 | Public-edge probes | Passed | Slice 5AV direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare response headers. |
@@ -95,7 +107,7 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 ## Current Provider Posture
 
 - Long-term custom-domain Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
-- Current live deploy for that service: `dep-d93t86hkh4rs73e0io4g`, commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`.
+- Current live deploy for that service: `dep-d93tr24vikkc73b3quug`, commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`.
 - Render PostgreSQL target remains `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) with status `available`, region `oregon`, and plan `basic_256mb` as reported by safe service metadata.
 - Render Production environment metadata reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`.
 - Public edge responses prove routing/denial behavior only. They do not prove customer-owned Cloudflare zone control, managed WAF rules, rule IDs, thresholds, or rate-limit behavior.
@@ -116,7 +128,7 @@ Still required:
 
 ## Recovery And Rollback Boundary
 
-- `docs/disaster-recovery.md` was updated to use the current live deploy `dep-d93t86hkh4rs73e0io4g` as the latest health-checked live deploy reference.
+- `docs/disaster-recovery.md` was updated to use the current live deploy `dep-d93tr24vikkc73b3quug` as the latest health-checked live deploy reference.
 - A disposable restore test from 2026-06-07 remains recorded in `docs/live-environment-proof.md`; this slice did not create another restore target.
 - The current slice did not test a live rollback because that is a production-sensitive action and no rollback owner/deputy has been named.
 

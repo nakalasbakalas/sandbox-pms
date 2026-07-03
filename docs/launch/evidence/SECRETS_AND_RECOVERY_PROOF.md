@@ -9,7 +9,7 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, an
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest run. |
-| Production service resource | Partially proven | [2026-07-03-slice-5bd-current-deploy-sync.md](2026-07-03-slice-5bd-current-deploy-sync.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93t86hkh4rs73e0io4g` for commit `163d49c2ff58eef5447e93f07d42babbf3b59d58`. |
+| Production service resource | Partially proven | [2026-07-03-slice-5be-gmail-oauth-status-tool.md](2026-07-03-slice-5be-gmail-oauth-status-tool.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93tr24vikkc73b3quug` for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`. |
 | Production database resource | Partially proven | [2026-07-03-slice-5av-secrets-recovery-waf-refresh.md](2026-07-03-slice-5av-secrets-recovery-waf-refresh.md) confirms `sandbox-hotel-pms-db-v43m` is available, plan `basic_256mb`, region `oregon`. |
 | Render Production environment posture | Open/risk remains | Slice 5AV confirms `Production` reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`. This is not WAF/rate-limit rule proof. |
 | Public deep health | Green as runtime health | `GET /healthz?deep=1` returned `200`, database configured, database OK, `server=cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` during the Slice 5AY refresh. |

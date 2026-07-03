@@ -1,9 +1,30 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-03T15:28Z.
+Latest external provider evidence refresh: 2026-07-03T16:08Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-03T16:08Z Render Sync After Gmail OAuth Status Tool
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy the current green status-tool commit, run public health/setup probes, verify booking-email proof job status, and recheck Gmail OAuth credential absence. No secret values, credentialed login, production database shell, production mutation, WAF mutation, provider setting change, or screenshot capture was performed.
+- GitHub Actions CI run `28671225263` passed for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`.
+- Render deploy `dep-d93tr24vikkc73b3quug` is live on `sandbox-hotel-pms-v43m`, serving commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`, finished `2026-07-03T16:07:00Z`.
+- Direct `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured and OK, `Server: cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` at `2026-07-03T16:07:28Z`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` for booking-specific and fallback Gmail credential paths at `2026-07-03T16:07:50.737Z`; values and Render auth tokens were omitted.
+- Render one-off job `job-d93tsq5aeets73ej4pvg` ran `npm run booking-email:proof` and succeeded at `2026-07-03T16:08:39Z`.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning.
+- Canonical evidence: `docs/launch/evidence/2026-07-03-slice-5be-gmail-oauth-status-tool.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth remains missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-03T15:28Z Current Deploy Sync After Gmail OAuth Helper
 
