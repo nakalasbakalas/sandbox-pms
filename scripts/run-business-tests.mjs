@@ -17,6 +17,7 @@ import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, 
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
+import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes } from './prepare-gmail-oauth-render.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -754,6 +755,70 @@ await assert.rejects(
     return true
   },
   'booking-email Gmail refresh errors are redacted before surfacing',
+)
+
+const gmailAuthorizationUrl = new URL(buildGmailAuthorizationUrl({
+  clientId: 'client-id-fixture',
+  redirectUri: 'http://127.0.0.1:53682/oauth2callback',
+  scopes: gmailOauthScopes([]),
+  state: 'state-fixture',
+}))
+assert.equal(String(gmailAuthorizationUrl.origin + gmailAuthorizationUrl.pathname), 'https://accounts.google.com/o/oauth2/v2/auth', 'Gmail OAuth helper uses Google authorization endpoint')
+assert.equal(gmailAuthorizationUrl.searchParams.get('client_id'), 'client-id-fixture', 'Gmail OAuth helper carries the configured OAuth client id')
+assert.equal(gmailAuthorizationUrl.searchParams.get('redirect_uri'), 'http://127.0.0.1:53682/oauth2callback', 'Gmail OAuth helper carries the exact redirect URI')
+assert.equal(gmailAuthorizationUrl.searchParams.get('response_type'), 'code', 'Gmail OAuth helper requests an authorization code')
+assert.equal(gmailAuthorizationUrl.searchParams.get('access_type'), 'offline', 'Gmail OAuth helper requests an offline refresh token')
+assert.equal(gmailAuthorizationUrl.searchParams.get('prompt'), 'consent', 'Gmail OAuth helper forces consent so Google can issue a refresh token')
+assert.equal(gmailAuthorizationUrl.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.readonly', 'Gmail OAuth helper defaults to readonly mailbox scope')
+assert.deepEqual(
+  gmailOauthScopes(['--include-send-scope']),
+  ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'],
+  'Gmail OAuth helper keeps send scope opt-in',
+)
+let gmailOauthExchangeBody = null
+const gmailOauthExchange = await exchangeAuthorizationCode({
+  code: 'authorization-code-fixture',
+  clientId: 'client-id-fixture',
+  clientSecret: 'client-secret-fixture',
+  redirectUri: 'http://127.0.0.1:53682/oauth2callback',
+  fetchImpl: async (url, request) => {
+    assert.equal(String(url), 'https://oauth2.googleapis.com/token', 'Gmail OAuth helper exchanges codes at the Google token endpoint')
+    gmailOauthExchangeBody = request.body
+    assert.equal(request.method, 'POST', 'Gmail OAuth helper exchanges codes with POST')
+    assert.equal(request.headers['content-type'], 'application/x-www-form-urlencoded', 'Gmail OAuth helper uses form encoding')
+    return new Response(JSON.stringify({
+      refresh_token: 'refresh-token-fixture',
+      access_token: 'access-token-fixture',
+      expires_in: 3600,
+      token_type: 'Bearer',
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+    }), { status: 200 })
+  },
+})
+assert.equal(gmailOauthExchange.refreshToken, 'refresh-token-fixture', 'Gmail OAuth helper returns a refresh token to the in-memory apply path')
+assert.equal(gmailOauthExchange.accessTokenPresent, true, 'Gmail OAuth helper reports access token presence without requiring output of the value')
+assert.equal(gmailOauthExchangeBody.get('grant_type'), 'authorization_code', 'Gmail OAuth helper uses authorization-code grant type')
+assert.equal(gmailOauthExchangeBody.get('code'), 'authorization-code-fixture', 'Gmail OAuth helper sends the pasted authorization code only to Google')
+assert.equal(gmailOauthExchangeBody.get('client_secret'), 'client-secret-fixture', 'Gmail OAuth helper sends the client secret only to Google')
+await assert.rejects(
+  () => exchangeAuthorizationCode({
+    code: 'authorization-code-fixture',
+    clientId: 'client-id-fixture',
+    clientSecret: 'client-secret-fixture',
+    redirectUri: 'http://127.0.0.1:53682/oauth2callback',
+    fetchImpl: async () => new Response(JSON.stringify({
+      error_description: 'invalid code=authorization-code-fixture refresh_token=refresh-token-fixture client_secret=client-secret-fixture token=ya29.access-fixture',
+    }), { status: 400 }),
+  }),
+  (error) => {
+    assert.equal(error.message.includes('authorization-code-fixture'), false, 'Gmail OAuth helper redacts authorization codes from errors')
+    assert.equal(error.message.includes('refresh-token-fixture'), false, 'Gmail OAuth helper redacts refresh tokens from errors')
+    assert.equal(error.message.includes('client-secret-fixture'), false, 'Gmail OAuth helper redacts client secrets from errors')
+    assert.equal(error.message.includes('ya29.access-fixture'), false, 'Gmail OAuth helper redacts access-token-shaped values from errors')
+    assert.match(error.message, /client_secret=\[redacted\]/, 'Gmail OAuth helper keeps redacted exchange errors actionable')
+    return true
+  },
+  'Gmail OAuth helper redacts provider errors before surfacing',
 )
 
 const previewedBookingEmail = previewBookingEmailEvent({

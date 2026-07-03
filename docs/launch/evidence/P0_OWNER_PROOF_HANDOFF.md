@@ -96,7 +96,7 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: open. Slice 5BH confirms the source/backend tooling is deployed and redacted Render status command still reports all supported backend Gmail credential paths `ready=false`. The connected Gmail connector account is not `booking@sandboxhotel.com` and is not a production app-server credential path. Production `booking-email:proof` job `job-d94460uq1p3s73apai5g` succeeded; production dry-run backfill job `job-d9446csvikkc73bh3ba0` failed while Gmail OAuth remained unconfigured.
+Current status: open. Slice 5BI adds the owner-run `npm.cmd run gmail-oauth:render` handoff helper for generating a Google consent URL and exchanging a pasted authorization code directly into Render env vars without printing token values. This does not close the blocker by itself. Slice 5BH remains the current production capture status: redacted Render status command still reports all supported backend Gmail credential paths `ready=false`, the connected Gmail connector account is not `booking@sandboxhotel.com` and is not a production app-server credential path, production `booking-email:proof` job `job-d94460uq1p3s73apai5g` succeeded, and production dry-run backfill job `job-d9446csvikkc73bh3ba0` failed while Gmail OAuth remained unconfigured.
 
 Required evidence to close:
 
@@ -105,6 +105,14 @@ Required evidence to close:
 | Gmail OAuth configured on Render | Key-name status only from `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` showing one supported backend credential path `ready=true`. | Client secret, refresh token, access token, OAuth consent screenshots containing secrets. |
 | Historical dry-run backfill | Redacted aggregate output from `npm run booking-email:backfill -- --all-past --limit 250` showing scanned count, existing/new candidates, event type mix, and confidence distribution. | Message IDs, senders, recipients, subjects, raw email text, guest/payment data. |
 | Review-only import if accepted | Confirmed import job ID and aggregate event counts; staff still review in `/booking-inbox`. | Raw email contents, credentials, production mutation payloads. |
+
+Safe owner setup command:
+
+```powershell
+npm.cmd run gmail-oauth:render
+$authCode = Read-Host 'Paste Gmail OAuth authorization code'
+$authCode | npm.cmd run gmail-oauth:render -- --exchange-code --code-stdin --apply-render --use-render-cli-token
+```
 
 ## Secrets, Recovery, Rollback, WAF
 

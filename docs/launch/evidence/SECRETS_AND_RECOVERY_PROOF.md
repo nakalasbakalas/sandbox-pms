@@ -2,7 +2,7 @@
 
 Last refreshed: 2026-07-04T06:18+07:00.
 
-Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BH, but this is not enough for launch sign-off. Live secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, and WAF/rate-limit rule evidence remain account-owner/provider-gated.
+Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BH; Slice 5BI adds a tested owner-run Gmail OAuth handoff helper. This is not enough for launch sign-off. Live secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, WAF/rate-limit rule evidence, and completed booking Gmail OAuth configuration remain account-owner/provider-gated.
 
 ## Current Evidence
 
@@ -15,7 +15,7 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, pu
 | Public edge/runtime health | Green as public-edge runtime health | Slice 5BH `npm.cmd run public-edge:proof` returned `200` for `/healthz?deep=1`, database configured/OK, `server=cloudflare`, `cfRayPresent=true`, `renderOriginServer=Render`, and common security-header presence. Selected denied paths returned `404` through Cloudflare/Render headers. This is public-edge routing proof, not WAF/rate-limit rule proof. |
 | Disposable restore test | Historical pass | `docs/live-environment-proof.md` records a disposable Render Postgres restore test that passed on 2026-06-07 and deleted the temporary database afterward. |
 | Render CLI env-var/secret metadata | Not available through this CLI path | Slice 5AV confirmed `render --help` exposes no top-level env-var/secret-manager command; `render services --help` exposes only `create` and `instances`; `render services env --help` returned services help only; `render ea --help` exposes object storage only. No safe CLI secret inventory or rotation metadata command was exposed in this session. |
-| Booking-email Gmail OAuth env-var metadata | Open/missing | Slice 5BH uses `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` and reports all supported booking-specific and fallback Gmail credential paths `ready=false` on `sandbox-hotel-pms-v43m`. No values were requested or printed. |
+| Booking-email Gmail OAuth env-var metadata | Open/missing | Slice 5BH uses `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` and reports all supported booking-specific and fallback Gmail credential paths `ready=false` on `sandbox-hotel-pms-v43m`. Slice 5BI adds `npm.cmd run gmail-oauth:render` so an owner can create/apply the refresh-token tuple without printing values. No real values were requested, printed, or applied. |
 | Render CLI backup/recovery metadata | Not available through this CLI path | `render backups --help` returned `unknown command "backups" for "render"`; no safe CLI recovery-point or retention metadata command was exposed in this session. |
 | Recovery/rollback owners | Open | `docs/disaster-recovery.md` still lists primary rollback owner, rollback deputy, database recovery owner, and WAF/rate-limit owner as `TBD`. |
 

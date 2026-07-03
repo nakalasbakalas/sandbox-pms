@@ -66,6 +66,7 @@ Booking-email operator CLI:
 
 - `npm.cmd run booking-email:backfill -- --all-past --limit <n>` performs a bounded Gmail historical dry-run using backend OAuth credentials and prints redacted capture/parser counts.
 - Adding `--confirm` imports the scanned messages into `BookingEmailEvent` rows for staff review in `/booking-inbox`. It does not approve events or directly create, modify, cancel, charge, or assign reservations.
+- `npm.cmd run gmail-oauth:render` generates a Google consent URL for the booking mailbox using a configured OAuth client id. Adding `-- --exchange-code --code-stdin --apply-render --use-render-cli-token` exchanges a locally pasted authorization code for a refresh token and writes the booking-specific Gmail OAuth tuple directly to Render without printing the authorization code, client secret, access token, refresh token, or Render auth token.
 - `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` checks the current Render service for supported backend Gmail credential key paths without printing values. `ready=true` requires a booking-specific refresh-token tuple, booking-specific access token, fallback refresh-token tuple, or fallback access token.
 - `npm.cmd run render:gmail-oauth` checks whether the local process environment has the durable Gmail OAuth refresh-token tuple needed for Render. It prints only key names and presence/action status. Adding `-- --apply` updates only the known Render env-var keys after Render API auth is available.
 
@@ -208,7 +209,7 @@ The Booking Inbox is a staff-facing exception queue for email-derived booking ev
 - Edit Parsed Details Then Apply submits corrected `editedDetails` through the same approval route.
 - Link/Create requires an explicit reservation id for linking; unmatched new-booking events can create a reservation from parsed details.
 - Cancellation email actions require an operational reason so the audit trail captures the staff decision.
-- Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, and must not use a pasted mailbox password. Render setup should use the booking-specific `BOOKING_EMAIL_GMAIL_*` env vars and the dry-run-first `render:gmail-oauth` helper when applying credentials from a secure shell.
+- Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, and must not use a pasted mailbox password. Render setup should use the booking-specific `BOOKING_EMAIL_GMAIL_*` env vars plus either the `gmail-oauth:render` code-exchange/apply helper or the dry-run-first `render:gmail-oauth` helper when applying credentials from a secure shell.
 
 ## Notifications
 

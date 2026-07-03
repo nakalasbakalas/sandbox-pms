@@ -109,13 +109,26 @@ npm.cmd run render:gmail-oauth:status -- --use-render-cli-token
 
 Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API key is available. The status output is ready only when one supported credential path is present: the booking-specific refresh-token tuple, booking-specific access token, fallback refresh-token tuple, or fallback access token.
 
-3. To prepare Render env-var updates from a local process environment without printing values, first run:
+3. If the booking mailbox does not yet have a durable backend refresh token, generate a Google OAuth consent URL from a secure shell. The OAuth client must allow the redirect URI shown in the command output. The default local redirect URI is `http://127.0.0.1:53682/oauth2callback`.
+
+```powershell
+npm.cmd run gmail-oauth:render
+```
+
+Authorize the `booking@sandboxhotel.com` mailbox, then paste the returned authorization code only into a local prompt and pipe it to the exchange/apply helper. The helper exchanges the code with Google and writes the refresh-token tuple directly to Render without printing the authorization code, client secret, access token, refresh token, or Render auth token:
+
+```powershell
+$authCode = Read-Host 'Paste Gmail OAuth authorization code'
+$authCode | npm.cmd run gmail-oauth:render -- --exchange-code --code-stdin --apply-render --use-render-cli-token
+```
+
+4. If an approved refresh token already exists in the local process environment, prepare Render env-var updates without printing values by first running:
 
 ```powershell
 npm.cmd run render:gmail-oauth
 ```
 
-4. After the required local process env vars are present, apply them to the custom-domain Render service only from a secure shell:
+5. After the required local process env vars are present, apply them to the custom-domain Render service only from a secure shell:
 
 ```powershell
 npm.cmd run render:gmail-oauth -- --apply --use-render-cli-token
@@ -123,21 +136,21 @@ npm.cmd run render:gmail-oauth -- --apply --use-render-cli-token
 
 Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API key is available. The helper updates only the known booking-email Gmail keys and omits all values from output.
 
-5. Redeploy the Render service so the new env vars reach runtime.
-6. Dry-run a bounded historical scan first:
+6. Redeploy the Render service so the new env vars reach runtime.
+7. Dry-run a bounded historical scan first:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250
 ```
 
-7. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
-8. If the preview looks correct, import the same bounded set as Booking Inbox review events:
+8. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
+9. If the preview looks correct, import the same bounded set as Booking Inbox review events:
 
 ```powershell
 npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-9. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+10. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
 Public edge posture proof:
 

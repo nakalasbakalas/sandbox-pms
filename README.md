@@ -85,12 +85,13 @@ Use `-- --include-room-type-labels` only when the operations owner approves expo
 Booking mailbox history can be scanned through backend Gmail OAuth credentials without exposing email contents in logs:
 
 ```bash
+npm run gmail-oauth:render
 npm run booking-email:proof
 npm run booking-email:backfill -- --all-past --limit 250
 npm run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-The proof command is read-only database evidence of current capture state. The backfill command without `--confirm` is Gmail scan dry-run only. The confirmed command imports review-only Booking Email Events for `/booking-inbox`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
+The Gmail OAuth helper generates a Google consent URL and can exchange an authorization code directly into Render env vars without printing token values. The proof command is read-only database evidence of current capture state. The backfill command without `--confirm` is Gmail scan dry-run only. The confirmed command imports review-only Booking Email Events for `/booking-inbox`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
 
 Real staff users must be approved and configured through hash-only `SEED_USERS_JSON`, a setup-token flow, or an explicitly reviewed bootstrap path. Staff accounts can be username-only when email is not available. Do not commit plaintext credentials.
 
