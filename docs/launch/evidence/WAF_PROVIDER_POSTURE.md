@@ -2,7 +2,7 @@
 
 Status date: 2026-07-03.
 
-Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BF, but this does not close the P0. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BH, but this does not close the P0. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
 
 ## Scope
 
@@ -79,6 +79,18 @@ Slice 5BF adds `2026-07-03-slice-5bf-public-edge-proof-helper.md` and a repeatab
 
 This improves repeatability of public-edge evidence. It still does not prove customer-owned WAF/rate-limit rule configuration.
 
+## 2026-07-04 Slice 5BH Update
+
+Slice 5BH adds `2026-07-04-slice-5bh-live-gmail-refresh.md` and refreshes the no-secret public-edge proof:
+
+- `render deploys list srv-d6ns31h4tr6s73c9i8g0 --output json` confirmed current live deploy remains `dep-d93ud5nlk1mc73a2sbv0`, status `live`, commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`.
+- `npm.cmd run public-edge:proof` completed at `2026-07-03T23:16:30.015Z`.
+- `/healthz?deep=1` returned `200`, `ok=true`, production environment, database configured/OK, `server=cloudflare`, `cfRayPresent=true`, `cfCacheStatus=DYNAMIC`, and `renderOriginServer=Render`.
+- `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` each returned `404` with Cloudflare and Render origin headers.
+- Probed responses reported `strictTransportSecurityPresent=true`, `contentSecurityPolicyPresent=true`, and `xFrameOptionsPresent=true`.
+
+This keeps public-edge evidence current. It still does not prove customer-owned WAF/rate-limit rule configuration.
+
 ## 2026-07-03 Slice 5AR Refresh
 
 Slice 5AR adds `2026-07-03-slice-5ar-secrets-recovery-waf-refresh.md` and reconfirms the available Render CLI path still cannot safely expose env-var key inventory, secret rotation metadata, backup/recovery-point metadata, or WAF/rate-limit rule IDs:
@@ -117,7 +129,7 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 | `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d93ud5nlk1mc73a2sbv0`, status `live`, commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`, finished `2026-07-03T16:45:40Z`. |
 | `render deploys list srv-d8bchr1akrks73disaog -o json` | Passed | Alternate service deploy is `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`. |
 | `render deploys list srv-d8clkqho3t8c73a1eldg -o json` | Passed | Launch service deploy is `dep-d8oh74m47okc739vhq2g`, status `live`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`; this is not the custom-domain production target. |
-| `npm.cmd run public-edge:proof` | Passed | Slice 5BF direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers plus common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare/Render response headers. Response bodies were omitted. |
+| `npm.cmd run public-edge:proof` | Passed | Slice 5BH direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers plus common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare/Render response headers. Response bodies were omitted. |
 | `npm.cmd run prod:preflight` | Passed with warning | Production preflight passed; LINE credentials remain unconfigured and live LINE messaging remains disabled. |
 | `npm.cmd run live:check` | Passed | Public health/deep-health passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured unless `LIVE_REQUIRE_LINE=true`. Latest Slice 5AV run resolved `book.sandboxhotel.com` to `216.24.57.9`. |
 

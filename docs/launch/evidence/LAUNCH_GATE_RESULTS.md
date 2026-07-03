@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: the deployed public-edge-helper commit is green in CI, with focused local checks also green. Slice 5BF GitHub Actions run `28672978563` passed `Install, test, build, and launch-check` for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`, and Slice 5BF deployed that commit to the custom-domain Render service. This proves engineering gate health for the deployed runtime commit, not production/account-owner launch sign-off.
 
-Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`.
+Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms latest `main` CI run `28674129355` passed `Install, test, build, and launch-check` for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`; this docs commit is not claimed as the deployed runtime.
 
 ## Scope
 
@@ -26,6 +26,7 @@ Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation lad
 | `npm.cmd run launch:check` | Passed | Slice 5AV rerun after secrets/recovery/WAF evidence/status updates completed all launch-check subcommands in the current checkout. |
 | `npm.cmd run launch:check` | Passed | GitHub Actions run `28672978563` completed launch-check successfully for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
 | GitHub Actions CI | Passed | Run `28672978563` completed `Install, test, build, and launch-check` successfully for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
+| GitHub Actions CI | Passed | Slice 5BH confirmed run `28674129355` completed `Install, test, build, and launch-check` successfully for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. |
 
 ## Launch Check Subcommands
 

@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BF confirms commit `0de2eb3d612a555dbd6cac92948becd16aa24cae` is live on Render deploy `dep-d93ud5nlk1mc73a2sbv0`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BE adds a reusable redacted Render Gmail OAuth status command and reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, proof job succeeds, and dry-run backfill fails before capture. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BH confirms commit `0de2eb3d612a555dbd6cac92948becd16aa24cae` remains live on Render deploy `dep-d93ud5nlk1mc73a2sbv0`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BH reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, the Gmail connector is reachable but connected to a non-booking account, proof job succeeds, and dry-run backfill fails before capture. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -96,7 +96,7 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: open. Slice 5BE confirms the source/backend tooling is deployed and adds a redacted Render status command, but all supported backend Gmail credential paths still report `ready=false`. Production `booking-email:proof` job `job-d93tsq5aeets73ej4pvg` succeeded; production dry-run backfill job `job-d93t9mdaeets73ehrus0` failed while Gmail OAuth remained unconfigured.
+Current status: open. Slice 5BH confirms the source/backend tooling is deployed and redacted Render status command still reports all supported backend Gmail credential paths `ready=false`. The connected Gmail connector account is not `booking@sandboxhotel.com` and is not a production app-server credential path. Production `booking-email:proof` job `job-d94460uq1p3s73apai5g` succeeded; production dry-run backfill job `job-d9446csvikkc73bh3ba0` failed while Gmail OAuth remained unconfigured.
 
 Required evidence to close:
 
