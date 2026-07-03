@@ -29,6 +29,7 @@ Owner-proof intake aid: `docs/launch/evidence/P0_OWNER_PROOF_HANDOFF.md` lists t
 | LINE messaging | Optional/manual unless required by owner. | If required, record credentials configured, signed webhook verification, and send-test proof without exposing secrets. |
 | OTA automation | iCal/manual metadata only. | No live Booking.com, Agoda, Expedia, Airbnb, or other OTA API/browser automation claim without adapter evidence, challenge handling, dry-run/default safety, and account-owner approval. |
 | Payments | PMS-recorded payments only. | No live card, PromptPay, bank-transfer collection, or gateway claim without provider credentials, callback proof, reconciliation proof, and finance owner acceptance. |
+| Booking email capture | Tooling is deployed, but production capture is not currently working. | Slice 5BB shows `booking@sandboxhotel.com` source enabled but Gmail OAuth missing, `lastSyncAt=null`, and `totalEvents=0`; historical backfill requires backend Gmail OAuth, a redacted dry-run, and review-only import before staff approval in `/booking-inbox`. |
 
 ## Proof Standards
 

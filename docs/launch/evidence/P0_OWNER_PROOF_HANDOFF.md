@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof, the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, or WAF/rate-limit rule metadata needed to close the remaining P0s.
+Latest intake: Slice 5AZ records owner approval for PR #150 / exact reviewed commit deployment and confirms the current live setup-complete reprobe. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BB records Booking Email capture state: the source exists, Gmail OAuth is missing, and there are zero production booking-email events. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
