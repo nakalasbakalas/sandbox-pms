@@ -13,6 +13,7 @@ import {
 loadEnvDefaults()
 
 const HARD_MESSAGE_LIMIT = 1000
+const DEFAULT_BOOKING_EMAIL_MAILBOX = 'booking@sandboxhotel.com'
 
 function argValue(name) {
   const index = process.argv.indexOf(name)
@@ -52,8 +53,12 @@ function queryFor(source) {
   return source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
 }
 
-async function selectSource(prisma) {
-  await listBookingEmailSources(prisma)
+function primaryMailbox() {
+  return String(process.env.BOOKING_EMAIL_PRIMARY_MAILBOX || DEFAULT_BOOKING_EMAIL_MAILBOX).trim().toLowerCase()
+}
+
+async function selectSource(prisma, options = {}) {
+  if (options.ensureSource) await listBookingEmailSources(prisma)
   const sourceId = argValue('--source-id')
   if (sourceId) {
     const source = await prisma.bookingEmailSource.findUnique({ where: { id: sourceId } })
@@ -65,8 +70,16 @@ async function selectSource(prisma) {
     where: { provider: 'GMAIL', enabled: true },
     orderBy: [{ updatedAt: 'desc' }],
   })
-  if (!source) fail('No enabled Gmail booking email source was found.')
-  return source
+  if (source) return source
+  if (options.ensureSource) fail('No enabled Gmail booking email source was found.')
+  return {
+    id: null,
+    provider: 'GMAIL',
+    mailbox: primaryMailbox(),
+    autoProcessSafeEvents: false,
+    reviewThreshold: 0.85,
+    query: null,
+  }
 }
 
 async function existingMessageIds(prisma, sourceId, ids) {
@@ -76,7 +89,7 @@ async function existingMessageIds(prisma, sourceId, ids) {
     if (batch.length === 0) continue
     const rows = await prisma.bookingEmailEvent.findMany({
       where: {
-        sourceId,
+        ...(sourceId ? { sourceId } : {}),
         sourceMessageId: { in: batch },
       },
       select: { sourceMessageId: true },
@@ -154,7 +167,7 @@ async function main() {
 
   const prisma = createPrismaClient()
   try {
-    const source = await selectSource(prisma)
+    const source = await selectSource(prisma, { ensureSource: confirm })
 
     const query = queryFor(source)
     const fetchedEvents = await fetchGmailEventsForSource(source, {
@@ -172,6 +185,7 @@ async function main() {
     let imported = []
 
     if (confirm) {
+      if (!source.id) fail('Confirmed import requires a saved booking email source.')
       const result = await syncBookingEmail(prisma, {
         sourceId: source.id,
         events: fetchedEvents,
@@ -194,6 +208,7 @@ async function main() {
       source: {
         provider: source.provider,
         mailbox: source.mailbox,
+        configuredSource: Boolean(source.id),
         autoProcessSafeEvents: source.autoProcessSafeEvents,
         reviewThreshold: source.reviewThreshold,
       },
