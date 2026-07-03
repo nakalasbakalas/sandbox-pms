@@ -1458,7 +1458,6 @@ export async function deactivateUser(prisma, userId, actor) {
 }
 
 export async function completeInitialSetup(prisma, input) {
-  const setup = validateSetupPayload(input)
   const status = await getSetupStatus(prisma)
 
   if (status.hasUsers) {
@@ -1476,6 +1475,8 @@ export async function completeInitialSetup(prisma, input) {
   if (operationalRecords.some((count) => count > 0)) {
     throw new PmsValidationError('Initial setup cannot run while operational records already exist.', 409)
   }
+
+  const setup = validateSetupPayload(input)
 
   return prisma.$transaction(async (tx) => {
     const property = await tx.property.upsert({

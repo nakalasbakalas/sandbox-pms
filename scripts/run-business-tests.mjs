@@ -16,7 +16,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, createUser, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -1216,6 +1216,26 @@ assert.equal(
   true,
   'Non-Booking OTA skeletons report credential/setup status instead of generic mock readiness',
 )
+
+let setupOperationalCountCalled = false
+await assert.rejects(
+  () => completeInitialSetup({
+    property: {
+      findUnique: async () => ({ id: 'property-setup-test', code: 'SANDBOX', name: 'SANDBOX HOTEL' }),
+    },
+    user: {
+      count: async () => 1,
+    },
+    reservation: { count: async () => { setupOperationalCountCalled = true; return 0 } },
+    guest: { count: async () => { setupOperationalCountCalled = true; return 0 } },
+    folio: { count: async () => { setupOperationalCountCalled = true; return 0 } },
+    payment: { count: async () => { setupOperationalCountCalled = true; return 0 } },
+    charge: { count: async () => { setupOperationalCountCalled = true; return 0 } },
+  }, {}),
+  /Initial setup has already been completed/,
+  'Completed setup rejects before setup payload validation',
+)
+assert.equal(setupOperationalCountCalled, false, 'Completed setup check exits before operational record counts')
 
 const agodaAdapter = createOtaPlatformSkeletonAdapter('agoda', { now: '2026-06-30T00:00:00.000Z' })
 const agodaHealth = await agodaAdapter.healthCheck()
