@@ -1,9 +1,29 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-03T16:08Z.
+Latest external provider evidence refresh: 2026-07-03T16:46Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-03T16:46Z Public Edge Helper Deploy And Proof
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy the current green public-edge-helper commit, run public health/setup probes, run the no-secret public-edge proof command, and refresh live/preflight checks. No secret values, credentialed login, production database shell, production mutation, WAF mutation, provider setting change, or screenshot capture was performed.
+- GitHub Actions CI run `28672978563` passed for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`.
+- Render deploy `dep-d93ud5nlk1mc73a2sbv0` is live on `sandbox-hotel-pms-v43m`, serving commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`, finished `2026-07-03T16:45:40Z`.
+- Direct `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured and OK, `Server: cloudflare`, `CF-RAY` present, and `X-Render-Origin-Server=Render` at `2026-07-03T16:45:55Z`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- `npm.cmd run public-edge:proof` passed at `2026-07-03T16:45:57.468Z`: `/healthz?deep=1` returned `200`, selected common unwanted paths returned `404`, Cloudflare and Render origin headers were present, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning.
+- Canonical evidence: `docs/launch/evidence/2026-07-03-slice-5bf-public-edge-proof-helper.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth remains missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-03T16:08Z Render Sync After Gmail OAuth Status Tool
 

@@ -1,15 +1,15 @@
 # Secrets And Recovery Proof
 
-Last refreshed: 2026-07-03T09:29Z.
+Last refreshed: 2026-07-03T16:46Z.
 
-Verdict: partial/open. Safe repository, Render resource, deploy, live-health, and public-edge evidence is current through Slice 5AY, but this is not enough for launch sign-off. Live secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, and WAF/rate-limit rule evidence remain account-owner/provider-gated.
+Verdict: partial/open. Safe repository, Render resource, deploy, live-health, and public-edge evidence is current through Slice 5BF, but this is not enough for launch sign-off. Live secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, and WAF/rate-limit rule evidence remain account-owner/provider-gated.
 
 ## Current Evidence
 
 | Area | Status | Evidence |
 | --- | --- | --- |
 | Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest run. |
-| Production service resource | Partially proven | [2026-07-03-slice-5be-gmail-oauth-status-tool.md](2026-07-03-slice-5be-gmail-oauth-status-tool.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93tr24vikkc73b3quug` for commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`. |
+| Production service resource | Partially proven | [2026-07-03-slice-5bf-public-edge-proof-helper.md](2026-07-03-slice-5bf-public-edge-proof-helper.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d93ud5nlk1mc73a2sbv0` for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
 | Production database resource | Partially proven | [2026-07-03-slice-5av-secrets-recovery-waf-refresh.md](2026-07-03-slice-5av-secrets-recovery-waf-refresh.md) confirms `sandbox-hotel-pms-db-v43m` is available, plan `basic_256mb`, region `oregon`. |
 | Render Production environment posture | Open/risk remains | Slice 5AV confirms `Production` reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`. This is not WAF/rate-limit rule proof. |
 | Public edge/runtime health | Green as public-edge runtime health | Slice 5BF `npm.cmd run public-edge:proof` returned `200` for `/healthz?deep=1`, database configured/OK, `server=cloudflare`, `cfRayPresent=true`, `renderOriginServer=Render`, and common security-header presence. Selected denied paths returned `404` through Cloudflare/Render headers. This is public-edge routing proof, not WAF/rate-limit rule proof. |

@@ -4,7 +4,7 @@ Status date: 2026-07-03.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BE confirms current `origin/main` commit `ad2b7267d7ac625708b935fa058361e86dfa09fb` is live on Render deploy `dep-d93tr24vikkc73b3quug`, public deep health is green, and unauthenticated setup-complete still returns the intended production-disabled `403`. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BE adds a reusable redacted Render Gmail OAuth status command and reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, proof job succeeds, and dry-run backfill fails before capture. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BF confirms commit `0de2eb3d612a555dbd6cac92948becd16aa24cae` is live on Render deploy `dep-d93ud5nlk1mc73a2sbv0`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BE adds a reusable redacted Render Gmail OAuth status command and reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, proof job succeeds, and dry-run backfill fails before capture. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -86,7 +86,7 @@ Required evidence to close:
 
 ## Live Setup-Completion Hardening
 
-Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; Slice 5BE confirms current Render deploy `dep-d93tr24vikkc73b3quug` is live on `sandbox-hotel-pms-v43m`, serving commit `ad2b7267d7ac625708b935fa058361e86dfa09fb`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
+Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; Slice 5BF confirms current Render deploy `dep-d93ud5nlk1mc73a2sbv0` is live on `sandbox-hotel-pms-v43m`, serving commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
 
 Maintenance evidence for future setup/auth route deploys:
 

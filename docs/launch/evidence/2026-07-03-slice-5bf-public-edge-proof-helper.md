@@ -10,13 +10,16 @@ Public edge posture proof is now repeatable through a no-secret repo command. Th
 
 - Public host: `https://book.sandboxhotel.com`
 - Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`)
-- Current live deploy at check time: `dep-d93tr24vikkc73b3quug`
+- Current live deploy at check time: `dep-d93ud5nlk1mc73a2sbv0`
 
 ## Checks
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Public edge proof command | Passed | `npm.cmd run public-edge:proof` completed at `2026-07-03T16:35:30.162Z`. |
+| GitHub CI | Passed | Run `28672978563` completed `Install, test, build, and launch-check` successfully for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
+| Exact Render deploy | Passed | `render deploys create srv-d6ns31h4tr6s73c9i8g0 --commit 0de2eb3d612a555dbd6cac92948becd16aa24cae --wait --confirm --output json` returned live deploy `dep-d93ud5nlk1mc73a2sbv0`, finished `2026-07-03T16:45:40Z`. |
+| Public health and setup reprobe | Passed | `GET /healthz?deep=1` returned `200`, `ok=true`, production environment, database configured/OK, Cloudflare header, and Render origin header at `2026-07-03T16:45:55Z`. Unauthenticated `POST /api/setup/complete` returned the intended production-disabled `403`. |
+| Public edge proof command | Passed | `npm.cmd run public-edge:proof` completed at `2026-07-03T16:45:57.468Z`. |
 | Health through edge | Passed | `/healthz?deep=1` returned `200`, `ok=true`, `environment=production`, database configured/OK, `server=cloudflare`, `cfRayPresent=true`, and `renderOriginServer=Render`. |
 | Selected denied paths | Passed | `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` each returned `404` through Cloudflare with Render origin headers. |
 | Security headers | Present | The probed responses reported `strictTransportSecurityPresent=true`, `contentSecurityPolicyPresent=true`, and `xFrameOptionsPresent=true`. |
