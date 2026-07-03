@@ -1,4 +1,4 @@
-/* global console, process, Response */
+/* global console, process, Response, URL */
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHmac } from 'node:crypto'
@@ -16,7 +16,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -755,6 +755,61 @@ await assert.rejects(
   },
   'booking-email Gmail refresh errors are redacted before surfacing',
 )
+
+const previewedBookingEmail = previewBookingEmailEvent({
+  subject: 'Booking confirmation ABC-1234',
+  rawText: 'Guest: Example Guest Check in: 2026-07-10 Check out: 2026-07-12 Double THB 3200 paid',
+})
+assert.equal(previewedBookingEmail.eventType, 'NEW_BOOKING', 'booking-email preview classifies booking confirmations')
+assert.equal(previewedBookingEmail.channelRefPresent, true, 'booking-email preview reports reference extraction without exposing the value')
+assert.equal(previewedBookingEmail.stayDatesPresent, true, 'booking-email preview reports stay-date extraction without exposing guest details')
+
+function gmailBody(value) {
+  return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+let gmailListPageRequests = 0
+const paginatedGmailEvents = await fetchGmailEventsForSource({
+  mailbox: 'booking@sandboxhotel.com',
+  query: 'to:booking@sandboxhotel.com',
+}, {
+  env: { BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture' },
+  maxMessages: 2,
+  pageSize: 1,
+  fetchImpl: async (url) => {
+    const parsed = new URL(String(url))
+    if (parsed.pathname.endsWith('/messages')) {
+      gmailListPageRequests += 1
+      const pageToken = parsed.searchParams.get('pageToken')
+      return new Response(JSON.stringify(pageToken
+        ? { messages: [{ id: 'gmail-page-2' }] }
+        : { messages: [{ id: 'gmail-page-1' }], nextPageToken: 'page-2' }), { status: 200 })
+    }
+    const id = decodeURIComponent(parsed.pathname.split('/').at(-1) || '')
+    return new Response(JSON.stringify({
+      id,
+      threadId: `thread-${id}`,
+      internalDate: String(Date.parse('2026-07-01T08:00:00.000Z')),
+      snippet: 'Booking snippet',
+      payload: {
+        mimeType: 'text/plain',
+        headers: [
+          { name: 'from', value: 'Booking.com <booking@example.test>' },
+          { name: 'to', value: 'booking@sandboxhotel.com' },
+          { name: 'subject', value: `Booking confirmation ${id}` },
+          { name: 'date', value: 'Wed, 01 Jul 2026 08:00:00 +0000' },
+          { name: 'message-id', value: `<${id}@example.test>` },
+        ],
+        body: {
+          data: gmailBody('Guest: Example Guest Check in: 2026-07-10 Check out: 2026-07-12 Double THB 3200'),
+        },
+      },
+    }), { status: 200 })
+  },
+})
+assert.equal(paginatedGmailEvents.length, 2, 'booking-email Gmail fetch follows bounded pagination')
+assert.equal(gmailListPageRequests, 2, 'booking-email Gmail fetch requests additional pages when needed')
+assert.equal(paginatedGmailEvents[0].sourceMessageId, 'gmail-page-1', 'booking-email Gmail fetch keeps source message ids for dedupe')
 
 const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
   id: 'email-event-1',

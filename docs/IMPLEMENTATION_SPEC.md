@@ -62,6 +62,11 @@ Booking-email API routes:
 - `GET/POST /api/booking-email/sources`
 - `PATCH /api/booking-email/sources/:id`
 
+Booking-email operator CLI:
+
+- `npm.cmd run booking-email:backfill -- --all-past --limit <n>` performs a bounded Gmail historical dry-run using backend OAuth credentials and prints redacted capture/parser counts.
+- Adding `--confirm` imports the scanned messages into `BookingEmailEvent` rows for staff review in `/booking-inbox`. It does not approve events or directly create, modify, cancel, charge, or assign reservations.
+
 ## Parser Contract
 
 The default parser is deterministic in `parseHotelOpsCommand`. When `HOTEL_OPS_AI_PARSER_ENABLED` or `HOTEL_OPS_AI_PARSER` is enabled and a backend `OPENAI_API_KEY` exists, `submitOpsCommand` can use the backend-only OpenAI Responses parser before falling back to deterministic parsing if the provider call or model output fails. Frontend code never receives the API key.
@@ -118,6 +123,8 @@ Booking mailbox sync can optionally feed allowlisted manager email commands into
 - The mapped PMS user must have `create:ops-task`; unmapped or under-permissioned email messages remain booking-email records and are skipped for Ops intake.
 - Accepted email commands use the source Gmail/message id as the idempotency key and are tagged with source channel `email`.
 - Task logs and `OPS_COMMAND_RECEIVED` audit records persist source email metadata, including the booking-email event id, source message id, raw email link, and sender when available.
+
+Historical backfill uses the same booking-email event parser and duplicate keys as mailbox sync. CLI proof output is aggregate-only; detailed email content is stored only in the PMS database when an operator explicitly confirms the import for review.
 - This bridge reuses booking-email Gmail OAuth sync and does not introduce a raw mailbox-password path.
 
 ## Permission And Approval Rules

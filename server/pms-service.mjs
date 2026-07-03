@@ -534,6 +534,8 @@ function parseBookingEmailDetails(input = {}) {
   const subject = String(input.subject || '')
   const combined = `${subject}\n${rawText}`
   const lower = combined.toLowerCase()
+  const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
+  const generalBookingSignal = lower.includes('booking') || lower.includes('reservation') || lower.includes('confirmation')
 
   const explicitType = normalizeBookingEmailEventType(input.eventType)
   const eventType = explicitType !== 'UNKNOWN'
@@ -542,11 +544,13 @@ function parseBookingEmailDetails(input = {}) {
       ? 'CANCELLATION'
       : lower.includes('modification') || lower.includes('changed') || lower.includes('amended')
         ? 'MODIFICATION'
-        : lower.includes('payment') || lower.includes('paid') || lower.includes('deposit')
-          ? 'PAYMENT_NOTICE'
-          : lower.includes('message') || lower.includes('request') || lower.includes('question')
-            ? 'GUEST_MESSAGE'
-            : lower.includes('booking') || lower.includes('reservation') || lower.includes('confirmation')
+        : newBookingSignal
+          ? 'NEW_BOOKING'
+          : lower.includes('payment') || lower.includes('paid') || lower.includes('deposit')
+            ? 'PAYMENT_NOTICE'
+            : lower.includes('message') || lower.includes('request') || lower.includes('question')
+              ? 'GUEST_MESSAGE'
+              : generalBookingSignal
               ? 'NEW_BOOKING'
               : 'UNKNOWN'
 
@@ -609,6 +613,21 @@ function parseBookingEmailDetails(input = {}) {
     details,
     confidence: Math.min(0.99, roundMoney(confidence)),
     reviewReason: missing.length > 0 ? `Missing ${missing.join(', ')}.` : null,
+  }
+}
+
+export function previewBookingEmailEvent(input = {}) {
+  const parsed = parseBookingEmailDetails(input)
+  return {
+    eventType: parsed.eventType,
+    confidence: parsed.confidence,
+    channelRefPresent: Boolean(parsed.channelRef),
+    guestNamePresent: Boolean(parsed.details.guestName),
+    stayDatesPresent: Boolean(parsed.details.checkIn && parsed.details.checkOut),
+    roomTypePresent: Boolean(parsed.details.roomType),
+    amountPresent: Boolean(parsed.details.amount),
+    paymentStatusPresent: Boolean(parsed.details.paymentStatus),
+    needsReview: Boolean(parsed.reviewReason),
   }
 }
 
@@ -750,43 +769,53 @@ async function fetchGmailJson(url, token, fetchImpl = fetch) {
   return payload
 }
 
-async function fetchGmailEventsForSource(source, options = {}) {
+export async function fetchGmailEventsForSource(source, options = {}) {
   const token = await resolveBookingEmailGmailAccessToken(options)
   if (!token) {
     throw new PmsValidationError('Gmail API OAuth credentials are not configured for booking email sync.', 503)
   }
   const env = options.env || process.env
   const userId = encodeURIComponent(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID || 'me')
-  const query = source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
-  const maxResults = Math.min(Math.max(Number(options.limit || 10), 1), 50)
-  const listUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages`)
-  listUrl.searchParams.set('q', query)
-  listUrl.searchParams.set('maxResults', String(maxResults))
-
-  const listed = await fetchGmailJson(listUrl, token, options.fetchImpl || fetch)
+  const query = normalizeNullableString(options.query) || source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
+  const maxMessages = Math.min(Math.max(Number(options.maxMessages || options.limit || 10), 1), 1000)
+  const pageSize = Math.min(Math.max(Number(options.pageSize || Math.min(maxMessages, 50)), 1), 50)
+  const maxPages = Math.min(Math.max(Number(options.maxPages || Math.ceil(maxMessages / pageSize)), 1), 100)
   const messages = []
-  for (const item of listed.messages || []) {
-    const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages/${encodeURIComponent(item.id)}`)
-    messageUrl.searchParams.set('format', 'full')
-    const message = await fetchGmailJson(messageUrl, token, options.fetchImpl || fetch)
-    const rawText = collectGmailTextParts(message.payload).join('\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    const receivedAt = Number(message.internalDate) ? new Date(Number(message.internalDate)).toISOString() : gmailHeader(message, 'date')
-    messages.push({
-      sourceMessageId: message.id,
-      threadId: message.threadId,
-      sender: gmailHeader(message, 'from') || 'Unknown sender',
-      recipient: gmailHeader(message, 'to') || source.mailbox,
-      subject: gmailHeader(message, 'subject') || '(no subject)',
-      receivedAt,
-      rawText: rawText || message.snippet || '',
-      snippet: message.snippet || '',
-      rawEmailUrl: `https://mail.google.com/mail/u/0/#inbox/${message.id}`,
-      rawHeaders: {
-        messageId: gmailHeader(message, 'message-id'),
-        date: gmailHeader(message, 'date'),
-      },
-    })
-  }
+  let pageToken = normalizeNullableString(options.pageToken)
+  let pageCount = 0
+  do {
+    const listUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages`)
+    listUrl.searchParams.set('q', query)
+    listUrl.searchParams.set('maxResults', String(Math.min(pageSize, maxMessages - messages.length)))
+    if (pageToken) listUrl.searchParams.set('pageToken', pageToken)
+
+    const listed = await fetchGmailJson(listUrl, token, options.fetchImpl || fetch)
+    for (const item of listed.messages || []) {
+      if (messages.length >= maxMessages) break
+      const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/${userId}/messages/${encodeURIComponent(item.id)}`)
+      messageUrl.searchParams.set('format', 'full')
+      const message = await fetchGmailJson(messageUrl, token, options.fetchImpl || fetch)
+      const rawText = collectGmailTextParts(message.payload).join('\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      const receivedAt = Number(message.internalDate) ? new Date(Number(message.internalDate)).toISOString() : gmailHeader(message, 'date')
+      messages.push({
+        sourceMessageId: message.id,
+        threadId: message.threadId,
+        sender: gmailHeader(message, 'from') || 'Unknown sender',
+        recipient: gmailHeader(message, 'to') || source.mailbox,
+        subject: gmailHeader(message, 'subject') || '(no subject)',
+        receivedAt,
+        rawText: rawText || message.snippet || '',
+        snippet: message.snippet || '',
+        rawEmailUrl: `https://mail.google.com/mail/u/0/#inbox/${message.id}`,
+        rawHeaders: {
+          messageId: gmailHeader(message, 'message-id'),
+          date: gmailHeader(message, 'date'),
+        },
+      })
+    }
+    pageToken = normalizeNullableString(listed.nextPageToken)
+    pageCount += 1
+  } while (pageToken && messages.length < maxMessages && pageCount < maxPages)
   return messages
 }
 
@@ -2187,6 +2216,7 @@ async function autoProcessBookingEmailEvent(tx, event, source, actor) {
 }
 
 export async function syncBookingEmail(prisma, input = {}, actor) {
+  const reviewOnly = Boolean(input.reviewOnly)
   const source = await prisma.$transaction(async (tx) => {
     if (input.sourceId) {
       const existing = await tx.bookingEmailSource.findUnique({ where: { id: input.sourceId } })
@@ -2215,7 +2245,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
     const events = []
     for (const inputEvent of importedEvents) {
       const event = await upsertBookingEmailEvent(tx, currentSource, inputEvent)
-      events.push(await autoProcessBookingEmailEvent(tx, event, currentSource, actor))
+      events.push(reviewOnly ? event : await autoProcessBookingEmailEvent(tx, event, currentSource, actor))
     }
     await tx.bookingEmailSource.update({
       where: { id: currentSource.id },
@@ -2227,6 +2257,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
     await createAudit(tx, actor, 'BOOKING_EMAIL_SYNCED', 'bookingEmailSource', currentSource.id, {
       imported: events.length,
       mailbox: currentSource.mailbox,
+      reviewOnly,
     })
     return events
   })

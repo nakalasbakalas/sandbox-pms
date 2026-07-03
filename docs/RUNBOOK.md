@@ -93,6 +93,24 @@ Booking Inbox operators:
 5. Enter an operational reason for cancellation email actions.
 6. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
+Historical booking mailbox capture:
+
+1. Confirm backend Gmail OAuth credentials are configured; do not use or store a raw mailbox password.
+2. Dry-run a bounded historical scan first:
+
+```powershell
+npm.cmd run booking-email:backfill -- --all-past --limit 250
+```
+
+3. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
+4. If the preview looks correct, import the same bounded set as Booking Inbox review events:
+
+```powershell
+npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
+```
+
+5. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+
 Hotel Ops notification center:
 
 1. In server mode, the shared header notification bell shows backend Hotel Ops notifications for users with Ops permission.

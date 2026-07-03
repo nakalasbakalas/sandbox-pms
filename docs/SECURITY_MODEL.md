@@ -27,6 +27,7 @@ When a task reaches `NEEDS_HUMAN`, automated execution stops. Requeueing require
 - `OPENAI_API_KEY`, when used for the optional parser, must be a backend environment secret only.
 - Booking.com credentials, when used, must come from backend environment secrets.
 - Booking email sync must use server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, not a raw mailbox password.
+- Booking email historical backfill must be dry-run first or explicitly confirmed; CLI output must omit message ids, senders, recipients, subjects, raw body text, guest data, payment data, and credential values.
 - Hotel Ops Gmail email delivery is backend-only and opt-in; it must use backend Gmail OAuth credentials and must redact provider failures before persistence.
 - Remote worker calls use `OTA_WORKER_BASE_URL` and `OTA_WORKER_SHARED_SECRET`.
 - Scheduled scans must not log credentials on failure.
@@ -88,4 +89,5 @@ The PMS normalizes proof kinds, caps persisted proof count, redacts credential-l
 - No CAPTCHA or 2FA bypass.
 - No real OTA write execution without dry-run removal, selector verification, and account-owner approval.
 - No production claim for email delivery unless a real provider is configured and tested.
+- No production claim that historical bookings are loaded into operational reservations until imported Booking Email Events are reviewed and approved through the PMS.
 - No launch-ready claim from local tests alone.

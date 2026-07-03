@@ -77,6 +77,8 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 
 - API keys and OTA credentials are not returned to the browser.
 - Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, and refresh failures redact token/client-secret values.
+- Booking-email historical backfill dry-run fetches bounded Gmail pages, reports redacted aggregate parser counts, and does not write PMS records.
+- Booking-email historical backfill with `--confirm` imports Booking Email Events for `/booking-inbox` review only; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
 - Hotel Ops Gmail email delivery is opt-in, backend-only, updates notification status to `SENT` or `FAILED`, and redacts provider failures.
 - LINE Hotel Ops command intake is disabled by default, requires a signed webhook plus configured prefix and LINE-user allowlist, maps to an active PMS user, and keeps command execution inside the shared Ops service.
 - WhatsApp Hotel Ops command intake is disabled by default, requires a Meta `x-hub-signature-256` verified webhook plus configured prefix and sender allowlist, maps to an active PMS user, links source message metadata into task logs/audit, and keeps command execution inside the shared Ops service.

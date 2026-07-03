@@ -11,6 +11,8 @@ Current dispatch:
 - Unknown or all-platform tasks use the signed mock worker fallback.
 - All worker execution is dry-run unless explicitly and safely changed later.
 
+Booking-email historical backfill is not an OTA adapter and is not live OTA scrape proof. It imports Gmail-derived Booking Email Events for PMS review through `npm.cmd run booking-email:backfill`; staff approval is still required before any reservation, payment, cancellation, or room mutation.
+
 ## Booking.com Adapter
 
 File: `server/ota-adapters/booking-com.mjs`
