@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { createHmac } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { get as httpGet } from 'node:http'
 import { basename, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
@@ -17,7 +18,7 @@ import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, 
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
-import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes } from './prepare-gmail-oauth-render.mjs'
+import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 
 function createOpsCommandPrismaFixture() {
@@ -824,6 +825,39 @@ assert.deepEqual(
   ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send'],
   'Gmail OAuth helper keeps send scope opt-in',
 )
+const gmailOauthClientFixturePath = resolve('node_modules/.tmp/business-tests/google-oauth-client.fixture.json')
+await writeFile(gmailOauthClientFixturePath, JSON.stringify({
+  installed: {
+    client_id: 'file-client-id-fixture',
+    client_secret: 'file-client-secret-fixture',
+    redirect_uris: ['http://127.0.0.1:53682/oauth2callback'],
+  },
+}), 'utf8')
+const gmailOauthFileCredentials = readGoogleOauthClientCredentials(gmailOauthClientFixturePath)
+assert.equal(gmailOauthFileCredentials.clientId, 'file-client-id-fixture', 'Gmail OAuth helper reads client id from Google OAuth JSON')
+assert.equal(gmailOauthFileCredentials.clientSecret, 'file-client-secret-fixture', 'Gmail OAuth helper reads client secret from Google OAuth JSON for in-memory exchange only')
+assert.deepEqual(gmailOauthFileCredentials.redirectUris, ['http://127.0.0.1:53682/oauth2callback'], 'Gmail OAuth helper reads redirect URIs from Google OAuth JSON')
+const resolvedGmailOauthClient = resolveGmailOauthClient(['--credentials-file', gmailOauthClientFixturePath], {})
+assert.equal(resolvedGmailOauthClient.clientId, 'file-client-id-fixture', 'Gmail OAuth helper can use a Google OAuth client JSON file')
+assert.equal(resolvedGmailOauthClient.clientSecret, 'file-client-secret-fixture', 'Gmail OAuth helper keeps JSON client secret in memory for exchange/apply')
+const overriddenGmailOauthClient = resolveGmailOauthClient(['--credentials-file', gmailOauthClientFixturePath, '--client-id', 'arg-client-id-fixture'], {
+  BOOKING_EMAIL_GMAIL_CLIENT_SECRET: 'env-client-secret-fixture',
+})
+assert.equal(overriddenGmailOauthClient.clientId, 'arg-client-id-fixture', 'Gmail OAuth helper lets explicit client id override the file')
+assert.equal(overriddenGmailOauthClient.clientSecret, 'env-client-secret-fixture', 'Gmail OAuth helper lets env client secret override the file')
+const gmailOauthListener = await startAuthorizationCodeListener({
+  redirectUri: 'http://127.0.0.1:53683/oauth2callback',
+  timeoutMs: 5000,
+})
+const gmailOauthListenerResponseStatus = await new Promise((resolveResponse, reject) => {
+  const request = httpGet('http://127.0.0.1:53683/oauth2callback?code=listener-code-fixture', (response) => {
+    response.resume()
+    response.on('end', () => resolveResponse(response.statusCode))
+  })
+  request.on('error', reject)
+})
+assert.equal(gmailOauthListenerResponseStatus, 200, 'Gmail OAuth helper local listener accepts the callback')
+assert.equal(await gmailOauthListener.code, 'listener-code-fixture', 'Gmail OAuth helper local listener captures the authorization code in memory')
 let gmailOauthExchangeBody = null
 const gmailOauthExchange = await exchangeAuthorizationCode({
   code: 'authorization-code-fixture',

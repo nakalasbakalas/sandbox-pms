@@ -1,4 +1,5 @@
-/* global Buffer, URL, URLSearchParams, console, fetch, process */
+/* global Buffer, URL, URLSearchParams, console, fetch, process, setTimeout, clearTimeout */
+import { createServer } from 'node:http'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -31,6 +32,13 @@ function nullableEnv(env, key) {
   return normalized ? normalized : null
 }
 
+function positiveInt(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) fail(`${value} is not a positive integer.`)
+  return parsed
+}
+
 function fail(message) {
   throw new Error(message)
 }
@@ -47,8 +55,61 @@ function serviceId(args) {
   return id
 }
 
-function redirectUri(args, env = process.env) {
-  const value = argValue(args, '--redirect-uri') || nullableEnv(env, 'BOOKING_EMAIL_GMAIL_REDIRECT_URI') || DEFAULT_REDIRECT_URI
+function oauthClientFile(args, env = process.env) {
+  return argValue(args, '--credentials-file')
+    || argValue(args, '--client-secret-file')
+    || nullableEnv(env, 'BOOKING_EMAIL_GMAIL_OAUTH_CLIENT_FILE')
+    || nullableEnv(env, 'GMAIL_OAUTH_CLIENT_FILE')
+}
+
+export function readGoogleOauthClientCredentials(filePath) {
+  if (!filePath) return null
+  const parsed = JSON.parse(readFileSync(resolve(filePath), 'utf8'))
+  const config = parsed.installed || parsed.web || parsed
+  return {
+    clientId: config.client_id ? String(config.client_id) : null,
+    clientSecret: config.client_secret ? String(config.client_secret) : null,
+    redirectUris: Array.isArray(config.redirect_uris)
+      ? config.redirect_uris.map((item) => String(item)).filter(Boolean)
+      : [],
+    source: 'credentials-file',
+  }
+}
+
+export function resolveGmailOauthClient(args = [], env = process.env) {
+  const filePath = oauthClientFile(args, env)
+  const fileCredentials = filePath ? readGoogleOauthClientCredentials(filePath) : null
+  return {
+    clientId: argValue(args, '--client-id')
+      || nullableEnv(env, 'BOOKING_EMAIL_GMAIL_CLIENT_ID')
+      || nullableEnv(env, 'GMAIL_CLIENT_ID')
+      || fileCredentials?.clientId
+      || null,
+    clientSecret: nullableEnv(env, 'BOOKING_EMAIL_GMAIL_CLIENT_SECRET')
+      || nullableEnv(env, 'GMAIL_CLIENT_SECRET')
+      || fileCredentials?.clientSecret
+      || null,
+    redirectUris: fileCredentials?.redirectUris || [],
+    source: fileCredentials ? fileCredentials.source : 'args-env',
+    filePath: filePath || null,
+  }
+}
+
+function preferredRedirectUri(clientConfig = {}) {
+  const uris = clientConfig.redirectUris || []
+  if (uris.includes(DEFAULT_REDIRECT_URI)) return DEFAULT_REDIRECT_URI
+  return uris.find((uri) => {
+    try {
+      const parsed = new URL(uri)
+      return parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname)
+    } catch {
+      return false
+    }
+  }) || uris[0] || DEFAULT_REDIRECT_URI
+}
+
+function redirectUri(args, env = process.env, clientConfig = {}) {
+  const value = argValue(args, '--redirect-uri') || nullableEnv(env, 'BOOKING_EMAIL_GMAIL_REDIRECT_URI') || preferredRedirectUri(clientConfig)
   try {
     const parsed = new URL(value)
     if (!['http:', 'https:'].includes(parsed.protocol)) fail('Redirect URI must use http or https.')
@@ -56,14 +117,6 @@ function redirectUri(args, env = process.env) {
   } catch {
     fail('A valid Gmail OAuth redirect URI is required.')
   }
-}
-
-function clientId(args, env = process.env) {
-  return argValue(args, '--client-id') || nullableEnv(env, 'BOOKING_EMAIL_GMAIL_CLIENT_ID') || nullableEnv(env, 'GMAIL_CLIENT_ID')
-}
-
-function clientSecret(env = process.env) {
-  return nullableEnv(env, 'BOOKING_EMAIL_GMAIL_CLIENT_SECRET') || nullableEnv(env, 'GMAIL_CLIENT_SECRET')
 }
 
 export function gmailOauthScopes(args = []) {
@@ -101,6 +154,81 @@ async function readStdin() {
   const chunks = []
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk))
   return Buffer.concat(chunks).toString('utf8').trim()
+}
+
+export async function startAuthorizationCodeListener({ redirectUri: oauthRedirectUri, timeoutMs = 180000 } = {}) {
+  const parsed = new URL(oauthRedirectUri || DEFAULT_REDIRECT_URI)
+  if (parsed.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(parsed.hostname)) {
+    fail('The local OAuth listener requires an http://127.0.0.1 or http://localhost redirect URI.')
+  }
+  if (!parsed.port) fail('The local OAuth listener requires an explicit redirect URI port.')
+
+  let settle
+  let rejectCode
+  let timeout
+  const code = new Promise((resolve, reject) => {
+    settle = resolve
+    rejectCode = reject
+  })
+
+  const server = createServer((request, response) => {
+    const requestUrl = new URL(request.url || '/', parsed)
+    if (requestUrl.pathname !== parsed.pathname) {
+      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Not found.')
+      return
+    }
+
+    const providerError = requestUrl.searchParams.get('error')
+    const providerCode = requestUrl.searchParams.get('code')
+    if (providerError) {
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Authorization failed. You can close this tab.')
+      rejectCode(new Error(redactSensitive(providerError)))
+      return
+    }
+    if (!providerCode) {
+      response.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+      response.end('Authorization code was missing. You can close this tab.')
+      rejectCode(new Error('Authorization code was missing from the OAuth callback.'))
+      return
+    }
+
+    response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+    response.end('Authorization received. You can close this tab and return to the secure shell.')
+    settle(providerCode)
+  })
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen)
+    server.listen(Number(parsed.port), parsed.hostname, resolveListen)
+  })
+
+  timeout = setTimeout(() => {
+    rejectCode(new Error('Timed out waiting for the Gmail OAuth callback.'))
+  }, timeoutMs)
+
+  const close = () => new Promise((resolveClose) => {
+    if (!server.listening) {
+      resolveClose()
+      return
+    }
+    server.close(() => resolveClose())
+  })
+
+  const address = server.address()
+  const listenPort = typeof address === 'object' && address ? address.port : Number(parsed.port)
+  return {
+    code: code.finally(async () => {
+      clearTimeout(timeout)
+      await close()
+    }),
+    listenHost: parsed.hostname,
+    listenPort,
+    callbackPath: parsed.pathname,
+    timeoutMs,
+    close,
+  }
 }
 
 async function authorizationCode(args, env = process.env) {
@@ -222,14 +350,23 @@ async function applyRenderEnvVars({
 }
 
 function baseOutput(mode, args, env = process.env) {
+  const oauthClient = resolveGmailOauthClient(args, env)
   return {
     generatedAt: new Date().toISOString(),
     purpose: 'safe booking Gmail OAuth refresh-token handoff for Render',
     mode,
     serviceId: serviceId(args),
     mailbox: normalizeMailbox(argValue(args, '--mailbox') || nullableEnv(env, 'BOOKING_EMAIL_PRIMARY_MAILBOX') || DEFAULT_MAILBOX),
-    redirectUri: redirectUri(args, env),
+    redirectUri: redirectUri(args, env, oauthClient),
     scopes: gmailOauthScopes(args),
+    oauthClient: {
+      clientIdPresent: Boolean(oauthClient.clientId),
+      clientSecretPresent: Boolean(oauthClient.clientSecret),
+      source: oauthClient.source,
+      credentialsFileProvided: Boolean(oauthClient.filePath),
+      redirectUriCount: oauthClient.redirectUris.length,
+      valuesPrinted: false,
+    },
     redaction: {
       clientSecret: 'omitted',
       authorizationCode: 'omitted',
@@ -241,12 +378,12 @@ function baseOutput(mode, args, env = process.env) {
 }
 
 async function main(args = process.argv.slice(2), env = process.env) {
-  const mode = hasFlag(args, '--exchange-code') ? 'exchange-code' : 'authorize-url'
+  const mode = (hasFlag(args, '--exchange-code') || hasFlag(args, '--listen')) ? 'exchange-code' : 'authorize-url'
   const output = baseOutput(mode, args, env)
-  const oauthClientId = clientId(args, env)
+  const oauthClient = resolveGmailOauthClient(args, env)
+  const oauthClientId = oauthClient.clientId
 
   if (mode === 'authorize-url') {
-    output.clientIdPresent = Boolean(oauthClientId)
     output.authorizationUrl = buildGmailAuthorizationUrl({
       clientId: oauthClientId,
       redirectUri: output.redirectUri,
@@ -258,8 +395,34 @@ async function main(args = process.argv.slice(2), env = process.env) {
     return output
   }
 
-  const oauthClientSecret = clientSecret(env)
-  const code = await authorizationCode(args, env)
+  const oauthClientSecret = oauthClient.clientSecret
+  let listener = null
+  let code = null
+  if (hasFlag(args, '--listen')) {
+    output.authorizationUrl = buildGmailAuthorizationUrl({
+      clientId: oauthClientId,
+      redirectUri: output.redirectUri,
+      scopes: output.scopes,
+      state: argValue(args, '--state'),
+    })
+    listener = await startAuthorizationCodeListener({
+      redirectUri: output.redirectUri,
+      timeoutMs: positiveInt(argValue(args, '--timeout-ms'), 180000),
+    })
+    output.listener = {
+      enabled: true,
+      host: listener.listenHost,
+      port: listener.listenPort,
+      callbackPath: listener.callbackPath,
+      timeoutMs: listener.timeoutMs,
+      authorizationCodePrinted: false,
+    }
+    output.nextStep = 'Open authorizationUrl with the booking mailbox signed in. The local listener will capture the callback and then continue.'
+    console.log(JSON.stringify(output, null, 2))
+    code = await listener.code
+  } else {
+    code = await authorizationCode(args, env)
+  }
   const exchanged = await exchangeAuthorizationCode({
     code,
     clientId: oauthClientId,

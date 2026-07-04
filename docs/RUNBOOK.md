@@ -109,17 +109,24 @@ npm.cmd run render:gmail-oauth:status -- --use-render-cli-token
 
 Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API key is available. The status output is ready only when one supported credential path is present: the booking-specific refresh-token tuple, booking-specific access token, fallback refresh-token tuple, or fallback access token.
 
-3. If the booking mailbox does not yet have a durable backend refresh token, generate a Google OAuth consent URL from a secure shell. The OAuth client must allow the redirect URI shown in the command output. The default local redirect URI is `http://127.0.0.1:53682/oauth2callback`.
+3. If the booking mailbox does not yet have a durable backend refresh token, generate a Google OAuth consent URL from a secure shell. The OAuth client must allow the redirect URI shown in the command output. The default local redirect URI is `http://127.0.0.1:53682/oauth2callback`. If the owner has a Google OAuth client JSON download, keep it in an untracked local path such as `.\.codex\google-oauth-client.local.json` and pass it with `--credentials-file`.
 
 ```powershell
 npm.cmd run gmail-oauth:render
+npm.cmd run gmail-oauth:render -- --credentials-file .\.codex\google-oauth-client.local.json
 ```
 
 Authorize the `booking@sandboxhotel.com` mailbox, then paste the returned authorization code only into a local prompt and pipe it to the exchange/apply helper. The helper exchanges the code with Google and writes the refresh-token tuple directly to Render without printing the authorization code, client secret, access token, refresh token, or Render auth token:
 
 ```powershell
 $authCode = Read-Host 'Paste Gmail OAuth authorization code'
-$authCode | npm.cmd run gmail-oauth:render -- --exchange-code --code-stdin --apply-render --use-render-cli-token
+$authCode | npm.cmd run gmail-oauth:render -- --credentials-file .\.codex\google-oauth-client.local.json --exchange-code --code-stdin --apply-render --use-render-cli-token
+```
+
+Alternatively, use the local callback listener from the same secure shell. The helper prints the consent URL, waits on the configured loopback redirect URI, captures the returned code locally, exchanges it, and applies the Render env vars without printing token values:
+
+```powershell
+npm.cmd run gmail-oauth:render -- --credentials-file .\.codex\google-oauth-client.local.json --listen --apply-render --use-render-cli-token
 ```
 
 4. If an approved refresh token already exists in the local process environment, prepare Render env-var updates without printing values by first running:
