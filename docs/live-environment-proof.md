@@ -1,9 +1,29 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-04.
-Latest external provider evidence refresh: 2026-07-04T16:05+07:00.
+Latest external provider evidence refresh: 2026-07-04T16:44+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T16:44+07:00 Current Main Render Deploy Sync
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy current green `main` to the long-term Render service, run public setup/deep-health/public-edge probes, and refresh redacted Render Gmail OAuth status. No secret values, credentialed PMS login, production database shell, production data mutation, confirmed booking-email import, WAF mutation, provider setting change, screenshot capture, or DB-mutating E2E was performed.
+- GitHub CI run `28701971403` passed for commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4`, including lint, typecheck, business tests, E2E smoke, build, and launch gate.
+- Render deploy `dep-d94daaflk1mc73b1m6m0` is live on `sandbox-hotel-pms-v43m`, serving commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4`, finished `2026-07-04T09:43:28.291471Z`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.` at `2026-07-04T09:43:42Z`.
+- `GET https://book.sandboxhotel.com/healthz?deep=1` returned `ok=true`, production environment, and database configured/OK at `2026-07-04T09:43:42.591Z`.
+- `npm.cmd run public-edge:proof` passed at `2026-07-04T09:43:55.241Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, and response bodies were omitted except bounded health fields.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` at `2026-07-04T09:43:42.829Z`: non-secret mailbox identity keys existed, but all supported booking-specific and fallback credential keys were still missing. Values and Render auth tokens were omitted.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bs-current-main-render-deploy.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth credentials remain missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T16:05+07:00 Gmail Mailbox Discovery And Backend OAuth Boundary
 
