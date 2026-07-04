@@ -58,7 +58,7 @@ For mutating E2E:
 
 ```powershell
 $env:ALLOW_DB_E2E = 'true'
-$env:E2E_DATABASE_URL = 'postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public'
+$env:E2E_DATABASE_URL = '<LOCAL_E2E_DATABASE_URL>'
 npm run db:e2e:ready
 npm run test:e2e:db
 ```

@@ -1040,8 +1040,8 @@ jobs:
 ```bash
 # .env.example
 # Database
-POSTGRES_URL="postgresql://user:pass@localhost:5432/sandbox_pms"
-POSTGRES_URL_NON_POOLING="postgresql://user:pass@localhost:5432/sandbox_pms"
+POSTGRES_URL="postgresql://USER:PASSWORD@localhost:5432/DB_NAME"
+POSTGRES_URL_NON_POOLING="postgresql://USER:PASSWORD@localhost:5432/DB_NAME"
 
 # Auth
 NEXTAUTH_URL="http://localhost:3000"

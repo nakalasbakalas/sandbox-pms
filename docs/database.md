@@ -31,8 +31,8 @@ The compose stack creates:
 Use these URLs locally:
 
 ```env
-DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_dev?schema=public"
-E2E_DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public"
+DATABASE_URL="<LOCAL_DATABASE_URL>"
+E2E_DATABASE_URL="<LOCAL_E2E_DATABASE_URL>"
 ALLOW_DB_E2E=false
 ```
 
@@ -81,15 +81,15 @@ npm run test:e2e
 Run database-mutating E2E only with an explicit disposable or staging URL:
 
 ```bash
-ALLOW_DB_E2E=true E2E_DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public" npm run db:e2e:ready
-ALLOW_DB_E2E=true E2E_DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public" npm run test:e2e:db
+ALLOW_DB_E2E=true E2E_DATABASE_URL="<LOCAL_E2E_DATABASE_URL>" npm run db:e2e:ready
+ALLOW_DB_E2E=true E2E_DATABASE_URL="<LOCAL_E2E_DATABASE_URL>" npm run test:e2e:db
 ```
 
 PowerShell equivalent:
 
 ```powershell
 $env:ALLOW_DB_E2E = 'true'
-$env:E2E_DATABASE_URL = 'postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public'
+$env:E2E_DATABASE_URL = '<LOCAL_E2E_DATABASE_URL>'
 npm run db:e2e:ready
 npm run test:e2e:db
 ```
@@ -109,7 +109,7 @@ Before the mutating workflow runs, the script applies Prisma migrations to `E2E_
 If Docker is unavailable, use a disposable hosted PostgreSQL database or a staging database that can be reset independently of production:
 
 ```env
-E2E_DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DB?schema=public"
+E2E_DATABASE_URL="<DISPOSABLE_E2E_DATABASE_URL>"
 ALLOW_DB_E2E=true
 SEED_MODE=e2e
 ```
