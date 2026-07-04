@@ -1,9 +1,36 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-04.
-Latest external provider evidence refresh: 2026-07-04T07:19+07:00.
+Latest external provider evidence refresh: 2026-07-04T08:15+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T08:15+07:00 Render Gmail Mailbox Identity Config
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: configure non-secret booking mailbox identifiers on Render, deploy current green `main`, run public health/setup probes, public-edge proof, production preflight, redacted Render Gmail OAuth status, and Booking Email proof/backfill jobs. No secret values, credentialed PMS login, production database shell, production mutation, confirmed booking-email import, WAF mutation, provider secret change, or screenshot capture was performed.
+- GitHub CI run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, including lint, typecheck, business tests, E2E smoke, build, and launch gate.
+- Render deploy `dep-d945rdpkh4rs73ei9asg` is live on `sandbox-hotel-pms-v43m`, serving commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, finished `2026-07-04T01:13:46Z`.
+- `BOOKING_EMAIL_PRIMARY_MAILBOX` and `BOOKING_EMAIL_GMAIL_USER_ID` were set on Render as non-secret booking mailbox identifiers. Values are operational mailbox identifiers, not tokens.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` at `2026-07-04T01:14:08.509Z`: the two mailbox identity keys existed, but all supported booking-specific and fallback credential keys were still missing. Values and Render auth tokens were omitted.
+- `npm.cmd run public-edge:proof` passed at `2026-07-04T01:14:11.343Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed; DNS lookup resolved `book.sandboxhotel.com` to `216.24.57.9`; LINE remains optional/unconfigured.
+- `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- The connected Codex Gmail account was `Nick@intercellartrading.com`, not `booking@sandboxhotel.com`; the connector cannot provide backend OAuth refresh tokens.
+- No local process values were present for supported booking-specific/fallback Gmail OAuth keys. `npm.cmd run gmail-oauth:render` exited before URL generation because no `BOOKING_EMAIL_GMAIL_CLIENT_ID` or `GMAIL_CLIENT_ID` was present.
+- Local `npm.cmd run booking-email:backfill -- --all-past --limit 250` failed before scanning with missing Gmail OAuth credentials.
+- Render one-off job `job-d945stmq1p3s73asuam0` ran `npm run booking-email:proof` and succeeded at `2026-07-04T01:15:04Z`; Render CLI logs did not return job stdout for the checked window.
+- Render one-off job `job-d945stsvikkc73bl8rt0` ran `npm run booking-email:backfill -- --all-past --limit 250` and failed at `2026-07-04T01:14:59Z` while backend Gmail OAuth credentials remained missing. No confirmed import was run.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bm-render-gmail-mailbox-config.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth credentials remain missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T07:19+07:00 Current Main Deploy And Gmail Boundary
 

@@ -1,6 +1,6 @@
 # Codex Launch Finish Packet
 
-Last updated: 2026-07-02
+Last updated: 2026-07-04
 
 Use this as the first instruction packet for the next Codex run in `nakalasbakalas/sandbox-pms`. It is scoped to prevent another long, overloaded session. The repo already has launch-hardening evidence through 2026-06-15, but current launch sign-off still depends on proof-heavy operational work and a fresh green gate in the current checkout.
 
@@ -25,8 +25,8 @@ The team roles are:
 - `LAUNCH_CHECKLIST.md` is the launch sign-off source of truth.
 - Existing launch posture is documented in `README.md`, `docs/launch-scope-decisions.md`, and `docs/live-environment-proof.md`.
 - `package.json` exposes the relevant gate commands: `db:doctor`, `db:e2e:ready`, `rooms:import`, `real-data:import`, `prod:preflight`, `render:validate`, `live:check`, `test:e2e`, `test:e2e:db`, and `launch:check`.
-- The June 15 docs say `launch:check` passed then, but the current operator report says the latest current-checkout run is not green because `db:doctor` reports configured DB migrate-status failures/unavailability and DB-mutating E2E is blocked without `ALLOW_DB_E2E=true`. Treat the current report as fresher than old proof until rerun.
-- `docs/live-environment-proof.md` already states what is still not proven: approved production users, current production room inventory, current Render secret rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, and live provider send/charge evidence.
+- Current July 4 evidence says `main` CI is green through run `28690040884`, the public Render service is live on deploy `dep-d945rdpkh4rs73ei9asg`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
+- `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence.
 
 ## Non-negotiable guardrails
 
@@ -47,7 +47,7 @@ The team roles are:
 - Close core hotel workflow acceptance: reservation create/update/cancel, room assignment, blocked/occupied rejection, overbooking rejection, check-in, check-out, folio/payment balance, housekeeping transitions, audit/timeline evidence.
 - Decide and record DB-mutating E2E posture: staging/disposable DB with `ALLOW_DB_E2E=true`, or explicit local-only proof acceptance.
 - Finish secret hygiene and ownership proof: redacted secret inventory, rotation dates, no prod secrets in repo/logs/screenshots, named rollback/deputy/database recovery owners, tested rollback path.
-- Re-run or repair local launch gating so `npm run launch:check` passes cleanly in the current checkout.
+- Keep launch gating current: latest `main` CI is green, but rerun `npm.cmd run launch:check` before release if code, dependency, migration, or environment assumptions change.
 - Verify production secret and recovery evidence in the live environment, not only in docs.
 
 ### P1 — before guest-facing launch or formal defer
