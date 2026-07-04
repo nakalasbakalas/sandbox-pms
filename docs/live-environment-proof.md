@@ -1,9 +1,25 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-04.
-Latest external provider evidence refresh: 2026-07-04T08:15+07:00.
+Latest external provider evidence refresh: 2026-07-04T16:05+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T16:05+07:00 Gmail Mailbox Discovery And Backend OAuth Boundary
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: read-only Gmail connector profile/search, redacted Render Gmail OAuth status, and aggregate-only Booking Email proof job status. No Gmail body export, attachment download, Gmail mutation, Render env-var mutation, deploy, production database shell, production data mutation, confirmed import, or DB-mutating E2E was performed.
+- Gmail connector profile returned `booking@sandboxhotel.com`.
+- Read-only Gmail provider-sender discovery returned the first `100` message IDs with more pages available. The latest summary page included Agoda, Trip.com, and LittleHotelier booking messages from 2026-07-03 and 2026-07-04. Message IDs, subjects, guest names, raw text, and payment data are omitted.
+- Subject-focused cancellation discovery returned at least `100` message IDs with more pages available. The latest summary page included LittleHotelier, Trip.com, and Ascend Travel cancellation-style messages. Message details are omitted.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` at `2026-07-04T09:01:27.767Z`: the non-secret mailbox identity keys existed, but all supported booking-specific and fallback credential keys were still missing. Values and Render auth tokens were omitted.
+- Render one-off job `job-d94cogtckfvc739odqig` ran `npm run booking-email:proof` and succeeded at `2026-07-04T09:03:26Z`; Render CLI logs did not return job stdout for the checked window.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bq-gmail-mailbox-discovery.md`.
+
+Still not proven by this refresh:
+
+- PMS booking-email capture/backfill with real Gmail data; backend Gmail OAuth credentials remain missing.
+- Review-only import into `/booking-inbox`; no `--confirm` backfill was run.
 
 ## 2026-07-04T08:15+07:00 Render Gmail Mailbox Identity Config
 
