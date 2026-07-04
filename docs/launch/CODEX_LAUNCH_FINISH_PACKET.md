@@ -25,8 +25,8 @@ The team roles are:
 - `LAUNCH_CHECKLIST.md` is the launch sign-off source of truth.
 - Existing launch posture is documented in `README.md`, `docs/launch-scope-decisions.md`, and `docs/live-environment-proof.md`.
 - `package.json` exposes the relevant gate commands: `db:doctor`, `db:e2e:ready`, `rooms:import`, `real-data:import`, `prod:preflight`, `render:validate`, `live:check`, `test:e2e`, `test:e2e:db`, and `launch:check`.
-- Current July 4 evidence says `main` CI is green through run `28690040884`, the public Render service is live on deploy `dep-d945rdpkh4rs73ei9asg`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
-- `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence.
+- Current July 4 evidence says `main` CI is green through run `28692255198` at commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`, the public Render service is live on runtime deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
+- `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret inventory/rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence. Slice 5BN proves the repository-scoped secret hygiene scan, not provider secret custody.
 
 ## Non-negotiable guardrails
 
@@ -337,7 +337,7 @@ When a slice is complete, respond with:
 4. Evidence files created/updated.
 5. Remaining P0 blockers.
 6. Next recommended slice.
-7. Explicit note that no production secrets were committed.
+7. Explicit note that repository/evidence secret scans were run and no unredacted production secret-shaped values were found.
 
 ## Pull request body template for launch slices
 
@@ -365,7 +365,7 @@ When a slice is complete, respond with:
 - docs/launch/evidence/...
 
 ## Safety
-- [ ] No production secrets committed
+- [ ] Repository/evidence secret scans found no unredacted production secret-shaped values
 - [ ] DB-mutating E2E was not run against production
 - [ ] Any live evidence is redacted
 

@@ -1,14 +1,14 @@
 # Secrets And Recovery Proof
 
-Last refreshed: 2026-07-04T08:15+07:00.
+Last refreshed: 2026-07-04T09:45+07:00.
 
-Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BM; Slice 5BM configures the non-secret booking mailbox identity keys on Render, and Slice 5BI adds a tested owner-run Gmail OAuth handoff helper. This is not enough for launch sign-off. Live secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, WAF/rate-limit rule evidence, and completed booking Gmail OAuth credentials remain account-owner/provider-gated.
+Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BN. Slice 5BN confirms the repository/evidence secret-hygiene scan passes at commit `26444eda87e31a6c90c19f7a13f47c7e74706beb` and supports checking the repository-scoped "no production secrets committed" launch item. Slice 5BM configures the non-secret booking mailbox identity keys on Render, and Slice 5BI adds a tested owner-run Gmail OAuth handoff helper. This is not enough for launch sign-off. Live provider secret key inventory, rotation metadata, owner confirmations, named rollback/deputy/database recovery owners, latest recovery-point proof, WAF/rate-limit rule evidence, and completed booking Gmail OAuth credentials remain account-owner/provider-gated.
 
 ## Current Evidence
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Local repository secret hygiene | Green locally | `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in tracked/unignored text files in the latest run. |
+| Local repository secret hygiene | Green locally | Slice 5BN `npm.cmd run launch:evidence` found no high-confidence unredacted production secret-shaped values in `510` tracked/unignored text files after the evidence file was added and no unredacted secret-shaped values in launch evidence docs at commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`. |
 | Production service resource | Partially proven | [2026-07-04-slice-5bm-render-gmail-mailbox-config.md](2026-07-04-slice-5bm-render-gmail-mailbox-config.md) confirms `sandbox-hotel-pms-v43m` is live on deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`. |
 | Production database resource | Partially proven | [2026-07-03-slice-5av-secrets-recovery-waf-refresh.md](2026-07-03-slice-5av-secrets-recovery-waf-refresh.md) confirms `sandbox-hotel-pms-db-v43m` is available, plan `basic_256mb`, region `oregon`. |
 | Render Production environment posture | Open/risk remains | Slice 5AV confirms `Production` reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`. This is not WAF/rate-limit rule proof. |
@@ -23,6 +23,7 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, pu
 
 - No production secret values were requested or recorded.
 - No raw database URLs, tokens, passwords, cookies, private keys, or screenshots were committed.
+- Slice 5BN is repository-scoped proof only; it does not inspect Render dashboard secret values or rotation metadata.
 - Slice 5BM performed a Render deploy of green commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and applied only non-secret mailbox identity env vars; no restart, SSH session, database shell, production data mutation, confirmed booking-email import, or DB-mutating E2E ran in this slice.
 - Runtime health proves the app can reach its configured production database; it does not prove secret rotation, custody, or cleanup.
 
