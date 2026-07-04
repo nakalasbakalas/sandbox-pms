@@ -25,7 +25,7 @@ The team roles are:
 - `LAUNCH_CHECKLIST.md` is the launch sign-off source of truth.
 - Existing launch posture is documented in `README.md`, `docs/launch-scope-decisions.md`, and `docs/live-environment-proof.md`.
 - `package.json` exposes the relevant gate commands: `db:doctor`, `db:e2e:ready`, `rooms:import`, `real-data:import`, `prod:preflight`, `render:validate`, `live:check`, `test:e2e`, `test:e2e:db`, and `launch:check`.
-- Current July 4 evidence says `main` CI is green through run `28692255198` at commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`, the public Render service is live on runtime deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
+- Current July 4 evidence says the Slice 5BN repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb` passed CI run `28692255198`, the public Render service is live on runtime deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
 - `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret inventory/rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence. Slice 5BN proves the repository-scoped secret hygiene scan, not provider secret custody.
 
 ## Non-negotiable guardrails

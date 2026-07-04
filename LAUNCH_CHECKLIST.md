@@ -5,7 +5,7 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 ## 2026-07-04 Current Evidence Refresh
 
 - [x] `npm.cmd run launch:check` passes in the current checkout at commit `fbc303136253a9785446d601d5532b6efc523b8f` after Slice 5AV evidence/status updates; see `docs/launch/evidence/2026-07-03-slice-5av-secrets-recovery-waf-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
-- [x] Latest `main` CI run `28692255198` passed for repository secret-redaction commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; see `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`.
+- [x] Slice 5BN repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb` passed CI run `28692255198`; see `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`.
 - [x] Slice 5AT non-destructive baseline validation passes in the current checkout, including `launch:evidence`, `db:doctor`, typecheck, lint, tests, build, production preflight, Render Blueprint validation, live readiness, and whitespace checks; see `docs/launch/evidence/2026-07-03-slice-5at-baseline-validation-refresh.md` and `docs/launch/evidence/DB_DOCTOR_RESULTS.md`.
 - [x] Guarded local disposable DB-mutating E2E passes with `ALLOW_DB_E2E=true` against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/DB_E2E_POSTURE.md`.
 - [x] Guarded local core workflow DB E2E passes against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/2026-07-03-slice-5aj-core-workflow-local-db-refresh.md`.

@@ -2,14 +2,14 @@
 
 Status date: 2026-07-04.
 
-Verdict: the latest `main` commit is green in CI, and the current deployed runtime commit remains green with focused live checks. Slice 5BN confirms GitHub Actions run `28692255198` passed for repository secret-redaction commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`. Slice 5BM remains the current deployed-runtime proof: GitHub Actions run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and that commit is live on the custom-domain Render service as `dep-d945rdpkh4rs73ei9asg`. This proves engineering gate health and focused live health, not production/account-owner launch sign-off.
+Verdict: the Slice 5BN repository secret-redaction source commit is green in CI, and the current deployed runtime commit remains green with focused live checks. Slice 5BN confirms GitHub Actions run `28692255198` passed for repository secret-redaction commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`. Slice 5BM remains the current deployed-runtime proof: GitHub Actions run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and that commit is live on the custom-domain Render service as `dep-d945rdpkh4rs73ei9asg`. This proves engineering gate health and focused live health, not production/account-owner launch sign-off.
 
-Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms run `28674129355` passed for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. Slice 5BJ confirms CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22`. Slice 5BK confirms CI run `28688693681` passed for commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`. Slice 5BM confirms CI run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and that commit is live on Render. Slice 5BN confirms CI run `28692255198` passed for latest `main` commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; this is a docs/runtime-example redaction commit and does not change the deployed app runtime.
+Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms run `28674129355` passed for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. Slice 5BJ confirms CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22`. Slice 5BK confirms CI run `28688693681` passed for commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`. Slice 5BM confirms CI run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and that commit is live on Render. Slice 5BN confirms CI run `28692255198` passed for repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; this is a docs/runtime-example redaction commit and does not change the deployed app runtime.
 
 ## Scope
 
 - Branch: `main`.
-- Latest `main` commit: `26444eda87e31a6c90c19f7a13f47c7e74706beb`.
+- Slice 5BN source redaction commit: `26444eda87e31a6c90c19f7a13f47c7e74706beb`.
 - Current deployed runtime commit: `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`.
 - Worktree: clean before the Slice 5BN evidence updates; Slice 5BN adds repository secret-redaction evidence.
 - Production posture: Slice 5BN performed no Render mutation. Slice 5BM performed a Render deploy of commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and applied only non-secret booking mailbox identity env vars; no restart, SSH session, production database shell, production data mutation, DB-mutating E2E against production, confirmed booking-email import, or secret-value access was performed.
@@ -31,7 +31,7 @@ Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation lad
 | GitHub Actions CI | Passed | Slice 5BJ confirmed run `28688152726` completed `Install, test, build, and launch-check` successfully for deployed commit `04d06d3351fa02154e258a35b84a379dd219db22`. |
 | GitHub Actions CI | Passed | Slice 5BK confirmed run `28688693681` completed `Install, test, build, and launch-check` successfully for deployed commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`. |
 | GitHub Actions CI | Passed | Slice 5BM confirmed run `28690040884` completed `Install, test, build, and launch-check` successfully for deployed commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`. |
-| GitHub Actions CI | Passed | Slice 5BN confirmed run `28692255198` completed successfully for latest `main` commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`. |
+| GitHub Actions CI | Passed | Slice 5BN confirmed run `28692255198` completed successfully for repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`. |
 
 ## Launch Check Subcommands
 
