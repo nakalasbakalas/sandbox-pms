@@ -20,6 +20,7 @@ import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPl
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
+import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -649,6 +650,43 @@ assert.throws(
   /only 401 or 403/,
   'auth proof denial probes can only expect denial statuses',
 )
+
+const cloudflareWafRulesetSummary = summarizeRuleset({
+  id: 'ruleset-fixture',
+  name: 'Sandbox WAF fixture',
+  kind: 'zone',
+  phase: 'http_ratelimit',
+  version: '1',
+  rules: [
+    {
+      id: 'rule-rate-fixture',
+      description: 'Protect booking API',
+      enabled: true,
+      action: 'block',
+      expression: '(http.host eq "book.sandboxhotel.com" and starts_with(http.request.uri.path, "/api/"))',
+      ratelimit: {
+        period: 60,
+        requests_per_period: 100,
+        mitigation_timeout: 600,
+        characteristics: ['cf.colo.id', 'ip.src'],
+      },
+      action_parameters: { response: { content: 'fixture body that must not be printed' } },
+    },
+    {
+      id: 'rule-challenge-fixture',
+      enabled: false,
+      action: 'managed_challenge',
+      expression: '(http.request.uri.path contains "/admin")',
+    },
+  ],
+}, { targetHostname: 'book.sandboxhotel.com' })
+assert.equal(cloudflareWafRulesetSummary.rulesCount, 2, 'Cloudflare WAF proof summarizes ruleset rule count')
+assert.equal(cloudflareWafRulesetSummary.enabledRulesCount, 1, 'Cloudflare WAF proof summarizes enabled rules')
+assert.equal(cloudflareWafRulesetSummary.targetHostnameCoveredRules, 2, 'Cloudflare WAF proof treats explicit host and unscoped zone rule as target coverage')
+assert.equal(cloudflareWafRulesetSummary.rules[0].ratelimit.requestsPerPeriod, 100, 'Cloudflare WAF proof summarizes rate-limit thresholds')
+assert.equal(cloudflareWafRulesetSummary.rules[0].expression, 'omitted', 'Cloudflare WAF proof omits rule expressions by default')
+assert.equal(cloudflareWafRulesetSummary.rules[0].actionParameters, 'omitted', 'Cloudflare WAF proof omits action parameters')
+assert.equal(JSON.stringify(cloudflareWafRulesetSummary).includes('fixture body'), false, 'Cloudflare WAF proof does not include custom response body values')
 
 const opsEmailNotification = {
   id: 'ops-notification-email-1',

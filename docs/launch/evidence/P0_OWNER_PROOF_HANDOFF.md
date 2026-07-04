@@ -4,7 +4,7 @@ Status date: 2026-07-04.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BS deploys current green `main` commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4` as Render deploy `dep-d94daaflk1mc73b1m6m0`, confirms public deep health is green, confirms unauthenticated setup-complete still returns the intended production-disabled `403`, reruns `npm.cmd run public-edge:proof`, and refreshes redacted Gmail OAuth status. Render backend Gmail OAuth still reports all supported credential paths `ready=false`, so PMS capture/backfill is not closed. Slice 5BT confirms the connected Gmail account contains `993` known OTA/provider messages, but the default primary-mailbox query would miss observed provider traffic; the first backfill needs an owner-approved explicit Gmail query. Slice 5BR improves the owner-run Gmail OAuth setup helper with local Google OAuth client JSON and optional local callback support. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper, and refreshes public-edge proof. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BS deploys current green `main` commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4` as Render deploy `dep-d94daaflk1mc73b1m6m0`, confirms public deep health is green, confirms unauthenticated setup-complete still returns the intended production-disabled `403`, and refreshes redacted Gmail OAuth status. Render backend Gmail OAuth still reports all supported credential paths `ready=false`, so PMS capture/backfill is not closed. Slice 5BT confirms the connected Gmail account contains `993` known OTA/provider messages, but the default primary-mailbox query would miss observed provider traffic; the first backfill needs an owner-approved explicit Gmail query. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -127,7 +127,7 @@ npm.cmd run booking-email:backfill -- --query "<owner-approved Gmail query>" --l
 
 ## Secrets, Recovery, Rollback, WAF
 
-Current status: partial/open. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only.
+Current status: partial/open. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only. Slice 5BU adds an owner-run Cloudflare Rulesets API helper, but it still requires a Cloudflare token and zone ID from an owner shell.
 
 Required evidence to close:
 
@@ -142,7 +142,17 @@ Required evidence to close:
 | Rollback path | Tested rollback or owner-approved dry-run/accepted risk with latest known-good deploy ID. | Credentials. |
 | WAF/rate-limit rules | Edge provider, zone/account, rule IDs, protected hostnames, thresholds/actions, and non-destructive test result. | Cloudflare/API tokens. |
 
-Public-edge routing proof can be refreshed without owner secrets using `npm.cmd run public-edge:proof`; Slice 5BO refreshed it successfully. This does not replace the privileged WAF/rate-limit rule proof above.
+Public-edge routing proof can be refreshed without owner secrets using `npm.cmd run public-edge:proof`; Slice 5BU refreshed it successfully. This does not replace the privileged WAF/rate-limit rule proof above.
+
+Safe owner-run WAF/rate-limit proof command:
+
+```powershell
+$env:CLOUDFLARE_API_TOKEN = '<redacted owner token>'
+$env:CLOUDFLARE_ZONE_ID = '<redacted zone id>'
+npm.cmd run cloudflare:waf:proof -- --hostname book.sandboxhotel.com --probe-url https://book.sandboxhotel.com/.env
+```
+
+If account-level WAF/rate-limit rulesets are used, also set `CLOUDFLARE_ACCOUNT_ID` or pass `--account-id`. The helper omits action parameters and rule expressions by default; use `--include-expressions` only if the owner approves recording expressions in redacted evidence.
 
 ## Open Launch Decision Needed
 

@@ -2,7 +2,7 @@
 
 Status date: 2026-07-04.
 
-Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BS, but this does not close the P0. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BU, and a read-only owner-run Cloudflare WAF/rate-limit proof helper now exists. This does not close the P0 because no Cloudflare API token or zone ID is available in this environment. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
 
 ## Scope
 
@@ -10,6 +10,21 @@ Verdict: partial/open. Safe Render and public-edge metadata has been refreshed t
 - Render workspace observed through CLI: `My Workspace` (`tea-d6n8kq14tr6s738stj5g`) with account email `nakalastravels@gmail.com`.
 - Commands were read-only except for explicitly noted Render deploy-sync slices. No restart, SSH session, database shell, production data mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
 - No production secrets, raw database URLs, tokens, passwords, cookies, or screenshots were recorded.
+
+## 2026-07-04 Slice 5BU Refresh
+
+Slice 5BU adds `2026-07-04-slice-5bu-cloudflare-waf-proof-helper.md` and the owner-run helper `npm.cmd run cloudflare:waf:proof`:
+
+- Official Cloudflare docs identify the WAF phases as `http_request_firewall_custom`, `http_ratelimit`, and `http_request_firewall_managed`, and the Rulesets API read path as account/zone ruleset list and view operations.
+- `scripts/prove-cloudflare-waf-rules.mjs` reads Cloudflare Rulesets API metadata only. It summarizes rule IDs, actions, enabled status, rate-limit thresholds, and target-hostname coverage while omitting API tokens, action parameters, response bodies, and rule expressions by default.
+- `npm.cmd run cloudflare:waf:proof -- --help` passed and printed the owner-run usage path.
+- `npm.cmd run cloudflare:waf:proof` failed as expected with redacted `ready=false` output because `CLOUDFLARE_API_TOKEN`/`CF_API_TOKEN` and `CLOUDFLARE_ZONE_ID`/`CF_ZONE_ID` are absent.
+- `npm.cmd test` passed with coverage for WAF/rate-limit ruleset summarization and redaction defaults.
+- `wrangler` and `cloudflared` are still unavailable on PATH in this session.
+- Local environment key-presence checks for `CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, and `CF_ZONE_ID` all returned absent. No values were printed.
+- A first `npm.cmd run public-edge:proof` attempt aborted at the request layer, then a retry passed at `2026-07-04T10:22:28.812Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, `server=cloudflare`, `CF-RAY` present, `CF-Cache-Status=DYNAMIC`, `X-Render-Origin-Server=Render`, and common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with bodies omitted.
+
+This improves the collection path for privileged Cloudflare WAF/rate-limit proof. It still does not prove customer-owned zone access, WAF/rate-limit rule IDs, thresholds/actions, protected hostnames, or owner-approved non-destructive WAF/rate-limit behavior.
 
 ## 2026-07-04 Slice 5BS Refresh
 
@@ -200,6 +215,8 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 | `render deploys list srv-d8bchr1akrks73disaog -o json` | Passed | Alternate service deploy is `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`. |
 | `render deploys list srv-d8clkqho3t8c73a1eldg -o json` | Passed | Launch service deploy is `dep-d8oh74m47okc739vhq2g`, status `live`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`; this is not the custom-domain production target. |
 | `npm.cmd run public-edge:proof` | Passed | Slice 5BS direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers plus common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare/Render response headers. Response bodies were omitted. |
+| `npm.cmd run cloudflare:waf:proof -- --help` | Passed | Slice 5BU added an owner-run helper for read-only Cloudflare Rulesets API WAF/rate-limit proof. |
+| `npm.cmd run cloudflare:waf:proof` | Failed as expected; missing owner inputs | Slice 5BU produced redacted `ready=false` output because no Cloudflare API token or zone ID is available in this environment. |
 | `npm.cmd run prod:preflight` | Passed with warning | Production preflight passed; LINE credentials remain unconfigured and live LINE messaging remains disabled. |
 | `npm.cmd run live:check` | Passed | Public health/deep-health passed for `https://book.sandboxhotel.com`; LINE remains optional and unconfigured unless `LIVE_REQUIRE_LINE=true`. Latest Slice 5AV run resolved `book.sandboxhotel.com` to `216.24.57.9`. |
 
