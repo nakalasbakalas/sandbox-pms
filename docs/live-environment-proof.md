@@ -1,9 +1,35 @@
 # Live Environment Proof Register
 
-Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-04T06:56+07:00.
+Latest validation refresh: 2026-07-04.
+Latest external provider evidence refresh: 2026-07-04T07:19+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T07:19+07:00 Current Main Deploy And Gmail Boundary
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy current green `main` evidence commit, run public health/setup probes, public-edge proof, production preflight, redacted Render Gmail OAuth status, Gmail connector account posture, and Booking Email proof/backfill jobs. No secret values, credentialed PMS login, production database shell, production mutation, confirmed booking-email import, WAF mutation, provider setting change, or screenshot capture was performed.
+- GitHub CI run `28688693681` passed for commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`, including lint, typecheck, business tests, E2E smoke, build, and launch gate.
+- Render deploy `dep-d945194vikkc73bj92ng` is live on `sandbox-hotel-pms-v43m`, serving commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`, finished `2026-07-04T00:18:12Z`.
+- `npm.cmd run public-edge:proof` passed at `2026-07-04T00:18:32.148Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed; DNS lookup resolved `book.sandboxhotel.com` to `216.24.57.9`; LINE remains optional/unconfigured.
+- `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` for all supported booking-specific and fallback Gmail credential paths at `2026-07-04T00:18:29.594Z`; values and Render auth tokens were omitted.
+- No local process values were present for supported booking-specific/fallback Gmail OAuth keys or `RENDER_API_KEY`.
+- The connected Codex Gmail account was `Nick@intercellartrading.com`, not `booking@sandboxhotel.com`; a bounded connector search for `booking@sandboxhotel.com` returned no messages. This is not backend booking-mailbox proof.
+- `npm.cmd run gmail-oauth:render` exited before URL generation because no `BOOKING_EMAIL_GMAIL_CLIENT_ID` or `GMAIL_CLIENT_ID` was present; no values were printed or applied.
+- Render one-off job `job-d9452ocvikkc73bjd3lg` ran `npm run booking-email:proof` and succeeded at `2026-07-04T00:19:12Z`; Render CLI logs did not return job stdout for the checked window.
+- Render one-off job `job-d9452p8js32c73dl4sr0` ran `npm run booking-email:backfill -- --all-past --limit 250` and failed at `2026-07-04T00:19:14Z` while backend Gmail OAuth remained missing. No confirmed import was run.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bk-current-main-deploy-gmail-boundary.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth remains missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T06:56+07:00 Current Helper Deploy Sync
 

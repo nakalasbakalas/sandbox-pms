@@ -4,7 +4,7 @@ Status date: 2026-07-04.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BJ confirms commit `04d06d3351fa02154e258a35b84a379dd219db22` is live on Render deploy `dep-d944ml4vikkc73bido10`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BJ reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, no local OAuth client id/secret/token values are present, the proof job succeeds, and dry-run backfill remains blocked until OAuth exists. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BK confirms commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272` is live on Render deploy `dep-d945194vikkc73bj92ng`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BK reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, no local OAuth client id/secret/token values are present, the connected Codex Gmail account is not `booking@sandboxhotel.com`, a bounded connector search returned no matching messages, the proof job succeeds, and dry-run backfill fails until OAuth exists. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -86,7 +86,7 @@ Required evidence to close:
 
 ## Live Setup-Completion Hardening
 
-Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; Slice 5BJ confirms current Render deploy `dep-d944ml4vikkc73bido10` is live on `sandbox-hotel-pms-v43m`, serving commit `04d06d3351fa02154e258a35b84a379dd219db22`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
+Current status: closed for the current public deploy. Slice 5AZ records owner approval for PR #150 / exact commit `fbc303136253a9785446d601d5532b6efc523b8f`; Slice 5BK confirms current Render deploy `dep-d945194vikkc73bj92ng` is live on `sandbox-hotel-pms-v43m`, serving commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`; unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` returns the intended production-disabled `403`.
 
 Maintenance evidence for future setup/auth route deploys:
 
@@ -96,7 +96,7 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: open. Slice 5BI adds the owner-run `npm.cmd run gmail-oauth:render` handoff helper for generating a Google consent URL and exchanging a pasted authorization code directly into Render env vars without printing token values. Slice 5BJ deploys that helper commit to the public Render service and confirms redacted Render status command still reports all supported backend Gmail credential paths `ready=false`; local OAuth client id/secret/token values are not present; production `booking-email:proof` job `job-d944o5ojs32c73dk9gog` succeeded; historical dry-run backfill was not rerun because Gmail OAuth remains unconfigured. The latest prior dry-run backfill job `job-d9446csvikkc73bh3ba0` failed while OAuth was missing. This does not close the blocker by itself.
+Current status: open. Slice 5BI adds the owner-run `npm.cmd run gmail-oauth:render` handoff helper for generating a Google consent URL and exchanging a pasted authorization code directly into Render env vars without printing token values. Slice 5BK confirms redacted Render status command still reports all supported backend Gmail credential paths `ready=false`; local OAuth client id/secret/token values are not present; the connected Codex Gmail account is `Nick@intercellartrading.com`, not `booking@sandboxhotel.com`; a bounded connector search for `booking@sandboxhotel.com` returned no messages; production `booking-email:proof` job `job-d9452ocvikkc73bjd3lg` succeeded; dry-run backfill job `job-d9452p8js32c73dl4sr0` failed while Gmail OAuth remained unconfigured. This does not close the blocker by itself.
 
 Required evidence to close:
 
