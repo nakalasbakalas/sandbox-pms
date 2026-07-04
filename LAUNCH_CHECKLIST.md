@@ -4,12 +4,12 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 
 ## 2026-07-04 Current Evidence Refresh
 
-- [x] `npm.cmd run launch:check` passes in the current checkout at commit `fbc303136253a9785446d601d5532b6efc523b8f` after Slice 5AV evidence/status updates; see `docs/launch/evidence/2026-07-03-slice-5av-secrets-recovery-waf-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
-- [x] Slice 5BN repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb` passed CI run `28692255198`; see `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`.
+- [x] Slice 5BP source commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e` passed GitHub CI run `28700849720`, including launch gate; see `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
+- [x] Local `npm.cmd run launch:evidence` passes cleanly at commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e`; see `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md`.
 - [x] Slice 5AT non-destructive baseline validation passes in the current checkout, including `launch:evidence`, `db:doctor`, typecheck, lint, tests, build, production preflight, Render Blueprint validation, live readiness, and whitespace checks; see `docs/launch/evidence/2026-07-03-slice-5at-baseline-validation-refresh.md` and `docs/launch/evidence/DB_DOCTOR_RESULTS.md`.
 - [x] Guarded local disposable DB-mutating E2E passes with `ALLOW_DB_E2E=true` against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/DB_E2E_POSTURE.md`.
 - [x] Guarded local core workflow DB E2E passes against `localhost:55432/sandbox_hotel_e2e`; see `docs/launch/evidence/2026-07-03-slice-5aj-core-workflow-local-db-refresh.md`.
-- [x] Local repository/evidence secret hygiene scan passes through `npm.cmd run launch:evidence`; see `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md` and `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`.
+- [x] Local repository/evidence secret hygiene scan passes through `npm.cmd run launch:evidence`; see `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md`, `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`, and `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md`.
 - [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest public-edge proof refresh; see `docs/launch/evidence/2026-07-04-slice-5bo-cloudflare-waf-boundary-refresh.md`.
 - [x] PR #150 setup-gate hardening is owner-approved, merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AZ confirmed the current live Render deploy `dep-d93ordnaqgkc73cd2ke0` serves commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated setup-complete returns the intended production-disabled `403`.
 - [x] Production aggregate room-inventory counts were captured without room numbers or sensitive data. Slice 5BA Render job `job-d93pfr6q1p3s73a2ufh0` on deploy `dep-d93pe7hkh4rs73dp5bcg` returned `33` total rooms across two redacted room-type buckets, with `33` operationally available and `0` inactive.
@@ -42,7 +42,7 @@ Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mu
 - [ ] If using bootstrap credentials, approved emails are set explicitly and temporary passwords are stored only in an ignored local credential bundle.
 - [x] LINE credentials are configured only if live messaging is enabled.
 - [x] `npm run prod:preflight` passes against the exact production env values before deploy.
-- [x] No high-confidence unredacted production secret-shaped values are committed in tracked/unignored text files, based on `npm.cmd run launch:evidence` at commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; see `docs/launch/evidence/2026-07-04-slice-5bn-repo-secret-redaction.md`.
+- [x] No high-confidence unredacted production secret-shaped values are committed in tracked/unignored text files, based on `npm.cmd run launch:evidence` at commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e`; see `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md`.
 
 ## Database
 

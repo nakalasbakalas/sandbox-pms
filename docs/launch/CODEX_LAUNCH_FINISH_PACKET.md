@@ -25,8 +25,8 @@ The team roles are:
 - `LAUNCH_CHECKLIST.md` is the launch sign-off source of truth.
 - Existing launch posture is documented in `README.md`, `docs/launch-scope-decisions.md`, and `docs/live-environment-proof.md`.
 - `package.json` exposes the relevant gate commands: `db:doctor`, `db:e2e:ready`, `rooms:import`, `real-data:import`, `prod:preflight`, `render:validate`, `live:check`, `test:e2e`, `test:e2e:db`, and `launch:check`.
-- Current July 4 evidence says the Slice 5BN repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb` passed CI run `28692255198`, the public Render service is live on runtime deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
-- `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret inventory/rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence. Slice 5BN proves the repository-scoped secret hygiene scan, not provider secret custody.
+- Current July 4 evidence says Slice 5BP source commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e` passed CI run `28700849720`, local `npm.cmd run launch:evidence` passes, the public Render service is live on runtime deploy `dep-d945rdpkh4rs73ei9asg` for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a`, and public health/setup probes pass. Treat later provider/deploy checks as fresher than this packet if they differ.
+- `docs/live-environment-proof.md` states what is still not proven: approved production users, real production inventory source, current Render secret inventory/rotation metadata, named rollback/deputy/recovery/WAF owners, upstream WAF/rate-limit rule IDs, completed backend Gmail OAuth/backfill if booking-email capture is required, and live provider send/charge evidence. Slice 5BP proves the repository-scoped secret hygiene scan is still green, not provider secret custody.
 
 ## Non-negotiable guardrails
 
@@ -47,7 +47,7 @@ The team roles are:
 - Close core hotel workflow acceptance: reservation create/update/cancel, room assignment, blocked/occupied rejection, overbooking rejection, check-in, check-out, folio/payment balance, housekeeping transitions, audit/timeline evidence.
 - Decide and record DB-mutating E2E posture: staging/disposable DB with `ALLOW_DB_E2E=true`, or explicit local-only proof acceptance.
 - Finish secret hygiene and ownership proof: redacted secret inventory, rotation dates, no prod secrets in repo/logs/screenshots, named rollback/deputy/database recovery owners, tested rollback path.
-- Keep launch gating current: latest `main` CI is green, but rerun `npm.cmd run launch:check` before release if code, dependency, migration, or environment assumptions change.
+- Keep launch gating current: CI is green through Slice 5BP evidence, but rerun `npm.cmd run launch:check` before release if code, dependency, migration, or environment assumptions change.
 - Verify production secret and recovery evidence in the live environment, not only in docs.
 
 ### P1 — before guest-facing launch or formal defer
