@@ -18,6 +18,7 @@ import { createBookingComAdapter, executeBookingComTask } from '../server/ota-ad
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes } from './prepare-gmail-oauth-render.mjs'
+import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -599,6 +600,54 @@ assert.equal(nullEmailUser.username, 'fd3', 'admin UI null-email payload creates
 assert.equal(nullEmailUser.email, null, 'null-email server user stores null email')
 assert.equal(nullEmailUser.role, 'FRONT_DESK', 'null-email server user role normalizes to backend enum')
 assert.equal(nullEmailUserAudits[0]?.action, 'USER_CREATED', 'null-email server user creation is audited')
+
+assert.equal(maskLoginIdentifier('manager@example.com'), 'm******@e***.com', 'auth proof masks email login identifiers')
+assert.equal(maskLoginIdentifier('hk1'), 'h***', 'auth proof masks username login identifiers')
+assert.equal(normalizeProofHost('https://book.sandboxhotel.com/protected?x=1'), 'https://book.sandboxhotel.com', 'auth proof normalizes production proof host')
+assert.equal(normalizeProofHost('http://localhost:5000'), 'http://localhost:5000', 'auth proof allows local development hosts')
+assert.throws(
+  () => normalizeProofHost('http://book.sandboxhotel.com'),
+  /must use https/,
+  'auth proof rejects non-https production hosts',
+)
+assert.deepEqual(
+  summarizePublicUserForProof({
+    username: 'frontdesk@example.com',
+    email: 'frontdesk@example.com',
+    displayName: 'Front Desk',
+    role: 'front-desk',
+    active: true,
+  }),
+  {
+    loginIdentifierMasked: 'f********@e***.com',
+    emailPresent: true,
+    displayInitials: 'FD',
+    role: 'FRONT-DESK',
+    active: true,
+  },
+  'auth proof summarizes public user payload without exposing identifiers',
+)
+assert.deepEqual(
+  validateDenialProbe({ method: 'GET', path: '/api/users', expectStatus: 403 }),
+  {
+    label: 'GET /api/users',
+    method: 'GET',
+    path: '/api/users',
+    expectStatuses: [403],
+    body: undefined,
+  },
+  'auth proof allows safe GET denial probes',
+)
+assert.throws(
+  () => validateDenialProbe({ method: 'POST', path: '/api/payments', expectStatus: 403 }),
+  /not allowed/,
+  'auth proof blocks mutating denial probes unless explicitly enabled',
+)
+assert.throws(
+  () => validateDenialProbe({ method: 'GET', path: '/api/users', expectStatus: 200 }),
+  /only 401 or 403/,
+  'auth proof denial probes can only expect denial statuses',
+)
 
 const opsEmailNotification = {
   id: 'ops-notification-email-1',

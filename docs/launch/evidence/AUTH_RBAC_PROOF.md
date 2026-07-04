@@ -1,8 +1,8 @@
 # Auth, RBAC, Logout, and Unauthorized Access Proof
 
-Status date: 2026-07-03.
+Status date: 2026-07-04.
 
-Verdict: partial. Slice 5AI refreshed local auth/RBAC behavior, live unauthenticated API denial, and representative live protected-page login gating for this checkout/public target, but the production users/auth/RBAC/logout P0 is not closed. There is still no redacted approved production user list, credentialed production login/logout proof, role-by-role production matrix, underprivileged-role denial proof, or bootstrap/temporary-access removal proof.
+Verdict: partial. Slice 5AI refreshed local auth/RBAC behavior, live unauthenticated API denial, and representative live protected-page login gating for this checkout/public target. Slice 5BL adds a redacted owner-run helper for collecting credentialed production login/logout and underprivileged denial proof. The production users/auth/RBAC/logout P0 is not closed because there is still no redacted approved production user list, actual credentialed production login/logout output, role-by-role production matrix output, underprivileged-role denial output, or bootstrap/temporary-access removal proof.
 
 ## Scope
 
@@ -101,6 +101,30 @@ Canonical evidence:
 - `docs/launch/evidence/2026-07-03-slice-5ai-auth-rbac-unauth-refresh.md`
 - `docs/launch/evidence/2026-07-02-slice-5z-live-protected-page-gate.md`
 
+## Owner-Run Credentialed Proof Helper
+
+Command:
+
+```powershell
+npm.cmd run auth-rbac:proof -- --users-file .\.codex\auth-proof-users.local.json
+```
+
+Latest result: helper added and business-test covered in Slice 5BL on 2026-07-04. It has not been run with real production credentials.
+
+Expected redacted behavior:
+
+- Reads approved proof users from stdin or an untracked local file.
+- Logs in through `POST /api/auth/login`.
+- Confirms authenticated session with `GET /api/auth/me`.
+- Runs an explicit first authenticated check and optional owner-approved denial probes.
+- Logs out through `POST /api/auth/logout`.
+- Confirms post-logout `GET /api/auth/me` returns `401`.
+- Masks login identifiers, keeps cookies in memory only, prints initials instead of display names, omits passwords/tokens/raw response bodies, and blocks mutating denial probes unless explicitly owner-enabled.
+
+Canonical evidence:
+
+- `docs/launch/evidence/2026-07-04-slice-5bl-auth-rbac-proof-helper.md`
+
 ## Implementation Checks Used For Interpretation
 
 - `server/index.mjs` has `requireUser()` behind protected API routes and raises `401 Authentication is required.` when the session cookie is missing or invalid.
@@ -115,9 +139,9 @@ An initial PowerShell probe using `[System.Net.Http.HttpClient]` failed because 
 ## Still Required To Close P0
 
 - Redacted approved production user list, including login identifiers and intended roles.
-- Credentialed production login proof for each required role, without recording credentials or cookies.
-- Credentialed production logout/session-clearing proof for at least one approved production user.
-- Production role matrix proof showing intended access and denial for admin/manager/front desk/housekeeping/cashier/cafe roles as applicable.
+- Credentialed production login proof for each required role, without recording credentials or cookies. The helper exists, but real owner-run output is still missing.
+- Credentialed production logout/session-clearing proof for at least one approved production user. The helper exists, but real owner-run output is still missing.
+- Production role matrix proof showing intended access and denial for admin/manager/front desk/housekeeping/cashier/cafe roles as applicable. The helper can collect selected checks, but a completed matrix is still missing.
 - Protected production page denial proof for an underprivileged role; unauthenticated representative page-gating proof is now recorded separately.
 - Protected production API mutation denial proof for an underprivileged role.
 - Bootstrap/setup-token/temporary access removal or rotation evidence.

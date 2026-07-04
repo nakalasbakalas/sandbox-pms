@@ -82,6 +82,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 - Booking-email capture proof reports aggregate current PMS email-event counts without message ids, sender/recipient, subject, raw body, guest, payment, or credential data.
 - Booking-email historical backfill dry-run fetches bounded Gmail pages, reports redacted aggregate parser counts, and does not write PMS records.
 - Booking-email historical backfill with `--confirm` imports Booking Email Events for `/booking-inbox` review only; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
+- Credentialed auth/RBAC proof helper reads approved users from stdin or an untracked local file, logs in and out through the real backend session APIs, masks login identifiers, keeps cookies in memory only, omits response bodies except bounded role/status fields, and rejects mutating denial probes unless explicitly owner-enabled.
 - Hotel Ops Gmail email delivery is opt-in, backend-only, updates notification status to `SENT` or `FAILED`, and redacts provider failures.
 - LINE Hotel Ops command intake is disabled by default, requires a signed webhook plus configured prefix and LINE-user allowlist, maps to an active PMS user, and keeps command execution inside the shared Ops service.
 - WhatsApp Hotel Ops command intake is disabled by default, requires a Meta `x-hub-signature-256` verified webhook plus configured prefix and sender allowlist, maps to an active PMS user, links source message metadata into task logs/audit, and keeps command execution inside the shared Ops service.

@@ -4,7 +4,7 @@ Status date: 2026-07-04.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BK confirms commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272` is live on Render deploy `dep-d945194vikkc73bj92ng`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BK reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, no local OAuth client id/secret/token values are present, the connected Codex Gmail account is not `booking@sandboxhotel.com`, a bounded connector search returned no matching messages, the proof job succeeds, and dry-run backfill fails until OAuth exists. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, credentialed role proof, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BK confirms commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272` is live on Render deploy `dep-d945194vikkc73bj92ng`, public deep health is green, unauthenticated setup-complete still returns the intended production-disabled `403`, and `npm.cmd run public-edge:proof` passes against the Cloudflare-fronted public domain. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. Slice 5BK reconfirms Booking Email capture remains blocked: all supported backend Gmail credential paths report `ready=false`, no local OAuth client id/secret/token values are present, the connected Codex Gmail account is not `booking@sandboxhotel.com`, a bounded connector search returned no matching messages, the proof job succeeds, and dry-run backfill fails until OAuth exists. Slice 5BF adds repeatable public-edge proof, but not privileged Cloudflare WAF/rate-limit rule proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
 
 ## Non-Negotiable Redaction Rules
 
@@ -37,6 +37,14 @@ Required evidence to close:
 | Underprivileged protected-page denial | Role, attempted page, expected denial, observed denial. | Cookies or full user identity unless approved. |
 | Underprivileged protected API mutation denial | Role, endpoint/method, expected denial, observed `401`/`403` or equivalent. Use a no-op/invalid payload approved by the owner. | Cookies, tokens, guest data, production mutation payloads. |
 | Bootstrap/setup-token cleanup | Redacted key-name inventory or owner confirmation that setup token/bootstrap admin path is rotated, disabled, or intentionally retained with owner/date/expiry. | Secret values. |
+
+Safe owner-run helper:
+
+```powershell
+npm.cmd run auth-rbac:proof -- --users-file .\.codex\auth-proof-users.local.json
+```
+
+The local input file must remain untracked and must not be copied into docs, issues, chat, or screenshots. Use `--users-stdin` if the owner prefers stdin-only handling. The helper masks login identifiers, keeps cookies in memory only, confirms login/logout with `/api/auth/me`, and rejects mutating denial probes unless `--allow-mutating-denial-probes` is explicitly set for an owner-approved no-op or invalid payload.
 
 ## Real Production Room Inventory
 

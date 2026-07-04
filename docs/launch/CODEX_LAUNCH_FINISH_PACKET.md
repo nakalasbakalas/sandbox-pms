@@ -148,6 +148,7 @@ Objective: prove access is secure for real intended roles.
 Allowed scope:
 
 - Tests and small fixes for username-first login, logout/session clearing, route guards, API authorization, and admin/manager restrictions.
+- Owner-run credentialed proof collection with `npm.cmd run auth-rbac:proof`, using only local untracked/stdin credentials and redacted output.
 - Remove or rotate any bootstrap path only after replacement real users are confirmed.
 
 Required proof:

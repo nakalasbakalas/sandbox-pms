@@ -160,6 +160,42 @@ npm.cmd run public-edge:proof
 
 This command is read-only and sends no cookies or authorization headers. It records DNS availability, selected public response statuses, Cloudflare/Render header presence, and bounded health fields while omitting response bodies. Treat it as public-edge routing evidence only; it does not prove Cloudflare account ownership, WAF rule IDs, rate-limit thresholds, or an owner-approved rate-limit test.
 
+Credentialed auth/RBAC/logout proof:
+
+1. The owner prepares a local, untracked JSON file with approved production users and passwords. Do not commit the file and do not paste passwords into docs, issues, screenshots, or chat.
+
+```json
+{
+  "users": [
+    {
+      "identity": "approved-login@example.com",
+      "password": "paste locally only",
+      "role": "MANAGER",
+      "approvedBy": "Owner initials",
+      "approvedAt": "2026-07-04",
+      "firstCheck": { "method": "GET", "path": "/api/auth/me", "expectStatus": 200 },
+      "denialProbes": [
+        { "label": "underprivileged user-management denial", "method": "GET", "path": "/api/users", "expectStatus": 403 }
+      ]
+    }
+  ]
+}
+```
+
+2. Run the proof helper from a secure shell:
+
+```powershell
+npm.cmd run auth-rbac:proof -- --users-file .\.codex\auth-proof-users.local.json
+```
+
+For stdin-only handling:
+
+```powershell
+Get-Content .\.codex\auth-proof-users.local.json -Raw | npm.cmd run auth-rbac:proof -- --users-stdin
+```
+
+The helper logs in, verifies `/api/auth/me`, runs the first authenticated check and any owner-approved denial probes, logs out, then confirms `/api/auth/me` returns unauthenticated. Output masks login identifiers, keeps cookies in memory only, omits response bodies except bounded role/status fields, and rejects mutating denial probes unless `--allow-mutating-denial-probes` is explicitly set for an owner-approved no-op/invalid payload.
+
 Hotel Ops notification center:
 
 1. In server mode, the shared header notification bell shows backend Hotel Ops notifications for users with Ops permission.

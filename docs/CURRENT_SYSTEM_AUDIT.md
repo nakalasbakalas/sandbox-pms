@@ -8,7 +8,7 @@ Last reviewed: 2026-07-02
 - Backend/runtime: Node HTTP server in `server/index.mjs`.
 - Package manager: npm, use `npm.cmd` and `npx.cmd` on Windows.
 - Database: Prisma with Postgres-compatible schema.
-- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`.
+- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`, and redacted owner-run production proof collection through `npm.cmd run auth-rbac:proof`.
 - Deployment: Render-oriented server build with local and GitHub CI launch checks.
 - Hotel Ops AI mode: deterministic controlled parser by default, with optional backend-only OpenAI Responses parsing when explicitly configured; all parsed tasks are strict-schema validated before permission decisions.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.

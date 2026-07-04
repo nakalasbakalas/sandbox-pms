@@ -12,7 +12,7 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 - [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest live proof refresh.
 - [x] PR #150 setup-gate hardening is owner-approved, merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AZ confirmed the current live Render deploy `dep-d93ordnaqgkc73cd2ke0` serves commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated setup-complete returns the intended production-disabled `403`.
 - [x] Production aggregate room-inventory counts were captured without room numbers or sensitive data. Slice 5BA Render job `job-d93pfr6q1p3s73a2ufh0` on deploy `dep-d93pe7hkh4rs73dp5bcg` returned `33` total rooms across two redacted room-type buckets, with `33` operationally available and `0` inactive.
-- [ ] Production/account-owner proof is complete for users/auth/RBAC/logout, real room inventory source approval, workflow acceptance, live secret inventory/rotation, recovery ownership, and WAF/rate-limit rules. Slice 5BA records aggregate room counts, but source-owner/import confirmation and not-fake-seed proof remain open.
+- [ ] Production/account-owner proof is complete for users/auth/RBAC/logout, real room inventory source approval, workflow acceptance, live secret inventory/rotation, recovery ownership, and WAF/rate-limit rules. Slice 5BL adds a redacted owner-run `auth-rbac:proof` helper for credentialed auth evidence, but real owner-run output remains open. Slice 5BA records aggregate room counts, but source-owner/import confirmation and not-fake-seed proof remain open.
 
 ## Historical 2026-06-15 Validation Evidence
 
