@@ -1,9 +1,32 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-04.
-Latest external provider evidence refresh: 2026-07-04T16:44+07:00.
+Latest external provider evidence refresh: 2026-07-04T17:43+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T17:43+07:00 Current Main Runtime Sync
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy current green `main` to the long-term Render service, run public setup/deep-health/public-edge probes, run live readiness and production preflight, and refresh redacted Render Gmail OAuth status. No secret values, credentialed PMS login, production database shell, production data mutation, confirmed booking-email import, WAF mutation, provider setting change, screenshot capture, or DB-mutating E2E was performed.
+- GitHub CI run `28703308473` passed for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`, including lint, typecheck, business tests, E2E smoke, build, and launch gate.
+- `npm.cmd run launch:evidence` passed on a clean tree at commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`, with dirty entries `0` and no high-confidence production secret findings in `518` tracked/unignored text files.
+- Render deploy `dep-d94e5e7lk1mc73b3oh2g` is live on `sandbox-hotel-pms-v43m`, serving commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`, finished `2026-07-04T10:41:18.349146Z`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.` at `2026-07-04T10:42:02Z`.
+- `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, production environment, and database configured/OK at `2026-07-04T10:42:21.866Z`.
+- The first `npm.cmd run public-edge:proof` attempt aborted immediately after deploy; a retry passed at `2026-07-04T10:42:23.971Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; LINE remains optional/unconfigured unless explicitly required.
+- `npm.cmd run prod:preflight` passed with the expected warning that LINE credentials are not configured and live LINE messaging remains disabled.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` at `2026-07-04T10:41:40.483Z`: non-secret mailbox identity keys existed, but all supported booking-specific and fallback credential keys were still missing. Values and Render auth tokens were omitted.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bv-current-main-runtime-sync.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth credentials remain missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T16:44+07:00 Current Main Render Deploy Sync
 

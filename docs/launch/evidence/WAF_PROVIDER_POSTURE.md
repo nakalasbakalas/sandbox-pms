@@ -2,7 +2,7 @@
 
 Status date: 2026-07-04.
 
-Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BU, and a read-only owner-run Cloudflare WAF/rate-limit proof helper now exists. This does not close the P0 because no Cloudflare API token or zone ID is available in this environment. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BV, and a read-only owner-run Cloudflare WAF/rate-limit proof helper now exists. This does not close the P0 because no Cloudflare API token or zone ID is available in this environment. Secret rotation metadata, named recovery/rollback owners, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
 
 ## Scope
 
@@ -10,6 +10,20 @@ Verdict: partial/open. Safe Render and public-edge metadata has been refreshed t
 - Render workspace observed through CLI: `My Workspace` (`tea-d6n8kq14tr6s738stj5g`) with account email `nakalastravels@gmail.com`.
 - Commands were read-only except for explicitly noted Render deploy-sync slices. No restart, SSH session, database shell, production data mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
 - No production secrets, raw database URLs, tokens, passwords, cookies, or screenshots were recorded.
+
+## 2026-07-04 Slice 5BV Refresh
+
+Slice 5BV adds `2026-07-04-slice-5bv-current-main-runtime-sync.md` and refreshes the current custom-domain service deploy plus public-edge/WAF boundary:
+
+- GitHub CI run `28703308473` passed for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`.
+- `render deploys create srv-d6ns31h4tr6s73c9i8g0 --commit d8884884faba8b50cb73c7f827aa4f9871744d4a --wait --confirm -o json` deployed exact commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`.
+- Render deploy `dep-d94e5e7lk1mc73b3oh2g` is live on `sandbox-hotel-pms-v43m`, status `live`, finished `2026-07-04T10:41:18.349146Z`.
+- Direct public `GET /healthz?deep=1` returned `200`, production environment, database configured/OK, `server=cloudflare`, and `X-Render-Origin-Server=Render`.
+- Direct public setup-complete reprobe returned the intended production-disabled `403`.
+- A first `npm.cmd run public-edge:proof` attempt aborted immediately after deploy, then a retry completed at `2026-07-04T10:42:23.971Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, `server=cloudflare`, `cfRayPresent=true`, `cfCacheStatus=DYNAMIC`, `renderOriginServer=Render`, and common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with response bodies omitted.
+- `npm.cmd run live:check` and `npm.cmd run prod:preflight` passed. Production preflight still warns that LINE credentials are not configured.
+
+This keeps public-edge evidence current for the latest deploy. It still does not prove customer-owned Cloudflare zone control, WAF/rate-limit rule IDs, thresholds/actions, protected hostnames, or an owner-approved non-destructive WAF/rate-limit test.
 
 ## 2026-07-04 Slice 5BU Refresh
 
@@ -211,10 +225,10 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 | `render services --help` / `render services env --help` / `render backups --help` / `render ea --help` | Mixed; no usable secret/recovery command | Slice 5AV found no service env-var inventory, backup/recovery-point, or WAF/rate-limit command exposed by the current CLI. `render backups --help` failed as an unsupported command. |
 | `render services -o json` | Passed | Confirmed target service and datastore metadata without secret values; latest refresh Slice 5AV. |
 | `render services instances srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Long-term service has one observed instance id `srv-d6ns31h4tr6s73c9i8g0-8wxvc`, created `2026-07-03T09:17:22Z` in the latest Slice 5AY refresh. |
-| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d94daaflk1mc73b1m6m0`, status `live`, commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4`, finished `2026-07-04T09:43:28Z`. |
+| `render deploys list srv-d6ns31h4tr6s73c9i8g0 -o json` | Passed | Current long-term custom-domain service deploy is `dep-d94e5e7lk1mc73b3oh2g`, status `live`, commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`, finished `2026-07-04T10:41:18Z`. |
 | `render deploys list srv-d8bchr1akrks73disaog -o json` | Passed | Alternate service deploy is `dep-d8ekph4p3tds738mdp6g`, status `live`, commit `7adcc01c609f5a6b9789d8de08e48e48651c5ae6`, finished `2026-06-01T09:13:20.6391Z`. |
 | `render deploys list srv-d8clkqho3t8c73a1eldg -o json` | Passed | Launch service deploy is `dep-d8oh74m47okc739vhq2g`, status `live`, commit `5f5b54162156a658bd37ec4c2d00941feea8d037`, finished `2026-06-16T09:13:59.052325Z`; this is not the custom-domain production target. |
-| `npm.cmd run public-edge:proof` | Passed | Slice 5BS direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers plus common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare/Render response headers. Response bodies were omitted. |
+| `npm.cmd run public-edge:proof` | Passed | Slice 5BV direct `/healthz?deep=1` returned `200` with Cloudflare and Render origin headers plus common security-header presence; `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with Cloudflare/Render response headers. Response bodies were omitted. |
 | `npm.cmd run cloudflare:waf:proof -- --help` | Passed | Slice 5BU added an owner-run helper for read-only Cloudflare Rulesets API WAF/rate-limit proof. |
 | `npm.cmd run cloudflare:waf:proof` | Failed as expected; missing owner inputs | Slice 5BU produced redacted `ready=false` output because no Cloudflare API token or zone ID is available in this environment. |
 | `npm.cmd run prod:preflight` | Passed with warning | Production preflight passed; LINE credentials remain unconfigured and live LINE messaging remains disabled. |
@@ -223,7 +237,7 @@ This refresh does not change the WAF/rate-limit boundary: public edge headers an
 ## Current Provider Posture
 
 - Long-term custom-domain Render service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
-- Current live deploy for that service: `dep-d94daaflk1mc73b1m6m0`, commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4`.
+- Current live deploy for that service: `dep-d94e5e7lk1mc73b3oh2g`, commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`.
 - Render PostgreSQL target remains `sandbox-hotel-pms-db-v43m` (`dpg-d6ns2d94tr6s73c9hve0-a`) with status `available`, region `oregon`, and plan `basic_256mb` as reported by safe service metadata.
 - Render Production environment metadata reports `protectedStatus=unprotected`, `networkIsolationEnabled=false`, and IP allow list `0.0.0.0/0`.
 - Public edge responses prove routing/denial/header behavior only. They do not prove customer-owned Cloudflare zone control, managed WAF rules, rule IDs, thresholds, or rate-limit behavior.
@@ -244,7 +258,7 @@ Still required:
 
 ## Recovery And Rollback Boundary
 
-- `docs/disaster-recovery.md` was updated to use the current live deploy `dep-d94daaflk1mc73b1m6m0` as the latest health-checked live deploy reference.
+- `docs/disaster-recovery.md` was updated to use the current live deploy `dep-d94e5e7lk1mc73b3oh2g` as the latest health-checked live deploy reference.
 - A disposable restore test from 2026-06-07 remains recorded in `docs/live-environment-proof.md`; this slice did not create another restore target.
 - The current slice did not test a live rollback because that is a production-sensitive action and no rollback owner/deputy has been named.
 
