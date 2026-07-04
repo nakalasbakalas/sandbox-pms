@@ -1,9 +1,34 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-03.
-Latest external provider evidence refresh: 2026-07-04T06:18+07:00.
+Latest external provider evidence refresh: 2026-07-04T06:56+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-04T06:56+07:00 Current Helper Deploy Sync
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy current green helper commit, run public health/setup probes, public-edge proof, production preflight, redacted Render Gmail OAuth status, and Booking Email proof job. No secret values, credentialed PMS login, production database shell, production mutation, confirmed booking-email import, WAF mutation, provider setting change, or screenshot capture was performed.
+- GitHub CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22`, including lint, typecheck, business tests, E2E smoke, build, and launch gate.
+- Render deploy `dep-d944ml4vikkc73bido10` is live on `sandbox-hotel-pms-v43m`, serving commit `04d06d3351fa02154e258a35b84a379dd219db22`, finished `2026-07-03T23:55:30Z`.
+- `npm.cmd run public-edge:proof` passed at `2026-07-03T23:55:52.008Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed; DNS lookup resolved `book.sandboxhotel.com` to `216.24.57.8`; LINE remains optional/unconfigured.
+- `npm.cmd run prod:preflight` passed with the expected LINE-disabled warning.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.`
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=false` for all supported booking-specific and fallback Gmail credential paths at `2026-07-03T23:55:49.692Z`; values and Render auth tokens were omitted.
+- No local process values were present for supported booking-specific/fallback Gmail OAuth keys or `RENDER_API_KEY`.
+- `npm.cmd run gmail-oauth:render` exited before URL generation because no `BOOKING_EMAIL_GMAIL_CLIENT_ID` or `GMAIL_CLIENT_ID` was present; no values were printed or applied.
+- Render one-off job `job-d944o5ojs32c73dk9gog` ran `npm run booking-email:proof` and succeeded at `2026-07-03T23:56:37Z`; Render CLI logs did not return job stdout for the checked window.
+- Dry-run historical backfill was not rerun because backend Gmail OAuth remains unconfigured. The latest prior dry-run backfill job remains `job-d9446csvikkc73bh3ba0`, which failed while OAuth was missing.
+- Canonical evidence: `docs/launch/evidence/2026-07-04-slice-5bj-current-helper-deploy-sync.md`.
+
+Still not proven by this refresh:
+
+- Booking-email capture/backfill with real Gmail data; backend Gmail OAuth remains missing.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T06:18+07:00 Live Gmail And Launch Status Refresh
 

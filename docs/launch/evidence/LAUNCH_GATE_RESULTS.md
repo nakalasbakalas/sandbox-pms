@@ -1,17 +1,17 @@
 # Current Checkout Launch Gate Results
 
-Status date: 2026-07-03.
+Status date: 2026-07-04.
 
-Verdict: the deployed public-edge-helper commit is green in CI, with focused local checks also green. Slice 5BF GitHub Actions run `28672978563` passed `Install, test, build, and launch-check` for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`, and Slice 5BF deployed that commit to the custom-domain Render service. This proves engineering gate health for the deployed runtime commit, not production/account-owner launch sign-off.
+Verdict: the current deployed helper commit is green in CI, with focused live checks also green. Slice 5BJ uses GitHub Actions run `28688152726`, which passed `Install, test, build, and launch-check` for commit `04d06d3351fa02154e258a35b84a379dd219db22`, and deploys that commit to the custom-domain Render service as `dep-d944ml4vikkc73bido10`. This proves engineering gate health for the deployed runtime commit, not production/account-owner launch sign-off.
 
-Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms latest `main` CI run `28674129355` passed `Install, test, build, and launch-check` for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`; this docs commit is not claimed as the deployed runtime.
+Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms run `28674129355` passed for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. Slice 5BJ confirms current `main` CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22` and that commit is now live on Render.
 
 ## Scope
 
 - Branch: `main`.
-- Commit: `0de2eb3d612a555dbd6cac92948becd16aa24cae`.
-- Worktree: clean after Slice 5BF public-edge-helper commit; Slice 5BF adds current deploy/public-edge evidence.
-- Production posture: no deploy, restart, SSH session, production database shell, production mutation, DB-mutating E2E against production, or secret-value access was performed.
+- Commit: `04d06d3351fa02154e258a35b84a379dd219db22`.
+- Worktree: clean before the Slice 5BJ evidence updates; Slice 5BJ adds current deploy/public-edge evidence.
+- Production posture: Slice 5BJ performed a Render deploy of the current green helper commit; no restart, SSH session, production database shell, production data mutation, DB-mutating E2E against production, confirmed booking-email import, or secret-value access was performed.
 - DB-mutating E2E posture: not run by `launch:check`; the gate confirmed it remains blocked unless `ALLOW_DB_E2E=true`.
 
 ## Command
@@ -27,6 +27,7 @@ Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation lad
 | `npm.cmd run launch:check` | Passed | GitHub Actions run `28672978563` completed launch-check successfully for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
 | GitHub Actions CI | Passed | Run `28672978563` completed `Install, test, build, and launch-check` successfully for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. |
 | GitHub Actions CI | Passed | Slice 5BH confirmed run `28674129355` completed `Install, test, build, and launch-check` successfully for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. |
+| GitHub Actions CI | Passed | Slice 5BJ confirmed run `28688152726` completed `Install, test, build, and launch-check` successfully for deployed commit `04d06d3351fa02154e258a35b84a379dd219db22`. |
 
 ## Launch Check Subcommands
 
@@ -46,7 +47,7 @@ Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation lad
 
 The current checkout passes the authoritative local launch gate after the Slice 5AV evidence/status updates. Slice 5AT observed non-mutating E2E timeout/latency before the final pass; no gate was weakened and no production mutation was performed.
 
-Post-merge update: Slice 5AY confirmed PR #150 merged into `origin/main` as `a01838a956f24164167ba7f91a7620a37de7f36d`, deployed live on Render deploy `dep-d93nr7nlk1mc739ldujg`, and passed the public setup-complete reprobe. Slice 5BF later confirmed current deployed helper commit `0de2eb3d612a555dbd6cac92948becd16aa24cae` is live on Render deploy `dep-d93ud5nlk1mc73a2sbv0`, public deep health is green, public-edge proof passes, and setup-complete still returns the intended production-disabled `403`.
+Post-merge update: Slice 5AY confirmed PR #150 merged into `origin/main` as `a01838a956f24164167ba7f91a7620a37de7f36d`, deployed live on Render deploy `dep-d93nr7nlk1mc739ldujg`, and passed the public setup-complete reprobe. Slice 5BF later confirmed deployed helper commit `0de2eb3d612a555dbd6cac92948becd16aa24cae` was live on Render deploy `dep-d93ud5nlk1mc73a2sbv0`. Slice 5BJ confirms current deployed helper commit `04d06d3351fa02154e258a35b84a379dd219db22` is live on Render deploy `dep-d944ml4vikkc73bido10`, public deep health is green, public-edge proof passes, and setup-complete still returns the intended production-disabled `403`.
 
 This does not close launch sign-off because several P0 items require live/account-owner proof:
 
