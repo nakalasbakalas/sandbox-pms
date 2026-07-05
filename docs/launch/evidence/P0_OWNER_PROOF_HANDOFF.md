@@ -1,10 +1,10 @@
 # P0 Owner Proof Handoff
 
-Status date: 2026-07-04.
+Status date: 2026-07-05.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BV deploys current green `main` commit `d8884884faba8b50cb73c7f827aa4f9871744d4a` as Render deploy `dep-d94e5e7lk1mc73b3oh2g`, confirms public deep health is green, confirms unauthenticated setup-complete still returns the intended production-disabled `403`, runs live/preflight checks, and refreshes redacted Gmail OAuth status. Render backend Gmail OAuth still reports all supported credential paths `ready=false`, so PMS capture/backfill is not closed. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BT confirms the connected Gmail account contains `993` known OTA/provider messages, but the default primary-mailbox query would miss observed provider traffic; the first backfill needs an owner-approved explicit Gmail query. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and mailbox OAuth/backfill proof if booking-email capture is required.
+Latest intake: Slice 5BW configures backend Gmail OAuth on Render, deploys commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` as Render deploy `dep-d94reknlk1mc73bqndq0`, confirms public deep health is green, confirms the booking-specific Gmail OAuth refresh-token tuple is `ready=true` with values omitted, and imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events. Staff parser review is still required before applying any reservation, cancellation, payment, or guest-message action. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and staff acceptance of booking-email parser/review quality.
 
 ## Non-Negotiable Redaction Rules
 
@@ -104,7 +104,7 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: open. Slice 5BT confirms the connected Gmail account contains `993` known OTA/provider messages, but the default `to:booking@sandboxhotel.com` backfill query is incomplete for the observed provider traffic. The Gmail connector cannot supply backend OAuth refresh tokens to Render. Slice 5BR improves the owner-run `npm.cmd run gmail-oauth:render` helper so the owner can use a local Google OAuth client JSON file and either paste a local authorization code via stdin or use the local callback listener. Slice 5BM configures the non-secret `BOOKING_EMAIL_PRIMARY_MAILBOX` and `BOOKING_EMAIL_GMAIL_USER_ID` keys on Render, but Slice 5BV redacted Render status at `2026-07-04T10:41:40.483Z` still reports all supported backend Gmail credential paths `ready=false`; dry-run backfill remains blocked while Gmail OAuth is unconfigured. This does not close the blocker by itself.
+Current status: loaded for staff review. Slice 5BW configures Render backend Gmail OAuth with the booking-specific refresh-token tuple `ready=true`, records a successful provider-query dry-run, deploys chunked confirmed backfill handling, imports 1000 provider messages as review-only Booking Email Events, and confirms PMS capture with `npm run booking-email:proof`. The proof reports 1000 total events, 1000 source-message events, 1000 Needs Review, 0 processed, 0 errors, and 0 ignored. This closes the OAuth/backfill mechanics blocker, but staff still need to review parser output in `/booking-inbox`.
 
 Required evidence to close:
 
@@ -113,6 +113,7 @@ Required evidence to close:
 | Gmail OAuth configured on Render | Key-name status only from `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` showing one supported backend credential path `ready=true`. | Client secret, refresh token, access token, OAuth consent screenshots containing secrets. |
 | Historical dry-run backfill | Redacted aggregate output from `npm run booking-email:backfill -- --query "<owner-approved Gmail query>" --limit 250 --max-pages 5` showing scanned count, existing/new candidates, event type mix, and confidence distribution. Do not use the default primary-mailbox query for the first historical import unless recipient coverage is reverified. | Message IDs, senders, recipients, subjects, raw email text, guest/payment data. |
 | Review-only import if accepted | Confirmed import job ID and aggregate event counts; staff still review in `/booking-inbox`. | Raw email contents, credentials, production mutation payloads. |
+| Staff visual review | Owner/staff note that `/booking-inbox` Needs Review, Errors, Processed, and Ignored tabs were inspected and parser quality is acceptable or gaps are accepted. | Raw message bodies, guest/payment details, credentials. |
 
 Safe owner setup command:
 
@@ -123,6 +124,8 @@ $authCode = Read-Host 'Paste Gmail OAuth authorization code'
 $authCode | npm.cmd run gmail-oauth:render -- --credentials-file .\.codex\google-oauth-client.local.json --exchange-code --code-stdin --apply-render --use-render-cli-token
 npm.cmd run gmail-oauth:render -- --credentials-file .\.codex\google-oauth-client.local.json --listen --apply-render --use-render-cli-token
 npm.cmd run booking-email:backfill -- --query "<owner-approved Gmail query>" --limit 250 --max-pages 5
+npm.cmd run booking-email:backfill -- --query "<owner-approved Gmail query>" --limit 1000 --max-pages 20 --confirm
+npm.cmd run booking-email:proof
 ```
 
 ## Secrets, Recovery, Rollback, WAF

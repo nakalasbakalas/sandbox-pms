@@ -1,18 +1,18 @@
 # Current Checkout Launch Gate Results
 
-Status date: 2026-07-04.
+Status date: 2026-07-05.
 
-Verdict: the Slice 5BV source commit is green in CI, the local launch-evidence inventory passes, and the current deployed runtime commit remains green with focused live checks. Slice 5BV confirms GitHub Actions run `28703308473` passed for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`, `npm.cmd run launch:evidence` passed cleanly at that commit, and that commit is live on the custom-domain Render service as `dep-d94e5e7lk1mc73b3oh2g`. This proves engineering gate health and focused live health, not production/account-owner launch sign-off.
+Verdict: the Slice 5BW source commit passed focused local validation, is live on Render, and closes the booking-email OAuth/backfill mechanics blocker with redacted aggregate proof. Slice 5BW deployed commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` to the custom-domain Render service as `dep-d94reknlk1mc73bqndq0`, confirmed public deep health, confirmed Render Gmail OAuth `ready=true`, and imported 1000 booking-email events as review-only Needs Review records. This proves focused engineering/runtime health for this slice, not production/account-owner launch sign-off.
 
-Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms run `28674129355` passed for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. Slice 5BJ confirms CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22`. Slice 5BK confirms CI run `28688693681` passed for commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`. Slice 5BM confirms CI run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and that commit is live on Render. Slice 5BN confirms CI run `28692255198` passed for repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; this is a docs/runtime-example redaction commit and does not change the deployed app runtime. Slice 5BO confirms CI run `28700849720` passed for Cloudflare/WAF-boundary evidence commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e`; Slice 5BS confirms CI run `28701971403` passed for commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4` and that commit was live on Render; Slice 5BV confirms CI run `28703308473` passed for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a` and that commit is live on Render.
+Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation ladder in the same checkout and all commands passed. See `2026-07-03-slice-5at-baseline-validation-refresh.md` and `DB_DOCTOR_RESULTS.md`. Later Slice 5BF records deploy/probe evidence for commit `0de2eb3d612a555dbd6cac92948becd16aa24cae`. Slice 5BH confirms run `28674129355` passed for docs/status commit `1d2ea176b5759e98f30d038a8f3985ab299105af`. Slice 5BJ confirms CI run `28688152726` passed for commit `04d06d3351fa02154e258a35b84a379dd219db22`. Slice 5BK confirms CI run `28688693681` passed for commit `c377f6a9f0cc8e6c2dbbca53366e50767b30f272`. Slice 5BM confirms CI run `28690040884` passed for commit `c8acc1df271711d0b1c8e81419fbd76d5b6e2c4a` and that commit is live on Render. Slice 5BN confirms CI run `28692255198` passed for repository secret-redaction source commit `26444eda87e31a6c90c19f7a13f47c7e74706beb`; this is a docs/runtime-example redaction commit and does not change the deployed app runtime. Slice 5BO confirms CI run `28700849720` passed for Cloudflare/WAF-boundary evidence commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e`; Slice 5BS confirms CI run `28701971403` passed for commit `e348fd6d076b2bf094dca1c77c372a2bbed612c4` and that commit was live on Render; Slice 5BV confirms CI run `28703308473` passed for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a` and that commit is live on Render; Slice 5BW confirms commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` is live on Render deploy `dep-d94reknlk1mc73bqndq0`.
 
 ## Scope
 
 - Branch: `main`.
-- Current repository commit: `d8884884faba8b50cb73c7f827aa4f9871744d4a` before Slice 5BV evidence updates.
-- Current deployed runtime commit: `d8884884faba8b50cb73c7f827aa4f9871744d4a`.
-- Worktree: clean before the Slice 5BV evidence updates; Slice 5BV adds current-runtime sync evidence.
-- Production posture: Slice 5BV performed a Render deploy of commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`; no OAuth env-var mutation, restart, SSH session, production database shell, production data mutation, DB-mutating E2E against production, confirmed booking-email import, or secret-value access was performed.
+- Current repository commit: `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` before Slice 5BW final status-doc updates.
+- Current deployed runtime commit: `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`.
+- Worktree: clean before the Slice 5BW final status-doc updates.
+- Production posture: Slice 5BW performed a Render deploy of commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`, configured booking Gmail OAuth through a redacted helper, and imported review-only booking-email events. No DB-mutating E2E against production or secret-value output occurred.
 - DB-mutating E2E posture: not run by `launch:check`; the gate confirmed it remains blocked unless `ALLOW_DB_E2E=true`.
 
 ## Command
@@ -37,6 +37,13 @@ Update: Slice 5AT also reran the non-destructive Slice 0 baseline validation lad
 | GitHub Actions CI | Passed | Slice 5BV confirmed run `28703308473` completed `Install, test, build, and launch-check` successfully for commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`. |
 | `npm.cmd run launch:evidence` | Passed | Slice 5BV ran on a clean tree at commit `d8884884faba8b50cb73c7f827aa4f9871744d4a`; no unredacted secret-shaped values were found in launch evidence docs and no high-confidence unredacted production secret-shaped values were found in 518 tracked/unignored text files. |
 | `node scripts/configure-render-gmail-oauth.mjs --status --use-render-cli-token` | Passed; not ready | Slice 5BV redacted status completed at `2026-07-04T10:41:40.483Z`; mailbox identity keys exist, but every supported booking-specific and fallback Gmail credential path remains `ready=false`. Values were omitted. |
+| `node --check scripts\booking-email-backfill.mjs` | Passed | Slice 5BW validated the chunked backfill CLI syntax before commit. |
+| `npm.cmd test` | Passed | Slice 5BW business rule tests passed before commit. |
+| `npx.cmd prisma validate` | Passed | Slice 5BW validation passed with a disposable local Postgres-shaped `DATABASE_URL`. |
+| `git diff --check` | Passed | Slice 5BW whitespace check passed before commit. |
+| `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` | Passed; ready | Slice 5BW redacted status completed at `2026-07-05T01:48:28.733Z`; the booking-specific refresh-token tuple reported `ready=true`. Values were omitted. |
+| `npm.cmd run booking-email:backfill -- --query "<approved provider query>" --limit 1000 --max-pages 20 --confirm` | Passed | Render job `job-d94rfti8qa3s73d5jhv0` imported 1000 messages as review-only Booking Email Events with `importBatchSize=50`; no events were approved or applied. |
+| `npm.cmd run booking-email:proof` | Passed | Render job `job-d94ri9mq1p3s73c6clsg` reported 1000 total events, 1000 Needs Review, 0 processed, 0 errors, and 0 ignored. |
 
 ## Launch Check Subcommands
 
