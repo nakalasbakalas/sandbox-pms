@@ -1,9 +1,32 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-05.
-Latest external provider evidence refresh: 2026-07-05T09:09+07:00.
+Latest external provider evidence refresh: 2026-07-05T09:40+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-05T09:40+07:00 Current Main Render Sync
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: deploy green `main` commit `bf37942ad77223e47f8fea41dc88e9921d7ddfec` to the long-term custom-domain Render service, reprobe public setup/deep-health/public-edge/live/preflight behavior, rerun redacted Render Gmail OAuth status, and rerun Cloudflare WAF proof readiness. No secret values, credentialed PMS login, production database shell, production data mutation, Gmail body, Cloudflare token, WAF mutation, screenshot capture, or DB-mutating E2E was performed.
+- GitHub CI run `28726972988` passed for commit `bf37942ad77223e47f8fea41dc88e9921d7ddfec`.
+- Render deploy `dep-d94s6oa8qa3s73d6bum0` is live on `sandbox-hotel-pms-v43m`, serving commit `bf37942ad77223e47f8fea41dc88e9921d7ddfec`, finished `2026-07-05T02:40:03.878047Z`.
+- Unauthenticated `POST https://book.sandboxhotel.com/api/setup/complete` with empty JSON returned `403` and `Public first-run setup is disabled in production. Seed an admin user or configure INITIAL_SETUP_TOKEN.` through Cloudflare/Render headers.
+- `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, database configured/OK, Cloudflare server header, and Render origin header.
+- `npm.cmd run public-edge:proof` passed at `2026-07-05T02:40:22.968Z`: `/healthz?deep=1` returned `200`, production environment, database configured/OK, Cloudflare headers, Render origin header, selected common unwanted paths returned `404`, common security headers were present, and response bodies were omitted except bounded health fields.
+- `npm.cmd run live:check` passed for `https://book.sandboxhotel.com`; LINE remains optional/unconfigured unless explicitly required.
+- `npm.cmd run prod:preflight` passed with the expected warning that LINE credentials are not configured and live LINE messaging remains disabled.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=true` at `2026-07-05T02:40:20.166Z`; the booking-specific refresh-token tuple existed, and values plus Render auth tokens were omitted.
+- `npm.cmd run cloudflare:waf:proof` remained blocked by missing owner inputs at `2026-07-05T02:40:20.157Z`: `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`, and `CLOUDFLARE_ZONE_ID` or `CF_ZONE_ID`.
+- Canonical evidence: `docs/launch/evidence/2026-07-05-slice-5by-current-main-render-sync.md`.
+
+Still not proven by this refresh:
+
+- Staff/admin visual review and parser-quality acceptance in `/booking-inbox`.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-05T09:09+07:00 Gmail OAuth And Booking Backfill
 
