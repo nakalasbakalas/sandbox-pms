@@ -19,7 +19,11 @@ export function LoginScreen() {
     setIsLoading(true)
 
     try {
-      const success = await login(identity, password)
+      const form = e.currentTarget as HTMLFormElement
+      const formData = new FormData(form)
+      const submittedIdentity = String(formData.get('identity') || identity).trim()
+      const submittedPassword = String(formData.get('password') || password)
+      const success = await login(submittedIdentity, submittedPassword)
       
       if (success) {
         toast.success('Login successful')
@@ -57,8 +61,10 @@ export function LoginScreen() {
                 <Label htmlFor="identity">Username or email</Label>
                 <Input
                   id="identity"
+                  name="identity"
                   type="text"
                   inputMode="text"
+                  autoComplete="username"
                   placeholder="staff username or email"
                   value={identity}
                   onChange={(e) => setIdentity(e.target.value)}
@@ -73,7 +79,9 @@ export function LoginScreen() {
                 <div className="relative">
                   <Input
                     id="password"
+                    name="password"
                     type="password"
+                    autoComplete="current-password"
                     placeholder="Enter password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
