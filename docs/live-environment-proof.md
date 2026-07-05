@@ -12,6 +12,7 @@ This register records point-in-time external evidence gathered from the live Ren
 - GitHub CI run `28726046155` passed for code commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`.
 - GitHub CI run `28726322076` passed for evidence commit `ca568784143afd4ca9c885a5f4b99b5193c567f5`.
 - GitHub CI run `28726610725` passed for live-proof register commit `7fdbfae92242be942b9f1087aa296efdb86e8f35`.
+- GitHub CI run `28726783220` passed for final live-proof note commit `6373ba5206cee3ecf196c7b7a37f19b954fa7db4`.
 - Render deploy `dep-d94reknlk1mc73bqndq0` is live on `sandbox-hotel-pms-v43m`, serving commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`, finished `2026-07-05T01:48:18.000607Z`.
 - `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, production environment, database configured/OK, Cloudflare server header, and Render origin header at the post-deploy probe.
 - `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=true` at `2026-07-05T02:08:51.023Z`; the booking-specific refresh-token tuple existed, and values plus Render auth tokens were omitted.

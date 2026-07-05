@@ -8,6 +8,7 @@ Verdict: not launch-signed-off. Slice 5BW configures backend Gmail OAuth on Rend
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
+| Slice 5BX - current status sync after Gmail backfill | Synced; final docs-only CI green, Gmail OAuth no longer the next setup task, launch sign-off still owner-proof gated | [2026-07-05-slice-5bx-status-sync.md](evidence/2026-07-05-slice-5bx-status-sync.md) |
 | Slice 5BW - Gmail OAuth and historical backfill | Loaded for staff review; backend OAuth ready, 1000 review-only events imported, parser review still required | [2026-07-05-slice-5bw-gmail-oauth-backfill.md](evidence/2026-07-05-slice-5bw-gmail-oauth-backfill.md) |
 | Slice 5BV - current main runtime sync | Partial; current green `main` is live, public checks pass, Gmail OAuth still not ready | [2026-07-04-slice-5bv-current-main-runtime-sync.md](evidence/2026-07-04-slice-5bv-current-main-runtime-sync.md) |
 | Slice 5BU - Cloudflare WAF proof helper | Partial; owner-run WAF/rate-limit proof helper added/tested, live rule proof still token/zone gated | [2026-07-04-slice-5bu-cloudflare-waf-proof-helper.md](evidence/2026-07-04-slice-5bu-cloudflare-waf-proof-helper.md) |
@@ -127,4 +128,4 @@ Verdict: not launch-signed-off. Slice 5BW configures backend Gmail OAuth on Rend
 
 ## Next Recommended Slice
 
-Run the new `auth-rbac:proof` helper from a secure owner shell with approved users to collect credentialed production login/logout and denial evidence, or run `gmail-oauth:render -- --credentials-file <local-json> --listen --apply-render --use-render-cli-token` from a secure owner shell to add the backend Gmail OAuth refresh-token tuple to Render, redeploy or restart as required, and rerun booking-email dry-run/proof if booking-email capture is required for launch. Continue using `P0_OWNER_PROOF_HANDOFF.md` to collect account-owner proof for real inventory source, workflow acceptance, secrets/recovery ownership, and WAF/rate-limit rules.
+Run `npm.cmd run auth-rbac:proof` from a secure owner shell with approved production users to collect credentialed login/logout, role matrix, and underprivileged denial evidence. In parallel, continue using `P0_OWNER_PROOF_HANDOFF.md` to collect account-owner proof for real inventory source, workflow acceptance or staging target, provider secret inventory/rotation, rollback and database recovery owners, latest recovery-point evidence, Cloudflare WAF/rate-limit rules, and staff `/booking-inbox` parser review acceptance.
