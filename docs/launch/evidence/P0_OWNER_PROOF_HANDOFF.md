@@ -4,7 +4,7 @@ Status date: 2026-07-05.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BW configures backend Gmail OAuth on Render, deploys commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` as Render deploy `dep-d94reknlk1mc73bqndq0`, confirms public deep health is green, confirms the booking-specific Gmail OAuth refresh-token tuple is `ready=true` with values omitted, and imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events. Staff parser review is still required before applying any reservation, cancellation, payment, or guest-message action. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and staff acceptance of booking-email parser/review quality.
+Latest intake: Slice 5BY deploys green `main` commit `bf37942ad77223e47f8fea41dc88e9921d7ddfec` to Render deploy `dep-d94s6oa8qa3s73d6bum0` and confirms setup gate, deep health, public edge, live readiness, production preflight, and redacted Gmail OAuth status. Slice 5BW configures backend Gmail OAuth on Render, imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events, and leaves staff parser review open. Slice 5BZ adds `npm.cmd run owner-proof:validate`, a local template and redaction validator for owner/provider proof intake. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and staff acceptance of booking-email parser/review quality.
 
 ## Non-Negotiable Redaction Rules
 
@@ -21,6 +21,17 @@ Use this structure when adding real owner/provider proof:
 | Area | Owner | Date/time | Source | Proof captured | Redaction performed | Verdict |
 | --- | --- | --- | --- | --- | --- | --- |
 | Example only | TBD | TBD | TBD | TBD | TBD | Open |
+
+Optional local validator before submitting proof:
+
+```powershell
+npm.cmd run owner-proof:validate -- --init-template
+# Edit .\.codex\owner-proof-intake.local.json locally; keep it untracked.
+npm.cmd run owner-proof:validate -- --file .\.codex\owner-proof-intake.local.json
+npm.cmd run owner-proof:validate -- --file .\.codex\owner-proof-intake.local.json --require-complete
+```
+
+The validator reports missing/open areas and obvious secret-shaped strings without echoing the raw proof object. It does not prove provider truth by itself; it is a redaction and completeness aid before evidence is summarized into this handoff or launch docs.
 
 ## Production Users, Auth, RBAC, Logout
 
