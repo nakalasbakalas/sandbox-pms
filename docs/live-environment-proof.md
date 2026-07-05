@@ -1,9 +1,31 @@
 # Live Environment Proof Register
 
-Latest validation refresh: 2026-07-04.
-Latest external provider evidence refresh: 2026-07-04T17:43+07:00.
+Latest validation refresh: 2026-07-05.
+Latest external provider evidence refresh: 2026-07-05T09:09+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-05T09:09+07:00 Gmail OAuth And Booking Backfill
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: configure backend Gmail OAuth on Render, deploy the chunked review-only booking-email backfill helper, run focused public health/OAuth checks, import historical provider messages as review-only Booking Email Events, and refresh current-status evidence. No mailbox password, OAuth client secret, authorization code, access token, refresh token, Render token, raw database URL, Gmail body, attachment, message id, guest data, payment data, or raw provider email was recorded.
+- GitHub CI run `28726046155` passed for code commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`.
+- GitHub CI run `28726322076` passed for evidence commit `ca568784143afd4ca9c885a5f4b99b5193c567f5`.
+- Render deploy `dep-d94reknlk1mc73bqndq0` is live on `sandbox-hotel-pms-v43m`, serving commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a`, finished `2026-07-05T01:48:18.000607Z`.
+- `GET https://book.sandboxhotel.com/healthz?deep=1` returned `200`, `ok=true`, production environment, database configured/OK, Cloudflare server header, and Render origin header at the post-deploy probe.
+- `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` returned `ready=true` at `2026-07-05T02:08:51.023Z`; the booking-specific refresh-token tuple existed, and values plus Render auth tokens were omitted.
+- `npm.cmd run cloudflare:waf:proof` remained blocked by missing owner inputs at `2026-07-05T02:09:11.838Z`: `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`, and `CLOUDFLARE_ZONE_ID` or `CF_ZONE_ID`.
+- Render job `job-d94rfti8qa3s73d5jhv0` imported `1000` provider-query Gmail messages as review-only Booking Email Events with `importBatchSize=50`; no events were approved or applied.
+- Render job `job-d94ri9mq1p3s73c6clsg` ran `npm run booking-email:proof` and reported `1000` total/source-message events, all `NEEDS_REVIEW`, with `0` processed, `0` errors, and `0` ignored.
+- Canonical evidence: `docs/launch/evidence/2026-07-05-slice-5bw-gmail-oauth-backfill.md`.
+
+Still not proven by this refresh:
+
+- Staff/admin visual review and parser-quality acceptance in `/booking-inbox`.
+- Approved production user list, credentialed login/logout proof, role matrix, underprivileged denial proof, and bootstrap/setup-token rotation or retention decision.
+- Owner/import proof confirming production room inventory is the approved real source and not fake seed/demo data.
+- Explicit owner decision accepting local disposable DB workflow proof or requiring staging/controlled production-like evidence.
+- Redacted secret inventory/rotation metadata, named rollback owner/deputy/database recovery owner, latest recovery point/retention proof, WAF/rate-limit rule metadata, and legacy key cleanup decisions.
 
 ## 2026-07-04T17:43+07:00 Current Main Runtime Sync
 
