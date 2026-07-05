@@ -147,17 +147,18 @@ Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API 
 7. Dry-run a bounded historical scan first:
 
 ```powershell
-npm.cmd run booking-email:backfill -- --all-past --limit 250
+npm.cmd run booking-email:backfill -- --query "<approved Gmail query>" --limit 250 --max-pages 5
 ```
 
 8. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
 9. If the preview looks correct, import the same bounded set as Booking Inbox review events:
 
 ```powershell
-npm.cmd run booking-email:backfill -- --all-past --limit 250 --confirm
+npm.cmd run booking-email:backfill -- --query "<approved Gmail query>" --limit 250 --max-pages 5 --confirm
 ```
 
-10. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
+10. For larger history loads, keep the same approved query and increase `--limit`/`--max-pages`; confirmed imports use `--import-batch-size 50` by default to avoid one giant database transaction.
+11. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
 Public edge posture proof:
 

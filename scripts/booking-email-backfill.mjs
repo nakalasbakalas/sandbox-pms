@@ -13,6 +13,7 @@ import {
 loadEnvDefaults()
 
 const HARD_MESSAGE_LIMIT = 1000
+const DEFAULT_IMPORT_BATCH_SIZE = 50
 const DEFAULT_BOOKING_EMAIL_MAILBOX = 'booking@sandboxhotel.com'
 
 function argValue(name) {
@@ -153,6 +154,14 @@ function buildPreviewSummary(events, existingIds) {
   }
 }
 
+function eventBatches(events, batchSize) {
+  const batches = []
+  for (let index = 0; index < events.length; index += batchSize) {
+    batches.push(events.slice(index, index + batchSize))
+  }
+  return batches
+}
+
 async function main() {
   if (!process.env.DATABASE_URL) fail('DATABASE_URL is required for booking email backfill.')
 
@@ -160,6 +169,10 @@ async function main() {
   const limit = Math.min(positiveInt(argValue('--limit'), 50), HARD_MESSAGE_LIMIT)
   const pageSize = Math.min(positiveInt(argValue('--page-size'), 50), 50)
   const maxPages = positiveInt(argValue('--max-pages'), Math.ceil(limit / pageSize))
+  const importBatchSize = Math.min(
+    positiveInt(argValue('--import-batch-size'), DEFAULT_IMPORT_BATCH_SIZE),
+    HARD_MESSAGE_LIMIT,
+  )
   const credentialStatus = bookingEmailGmailCredentialStatus()
   if (!credentialStatus.configured) {
     fail('Gmail API OAuth credentials are not configured for booking email sync.')
@@ -186,16 +199,18 @@ async function main() {
 
     if (confirm) {
       if (!source.id) fail('Confirmed import requires a saved booking email source.')
-      const result = await syncBookingEmail(prisma, {
-        sourceId: source.id,
-        events: fetchedEvents,
-        reviewOnly: true,
-      }, {
-        id: 'booking-email-backfill',
-        username: 'booking-email-backfill',
-        role: 'SYSTEM',
-      })
-      imported = result.events || []
+      for (const batch of eventBatches(fetchedEvents, importBatchSize)) {
+        const result = await syncBookingEmail(prisma, {
+          sourceId: source.id,
+          events: batch,
+          reviewOnly: true,
+        }, {
+          id: 'booking-email-backfill',
+          username: 'booking-email-backfill',
+          role: 'SYSTEM',
+        })
+        imported.push(...(result.events || []))
+      }
     }
 
     const output = {
@@ -221,6 +236,7 @@ async function main() {
         limit,
         pageSize,
         maxPages,
+        importBatchSize: confirm ? importBatchSize : null,
         reviewOnlyImport: confirm,
         scannedMessages: fetchedEvents.length,
         existingEvents: existingIds.size,
