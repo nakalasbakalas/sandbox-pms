@@ -241,9 +241,9 @@ Owner or approver:
 1. Configure a positive interval in minutes.
 2. Restart the app server.
 3. Confirm `/ops/settings` shows scheduler state and next scan time.
-4. Monitor `/ops/intelligence` for alerts.
+4. Monitor `/ops/intelligence` for alerts and latest scan evidence.
 5. Treat recommendations as separate approval-gated tasks.
-6. Use scan snapshots as backend evidence for how an alert was produced or refreshed; snapshots are PMS-derived and do not prove live OTA scrape coverage unless live adapter reads are configured and separately verified.
+6. Use the scan evidence panel or `GET /api/ops/intelligence/scans` as backend evidence for how an alert was produced or refreshed; snapshots are PMS-derived and do not prove live OTA scrape coverage unless live adapter reads are configured and separately verified.
 
 The scheduler runs as `SYSTEM`, skips overlaps, and redacts credential-like failure text.
 

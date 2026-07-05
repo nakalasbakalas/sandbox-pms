@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { buildIcalFeedForChannel, buildIcalFeedUrl, normalizeIcalProvider } from '../server/ical-feed.mjs'
 import { createHotelOpsScanScheduler } from '../server/ops-scheduler.mjs'
-import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
+import { approveOpsAlertRecommendation, approveOpsTask, buildOpsNotificationDrafts, buildOpsScanInsights, cancelOpsTask, denyOpsTask, dismissOpsNotification, evaluateOpsPermission, evaluateOpsTaskRun, getOpsPolicy, getOpsScanPolicy, getOpsTask, hotelOpsTrendAlertFingerprint, hotelOpsAiParserStatus, hotelOpsEmailProviderStatus, listOpsApprovals, listOpsNotifications, listOpsScanSnapshots, listOpsTasks, listOpsTrendAlerts, normalizeOpsSourceChannel, parseHotelOpsCommand, parseHotelOpsCommandForSubmission, parseHotelOpsCommandWithOpenAi, readOpsNotification, resolveOpsHumanAction, resolveOpsTrendAlert, runOpsScan, runQueuedOpsTask, sendOpsEmailNotification, setEmergencyStop, submitOpsCommand, validateParsedOpsTask } from '../server/ops-service.mjs'
 import { emailOpsCommandIdempotencyKey, emailOpsCommandIntakeStatus, extractEmailOpsCommandText, normalizeEmailOpsSender, parseEmailOpsCommandUserMap, processEmailOpsCommandEvents, resolveEmailOpsCommandEvent } from '../server/email-ops-intake.mjs'
 import { extractLineOpsCommandText, lineOpsCommandIdempotencyKey, lineOpsCommandIntakeStatus, parseLineOpsCommandUserMap, processLineOpsCommandEvents, resolveLineOpsCommandEvent } from '../server/line-ops-intake.mjs'
 import { extractWhatsAppOpsCommandText, extractWhatsAppWebhookMessages, normalizeWhatsAppOpsSender, parseWhatsAppOpsCommandUserMap, processWhatsAppOpsCommandEvents, resolveWhatsAppOpsCommandEvent, verifyWhatsAppWebhookSignature, whatsAppOpsCommandIdempotencyKey, whatsAppOpsCommandIntakeStatus, whatsAppWebhookStatus } from '../server/whatsapp-ops-intake.mjs'
@@ -2713,11 +2713,12 @@ const scanPrisma = {
   },
   hotelOpsScanSnapshot: {
     create: async ({ data }) => {
+      const createdAt = new Date(`2026-06-30T00:00:0${scanSnapshots.length}.000Z`)
       const row = {
         id: `scan-snapshot-${scanSnapshots.length + 1}`,
         alertsCreated: 0,
         alertsUpdated: 0,
-        createdAt: new Date('2026-06-30T00:00:00.000Z'),
+        createdAt,
         ...data,
       }
       scanSnapshots.push(row)
@@ -2728,6 +2729,15 @@ const scanPrisma = {
       Object.assign(row, data)
       return row
     },
+    findMany: async ({ where, take }) => scanSnapshots
+      .filter((snapshot) => snapshot.propertyId === where.propertyId)
+      .filter((snapshot) => !where.sourceChannel || snapshot.sourceChannel === where.sourceChannel)
+      .filter((snapshot) => !where.force || snapshot.force === where.force)
+      .sort((a, b) => (
+        new Date(b.scannedAt).getTime() - new Date(a.scannedAt).getTime()
+        || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ))
+      .slice(0, take),
   },
   hotelOpsTrendAlert: {
     findFirst: async ({ where }) => scanAlertRows.find((alert) => (
@@ -2785,6 +2795,15 @@ assert.equal(scanSnapshots[1].alertsUpdated, 1, 'Hotel Ops repeated scan snapsho
 assert.equal(scanAlertRows[0].scanSnapshotId, scanSnapshots[1].id, 'Hotel Ops refreshed alert links to the latest scan snapshot')
 assert.equal(scanSnapshots[1].metrics.alertIds.includes(scanAlertRows[0].id), true, 'Hotel Ops scan snapshot stores produced alert ids in metrics')
 assert.equal(scanAudits.filter((audit) => audit.action === 'OPS_SCAN_RUN').at(-1)?.changes.scanSnapshotId, scanSnapshots[1].id, 'Hotel Ops scan audit links to the durable snapshot')
+const listedScanSnapshots = await listOpsScanSnapshots(scanPrisma, { limit: 1 })
+assert.equal(listedScanSnapshots.length, 1, 'Hotel Ops scan snapshot list honors bounded limits')
+assert.equal(listedScanSnapshots[0].id, scanSnapshots[1].id, 'Hotel Ops scan snapshot list returns newest evidence first')
+assert.equal(listedScanSnapshots[0].hotelId, 'SANDBOX', 'Hotel Ops scan snapshot serialization includes the hotel code')
+assert.equal(listedScanSnapshots[0].sourceChannel, 'system', 'Hotel Ops scan snapshot serialization includes source channel')
+assert.equal(listedScanSnapshots[0].alertsUpdated, 1, 'Hotel Ops scan snapshot serialization includes alert mutation counts')
+assert.equal(Array.isArray(listedScanSnapshots[0].metrics.alertIds), true, 'Hotel Ops scan snapshot serialization includes produced alert ids')
+const filteredScanSnapshots = await listOpsScanSnapshots(scanPrisma, { sourceChannel: 'web' })
+assert.equal(filteredScanSnapshots.length, 0, 'Hotel Ops scan snapshot list filters source channel')
 
 const parsedIcal = ical.parseIcalEvents(`BEGIN:VCALENDAR
 VERSION:2.0

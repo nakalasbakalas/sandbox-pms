@@ -67,7 +67,7 @@ Evidence: `scripts/run-business-tests.mjs` and guarded DB E2E.
 - `/ops/chat` displays manager command entry and parsed preview.
 - `/ops/approvals` lists pending approvals and empty state.
 - `/ops/tasks` shows task status, requester, risk, timestamps, logs, notifications, and proof.
-- `/ops/intelligence` shows alert severity and recommendation actions.
+- `/ops/intelligence` shows alert severity, recommendation actions, and latest PMS-derived scan evidence from `GET /api/ops/intelligence/scans`.
 - `/ops/settings` shows emergency stop, OTA worker status, scan policy, scheduler state, and thresholds.
 - `/ops/chat` and `/ops/settings` show parser mode so staff can distinguish deterministic parsing, optional OpenAI parsing, and deterministic fallback.
 

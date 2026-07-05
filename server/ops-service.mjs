@@ -1090,6 +1090,27 @@ function serializeAlert(alert) {
   }
 }
 
+function serializeScanSnapshot(snapshot) {
+  if (!snapshot) return null
+  return {
+    id: snapshot.id,
+    hotelId: SANDBOX_RULES.propertyCode,
+    sourceChannel: snapshot.sourceChannel,
+    triggeredBy: snapshot.triggeredBy || null,
+    force: snapshot.force || null,
+    windowStart: snapshot.windowStart ? isoDate(snapshot.windowStart) : null,
+    windowEnd: snapshot.windowEnd ? isoDate(snapshot.windowEnd) : null,
+    scannedAt: snapshot.scannedAt?.toISOString?.() || snapshot.scannedAt,
+    activeReservations: snapshot.activeReservations || 0,
+    sellableRooms: snapshot.sellableRooms || 0,
+    cancellationLogs: snapshot.cancellationLogs || 0,
+    alertsCreated: snapshot.alertsCreated || 0,
+    alertsUpdated: snapshot.alertsUpdated || 0,
+    metrics: snapshot.metrics || {},
+    createdAt: snapshot.createdAt?.toISOString?.() || snapshot.createdAt,
+  }
+}
+
 async function getProperty(prisma) {
   const property = await prisma.property.findUnique({ where: { code: SANDBOX_RULES.propertyCode } })
   if (!property) throw new PmsValidationError('Property setup has not been completed yet.', 503)
@@ -2814,6 +2835,22 @@ export async function listOpsTrendAlerts(prisma, filters = {}) {
     take: Math.min(Math.max(Number(filters.limit) || 50, 1), 200),
   })
   return alerts.map(serializeAlert)
+}
+
+export async function listOpsScanSnapshots(prisma, filters = {}) {
+  const property = await getProperty(prisma)
+  const where = { propertyId: property.id }
+  if (filters.sourceChannel) where.sourceChannel = normalizeOpsSourceChannel(filters.sourceChannel)
+  if (filters.force) where.force = normalizeNullableString(filters.force)
+  const snapshots = await prisma.hotelOpsScanSnapshot.findMany({
+    where,
+    orderBy: [
+      { scannedAt: 'desc' },
+      { createdAt: 'desc' },
+    ],
+    take: Math.min(Math.max(Number(filters.limit) || 12, 1), 50),
+  })
+  return snapshots.map(serializeScanSnapshot)
 }
 
 async function updateOpsAlertStatus(prisma, alertId, status, input, actor) {

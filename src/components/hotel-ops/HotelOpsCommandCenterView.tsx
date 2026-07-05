@@ -32,6 +32,7 @@ import type {
   HotelOpsNotification,
   HotelOpsOtaStatus,
   HotelOpsPolicy,
+  HotelOpsScanSnapshot,
   HotelOpsTaskPolicyRule,
   HotelOpsTaskType,
   HotelOpsTask,
@@ -169,6 +170,23 @@ function roomTypeMetric(alert: HotelOpsTrendAlert, key: string) {
     activeReservations: typeof activeReservations === 'number' && Number.isFinite(activeReservations) ? activeReservations : null,
     sellableRooms: typeof sellableRooms === 'number' && Number.isFinite(sellableRooms) ? sellableRooms : null,
   }
+}
+
+function snapshotMetric(snapshot: HotelOpsScanSnapshot, key: string) {
+  const value = snapshot.metrics?.[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function nestedSnapshotMetric(snapshot: HotelOpsScanSnapshot, group: string, key: string) {
+  const value = snapshot.metrics?.[group]
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const nested = (value as Record<string, unknown>)[key]
+  return typeof nested === 'number' && Number.isFinite(nested) ? nested : null
+}
+
+function snapshotAlertCount(snapshot: HotelOpsScanSnapshot) {
+  const alertIds = snapshot.metrics?.alertIds
+  return Array.isArray(alertIds) ? alertIds.length : snapshot.alertsCreated + snapshot.alertsUpdated
 }
 
 function policyRuleEntries(policy: HotelOpsPolicy | null) {
@@ -412,6 +430,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
   const [approvals, setApprovals] = useState<HotelOpsApproval[]>([])
   const [notifications, setNotifications] = useState<HotelOpsNotification[]>([])
   const [alerts, setAlerts] = useState<HotelOpsTrendAlert[]>([])
+  const [scanSnapshots, setScanSnapshots] = useState<HotelOpsScanSnapshot[]>([])
   const [emergencyStop, setEmergencyStop] = useState<HotelOpsEmergencyStop | null>(null)
   const [otaStatus, setOtaStatus] = useState<HotelOpsOtaStatus | null>(null)
   const [opsPolicy, setOpsPolicy] = useState<HotelOpsPolicy | null>(null)
@@ -436,11 +455,12 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
     setLoading(true)
     setError(null)
     try {
-      const [tasksPayload, approvalsPayload, notificationsPayload, alertsPayload, stopPayload, otaPayload, policyPayload] = await Promise.all([
+      const [tasksPayload, approvalsPayload, notificationsPayload, alertsPayload, scansPayload, stopPayload, otaPayload, policyPayload] = await Promise.all([
         hotelOpsApi.listTasks({ limit: 80 }),
         hotelOpsApi.listApprovals(),
         hotelOpsApi.listNotifications({ limit: 20 }),
         hotelOpsApi.listAlerts({ limit: 50 }),
+        hotelOpsApi.listScanSnapshots({ limit: 6 }),
         hotelOpsApi.getEmergencyStop(),
         hotelOpsApi.getOtaStatus(),
         hotelOpsApi.getPolicy(),
@@ -449,6 +469,7 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
       setApprovals(approvalsPayload.data)
       setNotifications(notificationsPayload.data)
       setAlerts(alertsPayload.data)
+      setScanSnapshots(scansPayload.data)
       setEmergencyStop(stopPayload.data)
       setOtaStatus(otaPayload.data)
       setOpsPolicy(policyPayload.data)
@@ -833,6 +854,73 @@ export function HotelOpsCommandCenterView({ tab: routeTab }: { tab?: HotelOpsTab
                 <Button variant="outline" onClick={() => void runScan('ota-imbalance')} disabled={loading}>OTA Imbalance Demo</Button>
               </div>
             </div>
+            <Card className="rounded-lg">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Latest Scan Evidence</CardTitle>
+                <CardDescription>PMS-derived scan snapshots for the alert engine. This is not live OTA scrape proof unless live adapters are separately configured and verified.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {scanSnapshots.length === 0 ? (
+                  <div className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No scan snapshots recorded yet. Run a scan to store the first evidence record.
+                  </div>
+                ) : (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {scanSnapshots.slice(0, 4).map((snapshot) => {
+                      const occupancy = snapshotMetric(snapshot, 'occupancy')
+                      const velocityRatio = nestedSnapshotMetric(snapshot, 'velocity', 'velocityRatio')
+                      return (
+                        <div key={snapshot.id} className="rounded border bg-muted/30 p-3 text-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <div>
+                              <div className="font-semibold">{formatDateTimeValue(snapshot.scannedAt)}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Window {snapshot.windowStart || 'not set'} to {snapshot.windowEnd || 'not set'}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <Badge variant="outline">{snapshot.sourceChannel}</Badge>
+                              {snapshot.force && <Badge variant="secondary">{snapshot.force.replace(/-/g, ' ')}</Badge>}
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                            <div>
+                              <span className="font-medium text-foreground">Occupancy</span>
+                              <div>{formatPercentValue(occupancy ?? undefined)}</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-foreground">Velocity</span>
+                              <div>{velocityRatio === null ? 'Not set' : `${velocityRatio.toFixed(1)}x baseline`}</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-foreground">Inventory</span>
+                              <div>{snapshot.activeReservations} active / {snapshot.sellableRooms} rooms</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-foreground">Cancellations</span>
+                              <div>{snapshot.cancellationLogs} log(s)</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-foreground">Alert changes</span>
+                              <div>{snapshot.alertsCreated} created / {snapshot.alertsUpdated} refreshed</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-foreground">Produced alerts</span>
+                              <div>{snapshotAlertCount(snapshot)} linked</div>
+                            </div>
+                          </div>
+                          {snapshot.triggeredBy && (
+                            <div className="mt-2 truncate text-xs text-muted-foreground" title={snapshot.triggeredBy}>
+                              Triggered by {snapshot.triggeredBy}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
             {alerts.length === 0 ? (
               <Card className="rounded-lg"><CardContent className="p-8 text-center text-sm text-muted-foreground">No trend alerts yet. Run a scan to create the first booking intelligence alert.</CardContent></Card>
             ) : (

@@ -184,6 +184,26 @@ export type HotelOpsTrendAlert = {
   updatedAt?: string
 }
 
+export type HotelOpsSourceChannel = 'web' | 'line' | 'whatsapp' | 'telegram' | 'email' | 'system'
+
+export type HotelOpsScanSnapshot = {
+  id: string
+  hotelId: string
+  sourceChannel: HotelOpsSourceChannel
+  triggeredBy?: string | null
+  force?: string | null
+  windowStart?: string | null
+  windowEnd?: string | null
+  scannedAt: string
+  activeReservations: number
+  sellableRooms: number
+  cancellationLogs: number
+  alertsCreated: number
+  alertsUpdated: number
+  metrics: Record<string, unknown>
+  createdAt: string
+}
+
 export type HotelOpsEmergencyStop = {
   id: string
   propertyId: string

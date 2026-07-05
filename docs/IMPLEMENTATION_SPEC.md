@@ -39,6 +39,7 @@ API routes:
 - `POST /api/ops/notifications/:id/read`
 - `POST /api/ops/notifications/:id/dismiss`
 - `GET /api/ops/intelligence/alerts`
+- `GET /api/ops/intelligence/scans`
 - `POST /api/ops/intelligence/alerts/:id/approve-recommendation`
 - `POST /api/ops/intelligence/alerts/:id/acknowledge`
 - `POST /api/ops/intelligence/alerts/:id/resolve`
@@ -194,7 +195,7 @@ Worker requests:
 
 Recommendations create approval-gated tasks and never execute directly.
 
-Every scan persists a `HotelOpsScanSnapshot` before alert upserts. The snapshot records the scan window, actor/source channel, active reservations, sellable rooms, cancellation-log count, occupancy, velocity, cancellation, room-type occupancy, OTA distribution, generated insights, and final created/updated alert counts. Created or refreshed trend alerts link back to the snapshot that produced the current alert metrics.
+Every scan persists a `HotelOpsScanSnapshot` before alert upserts. The snapshot records the scan window, actor/source channel, active reservations, sellable rooms, cancellation-log count, occupancy, velocity, cancellation, room-type occupancy, OTA distribution, generated insights, and final created/updated alert counts. Created or refreshed trend alerts link back to the snapshot that produced the current alert metrics. Staff can inspect the latest bounded scan evidence through `GET /api/ops/intelligence/scans` and the `/ops/intelligence` evidence panel; this is PMS-derived evidence, not live OTA scrape proof unless live adapters are separately configured and verified.
 
 Scheduled scans:
 

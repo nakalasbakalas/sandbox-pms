@@ -51,6 +51,7 @@ import {
   getOpsTask,
   getOtaStatus,
   getOpsPolicy,
+  listOpsScanSnapshots,
   listOpsNotifications,
   listOpsApprovals,
   listOpsTasks,
@@ -898,6 +899,19 @@ async function handleApi(request, response, url) {
       ok: true,
       data: await listOpsTrendAlerts(db, {
         status: url.searchParams.get('status'),
+        limit: url.searchParams.get('limit'),
+      }),
+    })
+    return true
+  }
+
+  if (url.pathname === '/api/ops/intelligence/scans' && request.method === 'GET') {
+    requirePermission(user, 'view:ops')
+    sendJson(response, 200, {
+      ok: true,
+      data: await listOpsScanSnapshots(db, {
+        sourceChannel: url.searchParams.get('sourceChannel'),
+        force: url.searchParams.get('force'),
         limit: url.searchParams.get('limit'),
       }),
     })

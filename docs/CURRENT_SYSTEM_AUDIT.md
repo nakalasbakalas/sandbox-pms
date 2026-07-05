@@ -55,7 +55,7 @@ Last reviewed: 2026-07-05
 - Optional email command intake is prefix-gated, allowlisted by sender email, mapped to an active PMS user, checked for `create:ops-task`, submitted through `submitOpsCommand` with source channel `email`, and linked to source email metadata in task logs/audit.
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
-- Each Hotel Ops booking-intelligence scan now persists a durable `HotelOpsScanSnapshot` with scan window, occupancy, booking velocity, cancellation, room-type, OTA distribution, and alert mutation counts. Alerts are linked to the scan snapshot that created or last refreshed them.
+- Each Hotel Ops booking-intelligence scan now persists a durable `HotelOpsScanSnapshot` with scan window, occupancy, booking velocity, cancellation, room-type, OTA distribution, and alert mutation counts. Alerts are linked to the scan snapshot that created or last refreshed them, and the latest bounded snapshots are visible through `GET /api/ops/intelligence/scans` and the `/ops/intelligence` evidence panel.
 
 ## Current Boundaries
 

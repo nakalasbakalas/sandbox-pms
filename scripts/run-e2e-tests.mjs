@@ -715,6 +715,7 @@ assert.deepEqual(resolveApiRouteContract('/api/ops/approvals')?.methods, ['GET']
 assert.deepEqual(resolveApiRouteContract('/api/ops/notifications')?.methods, ['GET'], 'Hotel Ops notifications expose read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/notifications/notification-1/read')?.methods, ['POST'], 'Hotel Ops notification read acknowledgment exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/notifications/notification-1/dismiss')?.methods, ['POST'], 'Hotel Ops notification dismiss exposes mutation method')
+assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/scans')?.methods, ['GET'], 'Hotel Ops scan snapshots expose read method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/approve-recommendation')?.methods, ['POST'], 'Hotel Ops recommendation approval exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/acknowledge')?.methods, ['POST'], 'Hotel Ops alert acknowledge exposes mutation method')
 assert.deepEqual(resolveApiRouteContract('/api/ops/intelligence/alerts/alert-1/resolve')?.methods, ['POST'], 'Hotel Ops alert resolve exposes mutation method')

@@ -5,6 +5,7 @@ import type {
   HotelOpsNotification,
   HotelOpsOtaStatus,
   HotelOpsPolicy,
+  HotelOpsScanSnapshot,
   HotelOpsTask,
   HotelOpsTrendAlert,
 } from '@/types/hotel-ops'
@@ -111,6 +112,10 @@ export const hotelOpsApi = {
 
   listAlerts(filters: { status?: string; limit?: number } = {}) {
     return apiRequest<{ ok: true; data: HotelOpsTrendAlert[] }>(`/api/ops/intelligence/alerts${query(filters)}`)
+  },
+
+  listScanSnapshots(filters: { sourceChannel?: string; force?: string; limit?: number } = {}) {
+    return apiRequest<{ ok: true; data: HotelOpsScanSnapshot[] }>(`/api/ops/intelligence/scans${query(filters)}`)
   },
 
   approveRecommendation(alertId: string, reason?: string) {
