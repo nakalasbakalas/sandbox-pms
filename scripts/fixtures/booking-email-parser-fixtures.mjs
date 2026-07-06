@@ -85,3 +85,27 @@ export const bookingEmailParserFixtures = [
     },
   },
 ]
+
+export const bookingEmailNoiseFixtures = [
+  {
+    name: 'booking.com security notification',
+    input: {
+      subject: 'Booking.com - New sign-in to your account',
+      rawText: 'Your account was used to sign in from a new device or browser. If you do not recognise this sign in, please sign in and change your password.',
+    },
+  },
+  {
+    name: 'trip.com weekly performance report',
+    input: {
+      subject: "Weekly performance report: Here's how you did last week",
+      rawText: "Your Trip.com performance report for Jun 23, 2026-Jun 29, 2026 is ready. We've provided some suggestions to help you attract and convert more travelers.",
+    },
+  },
+  {
+    name: 'agoda partner invoice notice',
+    input: {
+      subject: 'Invoice Jun 2026 - Agoda Boost Campaigns (84663540 Sandbox Hotel)',
+      rawText: "This is with reference to Agoda's invoice for your participation in Agoda Boost Campaigns (attached for your review).",
+    },
+  },
+]

@@ -18,7 +18,7 @@ import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, 
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail } from '../server/pms-service.mjs'
-import { bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
+import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
@@ -1138,6 +1138,12 @@ for (const fixture of bookingEmailParserFixtures) {
   assert.equal(parsed.details.amount, fixture.expected.amount, `${fixture.name} keeps the expected booking-email amount`)
   assert.equal(parsed.details.paymentStatus, fixture.expected.paymentStatus, `${fixture.name} keeps the expected booking-email payment status`)
   assert.equal(parsed.reviewReason, null, `${fixture.name} parses without a review blocker`)
+}
+
+for (const fixture of bookingEmailNoiseFixtures) {
+  const parsed = parseBookingEmailDetails(fixture.input)
+  assert.equal(parsed.eventType, 'UNKNOWN', `${fixture.name} stays out of the booking-email workflow`)
+  assert.match(parsed.reviewReason || '', /event type/i, `${fixture.name} remains queued for manual classification`)
 }
 
 const duplicateScopeFixture = createBookingEmailPrismaFixture()

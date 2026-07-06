@@ -617,6 +617,10 @@ function bookingEmailDuplicateFingerprint(input = {}, parsed = undefined) {
   return createHash('sha256').update(payload.join('\n')).digest('hex')
 }
 
+function hasNonBookingOperationalSignal(text) {
+  return /\b(account security|security update|two-factor authentication|new sign-?in|sign(?:ed)? in from a new device|performance report|weekly performance report|partner hub|invoice\b|boost campaigns|phishing|market manager)\b/i.test(String(text || ''))
+}
+
 export function parseBookingEmailDetails(input = {}) {
   const parsedInput = safeJsonObject(input.parsedDetails)
   const rawText = String(input.rawText || input.body || input.snippet || '')
@@ -624,30 +628,6 @@ export function parseBookingEmailDetails(input = {}) {
   const combined = `${subject}\n${rawText}`
   const lower = combined.toLowerCase()
   const stayDateRange = parseDateRangeFromNormalizedText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
-  const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
-  const cancellationSignal = /\b(cancelled|canceled|cancellation|booking cancelled|reservation cancelled)\b/i.test(combined)
-  const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(combined)
-  const paymentSignal = /\b(payment received|payment notice|paid in full|fully paid|deposit received|deposit paid|transfer received|amount received|prepaid)\b/i.test(combined)
-  const guestMessageSignal = /\b(guest message|message from guest|guest request|guest question|guest enquiry|special request from guest|question from guest)\b/i.test(combined)
-  const generalBookingSignal = lower.includes('booking') || lower.includes('reservation') || lower.includes('confirmation')
-
-  const explicitType = normalizeBookingEmailEventType(input.eventType)
-  const eventType = explicitType !== 'UNKNOWN'
-    ? explicitType
-    : cancellationSignal
-      ? 'CANCELLATION'
-      : modificationSignal
-        ? 'MODIFICATION'
-        : guestMessageSignal
-          ? 'GUEST_MESSAGE'
-          : newBookingSignal
-            ? 'NEW_BOOKING'
-            : paymentSignal
-              ? 'PAYMENT_NOTICE'
-              : generalBookingSignal
-                ? 'NEW_BOOKING'
-                : 'UNKNOWN'
-
   const channelRef = normalizeNullableString(input.channelRef || parsedInput.channelRef || parsedInput.confirmationCode)
     || firstMatch([
       /\b(?:confirmation number|confirmation no\.?|booking number|reservation number|booking id|reservation id|booking reference|reservation reference|booking ref|reservation ref|reference|ref)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i,
@@ -676,6 +656,34 @@ export function parseBookingEmailDetails(input = {}) {
   const children = Number(input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 0)
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
+  const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
+  const cancellationSignal = /\b(cancelled|canceled|cancellation|booking cancelled|reservation cancelled)\b/i.test(combined)
+  const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(combined)
+  const paymentSignal = /\b(payment received|payment notice|paid in full|fully paid|deposit received|deposit paid|transfer received|amount received|prepaid)\b/i.test(combined)
+  const guestMessageSignal = /\b(guest message|message from guest|guest request|guest question|guest enquiry|special request from guest|question from guest)\b/i.test(combined)
+  const nonBookingOperationalSignal = hasNonBookingOperationalSignal(combined)
+  const reservationStructureSignal = Boolean(channelRef || guestName || (checkIn && checkOut) || roomType)
+  const generalBookingSignal = !nonBookingOperationalSignal && (
+    /\b(your booking|your reservation|booking details|reservation details|booking reference|reservation reference|booking number|reservation number|booking id|reservation id|booking ref|reservation ref)\b/i.test(combined)
+    || (/\breservation\b/i.test(combined) && reservationStructureSignal)
+  )
+
+  const explicitType = normalizeBookingEmailEventType(input.eventType)
+  const eventType = explicitType !== 'UNKNOWN'
+    ? explicitType
+    : cancellationSignal
+      ? 'CANCELLATION'
+      : modificationSignal
+        ? 'MODIFICATION'
+        : guestMessageSignal
+          ? 'GUEST_MESSAGE'
+          : newBookingSignal
+            ? 'NEW_BOOKING'
+            : paymentSignal
+              ? 'PAYMENT_NOTICE'
+              : generalBookingSignal && reservationStructureSignal
+                ? 'NEW_BOOKING'
+                : 'UNKNOWN'
 
   const details = {
     guestName: guestName || undefined,
