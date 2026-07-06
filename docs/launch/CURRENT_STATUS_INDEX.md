@@ -1,13 +1,14 @@
 # Launch Current Status Index
 
-Status date: 2026-07-05.
+Status date: 2026-07-06.
 
-Verdict: not launch-signed-off. Slice 5BW configures backend Gmail OAuth on Render, deploys commit `c0ecc6b92bea14e4a9e8871979049a3f8f887a1a` as Render deploy `dep-d94reknlk1mc73bqndq0`, and imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events. The booking-email OAuth/backfill mechanics blocker is closed, but staff parser review is still required before applying events. Slice 5BU adds a read-only owner-run Cloudflare WAF/rate-limit proof helper, but no Cloudflare API token or zone ID is available in this environment, so WAF/rate-limit rule IDs and thresholds remain unproven. Production/account-owner proof remains open for approved users/auth/RBAC, real room inventory source, workflow acceptance or explicit local-only acceptance, live secret inventory/rotation, recovery owners, WAF/rate-limit ownership, staff booking-inbox review acceptance, and any owner-required staging DB E2E acceptance.
+Verdict: not launch-signed-off. Current `main` commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0` passed GitHub Actions run `28794902800` and is live on Render deploy `dep-d95qsnvavr4c73aqics0`. A 2026-07-06 issue-remediation pass refreshed production preflight, public-edge proof, live check, redacted Render Gmail OAuth status, local migration status, and guarded local disposable DB-mutating E2E. The engineering/runtime path is green, and issue `#136` is closed, but launch sign-off remains blocked by owner/provider/manual proof for production auth/RBAC/logout, manual route/workflow/localization acceptance, real room inventory source, backup/recovery ownership, WAF/rate-limit rules, and staff booking-inbox parser acceptance.
 
 ## Latest Slice
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
+| 2026-07-06 issue remediation pass | Current runtime/CI/local DB proof refreshed; remaining launch issues kept open for owner/provider/manual evidence | [2026-07-06-issue-remediation-pass.md](evidence/2026-07-06-issue-remediation-pass.md) |
 | Slice 5BZ - owner proof intake validator | Completed; local template and redaction validator added for owner/provider proof intake, not closure proof | [2026-07-05-slice-5bz-owner-proof-validator.md](evidence/2026-07-05-slice-5bz-owner-proof-validator.md) |
 | Slice 5BY - current main Render sync | Completed; green `main` commit `bf37942` was deployed to Render deploy `dep-d94s6oa8qa3s73d6bum0`, public checks pass, WAF proof remains owner-token/zone gated | [2026-07-05-slice-5by-current-main-render-sync.md](evidence/2026-07-05-slice-5by-current-main-render-sync.md) |
 | Slice 5BX - current status sync after Gmail backfill | Synced; final docs-only CI green, Gmail OAuth no longer the next setup task, launch sign-off still owner-proof gated | [2026-07-05-slice-5bx-status-sync.md](evidence/2026-07-05-slice-5bx-status-sync.md) |
