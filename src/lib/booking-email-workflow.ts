@@ -28,16 +28,62 @@ export interface BookingEmailApplyInput {
   reason?: string
 }
 
+const APPROVAL_MODES: BookingEmailApprovalMode[] = ['apply_parsed', 'create_reservation', 'link_reservation']
+const PAYMENT_METHOD_ALIASES: Record<string, NonNullable<BookingEmailParsedDetails['paymentMethod']>> = {
+  CASH: 'CASH',
+  CARD: 'CARD',
+  BANK: 'BANK_TRANSFER',
+  BANK_TRANSFER: 'BANK_TRANSFER',
+  TRANSFER: 'BANK_TRANSFER',
+  ONLINE: 'ONLINE',
+  OTA: 'ONLINE',
+  OTHER: 'OTHER',
+}
+
 function text(value: unknown) {
   return String(value || '').trim()
 }
 
-function numberOrUndefined(value: string, label: string) {
+function numberOrUndefined(value: string, label: string, options: { integer?: boolean; min?: number; exclusiveMin?: number } = {}) {
   const normalized = text(value)
   if (!normalized) return undefined
   const parsed = Number(normalized)
   if (!Number.isFinite(parsed)) throw new Error(`${label} must be a valid number.`)
+  if (options.integer && !Number.isInteger(parsed)) throw new Error(`${label} must be a whole number.`)
+  if (options.exclusiveMin !== undefined && parsed <= options.exclusiveMin) throw new Error(`${label} must be greater than ${options.exclusiveMin}.`)
+  if (options.min !== undefined && parsed < options.min) throw new Error(`${label} must be at least ${options.min}.`)
   return parsed
+}
+
+function normalizedDateOrUndefined(value: string, label: string) {
+  const normalized = text(value)
+  if (!normalized) return undefined
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new Error(`${label} must use YYYY-MM-DD format.`)
+  const parsed = new Date(`${normalized}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized) {
+    throw new Error(`${label} must be a valid calendar date.`)
+  }
+  return normalized
+}
+
+function normalizedCurrency(value: string) {
+  const normalized = text(value).toUpperCase()
+  if (!normalized) return undefined
+  if (!/^[A-Z]{3}$/.test(normalized)) throw new Error('Currency must be a 3-letter ISO currency code.')
+  return normalized
+}
+
+function normalizedPaymentMethod(value: string): BookingEmailParsedDetails['paymentMethod'] | undefined {
+  const key = text(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+  if (!key) return undefined
+  const method = PAYMENT_METHOD_ALIASES[key]
+  if (!method) throw new Error('Payment method must be one of: CASH, CARD, BANK_TRANSFER, ONLINE, OTHER.')
+  return method
+}
+
+function normalizedApprovalMode(mode: BookingEmailApprovalMode): BookingEmailApprovalMode {
+  if (APPROVAL_MODES.includes(mode)) return mode
+  throw new Error('Booking email approval mode is not supported.')
 }
 
 export function bookingEmailDetailsForm(event: BookingEmailEvent): BookingEmailDetailsForm {
@@ -71,9 +117,13 @@ export function bookingEmailActionRequiresReason(event: Pick<BookingEmailEvent, 
 }
 
 export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm): BookingEmailParsedDetails {
-  const amount = numberOrUndefined(form.amount, 'Amount')
-  const adults = numberOrUndefined(form.adults, 'Adults')
-  const children = numberOrUndefined(form.children, 'Children')
+  const checkIn = normalizedDateOrUndefined(form.checkIn, 'Check-in')
+  const checkOut = normalizedDateOrUndefined(form.checkOut, 'Check-out')
+  if (checkIn && checkOut && checkOut <= checkIn) throw new Error('Check-out must be after check-in.')
+
+  const amount = numberOrUndefined(form.amount, 'Amount', { exclusiveMin: 0 })
+  const adults = numberOrUndefined(form.adults, 'Adults', { integer: true, min: 1 })
+  const children = numberOrUndefined(form.children, 'Children', { integer: true, min: 0 })
   const details: BookingEmailParsedDetails = {}
 
   const assign = <K extends keyof BookingEmailParsedDetails>(key: K, value: BookingEmailParsedDetails[K] | undefined) => {
@@ -83,15 +133,15 @@ export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm)
   assign('guestName', text(form.guestName) || undefined)
   assign('guestEmail', text(form.guestEmail) || undefined)
   assign('guestPhone', text(form.guestPhone) || undefined)
-  assign('checkIn', text(form.checkIn) || undefined)
-  assign('checkOut', text(form.checkOut) || undefined)
+  assign('checkIn', checkIn)
+  assign('checkOut', checkOut)
   assign('roomType', text(form.roomType) || undefined)
   assign('adults', adults)
   assign('children', children)
   assign('amount', amount)
-  assign('currency', text(form.currency) || undefined)
+  assign('currency', normalizedCurrency(form.currency))
   assign('paymentStatus', text(form.paymentStatus) || undefined)
-  assign('paymentMethod', (text(form.paymentMethod) || undefined) as BookingEmailParsedDetails['paymentMethod'] | undefined)
+  assign('paymentMethod', normalizedPaymentMethod(form.paymentMethod))
   assign('paymentReference', text(form.paymentReference) || undefined)
   assign('channelRef', text(form.channelRef) || undefined)
   assign('specialRequests', text(form.specialRequests) || undefined)
@@ -101,14 +151,15 @@ export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm)
 }
 
 export function buildBookingEmailApprovePayload(input: BookingEmailApplyInput): BookingEmailApprovePayload {
+  const mode = normalizedApprovalMode(input.mode)
   const reservationId = text(input.reservationId)
   const reason = text(input.reason)
-  if (input.mode === 'link_reservation' && !reservationId) {
+  if (mode === 'link_reservation' && !reservationId) {
     throw new Error('Reservation ID is required before linking an email event.')
   }
 
   return {
-    mode: input.mode,
+    mode,
     reservationId: reservationId || undefined,
     reason: reason || undefined,
     editedDetails: bookingEmailParsedDetailsFromForm(input.form),
