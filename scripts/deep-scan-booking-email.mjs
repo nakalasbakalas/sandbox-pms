@@ -17,7 +17,10 @@ function fail(message) {
 function optionValue(name, fallback = null) {
   const prefix = `--${name}=`
   const found = process.argv.find((arg) => arg.startsWith(prefix))
-  return found ? found.slice(prefix.length) : fallback
+  if (found) return found.slice(prefix.length)
+  const splitArg = `--${name}`
+  const index = process.argv.indexOf(splitArg)
+  return index >= 0 ? process.argv[index + 1] : fallback
 }
 
 function boundedNumber(value, fallback, min, max) {
@@ -362,7 +365,7 @@ async function main() {
       nextActions: [
         'Run npm run booking-email:deep-scan -- --limit=500 in the target environment.',
         'Fix parser coverage and duplicate-scope defects in server/pms-service.mjs, then rerun with --strict.',
-        'Reprocess NEEDS_REVIEW and ERROR events after parser changes; do not auto-approve historical events without staff review.',
+        'Run npm run booking-email:reprocess -- --confirm for NEEDS_REVIEW and ERROR events after parser changes; do not auto-approve historical events without staff review.',
       ],
     }
 

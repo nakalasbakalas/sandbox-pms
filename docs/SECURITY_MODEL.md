@@ -12,6 +12,8 @@ Email-originated manager commands are untrusted input. Booking mailbox sync may 
 
 The parser is not an execution authority. The backend owns parsed-task schema validation, policy, approvals, emergency stop, queueing, worker signing, secrets, audit records, and notifications.
 
+Booking-email deep scans, backfills, proof output, and review/error reprocess commands must keep message ids, raw bodies, guest data, payment data, and credentials redacted in CLI output. Reprocessing may only return stored events to the review queue; it must not auto-approve or bypass staff review.
+
 OpenAI Responses parsing is optional and backend-only. Prompt input is redacted before submission, model output is strict-schema validated and backend-policy normalized, and provider failures fall back to deterministic parsing with a redacted reason.
 
 The OTA worker accepts only signed, typed tasks. It rejects unknown task types, unknown platforms, unsigned requests, replayed nonces, and credential-shaped payload fields.

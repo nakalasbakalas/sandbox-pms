@@ -91,7 +91,8 @@ Booking Inbox operators:
 3. Use Edit Parsed Details Then Apply when the parser is close but needs corrected stay, payment, or guest fields.
 4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings.
 5. Enter an operational reason for cancellation email actions.
-6. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
+6. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
+7. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
 Historical booking mailbox capture:
 
@@ -158,6 +159,18 @@ npm.cmd run booking-email:backfill -- --query "<approved Gmail query>" --limit 2
 ```
 
 10. For larger history loads, keep the same approved query and increase `--limit`/`--max-pages`; confirmed imports use `--import-batch-size 50` by default to avoid one giant database transaction.
+11. Before rollout or after parser changes, inspect the live queue without exposing message content:
+
+```powershell
+npm.cmd run booking-email:deep-scan -- --limit 500
+```
+
+12. After parser changes, reprocess only review/error events and keep them in staff review:
+
+```powershell
+npm.cmd run booking-email:reprocess -- --confirm
+npm.cmd run booking-email:deep-scan -- --limit 500 --strict
+```
 11. Open `/booking-inbox` to visually inspect Needs Review, Errors, Processed, and Ignored tabs. Confirmed backfill does not approve, create, modify, cancel, charge, or assign reservations by itself.
 
 Public edge posture proof:
