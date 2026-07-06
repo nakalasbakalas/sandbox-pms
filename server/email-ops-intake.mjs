@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { canPerformAction } from './rbac.mjs'
 
 const DEFAULT_EMAIL_OPS_COMMAND_PREFIX = '/ops'
@@ -78,6 +79,17 @@ export function extractEmailOpsCommandText(event = {}, env = process.env) {
   return null
 }
 
+function emailOpsFallbackFingerprint(event = {}) {
+  const normalizedSender = normalizeEmailOpsSender(event.sender || event.from) || normalizeText(event.sender || event.from).toLowerCase()
+  const payload = [
+    normalizedSender,
+    normalizeText(event.subject).toLowerCase(),
+    normalizeText(event.receivedAt || event.date || event.internalDate),
+    eventTextCandidates(event).join('\n').slice(0, 4000),
+  ].join('\n---\n')
+  return createHash('sha256').update(payload).digest('hex').slice(0, 32)
+}
+
 export function emailOpsCommandIdempotencyKey(event = {}, index = 0) {
   const id = normalizeNullableString(
     event.sourceEmailId
@@ -87,7 +99,10 @@ export function emailOpsCommandIdempotencyKey(event = {}, index = 0) {
       || event.id
       || event.threadId,
   )
-  return `email:${id || `event-${index}`}`
+  if (id) return `email:${id}`
+
+  const fingerprint = emailOpsFallbackFingerprint(event)
+  return fingerprint ? `email:fingerprint:${fingerprint}` : `email:event-${index}`
 }
 
 async function findMappedActor(prisma, actorRef) {
