@@ -77,6 +77,24 @@ export interface BookingEmailSource {
 export interface BookingEmailStatus {
   configured: boolean
   credentialMode?: 'access_token' | 'refresh_token' | 'missing' | 'not-required'
+  credentialStatus?: {
+    gmailOauthClientConfigured: boolean
+    refreshTokenConfigured: boolean
+    accessTokenConfigured?: boolean
+    targetMailboxConfigured: boolean
+    targetMailbox?: string
+    userId?: string
+    scopes?: string[]
+    missing?: string[]
+    remediation?: string
+    connectionTest?: {
+      checked: boolean
+      status: 'pass' | 'fail' | 'not_configured' | 'not_required' | 'not_tested'
+      message?: string
+      authenticatedMailbox?: string
+      targetMailboxMatchesAuthenticatedAccount?: boolean
+    }
+  }
   lastSyncAt?: string
   nextSyncAt?: string
   needsReview: number

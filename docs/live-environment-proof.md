@@ -1,9 +1,18 @@
 # Live Environment Proof Register
 
 Latest validation refresh: 2026-07-05.
-Latest external provider evidence refresh: 2026-07-05T09:40+07:00.
+Latest external provider evidence refresh: 2026-07-05T22:20+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-05T22:20+07:00 Active Custom-Domain Service Sync
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: sync the committed blueprint and docs to the active Render service mapping, then revalidate public login on the live custom domain. No secret values, production database shell, production data mutation, Gmail body, Cloudflare token, WAF mutation, screenshot capture, or DB-mutating E2E was performed.
+- Render deploy `dep-d9577b28qa3s73dl81d0` is live on `sandbox-hotel-pms`, serving commit `a01838a956f24164167ba7f91a7620a37de7f36d`, finished `2026-07-05T15:13:14.199252Z`.
+- Public custom domains `https://book.sandboxhotel.com` and `https://staff.sandboxhotel.com` are attached to `sandbox-hotel-pms`; the live service env keeps `APP_URL=https://book.sandboxhotel.com` and the browser allowlist aligned to those public origins plus the Render host.
+- Headless browser login to `https://book.sandboxhotel.com` succeeded and reached the authenticated PMS dashboard.
+- A direct login `POST` with browser origin `https://book.sandboxhotel.com` returned `200` and included `access-control-allow-origin: https://book.sandboxhotel.com`.
 
 ## 2026-07-05T09:40+07:00 Current Main Render Sync
 

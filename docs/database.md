@@ -6,24 +6,27 @@ This app uses Prisma with PostgreSQL. The Prisma schema is in `prisma/schema.pri
 
 For Windows Docker installation and troubleshooting, see [docker-setup-windows.md](docker-setup-windows.md).
 
-Start the local databases:
+Bootstrap the local databases and seed the login-ready admin:
 
 ```bash
-npm run db:up
+npm run db:bootstrap
 ```
 
-Copy the local env template and set any local-only secrets:
+Copy the local env template and set any local-only secrets before bootstrap:
 
 ```bash
 cp .env.local.example .env
 cp .env.local.example .env.local
-npm run db:ready
-npm test
 ```
 
 Prisma and the Node server read `.env`; Vite-compatible local tooling can also read `.env.local`.
 
-The compose stack creates:
+`db:bootstrap` auto-detects either:
+
+- A native PostgreSQL 16 service already listening on `localhost:5432`.
+- The Docker Compose stack on `localhost:55432`.
+
+Either path creates:
 
 - `sandbox_hotel_dev` for normal local runtime and migration checks.
 - `sandbox_hotel_e2e` for database-mutating E2E.
@@ -36,7 +39,9 @@ E2E_DATABASE_URL="<LOCAL_E2E_DATABASE_URL>"
 ALLOW_DB_E2E=false
 ```
 
-`DATABASE_URL` is for normal runtime, migrations, and seed. `E2E_DATABASE_URL` is only for disposable or staging E2E. Keep `ALLOW_DB_E2E=false` unless you are intentionally running mutating E2E against a safe database. Local Docker maps host port `55432` to PostgreSQL's container port `5432` to avoid conflicts with any existing local Postgres service.
+`DATABASE_URL` is for normal runtime, migrations, and seed. `E2E_DATABASE_URL` is only for disposable or staging E2E. Keep `ALLOW_DB_E2E=false` unless you are intentionally running mutating E2E against a safe database.
+
+The bootstrap script will write the active local DB URLs into `.env.local`, and it will generate a local `SESSION_SECRET` when that file still has the template placeholder. The rest of the repo then uses the same backend path on later commands. The Docker path keeps the existing host-port mapping of `55432 -> 5432`. The native path uses PostgreSQL 16 directly on `5432`.
 
 ## Prisma Commands
 
@@ -61,6 +66,8 @@ Set `SEED_MODE` explicitly when the target matters:
 - `SEED_MODE=prod-safe`: production-safe property and room-type configuration only, plus optional explicit users when `SEED_USERS_JSON` is set, or a legacy bootstrap admin when `SEED_ADMIN_EMAIL` and a seed password/hash are explicitly set.
 
 The seed is idempotent and uses upserts. It does not delete existing data. `prod-safe` mode does not create fake guests, reservations, payments, invoices, operational room inventory, or demo staff users.
+
+For a login-ready local admin, keep `SEED_ADMIN_EMAIL` plus one of `SEED_ADMIN_PASSWORD_HASH`, `SEED_USER_PASSWORD_HASH`, or `SEED_ADMIN_PASSWORD` in `.env.local` before running `npm run db:bootstrap`. If you need a hash for a local-only password, generate it with `npm run security:hash-password -- "<your-local-password>"`.
 
 Generate production secret material with:
 

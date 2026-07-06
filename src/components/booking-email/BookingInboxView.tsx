@@ -103,6 +103,18 @@ function credentialModeLabel(mode?: string) {
   return 'Not configured'
 }
 
+function yesNo(value?: boolean) {
+  return value ? 'Yes' : 'No'
+}
+
+function gmailConnectionLabel(status?: string) {
+  if (status === 'pass') return 'Pass'
+  if (status === 'fail') return 'Fail'
+  if (status === 'not_configured') return 'Not configured'
+  if (status === 'not_required') return 'Not required'
+  return 'Not tested'
+}
+
 export function BookingInboxView() {
   const { events, sources, status, loading, error, notConfigured, apiAvailable, mode, reload } = useBookingEmailInbox()
   const { navigate } = useNavigation()
@@ -308,7 +320,13 @@ export function BookingInboxView() {
                   <p className="mt-1 text-xs text-amber-900/70">
                     Current mode: {mode === 'local-draft' ? 'local draft data only' : 'server API checked'}.
                     {status?.credentialMode ? ` Mailbox credential: ${credentialModeLabel(status.credentialMode)}.` : ''}
+                    {status?.credentialStatus?.connectionTest ? ` Gmail API test: ${gmailConnectionLabel(status.credentialStatus.connectionTest.status)}.` : ''}
                   </p>
+                  {status?.credentialStatus?.missing?.length ? (
+                    <p className="mt-1 text-xs text-amber-900/70">
+                      Missing server setting: {status.credentialStatus.missing.join(', ')}.
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <Button variant="outline" className="border-amber-300 bg-white/70" onClick={() => setActiveTab('SOURCES')}>
@@ -380,6 +398,20 @@ export function BookingInboxView() {
                     <div className="text-sm font-semibold">Configured sources</div>
                     <div className="mt-2 text-xs text-muted-foreground">
                       Mailbox credential mode: {credentialModeLabel(status?.credentialMode)}
+                    </div>
+                    <div className="mt-3 grid gap-1.5 rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                      <div>Gmail OAuth client configured: {yesNo(status?.credentialStatus?.gmailOauthClientConfigured)}</div>
+                      <div>Refresh token configured: {yesNo(status?.credentialStatus?.refreshTokenConfigured)}</div>
+                      <div>Target mailbox configured: {yesNo(status?.credentialStatus?.targetMailboxConfigured)}</div>
+                      <div>Target mailbox: {status?.credentialStatus?.targetMailbox || 'Not configured'}</div>
+                      <div>Gmail API connection test: {gmailConnectionLabel(status?.credentialStatus?.connectionTest?.status)}</div>
+                      {status?.credentialStatus?.connectionTest?.message && (
+                        <div className="text-amber-700">{status.credentialStatus.connectionTest.message}</div>
+                      )}
+                      {status?.lastSyncAt && <div>Last sync: {formatReceived(status.lastSyncAt)}</div>}
+                      {status?.credentialStatus?.missing?.length ? (
+                        <div>Missing setting: {status.credentialStatus.missing.join(', ')}</div>
+                      ) : null}
                     </div>
                     {sources.length === 0 ? (
                       <p className="mt-2 text-sm text-muted-foreground">No mailbox sources are configured in the PMS backend yet.</p>

@@ -17,7 +17,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
@@ -779,17 +779,25 @@ const bookingEmailReady = bookingEmailCapabilities.resolveBookingEmailCapabiliti
 assert.equal(bookingEmailReady.canApplyEvents, true, 'booking-email UI applies events when backend routes are available')
 assert.equal(bookingEmailReady.canSyncMailbox, true, 'booking-email UI syncs mailbox when backend and provider credentials are ready')
 
+const missingGmailCredentialStatus = bookingEmailGmailCredentialStatus({})
+assert.equal(missingGmailCredentialStatus.configured, false, 'booking-email Gmail credential status reports missing credentials')
+assert.equal(missingGmailCredentialStatus.mode, 'missing', 'booking-email Gmail credential status names missing mode')
+assert.equal(missingGmailCredentialStatus.hasAccessToken, false, 'booking-email Gmail credential status reports missing access token')
+assert.equal(missingGmailCredentialStatus.hasRefreshToken, false, 'booking-email Gmail credential status reports missing refresh-token tuple')
+assert.equal(missingGmailCredentialStatus.oauthClientConfigured, false, 'booking-email Gmail credential status reports missing OAuth client')
+assert.equal(missingGmailCredentialStatus.refreshTokenConfigured, false, 'booking-email Gmail credential status reports missing refresh token')
+assert.equal(missingGmailCredentialStatus.targetMailboxConfigured, true, 'booking-email Gmail credential status uses the default target mailbox when env is absent')
+assert.equal(missingGmailCredentialStatus.targetMailbox, 'booking@sandboxhotel.com', 'booking-email Gmail credential status reports the target mailbox without secrets')
 assert.deepEqual(
-  bookingEmailGmailCredentialStatus({}),
-  {
-    configured: false,
-    mode: 'missing',
-    hasAccessToken: false,
-    hasRefreshToken: false,
-    userId: 'me',
-  },
-  'booking-email Gmail credential status reports missing credentials without secrets',
+  missingGmailCredentialStatus.missing,
+  [
+    'BOOKING_EMAIL_GMAIL_CLIENT_ID or GMAIL_CLIENT_ID',
+    'BOOKING_EMAIL_GMAIL_CLIENT_SECRET or GMAIL_CLIENT_SECRET',
+    'BOOKING_EMAIL_GMAIL_REFRESH_TOKEN or GMAIL_REFRESH_TOKEN',
+  ],
+  'booking-email Gmail credential status reports exact non-secret missing keys',
 )
+assert.equal(JSON.stringify(missingGmailCredentialStatus).includes('fixture'), false, 'booking-email Gmail credential status omits secret values')
 assert.equal(
   bookingEmailGmailCredentialStatus({
     BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
@@ -807,6 +815,27 @@ assert.equal(
   'refresh_token',
   'booking-email Gmail credential status supports backend refresh-token credentials',
 )
+const gmailConnectionPass = await testBookingEmailGmailConnection({
+  env: {
+    BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture',
+    BOOKING_EMAIL_PRIMARY_MAILBOX: 'booking@sandboxhotel.com',
+  },
+  fetchImpl: async (url, request) => {
+    assert.equal(String(url), 'https://gmail.googleapis.com/gmail/v1/users/me/profile', 'booking-email Gmail connection test uses the profile endpoint')
+    assert.equal(request.headers.authorization, 'Bearer gmail-access-fixture', 'booking-email Gmail connection test authenticates with backend token')
+    return new Response(JSON.stringify({ emailAddress: 'booking@sandboxhotel.com', messagesTotal: 10 }), { status: 200 })
+  },
+})
+assert.equal(gmailConnectionPass.status, 'pass', 'booking-email Gmail connection test passes on profile response')
+assert.equal(gmailConnectionPass.targetMailboxMatchesAuthenticatedAccount, true, 'booking-email Gmail connection test compares authenticated account to target mailbox')
+const gmailConnectionMissing = await testBookingEmailGmailConnection({ env: {} })
+assert.equal(gmailConnectionMissing.status, 'not_configured', 'booking-email Gmail connection test reports missing credentials without calling Gmail')
+const gmailConnectionFail = await testBookingEmailGmailConnection({
+  env: { BOOKING_EMAIL_GMAIL_ACCESS_TOKEN: 'gmail-access-fixture' },
+  fetchImpl: async () => new Response(JSON.stringify({ error: { message: 'invalid token=gmail-access-fixture' } }), { status: 401 }),
+})
+assert.equal(gmailConnectionFail.status, 'fail', 'booking-email Gmail connection test reports provider failures')
+assert.equal(gmailConnectionFail.message.includes('gmail-access-fixture'), false, 'booking-email Gmail connection test redacts provider failures')
 let gmailRefreshRequestBody = null
 const refreshedGmailToken = await resolveBookingEmailGmailAccessToken({
   env: {

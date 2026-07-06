@@ -76,7 +76,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 ## Security
 
 - API keys and OTA credentials are not returned to the browser.
-- Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, and refresh failures redact token/client-secret values.
+- Booking-email Gmail sync can use backend-only OAuth access-token or refresh-token credentials, reports non-secret OAuth client, refresh token, target mailbox, Gmail API profile-test, last-sync, and missing-key status through `/api/booking-email/status`, and refresh/provider failures redact token/client-secret values.
 - Gmail OAuth Render setup generates a consent URL with offline access and readonly scope by default, can read a local Google OAuth client JSON file without printing values, keeps Gmail send scope opt-in, exchanges authorization codes through Google, and redacts authorization codes, client secrets, access tokens, and refresh tokens from surfaced errors/output.
 - Render Gmail OAuth status reports current Render key presence and supported credential-path readiness without values; dry-run reports missing/present local booking-email Gmail keys without values; apply mode updates only the approved booking-email Gmail env-var keys.
 - Booking-email capture proof reports aggregate current PMS email-event counts without message ids, sender/recipient, subject, raw body, guest, payment, or credential data.

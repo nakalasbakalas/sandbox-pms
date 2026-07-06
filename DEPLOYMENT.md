@@ -44,6 +44,8 @@ The intended Render web service is `sandbox-hotel-pms` at `https://sandbox-hotel
 
 Current live evidence is tracked in [docs/live-environment-proof.md](docs/live-environment-proof.md). On 2026-05-31, the public custom domain `https://book.sandboxhotel.com` resolved to `sandbox-hotel-pms-v43m.onrender.com`; that service was live on the same commit as `sandbox-hotel-pms` and had completed the starter-plan predeploy migration and seed path. The committed Blueprint now uses `https://book.sandboxhotel.com` as `APP_URL` and includes the verified Render hosts in `ALLOWED_ORIGINS`.
 
+Current live Render metadata now attaches `https://book.sandboxhotel.com` and `https://staff.sandboxhotel.com` to the `sandbox-hotel-pms` service (`srv-d8bchr1akrks73disaog`). Keep the committed Blueprint and the live env in sync with that mapping so future deploys preserve the same browser allowlist.
+
 Apply a new Blueprint only from `https://github.com/nakalasbakalas/sandbox-pms` if infrastructure-as-code management is restored.
 
 Render internal database URLs only resolve from inside Render's private network. Use Render's managed database link or the external database URL for local migration checks. Never commit either URL.

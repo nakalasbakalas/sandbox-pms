@@ -36,16 +36,16 @@ The intended Render web service is connected to `https://github.com/nakalasbakal
 
 The committed Blueprint defines the intended production resources:
 
-- web service: `sandbox-hotel-pms`
+- web service: `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`)
 - managed PostgreSQL database: `sandbox-hotel-pms-db-v43m`
 - health check: `/healthz`
 - production auth mode: `VITE_PMS_API_MODE=server`
 - production app URL: `APP_URL=https://book.sandboxhotel.com`
-- browser API allowlist: `ALLOWED_ORIGINS=https://book.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com,https://sandbox-hotel-pms.onrender.com`
+- browser API allowlist: `ALLOWED_ORIGINS=https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms.onrender.com`
 - production seed mode: `SEED_MODE=prod-safe`
 - generated session secret: `SESSION_SECRET`
 
-Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). At that time, the public custom domain `https://book.sandboxhotel.com` reached `sandbox-hotel-pms-v43m`, not the Blueprint-named `sandbox-hotel-pms` service. Both services were live on commit `3de37ab`; `sandbox-hotel-pms-v43m` was confirmed on the `starter` plan and confirmed to run the predeploy migration and seed path in the gathered logs. Current Render metadata includes `buildPlan=starter` for `sandbox-hotel-pms`, but its latest deploy log still reported predeploy as skipped. Before launch sign-off, choose the single Render service owner for the custom domain and rollback path.
+Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). Current Render metadata shows the public custom domain `https://book.sandboxhotel.com` and staff domain `https://staff.sandboxhotel.com` attached to `sandbox-hotel-pms`; keep the committed Blueprint and the live service env aligned to that mapping so browser-origin checks continue to accept the public site.
 
 Apply a new Blueprint only from a repository branch that contains the current `render.yaml`. The Dashboard path is:
 
@@ -57,7 +57,7 @@ Fill all `sync: false` values in Render's secret manager before first deploy. Do
 
 The committed Blueprint uses the `starter` instance type so Render can run `preDeployCommand`. If Render skips pre-deploy commands, apply migrations and `SEED_MODE=prod-safe` seed through a reviewed one-time Render build command or move the service to a supported instance type before relying on pre-deploy.
 
-If a custom domain replaces the default Render host, update both `APP_URL` and `ALLOWED_ORIGINS` before deploying. The server blocks browser-origin `/api/*` requests that are not same-origin or listed in `ALLOWED_ORIGINS`; non-browser webhooks without an `Origin` header still work.
+If a custom domain replaces the default Render host, update both `APP_URL` and `ALLOWED_ORIGINS` before deploying. The server blocks browser-origin `/api/*` requests that are not same-origin or listed in `ALLOWED_ORIGINS`; non-browser webhooks without an `Origin` header still work. For the current production mapping, `book.sandboxhotel.com` and `staff.sandboxhotel.com` must both remain in the allowlist.
 
 ## LINE Live Account
 

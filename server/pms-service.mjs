@@ -363,6 +363,7 @@ const BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE = 'Gmail API OAuth credent
 const VALID_BOOKING_EMAIL_STATUSES = ['NEEDS_REVIEW', 'PROCESSED', 'ERROR', 'IGNORED']
 const VALID_BOOKING_EMAIL_EVENT_TYPES = ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE', 'GUEST_MESSAGE', 'UNKNOWN']
 const GMAIL_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+const GMAIL_DEFAULT_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 const CLIENT_PROVIDER_BY_DB = {
   GMAIL: 'gmail',
   IMAP: 'imap',
@@ -382,6 +383,16 @@ function primaryBookingMailbox() {
   return String(process.env.BOOKING_EMAIL_PRIMARY_MAILBOX || DEFAULT_BOOKING_EMAIL_MAILBOX).trim().toLowerCase()
 }
 
+function primaryBookingMailboxFromEnv(env = process.env) {
+  return String(env.BOOKING_EMAIL_PRIMARY_MAILBOX || DEFAULT_BOOKING_EMAIL_MAILBOX).trim().toLowerCase()
+}
+
+function gmailScopeList(env = process.env) {
+  const configured = normalizeNullableString(env.BOOKING_EMAIL_GMAIL_SCOPES || env.GMAIL_SCOPES)
+  if (!configured) return GMAIL_DEFAULT_SCOPES
+  return configured.split(/[\s,]+/).map((scope) => scope.trim()).filter(Boolean)
+}
+
 function bookingEmailGmailAccessToken(env = process.env) {
   return normalizeNullableString(env.BOOKING_EMAIL_GMAIL_ACCESS_TOKEN || env.GMAIL_ACCESS_TOKEN)
 }
@@ -397,13 +408,31 @@ function bookingEmailGmailRefreshCredentials(env = process.env) {
 export function bookingEmailGmailCredentialStatus(env = process.env) {
   const hasAccessToken = Boolean(bookingEmailGmailAccessToken(env))
   const refreshCredentials = bookingEmailGmailRefreshCredentials(env)
-  const hasRefreshToken = Boolean(refreshCredentials.clientId && refreshCredentials.clientSecret && refreshCredentials.refreshToken)
+  const oauthClientConfigured = Boolean(refreshCredentials.clientId && refreshCredentials.clientSecret)
+  const refreshTokenConfigured = Boolean(refreshCredentials.refreshToken)
+  const hasRefreshToken = Boolean(oauthClientConfigured && refreshTokenConfigured)
+  const missing = []
+  if (!hasAccessToken && !refreshCredentials.clientId) missing.push('BOOKING_EMAIL_GMAIL_CLIENT_ID or GMAIL_CLIENT_ID')
+  if (!hasAccessToken && !refreshCredentials.clientSecret) missing.push('BOOKING_EMAIL_GMAIL_CLIENT_SECRET or GMAIL_CLIENT_SECRET')
+  if (!hasAccessToken && !refreshCredentials.refreshToken) missing.push('BOOKING_EMAIL_GMAIL_REFRESH_TOKEN or GMAIL_REFRESH_TOKEN')
+  const targetMailbox = primaryBookingMailboxFromEnv(env)
+  if (!targetMailbox) missing.push('BOOKING_EMAIL_PRIMARY_MAILBOX')
   return {
     configured: hasAccessToken || hasRefreshToken,
     mode: hasAccessToken ? 'access_token' : hasRefreshToken ? 'refresh_token' : 'missing',
     hasAccessToken,
     hasRefreshToken,
+    oauthClientConfigured,
+    refreshTokenConfigured,
+    targetMailboxConfigured: Boolean(targetMailbox),
+    targetMailbox,
+    userIdConfigured: Boolean(normalizeNullableString(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID)),
     userId: normalizeNullableString(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID) || 'me',
+    scopes: gmailScopeList(env),
+    missing,
+    remediation: missing.length
+      ? `Configure ${missing.join(', ')} in the server secret store. Do not use a Gmail mailbox password.`
+      : undefined,
   }
 }
 
@@ -764,15 +793,60 @@ async function fetchGmailJson(url, token, fetchImpl = fetch) {
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new PmsValidationError(payload?.error?.message || 'Gmail API request failed.', response.status)
+    throw new PmsValidationError(redactedCredentialMessage(payload?.error?.message || 'Gmail API request failed.'), response.status)
   }
   return payload
+}
+
+export async function testBookingEmailGmailConnection(options = {}) {
+  const env = options.env || process.env
+  const credentials = bookingEmailGmailCredentialStatus(env)
+  if (!credentials.configured) {
+    return {
+      checked: false,
+      status: 'not_configured',
+      message: credentials.remediation || 'Gmail API OAuth credentials are not configured.',
+    }
+  }
+
+  try {
+    const token = await resolveBookingEmailGmailAccessToken({ env, fetchImpl: options.fetchImpl || fetch })
+    if (!token) {
+      return {
+        checked: false,
+        status: 'not_configured',
+        message: 'Gmail API OAuth credentials are not configured.',
+      }
+    }
+    const userId = encodeURIComponent(credentials.userId || 'me')
+    const profile = await fetchGmailJson(`https://gmail.googleapis.com/gmail/v1/users/${userId}/profile`, token, options.fetchImpl || fetch)
+    const authenticatedMailbox = normalizeNullableString(profile?.emailAddress)?.toLowerCase() || null
+    return {
+      checked: true,
+      status: 'pass',
+      message: authenticatedMailbox && authenticatedMailbox !== credentials.targetMailbox
+        ? `Gmail API is reachable, but the authenticated Gmail account (${authenticatedMailbox}) is not the target mailbox ${credentials.targetMailbox}. Confirm forwarding, delegation, or BOOKING_EMAIL_GMAIL_USER_ID before syncing.`
+        : 'Gmail API connection test passed.',
+      authenticatedMailbox: authenticatedMailbox || undefined,
+      targetMailboxMatchesAuthenticatedAccount: authenticatedMailbox ? authenticatedMailbox === credentials.targetMailbox : undefined,
+    }
+  } catch (error) {
+    return {
+      checked: true,
+      status: 'fail',
+      message: redactedCredentialMessage(error instanceof Error ? error.message : String(error)),
+    }
+  }
 }
 
 export async function fetchGmailEventsForSource(source, options = {}) {
   const token = await resolveBookingEmailGmailAccessToken(options)
   if (!token) {
-    throw new PmsValidationError('Gmail API OAuth credentials are not configured for booking email sync.', 503)
+    const status = bookingEmailGmailCredentialStatus(options.env || process.env)
+    throw new PmsValidationError(
+      status.remediation || 'Gmail API OAuth credentials are not configured for booking email sync.',
+      503,
+    )
   }
   const env = options.env || process.env
   const userId = encodeURIComponent(env.BOOKING_EMAIL_GMAIL_USER_ID || env.GMAIL_USER_ID || 'me')
@@ -2132,7 +2206,7 @@ export async function updateBookingEmailSource(prisma, sourceId, input, actor) {
 }
 
 export async function getBookingEmailStatus(prisma) {
-  return prisma.$transaction(async (tx) => {
+  const status = await prisma.$transaction(async (tx) => {
     await ensurePrimaryBookingEmailSource(tx)
     const property = await getProperty(tx)
     const sources = await tx.bookingEmailSource.findMany({
@@ -2154,15 +2228,53 @@ export async function getBookingEmailStatus(prisma) {
     return {
       configured,
       credentialMode: gmailEnabled ? gmailCredentials.mode : 'not-required',
+      credentialStatus: gmailEnabled
+        ? {
+            gmailOauthClientConfigured: gmailCredentials.oauthClientConfigured,
+            refreshTokenConfigured: gmailCredentials.refreshTokenConfigured,
+            accessTokenConfigured: gmailCredentials.hasAccessToken,
+            targetMailboxConfigured: gmailCredentials.targetMailboxConfigured,
+            targetMailbox: gmailCredentials.targetMailbox,
+            userId: gmailCredentials.userId,
+            scopes: gmailCredentials.scopes,
+            missing: gmailCredentials.missing,
+            remediation: gmailCredentials.remediation,
+            connectionTest: {
+              checked: false,
+              status: gmailCredentials.configured ? 'not_tested' : 'not_configured',
+              message: gmailCredentials.configured ? 'Gmail API connection test was not run yet.' : gmailCredentials.remediation,
+            },
+          }
+        : {
+            gmailOauthClientConfigured: false,
+            refreshTokenConfigured: false,
+            accessTokenConfigured: false,
+            targetMailboxConfigured: false,
+            targetMailbox: primaryBookingMailbox(),
+            userId: 'not-required',
+            scopes: [],
+            missing: [],
+            connectionTest: {
+              checked: false,
+              status: 'not_required',
+              message: 'No enabled Gmail booking-email source requires OAuth credentials.',
+            },
+          },
       lastSyncAt: isoOrUndefined(lastSyncAt),
       needsReview,
       processedToday,
       errors,
       ignored,
       sources: sources.map(bookingEmailSourceResponse),
-      message: configured ? undefined : `Primary booking mailbox ${primaryBookingMailbox()} is registered, but Gmail API OAuth credentials are not configured on the server.`,
+      message: configured
+        ? undefined
+        : `Primary booking mailbox ${primaryBookingMailbox()} is registered, but Gmail API OAuth credentials are not configured on the server. ${gmailCredentials.remediation || ''}`.trim(),
     }
   })
+  if (status.credentialMode === 'access_token' || status.credentialMode === 'refresh_token') {
+    status.credentialStatus.connectionTest = await testBookingEmailGmailConnection()
+  }
+  return status
 }
 
 export async function listBookingEmailEvents(prisma, filters = {}) {

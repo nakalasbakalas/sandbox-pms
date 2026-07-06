@@ -23,15 +23,15 @@ Use `npm.cmd`/`npx.cmd` from PowerShell if script execution blocks `npm.ps1` or 
 
 ```bash
 npm install
-npm run db:up
 cp .env.local.example .env
 cp .env.local.example .env.local
-npm run db:doctor
-npm run db:ready
+npm run db:bootstrap
 npm run dev
 ```
 
-Database setup, seed modes, disposable E2E safety, and Render database wiring are documented in [docs/database.md](docs/database.md). Windows Docker setup is documented in [docs/docker-setup-windows.md](docs/docker-setup-windows.md).
+`db:bootstrap` uses native PostgreSQL 16 on `localhost:5432` when that service is already running, and falls back to the Docker Compose database stack on `localhost:55432` when Docker Desktop is available instead.
+
+Database setup, seed modes, disposable E2E safety, and Render database wiring are documented in [docs/database.md](docs/database.md). Windows Docker and native PostgreSQL setup are documented in [docs/docker-setup-windows.md](docs/docker-setup-windows.md).
 
 ## Validation
 

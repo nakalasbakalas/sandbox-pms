@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sandbox-hotel-pms-v43m
+    name: sandbox-hotel-pms
     runtime: node
     plan: starter
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build
@@ -16,7 +16,7 @@ services:
       - key: APP_URL
         value: https://book.sandboxhotel.com
       - key: ALLOWED_ORIGINS
-        value: https://book.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com,https://sandbox-hotel-pms.onrender.com
+        value: https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms.onrender.com
       - key: ALLOW_PUBLIC_SETUP
         value: false
       - key: BOOKING_EMAIL_PRIMARY_MAILBOX

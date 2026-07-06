@@ -28,6 +28,18 @@ function summarizeLocalStatus(events: BookingEmailEvent[], sources: BookingEmail
   }
 }
 
+function bookingMailboxReady(status: BookingEmailStatus) {
+  const connectionStatus = status.credentialStatus?.connectionTest?.status
+  return Boolean(status.configured && connectionStatus !== 'fail' && connectionStatus !== 'not_configured')
+}
+
+function bookingMailboxStatusMessage(status: BookingEmailStatus) {
+  if (status.message) return status.message
+  const connectionMessage = status.credentialStatus?.connectionTest?.message
+  if (connectionMessage && status.credentialStatus?.connectionTest?.status !== 'pass') return connectionMessage
+  return null
+}
+
 export function useBookingEmailInbox(): BookingEmailInboxState {
   const [localEvents] = useKV<BookingEmailEvent[]>('booking-email-events', [])
   const [localSources] = useKV<BookingEmailSource[]>('booking-email-sources', [])
@@ -70,10 +82,11 @@ export function useBookingEmailInbox(): BookingEmailInboxState {
       setStatus(statusPayload.data)
       setEvents(eventsPayload.data)
       setSources(sourcesPayload.data)
-      setNotConfigured(!statusPayload.data.configured)
+      const mailboxReady = bookingMailboxReady(statusPayload.data)
+      setNotConfigured(!mailboxReady)
       setApiAvailable(true)
       setMode('server')
-      setError(statusPayload.data.configured ? null : statusPayload.data.message || null)
+      setError(mailboxReady ? null : bookingMailboxStatusMessage(statusPayload.data))
     } catch (caught) {
       if (isBookingEmailApiNotConfigured(caught)) {
         setEvents([])

@@ -46,7 +46,15 @@ docker run hello-world
 
 ## Run The Project Database
 
-The project maps host port `55432` to container port `5432` to avoid conflicts with an existing local PostgreSQL on `5432`.
+Use one command to bootstrap the local database path that is already available on the machine:
+
+```powershell
+npm run db:bootstrap
+```
+
+`db:bootstrap` prefers a native PostgreSQL 16 service already listening on `localhost:5432`. If that service is not available, it falls back to the Docker Compose database stack on `localhost:55432`.
+
+If you want the Docker-only path:
 
 ```powershell
 npm run db:up
@@ -54,7 +62,7 @@ npm run db:doctor
 npm run db:ready
 ```
 
-For mutating E2E:
+For mutating E2E after either path:
 
 ```powershell
 $env:ALLOW_DB_E2E = 'true'
@@ -92,9 +100,10 @@ Hardware virtualization disabled:
 
 Port `5432` already in use:
 
-- This project intentionally uses host port `55432`.
-- Confirm `.env` and `.env.local` use `localhost:55432`.
+- This is expected when the native PostgreSQL 16 service path is active.
+- If you want the Docker Compose path, confirm `.env` and `.env.local` use `localhost:55432`.
 - Confirm `docker-compose.db.yml` has `55432:5432`.
+- If you want the native path, `db:bootstrap` will use `localhost:5432` automatically when PostgreSQL 16 is already listening there.
 
 Database credentials mismatch:
 
@@ -102,6 +111,7 @@ Database credentials mismatch:
 - Expected local password: `sandbox`.
 - Expected local databases: `sandbox_hotel_dev` and `sandbox_hotel_e2e`.
 - Run `npm run db:doctor` to see the sanitized connection details and connectivity result.
+- If you are using the native PostgreSQL path, confirm the PostgreSQL 16 service is running on `5432` and rerun `npm run db:bootstrap`.
 
 Container exists but the old volume has wrong credentials:
 

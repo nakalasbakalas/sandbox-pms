@@ -11,7 +11,7 @@ Current dispatch:
 - Unknown or all-platform tasks use the signed mock worker fallback.
 - All worker execution is dry-run unless explicitly and safely changed later.
 
-Booking-email historical backfill is not an OTA adapter and is not live OTA scrape proof. It imports Gmail-derived Booking Email Events for PMS review through `npm.cmd run booking-email:backfill`; staff approval is still required before any reservation, payment, cancellation, or room mutation. Render Gmail OAuth setup uses `npm.cmd run gmail-oauth:render` or `npm.cmd run render:gmail-oauth` and remains a mailbox-provider setup step, not OTA proof. Hotel Ops scan snapshots exposed through `/ops/intelligence` are PMS-derived evidence and also do not prove live OTA scraping unless a live adapter read is separately configured and verified.
+Booking-email historical backfill is not an OTA adapter and is not live OTA scrape proof. It imports Gmail-derived Booking Email Events for PMS review through `npm.cmd run booking-email:backfill`; staff approval is still required before any reservation, payment, cancellation, or room mutation. Render Gmail OAuth setup uses `npm.cmd run gmail-oauth:render` or `npm.cmd run render:gmail-oauth` and remains a mailbox-provider setup step, not OTA proof. `/api/booking-email/status` can validate Gmail API reachability for the booking mailbox path, but that is mailbox-provider proof only. Hotel Ops scan snapshots exposed through `/ops/intelligence` are PMS-derived evidence and also do not prove live OTA scraping unless a live adapter read is separately configured and verified.
 
 ## Booking.com Adapter
 
