@@ -19,6 +19,7 @@ import { createBookingComAdapter, executeBookingComTask } from '../server/ota-ad
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail } from '../server/pms-service.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
+import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
@@ -1127,6 +1128,18 @@ const previewedBookingEmail = previewBookingEmailEvent({
 assert.equal(previewedBookingEmail.eventType, 'NEW_BOOKING', 'booking-email preview classifies booking confirmations')
 assert.equal(previewedBookingEmail.channelRefPresent, true, 'booking-email preview reports reference extraction without exposing the value')
 assert.equal(previewedBookingEmail.stayDatesPresent, true, 'booking-email preview reports stay-date extraction without exposing guest details')
+const approvedProviderQuery = approvedBookingEmailProviderQuery()
+assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\.com OR from:agoda\.com OR from:trip\.com OR from:expedia\.com OR from:priceline\.com OR from:airbnb\.com\)/, 'booking-email approved provider query keeps the approved OTA sender scope')
+assert.match(approvedProviderQuery, /-from:ebk\.promo\.hotelpartner@trip\.com/, 'booking-email approved provider query excludes the Trip.com partner-report sender')
+assert.match(approvedProviderQuery, /-from:growth-product@agoda\.com/, 'booking-email approved provider query excludes the Agoda partner-invoice sender')
+assert.match(approvedProviderQuery, /-subject:\"new sign-in to your account\"/, 'booking-email approved provider query excludes Booking.com security notices')
+assert.match(approvedProviderQuery, /newer_than:30d/, 'booking-email approved provider query stays bounded by default')
+assert.doesNotMatch(approvedBookingEmailProviderQuery({ allPast: true }), /newer_than:/, 'booking-email all-past provider query removes the recency bound')
+assert.equal(
+  primaryMailboxBookingEmailQuery('booking@sandboxhotel.com'),
+  'to:booking@sandboxhotel.com -in:spam -in:trash newer_than:30d',
+  'booking-email primary-mailbox query stays available as an explicit troubleshooting fallback',
+)
 for (const fixture of bookingEmailParserFixtures) {
   const parsed = parseBookingEmailDetails(fixture.input)
   assert.equal(parsed.eventType, fixture.expected.eventType, `${fixture.name} keeps the expected booking-email event type`)

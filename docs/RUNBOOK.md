@@ -48,7 +48,7 @@ Cron expressions can be stored with `HOTEL_OPS_SCAN_CRON`, but cron execution mu
 
 OTA credentials must be platform secrets only. Do not commit or log them. Booking.com adapter secrets are read from `BOOKING_COM_USERNAME` and `BOOKING_COM_PASSWORD`, with `BOOKING_USERNAME` and `BOOKING_PASSWORD` kept as compatibility aliases. Optional Agoda, Trip.com, and Expedia skeletons report credential status from `AGODA_USERNAME` / `AGODA_PASSWORD`, `TRIP_COM_USERNAME` / `TRIP_COM_PASSWORD`, and `EXPEDIA_USERNAME` / `EXPEDIA_PASSWORD`. Those adapters still run as dry-run skeletons; real browser reads or writes need verified selectors, safe test-date proof, and account-owner approval.
 
-Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`. For Render, prefer the durable refresh-token tuple. Use `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` to check current Render key presence without printing values, then use `npm.cmd run render:gmail-oauth` as a dry-run before applying any env-var changes. Operational/security/provider-admin emails from OTA senders are not booking events; keep those rows `UNKNOWN` / review-only unless staff confirm they are actionable reservation communications.
+Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`. For Render, prefer the durable refresh-token tuple. Use `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` to check current Render key presence without printing values, then use `npm.cmd run render:gmail-oauth` as a dry-run before applying any env-var changes. Operational/security/provider-admin emails from OTA senders are not booking events; keep those rows `UNKNOWN` / review-only unless staff confirm they are actionable reservation communications. When no explicit `--query` is supplied, historical backfill now defaults to the approved provider-query boundary instead of the incomplete direct `to:booking@sandboxhotel.com` filter.
 
 Optional LINE Hotel Ops command intake:
 
@@ -148,14 +148,16 @@ Use `RENDER_API_KEY` instead of `--use-render-cli-token` when an automation API 
 7. Dry-run a bounded historical scan first:
 
 ```powershell
-npm.cmd run booking-email:backfill -- --query "<approved Gmail query>" --limit 250 --max-pages 5
+npm.cmd run booking-email:backfill -- --limit 250 --max-pages 5
 ```
+
+This default dry-run uses the approved provider-query boundary. Use `--query "<owner-approved Gmail query>"` only when an owner-approved override needs a different slice, or `--primary-mailbox-query` when troubleshooting only the direct primary-mailbox route.
 
 8. Review the redacted JSON counts for scanned messages, existing events, new candidates, event type mix, and extraction confidence.
 9. If the preview looks correct, import the same bounded set as Booking Inbox review events:
 
 ```powershell
-npm.cmd run booking-email:backfill -- --query "<approved Gmail query>" --limit 250 --max-pages 5 --confirm
+npm.cmd run booking-email:backfill -- --limit 250 --max-pages 5 --confirm
 ```
 
 10. For larger history loads, keep the same approved query and increase `--limit`/`--max-pages`; confirmed imports use `--import-batch-size 50` by default to avoid one giant database transaction.
