@@ -9,6 +9,8 @@ import { completeServerSetup, getServerSetupStatus, type ServerSetupStatus } fro
 
 type StoredUser = User & PasswordCredential
 
+const DEFAULT_BASE_RATE = 750
+
 const DEFAULT_PROPERTY: PropertySetup = {
   name: 'SANDBOX HOTEL',
   address: '626/1 Karom Rd., Pho Sadet',
@@ -36,7 +38,7 @@ const DEFAULT_ROOM_TYPES: RoomTypeSetup[] = [
     id: 'twin',
     code: 'TWIN',
     name: 'Standard Twin',
-    baseRate: 2000,
+    baseRate: DEFAULT_BASE_RATE,
     baseOccupancy: 2,
     maxOccupancy: 2,
     extraGuestFee: 300,
@@ -48,7 +50,7 @@ const DEFAULT_ROOM_TYPES: RoomTypeSetup[] = [
     id: 'double',
     code: 'DOUBLE',
     name: 'Superior Double',
-    baseRate: 2000,
+    baseRate: DEFAULT_BASE_RATE,
     baseOccupancy: 2,
     maxOccupancy: 4,
     extraGuestFee: 300,
@@ -96,13 +98,13 @@ const DEFAULT_ROOMS: RoomSetup[] = [
 const DEFAULT_RATES: RateSetup[] = [
   {
     roomTypeId: 'twin',
-    baseRate: 2000,
+    baseRate: DEFAULT_BASE_RATE,
     weekendRate: undefined,
     taxInclusive: false,
   },
   {
     roomTypeId: 'double',
-    baseRate: 2000,
+    baseRate: DEFAULT_BASE_RATE,
     weekendRate: undefined,
     taxInclusive: false,
   },

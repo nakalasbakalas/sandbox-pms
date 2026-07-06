@@ -11,10 +11,25 @@ import { formatBangkokTime, useI18n } from '@/lib/i18n'
 import { getOperationalRoomStatus, isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { cn } from '@/lib/utils'
 import { useKV } from '@github/spark/hooks'
-import type { PropertySetup } from '@/types/onboarding'
+import type { PropertySetup, RoomTypeSetup } from '@/types/onboarding'
+
+interface RoomSectionData {
+  id: string
+  title: string
+  rooms: BoardRoomCard[]
+}
 
 function roomSort(a: BoardRoomCard, b: BoardRoomCard) {
-  return Number(a.number) - Number(b.number)
+  const floorDelta = (a.floor || 0) - (b.floor || 0)
+  if (floorDelta !== 0) return floorDelta
+  return String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
+}
+
+function normalizeRoomTypeLabel(value?: string) {
+  return String(value || '')
+    .trim()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
 function RoomTile({ room, onOpen }: { room: BoardRoomCard; onOpen: () => void }) {
@@ -62,6 +77,8 @@ export function RoomsView() {
   const { navigate } = useNavigation()
   const { rooms } = useRoomSync()
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
+  const [configuredRoomTypes] = useKV<RoomTypeSetup[]>('onboarding-room-types', [])
+  const [rateRoomTypes] = useKV<Array<{ id: string; code?: string; name: string }>>('room-types-config', [])
   const [lastUpdated, setLastUpdated] = useState(() => new Date())
 
   useEffect(() => {
@@ -69,8 +86,43 @@ export function RoomsView() {
   }, [rooms])
 
   const operationalRooms = rooms
-  const twinRooms = useMemo(() => operationalRooms.filter((room) => room.type === 'TWIN').sort(roomSort), [operationalRooms])
-  const doubleRooms = useMemo(() => operationalRooms.filter((room) => room.type === 'DOUBLE').sort(roomSort), [operationalRooms])
+
+  const roomTypeLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const roomType of rateRoomTypes || []) {
+      if (roomType.id && roomType.name) labels.set(roomType.id, roomType.name)
+    }
+    for (const roomType of configuredRoomTypes || []) {
+      if (roomType.id && roomType.name) labels.set(roomType.id, roomType.name)
+    }
+    return labels
+  }, [configuredRoomTypes, rateRoomTypes])
+
+  const roomSections = useMemo<RoomSectionData[]>(() => {
+    const roomTypeOrder = new Map<string, number>()
+    const orderedRoomTypes = configuredRoomTypes.length > 0 ? configuredRoomTypes : rateRoomTypes
+    orderedRoomTypes.forEach((roomType, index) => {
+      if (roomType.id) roomTypeOrder.set(roomType.id, index)
+    })
+
+    const groups = new Map<string, RoomSectionData>()
+    operationalRooms.forEach((room) => {
+      const id = room.roomTypeId || room.roomType || room.type || 'unknown'
+      const title = roomTypeLabels.get(id) || normalizeRoomTypeLabel(room.type || id) || t('rooms.title')
+      const current = groups.get(id) || { id, title, rooms: [] }
+      current.rooms.push(room)
+      groups.set(id, current)
+    })
+
+    return Array.from(groups.values())
+      .map((section) => ({ ...section, rooms: [...section.rooms].sort(roomSort) }))
+      .sort((a, b) => {
+        const orderDelta = (roomTypeOrder.get(a.id) ?? 999) - (roomTypeOrder.get(b.id) ?? 999)
+        if (orderDelta !== 0) return orderDelta
+        return a.title.localeCompare(b.title)
+      })
+  }, [configuredRoomTypes, operationalRooms, rateRoomTypes, roomTypeLabels, t])
+
   const statusCounts = useMemo(() => {
     const counts = { ready: 0, occupied: 0, dirty: 0, blocked: 0 }
     operationalRooms.forEach((room) => {
@@ -119,8 +171,9 @@ export function RoomsView() {
           <RoomSummary label={t('rooms.blocked')} value={statusCounts.blocked} icon={SquaresFour} tone="text-slate-700 bg-slate-100 border-slate-200" />
         </div>
 
-        <RoomSection title={t('rooms.twin')} rooms={twinRooms} onOpenRoom={() => navigate('board')} />
-        <RoomSection title={t('rooms.double')} rooms={doubleRooms} onOpenRoom={() => navigate('board')} />
+        {roomSections.map((section) => (
+          <RoomSection key={section.id} title={section.title} rooms={section.rooms} onOpenRoom={() => navigate('board')} />
+        ))}
       </div>
     </div>
   )
@@ -153,11 +206,25 @@ function RoomSummary({
 }
 
 function RoomSection({ title, rooms, onOpenRoom }: { title: string; rooms: BoardRoomCard[]; onOpenRoom: (room: BoardRoomCard) => void }) {
+  const counts = rooms.reduce(
+    (summary, room) => {
+      const status = getOperationalRoomStatus(room)
+      if (isRoomReadyForArrival(room)) summary.ready += 1
+      if (status === 'occupied') summary.occupied += 1
+      if (status === 'dirty') summary.dirty += 1
+      if (status === 'blocked' || status === 'out_of_order') summary.blocked += 1
+      return summary
+    },
+    { ready: 0, occupied: 0, dirty: 0, blocked: 0 },
+  )
+
   return (
     <section className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-muted-foreground">{title}</h2>
-        <span className="text-xs text-muted-foreground">{rooms.length} rooms</span>
+        <span className="text-xs text-muted-foreground">
+          {rooms.length} rooms · {counts.ready} ready · {counts.occupied} occupied · {counts.dirty} dirty · {counts.blocked} blocked
+        </span>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-[repeat(15,minmax(0,1fr))]">
         {rooms.map((room) => (
