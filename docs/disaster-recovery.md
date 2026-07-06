@@ -7,7 +7,7 @@ This document defines the owner actions required before production launch sign-o
 - Production database: Render PostgreSQL `sandbox-hotel-pms-db-v43m`.
 - Public runtime: `https://book.sandboxhotel.com`.
 - Long-term production Render service: `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`).
-- Latest health-checked live deploy: `dep-d9577b28qa3s73dl81d0`, commit `a01838a956f24164167ba7f91a7620a37de7f36d`, finished at 2026-07-05T15:13:14Z after the browser-origin allowlist fix.
+- Latest health-checked live deploy recorded before the 2026-07-06 owner-decision update: `dep-d95qsnvavr4c73aqics0`, commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0`.
 - Render Postgres point-in-time recovery status: `AVAILABLE`, with recovery starting at 2026-06-03T21:59:41Z during the 2026-06-07 provider check.
 - Disposable restore test: passed on 2026-06-07 using temporary restored database `dpg-d8ip6rdckfvc73c2qirg-a`, then deleted.
 - Automated public health check: `npm run live:check`.
@@ -17,19 +17,19 @@ This document defines the owner actions required before production launch sign-o
 
 Record these in the live proof register before launch:
 
-- Primary rollback owner with Render dashboard access: TBD.
-- Rollback deputy with Render dashboard access: TBD.
-- Database recovery owner with Render PostgreSQL access: TBD.
-- WAF/rate-limit owner with Cloudflare or upstream edge access: TBD.
+- Primary rollback owner with Render dashboard access: Nick.
+- Rollback deputy with Render dashboard access: not assigned; this is an explicit follow-up or accepted-risk item before sign-off.
+- Database recovery owner with Render PostgreSQL access: Nick.
+- WAF/rate-limit owner with Cloudflare or upstream edge access: Nick.
 
 The confirmed Render workspace owner from CLI is `nakalastravels@gmail.com`; do not treat that as a complete operational roster until a deputy is named.
 
 ## Backup Evidence
 
-Before migrations, seed changes, or launch sign-off:
+Latest known owner answer as of 2026-07-06: the current backup/recovery point is unknown. Set up or freshly verify recovery proof before migrations, seed changes, or launch sign-off:
 
 1. Open the Render PostgreSQL dashboard for `sandbox-hotel-pms-db-v43m`.
-2. Record the latest available recovery point and retention window in [live-environment-proof.md](live-environment-proof.md).
+2. Record the latest available recovery point and retention window in [live-environment-proof.md](live-environment-proof.md) and `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md`.
 3. Confirm the database is `available`.
 4. Do not paste database URLs, passwords, or raw backup metadata containing secrets into tracked files.
 

@@ -17,7 +17,8 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { createPasswordHash } from '../server/security.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
@@ -781,6 +782,42 @@ assert.equal(nullEmailUser.username, 'fd3', 'admin UI null-email payload creates
 assert.equal(nullEmailUser.email, null, 'null-email server user stores null email')
 assert.equal(nullEmailUser.role, 'FRONT_DESK', 'null-email server user role normalizes to backend enum')
 assert.equal(nullEmailUserAudits[0]?.action, 'USER_CREATED', 'null-email server user creation is audited')
+
+const lockoutUser = {
+  id: 'lockout-user',
+  username: 'frontdesk',
+  email: null,
+  passwordHash: createPasswordHash('ValidPassword123!'),
+  firstName: 'Front',
+  lastName: 'Desk',
+  role: 'FRONT_DESK',
+  active: true,
+  failedLoginAttempts: 0,
+  lockedAt: null,
+}
+const lockoutPrisma = {
+  user: {
+    findFirst: async () => ({ ...lockoutUser }),
+    update: async ({ data }) => {
+      Object.assign(lockoutUser, data)
+      return { ...lockoutUser }
+    },
+  },
+}
+assert.equal(await authenticateUser(lockoutPrisma, 'frontdesk', 'wrong-password-1'), null, 'first failed login does not lock the account')
+assert.equal(lockoutUser.failedLoginAttempts, 1, 'failed login attempt is recorded')
+assert.equal(await authenticateUser(lockoutPrisma, 'frontdesk', 'wrong-password-2'), null, 'second failed login does not lock the account')
+await assert.rejects(
+  () => authenticateUser(lockoutPrisma, 'frontdesk', 'wrong-password-3'),
+  /Account is locked/,
+  'third failed login locks the account for admin reset',
+)
+assert.ok(lockoutUser.lockedAt instanceof Date, 'locked account records lock timestamp')
+lockoutUser.lockedAt = null
+lockoutUser.failedLoginAttempts = 2
+const authenticatedLockoutUser = await authenticateUser(lockoutPrisma, 'frontdesk', 'ValidPassword123!')
+assert.equal(authenticatedLockoutUser.username, 'frontdesk', 'successful login still works after admin clears lock')
+assert.equal(lockoutUser.failedLoginAttempts, 0, 'successful login clears failed attempts')
 
 assert.equal(maskLoginIdentifier('manager@example.com'), 'm******@e***.com', 'auth proof masks email login identifiers')
 assert.equal(maskLoginIdentifier('hk1'), 'h***', 'auth proof masks username login identifiers')

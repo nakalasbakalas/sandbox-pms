@@ -3,7 +3,7 @@
 Date: 2026-07-02T07:20Z.
 Latest update: 2026-07-03T17:45+07:00.
 
-Verdict: partial. Production aggregate room counts are now recorded through Slice 5BA, but real production room inventory is still not launch-signed-off because source-owner/import proof and not-fake-seed confirmation remain open.
+Verdict: partial. Production aggregate room counts are now recorded through Slice 5BA, and Nick states the current production room inventory is real. Real production room inventory is still not launch-signed-off because redacted source-owner/import/admin proof and not-fake-seed confirmation remain open.
 
 This file is the canonical Slice 3 evidence record for production room inventory. It records only non-secret command output and read-only probes. It does not contain room numbers, guest data, user data, database URLs, tokens, passwords, cookies, or raw secret values.
 
@@ -17,7 +17,7 @@ npm run rooms:proof
 
 The helper uses the configured `DATABASE_URL`, queries only aggregate room counts, and omits room numbers, guests, reservations, users, payments, and raw database URLs. By default, room-type labels are redacted to stable `ROOM_TYPE_XX` keys; use `-- --include-room-type-labels` only with operations-owner approval.
 
-This helper replaces the unreliable Render CLI `psql` proof path. It does not close this P0 by itself because production inventory still needs owner/import evidence showing the room set is real and not fake seed/demo data.
+This helper replaces the unreliable Render CLI `psql` proof path. It does not close this P0 by itself because production inventory still needs redacted owner/import/admin evidence showing the room set is real and not fake seed/demo data. 2026-07-06 owner update: Nick states the current production inventory is real, and future room mapping/customization should be maintained in app by admins.
 
 Slice 5BA deployed commit `527e231e3821eda6f70fdf1d3436e81bb098b0d7` to Render deploy `dep-d93pe7hkh4rs73dp5bcg`, then ran one-off job `job-d93pfr6q1p3s73a2ufh0` with `npm run rooms:proof`. The job succeeded and returned production aggregate counts only:
 

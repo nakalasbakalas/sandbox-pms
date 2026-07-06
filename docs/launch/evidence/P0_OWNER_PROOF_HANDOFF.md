@@ -1,10 +1,10 @@
 # P0 Owner Proof Handoff
 
-Status date: 2026-07-05.
+Status date: 2026-07-06.
 
 Verdict: action required. This file is an evidence intake checklist for the remaining P0 blockers. It is not proof that those blockers are closed.
 
-Latest intake: Slice 5BY deploys green `main` commit `bf37942ad77223e47f8fea41dc88e9921d7ddfec` to Render deploy `dep-d94s6oa8qa3s73d6bum0` and confirms setup gate, deep health, public edge, live readiness, production preflight, and redacted Gmail OAuth status. Slice 5BW configures backend Gmail OAuth on Render, imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events, and leaves staff parser review open. Slice 5BZ adds `npm.cmd run owner-proof:validate`, a local template and redaction validator for owner/provider proof intake. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, but does not supply owner/import source proof. This file still needs the redacted production user table, actual credentialed role proof output, local-only workflow acceptance decision, secret inventory, recovery owners, WAF/rate-limit rule metadata, and staff acceptance of booking-email parser/review quality.
+Latest intake: 2026-07-06 owner/provider/manual answers record the approved launch users (Nick admin, Hui admin, Hotel Manager manager, Front Desk front desk), required launch roles (`ADMIN`, `MANAGER`, `FRONT_DESK`), first-run setup posture, three-attempt lockout policy, Nick's provider ownership, local disposable DB E2E acceptance, review-only Booking Inbox posture, required manual workflows, Thai/English review owner plus staff review, demo/sample cleanup requirement, Nick go/no-go authority, and issue closure discipline. Slice 5BW configures backend Gmail OAuth on Render, imports 1000 provider messages into `/booking-inbox` as review-only Needs Review events, and leaves staff parser review open. Slice 5BZ adds `npm.cmd run owner-proof:validate`, a local template and redaction validator for owner/provider proof intake. Slice 5BU adds `npm.cmd run cloudflare:waf:proof`, a read-only owner-run Cloudflare WAF/rate-limit ruleset proof helper. Cloudflare API token and zone ID are still absent in this environment, and Cloudflare connector actions were unavailable in this session, so WAF/rate-limit rule IDs and thresholds remain open. Slice 5BL adds `npm.cmd run auth-rbac:proof`, an owner-run helper for collecting credentialed production login/logout and underprivileged denial evidence without printing passwords, cookies, tokens, full login identifiers, or raw response bodies. Slice 5BA records production aggregate room counts from a successful Render one-off job, and Nick now states the current inventory is real, but a redacted owner/import/admin source proof artifact is still needed. This file still needs actual credentialed role proof output, manual workflow acceptance, secret inventory, fresh recovery-point proof, WAF/rate-limit rule metadata, staff acceptance of booking-email parser/review quality, and demo/sample cleanup proof.
 
 ## Non-Negotiable Redaction Rules
 
@@ -35,18 +35,18 @@ The validator reports missing/open areas and obvious secret-shaped strings witho
 
 ## Production Users, Auth, RBAC, Logout
 
-Current status: partial. `AUTH_RBAC_PROOF.md` proves local RBAC and live unauthenticated API denial only.
+Current status: partial. Approved launch users and required roles are recorded, and the three-attempt lockout policy is implemented. `AUTH_RBAC_PROOF.md` proves local RBAC and live unauthenticated API denial only; credentialed production proof remains open.
 
 Required evidence to close:
 
 | Required proof | Accepted redacted format | Must not include |
 | --- | --- | --- |
-| Approved production user list | Table with login identifier redacted or partially masked, display name/initials if approved, active status, intended role, approving owner, date. | Passwords, password hashes, cookies, private email contents. |
+| Approved production user list | Nick admin, Hui admin, Hotel Manager manager, and Front Desk front desk are approved for launch. The remaining proof table must include login identifier redacted or partially masked, active status, intended role, whether email is intentionally null, approving owner, and date. | Passwords, password hashes, cookies, private email contents. |
 | Credentialed production login | Per-role note showing date/time, host, role, successful login, and first authenticated page/API check. | Passwords, cookies, session tokens, screenshots of secrets. |
 | Credentialed production logout | Note showing logout action followed by `/api/auth/me` or equivalent session check returning unauthenticated status. | Cookies, session tokens. |
 | Role matrix | Table of role vs allowed/denied pages/actions for admin, manager, front desk, housekeeping, cashier, and cafe staff where applicable. | Guest data or credentials. |
 | Underprivileged protected-page denial | Role, attempted page, expected denial, observed denial. | Cookies or full user identity unless approved. |
-| Underprivileged protected API mutation denial | Role, endpoint/method, expected denial, observed `401`/`403` or equivalent. Use a no-op/invalid payload approved by the owner. | Cookies, tokens, guest data, production mutation payloads. |
+| Underprivileged protected API mutation denial | Prefer staging/local. In production, use only `GET`/`HEAD` denial probes unless Nick separately approves a no-op/invalid mutating payload. | Cookies, tokens, guest data, production mutation payloads. |
 | Bootstrap/setup-token cleanup | Redacted key-name inventory or owner confirmation that setup token/bootstrap admin path is rotated, disabled, or intentionally retained with owner/date/expiry. | Secret values. |
 
 Safe owner-run helper:
@@ -59,7 +59,7 @@ The local input file must remain untracked and must not be copied into docs, iss
 
 ## Real Production Room Inventory
 
-Current status: partial. `ROOM_INVENTORY_PROOF.md` now records production aggregate room counts from Slice 5BA, but it does not prove owner-approved source of truth or that the rows are not fake seed/demo inventory.
+Current status: partial. `ROOM_INVENTORY_PROOF.md` records production aggregate room counts from Slice 5BA, and Nick states the current inventory is real. A redacted source artifact is still needed to prove owner-approved source of truth and that the rows are not fake seed/demo inventory.
 
 Required evidence to close:
 
@@ -78,7 +78,7 @@ Accepted collection paths:
 
 ## Core Hotel Workflow Acceptance
 
-Current status: partial local proof. `HOTEL_WORKFLOW_PROOF.md` proves business tests and disposable local DB E2E only.
+Current status: partial local proof. `HOTEL_WORKFLOW_PROOF.md` proves business tests and disposable local DB E2E only. Nick will perform manual desktop and tablet acceptance. Required workflows are reservations, Booking Inbox, guest replies, staff/users, rooms/rates, payments/folios, housekeeping status, reports, and Hotel Ops read/draft/approval-gated paths.
 
 Required evidence to close:
 
@@ -93,7 +93,7 @@ Required evidence to close:
 
 ## DB-Mutating E2E Posture
 
-Current status: local disposable proof exists. Final launch still needs either accepted local-only proof or staging proof if the launch owner requires stronger coverage.
+Current status: local disposable proof exists and Nick accepts it as launch engineering proof. Staging proof is optional unless Nick later requires stronger coverage. Production DB-mutating E2E remains forbidden.
 
 Required evidence to close:
 
@@ -115,7 +115,7 @@ Maintenance evidence for future setup/auth route deploys:
 
 ## Booking Email Capture And Backfill
 
-Current status: loaded for staff review. Slice 5BW configures Render backend Gmail OAuth with the booking-specific refresh-token tuple `ready=true`, records a successful provider-query dry-run, deploys chunked confirmed backfill handling, imports 1000 provider messages as review-only Booking Email Events, and confirms PMS capture with `npm run booking-email:proof`. The proof reports 1000 total events, 1000 source-message events, 1000 Needs Review, 0 processed, 0 errors, and 0 ignored. This closes the OAuth/backfill mechanics blocker, but staff still need to review parser output in `/booking-inbox`.
+Current status: loaded for staff review. Slice 5BW configures Render backend Gmail OAuth with the booking-specific refresh-token tuple `ready=true`, records a successful provider-query dry-run, deploys chunked confirmed backfill handling, imports 1000 provider messages as review-only Booking Email Events, and confirms PMS capture with `npm run booking-email:proof`. The proof reports 1000 total events, 1000 source-message events, 1000 Needs Review, 0 processed, 0 errors, and 0 ignored. Nick accepted the expert decision to keep imported events review-only until Nick and staff approve parser quality.
 
 Required evidence to close:
 
@@ -141,7 +141,7 @@ npm.cmd run booking-email:proof
 
 ## Secrets, Recovery, Rollback, WAF
 
-Current status: partial/open. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only. Slice 5BU adds an owner-run Cloudflare Rulesets API helper, but it still requires a Cloudflare token and zone ID from an owner shell.
+Current status: partial/open. Nick owns Cloudflare, Render, Gmail/OAuth, database backups, and emergency recovery. Latest recovery point is unknown and must be set up or freshly verified. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only. Slice 5BU adds an owner-run Cloudflare Rulesets API helper, but it still requires a Cloudflare token and zone ID from an owner shell.
 
 Required evidence to close:
 

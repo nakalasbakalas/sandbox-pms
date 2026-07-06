@@ -517,20 +517,23 @@ model RoomStatusLog {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String?  @unique
-  username     String   @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  role         UserRole @default(FRONT_DESK)
-  active       Boolean  @default(true)
-  lastLogin    DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  email               String?  @unique
+  username            String   @unique
+  passwordHash        String
+  firstName           String
+  lastName            String
+  role                UserRole @default(FRONT_DESK)
+  active              Boolean  @default(true)
+  failedLoginAttempts Int      @default(0)
+  lockedAt            DateTime?
+  lastLogin           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
   
   @@index([email])
   @@index([username])
+  @@index([lockedAt])
   @@index([role, active])
 }
 

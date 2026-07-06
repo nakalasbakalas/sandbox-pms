@@ -8,6 +8,7 @@ export interface User {
   createdAt: string
   username?: string
   active?: boolean
+  lockedAt?: string | null
 }
 
 export interface AuthState {

@@ -2,9 +2,11 @@
 
 Last refreshed: 2026-07-03T08:40+07:00.
 
-Verdict: partial. Core hotel workflow logic and guarded DB workflow E2E passed in the current checkout against a local disposable E2E database. This is not production, staging, real room inventory, or account-owner manual acceptance proof.
+Verdict: partial. Core hotel workflow logic and guarded DB workflow E2E passed in the current checkout against a local disposable E2E database. Nick accepts local disposable DB-mutating E2E as launch engineering proof, but this is still not production, real room inventory, or account-owner manual acceptance proof.
 
 This slice did not deploy, restart, SSH, open a production database shell, mutate production data, run DB-mutating E2E against production, or access secret values.
+
+2026-07-06 owner update: Nick will manually test dashboard routes on desktop and tablet. Required manual workflows are reservations, Booking Inbox, guest replies, staff/users, rooms/rates, payments/folios, housekeeping status, reports, and Hotel Ops read/draft/approval-gated paths. Thai and English labels require both owner and staff review, and all demo/test/sample labels, rooms, guests, prices, and messages must be removed before sign-off.
 
 ## Latest Evidence
 

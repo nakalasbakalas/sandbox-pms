@@ -2,7 +2,7 @@
 
 Status date: 2026-07-04.
 
-Verdict: partial. Slice 5AI refreshed local auth/RBAC behavior, live unauthenticated API denial, and representative live protected-page login gating for this checkout/public target. Slice 5BL adds a redacted owner-run helper for collecting credentialed production login/logout and underprivileged denial proof. The production users/auth/RBAC/logout P0 is not closed because there is still no redacted approved production user list, actual credentialed production login/logout output, role-by-role production matrix output, underprivileged-role denial output, or bootstrap/temporary-access removal proof.
+Verdict: partial. Slice 5AI refreshed local auth/RBAC behavior, live unauthenticated API denial, and representative live protected-page login gating for this checkout/public target. Slice 5BL adds a redacted owner-run helper for collecting credentialed production login/logout and underprivileged denial proof. The 2026-07-06 owner decision records the approved launch users and required roles, and the approved password policy is now implemented as persistent three-failure account lockout cleared by admin password reset. The production users/auth/RBAC/logout P0 is not closed because actual production user creation/verification, credentialed production login/logout output, role-by-role production matrix output, underprivileged-role denial output, and setup/default restore proof are still missing.
 
 ## Scope
 
@@ -28,6 +28,7 @@ Relevant assertions covered by the business tests include:
 - Server auth user mapping supports `User.username` as the login identifier.
 - Username-only staff users can omit email and store `email=null`.
 - Username-only and null-email user creation normalize backend roles and create audit records.
+- Staff accounts lock after three failed login attempts; admin password reset clears lock state.
 - Hotel Ops permission guards deny unknown/viewer roles and block forbidden/destructive commands.
 
 Command: `npm.cmd run test:e2e`
@@ -101,6 +102,17 @@ Canonical evidence:
 - `docs/launch/evidence/2026-07-03-slice-5ai-auth-rbac-unauth-refresh.md`
 - `docs/launch/evidence/2026-07-02-slice-5z-live-protected-page-gate.md`
 
+## Approved Launch User List
+
+| User label | Role | Active status | Email intentionally null |
+| --- | --- | --- | --- |
+| Nick | `ADMIN` | Production proof open | Production proof open |
+| Hui | `ADMIN` | Production proof open | Production proof open |
+| Hotel Manager | `MANAGER` | Production proof open | Production proof open |
+| Front Desk | `FRONT_DESK` | Production proof open | Production proof open |
+
+Launch-required roles are `ADMIN`, `MANAGER`, and `FRONT_DESK`. `HOUSEKEEPING`, `CASHIER`, and `CAFE_STAFF` are not launch-required unless Nick expands launch scope. This table records owner approval for intended accounts; it is not credentialed production proof.
+
 ## Owner-Run Credentialed Proof Helper
 
 Command:
@@ -138,7 +150,7 @@ An initial PowerShell probe using `[System.Net.Http.HttpClient]` failed because 
 
 ## Still Required To Close P0
 
-- Redacted approved production user list, including login identifiers and intended roles.
+- Actual production user creation/verification, including active status and whether email is intentionally null.
 - Credentialed production login proof for each required role, without recording credentials or cookies. The helper exists, but real owner-run output is still missing.
 - Credentialed production logout/session-clearing proof for at least one approved production user. The helper exists, but real owner-run output is still missing.
 - Production role matrix proof showing intended access and denial for admin/manager/front desk/housekeeping/cashier/cafe roles as applicable. The helper can collect selected checks, but a completed matrix is still missing.

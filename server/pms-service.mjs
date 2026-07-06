@@ -361,6 +361,7 @@ async function createRoomStatusLog(tx, room, toStatus, actor, notes) {
 const DEFAULT_BOOKING_EMAIL_MAILBOX = 'booking@sandboxhotel.com'
 const BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD = 0.85
 const BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE = 'Gmail API OAuth credentials are not configured for this server.'
+const LOGIN_FAILURE_LOCK_LIMIT = 3
 const VALID_BOOKING_EMAIL_STATUSES = ['NEEDS_REVIEW', 'PROCESSED', 'ERROR', 'IGNORED']
 const VALID_BOOKING_EMAIL_EVENT_TYPES = ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE', 'GUEST_MESSAGE', 'UNKNOWN']
 const GMAIL_OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -1565,13 +1566,30 @@ export async function authenticateUser(prisma, identity, password) {
     },
   })
   if (!user?.active) return null
+  if (user.lockedAt) {
+    throw new PmsValidationError('Account is locked after too many failed login attempts. Ask an admin to reset the password.', 423)
+  }
 
   const { verifyPassword } = await import('./security.mjs')
-  if (!verifyPassword(password, user.passwordHash)) return null
+  if (!verifyPassword(password, user.passwordHash)) {
+    const failedLoginAttempts = Number(user.failedLoginAttempts || 0) + 1
+    const lockedAt = failedLoginAttempts >= LOGIN_FAILURE_LOCK_LIMIT ? new Date() : null
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts,
+        ...(lockedAt ? { lockedAt } : {}),
+      },
+    })
+    if (lockedAt) {
+      throw new PmsValidationError('Account is locked after too many failed login attempts. Ask an admin to reset the password.', 423)
+    }
+    return null
+  }
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { lastLogin: new Date() },
+    data: { lastLogin: new Date(), failedLoginAttempts: 0, lockedAt: null },
   })
 
   return user
@@ -1658,7 +1676,11 @@ export async function updateUser(prisma, userId, input, actor) {
   if (input?.role !== undefined) data.role = normalizeUserRole(input.role)
   if (input?.active !== undefined) data.active = Boolean(input.active)
   const password = validateUserPassword(input?.password, false)
-  if (password) data.passwordHash = createPasswordHash(password)
+  if (password) {
+    data.passwordHash = createPasswordHash(password)
+    data.failedLoginAttempts = 0
+    data.lockedAt = null
+  }
 
   const nextUsername = data.username ?? existing.username
   const nextEmail = data.email === undefined ? existing.email : data.email

@@ -67,6 +67,7 @@ Auth proof operator CLI:
 
 - `npm.cmd run auth-rbac:proof -- --users-file <local-untracked-json>` performs credentialed login, `/api/auth/me`, optional owner-approved denial probes, logout, and post-logout `/api/auth/me` checks against the configured host.
 - The helper masks login identifiers, prints initials instead of display names, keeps cookies in memory only, omits passwords/tokens/raw response bodies, and defaults denial probes to GET/HEAD only. Mutating denial probes require explicit `--allow-mutating-denial-probes` and an owner-approved no-op or invalid payload.
+- Staff login policy is three failed attempts followed by persistent account lockout. Admin password reset through the user-management service clears `failedLoginAttempts` and `lockedAt`; normal successful login clears prior failed attempts.
 
 Booking-email operator CLI:
 

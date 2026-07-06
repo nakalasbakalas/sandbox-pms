@@ -1,6 +1,6 @@
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000
 const DEFAULT_LOCKOUT_MS = 15 * 60 * 1000
-const DEFAULT_ACCOUNT_ATTEMPTS = 5
+const DEFAULT_ACCOUNT_ATTEMPTS = 3
 const DEFAULT_IP_ATTEMPTS = 20
 
 function positiveInteger(value, fallback) {

@@ -344,6 +344,7 @@ function publicUser(user) {
     role: user.role,
     displayName: `${user.firstName} ${user.lastName}`.trim(),
     active: user.active,
+    lockedAt: user.lockedAt?.toISOString?.() || null,
     createdAt: user.createdAt?.toISOString?.() || null,
   }
 }

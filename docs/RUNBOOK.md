@@ -221,6 +221,13 @@ Get-Content .\.codex\auth-proof-users.local.json -Raw | npm.cmd run auth-rbac:pr
 
 The helper logs in, verifies `/api/auth/me`, runs the first authenticated check and any owner-approved denial probes, logs out, then confirms `/api/auth/me` returns unauthenticated. Output masks login identifiers, keeps cookies in memory only, omits response bodies except bounded role/status fields, and rejects mutating denial probes unless `--allow-mutating-denial-probes` is explicitly set for an owner-approved no-op/invalid payload.
 
+Staff account lockout:
+
+1. Staff accounts lock after three failed login attempts.
+2. A locked user cannot authenticate until an admin resets that user's password from user management.
+3. Password reset clears `failedLoginAttempts` and `lockedAt`. Do not unlock by editing production database rows directly unless emergency recovery is explicitly approved and recorded.
+4. Do not paste passwords, hashes, cookies, or session tokens into issue comments, screenshots, docs, or chat.
+
 Hotel Ops notification center:
 
 1. In server mode, the shared header notification bell shows backend Hotel Ops notifications for users with Ops permission.

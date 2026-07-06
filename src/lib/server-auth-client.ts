@@ -9,6 +9,7 @@ type ServerUser = {
   role: string
   displayName: string
   active?: boolean
+  lockedAt?: string | null
   createdAt?: string | null
 }
 
@@ -39,6 +40,7 @@ function mapUser(user: ServerUser): User {
     role: mapRole(user.role),
     displayName: user.displayName,
     active: user.active,
+    lockedAt: user.lockedAt || null,
     createdAt: user.createdAt || '',
   }
 }

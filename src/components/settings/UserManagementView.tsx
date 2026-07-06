@@ -486,8 +486,8 @@ export function UserManagementView() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={user.active === false ? 'outline' : 'secondary'}>
-                        {user.active === false ? 'Inactive' : 'Active'}
+                      <Badge variant={user.active === false || user.lockedAt ? 'outline' : 'secondary'}>
+                        {user.active === false ? 'Inactive' : user.lockedAt ? 'Locked' : 'Active'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">

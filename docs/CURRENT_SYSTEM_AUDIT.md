@@ -1,6 +1,6 @@
 # Current System Audit - Hotel Ops AI Command Center
 
-Last reviewed: 2026-07-05
+Last reviewed: 2026-07-06
 
 ## Repository Overview
 
@@ -8,7 +8,7 @@ Last reviewed: 2026-07-05
 - Backend/runtime: Node HTTP server in `server/index.mjs`.
 - Package manager: npm, use `npm.cmd` and `npx.cmd` on Windows.
 - Database: Prisma with Postgres-compatible schema.
-- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`, and redacted owner-run production proof collection through `npm.cmd run auth-rbac:proof`.
+- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`, persistent three-failure account lockout cleared by admin password reset, and redacted owner-run production proof collection through `npm.cmd run auth-rbac:proof`.
 - Deployment: Render-oriented server build with local and GitHub CI launch checks.
 - Hotel Ops AI mode: deterministic controlled parser by default, with optional backend-only OpenAI Responses parsing when explicitly configured; all parsed tasks are strict-schema validated before permission decisions.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
@@ -67,7 +67,7 @@ Last reviewed: 2026-07-05
 - Email notifications are recorded as provider-pending intents by default. When `HOTEL_OPS_EMAIL_DELIVERY_ENABLED=true` and backend Gmail OAuth credentials are configured, Hotel Ops email notifications are sent through Gmail API and persisted as `SENT` or `FAILED`.
 - Hotel Ops notification read/dismiss state is persisted server-side and audited separately from notification provider delivery status.
 - The parser is deterministic by default and strict-schema validated. An optional OpenAI Responses parser is available only when backend environment flags and `OPENAI_API_KEY` are configured; model output is redacted, schema-validated, policy-normalized, and falls back to deterministic parsing on provider failure.
-- Production launch readiness still needs account-owner proof, production user approval, provider setup, manual workflow acceptance, and recovery owner sign-off.
+- Production launch readiness still needs credentialed account-owner proof, production user creation/verification, provider WAF/recovery proof, manual workflow/localization acceptance, booking-email parser acceptance, and demo/sample cleanup proof.
 - Scan snapshots are PMS-derived operational evidence, not live OTA scrape proof. Live OTA snapshot quality still depends on verified adapter reads or imported booking data.
 
 ## Validation Evidence
