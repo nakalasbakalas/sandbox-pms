@@ -39,6 +39,8 @@
         "real-data:import": "node scripts/import-real-property-data.mjs",
         "booking-email:backfill": "node scripts/booking-email-backfill.mjs",
         "booking-email:proof": "node scripts/prove-booking-email-capture.mjs",
+        "booking-email:deep-scan": "node scripts/deep-scan-booking-email.mjs",
+        "booking-email:reprocess": "node scripts/reprocess-booking-email-events.mjs",
         "gmail-oauth:render": "node scripts/prepare-gmail-oauth-render.mjs",
         "render:gmail-oauth": "node scripts/configure-render-gmail-oauth.mjs",
         "render:gmail-oauth:status": "node scripts/configure-render-gmail-oauth.mjs --status",

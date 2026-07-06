@@ -1,6 +1,7 @@
 /* global console, process */
 import { loadEnvDefaults } from './env-utils.mjs'
 import { parseDatabaseUrl } from './db-safety.mjs'
+import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { createPrismaClient } from '../server/prisma-client.mjs'
 import {
   bookingEmailGmailCredentialStatus,
@@ -49,9 +50,24 @@ function databaseTargetSummary(databaseUrl) {
 
 function queryFor(source) {
   const explicitQuery = argValue('--query')
-  if (explicitQuery) return explicitQuery
-  if (hasFlag('--all-past')) return `to:${source.mailbox} -in:spam -in:trash`
-  return source.query || `to:${source.mailbox} -in:spam -in:trash newer_than:30d`
+  if (explicitQuery) return { mode: 'explicit', query: explicitQuery }
+  if (hasFlag('--primary-mailbox-query')) {
+    return {
+      mode: 'primary-mailbox',
+      query: primaryMailboxBookingEmailQuery(source.mailbox, { allPast: hasFlag('--all-past') }),
+    }
+  }
+  if (hasFlag('--all-past')) {
+    return {
+      mode: 'approved-provider',
+      query: approvedBookingEmailProviderQuery({ allPast: true }),
+    }
+  }
+  if (source.query) return { mode: 'source', query: source.query }
+  return {
+    mode: 'approved-provider',
+    query: approvedBookingEmailProviderQuery(),
+  }
 }
 
 function primaryMailbox() {
@@ -182,9 +198,9 @@ async function main() {
   try {
     const source = await selectSource(prisma, { ensureSource: confirm })
 
-    const query = queryFor(source)
+    const querySelection = queryFor(source)
     const fetchedEvents = await fetchGmailEventsForSource(source, {
-      query,
+      query: querySelection.query,
       maxMessages: limit,
       pageSize,
       maxPages,
@@ -232,7 +248,8 @@ async function main() {
         mode: credentialStatus.mode,
       },
       scan: {
-        query,
+        query: querySelection.query,
+        queryMode: querySelection.mode,
         limit,
         pageSize,
         maxPages,
@@ -258,6 +275,7 @@ async function main() {
         'Confirmed import creates Booking Email Events for staff review; it does not approve, create, modify, cancel, or charge reservations by itself.',
         'Visual review happens in /booking-inbox after login with a role that can view reservations or messaging.',
         'Parser results are heuristic and must be reviewed before operational PMS mutations.',
+        'The default approved-provider query excludes known OTA security, partner-reporting, and invoice noise; use --query or --primary-mailbox-query only when an owner-approved boundary needs a different slice.',
         'The scan is bounded by --limit and --max-pages; rerun in batches if Gmail has more historical messages.',
       ],
       nextStep: confirm

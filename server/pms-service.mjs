@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   SANDBOX_RULES,
   activeReservationStatuses,
@@ -536,17 +537,18 @@ function splitGuestName(value) {
 }
 
 function parseMoney(text) {
-  const amountMatch = String(text || '').match(/\b(?:THB)?\s*([0-9][0-9,]*(?:\.\d{1,2})?)\s*(?:THB)?\b/i)
+  const amountMatch = firstMatch([
+    /\b(?:total(?: amount| price)?|amount received|amount paid|payment amount|paid amount|deposit amount)\s*[:#-]?\s*(?:THB\s*)?([0-9][0-9,]*(?:\.\d{1,2})?)\b/i,
+    /\bTHB\s*([0-9][0-9,]*(?:\.\d{1,2})?)\b/i,
+    /\b([0-9][0-9,]*(?:\.\d{1,2})?)\s*THB\b/i,
+  ], text)
   if (!amountMatch) return {}
-  const amount = Number(amountMatch[1].replace(/,/g, ''))
+  const amount = Number(amountMatch.replace(/,/g, ''))
   if (!Number.isFinite(amount) || amount <= 0) return {}
-  return { amount, currency: /THB/i.test(amountMatch[0]) ? 'THB' : undefined }
+  return { amount, currency: 'THB' }
 }
 
-function parseDateFromText(label, text) {
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const labeled = String(text || '').match(new RegExp(`${escaped}\\s*[:#-]?\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})`, 'i'))
-  const raw = labeled?.[1]
+function normalizeParsedDateValue(raw) {
   if (!raw) return undefined
   if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(raw)) {
     const [year, month, day] = raw.split('-').map((part) => part.padStart(2, '0'))
@@ -557,52 +559,160 @@ function parseDateFromText(label, text) {
   return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
 }
 
-function parseBookingEmailDetails(input = {}) {
+function parseDateFromText(label, text) {
+  const labels = Array.isArray(label) ? label : [label]
+  for (const currentLabel of labels) {
+    const normalizedLabel = String(currentLabel || '')
+      .trim()
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[\\s_-]*')
+    if (!normalizedLabel) continue
+    const labeled = String(text || '').match(new RegExp(`${normalizedLabel}(?:\\s*date)?\\s*[:#-]?\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})`, 'i'))
+    const raw = labeled?.[1]
+    if (!raw) continue
+    return normalizeParsedDateValue(raw)
+  }
+  return undefined
+}
+
+function parseDateRangeFromText(labels, text) {
+  for (const label of Array.isArray(labels) ? labels : [labels]) {
+    const normalizedLabel = String(label || '')
+      .trim()
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[\\s_-]*')
+    if (!normalizedLabel) continue
+    const labeled = String(text || '').match(new RegExp(`${normalizedLabel}(?:\\s*dates?)?\\s*[:#-]?\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})\\s*(?:to|until|through|-|–|—)\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})`, 'i'))
+    const start = parseDateFromText(label, labeled?.[1])
+    const end = parseDateFromText(label, labeled?.[2])
+    if (start && end) return { start, end }
+  }
+  return null
+}
+
+function parseDateRangeFromNormalizedText(labels, text) {
+  for (const label of Array.isArray(labels) ? labels : [labels]) {
+    const normalizedLabel = String(label || '')
+      .trim()
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('[\\s_-]*')
+    if (!normalizedLabel) continue
+    const labeled = String(text || '').match(new RegExp(`${normalizedLabel}(?:\\s*dates?)?\\s*[:#-]?\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})\\s*(?:to|until|through|-)\\s*(\\d{4}-\\d{1,2}-\\d{1,2}|\\d{1,2}[/.]\\d{1,2}[/.]\\d{2,4})`, 'i'))
+    const start = normalizeParsedDateValue(labeled?.[1])
+    const end = normalizeParsedDateValue(labeled?.[2])
+    if (start && end) return { start, end }
+  }
+  return null
+}
+
+function firstMatch(patterns, text) {
+  for (const pattern of patterns) {
+    const candidate = normalizeNullableString(String(text || '').match(pattern)?.[1])
+    if (candidate) return candidate
+  }
+  return null
+}
+
+function normalizeBookingEmailMessageId(value) {
+  return normalizeNullableString(value)?.replace(/[<>]/g, '').toLowerCase() || null
+}
+
+function bookingEmailDuplicateFingerprint(input = {}, parsed = undefined) {
+  const event = safeJsonObject(input)
+  const derived = parsed || parseBookingEmailDetails(event)
+  const details = safeJsonObject(derived.details)
+  const headers = safeJsonObject(event.rawHeaders)
+  const payload = [
+    normalizeBookingEmailEventType(event.eventType || derived.eventType),
+    normalizeNullableString(event.channelRef || derived.channelRef)?.toUpperCase() || '',
+    normalizeNullableString(event.subject)?.toLowerCase() || '',
+    normalizeNullableString(event.sender)?.toLowerCase() || '',
+    normalizeBookingEmailMessageId(headers.messageId) || '',
+    normalizeNullableString(event.threadId)?.toLowerCase() || '',
+    normalizeNullableString(details.guestName)?.toLowerCase() || '',
+    normalizeNullableString(details.checkIn) || '',
+    normalizeNullableString(details.checkOut) || '',
+    normalizeNullableString(details.roomType)?.toUpperCase() || '',
+    Number.isFinite(Number(details.amount)) ? roundMoney(Number(details.amount)).toFixed(2) : '',
+    normalizeNullableString(details.paymentStatus)?.toUpperCase() || '',
+    normalizeNullableString(event.rawText || event.body || event.snippet)?.toLowerCase().replace(/\s+/g, ' ').slice(0, 2000) || '',
+  ]
+  return createHash('sha256').update(payload.join('\n')).digest('hex')
+}
+
+function hasNonBookingOperationalSignal(text) {
+  return /\b(account security|security update|two-factor authentication|new sign-?in|sign(?:ed)? in from a new device|performance report|weekly performance report|partner hub|invoice\b|boost campaigns|phishing|market manager)\b/i.test(String(text || ''))
+}
+
+export function parseBookingEmailDetails(input = {}) {
   const parsedInput = safeJsonObject(input.parsedDetails)
   const rawText = String(input.rawText || input.body || input.snippet || '')
   const subject = String(input.subject || '')
   const combined = `${subject}\n${rawText}`
-  const lower = combined.toLowerCase()
-  const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
-  const generalBookingSignal = lower.includes('booking') || lower.includes('reservation') || lower.includes('confirmation')
-
-  const explicitType = normalizeBookingEmailEventType(input.eventType)
-  const eventType = explicitType !== 'UNKNOWN'
-    ? explicitType
-    : lower.includes('cancel')
-      ? 'CANCELLATION'
-      : lower.includes('modification') || lower.includes('changed') || lower.includes('amended')
-        ? 'MODIFICATION'
-        : newBookingSignal
-          ? 'NEW_BOOKING'
-          : lower.includes('payment') || lower.includes('paid') || lower.includes('deposit')
-            ? 'PAYMENT_NOTICE'
-            : lower.includes('message') || lower.includes('request') || lower.includes('question')
-              ? 'GUEST_MESSAGE'
-              : generalBookingSignal
-              ? 'NEW_BOOKING'
-              : 'UNKNOWN'
-
+  const stayDateRange = parseDateRangeFromNormalizedText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
+    || parseDateRangeFromText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
   const channelRef = normalizeNullableString(input.channelRef || parsedInput.channelRef || parsedInput.confirmationCode)
-    || combined.match(/\b(?:confirmation|booking|reservation|reference|ref|booking id|reservation id)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i)?.[1]
+    || firstMatch([
+      /\b(?:confirmation number|confirmation no\.?|booking number|reservation number|booking id|reservation id|booking reference|reservation reference|booking ref|reservation ref|reference|ref)\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{3,})\b/i,
+      /\b(?:booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\s+([A-Z0-9][A-Z0-9-]{3,})\b/i,
+    ], combined)
     || null
   const guestName = normalizeNullableString(input.guestName || parsedInput.guestName)
-    || combined.match(/\b(?:guest|guest name|name)\s*[:#-]\s*([A-Z][A-Za-z .'-]{2,80})/i)?.[1]
+    || firstMatch([
+      /\b(?:guest name|lead guest|main guest|customer name|booker|guest|name)\s*[:#-]\s*([A-Z][A-Za-z .'-]{2,80}?)(?=\s+(?:booking|reservation|reference|check(?:\s*|-)?in|arrival|check(?:\s*|-)?out|departure|room type|adults?|children|amount|total|payment|special requests?|notes?)\b|$)/i,
+    ], combined)
     || null
   const checkIn = dateKeyOrUndefined(input.checkIn || parsedInput.checkIn)
-    || parseDateFromText('check in', combined)
-    || parseDateFromText('arrival', combined)
+    || parseDateFromText(['check in', 'check-in', 'checkin', 'arrival'], combined)
+    || stayDateRange?.start
   const checkOut = dateKeyOrUndefined(input.checkOut || parsedInput.checkOut)
-    || parseDateFromText('check out', combined)
-    || parseDateFromText('departure', combined)
+    || parseDateFromText(['check out', 'check-out', 'checkout', 'departure'], combined)
+    || stayDateRange?.end
   const roomType = normalizeRoomTypeCode(input.roomType || parsedInput.roomType)
+    || normalizeRoomTypeCode(firstMatch([
+      /\b(?:room type|room category|accommodation|unit type)\s*[:#-]?\s*([A-Za-z][A-Za-z0-9 /&'()-]{2,80}?)(?=\s+(?:adults?|children|check(?:\s*|-)?in|arrival|check(?:\s*|-)?out|departure|amount|total|payment|special requests?|notes?|booking|reservation|reference)\b|$)/i,
+    ], combined))
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
   const money = parseMoney(combined)
   const amount = Number(input.amount ?? parsedInput.amount ?? money.amount)
   const adults = Number(input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 1)
   const children = Number(input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 0)
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
-    || (lower.includes('paid') || lower.includes('payment received') ? 'PAID' : lower.includes('deposit') ? 'DEPOSIT' : null)
+    || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
+  const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
+  const cancellationSignal = /\b(cancelled|canceled|cancellation|booking cancelled|reservation cancelled)\b/i.test(combined)
+  const modificationSignal = /\b(modification|modified|changed booking|booking changed|updated booking|updated reservation|reservation updated|amended|amendment|alteration|revised)\b/i.test(combined)
+  const paymentSignal = /\b(payment received|payment notice|paid in full|fully paid|deposit received|deposit paid|transfer received|amount received|prepaid)\b/i.test(combined)
+  const guestMessageSignal = /\b(guest message|message from guest|guest request|guest question|guest enquiry|special request from guest|question from guest)\b/i.test(combined)
+  const nonBookingOperationalSignal = hasNonBookingOperationalSignal(combined)
+  const reservationStructureSignal = Boolean(channelRef || guestName || (checkIn && checkOut) || roomType)
+  const generalBookingSignal = !nonBookingOperationalSignal && (
+    /\b(your booking|your reservation|booking details|reservation details|booking reference|reservation reference|booking number|reservation number|booking id|reservation id|booking ref|reservation ref)\b/i.test(combined)
+    || (/\breservation\b/i.test(combined) && reservationStructureSignal)
+  )
+
+  const explicitType = normalizeBookingEmailEventType(input.eventType)
+  const eventType = explicitType !== 'UNKNOWN'
+    ? explicitType
+    : cancellationSignal
+      ? 'CANCELLATION'
+      : modificationSignal
+        ? 'MODIFICATION'
+        : guestMessageSignal
+          ? 'GUEST_MESSAGE'
+          : newBookingSignal
+            ? 'NEW_BOOKING'
+            : paymentSignal
+              ? 'PAYMENT_NOTICE'
+              : generalBookingSignal && reservationStructureSignal
+                ? 'NEW_BOOKING'
+                : 'UNKNOWN'
 
   const details = {
     guestName: guestName || undefined,
@@ -614,6 +724,7 @@ function parseBookingEmailDetails(input = {}) {
     amount: Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : undefined,
     currency: normalizeNullableString(input.currency || parsedInput.currency || money.currency) || 'THB',
     paymentStatus: paymentStatus || undefined,
+    paymentReference: normalizeNullableString(input.paymentReference || parsedInput.paymentReference) || undefined,
     specialRequests: normalizeNullableString(input.specialRequests || parsedInput.specialRequests) || undefined,
     notes: normalizeNullableString(input.notes || parsedInput.notes) || undefined,
   }
@@ -893,16 +1004,50 @@ export async function fetchGmailEventsForSource(source, options = {}) {
   return messages
 }
 
-async function findDuplicateBookingEmailEvent(tx, sourceId, channelRef, eventId) {
-  if (!channelRef) return null
-  return tx.bookingEmailEvent.findFirst({
+async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, eventId) {
+  const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
+  if (sourceMessageId) {
+    const exactSourceMessage = await tx.bookingEmailEvent.findFirst({
+      where: {
+        id: eventId ? { not: eventId } : undefined,
+        sourceId: sourceId || undefined,
+        sourceMessageId,
+      },
+      orderBy: { receivedAt: 'asc' },
+    })
+    if (exactSourceMessage) return exactSourceMessage
+  }
+
+  if (!parsed.channelRef) return null
+  const candidates = await tx.bookingEmailEvent.findMany({
     where: {
       id: eventId ? { not: eventId } : undefined,
       sourceId: sourceId || undefined,
-      channelRef,
+      channelRef: parsed.channelRef,
+      eventType: parsed.eventType,
     },
     orderBy: { receivedAt: 'asc' },
+    take: 25,
   })
+  if (candidates.length === 0) return null
+
+  const targetHeaders = safeJsonObject(input.rawHeaders)
+  const targetMessageId = normalizeBookingEmailMessageId(targetHeaders.messageId)
+  const targetFingerprint = bookingEmailDuplicateFingerprint(input, parsed)
+  for (const candidate of candidates) {
+    const candidateHeaders = safeJsonObject(candidate.rawHeaders)
+    if (targetMessageId && normalizeBookingEmailMessageId(candidateHeaders.messageId) === targetMessageId) {
+      return candidate
+    }
+    if (bookingEmailDuplicateFingerprint(candidate, {
+      eventType: candidate.eventType,
+      channelRef: candidate.channelRef,
+      details: safeJsonObject(candidate.parsedDetails),
+    }) === targetFingerprint) {
+      return candidate
+    }
+  }
+  return null
 }
 
 async function findReservationForBookingEmailEvent(tx, event, details = safeJsonObject(event.parsedDetails)) {
@@ -949,12 +1094,14 @@ async function findReservationForBookingEmailEvent(tx, event, details = safeJson
 
 async function buildBookingEmailEventData(tx, source, input, existingEventId = undefined) {
   const parsed = parseBookingEmailDetails(input)
-  const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed.channelRef, existingEventId)
+  const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed, input, existingEventId)
   const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
   const status = normalizeBookingEmailStatus(input.status, 'NEEDS_REVIEW')
-  const reviewReason = normalizeNullableString(input.reviewReason)
-    || (duplicateEvent ? `Possible duplicate of email event ${duplicateEvent.id}.` : null)
-    || parsed.reviewReason
+  const reviewReason = [
+    normalizeNullableString(input.reviewReason),
+    parsed.reviewReason,
+    duplicateEvent ? `Possible duplicate of email event ${duplicateEvent.id}.` : null,
+  ].filter(Boolean).join(' ') || null
 
   return {
     propertyId: source.propertyId,
@@ -2312,8 +2459,8 @@ async function autoProcessBookingEmailEvent(tx, event, source, actor) {
   if (event.reviewReason || Number(event.confidence || 0) < source.reviewThreshold) return event
   const details = safeJsonObject(event.parsedDetails)
   try {
-    if (event.eventType === 'NEW_BOOKING') return approveNewBookingEmailEvent(tx, event, details, actor)
-    if (event.eventType === 'PAYMENT_NOTICE') return approvePaymentEmailEvent(tx, event, details, actor)
+    if (event.eventType === 'NEW_BOOKING') return await approveNewBookingEmailEvent(tx, event, details, actor)
+    if (event.eventType === 'PAYMENT_NOTICE') return await approvePaymentEmailEvent(tx, event, details, actor)
     return event
   } catch (error) {
     return tx.bookingEmailEvent.update({
@@ -2511,6 +2658,7 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
         reservationId: event.reservationId,
         completedAction: null,
         processedAt: null,
+        processedBy: null,
         rejectedAt: null,
       },
       include: bookingEmailEventInclude(),

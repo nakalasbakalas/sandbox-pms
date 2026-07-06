@@ -17,7 +17,9 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
+import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
@@ -198,6 +200,183 @@ function createOpsCommandPrismaFixture() {
   }
 
   return { prisma, property, tasks, approvals, logs, audits, notifications, trendAlerts }
+}
+
+function createBookingEmailPrismaFixture(options = {}) {
+  const property = {
+    id: 'property-booking-email-test',
+    code: 'SANDBOX',
+    name: 'SANDBOX HOTEL',
+  }
+  const sources = [{
+    id: 'booking-source-1',
+    propertyId: property.id,
+    name: 'Primary booking Gmail',
+    provider: 'GMAIL',
+    mailbox: 'booking@sandboxhotel.com',
+    enabled: true,
+    autoProcessSafeEvents: Boolean(options.autoProcessSafeEvents),
+    reviewThreshold: options.reviewThreshold ?? 0.85,
+    query: 'to:booking@sandboxhotel.com',
+    credentialsRef: null,
+    lastSyncAt: null,
+    lastSyncCursor: null,
+    lastError: null,
+    createdAt: new Date('2026-07-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+  }]
+  const events = []
+  const audits = []
+  const roomTypes = Array.isArray(options.roomTypes) ? options.roomTypes : []
+  let eventCounter = 0
+
+  const withEventRelations = (event) => event ? {
+    ...event,
+    source: sources.find((source) => source.id === event.sourceId) || null,
+    reservation: null,
+  } : null
+
+  const matchesEventWhere = (event, where = {}) => {
+    if (where.id && typeof where.id === 'string' && event.id !== where.id) return false
+    if (where.id && typeof where.id === 'object' && where.id.not && event.id === where.id.not) return false
+    if (where.propertyId && event.propertyId !== where.propertyId) return false
+    if (where.sourceId !== undefined && event.sourceId !== where.sourceId) return false
+    if (where.status && event.status !== where.status) return false
+    if (where.eventType && event.eventType !== where.eventType) return false
+    if (where.channelRef !== undefined && event.channelRef !== where.channelRef) return false
+    if (where.sourceMessageId && typeof where.sourceMessageId === 'string' && event.sourceMessageId !== where.sourceMessageId) return false
+    if (where.sourceMessageId?.in && !where.sourceMessageId.in.includes(event.sourceMessageId)) return false
+    if (where.reservationId?.not === null && event.reservationId === null) return false
+    if (where.rawText?.not === null && event.rawText === null) return false
+    if (where.processedAt?.gte && !(event.processedAt instanceof Date && event.processedAt >= where.processedAt.gte)) return false
+    return true
+  }
+
+  const sortEvents = (rows, orderBy = []) => {
+    const entries = Array.isArray(orderBy) ? orderBy : [orderBy]
+    return rows.slice().sort((left, right) => {
+      for (const order of entries) {
+        const [field, direction] = Object.entries(order || {})[0] || []
+        if (!field) continue
+        const leftValue = left[field]
+        const rightValue = right[field]
+        if (leftValue === rightValue) continue
+        const multiplier = direction === 'asc' ? 1 : -1
+        return leftValue > rightValue ? multiplier : -multiplier
+      }
+      return 0
+    })
+  }
+
+  const prisma = {
+    property: {
+      findUnique: async ({ where }) => {
+        if (where?.id === property.id || where?.code === property.code) return property
+        return null
+      },
+    },
+    roomType: {
+      findFirst: async ({ where = {} } = {}) => roomTypes.find((roomType) => (
+        (!where.propertyId || roomType.propertyId === where.propertyId)
+        && (!where.code || roomType.code === where.code)
+      )) || null,
+    },
+    reservation: {
+      findFirst: async () => null,
+      findUnique: async () => null,
+    },
+    reservationLog: {
+      create: async ({ data }) => data,
+    },
+    auditLog: {
+      create: async ({ data }) => {
+        audits.push(data)
+        return data
+      },
+    },
+    bookingEmailSource: {
+      findUnique: async ({ where }) => {
+        if (where?.id) return sources.find((source) => source.id === where.id) || null
+        if (where?.propertyId_mailbox) {
+          return sources.find((source) => source.propertyId === where.propertyId_mailbox.propertyId && source.mailbox === where.propertyId_mailbox.mailbox) || null
+        }
+        return null
+      },
+      findFirst: async ({ where = {} } = {}) => sources.find((source) => (
+        (!where.provider || source.provider === where.provider)
+        && (where.enabled === undefined || source.enabled === where.enabled)
+      )) || null,
+      findMany: async ({ where = {}, orderBy = [] } = {}) => sortEvents(
+        sources.filter((source) => (!where.propertyId || source.propertyId === where.propertyId)),
+        orderBy,
+      ),
+      upsert: async ({ where, create, update }) => {
+        const existing = await prisma.bookingEmailSource.findUnique({ where })
+        if (existing) {
+          Object.assign(existing, update, { updatedAt: new Date('2026-07-01T01:00:00.000Z') })
+          return existing
+        }
+        const created = {
+          id: create.id || `booking-source-${sources.length + 1}`,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+          lastSyncCursor: null,
+          lastError: null,
+          credentialsRef: null,
+          ...create,
+        }
+        sources.push(created)
+        return created
+      },
+      update: async ({ where, data }) => {
+        const source = sources.find((item) => item.id === where?.id)
+        if (!source) return null
+        Object.assign(source, data, { updatedAt: new Date('2026-07-01T01:00:00.000Z') })
+        return source
+      },
+    },
+    bookingEmailEvent: {
+      findFirst: async ({ where = {}, orderBy = {} } = {}) => sortEvents(events.filter((event) => matchesEventWhere(event, where)), orderBy)[0] || null,
+      findMany: async ({ where = {}, orderBy = [], take } = {}) => sortEvents(events.filter((event) => matchesEventWhere(event, where)), orderBy)
+        .slice(0, take || events.length)
+        .map(withEventRelations),
+      findUnique: async ({ where }) => withEventRelations(events.find((event) => event.id === where?.id) || null),
+      create: async ({ data }) => {
+        const created = {
+          id: `booking-event-${++eventCounter}`,
+          createdAt: new Date('2026-07-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-01T00:00:00.000Z'),
+          processedAt: null,
+          processedBy: null,
+          rejectedAt: null,
+          duplicateOfEventId: null,
+          reservationId: null,
+          ...data,
+        }
+        events.push(created)
+        return withEventRelations(created)
+      },
+      upsert: async ({ where, create, update }) => {
+        const existing = events.find((event) => (
+          event.sourceId === where?.sourceId_sourceMessageId?.sourceId
+          && event.sourceMessageId === where?.sourceId_sourceMessageId?.sourceMessageId
+        ))
+        if (!existing) return prisma.bookingEmailEvent.create({ data: create })
+        Object.assign(existing, update, { updatedAt: new Date('2026-07-01T01:00:00.000Z') })
+        return withEventRelations(existing)
+      },
+      update: async ({ where, data }) => {
+        const event = events.find((item) => item.id === where?.id)
+        if (!event) return null
+        Object.assign(event, data, { updatedAt: new Date('2026-07-01T01:00:00.000Z') })
+        return withEventRelations(event)
+      },
+      count: async ({ where = {} } = {}) => events.filter((event) => matchesEventWhere(event, where)).length,
+    },
+    $transaction: async (callback) => callback(prisma),
+  }
+
+  return { prisma, property, sources, events, audits }
 }
 
 async function importTypeScriptModule(path) {
@@ -978,6 +1157,78 @@ const previewedBookingEmail = previewBookingEmailEvent({
 assert.equal(previewedBookingEmail.eventType, 'NEW_BOOKING', 'booking-email preview classifies booking confirmations')
 assert.equal(previewedBookingEmail.channelRefPresent, true, 'booking-email preview reports reference extraction without exposing the value')
 assert.equal(previewedBookingEmail.stayDatesPresent, true, 'booking-email preview reports stay-date extraction without exposing guest details')
+const approvedProviderQuery = approvedBookingEmailProviderQuery()
+assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\.com OR from:agoda\.com OR from:trip\.com OR from:expedia\.com OR from:priceline\.com OR from:airbnb\.com\)/, 'booking-email approved provider query keeps the approved OTA sender scope')
+assert.match(approvedProviderQuery, /-from:ebk\.promo\.hotelpartner@trip\.com/, 'booking-email approved provider query excludes the Trip.com partner-report sender')
+assert.match(approvedProviderQuery, /-from:growth-product@agoda\.com/, 'booking-email approved provider query excludes the Agoda partner-invoice sender')
+assert.match(approvedProviderQuery, /-subject:"new sign-in to your account"/, 'booking-email approved provider query excludes Booking.com security notices')
+assert.match(approvedProviderQuery, /newer_than:30d/, 'booking-email approved provider query stays bounded by default')
+assert.doesNotMatch(approvedBookingEmailProviderQuery({ allPast: true }), /newer_than:/, 'booking-email all-past provider query removes the recency bound')
+assert.equal(
+  primaryMailboxBookingEmailQuery('booking@sandboxhotel.com'),
+  'to:booking@sandboxhotel.com -in:spam -in:trash newer_than:30d',
+  'booking-email primary-mailbox query stays available as an explicit troubleshooting fallback',
+)
+for (const fixture of bookingEmailParserFixtures) {
+  const parsed = parseBookingEmailDetails(fixture.input)
+  assert.equal(parsed.eventType, fixture.expected.eventType, `${fixture.name} keeps the expected booking-email event type`)
+  assert.equal(parsed.channelRef, fixture.expected.channelRef, `${fixture.name} keeps the expected booking-email reference`)
+  assert.equal(parsed.details.guestName, fixture.expected.guestName, `${fixture.name} keeps the expected booking-email guest name`)
+  assert.equal(parsed.details.checkIn, fixture.expected.checkIn, `${fixture.name} keeps the expected booking-email check-in date`)
+  assert.equal(parsed.details.checkOut, fixture.expected.checkOut, `${fixture.name} keeps the expected booking-email check-out date`)
+  assert.equal(parsed.details.roomType, fixture.expected.roomType, `${fixture.name} keeps the expected booking-email room type`)
+  assert.equal(parsed.details.amount, fixture.expected.amount, `${fixture.name} keeps the expected booking-email amount`)
+  assert.equal(parsed.details.paymentStatus, fixture.expected.paymentStatus, `${fixture.name} keeps the expected booking-email payment status`)
+  assert.equal(parsed.reviewReason, null, `${fixture.name} parses without a review blocker`)
+}
+
+for (const fixture of bookingEmailNoiseFixtures) {
+  const parsed = parseBookingEmailDetails(fixture.input)
+  assert.equal(parsed.eventType, 'UNKNOWN', `${fixture.name} stays out of the booking-email workflow`)
+  assert.match(parsed.reviewReason || '', /event type/i, `${fixture.name} remains queued for manual classification`)
+}
+
+const duplicateScopeFixture = createBookingEmailPrismaFixture()
+const duplicateScopeActor = { id: 'front-desk-booking', username: 'front.desk', role: 'FRONT_DESK' }
+const sameReferencePaymentFixture = {
+  ...bookingEmailParserFixtures[4].input,
+  subject: bookingEmailParserFixtures[4].input.subject.replace('PAY-5511', 'LH-ABCD1234'),
+  rawText: bookingEmailParserFixtures[4].input.rawText.replace(/PAY-5511/g, 'LH-ABCD1234'),
+}
+await syncBookingEmail(duplicateScopeFixture.prisma, {
+  sourceId: duplicateScopeFixture.sources[0].id,
+  reviewOnly: true,
+  events: [
+    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-new-booking-fixture' },
+    { ...sameReferencePaymentFixture, sourceMessageId: 'gmail-payment-fixture' },
+  ],
+}, duplicateScopeActor)
+assert.equal(duplicateScopeFixture.events.length, 2, 'booking-email duplicate-scope fixture stores both test events')
+assert.equal(duplicateScopeFixture.events[1].duplicateOfEventId, null, 'booking-email duplicate scope does not mark different event types with the same reference as duplicates')
+
+const duplicateReplayFixture = createBookingEmailPrismaFixture()
+await syncBookingEmail(duplicateReplayFixture.prisma, {
+  sourceId: duplicateReplayFixture.sources[0].id,
+  reviewOnly: true,
+  events: [
+    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-a', rawHeaders: { messageId: '<provider-replay@example.test>' } },
+    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-resend-b', rawHeaders: { messageId: '<provider-replay@example.test>' } },
+  ],
+}, duplicateScopeActor)
+assert.equal(Boolean(duplicateReplayFixture.events[1].duplicateOfEventId), true, 'booking-email duplicate scope still flags same-type resend content as a duplicate')
+
+const autoProcessFixture = createBookingEmailPrismaFixture({
+  autoProcessSafeEvents: true,
+})
+const autoProcessResult = await syncBookingEmail(autoProcessFixture.prisma, {
+  sourceId: autoProcessFixture.sources[0].id,
+  reviewOnly: false,
+  events: [
+    { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-auto-process-fixture' },
+  ],
+}, duplicateScopeActor)
+assert.equal(autoProcessResult.events[0].status, 'ERROR', 'booking-email auto-process persists async approval failures onto the event')
+assert.match(autoProcessResult.events[0].errorReason || '', /room type/i, 'booking-email auto-process keeps the approval failure reason on the event')
 
 function gmailBody(value) {
   return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
