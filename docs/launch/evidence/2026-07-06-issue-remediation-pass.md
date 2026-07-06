@@ -4,14 +4,15 @@
 
 Not launch-signed-off. This pass refreshed current engineering, deploy, Gmail, public-edge, and local disposable DB proof after `main` was deployed as Render deploy `dep-d95qsnvavr4c73aqics0`, but the remaining open issues still require owner/provider/manual evidence before truthful closure.
 
-## Current Source And Runtime
+## Verified Source And Runtime
 
 - Repository: `nakalasbakalas/sandbox-pms`.
-- Branch: `main`.
-- Commit: `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0`.
+- Branch: `main` at the time this remediation proof was collected.
+- Verified runtime commit: `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0`.
 - GitHub Actions: run `28794902800` passed for `ce13cf6`, including install, Prisma generate, lint, typecheck, business tests, E2E smoke, build, and launch gate.
 - Render service: `srv-d6ns31h4tr6s73c9i8g0`.
 - Render deploy: `dep-d95qsnvavr4c73aqics0`, status `live`, finished `2026-07-06T13:34:57Z`.
+- Publication note: later documentation-only commits may advance `main` without changing this live runtime deploy.
 
 ## Commands And Results
 
@@ -50,4 +51,4 @@ All commands below were run from `D:\sandbox-pms`.
 
 ## Closure Boundary
 
-Do not close the remaining launch issues from this evidence alone. The current repository, CI, Render deploy, and local disposable DB proof are green; the remaining closure criteria are external owner/provider/manual proof items.
+Do not close the remaining launch issues from this evidence alone. The verified repository, CI, Render deploy, and local disposable DB proof are green; the remaining closure criteria are external owner/provider/manual proof items.

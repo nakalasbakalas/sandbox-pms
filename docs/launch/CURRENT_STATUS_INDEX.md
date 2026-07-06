@@ -2,7 +2,7 @@
 
 Status date: 2026-07-06.
 
-Verdict: not launch-signed-off. Current `main` commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0` passed GitHub Actions run `28794902800` and is live on Render deploy `dep-d95qsnvavr4c73aqics0`. A 2026-07-06 issue-remediation pass refreshed production preflight, public-edge proof, live check, redacted Render Gmail OAuth status, local migration status, and guarded local disposable DB-mutating E2E. The engineering/runtime path is green, and issue `#136` is closed, but launch sign-off remains blocked by owner/provider/manual proof for production auth/RBAC/logout, manual route/workflow/localization acceptance, real room inventory source, backup/recovery ownership, WAF/rate-limit rules, and staff booking-inbox parser acceptance.
+Verdict: not launch-signed-off. Verified runtime commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0` passed GitHub Actions run `28794902800` and is live on Render deploy `dep-d95qsnvavr4c73aqics0`. A 2026-07-06 issue-remediation pass refreshed production preflight, public-edge proof, live check, redacted Render Gmail OAuth status, local migration status, and guarded local disposable DB-mutating E2E. Later documentation-only commits may advance `main` without changing the live runtime deploy. The engineering/runtime path is green, and issue `#136` is closed, but launch sign-off remains blocked by owner/provider/manual proof for production auth/RBAC/logout, manual route/workflow/localization acceptance, real room inventory source, backup/recovery ownership, WAF/rate-limit rules, and staff booking-inbox parser acceptance.
 
 ## Latest Slice
 
