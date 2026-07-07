@@ -1,8 +1,8 @@
 # Secret, Recovery, Rollback, and WAF Provider Posture
 
-Status date: 2026-07-04.
+Status date: 2026-07-07.
 
-Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through Slice 5BV, and a read-only owner-run Cloudflare WAF/rate-limit proof helper now exists. This does not close the P0 because no Cloudflare API token or zone ID is available in this environment, and 2026-07-06 Cloudflare connector/tool discovery did not expose callable Cloudflare action tools in this Codex session. Nick owns Cloudflare launch proof. Secret rotation metadata, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through owner-directed launch completion, and the read-only owner-run Cloudflare WAF/rate-limit proof helper now creates an ignored local env template and can discover the zone ID from `book.sandboxhotel.com` when the token has zone read access. This does not close the P0 because no Cloudflare API token is available in this environment, and 2026-07-07 Cloudflare connector/tool discovery still did not expose callable Cloudflare WAF/ruleset action tools in this Codex session. Nick owns Cloudflare launch proof. Secret rotation metadata, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
 
 ## Scope
 
@@ -10,6 +10,27 @@ Verdict: partial/open. Safe Render and public-edge metadata has been refreshed t
 - Render workspace observed through CLI: `My Workspace` (`tea-d6n8kq14tr6s738stj5g`) with account email `nakalastravels@gmail.com`.
 - Commands were read-only except for explicitly noted Render deploy-sync slices. No restart, SSH session, database shell, production data mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
 - No production secrets, raw database URLs, tokens, passwords, cookies, or screenshots were recorded.
+
+## 2026-07-07 Owner-Run Setup Refresh
+
+This refresh keeps the Cloudflare proof path owner-runnable without committing provider secrets:
+
+- `scripts/prove-cloudflare-waf-rules.mjs` now supports `--init-env-template`, which creates `.codex/cloudflare-waf.local.env`. `.codex/` is ignored, and the template contains blank placeholders only.
+- The helper now supports `--env-file <path>` for allowed Cloudflare keys only: `CLOUDFLARE_API_TOKEN`, `CF_API_TOKEN`, `CLOUDFLARE_ZONE_ID`, `CF_ZONE_ID`, `CLOUDFLARE_ACCOUNT_ID`, and `CF_ACCOUNT_ID`. Existing shell environment values win over the local file.
+- Blank placeholder values are not reported as loaded credentials.
+- If no zone ID is supplied, the helper attempts read-only zone discovery from the requested hostname, checking `book.sandboxhotel.com` and then `sandboxhotel.com`.
+- `npm.cmd run cloudflare:waf:proof -- --help` passed after the update.
+- `npm.cmd run cloudflare:waf:proof -- --init-env-template` created `D:\sandbox-pms\.codex\cloudflare-waf.local.env` with no secret values.
+- `npm.cmd run cloudflare:waf:proof -- --env-file .\.codex\cloudflare-waf.local.env --hostname book.sandboxhotel.com` failed as expected with `ready=false` because the template has no token value. The output omitted secrets and reported no loaded keys.
+- `npm.cmd test` passed after the update.
+
+Owner-run command after the token is added locally:
+
+```powershell
+npm.cmd run cloudflare:waf:proof -- --env-file .\.codex\cloudflare-waf.local.env --hostname book.sandboxhotel.com --probe-url https://book.sandboxhotel.com/.env --require-rules
+```
+
+This setup still does not prove customer-owned Cloudflare zone control, WAF/rate-limit rule IDs, thresholds/actions, protected hostnames, or owner-approved non-destructive WAF/rate-limit behavior until an owner token is provided and the proof command succeeds.
 
 ## 2026-07-04 Slice 5BV Refresh
 

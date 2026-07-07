@@ -23,7 +23,7 @@ import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixture
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
-import { summarizeRuleset } from './prove-cloudflare-waf-rules.mjs'
+import { parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -903,6 +903,20 @@ assert.equal(cloudflareWafRulesetSummary.rules[0].ratelimit.requestsPerPeriod, 1
 assert.equal(cloudflareWafRulesetSummary.rules[0].expression, 'omitted', 'Cloudflare WAF proof omits rule expressions by default')
 assert.equal(cloudflareWafRulesetSummary.rules[0].actionParameters, 'omitted', 'Cloudflare WAF proof omits action parameters')
 assert.equal(JSON.stringify(cloudflareWafRulesetSummary).includes('fixture body'), false, 'Cloudflare WAF proof does not include custom response body values')
+assert.deepEqual(
+  zoneNameCandidates('book.sandboxhotel.com'),
+  ['book.sandboxhotel.com', 'sandboxhotel.com'],
+  'Cloudflare WAF proof can discover parent zone names from a protected hostname',
+)
+const cloudflareEnvFixture = parseCloudflareEnvFileContent(`
+# local fixture
+CLOUDFLARE_API_TOKEN="token-fixture"
+IGNORED_KEY=ignored
+CF_ZONE_ID=zone-fixture
+`)
+assert.equal(cloudflareEnvFixture.parsed.CLOUDFLARE_API_TOKEN, 'token-fixture', 'Cloudflare WAF proof parses allowed local env keys')
+assert.equal(cloudflareEnvFixture.parsed.CF_ZONE_ID, 'zone-fixture', 'Cloudflare WAF proof parses zone id from local env file')
+assert.deepEqual(cloudflareEnvFixture.skippedKeys, ['IGNORED_KEY'], 'Cloudflare WAF proof skips unrelated local env keys')
 
 const opsEmailNotification = {
   id: 'ops-notification-email-1',

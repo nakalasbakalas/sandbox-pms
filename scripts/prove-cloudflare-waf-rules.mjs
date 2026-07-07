@@ -1,8 +1,19 @@
 /* global console, process, fetch, AbortController, URL, setTimeout, clearTimeout */
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const API_BASE = 'https://api.cloudflare.com/client/v4'
 const DEFAULT_HOSTNAME = 'book.sandboxhotel.com'
+const DEFAULT_ENV_TEMPLATE_PATH = '.codex/cloudflare-waf.local.env'
+const CLOUDFLARE_ENV_KEYS = new Set([
+  'CLOUDFLARE_API_TOKEN',
+  'CF_API_TOKEN',
+  'CLOUDFLARE_ZONE_ID',
+  'CF_ZONE_ID',
+  'CLOUDFLARE_ACCOUNT_ID',
+  'CF_ACCOUNT_ID',
+])
 const SECURITY_PHASES = new Set([
   'http_request_firewall_custom',
   'http_ratelimit',
@@ -67,19 +78,92 @@ function positiveInt(value, fallback, max = 5) {
   return parsed
 }
 
+function stripOptionalQuotes(value) {
+  const trimmed = String(value || '').trim()
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1)
+  }
+  return trimmed
+}
+
+export function parseCloudflareEnvFileContent(content) {
+  const parsed = {}
+  const skippedKeys = []
+  const lines = String(content || '').split(/\r?\n/)
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const separatorIndex = trimmed.indexOf('=')
+    if (separatorIndex <= 0) fail(`Invalid env-file line ${index + 1}. Expected KEY=value.`)
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const value = stripOptionalQuotes(trimmed.slice(separatorIndex + 1))
+    if (!CLOUDFLARE_ENV_KEYS.has(key)) {
+      skippedKeys.push(key)
+      continue
+    }
+    parsed[key] = value
+  }
+  return { parsed, skippedKeys }
+}
+
+async function loadCloudflareEnvFile(filePath) {
+  if (!filePath) return { loadedKeys: [], skippedKeys: [], path: null }
+  const resolvedPath = resolve(filePath)
+  const content = await readFile(resolvedPath, 'utf8')
+  const { parsed, skippedKeys } = parseCloudflareEnvFileContent(content)
+  const loadedKeys = []
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!String(value || '').trim()) continue
+    if (process.env[key]) continue
+    process.env[key] = value
+    loadedKeys.push(key)
+  }
+  return { loadedKeys, skippedKeys, path: resolvedPath }
+}
+
+async function writeEnvTemplate(filePath = DEFAULT_ENV_TEMPLATE_PATH) {
+  const resolvedPath = resolve(filePath)
+  await mkdir(dirname(resolvedPath), { recursive: true })
+  const template = `# Local only. Do not commit.
+# Cloudflare API token with read access for zone rulesets/WAF metadata.
+CLOUDFLARE_API_TOKEN=
+
+# Optional if the token can read zones. The helper can discover this from --hostname.
+CLOUDFLARE_ZONE_ID=
+
+# Optional. Include only when account-level rulesets should be inspected.
+CLOUDFLARE_ACCOUNT_ID=
+`
+  await writeFile(resolvedPath, template, { encoding: 'utf8', flag: 'wx' })
+  return resolvedPath
+}
+
+export function zoneNameCandidates(hostname) {
+  const labels = normalizeHostname(hostname).split('.')
+  const candidates = []
+  for (let index = 0; index < labels.length - 1; index += 1) {
+    candidates.push(labels.slice(index).join('.'))
+  }
+  return candidates
+}
+
 function usage() {
   return `Usage:
+  npm.cmd run cloudflare:waf:proof -- --init-env-template
+  npm.cmd run cloudflare:waf:proof -- --env-file .\\.codex\\cloudflare-waf.local.env --hostname book.sandboxhotel.com --require-rules
   npm.cmd run cloudflare:waf:proof -- --zone-id <zone_id> --hostname book.sandboxhotel.com
   npm.cmd run cloudflare:waf:proof -- --zone-id <zone_id> --account-id <account_id> --hostname book.sandboxhotel.com
 
 Required:
   CLOUDFLARE_API_TOKEN or CF_API_TOKEN.
-  CLOUDFLARE_ZONE_ID or CF_ZONE_ID, unless --zone-id is provided.
+  CLOUDFLARE_ZONE_ID or CF_ZONE_ID, unless --zone-id is provided or the token can discover the zone from --hostname.
 
 Optional:
   --account-id <account_id>        Also inspect account-level WAF/rate-limit rulesets.
+  --env-file <path>                Load allowed Cloudflare keys from a local ignored env file. Existing shell env wins.
   --hostname <hostname>           Target hostname for coverage checks. Default: ${DEFAULT_HOSTNAME}
   --include-expressions           Include rule expressions in output after owner approval.
+  --init-env-template [path]       Create a local env template. Default: ${DEFAULT_ENV_TEMPLATE_PATH}
   --probe-url <https_url>         Run a bounded unauthenticated GET probe and omit response body.
   --probe-count <0-5>             Number of times to request --probe-url. Default: 1 when probe-url is set.
   --require-rules                 Exit non-zero if no WAF/rate-limit rules are found.
@@ -121,6 +205,21 @@ async function fetchRulesets({ level, id, token }) {
     details.push(await fetchRulesetDetails({ level, id, rulesetId: ruleset.id, token }))
   }
   return details
+}
+
+async function discoverZone({ token, hostname }) {
+  const errors = []
+  for (const candidate of zoneNameCandidates(hostname)) {
+    try {
+      const result = await requestJson(`/zones?name=${encodeURIComponent(candidate)}`, token)
+      const zones = Array.isArray(result) ? result : []
+      const zone = zones.find((item) => item?.name === candidate) || zones[0]
+      if (zone?.id) return { id: zone.id, name: zone.name || candidate, status: zone.status || null, source: 'api-discovery' }
+    } catch (error) {
+      errors.push(redactProviderMessage(error instanceof Error ? error.message : String(error)))
+    }
+  }
+  return { id: null, name: null, status: null, source: 'api-discovery-failed', errors }
 }
 
 function hostnameCoverage(expression, targetHostname) {
@@ -225,10 +324,13 @@ export async function buildCloudflareWafProof({
   probeCount = 0,
 } = {}) {
   if (!token) fail('Cloudflare API token is required. Set CLOUDFLARE_API_TOKEN or CF_API_TOKEN.')
-  if (!targetZoneId) fail('Cloudflare zone id is required. Set CLOUDFLARE_ZONE_ID or CF_ZONE_ID.')
   const hostname = normalizeHostname(targetHostname)
-  const zone = await requestJson(`/zones/${encodeURIComponent(targetZoneId)}`, token)
-  const zoneRulesets = await fetchRulesets({ level: 'zone', id: targetZoneId, token })
+  const discoveredZone = targetZoneId
+    ? { id: targetZoneId, name: null, status: null, source: 'provided' }
+    : await discoverZone({ token, hostname })
+  if (!discoveredZone.id) fail(`Cloudflare zone id is required. Set CLOUDFLARE_ZONE_ID or CF_ZONE_ID, pass --zone-id, or grant the token Zone Read for hostname discovery. Discovery source: ${discoveredZone.source}.`)
+  const zone = await requestJson(`/zones/${encodeURIComponent(discoveredZone.id)}`, token)
+  const zoneRulesets = await fetchRulesets({ level: 'zone', id: discoveredZone.id, token })
   const accountRulesets = targetAccountId
     ? await fetchRulesets({ level: 'account', id: targetAccountId, token })
     : []
@@ -244,7 +346,8 @@ export async function buildCloudflareWafProof({
     target: {
       hostname,
       zone: {
-        idPresent: Boolean(targetZoneId),
+        idPresent: Boolean(discoveredZone.id),
+        idSource: discoveredZone.source,
         name: zone?.name || null,
         status: zone?.status || null,
       },
@@ -287,16 +390,45 @@ async function main() {
     return
   }
 
+  if (hasFlag('--init-env-template')) {
+    const templatePath = argValue('--init-env-template')
+    const writtenPath = await writeEnvTemplate(templatePath && !templatePath.startsWith('--') ? templatePath : DEFAULT_ENV_TEMPLATE_PATH)
+    console.log(JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      ready: false,
+      mode: 'init-env-template',
+      path: writtenPath,
+      redaction: {
+        apiToken: 'omitted',
+        secrets: 'not generated',
+      },
+      nextStep: `Edit ${writtenPath} locally, then run npm.cmd run cloudflare:waf:proof -- --env-file ${writtenPath} --hostname ${DEFAULT_HOSTNAME} --require-rules`,
+    }, null, 2))
+    return
+  }
+
+  const envFilePath = argValue('--env-file')
+  const envFile = envFilePath ? await loadCloudflareEnvFile(envFilePath) : null
   const token = bearerToken()
   const targetZoneId = zoneId()
+  const hostname = normalizeHostname(argValue('--hostname') || DEFAULT_HOSTNAME)
   const outputBase = {
     generatedAt: new Date().toISOString(),
     purpose: 'read-only Cloudflare WAF and rate-limit ruleset proof',
     mode: 'status',
     target: {
-      hostname: normalizeHostname(argValue('--hostname') || DEFAULT_HOSTNAME),
+      hostname,
       zoneIdPresent: Boolean(targetZoneId),
       accountIdPresent: Boolean(accountId()),
+    },
+    envFile: envFile ? {
+      used: true,
+      path: envFile.path,
+      loadedKeys: envFile.loadedKeys,
+      skippedKeys: envFile.skippedKeys,
+      values: 'omitted',
+    } : {
+      used: false,
     },
     redaction: {
       apiToken: 'omitted',
@@ -305,15 +437,14 @@ async function main() {
     },
   }
 
-  if (!token || !targetZoneId) {
+  if (!token) {
     console.log(JSON.stringify({
       ...outputBase,
       ready: false,
       missingRequiredKeys: [
-        ...(!token ? ['CLOUDFLARE_API_TOKEN or CF_API_TOKEN'] : []),
-        ...(!targetZoneId ? ['CLOUDFLARE_ZONE_ID or CF_ZONE_ID'] : []),
+        'CLOUDFLARE_API_TOKEN or CF_API_TOKEN',
       ],
-      nextStep: 'Run from an owner shell with a Cloudflare API token that has Zone WAF Read permission and the target zone id.',
+      nextStep: `Run npm.cmd run cloudflare:waf:proof -- --init-env-template, add a Cloudflare API token locally, then rerun with --env-file ${DEFAULT_ENV_TEMPLATE_PATH}.`,
     }, null, 2))
     fail('Missing Cloudflare WAF proof inputs.')
   }
@@ -322,11 +453,12 @@ async function main() {
     token,
     targetZoneId,
     targetAccountId: accountId(),
-    targetHostname: argValue('--hostname') || DEFAULT_HOSTNAME,
+    targetHostname: hostname,
     includeExpressions: hasFlag('--include-expressions'),
     probeUrl: argValue('--probe-url') || null,
     probeCount: argValue('--probe-count'),
   })
+  proof.envFile = outputBase.envFile
   proof.ready = proof.summary.rulesCount > 0
   console.log(JSON.stringify(proof, null, 2))
 
