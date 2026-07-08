@@ -1,0 +1,59 @@
+diff --git a/src/components/board/NewReservationDialog.tsx b/src/components/board/NewReservationDialog.tsx
+--- a/src/components/board/NewReservationDialog.tsx
++++ b/src/components/board/NewReservationDialog.tsx
+@@
+   prefilledData?: {
+     roomId?: string
+     roomNumber?: string
+-    roomType?: 'TWIN' | 'DOUBLE'
++    roomType?: string
+     checkIn?: Date
+   } | null
+ }
+ 
+-type ReservationRoomTypeCode = 'TWIN' | 'DOUBLE'
++type ReservationRoomTypeCode = string
+@@
+ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }: NewReservationDialogProps) {
+   const [configuredRoomTypes] = useKV<Array<{
+     id: string
+-    code?: 'TWIN' | 'DOUBLE'
++    code?: string
+     name: string
+     baseRate: number
+     baseOccupancy?: number
+@@
+-  const roomTypeOptions = useMemo<ReservationRoomTypeOption[]>(() => {
++  const roomTypeOptions = useMemo<ReservationRoomTypeOption[]>(() => {
+     if (configuredRoomTypes.length === 0) {
+       return [
+-        { code: 'TWIN' as const, id: 'twin', name: 'Standard Twin', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFee: 300 },
+-        { code: 'DOUBLE' as const, id: 'double', name: 'Superior Double', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFee: 300 },
++        { code: 'TWIN', id: 'twin', name: 'Standard Twin', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 2, extraGuestFee: 300, childFee: 300 },
++        { code: 'DOUBLE', id: 'double', name: 'Superior Double', baseRate: 2000, baseOccupancy: 2, maxOccupancy: 4, extraGuestFee: 300, childFee: 300 },
+       ]
+     }
+ 
+     return configuredRoomTypes.map((roomType, index) => {
+-      const code = roomType.code || (roomType.name.toLowerCase().includes('double') || roomType.id.toLowerCase().includes('double') || index === 1 ? 'DOUBLE' : 'TWIN') as 'TWIN' | 'DOUBLE'
++      const code = normalizeRoomTypeCode(roomType.code, roomType.id || roomType.name || `TYPE_${index + 1}`)
+       return {
+         code,
+         id: roomType.id,
+@@
+   const selectedRoomType = roomTypeOptions.find((roomType) => roomType.code === formData.roomType) || roomTypeOptions[0]
+@@
+ }
++
++function normalizeRoomTypeCode(value: string | undefined, fallback: string) {
++  return String(value || fallback)
++    .trim()
++    .toUpperCase()
++    .replace(/[^A-Z0-9]+/g, '_')
++    .replace(/^_+|_+$/g, '')
++}
+
+Notes:
+- This patch intentionally keeps `roomTypeId` as the durable foreign key and `roomTypeName` as staff-facing display copy.
+- After applying, update local Board/FrontDesk helper interfaces that still narrow room type to `TWIN | DOUBLE` only if TypeScript reports propagation errors.
+- Acceptance fixture: add a third configured type (`family_suite`, `FAMILY_SUITE`, `Family Suite`) and confirm the select list, submitted `roomTypeId`, and room section labels all preserve it.
