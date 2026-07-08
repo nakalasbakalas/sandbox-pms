@@ -19,9 +19,19 @@ export interface BoardRoomCard {
   number: string
   roomNumber?: string
   floor: number
+
+  /**
+   * Legacy display bucket retained for older board/front-desk components.
+   * Use roomTypeId/roomTypeCode/roomTypeName for source-of-truth room type handling.
+   */
   type: 'TWIN' | 'DOUBLE'
   roomType?: 'TWIN' | 'DOUBLE'
+
+  /** Source-of-truth room-type metadata from server or onboarding configuration. */
   roomTypeId?: string
+  roomTypeCode?: string
+  roomTypeName?: string
+
   status: RoomStatus
   operationalStatus: RoomOpStatus
   

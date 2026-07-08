@@ -116,6 +116,43 @@ function boardStatusFromServer(status: string): BoardRoomCard['status'] {
   return 'VACANT_CLEAN'
 }
 
+function normalizeRoomTypeCode(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function humanizeRoomType(value: unknown) {
+  return String(value || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function legacyBoardRoomType(codeOrName: string): BoardRoomCard['type'] {
+  const normalized = normalizeRoomTypeCode(codeOrName)
+  if (normalized === 'TWIN' || normalized.includes('TWIN')) return 'TWIN'
+  if (normalized === 'DOUBLE' || normalized.includes('DOUBLE')) return 'DOUBLE'
+  // Keep older board/front-desk components safe while dynamic views use roomTypeCode/Name.
+  return 'DOUBLE'
+}
+
+function roomTypeMetadata(room: any) {
+  const id = String(room?.roomTypeId || room?.roomType?.id || room?.roomType?.code || '').trim() || undefined
+  const code = normalizeRoomTypeCode(room?.roomType?.code || room?.roomTypeCode || room?.roomType?.name || id)
+  const name = String(room?.roomType?.name || room?.roomTypeName || '').trim() || humanizeRoomType(code || id)
+
+  return {
+    id,
+    code: code || undefined,
+    name: name || undefined,
+    legacyType: legacyBoardRoomType(code || name || id || room?.type),
+  }
+}
+
 export function mapServerBoardRooms(data: any): BoardRoomCard[] {
   const reservationsByRoom = new Map<string, any>()
   for (const reservation of data?.reservations || []) {
@@ -129,12 +166,17 @@ export function mapServerBoardRooms(data: any): BoardRoomCard[] {
       : undefined
     const checkInDate = reservation?.checkIn ? new Date(reservation.checkIn) : undefined
     const checkOutDate = reservation?.checkOut ? new Date(reservation.checkOut) : undefined
+    const roomType = roomTypeMetadata(room)
 
     return {
       roomId: room.id,
       number: room.number,
       floor: room.floor,
-      type: room.roomType?.code === 'DOUBLE' ? 'DOUBLE' : 'TWIN',
+      type: roomType.legacyType,
+      roomType: roomType.legacyType,
+      roomTypeId: roomType.id,
+      roomTypeCode: roomType.code,
+      roomTypeName: roomType.name,
       status: boardStatusFromServer(room.currentStatus),
       operationalStatus: room.operationalStatus,
       guestName,
