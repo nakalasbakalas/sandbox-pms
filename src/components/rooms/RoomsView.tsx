@@ -29,13 +29,29 @@ function normalizeRoomTypeLabel(value?: string) {
   return String(value || '')
     .trim()
     .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
     .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function roomTypeKey(room: BoardRoomCard) {
+  return String(room.roomTypeId || room.roomTypeCode || room.roomType || room.type || 'unknown').trim() || 'unknown'
+}
+
+function roomTypeLabel(room: BoardRoomCard, configuredLabels: Map<string, string>) {
+  const key = roomTypeKey(room)
+  return configuredLabels.get(key)
+    || room.roomTypeName
+    || configuredLabels.get(room.roomTypeCode || '')
+    || normalizeRoomTypeLabel(room.roomTypeCode || room.roomType || room.type || key)
+    || 'Room Type'
 }
 
 function RoomTile({ room, onOpen }: { room: BoardRoomCard; onOpen: () => void }) {
   const { t } = useI18n()
   const status = getOperationalRoomStatus(room)
   const isReady = isRoomReadyForArrival(room)
+  const displayType = room.roomTypeName || normalizeRoomTypeLabel(room.roomTypeCode || room.type)
 
   return (
     <button
@@ -52,7 +68,7 @@ function RoomTile({ room, onOpen }: { room: BoardRoomCard; onOpen: () => void })
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-xl font-semibold tabular-nums">{room.number}</div>
-          <div className="text-xs font-medium uppercase text-muted-foreground">{room.type}</div>
+          <div className="text-xs font-medium uppercase text-muted-foreground">{displayType}</div>
         </div>
         <RoomStatusBadge status={status} />
       </div>
@@ -91,9 +107,11 @@ export function RoomsView() {
     const labels = new Map<string, string>()
     for (const roomType of rateRoomTypes || []) {
       if (roomType.id && roomType.name) labels.set(roomType.id, roomType.name)
+      if (roomType.code && roomType.name) labels.set(roomType.code, roomType.name)
     }
     for (const roomType of configuredRoomTypes || []) {
       if (roomType.id && roomType.name) labels.set(roomType.id, roomType.name)
+      if (roomType.code && roomType.name) labels.set(roomType.code, roomType.name)
     }
     return labels
   }, [configuredRoomTypes, rateRoomTypes])
@@ -103,12 +121,13 @@ export function RoomsView() {
     const orderedRoomTypes = configuredRoomTypes.length > 0 ? configuredRoomTypes : rateRoomTypes
     orderedRoomTypes.forEach((roomType, index) => {
       if (roomType.id) roomTypeOrder.set(roomType.id, index)
+      if (roomType.code) roomTypeOrder.set(roomType.code, index)
     })
 
     const groups = new Map<string, RoomSectionData>()
     operationalRooms.forEach((room) => {
-      const id = room.roomTypeId || room.roomType || room.type || 'unknown'
-      const title = roomTypeLabels.get(id) || normalizeRoomTypeLabel(room.type || id) || t('rooms.title')
+      const id = roomTypeKey(room)
+      const title = roomTypeLabel(room, roomTypeLabels)
       const current = groups.get(id) || { id, title, rooms: [] }
       current.rooms.push(room)
       groups.set(id, current)
@@ -121,7 +140,7 @@ export function RoomsView() {
         if (orderDelta !== 0) return orderDelta
         return a.title.localeCompare(b.title)
       })
-  }, [configuredRoomTypes, operationalRooms, rateRoomTypes, roomTypeLabels, t])
+  }, [configuredRoomTypes, operationalRooms, rateRoomTypes, roomTypeLabels])
 
   const statusCounts = useMemo(() => {
     const counts = { ready: 0, occupied: 0, dirty: 0, blocked: 0 }
