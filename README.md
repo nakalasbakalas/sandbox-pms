@@ -4,18 +4,21 @@ Boutique hotel property-management system for front desk, rooms, reservations, h
 
 ## Current Launch Status
 
-Status date: 2026-06-15.
+Status date: 2026-07-09.
 
-The codebase is in launch-hardening, not final launch sign-off. Automated checks can prove build, routing, business-rule, browser-smoke, API-contract, database-connectivity, and live-health behavior. They do not prove account-owner decisions, production user approval, provider credential ownership, role-by-role manual acceptance, WAF configuration, or launch go/no-go.
+The codebase is an **owner-accepted pilot / launch-hardening system**, not a fully launched or independently launch-signed-off PMS. Use “owner-accepted pilot” or “launch-hardening” language until the V2 launch proof pack is complete, current, and reviewed.
+
+Automated checks can prove build, routing, business-rule, browser-smoke, API-contract, database-connectivity, and live-health behavior. They do not prove account-owner decisions, production user approval, provider credential ownership, role-by-role manual acceptance, Cloudflare WAF/rate-limit configuration, database backup/recovery point freshness, or final launch go/no-go.
 
 Current integration posture:
 
 - LINE: server webhook/status support exists. Live LINE messaging must stay disabled/manual unless the account owner provides credentials, webhook configuration, signature validation, and send-test proof.
 - OTA: launch posture is iCal/manual metadata only. Booking.com, Agoda, Expedia, or Airbnb API automation is not live without provider adapters and sandbox/production evidence.
 - Payments: launch posture is PMS-recorded payments only. Card, PromptPay, bank transfer, and online payment records require references, but no live gateway/PromptPay collection adapter is proven.
-- Production data: `SEED_MODE=prod-safe` must not create fake operational guests, reservations, payments, invoices, room inventory, or demo staff users. Production room inventory is imported or configured separately.
+- Booking email: Gmail OAuth/backfill support can import provider messages into review-only Booking Email Events. Staff approval is required before creating, modifying, cancelling, charging, or linking operational reservations.
+- Production data: `SEED_MODE=prod-safe` must not create fake operational guests, reservations, payments, invoices, room inventory, or demo staff users. Production room inventory is imported or configured separately and still requires redacted owner/import/admin proof before full sign-off.
 
-Open launch proof work is tracked in GitHub issues #136-#142. Scope decisions and go/no-go boundaries are documented in [docs/launch-scope-decisions.md](docs/launch-scope-decisions.md). The checklist is [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md).
+Full production sign-off is blocked until the required V2 evidence files are completed. Start with [docs/launch/LAUNCH_PROOF_PACK_V2.md](docs/launch/LAUNCH_PROOF_PACK_V2.md), then record dated command/manual/provider proof under `docs/launch/evidence/`.
 
 ## Local Development
 
@@ -35,9 +38,10 @@ Database setup, seed modes, disposable E2E safety, and Render database wiring ar
 
 ## Validation
 
-Run the smallest relevant check first, then widen:
+Run the smallest relevant check first, then widen. For a candidate release, use the V2 evidence command pack from a clean checkout of the exact deploy candidate:
 
 ```bash
+npm run remediation:check
 npm run typecheck
 npm run lint
 npm test
@@ -46,12 +50,12 @@ npm run build
 npm run prod:preflight
 npm run render:validate
 npm run live:check
-npm run launch:check
+npm run public-edge:proof
 npm audit --audit-level=high
 npx prisma migrate status
 ```
 
-Database-mutating E2E is guarded and must only run against a disposable or staging database:
+Database-mutating E2E is guarded and must only run against a disposable or owner-approved staging database:
 
 ```bash
 ALLOW_DB_E2E=true E2E_DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432/sandbox_hotel_e2e?schema=public" npm run db:e2e:ready
@@ -91,7 +95,7 @@ npm run booking-email:backfill -- --all-past --limit 250
 npm run booking-email:backfill -- --all-past --limit 250 --confirm
 ```
 
-The Gmail OAuth helper generates a Google consent URL and can exchange an authorization code directly into Render env vars without printing token values. The proof command is read-only database evidence of current capture state. The backfill command without `--confirm` is Gmail scan dry-run only. By default it now uses the approved provider query boundary rather than the incomplete primary-mailbox-only filter, excluding known OTA security/reporting/invoice noise while keeping explicit `--query` available for owner-approved overrides. The confirmed command imports review-only Booking Email Events for `/booking-inbox`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
+The Gmail OAuth helper generates a Google consent URL and can exchange an authorization code directly into Render env vars without printing token values. The proof command is read-only database evidence of current capture state. The backfill command without `--confirm` is Gmail scan dry-run only. By default it uses the approved provider query boundary rather than the incomplete primary-mailbox-only filter, excluding known OTA security/reporting/invoice noise while keeping explicit `--query` available for owner-approved overrides. The confirmed command imports review-only Booking Email Events for `/booking-inbox`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
 
 Real staff users must be approved and configured through hash-only `SEED_USERS_JSON`, a setup-token flow, or an explicitly reviewed bootstrap path. Staff accounts can be username-only when email is not available. Do not commit plaintext credentials.
 
@@ -114,7 +118,7 @@ Hotel Ops command-center docs:
 - [docs/OTA_ADAPTER_GUIDE.md](docs/OTA_ADAPTER_GUIDE.md)
 - [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md)
 
-Before launch sign-off, the live proof register must record current production-secret metadata with values redacted, rollback owner and deputy, database recovery owner, latest known-good deploy ID, backup/restore evidence, WAF/rate-limit rule IDs, production user/role proof, and accepted deferrals.
+Before full production launch sign-off, the V2 proof pack must record current production-secret metadata with values redacted, rollback owner and deputy, database recovery owner, latest known-good deploy ID, backup/restore evidence, Cloudflare WAF/rate-limit rule IDs, production user/role proof, staff workflow acceptance, PII governance proof, money precision decision, and accepted deferrals.
 
 ## License
 
