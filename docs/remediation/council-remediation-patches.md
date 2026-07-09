@@ -2,7 +2,7 @@
 
 This document translates the due-diligence findings into reviewable patch work. It is written as a council of experts: product/operations, front-end, backend, data, security, privacy, QA, and launch governance.
 
-## Applied in this branch
+## Applied in previous branch work
 
 ### 1. Dynamic room-type metadata hardening
 
@@ -10,9 +10,9 @@ Expert view: the prior Rooms section work made the UI appear dynamic, but the AP
 
 Applied patches:
 
-- `src/types/board.ts` now carries source room-type metadata: `roomTypeId`, `roomTypeCode`, and `roomTypeName`.
-- `src/lib/pms-api-client.ts` now preserves room type id/code/name from API room records and keeps the legacy `type` bucket only as a compatibility fallback.
-- `src/components/rooms/RoomsView.tsx` now groups and labels sections from source room-type metadata instead of visual Twin/Double buckets.
+- `src/types/board.ts` carries source room-type metadata: `roomTypeId`, `roomTypeCode`, and `roomTypeName`.
+- `src/lib/pms-api-client.ts` preserves room type id/code/name from API room records and keeps the legacy `type` bucket only as a compatibility fallback.
+- `src/components/rooms/RoomsView.tsx` groups and labels sections from source room-type metadata instead of visual Twin/Double buckets.
 - `npm run remediation:check` validates that the hardcoded non-Double-to-Twin mapper has not returned.
 
 Remaining follow-up:
@@ -27,6 +27,34 @@ Expert view: accepted-risk launch closure is not the same as final production pr
 Applied patches:
 
 - `docs/launch/LAUNCH_PROOF_PACK_V2.md` defines the proof matrix for auth/RBAC, staff workflow acceptance, backups, WAF, dynamic room types, money precision, Booking Inbox parser review, localization, and PII governance.
+
+## Applied in this V2 proof-reset branch
+
+### 3. Launch language and evidence reset
+
+Expert view: the repo must not imply full production launch while the V2 proof pack is open.
+
+Applied patches:
+
+- `README.md` now states the PMS is an owner-accepted pilot / launch-hardening system, not fully launch-signed-off.
+- `docs/launch-scope-decisions.md` now records full production sign-off as blocked by open V2 gates.
+- `docs/launch/LAUNCH_PROOF_PACK_V2.md` now includes command evidence, deep-health hardening, and repo visibility/license gates.
+- `docs/launch/evidence/2026-07-09-v2-proof-gate-reset.md` records the current blocked proof status without secrets.
+- `docs/launch/evidence/COMMAND_EVIDENCE_V2.md`, `DEEP_HEALTH_HARDENING_V2.md`, and `REPO_VISIBILITY_LICENSE_DECISION_V2.md` provide ready-to-fill proof templates.
+
+### 4. License metadata correction
+
+Expert view: the license file had template copyright metadata. This weakens handover quality and creates avoidable ambiguity.
+
+Applied patch:
+
+- `LICENSE` now names `Nakalas Travels` as the MIT copyright holder.
+
+Owner follow-up:
+
+- Confirm the legal owner is correct.
+- Decide whether MIT is intended for a hotel PMS or whether the repository should be private/internal.
+- Decide whether the public repo should remain public given operational posture and launch proof docs.
 
 ## Ready-to-apply implementation patches
 
@@ -110,9 +138,35 @@ Patch intent:
 - Add a privacy/security doc covering retention, masking, access control, export/delete, and incident response.
 - Hide raw email text/headers by default in the Booking Inbox.
 - Restrict raw email details to admin/manager.
-- Add tests for role-gated raw-email access.
+- Add sensitive-view audit records when raw email, documents, ID fields, or payment references are opened.
+- Add tests for role-gated raw-email and sensitive-field access.
 
-### E. CSP report-only patch
+### E. Deep-health public diagnostics patch
+
+Expert view: public health endpoints are useful, but public deep-health failure output should not disclose internal database/driver/network exception text.
+
+Patch intent:
+
+- In `server/index.mjs`, change the `databaseStatus(deep)` catch branch so public payloads return generic failure metadata only.
+- Suggested public payload:
+
+```js
+return {
+  configured: true,
+  ok: false,
+  error: 'Database connectivity check failed.',
+}
+```
+
+- If raw details are operationally needed, log them server-side only behind safe logging policy and never return them in JSON.
+
+Acceptance proof:
+
+- Healthy `/healthz?deep=1` returns `database.ok=true`.
+- Controlled failed DB check returns generic `Database connectivity check failed.` and no raw Prisma/Postgres/network text.
+- `npm run live:check` and `npm run public-edge:proof` pass.
+
+### F. CSP report-only patch
 
 Expert view: current CSP is useful but minimal. A fuller policy should start in report-only mode to avoid breaking Vite assets and integrations.
 
@@ -123,31 +177,33 @@ Patch intent:
 - Keep enforced minimal CSP until the violation report is reviewed.
 - Move to full `script-src`, `connect-src`, `img-src`, `style-src`, and `font-src` enforcement after allowlist validation.
 
-### F. Provider proof closure patch
+### G. Provider proof closure patch
 
 Expert view: Cloudflare WAF/rate-limit, Render backup/recovery, production auth, and staff acceptance were accepted risks. They should be reopened as proof tasks, not treated as complete.
 
 Patch intent:
 
-- Create current proof files under `docs/launch/evidence/` using the V2 template.
+- Fill current proof files under `docs/launch/evidence/` using the V2 template.
 - Record owner/deputy, last verified timestamp, provider dashboard proof, and accepted residual risk.
 - Mark old accepted-risk closure as historical, not current launch proof.
 
 ## Recommended PR review order
 
-1. Review dynamic room-type code diff.
-2. Run `npm run remediation:check`.
-3. Run `npm run typecheck` and `npm run lint`.
-4. Add/execute New Reservation arbitrary room-type patch.
-5. Add server-mode E2E with third room type.
-6. Fill `LAUNCH_PROOF_PACK_V2.md` evidence files.
+1. Review launch language and V2 proof gates.
+2. Run the full V2 command evidence pack from a clean checkout.
+3. Complete credentialed auth/RBAC proof.
+4. Complete staff workflow acceptance.
+5. Capture Render backup/recovery and Cloudflare WAF/rate-limit proof from owner dashboards/tokens.
+6. Implement deep-health runtime sanitization.
 7. Decide Decimal vs integer satang before gateway/payment automation.
+8. Implement PII governance controls before expanding staff/raw-email access.
+9. Decide repo visibility and final license owner.
 
 ## Council sign-off stance
 
-- Product/Operations: acceptable for controlled beta after staff proof, not unsupervised launch.
+- Product/Operations: acceptable for controlled owner-accepted pilot after staff proof, not unsupervised launch.
 - Front-end: room-type metadata patch is required before adding more room types.
 - Backend: provider and backup proof remain external blockers.
 - Data/Finance: money precision needs a migration decision before payment volume grows.
-- Security/Privacy: CSP, PII retention, and raw-email access policy need explicit implementation.
+- Security/Privacy: CSP, PII retention, raw-email access policy, and public diagnostics hardening need explicit implementation.
 - QA: server-mode E2E and role matrix proof are the next high-value tests.
