@@ -77,6 +77,7 @@ There is no automatic dispatch transition.
 - `permissionDecision.autoDispatch` is always `false`.
 - Queue creation and approval do not call an OTA worker, browser adapter, or API.
 - Generic Hotel Ops approval leaves these records in `APPROVED`; generic queue/run actions reject them.
+- Both the task interface and dedicated CLI approval path honor the Hotel Ops emergency stop.
 - The task interface labels them as manual delivery and hides the worker Run action.
 - `mark-sent` requires a provider confirmation/reference.
 - Every transition writes a task log and an audit log.

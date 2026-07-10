@@ -421,6 +421,11 @@ export async function approveAvailabilityQueueItem(prisma, taskId, input = {}, a
       throw new PmsValidationError(`Availability queue item cannot be approved from ${task.status}.`, 409)
     }
 
+    const emergencyStop = await tx.hotelOpsEmergencyStop.findUnique({ where: { propertyId: task.propertyId } })
+    if (emergencyStop?.enabled) {
+      throw new PmsValidationError('Emergency stop is enabled for Hotel Ops write tasks.', 409)
+    }
+
     const approval = await tx.hotelOpsTaskApproval.findFirst({
       where: { taskId: task.id, status: 'PENDING' },
       orderBy: { requestedAt: 'desc' },

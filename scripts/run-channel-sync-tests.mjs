@@ -35,7 +35,7 @@ function bookingEmailEnv(overrides = {}) {
   }
 }
 
-function createQueuePrismaFixture() {
+function createQueuePrismaFixture(options = {}) {
   const now = () => new Date('2026-07-10T00:00:00.000Z')
   const property = {
     id: 'property-1',
@@ -58,6 +58,7 @@ function createQueuePrismaFixture() {
   let approvalCounter = 0
   let logCounter = 0
   let auditCounter = 0
+  let emergencyStopEnabled = Boolean(options.emergencyStopEnabled)
 
   const withRelations = (task) => task ? {
     ...task,
@@ -95,7 +96,7 @@ function createQueuePrismaFixture() {
       }) || null,
     },
     hotelOpsEmergencyStop: {
-      findUnique: async () => ({ id: 'stop-1', propertyId: property.id, enabled: false }),
+      findUnique: async () => ({ id: 'stop-1', propertyId: property.id, enabled: emergencyStopEnabled }),
     },
     hotelOpsTask: {
       findUnique: async ({ where }) => withRelations(tasks.find((task) => taskMatches(task, where))),
@@ -183,6 +184,7 @@ function createQueuePrismaFixture() {
     approvals,
     logs,
     audits,
+    setEmergencyStop: (enabled) => { emergencyStopEnabled = Boolean(enabled) },
     getTask: (taskId) => withRelations(tasks.find((task) => task.id === taskId)),
   }
 }
@@ -322,6 +324,25 @@ async function run() {
   assert.equal(fixture.getTask(created.item.id).status, 'APPROVED')
   assert.equal(fixture.logs.some((log) => log.taskId === created.item.id && log.action === 'TASK_QUEUED'), false)
   assert.equal(fixture.logs.some((log) => log.taskId === created.item.id && log.action === 'AVAILABILITY_APPROVED'), true)
+
+  const stoppedFixture = createQueuePrismaFixture({ emergencyStopEnabled: true })
+  const stoppedAdmin = await resolveAvailabilityQueueActor(stoppedFixture.prisma, 'admin')
+  const stoppedManager = await resolveAvailabilityQueueActor(stoppedFixture.prisma, 'manager')
+  const stoppedItem = await createAvailabilityQueueItem(stoppedFixture.prisma, {
+    provider: 'trip',
+    hotelId: 'TRIP-STOPPED',
+    roomType: 'DOUBLE',
+    startDate: '2026-07-11',
+    endDate: '2026-07-12',
+    availableRooms: 1,
+    reason: 'Queue while emergency stop is active.',
+  }, stoppedAdmin)
+  await assert.rejects(
+    () => approveAvailabilityQueueItem(stoppedFixture.prisma, stoppedItem.item.id, { notes: 'Should be blocked.' }, stoppedManager),
+    /Emergency stop is enabled/,
+  )
+  assert.equal(stoppedFixture.getTask(stoppedItem.item.id).status, 'PENDING_APPROVAL')
+  assert.equal(stoppedFixture.approvals[0].status, 'PENDING')
 
   const workerDecision = evaluateOpsTaskRun(fixture.getTask(created.item.id), admin, { enabled: false })
   assert.equal(workerDecision.allowed, false)
