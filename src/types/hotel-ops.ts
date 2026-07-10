@@ -70,11 +70,20 @@ export type ParsedHotelOpsTask = {
 
 export type PermissionDecision = {
   allowed: boolean
-  approvalRequired: boolean
+  approvalRequired?: boolean
   requiredApprovalRole?: HotelOpsRole
-  riskLevel: RiskLevel
-  reason: string
+  riskLevel?: RiskLevel
+  reason?: string
   blockedByEmergencyStop?: boolean
+  queueSource?: string
+  policyVersion?: string
+  provider?: string
+  providerLabel?: string
+  deliveryTarget?: 'MANUAL_PORTAL' | 'CHANNEL_MANAGER' | string
+  autoDispatch?: boolean
+  trueTwoWayRequiresZeroLag?: boolean
+  providerReference?: string
+  deliveryNotes?: string
 }
 
 export type ProofScreenshot = {

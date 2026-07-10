@@ -1,6 +1,6 @@
 # Channel synchronization v2
 
-Status: **implemented on `feat/channel-sync-v2`; external provider access remains pending owner submission and provider approval**.
+Status: **lite finalization candidate on `feat/channel-sync-lite-finalize`; external provider access remains pending owner submission and provider approval**.
 
 ## Decision
 
@@ -19,13 +19,14 @@ The scheduler polls every 120 seconds by default. It is not a webhook and it is 
 
 A scheduled pass:
 
-1. loads every enabled booking-email source;
-2. fetches a bounded set of recent Gmail messages through OAuth;
-3. uses existing source-message and booking-reference de-duplication;
-4. parses and stores review events;
-5. optionally recognizes allowlisted `/ops` commands through the existing guarded intake;
-6. records source sync timestamps/errors;
-7. leaves booking, cancellation, modification, and payment application to the review workflow.
+1. loads enabled booking-email sources;
+2. polls only Gmail-backed source types supported by the lite synchronizer and records unsupported source types as skipped;
+3. fetches a bounded set of recent Gmail messages through OAuth;
+4. uses existing source-message and booking-reference de-duplication;
+5. parses and stores review events;
+6. optionally recognizes allowlisted `/ops` commands through the existing guarded intake;
+7. records source sync timestamps/errors;
+8. leaves booking, cancellation, modification, and payment application to the review workflow.
 
 The scheduler always calls `syncBookingEmail` with `reviewOnly: true`. Its policy also reports `operationalMutationsEnabled: false`.
 
@@ -71,10 +72,12 @@ There is no automatic dispatch transition.
 ### Safety invariants
 
 - `taskType` is always `UPDATE_AVAILABILITY`.
-- Risk is `HIGH` and owner approval is created with the task.
+- Risk is `HIGH` and hotel-manager-or-owner approval is created with the task.
 - `permissionDecision.queueSource` identifies v2 queue records.
 - `permissionDecision.autoDispatch` is always `false`.
 - Queue creation and approval do not call an OTA worker, browser adapter, or API.
+- Generic Hotel Ops approval leaves these records in `APPROVED`; generic queue/run actions reject them.
+- The task interface labels them as manual delivery and hides the worker Run action.
 - `mark-sent` requires a provider confirmation/reference.
 - Every transition writes a task log and an audit log.
 - Deterministic idempotency prevents duplicate queue records.
@@ -107,9 +110,7 @@ npm run availability:queue -- create \
   --to 2026-07-15 \
   --rooms 2 \
   --reason "New reservation reduces shared sellable inventory" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 ```
 
 Close Trip.com inventory:
@@ -123,9 +124,7 @@ npm run availability:queue -- create \
   --to 2026-07-12 \
   --status closed \
   --reason "Temporary stop-sell during reconciliation" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 ```
 
 Review and approve:
@@ -135,9 +134,7 @@ npm run availability:queue -- list --status PENDING_APPROVAL
 npm run availability:queue -- approve \
   --id TASK_ID \
   --notes "Compared with PMS room-type inventory" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 ```
 
 After updating the provider portal manually, record evidence:
@@ -147,9 +144,7 @@ npm run availability:queue -- mark-sent \
   --id TASK_ID \
   --reference PROVIDER_CONFIRMATION \
   --notes "Availability updated in provider extranet" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 ```
 
 Record failure or cancellation:
@@ -158,19 +153,15 @@ Record failure or cancellation:
 npm run availability:queue -- mark-failed \
   --id TASK_ID \
   --reason "Provider portal unavailable" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 
 npm run availability:queue -- cancel \
   --id TASK_ID \
   --reason "Superseded by a newer inventory calculation" \
-  --actor-id PMS_USER_ID \
-  --actor-label "Hotel manager" \
-  --actor-role MANAGER
+  --actor manager
 ```
 
-Queue records also remain visible through the existing Hotel Ops task/approval interfaces because they use the same database models.
+Queue records also remain visible through the existing Hotel Ops task/approval interfaces because they use the same database models. CLI actor identity is resolved from an active PMS user ID, username, or email; command-line labels and roles are not trusted.
 
 ## Direct API access tracks
 
@@ -228,18 +219,18 @@ Channex may transport bookings, ARI, rates, restrictions, and acknowledgements. 
 
 1. Merge only after tests and build pass.
 2. Confirm Gmail OAuth secrets exist in Render.
-3. Deploy with the Render blueprint values.
+3. Deploy with near-live polling still disabled, then explicitly set `BOOKING_EMAIL_NEAR_LIVE_ENABLED=true` after the mailbox check.
 4. Confirm booking-email source `lastSyncAt` advances approximately every two minutes.
 5. Verify new messages appear once in the review inbox.
 6. Create a non-production availability queue item and verify task, approval, log, and audit records.
-7. Approve it and confirm no OTA call occurs.
+7. Approve it, confirm it remains `APPROVED`, and verify the generic worker Run action is unavailable/rejected.
 8. Perform a safe manual provider update and record the confirmation reference.
 9. Complete Agoda/Trip.com owner fields in issues #168 and #169, then submit through authorized provider accounts.
 10. Begin Channex staging only if the adoption trigger is met.
 
 ## Test coverage
 
-`npm test` now runs the existing business suite followed by `scripts/run-channel-sync-tests.mjs`. The added tests cover policy gating, bounds, review-only scheduling, multi-source scheduler behavior, queue validation, idempotency, audit artifacts, and the Channex decision policy.
+`npm test` runs the existing business suite followed by `scripts/run-channel-sync-tests.mjs`. The lite tests cover policy gating, bounds, email-only startup semantics, review-only scheduling, supported-source filtering, per-source failure isolation, database-resolved actors, the manual queue lifecycle, generic worker-path rejection, idempotency, audit artifacts, and the Channex decision policy.
 
 ## Known limitations
 

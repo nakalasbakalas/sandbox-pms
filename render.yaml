@@ -22,7 +22,7 @@ services:
       - key: BOOKING_EMAIL_PRIMARY_MAILBOX
         value: booking@sandboxhotel.com
       - key: BOOKING_EMAIL_NEAR_LIVE_ENABLED
-        value: true
+        value: false
       - key: BOOKING_EMAIL_SYNC_INTERVAL_SECONDS
         value: 120
       - key: BOOKING_EMAIL_SYNC_BATCH_LIMIT

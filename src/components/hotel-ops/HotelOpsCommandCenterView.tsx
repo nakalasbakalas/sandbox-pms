@@ -282,6 +282,10 @@ async function copyProofUrl(url: string) {
   }
 }
 
+function isManualAvailabilityQueueTask(task: HotelOpsTask) {
+  return task.permissionDecision?.queueSource === 'manual_availability_queue_v2'
+}
+
 function TaskCard({
   task,
   onApprove,
@@ -299,6 +303,7 @@ function TaskCard({
   onResolveHuman?: (task: HotelOpsTask) => void
   compact?: boolean
 }) {
+  const manualAvailabilityQueue = isManualAvailabilityQueueTask(task)
   return (
     <Card className="rounded-lg">
       <CardContent className="space-y-3 p-4">
@@ -308,6 +313,7 @@ function TaskCard({
               <Badge variant={riskTone(task.riskLevel)}>{task.riskLevel}</Badge>
               <span className={`rounded border px-2 py-0.5 text-xs font-medium ${statusTone(task.status)}`}>{task.status.replace(/_/g, ' ')}</span>
               {task.approvalRequired && <Badge variant="outline">Approval required</Badge>}
+              {manualAvailabilityQueue && <Badge variant="secondary">Manual delivery</Badge>}
             </div>
             <div className="text-sm font-semibold">{task.taskType.replace(/_/g, ' ')}</div>
             <p className="text-sm text-muted-foreground">{formatTaskSummary(task)}</p>
@@ -325,7 +331,7 @@ function TaskCard({
                 Deny
               </Button>
             )}
-            {['QUEUED', 'APPROVED'].includes(task.status) && onRun && (
+            {!manualAvailabilityQueue && ['QUEUED', 'APPROVED'].includes(task.status) && onRun && (
               <Button size="sm" onClick={() => onRun(task)}>
                 <PlayCircle className="mr-2" />
                 Run
@@ -357,6 +363,12 @@ function TaskCard({
         {task.missingFields.length > 0 && (
           <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
             Needs details: {task.missingFields.join(', ')}
+          </div>
+        )}
+
+        {manualAvailabilityQueue && ['PENDING_APPROVAL', 'APPROVED'].includes(task.status) && (
+          <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            This item is manual-only. After approval, update the provider portal and record the provider confirmation with the availability queue command. It cannot be sent to the OTA worker.
           </div>
         )}
 

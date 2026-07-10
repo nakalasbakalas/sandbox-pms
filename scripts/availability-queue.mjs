@@ -10,6 +10,7 @@ import {
   listAvailabilityQueue,
   markAvailabilityQueueItemFailed,
   markAvailabilityQueueItemSent,
+  resolveAvailabilityQueueActor,
 } from '../server/availability-queue.mjs'
 
 function parseArgs(argv) {
@@ -43,32 +44,35 @@ function helpText() {
 Manual outbound availability queue
 
 Usage:
-  npm run availability:queue -- create --provider agoda --hotel-id HOTEL123 \\
-    --room-type DOUBLE --from 2026-07-11 --to 2026-07-15 --rooms 2 \\
-    --reason "Reservation received; reduce sellable inventory" \\
-    --actor-id USER_ID --actor-label "Hotel owner" --actor-role ADMIN
+  npm run availability:queue -- create --provider agoda --hotel-id HOTEL123 \
+    --room-type DOUBLE --from 2026-07-11 --to 2026-07-15 --rooms 2 \
+    --reason "Reservation received; reduce sellable inventory" \
+    --actor admin@example.com
 
   npm run availability:queue -- list [--status PENDING_APPROVAL] [--limit 100]
 
-  npm run availability:queue -- approve --id TASK_ID \\
-    --notes "Approved against PMS inventory" \\
-    --actor-id USER_ID --actor-label "Hotel manager" --actor-role MANAGER
+  npm run availability:queue -- approve --id TASK_ID \
+    --notes "Approved against PMS inventory" --actor manager
 
-  npm run availability:queue -- mark-sent --id TASK_ID \\
-    --reference PROVIDER_CONFIRMATION --notes "Updated in partner portal" \\
-    --actor-id USER_ID --actor-label "Hotel manager" --actor-role MANAGER
+  npm run availability:queue -- mark-sent --id TASK_ID \
+    --reference PROVIDER_CONFIRMATION --notes "Updated in partner portal" \
+    --actor manager
 
-  npm run availability:queue -- mark-failed --id TASK_ID \\
-    --reason "Partner portal unavailable" \\
-    --actor-id USER_ID --actor-label "Hotel manager" --actor-role MANAGER
+  npm run availability:queue -- mark-failed --id TASK_ID \
+    --reason "Partner portal unavailable" --actor manager
 
-  npm run availability:queue -- cancel --id TASK_ID --reason "Superseded by newer inventory" \\
-    --actor-id USER_ID --actor-label "Hotel manager" --actor-role MANAGER
+  npm run availability:queue -- cancel --id TASK_ID \
+    --reason "Superseded by newer inventory" --actor manager
 
   npm run availability:queue -- policy
 
 Providers:
   booking | agoda | trip | expedia | channex
+
+Identity:
+  --actor accepts an active PMS user ID, username, or email. The database role and
+  display name are used for authorization and audit. --actor-id is a legacy alias;
+  caller-supplied actor labels or roles are ignored.
 
 Safety:
   Queue creation and approval never call an OTA. An item is only completed after a
@@ -82,12 +86,10 @@ function required(args, key, label = key) {
   return value
 }
 
-function actorFromArgs(args) {
-  return {
-    id: required(args, 'actor-id', 'Actor ID'),
-    name: required(args, 'actor-label', 'Actor label'),
-    role: required(args, 'actor-role', 'Actor role'),
-  }
+async function actorFromArgs(prisma, args) {
+  const actorRef = String(args.actor || args['actor-id'] || '').trim()
+  if (!actorRef) throw new Error('Active PMS actor is required (--actor).')
+  return resolveAvailabilityQueueActor(prisma, actorRef)
 }
 
 function printJson(value) {
@@ -108,7 +110,7 @@ async function runCommand(prisma, command, args) {
     }
   }
 
-  const actor = actorFromArgs(args)
+  const actor = await actorFromArgs(prisma, args)
   if (command === 'create') {
     return createAvailabilityQueueItem(
       prisma,

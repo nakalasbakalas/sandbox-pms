@@ -18,6 +18,13 @@ const SYSTEM_BOOKING_EMAIL_ACTOR = Object.freeze({
   name: 'Near-live Booking Email Scheduler',
 })
 
+const SCHEDULED_BOOKING_EMAIL_PROVIDERS = new Set(['gmail', 'forwarded-mailbox'])
+
+export function isBookingEmailSourceSchedulable(source = {}) {
+  const provider = String(source.provider || 'gmail').trim().toLowerCase()
+  return source.enabled !== false && SCHEDULED_BOOKING_EMAIL_PROVIDERS.has(provider)
+}
+
 function redactSchedulerError(error) {
   return String(error?.message || error || 'Scheduled scan failed.')
     .replace(/\b(password|secret|token|key)=([^&\s]+)/gi, '$1=[redacted]')
@@ -95,6 +102,7 @@ function initialBookingEmailState(policy) {
     lastRunAt: null,
     nextRunAt: null,
     lastSourceCount: null,
+    lastSkippedSourceCount: null,
     lastImportedCount: null,
     lastCommandCount: null,
     lastErrorCount: null,
@@ -215,11 +223,23 @@ export function createHotelOpsScanScheduler(options = {}) {
 
     try {
       const db = await resolvePrisma()
-      const sources = (await listBookingSources(db)).filter((source) => source.enabled)
-      const sourceResults = []
+      const enabledSources = (await listBookingSources(db)).filter((source) => source.enabled)
+      const sources = enabledSources.filter(isBookingEmailSourceSchedulable)
+      const skippedSources = enabledSources.filter((source) => !isBookingEmailSourceSchedulable(source))
+      const sourceResults = skippedSources.map((source) => ({
+        sourceId: source.id,
+        mailbox: source.mailbox,
+        provider: source.provider || 'unknown',
+        imported: 0,
+        acceptedCommands: 0,
+        skipped: true,
+        skipReason: 'unsupported_provider',
+        error: null,
+      }))
       let importedCount = 0
       let commandCount = 0
       let errorCount = 0
+      const skippedSourceCount = skippedSources.length
 
       for (const source of sources) {
         try {
@@ -267,7 +287,8 @@ export function createHotelOpsScanScheduler(options = {}) {
 
       emailState.status = errorCount === 0 ? 'SUCCEEDED' : importedCount > 0 ? 'PARTIAL' : 'FAILED'
       emailState.lastRunAt = now().toISOString()
-      emailState.lastSourceCount = sources.length
+      emailState.lastSourceCount = enabledSources.length
+      emailState.lastSkippedSourceCount = skippedSourceCount
       emailState.lastImportedCount = importedCount
       emailState.lastCommandCount = commandCount
       emailState.lastErrorCount = errorCount
@@ -280,6 +301,7 @@ export function createHotelOpsScanScheduler(options = {}) {
         importedCount,
         commandCount,
         errorCount,
+        skippedSourceCount,
         status: getStatus(),
       }
     } catch (error) {
@@ -287,6 +309,7 @@ export function createHotelOpsScanScheduler(options = {}) {
       emailState.status = 'FAILED'
       emailState.lastRunAt = now().toISOString()
       emailState.lastSourceCount = null
+      emailState.lastSkippedSourceCount = null
       emailState.lastImportedCount = null
       emailState.lastCommandCount = null
       emailState.lastErrorCount = 1

@@ -67,7 +67,7 @@ Never run DB-mutating E2E against the Render production database.
 
 ## Channel Synchronization V2
 
-The complete architecture, activation sequence, failure behavior, application status, Channex decision trigger, and operator commands are in [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md). The implementation prompt is recorded in [docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md).
+The lite release boundary, audit findings, execution plan, activation checks, and rollback steps are in [docs/CHANNEL_SYNC_LITE_FINALIZATION.md](docs/CHANNEL_SYNC_LITE_FINALIZATION.md). The architecture and operator runbook remain in [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md). The executed prompts are recorded in [docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md) and [docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md).
 
 Inspect the enforced policy:
 

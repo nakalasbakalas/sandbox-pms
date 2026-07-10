@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { SANDBOX_RULES, PmsValidationError } from './pms-domain.mjs'
 
-const QUEUE_SOURCE = 'manual_availability_queue_v2'
+export const AVAILABILITY_QUEUE_SOURCE = 'manual_availability_queue_v2'
+const QUEUE_SOURCE = AVAILABILITY_QUEUE_SOURCE
 const POLICY_VERSION = '2026-07-10'
 const PROVIDER_ALIASES = Object.freeze({
   booking: 'booking',
@@ -23,6 +24,18 @@ const TASK_PLATFORM_BY_PROVIDER = Object.freeze({
   channex: 'all',
 })
 const MUTABLE_QUEUE_STATUSES = new Set(['PENDING_APPROVAL', 'APPROVED', 'QUEUED'])
+const QUEUE_FILTER_STATUSES = new Set([
+  'DRAFT',
+  'PENDING_APPROVAL',
+  'APPROVED',
+  'QUEUED',
+  'RUNNING',
+  'SUCCEEDED',
+  'FAILED',
+  'DENIED',
+  'CANCELLED',
+  'NEEDS_HUMAN',
+])
 const APPROVER_ROLES = new Set(['ADMIN', 'MANAGER', 'OWNER', 'HOTEL_MANAGER'])
 const ATTESTER_ROLES = new Set(['ADMIN', 'MANAGER', 'OWNER', 'HOTEL_MANAGER'])
 
@@ -61,6 +74,41 @@ function requireActorRole(actor, allowedRoles, action) {
   return normalized
 }
 
+export async function resolveAvailabilityQueueActor(prisma, actorRef) {
+  const ref = normalizeNullableText(
+    actorRef && typeof actorRef === 'object'
+      ? actorRef.id || actorRef.username || actorRef.email
+      : actorRef,
+  )
+  if (!ref) throw new PmsValidationError('An active PMS user reference is required.', 401)
+
+  const lowered = ref.toLowerCase()
+  const actor = await prisma.user.findFirst({
+    where: {
+      active: true,
+      OR: [
+        { id: ref },
+        { username: lowered },
+        { email: lowered },
+      ],
+    },
+  })
+  if (!actor) throw new PmsValidationError('Active PMS user was not found for this queue action.', 404)
+
+  const name = [actor.firstName, actor.lastName]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .join(' ')
+
+  return {
+    id: actor.id,
+    name: name || actor.username || actor.email || actor.id,
+    email: actor.email || undefined,
+    username: actor.username || undefined,
+    role: actor.role,
+  }
+}
+
 function parseDateKey(value, label) {
   const key = normalizeText(value)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
@@ -88,6 +136,10 @@ function safeObject(value) {
 function queueMetadata(task) {
   const metadata = safeObject(task?.permissionDecision)
   return metadata.queueSource === QUEUE_SOURCE ? metadata : null
+}
+
+export function isManualAvailabilityQueueTask(task) {
+  return Boolean(queueMetadata(task))
 }
 
 function queueIdempotencyKey(payload, requestedKey) {
@@ -246,7 +298,12 @@ export async function createAvailabilityQueueItem(prisma, input = {}, actor) {
         logs: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
     })
-    if (existing) return { duplicate: true, item: queueTaskResponse(existing) }
+    if (existing) {
+      if (!queueMetadata(existing)) {
+        throw new PmsValidationError('Idempotency key is already used by another Hotel Ops task.', 409)
+      }
+      return { duplicate: true, item: queueTaskResponse(existing) }
+    }
 
     const task = await tx.hotelOpsTask.create({
       data: {
@@ -273,6 +330,10 @@ export async function createAvailabilityQueueItem(prisma, input = {}, actor) {
         idempotencyKey: normalized.idempotencyKey,
         permissionDecision: {
           allowed: true,
+          approvalRequired: true,
+          requiredApprovalRole: 'HOTEL_MANAGER',
+          riskLevel: 'HIGH',
+          reason: 'Manual availability delivery requires hotel manager or owner approval and provider confirmation.',
           queueSource: QUEUE_SOURCE,
           policyVersion: POLICY_VERSION,
           provider: normalized.provider,
@@ -287,7 +348,7 @@ export async function createAvailabilityQueueItem(prisma, input = {}, actor) {
     await tx.hotelOpsTaskApproval.create({
       data: {
         taskId: task.id,
-        requiredRole: 'OWNER',
+        requiredRole: 'HOTEL_MANAGER',
         status: 'PENDING',
       },
     })
@@ -295,7 +356,7 @@ export async function createAvailabilityQueueItem(prisma, input = {}, actor) {
       data: {
         taskId: task.id,
         action: 'AVAILABILITY_QUEUED',
-        message: `${normalized.providerLabel} availability change queued for owner approval; no external write executed.`,
+        message: `${normalized.providerLabel} availability change queued for manager/owner approval; no external write executed.`,
         actor: operator.label,
         metadata: {
           provider: normalized.provider,
@@ -332,6 +393,9 @@ export async function listAvailabilityQueue(prisma, filters = {}) {
   const property = await getProperty(prisma)
   const limit = Math.min(Math.max(Number(filters.limit || 100), 1), 250)
   const status = normalizeNullableText(filters.status)?.toUpperCase()
+  if (status && !QUEUE_FILTER_STATUSES.has(status)) {
+    throw new PmsValidationError('Availability queue status filter is invalid.')
+  }
   const tasks = await prisma.hotelOpsTask.findMany({
     where: {
       propertyId: property.id,
@@ -361,7 +425,7 @@ export async function approveAvailabilityQueueItem(prisma, taskId, input = {}, a
       where: { taskId: task.id, status: 'PENDING' },
       orderBy: { requestedAt: 'desc' },
     })
-    if (!approval) throw new PmsValidationError('Pending owner approval record was not found.', 409)
+    if (!approval) throw new PmsValidationError('Pending manager/owner approval record was not found.', 409)
 
     await tx.hotelOpsTaskApproval.update({
       where: { id: approval.id },
