@@ -1,0 +1,51 @@
+name: Apply channel sync lite emergency-stop consistency
+
+on:
+  push:
+    branches:
+      - feat/channel-sync-lite-finalize
+    paths:
+      - .github/workflows/apply-channel-sync-lite-emergency-stop.yml
+      - scripts/apply-channel-sync-lite-emergency-stop.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/channel-sync-lite-finalize
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Validate and apply patch
+        run: |
+          node --check scripts/apply-channel-sync-lite-emergency-stop.mjs
+          node scripts/apply-channel-sync-lite-emergency-stop.mjs
+          node --check server/availability-queue.mjs
+          node --check scripts/run-channel-sync-tests.mjs
+
+      - name: Install and validate
+        run: |
+          npm ci --include=dev
+          npm run db:generate
+          npm test
+          npm run typecheck
+          git diff --check
+
+      - name: Commit final consistency fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: honor emergency stop for manual availability approval"
+          git push origin HEAD:feat/channel-sync-lite-finalize
