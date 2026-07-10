@@ -1,0 +1,79 @@
+name: Apply channel sync lite finalization
+
+on:
+  push:
+    branches:
+      - feat/channel-sync-lite-finalize
+    paths:
+      - scripts/apply-channel-sync-lite-finalization.mjs
+      - scripts/apply-channel-sync-lite-polish.mjs
+      - .github/workflows/apply-channel-sync-lite-finalization.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    name: Apply and validate lite finalization
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out finalization branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/channel-sync-lite-finalize
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Validate one-off patch runners
+        run: |
+          node --check scripts/apply-channel-sync-lite-finalization.mjs
+          node --check scripts/apply-channel-sync-lite-polish.mjs
+
+      - name: Apply finalization patch
+        run: |
+          node scripts/apply-channel-sync-lite-finalization.mjs
+          node scripts/apply-channel-sync-lite-polish.mjs
+
+      - name: Validate changed JavaScript syntax
+        run: |
+          node --check server/availability-queue.mjs
+          node --check server/ops-service.mjs
+          node --check server/ops-scheduler.mjs
+          node --check scripts/availability-queue.mjs
+          node --check scripts/run-channel-sync-tests.mjs
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Run business and lite tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Commit finalization
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/CHANNEL_SYNC_V2.md render.yaml \
+            server/availability-queue.mjs server/ops-service.mjs server/ops-scheduler.mjs \
+            scripts/availability-queue.mjs scripts/run-channel-sync-tests.mjs \
+            src/types/hotel-ops.ts src/components/hotel-ops/HotelOpsCommandCenterView.tsx
+          git commit -m "fix: finalize channel synchronization lite"
+          git push origin HEAD:feat/channel-sync-lite-finalize
