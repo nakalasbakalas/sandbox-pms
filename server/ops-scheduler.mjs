@@ -302,7 +302,8 @@ export function createHotelOpsScanScheduler(options = {}) {
   }
 
   function start() {
-    let started = false
+    let scanStarted = false
+    let bookingEmailStarted = false
 
     if (state.enabled && !timer) {
       state.startedAt = now().toISOString()
@@ -311,7 +312,7 @@ export function createHotelOpsScanScheduler(options = {}) {
         void runOnce('interval')
       }, state.intervalMinutes * 60_000)
       timer?.unref?.()
-      started = true
+      scanStarted = true
     }
 
     if (state.bookingEmail.enabled && !bookingEmailTimer) {
@@ -321,15 +322,31 @@ export function createHotelOpsScanScheduler(options = {}) {
         void runBookingEmailOnce('interval')
       }, state.bookingEmail.intervalSeconds * 1_000)
       bookingEmailTimer?.unref?.()
-      started = true
+      bookingEmailStarted = true
+      logger.log?.(`Near-live booking email scheduler active every ${state.bookingEmail.intervalSeconds} seconds (review-only).`)
     }
 
-    if (started) return { started: true, status: getStatus() }
+    if (scanStarted || bookingEmailStarted) {
+      return {
+        started: scanStarted,
+        backgroundStarted: true,
+        bookingEmailStarted,
+        status: getStatus(),
+      }
+    }
     if (timer || bookingEmailTimer) {
-      return { started: false, reason: 'already_started', status: getStatus() }
+      return {
+        started: false,
+        backgroundStarted: false,
+        bookingEmailStarted: false,
+        reason: 'already_started',
+        status: getStatus(),
+      }
     }
     return {
       started: false,
+      backgroundStarted: false,
+      bookingEmailStarted: false,
       reason: state.disabledReason || state.bookingEmail.disabledReason || 'disabled',
       status: getStatus(),
     }
