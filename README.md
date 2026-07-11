@@ -4,7 +4,7 @@ Boutique hotel property-management system for front desk, rooms, reservations, h
 
 ## Current Launch Status
 
-Status date: 2026-07-09.
+Status date: 2026-07-10.
 
 The codebase is an **owner-accepted pilot / launch-hardening system**, not a fully launched or independently launch-signed-off PMS. Use “owner-accepted pilot” or “launch-hardening” language until the V2 launch proof pack is complete, current, and reviewed.
 
@@ -13,9 +13,10 @@ Automated checks can prove build, routing, business-rule, browser-smoke, API-con
 Current integration posture:
 
 - LINE: server webhook/status support exists. Live LINE messaging must stay disabled/manual unless the account owner provides credentials, webhook configuration, signature validation, and send-test proof.
-- OTA: launch posture is iCal/manual metadata only. Booking.com, Agoda, Expedia, or Airbnb API automation is not live without provider adapters and sandbox/production evidence.
+- OTA: iCal/manual metadata remains the launch-safe integration. Channel-sync v2 adds an audited **manual outbound availability queue** over existing Hotel Ops task/approval models. Queue creation and approval never call an OTA, and completion requires a human-entered provider confirmation. Direct Booking.com, Agoda, Trip.com, Expedia, Airbnb, or Channex production writes are not enabled without provider access, mappings, sandbox/certification evidence, and a reviewed adapter.
+- Direct API access: Agoda and Trip.com application dossiers are tracked in [#168](https://github.com/nakalasbakalas/sandbox-pms/issues/168) and [#169](https://github.com/nakalasbakalas/sandbox-pms/issues/169). They are **preparing**, not submitted or approved. A channel-only Channex contingency is tracked in [#170](https://github.com/nakalasbakalas/sandbox-pms/issues/170).
 - Payments: launch posture is PMS-recorded payments only. Card, PromptPay, bank transfer, and online payment records require references, but no live gateway/PromptPay collection adapter is proven.
-- Booking email: Gmail OAuth/backfill support can import provider messages into review-only Booking Email Events. Staff approval is required before creating, modifying, cancelling, charging, or linking operational reservations.
+- Booking email: Gmail OAuth/backfill support can import provider messages into review-only Booking Email Events. When explicitly enabled and OAuth is complete, the in-process scheduler polls enabled sources every 120 seconds by default. Scheduled passes are review-only; staff approval is still required before creating, modifying, cancelling, charging, or linking operational reservations.
 - Production data: `SEED_MODE=prod-safe` must not create fake operational guests, reservations, payments, invoices, room inventory, or demo staff users. Production room inventory is imported or configured separately and still requires redacted owner/import/admin proof before full sign-off.
 
 Full production sign-off is blocked until the required V2 evidence files are completed. Start with [docs/launch/LAUNCH_PROOF_PACK_V2.md](docs/launch/LAUNCH_PROOF_PACK_V2.md), then record dated command/manual/provider proof under `docs/launch/evidence/`.
@@ -63,6 +64,34 @@ ALLOW_DB_E2E=true E2E_DATABASE_URL="postgresql://sandbox:sandbox@localhost:55432
 ```
 
 Never run DB-mutating E2E against the Render production database.
+
+## Channel Synchronization V2
+
+The lite release boundary, audit findings, execution plan, activation checks, and rollback steps are in [docs/CHANNEL_SYNC_LITE_FINALIZATION.md](docs/CHANNEL_SYNC_LITE_FINALIZATION.md). The architecture and operator runbook remain in [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md). The executed prompts are recorded in [docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md) and [docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md).
+
+Inspect the enforced policy:
+
+```bash
+npm run channel-sync:policy
+```
+
+Use the manual outbound queue:
+
+```bash
+npm run availability:queue -- help
+npm run availability:queue -- list
+```
+
+Near-live inbound polling requires the following non-secret configuration plus Gmail OAuth secrets:
+
+```env
+BOOKING_EMAIL_NEAR_LIVE_ENABLED=true
+BOOKING_EMAIL_SYNC_INTERVAL_SECONDS=120
+BOOKING_EMAIL_SYNC_BATCH_LIMIT=25
+CHANNEL_MANAGER_PROVIDER=channex
+```
+
+“Near-live” is short-interval polling, not a zero-lag webhook. Channex is a channel-only contingency and must not become a second PMS.
 
 ## Production Data
 
@@ -116,6 +145,7 @@ Hotel Ops command-center docs:
 - [docs/RUNBOOK.md](docs/RUNBOOK.md)
 - [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md)
 - [docs/OTA_ADAPTER_GUIDE.md](docs/OTA_ADAPTER_GUIDE.md)
+- [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md)
 - [docs/ACCEPTANCE_TESTS.md](docs/ACCEPTANCE_TESTS.md)
 
 Before full production launch sign-off, the V2 proof pack must record current production-secret metadata with values redacted, rollback owner and deputy, database recovery owner, latest known-good deploy ID, backup/restore evidence, Cloudflare WAF/rate-limit rule IDs, production user/role proof, staff workflow acceptance, PII governance proof, money precision decision, and accepted deferrals.

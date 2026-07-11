@@ -1,4 +1,10 @@
-import { getOpsScanPolicy, runOpsScan } from './ops-service.mjs'
+import { getOpsScanPolicy, runOpsScan, submitOpsCommand } from './ops-service.mjs'
+import {
+  bookingEmailGmailCredentialStatus,
+  listBookingEmailSources,
+  syncBookingEmail,
+} from './pms-service.mjs'
+import { processEmailOpsCommandEvents } from './email-ops-intake.mjs'
 
 const SYSTEM_SCAN_ACTOR = Object.freeze({
   id: 'system',
@@ -6,15 +12,43 @@ const SYSTEM_SCAN_ACTOR = Object.freeze({
   name: 'Hotel Ops Scheduler',
 })
 
+const SYSTEM_BOOKING_EMAIL_ACTOR = Object.freeze({
+  id: 'system',
+  role: 'SYSTEM',
+  name: 'Near-live Booking Email Scheduler',
+})
+
+const SCHEDULED_BOOKING_EMAIL_PROVIDERS = new Set(['gmail', 'forwarded-mailbox'])
+
+export function isBookingEmailSourceSchedulable(source = {}) {
+  const provider = String(source.provider || 'gmail').trim().toLowerCase()
+  return source.enabled !== false && SCHEDULED_BOOKING_EMAIL_PROVIDERS.has(provider)
+}
+
 function redactSchedulerError(error) {
   return String(error?.message || error || 'Scheduled scan failed.')
     .replace(/\b(password|secret|token|key)=([^&\s]+)/gi, '$1=[redacted]')
     .replace(/\b(Bearer)\s+[A-Za-z0-9._~+/=-]+/gi, '$1 [redacted]')
+    .replace(/\bya29\.[A-Za-z0-9._-]+/g, 'ya29.[redacted]')
     .slice(0, 500)
 }
 
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60_000).toISOString()
+}
+
+function addSeconds(date, seconds) {
+  return new Date(date.getTime() + seconds * 1_000).toISOString()
+}
+
+function envEnabled(value) {
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(String(value || '').trim().toLowerCase())
+}
+
+function boundedInteger(value, fallback, minimum, maximum) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(Math.max(Math.round(parsed), minimum), maximum)
 }
 
 function disabledReasonForPolicy(policy) {
@@ -23,12 +57,69 @@ function disabledReasonForPolicy(policy) {
   return 'manual_only'
 }
 
+export function getBookingEmailSyncPolicy(env = process.env) {
+  const requested = envEnabled(env.BOOKING_EMAIL_NEAR_LIVE_ENABLED)
+  const intervalSeconds = boundedInteger(env.BOOKING_EMAIL_SYNC_INTERVAL_SECONDS, 120, 30, 3_600)
+  const batchLimit = boundedInteger(env.BOOKING_EMAIL_SYNC_BATCH_LIMIT, 25, 1, 250)
+  const credentials = bookingEmailGmailCredentialStatus(env)
+  const enabled = requested && credentials.configured
+
+  return {
+    requested,
+    configured: credentials.configured,
+    enabled,
+    intervalSeconds,
+    batchLimit,
+    reviewOnly: true,
+    operationalMutationsEnabled: false,
+    disabledReason: enabled
+      ? null
+      : !requested
+        ? 'not_requested'
+        : 'gmail_oauth_not_configured',
+    credentialMode: credentials.mode,
+    targetMailboxConfigured: credentials.targetMailboxConfigured,
+    missing: credentials.missing,
+  }
+}
+
+function initialBookingEmailState(policy) {
+  return {
+    requested: policy.requested,
+    configured: policy.configured,
+    enabled: policy.enabled,
+    intervalSeconds: policy.intervalSeconds,
+    batchLimit: policy.batchLimit,
+    reviewOnly: true,
+    operationalMutationsEnabled: false,
+    status: policy.enabled ? 'IDLE' : 'DISABLED',
+    disabledReason: policy.disabledReason,
+    credentialMode: policy.credentialMode,
+    targetMailboxConfigured: policy.targetMailboxConfigured,
+    missing: policy.missing,
+    startedAt: null,
+    lastRunStartedAt: null,
+    lastRunAt: null,
+    nextRunAt: null,
+    lastSourceCount: null,
+    lastSkippedSourceCount: null,
+    lastImportedCount: null,
+    lastCommandCount: null,
+    lastErrorCount: null,
+    lastError: null,
+  }
+}
+
 export function createHotelOpsScanScheduler(options = {}) {
   const {
     env = process.env,
     prisma = null,
     getPrisma = null,
     runScan = runOpsScan,
+    listBookingSources = listBookingEmailSources,
+    syncBooking = syncBookingEmail,
+    processEmailCommands = processEmailOpsCommandEvents,
+    submitEmailCommand = submitOpsCommand,
     logger = console,
     setIntervalFn = setInterval,
     clearIntervalFn = clearInterval,
@@ -38,8 +129,11 @@ export function createHotelOpsScanScheduler(options = {}) {
   const policy = getOpsScanPolicy(env)
   const intervalMinutes = policy.schedule.mode === 'interval' ? policy.schedule.intervalMinutes : null
   const enabled = Number.isFinite(intervalMinutes) && intervalMinutes > 0
+  const bookingEmailPolicy = getBookingEmailSyncPolicy(env)
   let timer = null
+  let bookingEmailTimer = null
   let running = false
+  let bookingEmailRunning = false
 
   const state = {
     enabled,
@@ -53,6 +147,7 @@ export function createHotelOpsScanScheduler(options = {}) {
     nextRunAt: null,
     lastAlertCount: null,
     lastError: null,
+    bookingEmail: initialBookingEmailState(bookingEmailPolicy),
   }
 
   async function resolvePrisma() {
@@ -64,7 +159,13 @@ export function createHotelOpsScanScheduler(options = {}) {
   function getStatus() {
     return {
       ...state,
+      bookingEmail: {
+        ...state.bookingEmail,
+        started: Boolean(bookingEmailTimer),
+        running: bookingEmailRunning,
+      },
       started: Boolean(timer),
+      anyStarted: Boolean(timer || bookingEmailTimer),
       running,
     }
   }
@@ -106,21 +207,172 @@ export function createHotelOpsScanScheduler(options = {}) {
     return { ...result, status: getStatus() }
   }
 
-  function start() {
-    if (!state.enabled) {
-      return { started: false, reason: state.disabledReason || 'disabled', status: getStatus() }
+  async function runBookingEmailOnce(trigger = 'scheduled') {
+    const emailState = state.bookingEmail
+    if (!emailState.enabled) {
+      return { skipped: true, reason: emailState.disabledReason || 'disabled', status: getStatus() }
     }
-    if (timer) {
-      return { started: false, reason: 'already_started', status: getStatus() }
+    if (bookingEmailRunning) {
+      return { skipped: true, reason: 'already_running', status: getStatus() }
     }
 
-    state.startedAt = now().toISOString()
-    state.nextRunAt = addMinutes(now(), state.intervalMinutes)
-    timer = setIntervalFn(() => {
-      void runOnce('interval')
-    }, state.intervalMinutes * 60_000)
-    timer?.unref?.()
-    return { started: true, status: getStatus() }
+    bookingEmailRunning = true
+    emailState.status = 'RUNNING'
+    emailState.lastError = null
+    emailState.lastRunStartedAt = now().toISOString()
+
+    try {
+      const db = await resolvePrisma()
+      const enabledSources = (await listBookingSources(db)).filter((source) => source.enabled)
+      const sources = enabledSources.filter(isBookingEmailSourceSchedulable)
+      const skippedSources = enabledSources.filter((source) => !isBookingEmailSourceSchedulable(source))
+      const sourceResults = skippedSources.map((source) => ({
+        sourceId: source.id,
+        mailbox: source.mailbox,
+        provider: source.provider || 'unknown',
+        imported: 0,
+        acceptedCommands: 0,
+        skipped: true,
+        skipReason: 'unsupported_provider',
+        error: null,
+      }))
+      let importedCount = 0
+      let commandCount = 0
+      let errorCount = 0
+      const skippedSourceCount = skippedSources.length
+
+      for (const source of sources) {
+        try {
+          const result = await syncBooking(
+            db,
+            {
+              sourceId: source.id,
+              reviewOnly: true,
+              limit: emailState.batchLimit,
+              schedulerTrigger: trigger,
+            },
+            SYSTEM_BOOKING_EMAIL_ACTOR,
+          )
+          const events = Array.isArray(result?.events) ? result.events : []
+          const commandEvents = Array.isArray(result?.opsCommandEvents) ? result.opsCommandEvents : events
+          const commandResults = commandEvents.length > 0
+            ? await processEmailCommands(db, commandEvents, {
+                env,
+                submitCommand: submitEmailCommand,
+              })
+            : []
+          const acceptedCommands = commandResults.filter((item) => item.status === 'accepted').length
+          importedCount += events.length
+          commandCount += acceptedCommands
+          sourceResults.push({
+            sourceId: source.id,
+            mailbox: source.mailbox,
+            imported: events.length,
+            acceptedCommands,
+            error: null,
+          })
+        } catch (error) {
+          const message = redactSchedulerError(error)
+          errorCount += 1
+          sourceResults.push({
+            sourceId: source.id,
+            mailbox: source.mailbox,
+            imported: 0,
+            acceptedCommands: 0,
+            error: message,
+          })
+          logger.error?.(`Near-live booking email sync failed for ${source.mailbox || source.id}:`, message)
+        }
+      }
+
+      emailState.status = errorCount === 0 ? 'SUCCEEDED' : importedCount > 0 ? 'PARTIAL' : 'FAILED'
+      emailState.lastRunAt = now().toISOString()
+      emailState.lastSourceCount = enabledSources.length
+      emailState.lastSkippedSourceCount = skippedSourceCount
+      emailState.lastImportedCount = importedCount
+      emailState.lastCommandCount = commandCount
+      emailState.lastErrorCount = errorCount
+      emailState.lastError = sourceResults.find((item) => item.error)?.error || null
+
+      return {
+        skipped: false,
+        trigger,
+        sources: sourceResults,
+        importedCount,
+        commandCount,
+        errorCount,
+        skippedSourceCount,
+        status: getStatus(),
+      }
+    } catch (error) {
+      const message = redactSchedulerError(error)
+      emailState.status = 'FAILED'
+      emailState.lastRunAt = now().toISOString()
+      emailState.lastSourceCount = null
+      emailState.lastSkippedSourceCount = null
+      emailState.lastImportedCount = null
+      emailState.lastCommandCount = null
+      emailState.lastErrorCount = 1
+      emailState.lastError = message
+      logger.error?.('Near-live booking email scheduler failed:', message)
+      return { skipped: false, error: message, status: getStatus() }
+    } finally {
+      bookingEmailRunning = false
+      if (emailState.enabled && bookingEmailTimer) {
+        emailState.nextRunAt = addSeconds(now(), emailState.intervalSeconds)
+      }
+    }
+  }
+
+  function start() {
+    let scanStarted = false
+    let bookingEmailStarted = false
+
+    if (state.enabled && !timer) {
+      state.startedAt = now().toISOString()
+      state.nextRunAt = addMinutes(now(), state.intervalMinutes)
+      timer = setIntervalFn(() => {
+        void runOnce('interval')
+      }, state.intervalMinutes * 60_000)
+      timer?.unref?.()
+      scanStarted = true
+    }
+
+    if (state.bookingEmail.enabled && !bookingEmailTimer) {
+      state.bookingEmail.startedAt = now().toISOString()
+      state.bookingEmail.nextRunAt = addSeconds(now(), state.bookingEmail.intervalSeconds)
+      bookingEmailTimer = setIntervalFn(() => {
+        void runBookingEmailOnce('interval')
+      }, state.bookingEmail.intervalSeconds * 1_000)
+      bookingEmailTimer?.unref?.()
+      bookingEmailStarted = true
+      logger.log?.(`Near-live booking email scheduler active every ${state.bookingEmail.intervalSeconds} seconds (review-only).`)
+    }
+
+    if (scanStarted || bookingEmailStarted) {
+      return {
+        started: scanStarted,
+        backgroundStarted: true,
+        bookingEmailStarted,
+        status: getStatus(),
+      }
+    }
+    if (timer || bookingEmailTimer) {
+      return {
+        started: false,
+        backgroundStarted: false,
+        bookingEmailStarted: false,
+        reason: 'already_started',
+        status: getStatus(),
+      }
+    }
+    return {
+      started: false,
+      backgroundStarted: false,
+      bookingEmailStarted: false,
+      reason: state.disabledReason || state.bookingEmail.disabledReason || 'disabled',
+      status: getStatus(),
+    }
   }
 
   function stop() {
@@ -128,7 +380,12 @@ export function createHotelOpsScanScheduler(options = {}) {
       clearIntervalFn(timer)
       timer = null
     }
+    if (bookingEmailTimer) {
+      clearIntervalFn(bookingEmailTimer)
+      bookingEmailTimer = null
+    }
     state.nextRunAt = null
+    state.bookingEmail.nextRunAt = null
     return getStatus()
   }
 
@@ -136,6 +393,7 @@ export function createHotelOpsScanScheduler(options = {}) {
     start,
     stop,
     runOnce,
+    runBookingEmailOnce,
     getStatus,
   }
 }

@@ -7,6 +7,7 @@ import { executeOpsWorkerTask } from './ops-worker-client.mjs'
 import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
 import { otaPlatformSkeletonStatuses } from './ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, resolveBookingEmailGmailAccessToken } from './pms-service.mjs'
+import { isManualAvailabilityQueueTask } from './availability-queue.mjs'
 
 const TASK_TYPE_VALUES = [
   'READ_RESERVATIONS',
@@ -1393,6 +1394,9 @@ function fallbackProofKindForTaskRun(status, task) {
 }
 
 async function queueOpsTask(tx, task, actor, message = 'Task queued for signed worker execution.', extraData = {}) {
+  if (isManualAvailabilityQueueTask(task)) {
+    throw new PmsValidationError('Manual availability queue items cannot enter the OTA worker queue.', 409)
+  }
   const queued = task.status === 'QUEUED'
     ? await tx.hotelOpsTask.findUnique({ where: { id: task.id }, include: taskInclude })
     : await tx.hotelOpsTask.update({ where: { id: task.id }, data: { status: 'QUEUED', ...extraData }, include: taskInclude })
@@ -1434,6 +1438,14 @@ function requiredApprovalRoleForTask(task) {
 
 export function evaluateOpsTaskRun(task, actor, emergencyStop = { enabled: false }) {
   if (!task) return { allowed: false, statusCode: 404, reason: 'Hotel Ops task was not found.' }
+  if (isManualAvailabilityQueueTask(task)) {
+    return {
+      allowed: false,
+      statusCode: 409,
+      reason: 'Manual availability queue items must be delivered by a human and completed with a provider confirmation reference.',
+      manualOnly: true,
+    }
+  }
   if (!['QUEUED', 'APPROVED'].includes(task.status)) {
     return { allowed: false, statusCode: 409, reason: `Only queued Hotel Ops tasks can run. Current status is ${task.status}.` }
   }
@@ -1882,6 +1894,30 @@ export async function approveOpsTask(prisma, taskId, input, actor) {
     })
     await taskLog(tx, task.id, 'APPROVAL_GRANTED', 'Hotel Ops task approved.', actor, { notes: approvalNotes })
     await audit(tx, actor, 'OPS_APPROVAL_GRANTED', 'hotelOpsTask', task.id, { requiredRole: approval.requiredRole, notes: approvalNotes })
+
+    if (isManualAvailabilityQueueTask(task)) {
+      const approvedTask = await tx.hotelOpsTask.update({
+        where: { id: task.id },
+        data: { status: 'APPROVED' },
+        include: taskInclude,
+      })
+      await taskLog(
+        tx,
+        task.id,
+        'AVAILABILITY_APPROVED',
+        'Manual availability change approved. It remains unsent until a human records provider delivery.',
+        actor,
+        { manualOnly: true, autoDispatch: false },
+      )
+      await audit(tx, actor, 'AVAILABILITY_QUEUE_APPROVED', 'hotelOpsTask', task.id, {
+        requiredRole: approval.requiredRole,
+        notes: approvalNotes,
+        manualOnly: true,
+        autoDispatch: false,
+      })
+      return serializeTask(approvedTask)
+    }
+
     return serializeTask(await queueOpsTask(tx, task, actor, 'Approved task queued for signed worker execution.'))
   })
   if (result?.blocked) throw new PmsValidationError(result.reason, result.statusCode)
