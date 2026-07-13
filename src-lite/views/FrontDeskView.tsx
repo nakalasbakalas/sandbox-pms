@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatCard, StatusPill } from '../components'
 import { useI18n } from '../i18n'
+import { ReservationBookingForm } from '../reservation-booking-form'
 import type { LiteRole, ReservationSummary, RoomSummary } from '../types'
 
 function hotelDate() {
@@ -193,8 +194,9 @@ function StaySection({ title, reservations, rooms, role }: { title: string; rese
 }
 
 export function FrontDeskView({ role }: { role: LiteRole }) {
-  const { t } = useI18n()
+  const { t, language } = useI18n()
   const [date, setDate] = useState(hotelDate())
+  const [walkInOpen, setWalkInOpen] = useState(false)
   const query = useQuery({
     queryKey: ['lite', 'front-desk', date],
     queryFn: () => liteApi.frontDesk(date),
@@ -211,12 +213,18 @@ export function FrontDeskView({ role }: { role: LiteRole }) {
 
   const data = query.data
   const rooms = board.data?.rooms || []
+  const roomTypes = board.data?.roomTypes || []
+  const canCreateWalkIn = ['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(role)
   return (
     <div className="view-stack">
       <header className="view-heading">
         <div><p className="eyebrow">{data.hotelDate}</p><h1>{t('frontDesk')}</h1></div>
-        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={t('dateRange')} />
+        <div className="heading-actions">
+          {canCreateWalkIn ? <button className="button button--primary" disabled={board.isLoading || Boolean(board.error) || roomTypes.length === 0} onClick={() => setWalkInOpen(true)}>{language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in'}</button> : null}
+          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={t('dateRange')} />
+        </div>
       </header>
+      {board.error && canCreateWalkIn ? <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดประเภทห้องได้ ปิดการจอง Walk-in ไว้ชั่วคราว' : 'Room types could not be loaded, so walk-in booking is temporarily disabled.'} retry={() => board.refetch()} /> : null}
       <div className="stats-grid">
         <StatCard label={t('arrivals')} value={data.summary.arrivals} tone="blue" />
         <StatCard label={t('departures')} value={data.summary.departures} tone="gold" />
@@ -228,6 +236,7 @@ export function FrontDeskView({ role }: { role: LiteRole }) {
       <StaySection title={t('arrivals')} reservations={data.arrivals} rooms={rooms} role={role} />
       <StaySection title={t('departures')} reservations={data.departures} rooms={rooms} role={role} />
       <StaySection title={t('inHouse')} reservations={data.inHouse} rooms={rooms} role={role} />
+      {walkInOpen ? <Modal title={language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in booking'} close={() => setWalkInOpen(false)}><ReservationBookingForm walkIn roomTypes={roomTypes} close={() => setWalkInOpen(false)} /></Modal> : null}
     </div>
   )
 }

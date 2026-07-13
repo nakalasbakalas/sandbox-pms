@@ -75,6 +75,7 @@ Booking-email operator CLI:
 - Adding `--confirm` imports the scanned messages as review-only Booking Email Events in chunks controlled by `--import-batch-size`, defaulting to `50`, so large history loads do not run as one long database transaction.
 - Adding `--confirm` imports the scanned messages into `BookingEmailEvent` rows for staff review in `/booking-inbox`. It does not approve events or directly create, modify, cancel, charge, or assign reservations.
 - Without an explicit `--query`, the helper uses the approved provider-query default: common OTA/provider senders, spam/trash excluded, recent-only by default, and known Booking.com security, Trip.com performance, and Agoda partner-invoice noise excluded. `--all-past` removes the recency bound while keeping the same approved-provider scope. `--primary-mailbox-query` is the explicit fallback for the old `to:booking@sandboxhotel.com` troubleshooting boundary.
+- The primary Gmail source and missed-push reconciliation use that same shared approved-provider query. On source ensure, an empty query or the known legacy direct-mailbox query is upgraded while an owner-customized query is preserved, preventing the fallback path from silently narrowing to direct-recipient mail only.
 - `npm.cmd run booking-email:deep-scan -- --limit <n>` reports redacted aggregate parser coverage, duplicate-scope, and workflow anomalies for the current PMS booking-email queue. Adding `--strict` exits non-zero when high-severity findings remain.
 - `npm.cmd run booking-email:reprocess -- --confirm` reparses only selected `NEEDS_REVIEW` / `ERROR` Booking Email Events through the current parser and keeps them in the review queue for staff approval.
 - Parser fallback must not promote OTA account-security, partner-reporting, or partner-invoice emails into `NEW_BOOKING`; those messages should remain `UNKNOWN` for manual triage unless staff explicitly reclassify them.
@@ -245,6 +246,7 @@ Lite read routes:
 
 - `GET /api/lite/v1/front-desk?date=YYYY-MM-DD`
 - `GET /api/lite/v1/bookings?from=&to=&status=&source=&query=&cursor=&limit=`
+- `GET /api/lite/v1/bookings/:id` (property-scoped detail plus at most 100 newest `ReservationLog` lifecycle events; exposes safe action, timestamp, and staff display label only, with truncation metadata and no raw changes, notes, account identifiers, IP/user-agent data, credentials, or payment details)
 - `GET /api/lite/v1/board?from=&to=`
 - `GET /api/lite/v1/housekeeping?date=YYYY-MM-DD`
 - `GET /api/lite/v1/channel-desk`
@@ -275,6 +277,11 @@ The handler persists a unique `BookingEmailPushDelivery` before acknowledging wi
 4. emits only redacted aggregate output.
 
 Every Gmail ingestion call is forced to `reviewOnly: true`, including the push, history, reconciliation, and explicit Gmail sync paths. New, modified, and cancelled bookings must remain `NEEDS_REVIEW` until authorized staff approve them. A processed event cannot be reprocessed. Modification and cancellation approvals require an operational reason and use the existing PMS transaction functions.
+
+At the Lite migration boundary, every pre-existing `BookingEmailEvent` is marked
+`legacyReadOnly`, including unresolved rows from the bounded 1,000-message
+historical import. New post-cutover rows retain the actionable default. Legacy
+rows can be inspected but cannot be approved, rejected, reprocessed, or replayed.
 
 ### Provider Attribution And Manual Availability
 

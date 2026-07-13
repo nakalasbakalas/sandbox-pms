@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   SANDBOX_RULES,
   activeReservationStatuses,
+  assertHousekeepingTransition,
   calculateStayPricing,
   checkedInRoomStatus,
   dateFromKey,
@@ -31,6 +32,10 @@ import {
   normalizeManualChannelProviderCode,
   reconcileManualChannelTasksInTransaction,
 } from './manual-channel-service.mjs'
+import {
+  approvedBookingEmailProviderQuery,
+  bookingEmailSourceReconciliationQuery,
+} from './booking-email-query.mjs'
 
 const reservationBookingEmailEventSelect = {
   id: true,
@@ -1545,6 +1550,15 @@ async function ensurePrimaryBookingEmailSource(tx) {
   const property = await getProperty(tx)
   const mailbox = primaryBookingMailbox()
   const credentials = bookingEmailGmailCredentialStatus()
+  const existing = await tx.bookingEmailSource.findUnique({
+    where: {
+      propertyId_mailbox: {
+        propertyId: property.id,
+        mailbox,
+      },
+    },
+  })
+  const query = bookingEmailSourceReconciliationQuery(existing?.query, mailbox)
   return tx.bookingEmailSource.upsert({
     where: {
       propertyId_mailbox: {
@@ -1556,6 +1570,7 @@ async function ensurePrimaryBookingEmailSource(tx) {
       name: 'Primary booking Gmail',
       provider: 'GMAIL',
       enabled: true,
+      query,
       ...(credentials.configured ? {} : { lastError: BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE }),
     },
     create: {
@@ -1566,7 +1581,7 @@ async function ensurePrimaryBookingEmailSource(tx) {
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: BOOKING_EMAIL_DEFAULT_REVIEW_THRESHOLD,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query: approvedBookingEmailProviderQuery(),
       lastError: credentials.configured ? null : BOOKING_EMAIL_GMAIL_MISSING_CREDENTIALS_MESSAGE,
     },
   })
@@ -4480,23 +4495,33 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
     if (!['DIRTY', 'CLEANING', 'CLEAN', 'INSPECTED', 'MAINTENANCE'].includes(cleanStatus)) {
       throw new PmsValidationError('Select a valid housekeeping status.')
     }
+    const occupied = Boolean(room.currentReservation)
+      || ['OCCUPIED_CLEAN', 'OCCUPIED_DIRTY', 'OCCUPIED'].includes(room.currentStatus)
+    assertHousekeepingTransition(room.currentStatus, cleanStatus, { occupied })
+    const operationalNotes = cleanStatus === 'MAINTENANCE'
+      ? requireOperationalReason(notes, 'Taking a room out of service for maintenance')
+      : notes
 
     const operationalStatus = cleanStatus === 'MAINTENANCE' ? 'OUT_OF_SERVICE' : room.operationalStatus
     const toStatus = cleanStatus === 'MAINTENANCE'
       ? 'VACANT_DIRTY'
-      : roomStatusForHousekeeping(room.currentStatus, cleanStatus)
+      : roomStatusForHousekeeping(room.currentStatus, cleanStatus, occupied)
 
-    await createRoomStatusLog(tx, room, toStatus, actor, notes)
+    await createRoomStatusLog(tx, room, toStatus, actor, operationalNotes)
     const updated = await tx.room.update({
       where: { id: room.id },
       data: {
         currentStatus: toStatus,
         operationalStatus,
-        notes: notes || room.notes,
+        notes: operationalNotes || room.notes,
       },
       include: { roomType: true },
     })
-    await createAudit(tx, actor, 'HOUSEKEEPING_STATUS_UPDATED', 'room', room.id, { cleanStatus, toStatus })
+    await createAudit(tx, actor, 'HOUSEKEEPING_STATUS_UPDATED', 'room', room.id, {
+      cleanStatus,
+      toStatus,
+      ...(cleanStatus === 'MAINTENANCE' ? { reason: operationalNotes } : {}),
+    })
     await reconcileRoomCapacityInTransaction(tx, {
       propertyId: room.propertyId,
       beforeRoom: room,

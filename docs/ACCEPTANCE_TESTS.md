@@ -81,6 +81,7 @@ Evidence: `scripts/run-e2e-tests.mjs`.
 - Render Gmail OAuth status reports current Render key presence and supported credential-path readiness without values; dry-run reports missing/present local booking-email Gmail keys without values; apply mode updates only the approved booking-email Gmail env-var keys.
 - Booking-email capture proof reports aggregate current PMS email-event counts without message ids, sender/recipient, subject, raw body, guest, payment, or credential data.
 - Booking-email historical backfill dry-run fetches bounded Gmail pages, reports redacted aggregate parser counts, and does not write PMS records.
+- Primary-source initialization and missed-push reconciliation use the shared approved-provider query; the known incomplete direct-mailbox default is upgraded while an owner-custom query is preserved.
 - Booking-email historical backfill with `--confirm` imports Booking Email Events for `/booking-inbox` review only, chunking large confirmed imports by `--import-batch-size`; staff approval is still required before creating, modifying, cancelling, charging, or linking reservations.
 - Booking-email parser fixtures cover new booking, modification, cancellation, guest message, and payment notice templates with check-in/check-out label variants, stay-date ranges, and payment extraction.
 - Booking-email parser regressions also cover representative OTA security/reporting/invoice noise so non-reservation provider mail stays `UNKNOWN` instead of entering the booking workflow.
@@ -146,8 +147,10 @@ Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/t
 - Bookings supports bounded pagination plus date, status, source, and text filters.
 - Board returns separate `rooms`, complete `reservationSegments`, and `unassignedBookings`; two future reservations on one room are both visible.
 - Board supports a 14-day default and validated ranges up to 90 days, including a configured room type that is neither Twin nor Double.
-- Housekeeping supports dirty -> cleaning -> clean -> inspected according to backend transition rules.
+- Housekeeping supports dirty -> cleaning -> clean -> inspected according to backend transition rules; occupied cleaning preserves the active stay, while occupied inspection/maintenance and reason-less maintenance fail before mutation.
+- Booking detail is property-scoped, authenticated, and loads a capped, newest-first safe `ReservationLog` timeline on demand without exposing raw changes, notes, internal account identifiers, network metadata, credentials, or payment details.
 - Channel Desk exposes non-secret mailbox/watch health, review-required events, mappings, and pending/failed manual tasks.
+- Pending and failed manual tasks display creation time and raw age; failed tasks show manager escalation without inventing an unapproved overdue SLA.
 - Settings is permission-filtered and does not expose credentials.
 - Clearing browser storage loses no booking, room, folio, payment, housekeeping, email-review, or channel-task state.
 - Two browser sessions observe committed changes through SSE-triggered refetch or fallback polling.
@@ -162,6 +165,7 @@ Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/t
 - A stale `PROCESSING` claim is reclaimed after its timeout; retries remain visible and errors are redacted.
 - Gmail watch renewal records a future expiry; an invalid/expired history cursor uses bounded reconciliation without silently advancing past an incomplete scan.
 - Push, history, reconciliation, explicit Gmail sync, and five-minute maintenance all call the PMS ingester with `reviewOnly: true`.
+- Every booking-email row present at the Lite migration boundary is immutable `legacyReadOnly` evidence; only post-cutover ingestion can enter the actionable review queue.
 - Booking.com, Agoda, and Trip.com fixtures cover new booking, modification, cancellation, duplicates, out-of-order notification/history delivery, parser errors, and failed review actions.
 - Parser-error rows and true aggregate totals remain visible in Channel Desk; authorized staff can retry parsing or reject with a reason.
 - Approval mode cannot retype an event, cancellation requires `cancel:reservation`, payment requires `process:payment`, and a declared child count cannot be applied without one verified age per child.
@@ -187,6 +191,7 @@ Automated tests target negative OIDC and Pub/Sub envelope handling, durable idem
 - Reconciliation creates no task for an unmapped provider/room cell, returns the gap, and persists an aggregated `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` audit record.
 - Enabling a previously disabled connection requires a 1–90-day initial horizon, stages absolute-availability tasks for only that connection in the activation transaction, records `MANUAL_CHANNEL_INITIAL_BASELINE_STAGED`, and rolls back activation if task staging fails.
 - Each Channel Desk task displays its external room type id/name and rate-plan id; a legacy task with no current mapping cannot be completed.
+- Direct housekeeping API calls cannot skip or reverse `DIRTY -> CLEANING -> CLEAN -> INSPECTED`; explicit dirty-cycle restart and idempotent repeats remain allowed, while maintenance requires a reason and is blocked for occupied rooms.
 - Direct and walk-in inventory changes create cells for all enabled manual connections.
 - An approved OTA email reconciles every enabled connection, including the originating provider, with current absolute PMS availability and supersedes stale source-provider work.
 - Creation, inventory-changing edit, cancellation/no-show, and reviewed modification/cancellation recalculate every affected stay date inside the PMS transaction.
@@ -225,6 +230,7 @@ The schema now contains nullable integer-satang authority fields while retaining
 - A separate Render Lite staging service uses a sanitized disposable/staging database and the exact reviewed commit.
 - Staging proves migrations, `/healthz?deep=1`, `/api/version`, asset identity, auth/RBAC, review-only Gmail watch/push, five-minute cron, manual queue, logs, and rollback.
 - Cloudflare DNS/proxy/WAF traffic-path evidence is recorded before any Lite public hostname is treated as protected.
+- Cloudflare rule-configuration proof and traffic-enforcement proof remain separate: hostname-covered metadata alone does not pass the public-edge gate while DNS is absent or DNS-only.
 - Seven consecutive days of Gmail/parser shadow comparison and a 14-day staff pilot pass before domain cutover.
 - Every active/future booking, mapping, opening inventory/rate plan, duplicate risk, inventory drift, and unresolved task is reconciled.
 - OTA disconnect happens one provider at a time in an owner-controlled maintenance window, with an approved booking/modification/cancellation test and 48-hour observation before the next provider.

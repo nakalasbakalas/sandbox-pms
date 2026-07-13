@@ -185,8 +185,60 @@ export function checkedInRoomStatus(currentStatus) {
     : 'OCCUPIED_CLEAN'
 }
 
-export function roomStatusForHousekeeping(currentStatus, cleanStatus) {
-  const occupied = currentStatus === 'OCCUPIED_CLEAN' || currentStatus === 'OCCUPIED_DIRTY' || currentStatus === 'OCCUPIED'
+const HOUSEKEEPING_STATUS_BY_ROOM_STATUS = {
+  VACANT_DIRTY: 'DIRTY',
+  OCCUPIED_DIRTY: 'DIRTY',
+  CLEANING: 'CLEANING',
+  VACANT_CLEAN: 'CLEAN',
+  OCCUPIED_CLEAN: 'CLEAN',
+  OCCUPIED: 'CLEAN',
+  INSPECTED: 'INSPECTED',
+}
+
+const NEXT_HOUSEKEEPING_STATUS = {
+  DIRTY: 'CLEANING',
+  CLEANING: 'CLEAN',
+  CLEAN: 'INSPECTED',
+}
+
+function roomStatusIndicatesOccupancy(roomStatus) {
+  return roomStatus === 'OCCUPIED_CLEAN' || roomStatus === 'OCCUPIED_DIRTY' || roomStatus === 'OCCUPIED'
+}
+
+export function assertHousekeepingTransition(currentRoomStatus, requestedStatus, options = {}) {
+  const currentStatus = HOUSEKEEPING_STATUS_BY_ROOM_STATUS[currentRoomStatus]
+  if (!currentStatus) {
+    throw new PmsValidationError('Room has an invalid housekeeping status.')
+  }
+  const occupied = options.occupied === undefined
+    ? roomStatusIndicatesOccupancy(currentRoomStatus)
+    : Boolean(options.occupied)
+
+  if (occupied && (requestedStatus === 'INSPECTED' || requestedStatus === 'MAINTENANCE')) {
+    throw new PmsValidationError(
+      `An occupied room cannot be marked ${requestedStatus}. Complete or resolve the active stay first.`,
+      409,
+    )
+  }
+
+  // Maintenance is an operational exception, while DIRTY explicitly starts a
+  // new cleaning cycle. Repeating the current state remains idempotent.
+  if (requestedStatus === 'MAINTENANCE' || requestedStatus === 'DIRTY' || requestedStatus === currentStatus) {
+    return
+  }
+
+  if (NEXT_HOUSEKEEPING_STATUS[currentStatus] !== requestedStatus) {
+    throw new PmsValidationError(
+      `Housekeeping status cannot move from ${currentStatus} to ${requestedStatus}. Follow DIRTY -> CLEANING -> CLEAN -> INSPECTED, or mark DIRTY to restart the cycle.`,
+      409,
+    )
+  }
+}
+
+export function roomStatusForHousekeeping(currentStatus, cleanStatus, occupiedOverride = undefined) {
+  const occupied = occupiedOverride === undefined
+    ? roomStatusIndicatesOccupancy(currentStatus)
+    : Boolean(occupiedOverride)
   if (cleanStatus === 'DIRTY') return occupied ? 'OCCUPIED_DIRTY' : 'VACANT_DIRTY'
   if (cleanStatus === 'CLEANING') return 'CLEANING'
   if (cleanStatus === 'INSPECTED') return 'INSPECTED'

@@ -1,5 +1,6 @@
 import type {
   BoardPayload,
+  BookingDetail,
   BookingPage,
   ChannelDeskPayload,
   FrontDeskPayload,
@@ -129,6 +130,10 @@ export const liteApi = {
 
   async bookings(filters: Record<string, string | number | undefined | null>) {
     return (await request<ApiEnvelope<BookingPage>>(query('/api/lite/v1/bookings', filters))).data
+  },
+
+  async bookingDetail(id: string) {
+    return (await request<ApiEnvelope<BookingDetail>>(`/api/lite/v1/bookings/${encodeURIComponent(id)}`)).data
   },
 
   async board(from: string, to: string) {

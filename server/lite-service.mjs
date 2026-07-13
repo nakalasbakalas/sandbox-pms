@@ -6,9 +6,11 @@ import {
 } from './pms-domain.mjs'
 
 const DAY_MS = 86_400_000
+const MINUTE_MS = 60_000
 const DEFAULT_BOOKING_LIMIT = 25
 const MAX_BOOKING_LIMIT = 100
 const MAX_BOOKING_RANGE_DAYS = 730
+const MAX_BOOKING_AUDIT_EVENTS = 100
 const DEFAULT_BOARD_DAYS = 14
 const MAX_BOARD_DAYS = 90
 const PENDING_EMAIL_SAMPLE_LIMIT = 25
@@ -44,6 +46,20 @@ const BOOKING_SOURCES = new Set([
   'AIRBNB',
   'OTHER',
 ])
+
+const RESERVATION_AUDIT_ACTION_LABELS = Object.freeze({
+  CREATED: 'Booking created',
+  MODIFIED: 'Booking updated',
+  ASSIGNED_ROOM: 'Room assigned',
+  CHECKED_IN: 'Guest checked in',
+  CHECKED_OUT: 'Guest checked out',
+  CANCELLED: 'Booking cancelled',
+  NO_SHOW: 'Booking marked no-show',
+  RATE_ADJUSTED: 'Rate adjusted',
+  MOVED_ROOM: 'Room moved',
+  DEPOSIT_PAID: 'Deposit marked paid',
+  WALK_IN_CHECKED_IN: 'Walk-in created and checked in',
+})
 
 const PROPERTY_SELECT = {
   id: true,
@@ -320,6 +336,13 @@ function parseCursor(value) {
   return supplied
 }
 
+function parseReservationId(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+    throw new PmsValidationError('Booking id is invalid.')
+  }
+  return value
+}
+
 function isoDateKey(value) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
     throw new PmsValidationError('Stored reservation date is invalid.', 503)
@@ -331,6 +354,13 @@ function isoTimestamp(value) {
   if (!value) return null
   const date = value instanceof Date ? value : new Date(value)
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+export function manualChannelTaskAgeMinutes(createdAt, now = new Date()) {
+  const created = createdAt instanceof Date ? createdAt : new Date(createdAt)
+  const current = now instanceof Date ? now : new Date(now)
+  if (Number.isNaN(created.getTime()) || Number.isNaN(current.getTime())) return null
+  return Math.max(0, Math.floor((current.getTime() - created.getTime()) / MINUTE_MS))
 }
 
 function storedMoneySatang(value, label, { nullable = false } = {}) {
@@ -773,6 +803,71 @@ export async function listLiteBookings(prisma, input = {}) {
   }
 }
 
+export async function getLiteBookingDetail(prisma, reservationId) {
+  requirePrisma(prisma)
+  if (!prisma.reservationLog || !prisma.user) throw new TypeError('ReservationLog and User models are required for Lite booking detail.')
+  const id = parseReservationId(reservationId)
+  const property = await resolveProperty(prisma)
+  const reservation = await prisma.reservation.findFirst({
+    where: { id, propertyId: property.id },
+    select: RESERVATION_SELECT,
+  })
+  if (!reservation) throw new PmsValidationError('Booking was not found in this property.', 404)
+
+  const auditWhere = {
+    reservationId: reservation.id,
+  }
+  const [total, auditRows] = await Promise.all([
+    prisma.reservationLog.count({ where: auditWhere }),
+    prisma.reservationLog.findMany({
+      where: auditWhere,
+      select: {
+        id: true,
+        action: true,
+        performedBy: true,
+        createdAt: true,
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: MAX_BOOKING_AUDIT_EVENTS,
+    }),
+  ])
+  const actorIdentities = [...new Set(auditRows
+    .map((row) => String(row.performedBy || '').trim())
+    .filter((identity) => identity && identity.toLowerCase() !== 'system'))]
+  const users = actorIdentities.length === 0
+    ? []
+    : await prisma.user.findMany({
+        where: {
+          OR: actorIdentities.flatMap((identity) => [
+            { id: identity },
+            { email: identity },
+            { username: identity },
+          ]),
+        },
+        select: { id: true, email: true, username: true, firstName: true, lastName: true },
+      })
+  const actorLabels = new Map()
+  for (const user of users) {
+    const label = safeStaffDisplayName(user)
+    for (const identity of [user.id, user.email, user.username]) {
+      if (identity) actorLabels.set(String(identity).toLowerCase(), label)
+    }
+  }
+
+  return {
+    property: mapProperty(property),
+    reservation: mapReservation(reservation),
+    auditTimeline: {
+      order: 'newest_first',
+      total,
+      returned: auditRows.length,
+      truncated: total > auditRows.length,
+      events: auditRows.map((row) => mapReservationAuditEvent(row, actorLabels)),
+      privacyBoundary: 'Internal identifiers, raw changes and notes, IP addresses, user agents, and credential or payment details are not returned; staff display names are returned.',
+    },
+  }
+}
+
 function clipSegment(reservation, from, to) {
   const mapped = mapReservation(reservation)
   return {
@@ -872,6 +967,41 @@ function mapHousekeepingStay(reservation) {
     checkIn: isoDateKey(reservation.checkIn),
     checkOut: isoDateKey(reservation.checkOut),
     status: reservation.status,
+  }
+}
+
+function safeStaffDisplayName(user) {
+  if (!user) return 'Staff member'
+  const label = [user.firstName, user.lastName]
+    .map((value) => String(value || '').replace(/\p{Cc}+/gu, ' ').trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80)
+  return label || 'Staff member'
+}
+
+function safePerformedByLabel(performedBy, actorLabels) {
+  const raw = String(performedBy || '').replace(/\p{Cc}+/gu, ' ').trim()
+  if (!raw) return 'Staff member'
+  if (raw.toLowerCase() === 'system') return 'System'
+  const resolved = actorLabels.get(raw.toLowerCase())
+  if (resolved) return resolved
+  if (raw.includes('@') || /^[a-z0-9._-]{2,128}$/i.test(raw)) return 'Staff member'
+  return raw.replace(/\s+/g, ' ').slice(0, 80) || 'Staff member'
+}
+
+function mapReservationAuditEvent(log, actorLabels) {
+  const rawAction = String(log.action || '').trim().toUpperCase()
+  const recognized = Object.hasOwn(RESERVATION_AUDIT_ACTION_LABELS, rawAction)
+  const action = recognized ? rawAction : 'OTHER'
+  return {
+    id: log.id,
+    action,
+    label: recognized ? RESERVATION_AUDIT_ACTION_LABELS[rawAction] : 'Reservation activity',
+    actorLabel: safePerformedByLabel(log.performedBy, actorLabels),
+    occurredAt: isoTimestamp(log.createdAt),
+    source: 'RESERVATION_LOG',
   }
 }
 
@@ -1058,9 +1188,11 @@ function groupedStatusCount(rows, status) {
 export async function getLiteChannelDesk(prisma, options = {}) {
   requirePrisma(prisma)
   const normalized = normalizeFilterObject(options)
-  assertAllowedFilters(normalized, new Set(['credentialStatus', 'pubsubConfig']))
+  assertAllowedFilters(normalized, new Set(['credentialStatus', 'pubsubConfig', 'now']))
+  const now = normalized.now === undefined ? new Date() : new Date(normalized.now)
+  if (Number.isNaN(now.getTime())) throw new PmsValidationError('Channel Desk now must be a valid timestamp.')
   const property = await resolveProperty(prisma)
-  const today = dateFromKey(getBangkokDateKey(new Date()))
+  const today = dateFromKey(getBangkokDateKey(now))
 
   const reviewEventWhere = {
     propertyId: property.id,
@@ -1221,6 +1353,8 @@ export async function getLiteChannelDesk(prisma, options = {}) {
         status: task.status,
         revision: task.revision,
         extranetUrl: task.connection.extranetUrl || null,
+        createdAt: isoTimestamp(task.createdAt),
+        ageMinutes: manualChannelTaskAgeMinutes(task.createdAt, now),
         completedAt: isoTimestamp(task.completedAt),
         completedBy: task.completedBy || null,
         completionNotes: task.completionNotes || null,

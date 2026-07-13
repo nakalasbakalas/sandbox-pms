@@ -4,6 +4,10 @@ import {
   dualWriteMoneyFromThb,
   dualWriteTaxRateFromPercent,
 } from '../server/money-satang.mjs'
+import {
+  approvedBookingEmailProviderQuery,
+  bookingEmailSourceReconciliationQuery,
+} from '../server/booking-email-query.mjs'
 
 const prisma = new PrismaClient()
 
@@ -416,20 +420,23 @@ async function seedProperty() {
 
 async function seedBookingEmailSource(propertyId: string) {
   const mailbox = 'booking@sandboxhotel.com'
-  return prisma.bookingEmailSource.upsert({
-    where: {
-      propertyId_mailbox: {
-        propertyId,
-        mailbox,
-      },
+  const where = {
+    propertyId_mailbox: {
+      propertyId,
+      mailbox,
     },
+  }
+  const existing = await prisma.bookingEmailSource.findUnique({ where })
+  const query = bookingEmailSourceReconciliationQuery(existing?.query, mailbox)
+  return prisma.bookingEmailSource.upsert({
+    where,
     update: {
       name: 'Primary booking Gmail',
       provider: 'GMAIL',
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: 0.85,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query,
     },
     create: {
       propertyId,
@@ -439,7 +446,7 @@ async function seedBookingEmailSource(propertyId: string) {
       enabled: true,
       autoProcessSafeEvents: false,
       reviewThreshold: 0.85,
-      query: `to:${mailbox} -in:spam -in:trash newer_than:30d`,
+      query: approvedBookingEmailProviderQuery(),
       lastError: 'Gmail API credentials are not configured for this server.',
     },
   })

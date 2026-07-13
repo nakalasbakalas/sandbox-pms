@@ -190,6 +190,42 @@ export type BookingPage = {
   pendingReviewEmail: PendingReviewEmailSummary
 }
 
+export type ReservationAuditAction =
+  | 'CREATED'
+  | 'MODIFIED'
+  | 'ASSIGNED_ROOM'
+  | 'CHECKED_IN'
+  | 'CHECKED_OUT'
+  | 'CANCELLED'
+  | 'NO_SHOW'
+  | 'RATE_ADJUSTED'
+  | 'MOVED_ROOM'
+  | 'DEPOSIT_PAID'
+  | 'WALK_IN_CHECKED_IN'
+  | 'OTHER'
+
+export type ReservationAuditEvent = {
+  id: string
+  action: ReservationAuditAction
+  label: string
+  actorLabel: string
+  occurredAt: string | null
+  source: 'RESERVATION_LOG'
+}
+
+export type BookingDetail = {
+  property: PropertySummary
+  reservation: ReservationSummary
+  auditTimeline: {
+    order: 'newest_first'
+    total: number
+    returned: number
+    truncated: boolean
+    events: ReservationAuditEvent[]
+    privacyBoundary: string
+  }
+}
+
 export type ReservationSegment = ReservationSummary & {
   segmentStart: string
   segmentEnd: string
@@ -340,6 +376,8 @@ export type ManualChannelTask = {
   status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'SUPERSEDED' | 'FAILED'
   revision: number
   extranetUrl: string | null
+  createdAt: string | null
+  ageMinutes: number | null
   completedAt: string | null
   completedBy: string | null
   completionNotes: string | null

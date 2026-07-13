@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatusPill } from '../components'
 import { useI18n } from '../i18n'
-import type { LiteRole, ReservationSummary, RoomTypeSummary } from '../types'
+import { ReservationBookingForm } from '../reservation-booking-form'
+import type { BookingDetail, LiteRole, ReservationAuditEvent, ReservationSummary } from '../types'
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -16,110 +17,59 @@ function plusDays(value: string, days: number) {
   return date.toISOString().slice(0, 10)
 }
 
-type BookingFormProps = {
-  reservation?: ReservationSummary
-  roomTypes: RoomTypeSummary[]
-  walkIn?: boolean
-  close: () => void
+function auditActionLabel(event: ReservationAuditEvent, language: string) {
+  if (language !== 'th') return event.label
+  const labels: Partial<Record<ReservationAuditEvent['action'], string>> = {
+    CREATED: 'สร้างการจอง',
+    MODIFIED: 'แก้ไขการจอง',
+    ASSIGNED_ROOM: 'มอบหมายห้อง',
+    CHECKED_IN: 'เช็คอินแขก',
+    CHECKED_OUT: 'เช็คเอาต์แขก',
+    CANCELLED: 'ยกเลิกการจอง',
+    NO_SHOW: 'บันทึกว่าไม่เข้าพัก',
+    RATE_ADJUSTED: 'ปรับราคา',
+    MOVED_ROOM: 'ย้ายห้อง',
+    DEPOSIT_PAID: 'บันทึกเงินมัดจำแล้ว',
+    WALK_IN_CHECKED_IN: 'สร้างและเช็คอิน Walk-in',
+  }
+  return labels[event.action] || event.label
 }
 
-function BookingForm({ reservation, roomTypes, walkIn = false, close }: BookingFormProps) {
-  const { t, language } = useI18n()
-  const queryClient = useQueryClient()
-  const [firstName, setFirstName] = useState(reservation?.guest.firstName || '')
-  const [lastName, setLastName] = useState(reservation?.guest.lastName || '')
-  const [checkIn, setCheckIn] = useState(reservation?.checkIn.slice(0, 10) || today())
-  const [checkOut, setCheckOut] = useState(reservation?.checkOut.slice(0, 10) || plusDays(today(), 1))
-  const [roomTypeCode, setRoomTypeCode] = useState(reservation?.roomType.code || roomTypes[0]?.code || '')
-  const [rate, setRate] = useState(reservation ? String(reservation.ratePerNightSatang / 100) : String((roomTypes[0]?.baseRateSatang || 0) / 100))
-  const [adults, setAdults] = useState(String(reservation?.adults || 1))
-  const [children, setChildren] = useState(String(reservation?.children || 0))
-  const [childAges, setChildAges] = useState<string[]>(() => Array.from(
-    { length: reservation?.children || 0 },
-    (_, index) => reservation?.childAges?.[index] == null ? '' : String(reservation.childAges[index]),
-  ))
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const childCount = Number(children)
-      const childAgeInputs = childAges.slice(0, childCount)
-      const parsedChildAges = childAgeInputs.map((value) => Number(value))
-      if (!Number.isSafeInteger(childCount) || childCount < 0 || childAgeInputs.some((value) => !value.trim()) || parsedChildAges.length !== childCount || parsedChildAges.some((age) => !Number.isSafeInteger(age) || age < 0 || age > 17)) {
-        throw new Error(language === 'th' ? 'กรอกอายุของเด็กทุกคน' : 'Enter one valid age for every child.')
-      }
-      const common = {
-        checkIn,
-        checkOut,
-        roomTypeCode,
-        adults: Number(adults),
-        children: Number(children),
-        childAges: parsedChildAges,
-        ratePerNightSatang: thbInputToSatang(rate, language === 'th' ? 'ราคาต่อคืน' : 'Nightly rate'),
-        ...(reservation?.updatedAt ? { expectedUpdatedAt: reservation.updatedAt } : {}),
-      }
-      if (reservation) return liteApi.updateReservation(reservation.id, common)
-      return liteApi.createReservation({
-        ...common,
-        guest: { firstName, lastName },
-        source: walkIn ? 'WALK_IN' : 'DIRECT',
-      })
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['lite'] })
-      close()
-    },
-  })
+function auditTime(value: string | null, language: string) {
+  if (!value) return language === 'th' ? 'ไม่ทราบเวลา' : 'Time unavailable'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return language === 'th' ? 'ไม่ทราบเวลา' : 'Time unavailable'
+  return new Intl.DateTimeFormat(language === 'th' ? 'th-TH' : 'en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Bangkok',
+  }).format(date)
+}
 
-  useEffect(() => {
-    const selected = roomTypes.find((item) => String(item.code) === roomTypeCode)
-    if (!reservation && selected) setRate(String(selected.baseRateSatang / 100))
-  }, [reservation, roomTypeCode, roomTypes])
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    mutation.mutate()
-  }
-
+function AuditTimeline({ timeline }: { timeline: BookingDetail['auditTimeline'] }) {
+  const { language } = useI18n()
   return (
-    <form className="form-grid" onSubmit={submit}>
-      {!reservation ? (
-        <>
-          <label>{t('firstName')}<input required value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label>
-          <label>{t('lastName')}<input required value={lastName} onChange={(event) => setLastName(event.target.value)} /></label>
-        </>
-      ) : null}
-      <label>{t('checkInDate')}<input required type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} /></label>
-      <label>{t('checkOutDate')}<input required type="date" min={plusDays(checkIn, 1)} value={checkOut} onChange={(event) => setCheckOut(event.target.value)} /></label>
-      <label>{t('roomType')}
-        <select required value={roomTypeCode} onChange={(event) => setRoomTypeCode(event.target.value)}>
-          {roomTypes.map((roomType) => <option key={roomType.id} value={roomType.code}>{roomType.name}</option>)}
-        </select>
-      </label>
-      <label>{t('nightlyRate')}<input required min="0" step="0.01" type="number" value={rate} onChange={(event) => setRate(event.target.value)} /></label>
-      <label>{t('adults')}<input required min="1" type="number" value={adults} onChange={(event) => setAdults(event.target.value)} /></label>
-      <label>{t('children')}<input min="0" step="1" type="number" value={children} onChange={(event) => {
-        const value = event.target.value
-        setChildren(value)
-        const count = Number(value)
-        if (Number.isSafeInteger(count) && count >= 0) {
-          setChildAges((current) => Array.from({ length: count }, (_, index) => current[index] || ''))
-        }
-      }} /></label>
-      {childAges.map((age, index) => (
-        <label key={index}>{language === 'th' ? `อายุเด็กคนที่ ${index + 1}` : `Child ${index + 1} age`}<input required min="0" max="17" step="1" type="number" value={age} onChange={(event) => setChildAges((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} /></label>
+    <section className="audit-timeline">
+      <div className="audit-timeline__heading">
+        <h3>{language === 'th' ? 'ประวัติการจอง' : 'Booking history'}</h3>
+        <span>{timeline.total} {language === 'th' ? 'เหตุการณ์' : 'events'}</span>
+      </div>
+      {timeline.events.length === 0 ? <EmptyBlock /> : timeline.events.map((event) => (
+        <div className="audit-event" key={event.id}>
+          <span className="audit-event__dot" aria-hidden="true" />
+          <div><strong>{auditActionLabel(event, language)}</strong><span>{event.actorLabel}</span></div>
+          <time dateTime={event.occurredAt || undefined}>{auditTime(event.occurredAt, language)}</time>
+        </div>
       ))}
-      {mutation.error ? <div className="form-error">{mutation.error.message}</div> : null}
-      <footer className="form-actions">
-        <button type="button" className="button button--secondary" onClick={close}>{t('close')}</button>
-        <button className="button button--primary" disabled={mutation.isPending}>{mutation.isPending ? '…' : t('save')}</button>
-      </footer>
-      <p className="form-note">{language === 'th' ? 'ระบบจะตรวจสอบจำนวนห้องว่างและบันทึกในฐานข้อมูลก่อนยืนยัน' : 'Availability is checked and committed on the server before confirmation.'}</p>
-    </form>
+      {timeline.truncated ? <p className="form-note">{language === 'th' ? `แสดง ${timeline.returned} เหตุการณ์ล่าสุด` : `Showing the latest ${timeline.returned} events.`}</p> : null}
+    </section>
   )
 }
 
-function FolioPanel({ reservation, role, close }: { reservation: ReservationSummary; role: LiteRole; close: () => void }) {
+function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: LiteRole; close: () => void }) {
   const { t, language } = useI18n()
   const queryClient = useQueryClient()
+  const reservation = detail.reservation
   const folio = reservation.folio
   const [action, setAction] = useState<'charge' | 'payment' | null>(null)
   const [description, setDescription] = useState('')
@@ -159,7 +109,7 @@ function FolioPanel({ reservation, role, close }: { reservation: ReservationSumm
     },
   })
 
-  if (!folio) return <div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div>
+  if (!folio) return <div className="booking-detail"><div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div><AuditTimeline timeline={detail.auditTimeline} /><div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button></div></div>
   return (
     <div className="folio-detail">
       <div className="folio-summary">
@@ -187,6 +137,7 @@ function FolioPanel({ reservation, role, close }: { reservation: ReservationSumm
           </div>
         ))}
       </section>
+      <AuditTimeline timeline={detail.auditTimeline} />
       {canPost && folio.status === 'OPEN' ? (
         <div className="folio-actions">
           <button type="button" className="button button--secondary" onClick={() => { setAction('charge'); setAmount('') }}>{language === 'th' ? 'เพิ่มค่าใช้จ่าย' : 'Add charge'}</button>
@@ -237,6 +188,14 @@ export function BookingsView({ role }: { role: LiteRole }) {
     queryKey: ['lite', 'bookings', search, status, source, cursor],
     queryFn: () => liteApi.bookings({ query: search, status, source, cursor, limit: 30 }),
     refetchInterval: 30_000,
+  })
+  const detailQuery = useQuery({
+    queryKey: ['lite', 'booking-detail', detailId],
+    queryFn: () => {
+      if (!detailId) throw new Error('Booking id is required.')
+      return liteApi.bookingDetail(detailId)
+    },
+    enabled: Boolean(detailId),
   })
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => liteApi.reservationAction(id, 'cancel', { reason }),
@@ -298,7 +257,7 @@ export function BookingsView({ role }: { role: LiteRole }) {
                       <td><StatusPill value={reservation.status} /></td>
                       <td>{formatMoney(reservation.folio?.balanceSatang, language)}</td>
                       <td className="row-actions">
-                        <button className="text-button" onClick={() => setDetailId(reservation.id)}>{language === 'th' ? 'โฟลิโอ' : 'Folio'}</button>
+                        <button className="text-button" onClick={() => setDetailId(reservation.id)}>{language === 'th' ? 'รายละเอียด' : 'Details'}</button>
                         {canOpenEditor && !['CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(reservation.status) ? <button className="text-button" onClick={() => setModal({ kind: 'edit', reservation })}>{language === 'th' ? 'แก้ไข' : 'Edit'}</button> : null}
                         {canCancel && reservation.checkIn.slice(0, 10) <= today() && ['PENDING', 'CONFIRMED', 'HOLD'].includes(reservation.status) ? <button className="text-button" onClick={() => markNoShow(reservation)}>{language === 'th' ? 'ไม่เข้าพัก' : 'No show'}</button> : null}
                         {canCancel && !['CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(reservation.status) ? <button className="text-button text-button--danger" onClick={() => cancelBooking(reservation)}>{t('cancel')}</button> : null}
@@ -317,10 +276,14 @@ export function BookingsView({ role }: { role: LiteRole }) {
       </div>
       {modal ? (
         <Modal title={modal.kind === 'edit' ? `${language === 'th' ? 'แก้ไข' : 'Edit'} ${modal.reservation?.confirmationCode}` : modal.kind === 'walk-in' ? (language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in booking') : t('newBooking')} close={() => setModal(null)}>
-          <BookingForm reservation={modal.reservation} walkIn={modal.kind === 'walk-in'} roomTypes={roomTypes} close={() => setModal(null)} />
+          <ReservationBookingForm reservation={modal.reservation} walkIn={modal.kind === 'walk-in'} roomTypes={roomTypes} close={() => setModal(null)} />
         </Modal>
       ) : null}
-      {detailReservation ? <Modal title={`${language === 'th' ? 'โฟลิโอ' : 'Folio'} · ${detailReservation.confirmationCode}`} close={() => setDetailId(null)}><FolioPanel reservation={detailReservation} role={role} close={() => setDetailId(null)} /></Modal> : null}
+      {detailId ? (
+        <Modal title={`${language === 'th' ? 'รายละเอียดการจอง' : 'Booking details'} · ${detailQuery.data?.reservation.confirmationCode || detailReservation?.confirmationCode || '…'}`} close={() => setDetailId(null)}>
+          {detailQuery.isLoading ? <LoadingBlock /> : detailQuery.error || !detailQuery.data ? <ErrorBlock error={detailQuery.error || 'Booking details unavailable.'} retry={() => detailQuery.refetch()} /> : <FolioPanel detail={detailQuery.data} role={role} close={() => setDetailId(null)} />}
+        </Modal>
+      ) : null}
     </div>
   )
 }

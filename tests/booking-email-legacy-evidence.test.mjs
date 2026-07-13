@@ -12,29 +12,27 @@ import {
 
 const actor = { id: 'manager-1', name: 'Manager', role: 'MANAGER' }
 
-test('migration archives only terminal or past email evidence and preserves unresolved active work', async () => {
-  const sql = await readFile(
+test('migration archives every pre-cutover booking email as immutable evidence', async () => {
+  const columnSql = await readFile(
     new URL('../prisma/migrations/20260713120000_manual_channel_task_target_snapshot/migration.sql', import.meta.url),
+    'utf8',
+  )
+  const cutoverSql = await readFile(
+    new URL('../prisma/migrations/20260714100000_booking_email_legacy_readonly_cutover/migration.sql', import.meta.url),
     'utf8',
   )
 
   assert.match(
-    sql,
+    columnSql,
     /ADD COLUMN "legacyReadOnly" BOOLEAN NOT NULL DEFAULT FALSE;/i,
   )
   assert.doesNotMatch(
-    sql,
+    columnSql,
     /ADD COLUMN "legacyReadOnly" BOOLEAN NOT NULL DEFAULT TRUE;/i,
   )
-  const archiveUpdate = sql.match(
-    /UPDATE "BookingEmailEvent"\s+SET "legacyReadOnly" = TRUE\s+WHERE[\s\S]*?;/i,
-  )?.[0]
+  const archiveUpdate = cutoverSql.match(/UPDATE "BookingEmailEvent"\s+SET "legacyReadOnly" = TRUE;/i)?.[0]
   assert.ok(archiveUpdate, 'legacy archive UPDATE must exist')
-  assert.match(
-    archiveUpdate,
-    /SET "legacyReadOnly" = TRUE\s+WHERE "status" IN \('PROCESSED', 'IGNORED'\)\s+OR "processedAt" IS NOT NULL\s+OR "rejectedAt" IS NOT NULL\s+OR \("checkOut" IS NOT NULL AND "checkOut" < CURRENT_DATE\);/i,
-  )
-  assert.doesNotMatch(archiveUpdate, /NEEDS_REVIEW|ERROR/i)
+  assert.doesNotMatch(archiveUpdate, /WHERE/i)
 })
 
 function legacyEvent() {
@@ -76,22 +74,22 @@ test('legacy booking email evidence is labeled non-actionable in read responses'
   assert.equal(response.reviewActionsAllowed, false)
 })
 
-test('unresolved NEEDS_REVIEW and ERROR events preserved by the cutover remain reviewable', async () => {
+test('pre-cutover unresolved NEEDS_REVIEW and ERROR events remain non-actionable evidence', async () => {
   for (const [index, status] of ['NEEDS_REVIEW', 'ERROR'].entries()) {
     const event = {
       ...legacyEvent(),
       id: `active-event-${index + 1}`,
       status,
       checkOut: new Date(Date.now() + 86_400_000),
-      legacyReadOnly: false,
+      legacyReadOnly: true,
     }
     const prisma = {
       bookingEmailEvent: { findUnique: async () => event },
     }
 
     const response = await getBookingEmailEvent(prisma, event.id)
-    assert.equal(response.legacyReadOnly, false)
-    assert.equal(response.reviewActionsAllowed, true)
+    assert.equal(response.legacyReadOnly, true)
+    assert.equal(response.reviewActionsAllowed, false)
   }
 })
 

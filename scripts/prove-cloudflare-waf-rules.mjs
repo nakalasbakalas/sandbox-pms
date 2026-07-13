@@ -19,6 +19,9 @@ const SECURITY_PHASES = new Set([
   'http_ratelimit',
   'http_request_firewall_managed',
 ])
+const EXPECTED_WAF_RULE_REF = 'sandbox_pms_common_probe_block'
+const EXPECTED_LOGIN_RATE_LIMIT_RULE_REF = 'sandbox_pms_login_rate_limit'
+const HOST_CLAUSE_PATTERN = String.raw`http\.host\s+(?:eq\s+"[^"]+"|in\s+\{(?:\s*"[^"]+"\s*)+\})`
 
 function argValue(name) {
   const index = process.argv.indexOf(name)
@@ -53,9 +56,44 @@ function zoneId() {
 }
 
 function accountId() {
-  return argValue('--account-id')
-    || nullableEnv('CLOUDFLARE_ACCOUNT_ID')
+  const explicitAccountId = argValue('--account-id')
+  if (explicitAccountId) return explicitAccountId
+  return nullableEnv('CLOUDFLARE_ACCOUNT_ID')
     || nullableEnv('CF_ACCOUNT_ID')
+}
+
+function accountInspectionRequested() {
+  return hasFlag('--account-id') || hasFlag('--use-env-account-id')
+}
+
+export function isCloudflareWafProofReady({
+  verifiedExpectedWafRules,
+  verifiedExpectedLoginRateLimitRules,
+  accountInspectionRequested = false,
+  accountInspectionInspected = false,
+}) {
+  return verifiedExpectedWafRules > 0
+    && verifiedExpectedLoginRateLimitRules > 0
+    && (!accountInspectionRequested || accountInspectionInspected)
+}
+
+export function assertCloudflareWafProofRequirements({ proof }) {
+  if (!proof?.summary) {
+    throw new Error('Cloudflare WAF proof output is missing summary metadata.')
+  }
+  if (!proof.summary.requireOwnerReview) return
+
+  const reasons = []
+  if (proof.summary.verifiedExpectedWafRules < 1) {
+    reasons.push(`the enabled ${EXPECTED_WAF_RULE_REF} block contract is not verified for the target hostname`)
+  }
+  if (proof.summary.verifiedExpectedLoginRateLimitRules < 1) {
+    reasons.push(`the enabled ${EXPECTED_LOGIN_RATE_LIMIT_RULE_REF} login block contract is not verified for the target hostname`)
+  }
+  if (proof.summary.accountInspectionRequested && !proof.summary.accountInspectionInspected) {
+    reasons.push('requested account-level inspection could not be completed')
+  }
+  throw new Error(`Cloudflare WAF/rate-limit proof is incomplete: ${reasons.join('; ') || 'owner review is required'}.`)
 }
 
 function normalizeHostname(value = DEFAULT_HOSTNAME) {
@@ -131,7 +169,7 @@ CLOUDFLARE_API_TOKEN=
 # Optional if the token can read zones. The helper can discover this from --hostname.
 CLOUDFLARE_ZONE_ID=
 
-# Optional. Include only when account-level rulesets should be inspected.
+# Optional. Include only when account-level rulesets should be inspected with --use-env-account-id.
 CLOUDFLARE_ACCOUNT_ID=
 `
   await writeFile(resolvedPath, template, { encoding: 'utf8', flag: 'wx' })
@@ -166,7 +204,8 @@ Optional:
   --init-env-template [path]       Create a local env template. Default: ${DEFAULT_ENV_TEMPLATE_PATH}
   --probe-url <https_url>         Run a bounded unauthenticated GET probe and omit response body.
   --probe-count <0-5>             Number of times to request --probe-url. Default: 1 when probe-url is set.
-  --require-rules                 Exit non-zero if no WAF/rate-limit rules are found.
+  --require-rules                 Exit non-zero unless enabled WAF and rate-limit rules cover the target hostname.
+  --use-env-account-id            Inspect account-level rulesets using CLOUDFLARE_ACCOUNT_ID/CF_ACCOUNT_ID.
 `
 }
 
@@ -231,6 +270,81 @@ function hostnameCoverage(expression, targetHostname) {
   return { scope: 'other-hostname-or-expression', targetHostnameCovered: false }
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function expressionHasQuotedEquality(expression, field, value) {
+  return new RegExp(`\\b${escapeRegExp(field)}\\s+eq\\s+"${escapeRegExp(value)}"`, 'i')
+    .test(String(expression || ''))
+}
+
+function expressionHasPositiveHostname(expression, targetHostname) {
+  const text = String(expression || '')
+  if (expressionHasQuotedEquality(text, 'http.host', targetHostname)) return true
+  const inSets = [...text.matchAll(/\bhttp\.host\s+in\s+\{([^}]*)\}/gi)]
+  const quotedHostname = new RegExp(`"${escapeRegExp(targetHostname)}"`, 'i')
+  return inSets.some((match) => quotedHostname.test(match[1]))
+}
+
+function canonicalWafExpressionMatches(expression, targetHostname) {
+  const pattern = new RegExp(
+    String.raw`^\(\s*(${HOST_CLAUSE_PATTERN})\s+and\s+\(\s*http\.request\.uri\.path\s+eq\s+"/\.env"\s+or\s+starts_with\(\s*http\.request\.uri\.path\s*,\s*"/wp-"\s*\)\s+or\s+starts_with\(\s*http\.request\.uri\.path\s*,\s*"/phpmyadmin"\s*\)\s+or\s+starts_with\(\s*http\.request\.uri\.path\s*,\s*"/vendor/"\s*\)\s*\)\s*\)$`,
+    'i',
+  )
+  const match = String(expression || '').match(pattern)
+  return Boolean(match && expressionHasPositiveHostname(match[1], targetHostname))
+}
+
+function canonicalLoginRateExpressionMatches(expression, targetHostname) {
+  const pattern = new RegExp(
+    String.raw`^\(\s*(${HOST_CLAUSE_PATTERN})\s+and\s+http\.request\.method\s+eq\s+"POST"\s+and\s+http\.request\.uri\.path\s+eq\s+"/api/auth/login"\s*\)$`,
+    'i',
+  )
+  const match = String(expression || '').match(pattern)
+  return Boolean(match && expressionHasPositiveHostname(match[1], targetHostname))
+}
+
+function expectedSandboxRuleContract(rule, { phase, targetHostname }) {
+  const enabled = rule.enabled === undefined ? true : Boolean(rule.enabled)
+  const action = String(rule.action || '').toLowerCase()
+  const expression = String(rule.expression || '')
+  const positiveHostname = expressionHasPositiveHostname(expression, targetHostname)
+  const positiveOnly = !/\b(?:not|ne)\b/i.test(expression)
+
+  if (rule.ref === EXPECTED_WAF_RULE_REF) {
+    const checks = {
+      phase: phase === 'http_request_firewall_custom',
+      enabled,
+      action: action === 'block',
+      positiveOnly,
+      positiveHostname,
+      canonicalExpression: canonicalWafExpressionMatches(expression, targetHostname),
+    }
+    return { type: 'waf', verified: Object.values(checks).every(Boolean), checks }
+  }
+
+  if (rule.ref === EXPECTED_LOGIN_RATE_LIMIT_RULE_REF) {
+    const ratelimit = rule.ratelimit && typeof rule.ratelimit === 'object' ? rule.ratelimit : {}
+    const characteristics = [...new Set((Array.isArray(ratelimit.characteristics) ? ratelimit.characteristics : []).map(String))].sort()
+    const checks = {
+      phase: phase === 'http_ratelimit',
+      enabled,
+      action: action === 'block',
+      positiveOnly,
+      positiveHostname,
+      canonicalExpression: canonicalLoginRateExpressionMatches(expression, targetHostname),
+      threshold: Number(ratelimit.period) === 10
+        && Number(ratelimit.requests_per_period) === 10
+        && Number(ratelimit.mitigation_timeout) === 10,
+      characteristics: JSON.stringify(characteristics) === JSON.stringify(['cf.colo.id', 'ip.src']),
+    }
+    return { type: 'login_rate_limit', verified: Object.values(checks).every(Boolean), checks }
+  }
+
+  return { type: null, verified: false, checks: {} }
+}
+
 function summarizeRatelimit(value) {
   if (!value || typeof value !== 'object') return null
   return {
@@ -243,8 +357,9 @@ function summarizeRatelimit(value) {
   }
 }
 
-function summarizeRule(rule = {}, { targetHostname, includeExpressions = false } = {}) {
+function summarizeRule(rule = {}, { phase, targetHostname, includeExpressions = false } = {}) {
   const coverage = hostnameCoverage(rule.expression, targetHostname)
+  const expectedContract = expectedSandboxRuleContract(rule, { phase, targetHostname })
   return {
     id: rule.id || null,
     ref: rule.ref || null,
@@ -254,13 +369,16 @@ function summarizeRule(rule = {}, { targetHostname, includeExpressions = false }
     targetHostnameCovered: coverage.targetHostnameCovered,
     coverageScope: coverage.scope,
     ratelimit: summarizeRatelimit(rule.ratelimit),
+    expectedContract,
     expression: includeExpressions ? (rule.expression || null) : 'omitted',
     actionParameters: 'omitted',
   }
 }
 
 export function summarizeRuleset(ruleset = {}, options = {}) {
-  const rules = Array.isArray(ruleset.rules) ? ruleset.rules.map((rule) => summarizeRule(rule, options)) : []
+  const rules = Array.isArray(ruleset.rules)
+    ? ruleset.rules.map((rule) => summarizeRule(rule, { ...options, phase: ruleset.phase }))
+    : []
   return {
     id: ruleset.id || null,
     name: ruleset.name || null,
@@ -318,6 +436,7 @@ export async function buildCloudflareWafProof({
   token,
   targetZoneId,
   targetAccountId = null,
+  targetAccountInspectionRequested = false,
   targetHostname = DEFAULT_HOSTNAME,
   includeExpressions = false,
   probeUrl = null,
@@ -331,14 +450,59 @@ export async function buildCloudflareWafProof({
   if (!discoveredZone.id) fail(`Cloudflare zone id is required. Set CLOUDFLARE_ZONE_ID or CF_ZONE_ID, pass --zone-id, or grant the token Zone Read for hostname discovery. Discovery source: ${discoveredZone.source}.`)
   const zone = await requestJson(`/zones/${encodeURIComponent(discoveredZone.id)}`, token)
   const zoneRulesets = await fetchRulesets({ level: 'zone', id: discoveredZone.id, token })
-  const accountRulesets = targetAccountId
-    ? await fetchRulesets({ level: 'account', id: targetAccountId, token })
-    : []
+  let accountRulesets = []
+  let accountRulesetInspectionError = null
+  if (targetAccountId && targetAccountInspectionRequested) {
+    try {
+      accountRulesets = await fetchRulesets({ level: 'account', id: targetAccountId, token })
+    } catch (error) {
+      accountRulesetInspectionError = redactProviderMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
   const summarizedZoneRulesets = zoneRulesets.map((ruleset) => summarizeRuleset(ruleset, { targetHostname: hostname, includeExpressions }))
   const summarizedAccountRulesets = accountRulesets.map((ruleset) => summarizeRuleset(ruleset, { targetHostname: hostname, includeExpressions }))
   const allRulesets = [...summarizedZoneRulesets, ...summarizedAccountRulesets]
   const rulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.rulesCount, 0)
   const coveredRulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.targetHostnameCoveredRules, 0)
+  const enabledTargetHostnameCoveredRules = allRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.enabled && rule.targetHostnameCovered).length,
+    0,
+  )
+  const enabledTargetHostnameCoveredWafRules = allRulesets.reduce(
+    (sum, ruleset) => sum + (
+      ruleset.phase === 'http_request_firewall_custom' || ruleset.phase === 'http_request_firewall_managed'
+        ? ruleset.rules.filter((rule) => rule.enabled && rule.targetHostnameCovered).length
+        : 0
+    ),
+    0,
+  )
+  const enabledTargetHostnameCoveredRateLimitRules = allRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter(
+      (rule) => rule.enabled && rule.targetHostnameCovered && Boolean(rule.ratelimit),
+    ).length,
+    0,
+  )
+  const verifiedExpectedWafRules = summarizedZoneRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter(
+      (rule) => rule.expectedContract.type === 'waf' && rule.expectedContract.verified,
+    ).length,
+    0,
+  )
+  const verifiedExpectedLoginRateLimitRules = summarizedZoneRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter(
+      (rule) => rule.expectedContract.type === 'login_rate_limit' && rule.expectedContract.verified,
+    ).length,
+    0,
+  )
+  const accountInspectionInspected = Boolean(targetAccountId)
+    && Boolean(targetAccountInspectionRequested)
+    && !accountRulesetInspectionError
+  const isReady = isCloudflareWafProofReady({
+    verifiedExpectedWafRules,
+    verifiedExpectedLoginRateLimitRules,
+    accountInspectionRequested: Boolean(targetAccountInspectionRequested),
+    accountInspectionInspected,
+  })
 
   return {
     generatedAt: new Date().toISOString(),
@@ -353,11 +517,14 @@ export async function buildCloudflareWafProof({
       },
       account: {
         idPresent: Boolean(targetAccountId),
+        requested: Boolean(targetAccountInspectionRequested),
+        inspected: accountInspectionInspected,
+        inspectionError: accountRulesetInspectionError,
       },
     },
     cloudflareApi: {
       baseUrl: API_BASE,
-      rulesetLevels: targetAccountId ? ['zone', 'account'] : ['zone'],
+      rulesetLevels: targetAccountId && targetAccountInspectionRequested ? ['zone', 'account'] : ['zone'],
       phases: [...SECURITY_PHASES],
     },
     summary: {
@@ -365,9 +532,16 @@ export async function buildCloudflareWafProof({
       rulesCount,
       enabledRulesCount: allRulesets.reduce((sum, ruleset) => sum + ruleset.enabledRulesCount, 0),
       targetHostnameCoveredRules: coveredRulesCount,
+      enabledTargetHostnameCoveredRules,
+      enabledTargetHostnameCoveredWafRules,
+      enabledTargetHostnameCoveredRateLimitRules,
+      verifiedExpectedWafRules,
+      verifiedExpectedLoginRateLimitRules,
       rateLimitRulesCount: allRulesets.reduce((sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.ratelimit).length, 0),
       actions: [...new Set(allRulesets.flatMap((ruleset) => ruleset.actions))].sort(),
-      requireOwnerReview: rulesCount === 0 || coveredRulesCount === 0,
+      accountInspectionRequested: Boolean(targetAccountInspectionRequested),
+      accountInspectionInspected,
+      requireOwnerReview: !isReady,
     },
     rulesets: {
       zone: summarizedZoneRulesets,
@@ -412,6 +586,8 @@ async function main() {
   const token = bearerToken()
   const targetZoneId = zoneId()
   const hostname = normalizeHostname(argValue('--hostname') || DEFAULT_HOSTNAME)
+  const targetAccountId = accountId()
+  const targetAccountInspectionRequested = accountInspectionRequested()
   const outputBase = {
     generatedAt: new Date().toISOString(),
     purpose: 'read-only Cloudflare WAF and rate-limit ruleset proof',
@@ -419,7 +595,7 @@ async function main() {
     target: {
       hostname,
       zoneIdPresent: Boolean(targetZoneId),
-      accountIdPresent: Boolean(accountId()),
+      accountIdPresent: Boolean(targetAccountId),
     },
     envFile: envFile ? {
       used: true,
@@ -452,17 +628,18 @@ async function main() {
   const proof = await buildCloudflareWafProof({
     token,
     targetZoneId,
-    targetAccountId: accountId(),
+    targetAccountId,
+    targetAccountInspectionRequested,
     targetHostname: hostname,
     includeExpressions: hasFlag('--include-expressions'),
     probeUrl: argValue('--probe-url') || null,
     probeCount: argValue('--probe-count'),
   })
   proof.envFile = outputBase.envFile
-  proof.ready = proof.summary.rulesCount > 0
+  proof.ready = !proof.summary.requireOwnerReview
   console.log(JSON.stringify(proof, null, 2))
 
-  if (hasFlag('--require-rules') && proof.summary.rulesCount === 0) fail('No Cloudflare WAF/rate-limit rules were found.')
+  if (hasFlag('--require-rules')) assertCloudflareWafProofRequirements({ proof })
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

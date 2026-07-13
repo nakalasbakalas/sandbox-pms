@@ -58,6 +58,7 @@ import {
 } from './manual-channel-service.mjs'
 import {
   getLiteBoard,
+  getLiteBookingDetail,
   getLiteChannelDesk,
   getLiteFrontDesk,
   getLiteHousekeeping,
@@ -974,6 +975,13 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  let liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/bookings\/(?<id>[^/]+)$/)
+  if (liteParams && request.method === 'GET') {
+    requirePermission(user, 'view:reservations')
+    sendJson(response, 200, { ok: true, data: await getLiteBookingDetail(db, liteParams.id) })
+    return true
+  }
+
   if (url.pathname === '/api/lite/v1/board' && request.method === 'GET') {
     requirePermission(user, 'view:board')
     sendJson(response, 200, { ok: true, data: await getLiteBoard(db, queryInput(url.searchParams)) })
@@ -998,7 +1006,7 @@ async function handleApi(request, response, url) {
     return true
   }
 
-  let liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/channels\/connections\/(?<provider>[^/]+)$/)
+  liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/channels\/connections\/(?<provider>[^/]+)$/)
   if (liteParams && request.method === 'PUT') {
     requirePermission(user, 'manage:channels')
     const body = await readJson(request)

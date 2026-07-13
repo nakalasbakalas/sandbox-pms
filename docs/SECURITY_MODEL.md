@@ -122,7 +122,7 @@ Email-derived money keeps persisted parser semantics: a stay total cannot be sou
 
 `sourceEmailEventId` is internal evidence provenance. Public charge, payment, walk-in, check-in, and checkout payloads are rejected if they attempt to set it. Cumulative exact payments set `depositPaid` only after crossing a positive deposit threshold; provider repricing re-evaluates that threshold. Checkout releases physical room-date inventory before publishing any early-checkout availability increase.
 
-Completed, ignored, or already-past rows that predate the Lite review boundary are marked `legacyReadOnly`. They remain evidence but cannot be approved, rejected, reprocessed, or replayed into operational reservations. Unresolved `NEEDS_REVIEW` or `ERROR` rows with an active, future, or unknown checkout remain actionable after migration so Gmail message-id deduplication cannot strand a live booking or cancellation.
+Every booking-email row that predates the Lite review boundary is marked `legacyReadOnly`, including unresolved rows from the bounded 1,000-message historical import. These rows remain evidence but cannot be approved, rejected, reprocessed, or replayed into operational reservations. Only messages ingested after the Lite cutover enter the actionable review queue; staff must reconcile any real active stay from authoritative OTA/PMS evidence rather than applying stale imported parser output.
 
 The five-minute maintenance cron renews watches, retries durable deliveries, and reconciles Gmail history. It improves recovery but is neither a security bypass nor a delivery guarantee. If the watch or push identity is misconfigured, the correct response is to repair configuration or rely on reviewed manual intake—not to disable OIDC or review controls.
 

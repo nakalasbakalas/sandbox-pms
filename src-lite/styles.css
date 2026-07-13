@@ -154,6 +154,17 @@ tbody tr:hover { background: #fbfaf5; }
 .ledger-row > div span { color: var(--muted); }
 .ledger-row.is-void { opacity: .55; text-decoration: line-through; }
 .folio-form { margin: 0 -18px -18px; border-top: 1px solid var(--line); }
+.booking-detail { display: grid; gap: 15px; padding: 18px; }
+.booking-detail .audit-timeline, .folio-detail .audit-timeline { padding-top: 6px; border-top: 1px solid var(--line); }
+.audit-timeline { display: grid; gap: 0; }
+.audit-timeline__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; }
+.audit-timeline__heading h3 { margin: 0; font-size: 14px; }
+.audit-timeline__heading span { color: var(--muted); font-size: 11px; }
+.audit-event { display: grid; grid-template-columns: 10px minmax(150px, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #ece9e1; font-size: 12px; }
+.audit-event__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+.audit-event > div { display: grid; gap: 2px; }
+.audit-event > div span, .audit-event time { color: var(--muted); }
+.audit-event time { text-align: right; }
 
 .date-filter { display: flex; gap: 8px; }
 .date-filter label { grid-template-columns: auto 145px; align-items: center; }

@@ -71,6 +71,11 @@ type DeskCopy = {
   taskCount: string
   activeConnections: string
   taskDate: string
+  taskCreated: string
+  taskAge: string
+  taskAgeUnknown: string
+  pendingTaskRisk: string
+  failedTaskEscalation: string
   revision: string
   desiredAvailability: string
   confirmedAvailability: string
@@ -203,6 +208,11 @@ const deskCopy: Record<Language, DeskCopy> = {
     taskCount: 'Availability tasks',
     activeConnections: 'Enabled connections',
     taskDate: 'Stay date',
+    taskCreated: 'Created',
+    taskAge: 'Open for',
+    taskAgeUnknown: 'Age unavailable',
+    pendingTaskRisk: 'This manual OTA update is still open. Complete it promptly; the Extranet may differ until staff confirm the task.',
+    failedTaskEscalation: 'Escalate now to a manager. Reconcile this failed task before treating OTA inventory as current.',
     revision: 'Revision',
     confirmedAvailability: 'Availability confirmed in OTA',
     completionNotes: 'Completion evidence',
@@ -330,6 +340,11 @@ const deskCopy: Record<Language, DeskCopy> = {
     taskCount: 'งานอัปเดตห้องว่าง',
     activeConnections: 'ช่องทางที่เปิดใช้',
     taskDate: 'วันที่เข้าพัก',
+    taskCreated: 'สร้างเมื่อ',
+    taskAge: 'เปิดค้างมาแล้ว',
+    taskAgeUnknown: 'ไม่ทราบอายุงาน',
+    pendingTaskRisk: 'งานอัปเดต OTA แบบดำเนินการเองนี้ยังเปิดอยู่ โปรดดำเนินการโดยเร็ว เพราะข้อมูลใน Extranet อาจต่างจาก PMS จนกว่าพนักงานจะยืนยันงาน',
+    failedTaskEscalation: 'แจ้งผู้จัดการทันที โปรดตรวจสอบและสร้างงานนี้ใหม่ก่อนถือว่าจำนวนห้องใน OTA เป็นปัจจุบัน',
     revision: 'Revision',
     confirmedAvailability: 'จำนวนห้องที่ยืนยันใน OTA',
     completionNotes: 'หลักฐานการยืนยัน',
@@ -555,6 +570,20 @@ function formatDateTime(value: string | null | undefined, language: Language) {
   }).format(date)
 }
 
+function formatTaskAge(ageMinutes: number | null, language: Language, unknownLabel: string) {
+  if (ageMinutes === null || !Number.isSafeInteger(ageMinutes) || ageMinutes < 0) return unknownLabel
+  if (ageMinutes < 1) return language === 'th' ? 'น้อยกว่า 1 นาที' : 'less than 1 min'
+  if (ageMinutes < 60) return language === 'th' ? `${ageMinutes} นาที` : `${ageMinutes} min`
+  if (ageMinutes < 1_440) {
+    const hours = Math.floor(ageMinutes / 60)
+    const minutes = ageMinutes % 60
+    return language === 'th' ? `${hours} ชม. ${minutes} นาที` : `${hours}h ${minutes}m`
+  }
+  const days = Math.floor(ageMinutes / 1_440)
+  const hours = Math.floor((ageMinutes % 1_440) / 60)
+  return language === 'th' ? `${days} วัน ${hours} ชม.` : `${days}d ${hours}h`
+}
+
 function formatCurrencySatang(value: number, currency: string | null, language: Language) {
   if (!currency) {
     const amount = new Intl.NumberFormat(language === 'th' ? 'th-TH' : 'en-GB', {
@@ -758,6 +787,7 @@ function TaskCard({
         <div>
           <strong>{providerLabel(task.providerCode)} · {task.roomTypeName || task.roomTypeId}</strong>
           <span className="muted">{text.taskDate}: {formatDate(task.stayDate, language)} · {text.revision} {task.revision}</span>
+          <span className="muted">{text.taskAge}: {formatTaskAge(task.ageMinutes, language, text.taskAgeUnknown)} · {text.taskCreated}: {formatDateTime(task.createdAt, language)}</span>
         </div>
         <StatusPill value={task.status} />
       </header>
@@ -773,6 +803,7 @@ function TaskCard({
         <div><span>{text.externalRatePlanId}</span><strong>{task.externalRatePlanId || '—'}</strong></div>
       </div>
       <p className="notice notice--subtle">{text.immutableTarget}</p>
+      <p className="notice notice--warning">{text.pendingTaskRisk}</p>
       {!task.externalRoomTypeId ? <p className="notice notice--warning">{text.mappingMissing}</p> : null}
 
       <div className="task-form-grid">
@@ -832,6 +863,7 @@ function FailedTaskCard({
         <div>
           <strong>{providerLabel(task.providerCode)} · {task.roomTypeName || task.roomTypeId}</strong>
           <span className="muted">{text.taskDate}: {formatDate(task.stayDate, language)} · {text.revision} {task.revision}</span>
+          <span className="muted">{text.taskAge}: {formatTaskAge(task.ageMinutes, language, text.taskAgeUnknown)} · {text.taskCreated}: {formatDateTime(task.createdAt, language)}</span>
         </div>
         <StatusPill value={task.status} />
       </header>
@@ -845,6 +877,7 @@ function FailedTaskCard({
         <div><span>{text.externalRatePlanId}</span><strong>{task.externalRatePlanId || '—'}</strong></div>
       </div>
       <p className="notice notice--subtle">{text.immutableTarget}</p>
+      <p className="notice notice--error">{text.failedTaskEscalation}</p>
       {task.lastErrorMessage || task.lastErrorCode ? (
         <p className="notice notice--error"><strong>{text.lastFailure}:</strong> {safeSummary(task.lastErrorMessage) || task.lastErrorCode}</p>
       ) : null}

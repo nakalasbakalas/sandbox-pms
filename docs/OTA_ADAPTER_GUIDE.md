@@ -183,7 +183,7 @@ Choosing Booking.com, Agoda, or Trip.com in a manual reservation form is attribu
 
 Tasks coalesce when the desired availability has not changed. When it changes, the active task is superseded and a higher revision becomes current. Staff must enter the value in the official Extranet, then confirm the exact value and revision in Lite. A completion record is an operator attestation and audit event; it is not a provider API read-back.
 
-Manual work cannot guarantee zero-lag synchronization or prevent overbooking during the interval before every affected Extranet is updated. The Channel Desk must expose pending/failed task age and must never label this workflow `live sync`, `automatic sync`, or `two-way sync`.
+Manual work cannot guarantee zero-lag synchronization or prevent overbooking during the interval before every affected Extranet is updated. The Channel Desk exposes each pending/failed task's creation time and raw age, prompts staff to complete open work, and escalates failed work to a manager. No overdue SLA flag is invented because no owner-approved task-age threshold exists. The UI must never label this workflow `live sync`, `automatic sync`, or `two-way sync`.
 
 ## Direct Connectivity Decision
 

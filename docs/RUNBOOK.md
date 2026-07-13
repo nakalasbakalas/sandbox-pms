@@ -50,6 +50,10 @@ OTA credentials must be platform secrets only. Do not commit or log them. Bookin
 
 Booking email intake uses `BOOKING_EMAIL_PRIMARY_MAILBOX=booking@sandboxhotel.com`. Do not store a Gmail mailbox password in app config. Server sync requires either `BOOKING_EMAIL_GMAIL_ACCESS_TOKEN` or backend OAuth refresh-token credentials: `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN`. `BOOKING_EMAIL_GMAIL_SCOPES` defaults to `https://www.googleapis.com/auth/gmail.readonly`; do not broaden it unless a backend feature genuinely needs more access. `/api/booking-email/status` reports non-secret credential readiness, missing key names, the target mailbox, last sync state, and a Gmail profile connection test. For Render, prefer the durable refresh-token tuple. Use `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` to check current Render key presence without printing values, then use `npm.cmd run render:gmail-oauth` as a dry-run before applying any env-var changes. Operational/security/provider-admin emails from OTA senders are not booking events; keep those rows `UNKNOWN` / review-only unless staff confirm they are actionable reservation communications. When no explicit `--query` is supplied, historical backfill defaults to the approved provider-query boundary instead of the incomplete direct `to:booking@sandboxhotel.com` filter.
 
+The primary Gmail source and missed-push reconciliation use that same
+provider-aware default. Source ensure upgrades only an empty query or the known
+legacy direct-mailbox query; it preserves an owner-customized query.
+
 Optional LINE Hotel Ops command intake:
 
 ```env
@@ -359,6 +363,25 @@ in the Render creation form without pasting them into repo files, logs, or chat:
   `passwordHash`; never include a `password` field;
 - Gmail OAuth and Pub/Sub values only when the staging mailbox integration is
   ready to be exercised.
+
+Generate the one-time staging admin bundle without putting a password in shell
+arguments or terminal output:
+
+```powershell
+npm.cmd run staging:credentials:lite -- --username lite-owner --first-name Lite --last-name Owner
+```
+
+The command refuses to overwrite an existing file and writes the login,
+generated temporary password, and hash-only `SEED_USERS_JSON` to the ignored
+`.codex/lite-staging-bootstrap.local` file. Enter only the `SEED_USERS_JSON`
+value in Render's secret field. Keep the local file private, verify the first
+login, rotate the temporary password, remove `SEED_USERS_JSON` from Render, and
+then delete the local file through the normal owner credential-cleanup process.
+
+When creating the Blueprint, explicitly select branch
+`codex/sandbox-pms-lite-v1` and Blueprint Path `render-lite.yaml`. The root
+`render.yaml` manages the existing production service and must not be selected
+for the Lite staging deployment.
 
 The `initialDeployHook` runs `scripts/render-lite-staging-bootstrap.mjs` once after
 the first successful deploy. It refuses any database other than

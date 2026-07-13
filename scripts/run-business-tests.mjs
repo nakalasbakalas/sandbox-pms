@@ -20,10 +20,11 @@ import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPl
 import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, ingestBookingEmailEvents as syncBookingEmail, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail as publicSyncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
-import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
+import { approvedBookingEmailProviderQuery, bookingEmailSourceReconciliationQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
-import { parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { isCloudflareWafProofReady, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { createLiteStagingBootstrapBundle, resolveLiteStagingBootstrapOutputPath, serializeLiteStagingBootstrapBundle } from './generate-lite-staging-bootstrap.mjs'
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -925,10 +926,135 @@ assert.equal(cloudflareWafRulesetSummary.rules[0].ratelimit.requestsPerPeriod, 1
 assert.equal(cloudflareWafRulesetSummary.rules[0].expression, 'omitted', 'Cloudflare WAF proof omits rule expressions by default')
 assert.equal(cloudflareWafRulesetSummary.rules[0].actionParameters, 'omitted', 'Cloudflare WAF proof omits action parameters')
 assert.equal(JSON.stringify(cloudflareWafRulesetSummary).includes('fixture body'), false, 'Cloudflare WAF proof does not include custom response body values')
+const expectedCloudflareWafSummary = summarizeRuleset({
+  phase: 'http_request_firewall_custom',
+  rules: [{
+    ref: 'sandbox_pms_common_probe_block',
+    enabled: true,
+    action: 'block',
+    expression: '(http.host in {"book.sandboxhotel.com" "lite.sandboxhotel.com"} and (http.request.uri.path eq "/.env" or starts_with(http.request.uri.path, "/wp-") or starts_with(http.request.uri.path, "/phpmyadmin") or starts_with(http.request.uri.path, "/vendor/")))',
+  }],
+}, { targetHostname: 'lite.sandboxhotel.com' })
+assert.equal(expectedCloudflareWafSummary.rules[0].expectedContract.verified, true, 'Cloudflare WAF proof verifies the exact blocking probe-rule contract')
+const expectedCloudflareRateSummary = summarizeRuleset({
+  phase: 'http_ratelimit',
+  rules: [{
+    ref: 'sandbox_pms_login_rate_limit',
+    enabled: true,
+    action: 'block',
+    expression: '(http.host eq "lite.sandboxhotel.com" and http.request.method eq "POST" and http.request.uri.path eq "/api/auth/login")',
+    ratelimit: {
+      period: 10,
+      requests_per_period: 10,
+      mitigation_timeout: 10,
+      characteristics: ['cf.colo.id', 'ip.src'],
+    },
+  }],
+}, { targetHostname: 'lite.sandboxhotel.com' })
+assert.equal(expectedCloudflareRateSummary.rules[0].expectedContract.verified, true, 'Cloudflare WAF proof verifies the exact blocking login-rate contract')
+const deceptiveCloudflareRules = [
+  summarizeRuleset({
+    phase: 'http_request_firewall_custom',
+    rules: [{
+      ref: 'sandbox_pms_common_probe_block',
+      enabled: true,
+      action: 'skip',
+      expression: '(http.host ne "lite.sandboxhotel.com" and http.request.uri.path eq "/.env")',
+    }],
+  }, { targetHostname: 'lite.sandboxhotel.com' }),
+  summarizeRuleset({
+    phase: 'http_ratelimit',
+    rules: [{
+      ref: 'sandbox_pms_login_rate_limit',
+      enabled: true,
+      action: 'log',
+      expression: '(http.request.uri.path eq "/unrelated")',
+      ratelimit: { period: 10, requests_per_period: 10, mitigation_timeout: 10, characteristics: ['cf.colo.id', 'ip.src'] },
+    }],
+  }, { targetHostname: 'lite.sandboxhotel.com' }),
+]
+assert.equal(deceptiveCloudflareRules[0].rules[0].expectedContract.verified, false, 'Cloudflare WAF proof rejects negative-host skip rules')
+assert.equal(deceptiveCloudflareRules[1].rules[0].expectedContract.verified, false, 'Cloudflare WAF proof rejects unrelated non-mitigating rate rules')
+const negatedCanonicalCloudflareRule = summarizeRuleset({
+  phase: 'http_request_firewall_custom',
+  rules: [{
+    ref: 'sandbox_pms_common_probe_block',
+    enabled: true,
+    action: 'block',
+    expression: '(not (http.host eq "lite.sandboxhotel.com") and (not (http.request.uri.path eq "/.env") or starts_with(http.request.uri.path, "/wp-") or starts_with(http.request.uri.path, "/phpmyadmin") or starts_with(http.request.uri.path, "/vendor/")))',
+  }],
+}, { targetHostname: 'lite.sandboxhotel.com' })
+assert.equal(negatedCanonicalCloudflareRule.rules[0].expectedContract.verified, false, 'Cloudflare WAF proof rejects negated copies of the canonical contract')
+const impossibleAllAndCloudflareRule = summarizeRuleset({
+  phase: 'http_request_firewall_custom',
+  rules: [{
+    ref: 'sandbox_pms_common_probe_block',
+    enabled: true,
+    action: 'block',
+    expression: '(http.host eq "lite.sandboxhotel.com" and (http.request.uri.path eq "/.env" and starts_with(http.request.uri.path, "/wp-") and starts_with(http.request.uri.path, "/phpmyadmin") and starts_with(http.request.uri.path, "/vendor/")))',
+  }],
+}, { targetHostname: 'lite.sandboxhotel.com' })
+assert.equal(impossibleAllAndCloudflareRule.rules[0].expectedContract.verified, false, 'Cloudflare WAF proof rejects an impossible all-AND path contract')
 assert.deepEqual(
   zoneNameCandidates('book.sandboxhotel.com'),
   ['book.sandboxhotel.com', 'sandboxhotel.com'],
   'Cloudflare WAF proof can discover parent zone names from a protected hostname',
+)
+assert.equal(
+  isCloudflareWafProofReady({
+    verifiedExpectedWafRules: 1,
+    verifiedExpectedLoginRateLimitRules: 1,
+  }),
+  true,
+  'Cloudflare WAF proof is ready only when enabled WAF and rate-limit rules cover the target hostname',
+)
+assert.equal(
+  isCloudflareWafProofReady({
+    verifiedExpectedWafRules: 0,
+    verifiedExpectedLoginRateLimitRules: 0,
+  }),
+  false,
+  'Cloudflare WAF proof rejects unrelated rulesets that do not cover the target hostname',
+)
+assert.equal(
+  isCloudflareWafProofReady({
+    verifiedExpectedWafRules: 1,
+    verifiedExpectedLoginRateLimitRules: 0,
+  }),
+  false,
+  'Cloudflare WAF proof rejects hostname coverage without a hostname-covered rate-limit rule',
+)
+assert.equal(
+  isCloudflareWafProofReady({
+    verifiedExpectedWafRules: 1,
+    verifiedExpectedLoginRateLimitRules: 1,
+    accountInspectionRequested: true,
+    accountInspectionInspected: false,
+  }),
+  false,
+  'Cloudflare WAF proof rejects incomplete explicitly requested account-level inspection',
+)
+
+const liteStagingBootstrapFixture = createLiteStagingBootstrapBundle({
+  username: 'lite-owner',
+  firstName: 'Lite',
+  lastName: 'Owner',
+  password: 'fixture-password-that-is-long-enough',
+})
+const liteStagingSeedFixture = JSON.parse(liteStagingBootstrapFixture.seedUsersJson)
+assert.equal(liteStagingSeedFixture.length, 1, 'Lite staging credential generator creates one bootstrap user')
+assert.equal(liteStagingSeedFixture[0].role, 'ADMIN', 'Lite staging credential generator creates only an ADMIN bootstrap user')
+assert.equal(liteStagingSeedFixture[0].email, null, 'Lite staging credential generator keeps email intentionally null unless supplied')
+assert.equal(Object.hasOwn(liteStagingSeedFixture[0], 'password'), false, 'Lite staging seed JSON never includes the plaintext password')
+assert.match(liteStagingSeedFixture[0].passwordHash, /^pbkdf2_sha256\$310000\$/, 'Lite staging seed JSON uses the supported password hash format')
+const liteStagingSerializedFixture = serializeLiteStagingBootstrapBundle(liteStagingBootstrapFixture)
+assert.match(liteStagingSerializedFixture, /^# LOCAL SECRET\./, 'Lite staging credential file is clearly marked as a local secret')
+assert.ok(liteStagingSerializedFixture.includes('SEED_USERS_JSON='), 'Lite staging credential file contains the Render secret payload')
+assert.match(resolveLiteStagingBootstrapOutputPath(), /[\\/]\.codex[\\/]lite-staging-bootstrap\.local$/, 'Lite staging credential generator defaults to the ignored .codex directory')
+assert.throws(
+  () => resolveLiteStagingBootstrapOutputPath('staging-admin.txt'),
+  /inside the repository \.codex directory/,
+  'Lite staging credential generator refuses a plaintext-password file in the committable worktree',
 )
 const cloudflareEnvFixture = parseCloudflareEnvFileContent(`
 # local fixture
@@ -1235,12 +1361,29 @@ assert.match(approvedProviderQuery, /\(from:booking\.com OR from:guest\.booking\
 assert.match(approvedProviderQuery, /-from:ebk\.promo\.hotelpartner@trip\.com/, 'booking-email approved provider query excludes the Trip.com partner-report sender')
 assert.match(approvedProviderQuery, /-from:growth-product@agoda\.com/, 'booking-email approved provider query excludes the Agoda partner-invoice sender')
 assert.match(approvedProviderQuery, /-subject:"new sign-in to your account"/, 'booking-email approved provider query excludes Booking.com security notices')
+assert.doesNotMatch(approvedProviderQuery, /-"(?:two-factor authentication|phishing|market manager)"/, 'booking-email approved provider query does not globally exclude legitimate messages by body or footer terms')
 assert.match(approvedProviderQuery, /newer_than:30d/, 'booking-email approved provider query stays bounded by default')
 assert.doesNotMatch(approvedBookingEmailProviderQuery({ allPast: true }), /newer_than:/, 'booking-email all-past provider query removes the recency bound')
 assert.equal(
   primaryMailboxBookingEmailQuery('booking@sandboxhotel.com'),
   'to:booking@sandboxhotel.com -in:spam -in:trash newer_than:30d',
   'booking-email primary-mailbox query stays available as an explicit troubleshooting fallback',
+)
+assert.equal(
+  bookingEmailSourceReconciliationQuery(
+    'to:booking@sandboxhotel.com -in:spam -in:trash newer_than:30d',
+    'booking@sandboxhotel.com',
+  ),
+  approvedProviderQuery,
+  'booking-email source reconciliation upgrades the known incomplete direct-mailbox query',
+)
+assert.equal(
+  bookingEmailSourceReconciliationQuery(
+    'from:verified-owner-custom-provider@example.com -in:spam',
+    'booking@sandboxhotel.com',
+  ),
+  'from:verified-owner-custom-provider@example.com -in:spam',
+  'booking-email source reconciliation preserves owner-customized queries',
 )
 for (const fixture of bookingEmailParserFixtures) {
   const parsed = parseBookingEmailDetails(fixture.input)

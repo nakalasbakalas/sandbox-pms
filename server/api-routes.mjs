@@ -53,6 +53,7 @@ const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/channels\/ical\/[^/]+$/, methods: ['POST', 'DELETE'] },
   { pattern: /^\/api\/lite\/v1\/front-desk$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/bookings$/, methods: ['GET'] },
+  { pattern: /^\/api\/lite\/v1\/bookings\/[^/]+$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/board$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/housekeeping$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/channel-desk$/, methods: ['GET'] },
