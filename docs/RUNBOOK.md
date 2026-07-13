@@ -87,11 +87,11 @@ Email command intake runs only after booking-email sync imports messages through
 Booking Inbox operators:
 
 1. Use `/booking-inbox` to review imported booking email events.
-2. Use Approve & Apply only when the extracted guest, dates, room type, amount, and reservation match are clear.
+2. Use Approve & Apply only when the extracted guest, dates, room type, amount kind, currency, occupancy, and reservation match are clear. Payment, cancellation, modification, and other non-new-booking events must already show the exact linked reservation; otherwise use Link / Create first. Never apply a guest-name/date suggestion as write authority. Currency must be explicit and equal the configured property currency; never guess, relabel, convert, or edit the persisted money value. If an email shows conflicting totals, reject or reprocess it after verifying the OTA Extranet; the PMS will not choose one. For OTA new/modification events, only an explicit stay total can set pricing; payment/deposit labels cannot become the stay total.
 3. Use Edit Parsed Details Then Apply when the parser is close but needs corrected stay, payment, or guest fields.
-4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings.
+4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings. Link mode intentionally ignores incomplete edited occupancy fields; creation requires one verified age from 0 through 17 for every child.
 5. Enter an operational reason for modification and cancellation email actions.
-6. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
+6. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; it reparses immutable raw content and stored Gmail authentication evidence, replaces the old parser result/match, returns the event to review, and does not auto-approve it.
 7. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
 Historical booking mailbox capture:
@@ -375,6 +375,8 @@ Minimum runtime configuration remains:
 DATABASE_URL=postgresql://...disposable-or-staging...
 SESSION_SECRET=...
 PMS_UI_VARIANT=lite
+CHANNEL_SYNC_QUEUE_BACKEND=lite_manual
+BOOKING_EMAIL_NEAR_LIVE_ENABLED=false
 ```
 
 Render supplies `RENDER_EXTERNAL_URL`, which the server uses for its initial
@@ -405,7 +407,23 @@ Before applying the Lite schema migrations:
 6. Run `npm.cmd run money:reconcile` with the same target `DATABASE_URL` and require `status=PASS` with zero unexplained differences.
 7. Inspect only redacted aggregate counts and migration state.
 
-The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill, and database-enforced active OTA mapping-target uniqueness. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill, database-enforced active OTA mapping-target uniqueness, immutable task target snapshots, read-only legacy email evidence, and the exact provider-total satang/currency provenance pair. The immutable-target migration reopens folios that the older runtime auto-closed for still-active stays. It marks every historical task target unverified rather than inferring it from a newer mapping, so reconciliation must supersede that work before completion. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+
+### Core Hotel Operation
+
+Use one browser action at a time and confirm the persisted result before moving on:
+
+1. Create a booking or same-day walk-in with an exact THB amount. Enter one age for every declared child; Lite sends integer satang and the backend rejects occupancy/pricing ambiguity.
+2. On Booking Board, assign only a matching available room. If another user changed the booking, a `409` requires refresh; never overwrite the newer state.
+3. Before check-in, record nationality and ID/passport number, confirm room readiness, and collect the balance. Manager/Admin may use pay-later or identity-later only with an operational reason.
+4. Keep the folio open throughout an active stay, including a prepaid stay, so incidentals can be posted. Record each charge and payment from the folio and verify the exact balance. Overpayment is refused.
+5. Check out only at zero balance in normal operation. A Manager/Admin unpaid override requires a reason and leaves the folio open; later settlement closes it automatically.
+6. Checkout sends the room to `VACANT_DIRTY` and releases that reservation's room-date rows before early-checkout availability work is staged. Housekeeping progresses it through the permitted cleaning states without receiving guest, email, rate, folio, or payment data.
+7. Mark no-show only for an active arrival on or after its Bangkok arrival date and always record the reason. A future arrival or terminal booking must be rejected.
+
+Generic booking edits are unavailable after check-in because changing a checked-in room/type through that form can corrupt occupied-room state. Use checkout or an owner-approved dedicated in-house extension/room-move workflow; do not work around this backend guard.
+
+For release proof, run the guarded disposable `npm.cmd run test:e2e:lite`; it directly clicks Board assign/edit, Thai check-in error and success, folio charge/payment, checkout, no-show, concurrent room assignment, and stale-edit rejection. This is engineering proof only, not staff or production acceptance.
 
 ### Gmail Watch, Push, And Five-Minute Fallback
 
@@ -462,14 +480,16 @@ If Pub/Sub is unhealthy, leave the review queue enabled, keep the maintenance cr
 
 ### Manual Channel Desk Operation
 
+This Channel Desk workflow is the only Lite outbound queue. The separate `availability:queue` CLI stores legacy Hotel Ops tasks and must not run in a Lite environment; it rejects commands when `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`. Do not enable the 120-second in-process poller beside Gmail Pub/Sub/history reconciliation.
+
 Manager/Admin setup:
 
 1. Create/save only the intended provider connection and leave it disabled during mapping setup.
 2. Store a provider property id only when verified; never store credentials.
 3. Save an official HTTPS Extranet URL without query parameters, fragments, embedded credentials, or non-standard ports.
 4. While the connection is disabled, map every PMS room type that has at least one physical room to verified OTA room/rate-plan identifiers. Temporarily out-of-service rooms still count because they can return to sale.
-5. Confirm that no two PMS room types use the same active OTA room-type/rate-plan target, then enable the connection. The backend and database reject incomplete or conflicting activation.
-6. Run reconciliation with an operational reason and review the resulting task counts.
+5. Confirm that no two PMS room types use the same active OTA room-type/rate-plan target, choose the initial 1–90-day availability horizon (90 days by default), then enable the connection.
+6. Confirm the initial baseline tasks and `MANUAL_CHANNEL_INITIAL_BASELINE_STAGED` audit. The backend enables and stages this connection in one serializable transaction, so incomplete mappings, conflicting mappings, an invalid horizon, or task-staging failure leave it disabled. Run a later reasoned reconciliation only when the baseline range must be extended or recalculated.
 
 Front Desk/Manager/Admin completion:
 
@@ -479,7 +499,7 @@ Front Desk/Manager/Admin completion:
 4. Return to Lite and complete the task using the same current revision and exact confirmed availability.
 5. If the task changed, refresh; do not complete a stale revision.
 
-Manager/Admin may reopen a completed task only with an operational reason. A newer PMS inventory state may supersede an open task. Completed means a staff operator attested that the Extranet was updated; it is not an independent OTA API read-back.
+Manager/Admin may retry a failed task or reopen a completed task only with an operational reason. The backend recalculates current absolute availability and snapshots the current mapping into the next revision; it never blindly copies an old target/value. A newer PMS inventory state may supersede an open task. Completed means a staff operator attested that the Extranet was updated; it is not an independent OTA API read-back.
 
 Escalate overdue or failed tasks immediately because the workflow cannot guarantee zero-lag inventory or prevent overbooking while Extranets differ. Booking.com stays manual. Agoda and Trip.com partner application submission/approval require owner-controlled business/legal details and provider testing. The Channex path must remain disabled until a certified account, secret handling, mappings, sandbox tests, and owner acceptance are complete.
 

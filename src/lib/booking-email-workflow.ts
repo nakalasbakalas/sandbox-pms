@@ -11,6 +11,7 @@ export interface BookingEmailDetailsForm {
   roomType: string
   adults: string
   children: string
+  childAges: string[]
   amount: string
   currency: string
   paymentStatus: string
@@ -66,13 +67,6 @@ function normalizedDateOrUndefined(value: string, label: string) {
   return normalized
 }
 
-function normalizedCurrency(value: string) {
-  const normalized = text(value).toUpperCase()
-  if (!normalized) return undefined
-  if (!/^[A-Z]{3}$/.test(normalized)) throw new Error('Currency must be a 3-letter ISO currency code.')
-  return normalized
-}
-
 function normalizedPaymentMethod(value: string): BookingEmailParsedDetails['paymentMethod'] | undefined {
   const key = text(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
   if (!key) return undefined
@@ -97,8 +91,9 @@ export function bookingEmailDetailsForm(event: BookingEmailEvent): BookingEmailD
     roomType: text(details.roomType || event.roomType),
     adults: details.adults === undefined ? '' : String(details.adults),
     children: details.children === undefined ? '' : String(details.children),
+    childAges: Array.isArray(details.childAges) ? details.childAges.map(String) : [],
     amount: details.amount === undefined && event.amount === undefined ? '' : String(details.amount ?? event.amount),
-    currency: text(details.currency || event.currency || 'THB'),
+    currency: text(details.currency || event.currency),
     paymentStatus: text(details.paymentStatus || event.paymentStatus),
     paymentMethod: text(details.paymentMethod),
     paymentReference: text(details.paymentReference),
@@ -113,7 +108,7 @@ export function bookingEmailDefaultApprovalMode(event: Pick<BookingEmailEvent, '
 }
 
 export function bookingEmailActionRequiresReason(event: Pick<BookingEmailEvent, 'eventType'>) {
-  return event.eventType === 'CANCELLATION'
+  return event.eventType === 'CANCELLATION' || event.eventType === 'MODIFICATION'
 }
 
 export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm): BookingEmailParsedDetails {
@@ -121,9 +116,21 @@ export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm)
   const checkOut = normalizedDateOrUndefined(form.checkOut, 'Check-out')
   if (checkIn && checkOut && checkOut <= checkIn) throw new Error('Check-out must be after check-in.')
 
-  const amount = numberOrUndefined(form.amount, 'Amount', { exclusiveMin: 0 })
   const adults = numberOrUndefined(form.adults, 'Adults', { integer: true, min: 1 })
   const children = numberOrUndefined(form.children, 'Children', { integer: true, min: 0 })
+  const childAgeInputs = Array.isArray(form.childAges) ? form.childAges.map(text) : []
+  let childAges: number[] | undefined
+  if (children !== undefined) {
+    if (childAgeInputs.length !== children || childAgeInputs.some((value) => value === '')) {
+      throw new Error('Enter one age for every child.')
+    }
+    childAges = childAgeInputs.map(Number)
+    if (childAges.some((age) => !Number.isInteger(age) || age < 0 || age > 17)) {
+      throw new Error('Child ages must be whole numbers from 0 to 17.')
+    }
+  } else if (childAgeInputs.some(Boolean)) {
+    throw new Error('Enter the number of children before entering child ages.')
+  }
   const details: BookingEmailParsedDetails = {}
 
   const assign = <K extends keyof BookingEmailParsedDetails>(key: K, value: BookingEmailParsedDetails[K] | undefined) => {
@@ -138,8 +145,7 @@ export function bookingEmailParsedDetailsFromForm(form: BookingEmailDetailsForm)
   assign('roomType', text(form.roomType) || undefined)
   assign('adults', adults)
   assign('children', children)
-  assign('amount', amount)
-  assign('currency', normalizedCurrency(form.currency))
+  assign('childAges', childAges)
   assign('paymentStatus', text(form.paymentStatus) || undefined)
   assign('paymentMethod', normalizedPaymentMethod(form.paymentMethod))
   assign('paymentReference', text(form.paymentReference) || undefined)
@@ -162,6 +168,6 @@ export function buildBookingEmailApprovePayload(input: BookingEmailApplyInput): 
     mode,
     reservationId: reservationId || undefined,
     reason: reason || undefined,
-    editedDetails: bookingEmailParsedDetailsFromForm(input.form),
+    ...(mode === 'link_reservation' ? {} : { editedDetails: bookingEmailParsedDetailsFromForm(input.form) }),
   }
 }

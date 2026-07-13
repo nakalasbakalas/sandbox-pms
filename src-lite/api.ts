@@ -6,9 +6,30 @@ import type {
   HousekeepingPayload,
   LiteUser,
   ManualChannelConnection,
+  ManualChannelMapping,
+  ManualChannelProviderCode,
+  ManualChannelReconcileResult,
+  ManualChannelTask,
+  MoneySatang,
   ReservationSummary,
+  SaveManualChannelConnectionInput,
+  SaveManualChannelMappingInput,
   VersionPayload,
 } from './types'
+
+export type LiteReservationWrite = {
+  checkIn: string
+  checkOut: string
+  roomTypeCode: string
+  adults: number
+  children: number
+  childAges: number[]
+  ratePerNightSatang: MoneySatang
+  guest?: Record<string, unknown>
+  source?: string
+  assignedRoomId?: string
+  expectedUpdatedAt?: string | null
+}
 
 type ApiEnvelope<T> = { ok: true; data: T; message?: string }
 
@@ -41,6 +62,43 @@ function query(path: string, values: Record<string, string | number | undefined 
     if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
   }
   return `${url.pathname}${url.search}`
+}
+
+function assertMoneySatang(value: unknown, label: string): asserts value is MoneySatang {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new ApiError(`${label} must be a whole number of satang.`, 400)
+  }
+}
+
+function assertNoLegacyMoney(input: Record<string, unknown>, legacyField: string, satangField: string, required = false) {
+  if (Object.hasOwn(input, legacyField)) {
+    throw new ApiError(`PMS Lite writes ${satangField}; ${legacyField} is not accepted.`, 400)
+  }
+  if (required || Object.hasOwn(input, satangField)) assertMoneySatang(input[satangField], satangField)
+}
+
+function utcDateKey(value: string, label: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ApiError(`${label} must use YYYY-MM-DD.`, 400)
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new ApiError(`${label} must be a real calendar date.`, 400)
+  }
+  return parsed
+}
+
+function nextUtcDateKey(value: string) {
+  const date = utcDateKey(value, 'End date')
+  date.setUTCDate(date.getUTCDate() + 1)
+  return date.toISOString().slice(0, 10)
+}
+
+export function thbInputToSatang(value: string, label = 'Amount'): MoneySatang {
+  const normalized = String(value || '').trim()
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(normalized)
+  if (!match) throw new ApiError(`${label} must use no more than two decimal places.`, 400)
+  const satang = (BigInt(match[1]) * 100n) + BigInt((match[2] || '').padEnd(2, '0') || '0')
+  if (satang > 2_147_483_647n) throw new ApiError(`${label} is outside the supported range.`, 400)
+  return Number(satang)
 }
 
 export const liteApi = {
@@ -89,14 +147,16 @@ export const liteApi = {
     return (await request<ApiEnvelope<Array<LiteUser>>>('/api/users')).data
   },
 
-  async createReservation(input: Record<string, unknown>) {
+  async createReservation(input: LiteReservationWrite) {
+    assertNoLegacyMoney(input, 'ratePerNight', 'ratePerNightSatang', true)
     return (await request<ApiEnvelope<ReservationSummary>>('/api/reservations', {
       method: 'POST',
       body: JSON.stringify(input),
     })).data
   },
 
-  async updateReservation(id: string, input: Record<string, unknown>) {
+  async updateReservation(id: string, input: Partial<LiteReservationWrite>) {
+    assertNoLegacyMoney(input, 'ratePerNight', 'ratePerNightSatang')
     return (await request<ApiEnvelope<ReservationSummary>>(`/api/reservations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(input),
@@ -104,7 +164,27 @@ export const liteApi = {
   },
 
   async reservationAction(id: string, action: 'check-in' | 'check-out' | 'cancel' | 'no-show' | 'assign-room', input: Record<string, unknown> = {}) {
+    const payment = input.payment
+    if (payment && typeof payment === 'object' && !Array.isArray(payment)) {
+      assertNoLegacyMoney(payment as Record<string, unknown>, 'amount', 'amountSatang', true)
+    }
     return (await request<ApiEnvelope<ReservationSummary>>(`/api/reservations/${encodeURIComponent(id)}/${action}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })).data
+  },
+
+  async createCharge(input: { folioId: string; description: string; category: string; amountSatang: MoneySatang; quantity: number; date?: string }) {
+    assertNoLegacyMoney(input, 'amount', 'amountSatang', true)
+    return (await request<ApiEnvelope<unknown>>('/api/charges', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })).data
+  },
+
+  async createPayment(input: { folioId: string; amountSatang: MoneySatang; method: string; reference?: string; notes?: string }) {
+    assertNoLegacyMoney(input, 'amount', 'amountSatang', true)
+    return (await request<ApiEnvelope<unknown>>('/api/payments', {
       method: 'POST',
       body: JSON.stringify(input),
     })).data
@@ -131,6 +211,13 @@ export const liteApi = {
     })).data
   },
 
+  async reprocessEmailEvent(id: string) {
+    return (await request<ApiEnvelope<unknown>>(`/api/booking-email/events/${encodeURIComponent(id)}/reprocess`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })).data
+  },
+
   async completeChannelTask(id: string, revision: number, confirmedAvailability: number, completionNotes?: string) {
     return (await request<ApiEnvelope<unknown>>(`/api/lite/v1/channel-tasks/${encodeURIComponent(id)}/complete`, {
       method: 'POST',
@@ -138,10 +225,44 @@ export const liteApi = {
     })).data
   },
 
-  async saveConnection(providerCode: string, input: Partial<ManualChannelConnection> & { reason: string }) {
+  async saveConnection(providerCode: ManualChannelProviderCode, input: SaveManualChannelConnectionInput) {
     return (await request<ApiEnvelope<ManualChannelConnection>>(`/api/lite/v1/channels/connections/${encodeURIComponent(providerCode)}`, {
       method: 'PUT',
       body: JSON.stringify(input),
+    })).data
+  },
+
+  async saveChannelMapping(input: SaveManualChannelMappingInput) {
+    return (await request<ApiEnvelope<ManualChannelMapping>>('/api/lite/v1/channels/mappings', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })).data
+  },
+
+  async reconcileChannelTasks(input: { from: string; through: string; roomTypeIds: string[]; reason: string }) {
+    const start = utcDateKey(input.from, 'Start date')
+    const end = utcDateKey(input.through, 'End date')
+    const dayCount = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1
+    if (dayCount < 1 || dayCount > 90) throw new ApiError('Reconciliation must cover between 1 and 90 stay dates.', 400)
+    if (input.roomTypeIds.length === 0) throw new ApiError('At least one physical room type is required.', 400)
+    return (await request<ApiEnvelope<ManualChannelReconcileResult>>('/api/lite/v1/channel-tasks/reconcile', {
+      method: 'POST',
+      body: JSON.stringify({
+        reason: input.reason,
+        triggerType: 'MANUAL_RECONCILIATION',
+        affected: [...new Set(input.roomTypeIds)].map((roomTypeId) => ({
+          roomTypeId,
+          dateStart: input.from,
+          dateEnd: nextUtcDateKey(input.through),
+        })),
+      }),
+    })).data
+  },
+
+  async reopenChannelTask(id: string, reason: string) {
+    return (await request<ApiEnvelope<ManualChannelTask>>(`/api/lite/v1/channel-tasks/${encodeURIComponent(id)}/reopen`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     })).data
   },
 }

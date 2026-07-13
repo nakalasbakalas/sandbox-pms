@@ -44,12 +44,23 @@ await assert.rejects(
   /cannot set internal integration fields/i,
   'public reservation updates cannot forge booking-email linkage',
 )
+await assert.rejects(
+  () => createReservation({}, { status: 'CHECKED_IN' }, actor),
+  /cannot set internal integration fields: status/i,
+  'public reservation creation cannot forge a lifecycle status',
+)
+await assert.rejects(
+  () => createReservation({}, { authoritativeTotalSatang: 1 }, actor),
+  /cannot set internal integration fields: authoritativeTotalSatang/i,
+  'public reservation creation cannot forge an OTA-authoritative total',
+)
 
 function createMutationFixture(eventType) {
   const property = {
     id: 'property-channel-test',
     code: 'SANDBOX',
     name: 'SANDBOX HOTEL',
+    currency: 'THB',
     extraGuestFee: 300,
     childFee: 200,
   }
@@ -60,7 +71,7 @@ function createMutationFixture(eventType) {
     name: 'Twin Room',
     baseRate: 1_500,
     standardOcc: 2,
-    maxOccupancy: 3,
+    maxOccupancy: 4,
   }
   const externalReservationId = 'TRIP-REF-1001'
   const externalReferenceKey = buildManualChannelExternalReferenceKey(
@@ -85,8 +96,11 @@ function createMutationFixture(eventType) {
     children: 0,
     childAges: [],
     ratePerNight: 1_500,
+    ratePerNightSatang: 150_000,
     totalAmount: 3_000,
+    totalAmountSatang: 300_000,
     depositAmount: 900,
+    depositAmountSatang: 90_000,
     depositPaid: false,
     source: 'TRIP_COM',
     channelRef: externalReservationId,
@@ -125,8 +139,20 @@ function createMutationFixture(eventType) {
     channelRef: externalReservationId,
     providerCode: 'trip_com',
     externalReservationId,
+    amount: eventType === 'MODIFICATION' ? 4_500 : null,
+    amountSatang: eventType === 'MODIFICATION' ? 450_000 : null,
+    currency: 'THB',
     parsedDetails: eventType === 'MODIFICATION'
-      ? { checkIn: integrationDateKey(2), checkOut: integrationDateKey(5), amount: 4_500, currency: 'THB' }
+      ? {
+          checkIn: integrationDateKey(2),
+          checkOut: integrationDateKey(5),
+          adults: 3,
+          children: 1,
+          childAges: [8],
+          amount: 4_500,
+          amountKind: 'STAY_TOTAL',
+          currency: 'THB',
+        }
       : { currency: 'THB' },
     reviewReason: null,
     errorReason: null,
@@ -140,11 +166,43 @@ function createMutationFixture(eventType) {
   }
   const audits = []
   const reservationLogs = []
+  const payments = []
   const connectionQueries = []
   const externalReferenceQueries = []
   const providerScopedLegacyQueries = []
+  const folio = {
+    id: 'folio-channel-test',
+    reservationId: reservation.id,
+    status: 'OPEN',
+    subtotal: 3_000,
+    subtotalSatang: 300_000,
+    tax: 0,
+    taxSatang: 0,
+    total: 3_000,
+    totalSatang: 300_000,
+    paid: 0,
+    paidSatang: 0,
+    balance: 3_000,
+    balanceSatang: 300_000,
+  }
+  const roomCharge = {
+    id: 'charge-room-channel-test',
+    folioId: folio.id,
+    category: 'ROOM',
+    amount: 1_500,
+    amountSatang: 150_000,
+    quantity: 2,
+    total: 3_000,
+    totalSatang: 300_000,
+    void: false,
+    createdAt: now,
+  }
 
-  const withReservationRelations = () => ({ ...reservation, roomType, folio: null })
+  const withReservationRelations = () => ({
+    ...reservation,
+    roomType,
+    folio: { ...folio, charges: [roomCharge], payments },
+  })
   const withEventRelations = () => ({ ...event, source, reservation: event.reservationId ? withReservationRelations() : null })
 
   const prisma = {
@@ -187,8 +245,38 @@ function createMutationFixture(eventType) {
     inventoryHold: {
       findMany: async () => [],
     },
+    charge: {
+      findMany: async () => [roomCharge],
+      update: async ({ where, data }) => {
+        assert.equal(where.id, roomCharge.id)
+        Object.assign(roomCharge, data)
+        return roomCharge
+      },
+    },
+    payment: {
+      findUnique: async ({ where }) => payments.find((payment) => (
+        (where?.referenceFingerprint && payment.referenceFingerprint === where.referenceFingerprint)
+        || (where?.sourceEmailEventId && payment.sourceEmailEventId === where.sourceEmailEventId)
+      )) || null,
+      create: async ({ data }) => {
+        const payment = { id: `payment-channel-${payments.length + 1}`, ...data }
+        payments.push(payment)
+        return payment
+      },
+      findMany: async () => payments,
+    },
+    folio: {
+      findUnique: async ({ where }) => (where?.id === folio.id ? { ...folio } : null),
+      update: async ({ where, data }) => {
+        assert.equal(where.id, folio.id)
+        Object.assign(folio, data)
+        return { ...folio, charges: [roomCharge], payments, reservation: withReservationRelations() }
+      },
+    },
     bookingEmailEvent: {
       findUnique: async ({ where }) => (where?.id === event.id ? withEventRelations() : null),
+      findFirst: async () => null,
+      findMany: async () => [],
       update: async ({ where, data }) => {
         assert.equal(where.id, event.id)
         Object.assign(event, data, { updatedAt: now })
@@ -222,6 +310,8 @@ function createMutationFixture(eventType) {
     event,
     audits,
     reservationLogs,
+    payments,
+    roomCharge,
     connectionQueries,
     externalReferenceQueries,
     providerScopedLegacyQueries,
@@ -237,6 +327,15 @@ const approvedModification = await approveBookingEmailEvent(modification.prisma,
 assert.equal(approvedModification.status, 'PROCESSED', 'approved booking-email modifications are marked processed')
 assert.equal(modification.reservation.checkIn.toISOString().slice(0, 10), integrationDateKey(2), 'approved booking-email modifications apply the new check-in date')
 assert.equal(modification.reservation.checkOut.toISOString().slice(0, 10), integrationDateKey(5), 'approved booking-email modifications apply the new check-out date')
+assert.equal(modification.reservation.adults, 3, 'approved booking-email modifications apply adult occupancy')
+assert.equal(modification.reservation.children, 1, 'approved booking-email modifications apply child occupancy')
+assert.deepEqual(modification.reservation.childAges, [8], 'approved booking-email modifications apply child ages')
+assert.equal(modification.reservation.totalAmount, 4_500, 'the provider-reported stay total is not inflated by PMS occupancy supplements')
+assert.equal(modification.reservation.totalAmountSatang, 450_000, 'the provider-reported stay total is persisted in exact satang')
+assert.equal(modification.reservation.depositAmountSatang, 135_000, 'the deposit is recomputed from the exact provider total')
+assert.equal(modification.reservation.providerTotalSatang, 450_000, 'the exact provider total is persisted as pricing provenance')
+assert.equal(modification.reservation.providerTotalCurrency, 'THB', 'provider pricing provenance stores the verified property currency')
+assert.equal(modification.roomCharge.description, 'Twin Room 3 nights', 'repricing refreshes the canonical room-charge description')
 assert.equal(modification.connectionQueries.length, 1, 'approved inventory-changing modifications reconcile the manual channel queue in-transaction')
 assert.deepEqual(
   modification.connectionQueries[0].providerCode.in,
@@ -261,6 +360,7 @@ await assert.rejects(
 const cancellation = createMutationFixture('CANCELLATION')
 cancellation.reservation.notes = 'Keep the original guest and operations note.'
 const approvedCancellation = await approveBookingEmailEvent(cancellation.prisma, cancellation.event.id, {
+  reservationId: cancellation.reservation.id,
   reason: 'Cancellation confirmed in the Trip.com Extranet.',
 }, actor)
 assert.equal(approvedCancellation.status, 'PROCESSED', 'approved booking-email cancellations are marked processed')
@@ -269,8 +369,8 @@ assert.match(cancellation.reservation.notes, /Keep the original guest and operat
 assert.match(cancellation.reservation.notes, /Cancellation reason:/, 'cancellation appends the audited operational reason')
 assert.deepEqual(
   cancellation.externalReferenceQueries,
-  [cancellation.externalReferenceKey],
-  'booking-email matching checks the provider-scoped external reference before any fuzzy fallback',
+  [],
+  'an explicitly linked cancellation does not rerun heuristic reservation matching',
 )
 assert.equal(cancellation.providerScopedLegacyQueries.length, 0, 'an exact provider reference match avoids legacy or fuzzy matching')
 assert.deepEqual(
@@ -279,12 +379,195 @@ assert.deepEqual(
   'approved cancellations reconcile every manual OTA, including the source provider',
 )
 
+const modificationCurrencyMismatch = createMutationFixture('MODIFICATION')
+modificationCurrencyMismatch.event.parsedDetails.currency = 'USD'
+modificationCurrencyMismatch.event.currency = 'USD'
+await assert.rejects(
+  () => approveBookingEmailEvent(modificationCurrencyMismatch.prisma, modificationCurrencyMismatch.event.id, {
+    reservationId: modificationCurrencyMismatch.reservation.id,
+    reason: 'Guest changed stay dates in the Trip.com Extranet.',
+  }, actor),
+  /currency USD does not match the property currency THB/i,
+  'booking-email amounts in a different currency require review instead of silent conversion',
+)
+assert.equal(modificationCurrencyMismatch.event.status, 'NEEDS_REVIEW', 'a currency mismatch leaves the source event unprocessed')
+assert.equal(modificationCurrencyMismatch.reservation.totalAmount, 3_000, 'a currency mismatch leaves the reservation total unchanged')
+
+const paymentCurrencyMismatch = createMutationFixture('PAYMENT_NOTICE')
+paymentCurrencyMismatch.event.parsedDetails = { amount: 1_000, amountKind: 'PAYMENT', currency: 'USD' }
+paymentCurrencyMismatch.event.amount = 1_000
+paymentCurrencyMismatch.event.amountSatang = 100_000
+paymentCurrencyMismatch.event.currency = 'USD'
+await assert.rejects(
+  () => approveBookingEmailEvent(paymentCurrencyMismatch.prisma, paymentCurrencyMismatch.event.id, {
+    reservationId: paymentCurrencyMismatch.reservation.id,
+  }, actor),
+  /currency USD does not match the property currency THB/i,
+  'payment notices in a different currency cannot silently post to the folio',
+)
+assert.equal(paymentCurrencyMismatch.event.status, 'NEEDS_REVIEW', 'a payment currency mismatch remains in review')
+
+const installmentPayments = createMutationFixture('PAYMENT_NOTICE')
+installmentPayments.event.amount = 400
+installmentPayments.event.amountSatang = 40_000
+installmentPayments.event.parsedDetails = { amount: 400, amountKind: 'PAYMENT', currency: 'THB' }
+const firstPaymentEventId = installmentPayments.event.id
+await approveBookingEmailEvent(installmentPayments.prisma, firstPaymentEventId, {
+  reservationId: installmentPayments.reservation.id,
+}, actor)
+assert.equal(installmentPayments.payments.length, 1, 'the first payment notice creates one exact payment')
+assert.equal(installmentPayments.reservation.depositPaid, false, 'a partial payment below the deposit threshold stays pending')
+assert.equal(installmentPayments.reservationLogs.some((log) => log.action === 'DEPOSIT_PAID'), false, 'partial payment does not falsely log deposit paid')
+
+installmentPayments.event.id = 'booking-email-payment-notice-second'
+installmentPayments.event.sourceMessageId = 'gmail-payment-notice-second'
+installmentPayments.event.status = 'NEEDS_REVIEW'
+installmentPayments.event.reservationId = null
+installmentPayments.event.processedAt = null
+installmentPayments.event.processedBy = null
+installmentPayments.event.completedAction = null
+installmentPayments.event.amount = 600
+installmentPayments.event.amountSatang = 60_000
+installmentPayments.event.parsedDetails = { amount: 600, amountKind: 'PAYMENT', currency: 'THB' }
+await approveBookingEmailEvent(installmentPayments.prisma, installmentPayments.event.id, {
+  reservationId: installmentPayments.reservation.id,
+}, actor)
+assert.equal(installmentPayments.payments.length, 2, 'a second notice for the same booking reference creates a distinct installment')
+assert.notEqual(installmentPayments.payments[0].referenceFingerprint, installmentPayments.payments[1].referenceFingerprint, 'source message ids keep installment payment references distinct')
+assert.equal(installmentPayments.reservation.depositPaid, true, 'cumulative payments mark the deposit paid only after reaching its threshold')
+assert.equal(installmentPayments.reservationLogs.filter((log) => log.action === 'DEPOSIT_PAID').length, 1, 'deposit threshold crossing is logged exactly once')
+await assert.rejects(
+  () => approveBookingEmailEvent(installmentPayments.prisma, installmentPayments.event.id, {
+    reservationId: installmentPayments.reservation.id,
+  }, actor),
+  /already been processed/i,
+  'replaying the same payment notice is rejected',
+)
+assert.equal(installmentPayments.payments.length, 2, 'replayed notice does not create a duplicate payment')
+
+const relabelledCurrency = createMutationFixture('MODIFICATION')
+relabelledCurrency.event.currency = 'USD'
+relabelledCurrency.event.parsedDetails.currency = 'USD'
+await assert.rejects(
+  () => approveBookingEmailEvent(relabelledCurrency.prisma, relabelledCurrency.event.id, {
+    reservationId: relabelledCurrency.reservation.id,
+    reason: 'A caller must not relabel a provider amount during approval.',
+    editedDetails: { currency: 'THB' },
+  }, actor),
+  /currency cannot be relabelled/i,
+  'approval input cannot relabel a persisted provider currency',
+)
+
+const duplicateRoomCharges = createMutationFixture('MODIFICATION')
+duplicateRoomCharges.prisma.charge.findMany = async () => [
+  { id: 'room-charge-1', category: 'ROOM', void: false },
+  { id: 'room-charge-2', category: 'ROOM', void: false },
+]
+await assert.rejects(
+  () => approveBookingEmailEvent(duplicateRoomCharges.prisma, duplicateRoomCharges.event.id, {
+    reservationId: duplicateRoomCharges.reservation.id,
+    reason: 'Provider supplied a new inclusive stay total.',
+  }, actor),
+  /exactly one active room charge/i,
+  'provider repricing fails closed when a folio has multiple active room charges',
+)
+
+const increasedDepositRequirement = createMutationFixture('MODIFICATION')
+increasedDepositRequirement.reservation.depositPaid = true
+increasedDepositRequirement.prisma.payment.findMany = async () => [{ amount: 1_000, amountSatang: 100_000 }]
+await approveBookingEmailEvent(increasedDepositRequirement.prisma, increasedDepositRequirement.event.id, {
+  reservationId: increasedDepositRequirement.reservation.id,
+  reason: 'Provider supplied a higher inclusive stay total.',
+}, actor)
+assert.equal(increasedDepositRequirement.reservation.depositPaid, false, 'repricing clears depositPaid when the new deposit threshold exceeds paid funds')
+
+const decreasedDepositRequirement = createMutationFixture('MODIFICATION')
+decreasedDepositRequirement.event.amount = 2_000
+decreasedDepositRequirement.event.amountSatang = 200_000
+decreasedDepositRequirement.event.parsedDetails.amount = 2_000
+decreasedDepositRequirement.prisma.payment.findMany = async () => [{ amount: 1_000, amountSatang: 100_000 }]
+await approveBookingEmailEvent(decreasedDepositRequirement.prisma, decreasedDepositRequirement.event.id, {
+  reservationId: decreasedDepositRequirement.reservation.id,
+  reason: 'Provider supplied a lower inclusive stay total.',
+}, actor)
+assert.equal(decreasedDepositRequirement.reservation.depositPaid, true, 'repricing marks depositPaid when paid funds meet the reduced threshold')
+
+await updateReservation(modification.prisma, modification.reservation.id, {
+  notes: 'Non-pricing follow-up note.',
+}, actor)
+assert.equal(modification.reservation.totalAmountSatang, 450_000, 'a later non-pricing edit preserves the persisted provider total')
+assert.equal(modification.reservation.providerTotalSatang, 450_000, 'a later non-pricing edit preserves provider pricing provenance')
+await assert.rejects(
+  () => updateReservation(modification.prisma, modification.reservation.id, {
+    checkOut: integrationDateKey(6),
+  }, actor),
+  /cannot change dates, room type, occupancy, or rate without a new parser-verified stay total/i,
+  'a provider-priced reservation cannot be repriced by a public date edit without a new verified total',
+)
+
+const manualOtaReservation = createMutationFixture('MODIFICATION')
+Object.assign(manualOtaReservation.reservation, {
+  source: 'AGODA',
+  channelRef: null,
+  providerCode: null,
+  externalReservationId: null,
+  externalReferenceKey: null,
+  providerTotalSatang: null,
+  providerTotalCurrency: null,
+  sourceEmailEventId: null,
+})
+await updateReservation(manualOtaReservation.prisma, manualOtaReservation.reservation.id, {
+  checkOut: integrationDateKey(4),
+}, actor)
+assert.equal(
+  manualOtaReservation.reservation.checkOut.toISOString().slice(0, 10),
+  integrationDateKey(4),
+  'an OTA source label without trusted provider pricing provenance remains editable',
+)
+
+const unauthorizedCancellation = createMutationFixture('CANCELLATION')
+await assert.rejects(
+  () => approveBookingEmailEvent(unauthorizedCancellation.prisma, unauthorizedCancellation.event.id, {
+    reason: 'Front desk must not bypass cancellation authority.',
+  }, { id: 'front-channel-test', username: 'front.channel', role: 'FRONT_DESK' }),
+  (error) => error?.statusCode === 403 && /cancel:reservation permission/i.test(error.message),
+  'booking-email cancellation approval enforces cancel permission inside the service',
+)
+assert.equal(unauthorizedCancellation.reservation.status, 'CONFIRMED', 'denied email cancellation leaves the reservation unchanged')
+
+const spoofedCancellationCreate = createMutationFixture('CANCELLATION')
+await assert.rejects(
+  () => approveBookingEmailEvent(spoofedCancellationCreate.prisma, spoofedCancellationCreate.event.id, {
+    mode: 'create_reservation',
+    reason: 'A cancellation must never be retyped into reservation creation.',
+  }, actor),
+  /only a new-booking email can create a reservation/i,
+  'approval mode cannot retype a non-booking event into a new reservation',
+)
+
 const cancellationWithoutReason = createMutationFixture('CANCELLATION')
 await assert.rejects(
   () => approveBookingEmailEvent(cancellationWithoutReason.prisma, cancellationWithoutReason.event.id, {}, actor),
   /operational reason/i,
   'booking-email cancellation approval requires a backend-enforced operational reason',
 )
+
+for (const [eventType, input] of [
+  ['PAYMENT_NOTICE', {}],
+  ['CANCELLATION', { reason: 'Provider cancellation requires an explicitly linked reservation.' }],
+  ['MODIFICATION', { reason: 'Provider modification requires an explicitly linked reservation.' }],
+]) {
+  const unmatchedWrite = createMutationFixture(eventType)
+  await assert.rejects(
+    () => approveBookingEmailEvent(unmatchedWrite.prisma, unmatchedWrite.event.id, input, actor),
+    /link this .* to a reservation before applying it/i,
+    `unmatched ${eventType} email cannot mutate a guest-and-date heuristic reservation`,
+  )
+  assert.equal(unmatchedWrite.event.status, 'NEEDS_REVIEW', `unmatched ${eventType} remains in review`)
+  assert.equal(unmatchedWrite.payments.length, 0, `unmatched ${eventType} creates no payment`)
+  assert.equal(unmatchedWrite.reservation.status, 'CONFIRMED', `unmatched ${eventType} does not change reservation lifecycle`)
+  assert.equal(unmatchedWrite.audits.length, 0, `unmatched ${eventType} creates no mutation audit`)
+}
 
 await assert.rejects(
   () => cancelReservation(cancellation.prisma, cancellation.reservation.id, actor, 'CANCELLED'),
@@ -396,6 +679,43 @@ await assert.rejects(
   'processed booking-email evidence cannot be changed to ignored',
 )
 
+const verifiedReprocess = createMutationFixture('MODIFICATION')
+verifiedReprocess.event.reservationId = null
+verifiedReprocess.event.subject = 'Booking modification TRIP-REF-1001'
+verifiedReprocess.event.rawText = 'Booking reference: TRIP-REF-1001 Check-in: 2026-08-01 Check-out: 2026-08-03 Room type: Twin Total amount: THB 3000'
+verifiedReprocess.event.rawHeaders = {
+  authenticationResults: 'mx.google.com; dmarc=pass header.from=trip.com',
+}
+await reprocessBookingEmailEvent(verifiedReprocess.prisma, verifiedReprocess.event.id, actor)
+assert.equal(verifiedReprocess.event.providerCode, 'trip_com', 'reprocess retains provider identity only from immutable verified Gmail headers')
+assert.equal(verifiedReprocess.event.reservationId, verifiedReprocess.reservation.id, 'reprocess recomputes an exact provider-scoped reservation match')
+
+const unverifiedReprocess = createMutationFixture('MODIFICATION')
+unverifiedReprocess.event.reservationId = unverifiedReprocess.reservation.id
+unverifiedReprocess.event.providerCode = 'trip_com'
+unverifiedReprocess.event.externalReservationId = 'STALE-REF'
+unverifiedReprocess.event.channelRef = 'STALE-REF'
+unverifiedReprocess.event.amount = 999
+unverifiedReprocess.event.amountSatang = 99_900
+unverifiedReprocess.event.currency = 'USD'
+unverifiedReprocess.event.parsedDetails = {
+  channelRef: 'STALE-REF',
+  amount: 999,
+  amountKind: 'STAY_TOTAL',
+  currency: 'USD',
+}
+unverifiedReprocess.event.subject = 'Account security update'
+unverifiedReprocess.event.rawText = 'Weekly performance report. No reservation action is present.'
+unverifiedReprocess.event.rawHeaders = {
+  authenticationResults: 'attacker.example; dmarc=pass header.from=trip.com',
+}
+await reprocessBookingEmailEvent(unverifiedReprocess.prisma, unverifiedReprocess.event.id, actor)
+assert.equal(unverifiedReprocess.event.providerCode, null, 'reprocess clears provider identity when Gmail authentication is not verified')
+assert.equal(unverifiedReprocess.event.reservationId, null, 'reprocess clears a stale reservation match instead of preserving it')
+assert.equal(unverifiedReprocess.event.channelRef, null, 'reprocess clears a stale channel reference absent from immutable raw content')
+assert.equal(unverifiedReprocess.event.amountSatang, null, 'reprocess clears a stale amount absent from immutable raw content')
+assert.equal(unverifiedReprocess.event.currency, null, 'reprocess clears a stale currency absent from immutable raw content')
+
 const capacityTodayKey = getBangkokDateKey(new Date())
 
 function capacityDate(offsetDays) {
@@ -487,6 +807,7 @@ function createCapacityFixture({
   const availabilityQueries = []
   const connectionQueries = []
   const audits = []
+  const releasedInventoryReservations = []
 
   const relatedRoom = (value) => value && ({
     ...value,
@@ -564,6 +885,10 @@ function createCapacityFixture({
       findMany: async () => [],
     },
     roomDateInventory: {
+      deleteMany: async ({ where }) => {
+        releasedInventoryReservations.push(where?.reservationId)
+        return { count: 1 }
+      },
       findMany: async ({ where }) => {
         availabilityQueries.push({
           roomTypeId: where?.room?.roomTypeId,
@@ -603,6 +928,7 @@ function createCapacityFixture({
     availabilityQueries,
     connectionQueries,
     audits,
+    releasedInventoryReservations,
   }
 }
 
@@ -616,6 +942,11 @@ function assertFutureCapacityWindow(query, roomTypeId, label) {
 
 const earlyCheckout = createCapacityFixture({ checkedIn: true, checkoutOffsetDays: 3 })
 await checkOutReservation(earlyCheckout.prisma, earlyCheckout.reservation.id, actor)
+assert.deepEqual(
+  earlyCheckout.releasedInventoryReservations,
+  [earlyCheckout.reservation.id],
+  'early checkout releases the physical room-date inventory before advertising availability',
+)
 assert.equal(earlyCheckout.availabilityQueries.length, 1, 'early checkout reconciles released future stay dates')
 assert.deepEqual(
   earlyCheckout.availabilityQueries[0].dateKeys,

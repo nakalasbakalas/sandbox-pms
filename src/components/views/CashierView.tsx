@@ -253,7 +253,7 @@ export function CashierView() {
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false)
   const [chargeFolio, setChargeFolio] = useState<Folio | null>(null)
-  const [chargeCategory, setChargeCategory] = useState<FolioCharge['category']>('OTHER')
+  const [chargeCategory, setChargeCategory] = useState<Exclude<FolioCharge['category'], 'ROOM'>>('OTHER')
   const [chargeDescription, setChargeDescription] = useState('')
   const [chargeAmount, setChargeAmount] = useState('')
   const [chargeQuantity, setChargeQuantity] = useState('1')
@@ -1135,12 +1135,11 @@ export function CashierView() {
 
               <div className="space-y-2">
                 <Label>Category</Label>
-                <Select value={chargeCategory} onValueChange={(value) => setChargeCategory(value as FolioCharge['category'])}>
+                <Select value={chargeCategory} onValueChange={(value) => setChargeCategory(value as Exclude<FolioCharge['category'], 'ROOM'>)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ROOM">Room</SelectItem>
                     <SelectItem value="EXTRA_GUEST">Extra guest</SelectItem>
                     <SelectItem value="CHILD">Child</SelectItem>
                     <SelectItem value="CAFE">Cafe</SelectItem>

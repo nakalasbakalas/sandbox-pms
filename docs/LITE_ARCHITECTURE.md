@@ -12,9 +12,9 @@ The current implementation is a staging candidate only. Repository code and loca
 
 The Lite client lives under `src-lite/` and exposes six focused surfaces:
 
-- Front Desk: arrivals, departures, in-house stays, room readiness, balances, assignment, check-in, and checkout.
-- Bookings: filtered/paginated booking reads plus the existing audited create, edit, cancel, charge, and payment mutations.
-- Booking Board: a date-ranged room grid with complete reservation segments and a separate unassigned-booking list.
+- Front Desk: arrivals, departures, and in-house stays; room assignment; nationality/ID capture; exact-payment or manager pay-later check-in; zero-balance checkout; and housekeeping handoff.
+- Bookings: filtered/paginated booking reads, same-day walk-ins, audited edits/cancellation/no-show, and a detailed folio with exact-satang charges and payments. Active/prepaid stays keep an open folio for incidentals; a settled checkout closes it, while an approved unpaid checkout stays open until later settlement.
+- Booking Board: a date-ranged room grid with complete reservation segments and a separate unassigned-booking list. Assignment and stay-date edits use a reservation version plus serializable database conflict checks so a stale board cannot overwrite newer work.
 - Housekeeping: room readiness and cleaning-state work.
 - Channel Desk: Gmail intake health, review-required booking emails, mappings, and manual availability tasks.
 - Settings: property, rooms, users, Gmail, channel, and release information according to backend permissions.
@@ -30,7 +30,8 @@ The intended inbound flow is:
 3. The server stores the Pub/Sub message in `BookingEmailPushDelivery` before returning HTTP `202`. Duplicate Pub/Sub message ids are idempotent and do not reset an existing delivery.
 4. A bounded worker drains durable deliveries, obtains Gmail history, retrieves candidate messages with backend OAuth, and calls the normal booking-email ingester with `reviewOnly: true`.
 5. The resulting `BookingEmailEvent` remains in the staff review workflow. Email receipt alone never creates, edits, cancels, charges, pays, or assigns a reservation.
-6. Only an authorized staff approval may invoke the existing PMS transaction functions. Approved OTA-originated inventory changes then recalculate absolute-availability tasks for every enabled OTA, including the source provider, so stale pending work is superseded instead of left actionable.
+6. Parser errors remain visible in Channel Desk for retry or reasoned rejection; they are never hidden inside an aggregate count.
+7. Only an authorized staff approval may invoke the existing PMS transaction functions. Creating, modifying, cancelling, and paying each recheck their action-specific backend permission. New/modification approvals require one verified age per declared child. Stay totals, payments, and deposits retain separate parser semantics; conflicting same-kind values are ambiguous, currency is never inferred from an unmarked number, and approval cannot replace or relabel persisted money. A verified OTA stay total is inclusive exact satang with persistent reservation provenance. Approved OTA-originated inventory changes then recalculate absolute-availability tasks for every enabled OTA, including the source provider, so stale pending work is superseded instead of left actionable.
 
 `npm.cmd run booking-email:maintenance` is the reconciliation/fallback command. One bounded run renews due Gmail watches, retries or coalesces durable push deliveries, and reconciles every enabled Gmail source. Configure it as a five-minute Render cron in staging. A five-minute cron is a recovery interval, not proof of five-minute delivery and not a zero-lag guarantee. The schedule, watch, OAuth tuple, Pub/Sub topic/subscription, and first successful staging run must all be proven separately.
 
@@ -61,13 +62,16 @@ Lite V1 does not automate OTA writes. `ManualChannelConnection`, `ManualChannelR
 - official HTTPS Extranet links restricted to the provider's domain;
 - desired availability calculated from PMS rooms, active reservations, holds, and out-of-service inventory;
 - a current task per provider, room type, and stay date;
+- an immutable external room/rate-plan target snapshot on every task revision, so a later mapping edit cannot silently retarget work already shown to staff;
 - coalescing when the desired value is unchanged;
 - supersession and revision checks when a newer value replaces pending work;
 - source-provider reconciliation after an approved OTA email using current absolute PMS availability, including supersession of stale pending work;
 - exact availability confirmation, operator, timestamp, notes, and audit evidence when staff complete a task.
 - audited task suppression when an enabled provider/room cell has no active mapping, so staff never receive a task with an unknown external target.
 
-Front Desk, Manager, and Admin may complete a current manual task. Only Manager/Admin may configure connections/mappings, reconcile, or reopen tasks. Passwords, cookies, tokens, 2FA material, and credential-shaped configuration fields are rejected.
+Front Desk, Manager, and Admin may complete a current manual task. Only Manager/Admin may use the disabled-first connection/mapping setup, run a bounded reconciliation, or retry/reopen work. A disabled-to-enabled transition transactionally stages an initial absolute-availability baseline for that connection across the manager-selected 1–90-day horizon (90 days by default); activation rolls back if staging fails. A retry recalculates current absolute PMS availability and snapshots the current mapping before creating its audited revision. Channel Desk reports database totals separately from its bounded returned lists. Passwords, cookies, tokens, 2FA material, and credential-shaped configuration fields are rejected.
+
+This is the only operator-facing queue when `PMS_UI_VARIANT=lite`. Set `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual` and keep `BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`. The repository also retains a Hotel Ops task-based availability CLI for legacy compatibility; that CLI refuses to mutate when the Lite backend is selected and must never be run as a parallel queue.
 
 Manual processing has an unavoidable exposure window between a PMS change and staff updating every affected Extranet. It cannot promise zero-lag inventory, guaranteed two-way sync, or elimination of overbooking. Pending tasks, task age, failures, and completion evidence must remain visible to staff.
 
@@ -80,7 +84,7 @@ Manual processing has an unavoidable exposure window between a PMS change and st
 
 ## Money Precision Gate
 
-Lite monetary DTOs read the nullable integer-satang columns as authoritative and fail closed when a required satang value is missing. Active PMS writers derive both the satang value and the legacy Float value from one validated integer amount. Reservation pricing, deposits, folios, payments, charges, booking-email amounts, property fees, tax basis points, and room-type rates therefore use exact satang arithmetic; Float remains only for rollback parity during the pilot. `npm.cmd run money:reconcile` is a read-only parity report.
+Lite monetary DTOs read the nullable integer-satang columns as authoritative and fail closed when a required satang value is missing. Active PMS writers derive both the satang value and the legacy Float value from one validated integer amount. Reservation pricing, deposits, folios, payments, charges, booking-email amounts, property fees, tax basis points, and room-type rates therefore use exact satang arithmetic; Float remains only for rollback parity during the pilot. `providerTotalSatang` and `providerTotalCurrency` persist a verified inclusive OTA total; non-pricing edits leave it untouched, and provider-linked date/room/occupancy/rate changes require a new parser-verified total. `npm.cmd run money:reconcile` is a read-only parity report.
 
 Production money authority remains blocked until all of the following are complete and evidenced:
 
@@ -117,7 +121,7 @@ No repository change alone proves any Render deployment, Cloudflare routing/WAF 
 - Manual channel queue: `server/manual-channel-service.mjs`
 - PII-safe invalidation: `server/realtime-events.mjs`
 - API and RBAC wiring: `server/index.mjs`, `server/api-routes.mjs`, `server/rbac.mjs`
-- Data model/migrations: `prisma/schema.prisma`, `prisma/migrations/20260710120000_lite_manual_channel_queue/`, `prisma/migrations/20260710123000_lite_gmail_push/`, `prisma/migrations/20260713100000_money_satang_expand/`, `prisma/migrations/20260713110000_manual_channel_mapping_target_uniqueness/`
+- Data model/migrations: `prisma/schema.prisma`, `prisma/migrations/20260710120000_lite_manual_channel_queue/`, `prisma/migrations/20260710123000_lite_gmail_push/`, `prisma/migrations/20260713100000_money_satang_expand/`, `prisma/migrations/20260713110000_manual_channel_mapping_target_uniqueness/`, `prisma/migrations/20260713120000_manual_channel_task_target_snapshot/`, `prisma/migrations/20260713130000_provider_total_provenance/`
 
 ## Proof Still Required
 

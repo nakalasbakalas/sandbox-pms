@@ -130,13 +130,19 @@ Lite V1 remains a staging candidate until every applicable item below has eviden
 - `npm.cmd run test:lite` passes.
 - `npm.cmd test`, `npm.cmd run typecheck`, `npm.cmd run lint`, `npx.cmd prisma validate`, `npm.cmd run build`, `npm.cmd run build:lite`, and `git diff --check` pass.
 - Legacy UI behavior remains available during the pilot.
-- Lite initial JavaScript is measured against the 250 KB gzip target; secondary screens are lazy-loaded where required. A build pass without an asset-size measurement is insufficient.
+- `npm.cmd run build:lite` invokes `npm.cmd run check:lite-bundle` and fails when the entry plus its static JavaScript imports exceed 250 KiB gzip; secondary screens are excluded only when they remain dynamic imports.
+- Pull requests run guarded `test:e2e:lite` against the workflow job's disposable PostgreSQL 17 service with `ALLOW_DB_E2E=true`; this is CI engineering proof, never production proof.
 
 Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/tests/pms-channel-integration.mjs`, `scripts/run-business-tests.mjs`, and the server-mode E2E harness. Record actual command output separately; listing a test file here is not a pass claim.
 
 ### Lite Operational Reads And UI
 
 - Front Desk separates arrivals, departures, and in-house stays and shows room/payment blockers.
+- Check-in requires nationality plus ID/passport evidence and exact settlement unless a reasoned Manager/Admin override is authorized; a failed payment/check-in attempt leaves the reservation unchanged.
+- Active/prepaid stays retain an open folio for incidentals. Normal checkout requires zero balance and closes the folio; an approved unpaid checkout leaves it open until later settlement closes it.
+- No-show rejects future and terminal reservations and requires an operational reason.
+- The booking editor rejects checked-in stays, public lifecycle-status injection, a child count without one age per child, and overpayment even when a caller supplies an override-shaped flag.
+- Every active reservation-create form captures one age from 0 through 17 for each child. Cashier incidental entry cannot select `ROOM`.
 - Bookings supports bounded pagination plus date, status, source, and text filters.
 - Board returns separate `rooms`, complete `reservationSegments`, and `unassignedBookings`; two future reservations on one room are both visible.
 - Board supports a 14-day default and validated ranges up to 90 days, including a configured room type that is neither Twin nor Double.
@@ -157,13 +163,20 @@ Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/t
 - Gmail watch renewal records a future expiry; an invalid/expired history cursor uses bounded reconciliation without silently advancing past an incomplete scan.
 - Push, history, reconciliation, explicit Gmail sync, and five-minute maintenance all call the PMS ingester with `reviewOnly: true`.
 - Booking.com, Agoda, and Trip.com fixtures cover new booking, modification, cancellation, duplicates, out-of-order notification/history delivery, parser errors, and failed review actions.
+- Parser-error rows and true aggregate totals remain visible in Channel Desk; authorized staff can retry parsing or reject with a reason.
+- Approval mode cannot retype an event, cancellation requires `cancel:reservation`, payment requires `process:payment`, and a declared child count cannot be applied without one verified age per child.
+- Payment, cancellation, modification, and other non-new-booking email writes with no explicit or persisted exact reservation id fail without mutation; a guest-name/date heuristic is never write authority. Cross-property, cancelled, and no-show links also fail without mutation.
+- Parser tests distinguish `STAY_TOTAL`, `PAYMENT`, and `DEPOSIT`, prefer the event-appropriate semantic class, never invent currency for an unmarked number, and mark distinct same-kind values ambiguous. Approval input cannot replace the persisted amount or relabel its currency/semantics.
+- Parser tests reject impossible calendar dates, retain valid leap days and hyphenated provider references, and do not treat lowercase prose such as `all`, `try`, or `mad` as ISO currency. Reprocess replaces stale amount/currency/reference/match fields from immutable raw text, retains provider identity only with stored Google-authenticated evidence, and clears an unverifiable stale match.
+- New/modification totals remain the provider's exact inclusive satang total even with extra-adult/child occupancy. Persistent provider-total provenance survives non-pricing edits without rewriting room inventory; provider-linked pricing changes without a new verified stay total or with zero/multiple active room charges fail without mutation. Public incidental-charge entry rejects `ROOM`.
+- Public charge, payment, walk-in, check-in, and checkout payloads cannot forge `sourceEmailEventId`. Partial payments change `depositPaid` only at a positive cumulative threshold, and repricing can move that state in either direction.
 - Receipt of any fixture creates/updates `NEEDS_REVIEW` evidence and makes no reservation, inventory, payment, or room mutation.
 - An authorized approval uses the existing PMS transaction, reason/audit rules, and exact provider-scoped reference. Modification and cancellation approvals require a reason.
 - A processed event cannot be reprocessed.
 - A missed/failed push is recovered by a later maintenance run without duplicate event/reservation creation.
 - SSE emitted for email changes contains no guest, sender, recipient, subject, room, payment, body, or credential data.
 
-Automated tests currently target Pub/Sub authentication/envelope handling, durable idempotency, review-only history ingestion, stale claim recovery, Trip.com exact-reference handling, modification/cancellation reasons, absolute source-provider reconciliation, and processed-event reprocess denial. Staging watch/push/cron evidence remains separately required.
+Automated tests target negative OIDC and Pub/Sub envelope handling, durable idempotency, review-only history ingestion, watch renewal and invalid-response handling, stale history fallback, abandoned-claim recovery, out-of-order cursor coalescing, all nine Booking.com/Agoda/Trip.com create-modify-cancel attribution combinations, exact-reference handling, modification/cancellation reasons, absolute source-provider reconciliation, and processed-event reprocess denial. Staging watch/push/cron evidence remains separately required.
 
 ### Manual Channel Queue
 
@@ -172,15 +185,18 @@ Automated tests currently target Pub/Sub authentication/envelope handling, durab
 - Enabling a connection fails until every room type with at least one physical room has an active mapping, including room types whose rooms are temporarily out of service.
 - Two PMS room types cannot share the same active external room-type/rate-plan target on one connection; both service preflight and the database concurrency constraint reject the conflict.
 - Reconciliation creates no task for an unmapped provider/room cell, returns the gap, and persists an aggregated `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` audit record.
+- Enabling a previously disabled connection requires a 1–90-day initial horizon, stages absolute-availability tasks for only that connection in the activation transaction, records `MANUAL_CHANNEL_INITIAL_BASELINE_STAGED`, and rolls back activation if task staging fails.
 - Each Channel Desk task displays its external room type id/name and rate-plan id; a legacy task with no current mapping cannot be completed.
 - Direct and walk-in inventory changes create cells for all enabled manual connections.
 - An approved OTA email reconciles every enabled connection, including the originating provider, with current absolute PMS availability and supersedes stale source-provider work.
 - Creation, inventory-changing edit, cancellation/no-show, and reviewed modification/cancellation recalculate every affected stay date inside the PMS transaction.
+- Early checkout deletes the reservation's physical room-date inventory before reconciling the released stay dates to Channel Desk.
 - Identical desired values coalesce; changed values supersede the active task and increment revision.
 - A stale revision, wrong availability, disabled connection, missing mapping, or non-manual mode cannot be completed.
 - Front Desk/Manager/Admin may complete a current task; only Manager/Admin may configure, reconcile, or reopen.
 - Completion persists exact availability, operator, timestamp, notes, and audit evidence.
-- Reopen requires a reason and cannot conflict with an already-current task.
+- Retry/reopen requires a reason, recalculates current absolute availability, snapshots the current mapping, and cannot conflict with an already-current task.
+- A service-level lifecycle test proves identical-task coalescing, completed operator evidence, unchanged confirmed inventory, and reasoned audited reopen into the next revision.
 - Pending/failed task age and retry/error visibility are usable by staff.
 - The disabled Channex boundary reports `CHANNEX_NOT_CONFIGURED` and cannot perform a push.
 
@@ -193,12 +209,13 @@ Repository tests for exact satang reads, dual writes, pricing, deposits, tax/voi
 - nullable integer-satang columns for every scoped money field and integer basis points for tax configuration;
 - audited Float-to-satang backfill and reconciliation report;
 - dual-write parity tests for creates/edits, partial and multiple payments, taxes, voids, deposits, and zero-balance checkout;
+- applied migration and runtime proof for the provider-total satang/currency provenance pair;
 - zero unexplained folio/payment discrepancies;
 - fresh Render recovery point and successful disposable restore;
 - Lite authoritative satang reads/writes; and
 - a 30-day rollback period before Float authority is removed.
 
-The schema now contains nullable integer-satang authority fields while retaining Float rollback-parity columns. This acceptance section remains open until the migration is applied to a disposable restore/staging target and `npm.cmd run money:reconcile` reports zero unexplained differences after representative workflows. Do not infer production completion from repository tests alone.
+The schema now contains nullable integer-satang authority fields while retaining Float rollback-parity columns. An isolated local PostgreSQL schema has passed all migrations, representative browser workflows, pre/post money reconciliation, and automatic cleanup. This acceptance section remains open for a fresh Render recovery point, disposable restore or isolated staging database, live migration/reconciliation evidence, and the rollback period. Do not infer production completion from local E2E alone.
 
 ### Provider And Staging Proof
 

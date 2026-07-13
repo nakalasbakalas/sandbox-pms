@@ -25,6 +25,8 @@ services:
         value: production
       - key: PMS_DEPLOYMENT_TIER
         value: staging
+      - key: CHANNEL_SYNC_QUEUE_BACKEND
+        value: lite_manual
       - key: DATABASE_URL
         fromDatabase:
           name: sandbox-hotel-pms-lite-staging-db

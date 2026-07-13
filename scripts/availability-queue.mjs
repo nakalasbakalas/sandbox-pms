@@ -173,9 +173,16 @@ async function main() {
   }
 
   loadEnvDefaults()
+  const policy = getChannelSyncV2Policy(process.env)
   if (command === 'policy') {
-    printJson(await runCommand(null, command, args))
+    printJson(policy)
     return
+  }
+
+  if (policy.queueBackend !== 'hotel_ops_legacy') {
+    throw new Error(
+      'The Hotel Ops availability queue is disabled for this runtime. Use the Lite Channel Desk manual queue.',
+    )
   }
 
   const prisma = createPrismaClient()

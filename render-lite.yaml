@@ -36,6 +36,8 @@ services:
         value: lite
       - key: PMS_WRITE_MODE
         value: active
+      - key: CHANNEL_SYNC_QUEUE_BACKEND
+        value: lite_manual
       - key: SEED_MODE
         value: prod-safe
       - key: DATABASE_URL
@@ -68,6 +70,10 @@ services:
       - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
         sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+        value: false
+      # Do not run the legacy in-process polling path beside Pub/Sub/history
+      # reconciliation. The paid maintenance job is the bounded fallback.
+      - key: BOOKING_EMAIL_NEAR_LIVE_ENABLED
         value: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
         sync: false

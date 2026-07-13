@@ -86,7 +86,9 @@ function formatReceived(value?: string) {
 
 function amountLabel(event: BookingEmailEvent) {
   if (typeof event.amount !== 'number') return event.paymentStatus || 'Amount not extracted'
-  return `${event.currency || 'THB'} ${event.amount.toLocaleString('en-US')}${event.paymentStatus ? ` - ${event.paymentStatus}` : ''}`
+  const amount = event.amount.toLocaleString('en-US')
+  const labelledAmount = event.currency ? `${event.currency} ${amount}` : `${amount} - currency not extracted`
+  return `${labelledAmount}${event.paymentStatus ? ` - ${event.paymentStatus}` : ''}`
 }
 
 function statusTone(status: BookingEmailEventStatus) {
@@ -170,8 +172,26 @@ export function BookingInboxView() {
     })
   }
 
-  const updateActionForm = (field: keyof BookingEmailDetailsForm, value: string) => {
-    setActionDialog((current) => current ? { ...current, form: { ...current.form, [field]: value } } : current)
+  const updateActionForm = (field: Exclude<keyof BookingEmailDetailsForm, 'childAges'>, value: string) => {
+    setActionDialog((current) => {
+      if (!current) return current
+      if (field !== 'children') return { ...current, form: { ...current.form, [field]: value } }
+      const count = Number(value)
+      const childAges = Number.isInteger(count) && count >= 0
+        ? Array.from({ length: count }, (_, index) => current.form.childAges[index] || '')
+        : current.form.childAges
+      return { ...current, form: { ...current.form, children: value, childAges } }
+    })
+  }
+
+  const updateActionChildAge = (index: number, value: string) => {
+    setActionDialog((current) => current ? {
+      ...current,
+      form: {
+        ...current.form,
+        childAges: current.form.childAges.map((age, ageIndex) => ageIndex === index ? value : age),
+      },
+    } : current)
   }
 
   const submitActionDialog = async () => {
@@ -181,7 +201,7 @@ export function BookingInboxView() {
       return
     }
     if (bookingEmailActionRequiresReason(actionDialog.event) && !actionDialog.reason.trim()) {
-      toast.error('Cancellation email actions require an operational reason.')
+      toast.error('Cancellation and modification email actions require an operational reason.')
       return
     }
     try {
@@ -226,12 +246,16 @@ export function BookingInboxView() {
       requireBackend()
       return
     }
+    if (event.eventType !== 'NEW_BOOKING' && !event.reservationId) {
+      toast.error('Link this email to a reservation before applying it.')
+      return
+    }
     const requiresReason = bookingEmailActionRequiresReason(event)
     const reason = requiresReason
-      ? window.prompt('Operational reason for applying this cancellation email?')?.trim()
+      ? window.prompt(`Operational reason for applying this ${event.eventType.toLowerCase().replaceAll('_', ' ')} email?`)?.trim()
       : undefined
     if (requiresReason && !reason) {
-      toast.error('Cancellation email actions require an operational reason.')
+      toast.error('Cancellation and modification email actions require an operational reason.')
       return
     }
     const mode = bookingEmailDefaultApprovalMode(event)
@@ -496,14 +520,27 @@ export function BookingInboxView() {
               <BookingEmailField label="Room type" value={actionDialog.form.roomType} onChange={(value) => updateActionForm('roomType', value)} />
               <BookingEmailField label="Adults" type="number" value={actionDialog.form.adults} onChange={(value) => updateActionForm('adults', value)} />
               <BookingEmailField label="Children" type="number" value={actionDialog.form.children} onChange={(value) => updateActionForm('children', value)} />
-              <BookingEmailField label="Amount" type="number" value={actionDialog.form.amount} onChange={(value) => updateActionForm('amount', value)} />
-              <BookingEmailField label="Currency" value={actionDialog.form.currency} onChange={(value) => updateActionForm('currency', value)} />
+              {actionDialog.form.childAges.map((age, index) => (
+                <BookingEmailField
+                  key={index}
+                  label={`Child ${index + 1} age`}
+                  type="number"
+                  value={age}
+                  onChange={(value) => updateActionChildAge(index, value)}
+                />
+              ))}
+              <BookingEmailField label="Amount (source, read only)" type="number" value={actionDialog.form.amount} readOnly onChange={() => {}} />
+              <BookingEmailField label="Currency (source, read only)" value={actionDialog.form.currency} readOnly onChange={() => {}} />
               <BookingEmailField label="Payment status" value={actionDialog.form.paymentStatus} onChange={(value) => updateActionForm('paymentStatus', value)} />
               <BookingEmailField label="Payment method" value={actionDialog.form.paymentMethod} onChange={(value) => updateActionForm('paymentMethod', value)} />
               <BookingEmailField label="Payment reference" value={actionDialog.form.paymentReference} onChange={(value) => updateActionForm('paymentReference', value)} />
               {actionDialog.kind === 'link' && actionDialog.mode === 'link_reservation' && (
                 <BookingEmailField label="Reservation ID" value={actionDialog.reservationId} onChange={(value) => setActionDialog((current) => current ? { ...current, reservationId: value } : current)} />
               )}
+            </div>
+
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Source amount and currency cannot be edited during approval. If either is wrong or missing, reject or reprocess the event after checking the OTA Extranet.
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -528,7 +565,7 @@ export function BookingInboxView() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="booking-email-action-reason">Operational reason{actionDialog.event.eventType === 'CANCELLATION' ? ' required' : ''}</Label>
+              <Label htmlFor="booking-email-action-reason">Operational reason{bookingEmailActionRequiresReason(actionDialog.event) ? ' required' : ''}</Label>
               <Textarea
                 id="booking-email-action-reason"
                 value={actionDialog.reason}
@@ -591,6 +628,7 @@ function BookingEmailEventCard({
   onLinkOrCreate: (event: BookingEmailEvent) => void
 }) {
   const backendTitle = canUseBackend ? undefined : 'Requires booking-email API routes.'
+  const quickApplyNeedsLink = event.eventType !== 'NEW_BOOKING' && !event.reservationId
 
   return (
     <Card className="rounded-lg bg-white py-0 shadow-sm">
@@ -628,7 +666,12 @@ function BookingEmailEventCard({
         </div>
 
         <div className="flex flex-col gap-2 xl:items-stretch">
-          <Button className="justify-start gap-1.5 bg-emerald-600 hover:bg-emerald-700" title={backendTitle} disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW'} onClick={() => onApprove(event)}>
+          <Button
+            className="justify-start gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+            title={quickApplyNeedsLink ? 'Link this email to a reservation before applying it.' : backendTitle}
+            disabled={!canUseBackend || event.status !== 'NEEDS_REVIEW' || quickApplyNeedsLink}
+            onClick={() => onApprove(event)}
+          >
             <CheckCircle size={16} weight="bold" />
             Approve & Apply
           </Button>
@@ -687,11 +730,13 @@ function BookingEmailField({
   value,
   onChange,
   type = 'text',
+  readOnly = false,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   type?: 'text' | 'date' | 'number'
+  readOnly?: boolean
 }) {
   const id = `booking-email-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   return (
@@ -701,6 +746,9 @@ function BookingEmailField({
         id={id}
         type={type}
         value={value}
+        readOnly={readOnly}
+        aria-readonly={readOnly}
+        className={readOnly ? 'bg-muted text-muted-foreground' : undefined}
         onChange={(event) => onChange(event.target.value)}
       />
     </div>

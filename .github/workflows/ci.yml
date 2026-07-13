@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify-fast:
     name: Fast checks (no database mutations)
@@ -38,51 +42,29 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Generate Prisma client
-        run: npm run db:generate
-
       - name: Validate Prisma schema
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/sandbox_ci?schema=public
         run: npx prisma validate
 
-      - name: Lint
-        run: npm run lint
+      - name: Complete legacy launch gate
+        run: npm run launch:check
 
-      - name: Typecheck full PMS
-        run: npm run typecheck
-
-      - name: Typecheck PMS Lite
-        run: npm run typecheck:lite
-
-      - name: Business tests
-        run: npm test
-
-      - name: PMS Lite unit tests
+      - name: PMS Lite, Gmail push, and manual-channel tests
         run: npm run test:lite
 
-      - name: Existing browser, contract, and server-mode smoke tests
-        run: npm run test:e2e
-
-      - name: Build full PMS
-        run: npm run build
-
-      - name: Build PMS Lite in server mode
+      - name: Typecheck and build PMS Lite with the 250 KiB gzip gate
         env:
           VITE_PMS_API_MODE: server
           PMS_UI_VARIANT: lite
         run: npm run build:lite
 
-      - name: Launch gate
-        run: npm run launch:check
-
       - name: Record validation boundary
-        run: echo "Fast CI completed without a database. It is not proof of Lite database workflows." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Fast CI ran the complete legacy launch gate once, plus all Lite/Gmail/manual-channel tests and the Lite bundle gate. It did not mutate a database." >> "$GITHUB_STEP_SUMMARY"
 
   lite-db-e2e:
     name: PMS Lite E2E (ephemeral PostgreSQL)
-    needs: verify-fast
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_lite_db_e2e }}
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_lite_db_e2e) }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -121,8 +103,8 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run guarded PMS Lite database E2E
-        run: node scripts/run-lite-e2e-tests.mjs
+        run: npm run test:e2e:lite
 
       - name: Record database proof scope
         if: ${{ always() }}
-        run: echo "Lite E2E was requested explicitly and targeted the job-scoped ephemeral PostgreSQL service; it never targeted production." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Lite E2E targeted the job-scoped ephemeral PostgreSQL service for this pull request or explicit dispatch; it never targeted production." >> "$GITHUB_STEP_SUMMARY"

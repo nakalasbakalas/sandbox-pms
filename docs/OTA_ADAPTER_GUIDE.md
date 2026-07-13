@@ -169,11 +169,17 @@ The Lite Channel Desk does not use the experimental OTA browser adapters above. 
 | Existing OTA adapter skeletons | Dry-run placeholders only | No production writes | Hotel Ops experimentation; not Lite synchronization |
 | Channex boundary | No | No | Disabled future certified channel rail |
 
+For Lite deployments, set `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`. The older `HotelOpsTask` availability CLI is a legacy compatibility path only and must not operate beside Channel Desk. Keep the legacy in-process email poller disabled (`BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`) because Gmail Pub/Sub plus history reconciliation is the canonical Lite intake path.
+
 Manual channel records may store only non-secret provider/property/room/rate mapping metadata and an official HTTPS Extranet link. They must never store OTA usernames, passwords, cookies, session state, API tokens, 2FA material, or CAPTCHA answers.
 
 Keep a connection disabled until every PMS room type with one or more physical rooms has an active provider mapping. This scope includes temporarily out-of-service rooms because they can return to sale. Per connection, an active external room-type/rate-plan target may belong to only one PMS room type; a database partial unique index is the concurrency backstop. If mapping coverage is later lost, reconciliation skips the affected provider/room cells, records `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED`, and creates no task with an unknown external target. Channel Desk displays the external room type id/name and rate-plan id on executable tasks.
 
 An enabled manual connection participates in inventory reconciliation. Booking creation, inventory-changing edits, cancellation/no-show, and walk-in changes calculate affected room-type/date cells inside the PMS transaction. Every change reconciles all enabled providers. After staff approve an OTA-originated email, the originating provider is reconciled too using current absolute PMS availability, which coalesces or supersedes stale pending source-provider work instead of leaving it actionable.
+
+OTA email money remains review evidence, not a currency-conversion feed. The parser distinguishes stay totals from payments and deposits, marks conflicting same-kind values ambiguous, and only a persisted `STAY_TOTAL` with an explicit property-matching currency may set new/modification pricing. Approval cannot replace that persisted amount. The inclusive exact-satang total and currency are persisted on the reservation; local occupancy supplements are not added again, and later provider-linked pricing changes require a new verified total plus exactly one active system-managed room charge.
+
+Choosing Booking.com, Agoda, or Trip.com in a manual reservation form is attribution only. A source label or bare provider code without an external reservation reference/provider-total/email-evidence pair is not trusted provider-pricing provenance and must not make normal manual booking edits impossible.
 
 Tasks coalesce when the desired availability has not changed. When it changes, the active task is superseded and a higher revision becomes current. Staff must enter the value in the official Extranet, then confirm the exact value and revision in Lite. A completion record is an operator attestation and audit event; it is not a provider API read-back.
 
@@ -220,5 +226,7 @@ The manual queue remains authoritative until every applicable item is complete a
 Gmail Pub/Sub can signal new provider email near-live, and the five-minute maintenance command renews watches, retries deliveries, and reconciles history. All resulting events remain review-only. Email delivery can be delayed, duplicated, reordered, incomplete, or differently formatted; Gmail cannot supply authoritative live room inventory and cannot push inventory back to an OTA.
 
 Provider-scoped external references reduce duplicate/mismatched booking risk, but staff review remains mandatory. A successful Gmail watch, push, or reconciliation is mailbox evidence only, not Booking.com, Agoda, or Trip.com API proof.
+
+Only a Gmail-retained `Authentication-Results` header whose authentication service id is `mx.google.com` can establish provider sender alignment. Reprocess uses that immutable header and raw content, discards stale parsed fields, and recomputes the reservation match. Payment, cancellation, and modification writes require the resulting exact persisted match or an explicit staff-selected reservation id; guest/date similarity is review guidance only.
 
 See `docs/LITE_ARCHITECTURE.md` for the complete workflow and staging proof boundary.

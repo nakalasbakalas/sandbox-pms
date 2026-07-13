@@ -30,6 +30,7 @@ export class PmsValidationError extends Error {
 
 export function getBangkokDateKey(value) {
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    dateFromKey(value)
     return value
   }
 
@@ -49,7 +50,11 @@ export function dateFromKey(key) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
     throw new PmsValidationError('Enter dates in YYYY-MM-DD format.')
   }
-  return new Date(`${key}T00:00:00.000Z`)
+  const date = new Date(`${key}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) {
+    throw new PmsValidationError('Enter a real calendar date in YYYY-MM-DD format.')
+  }
+  return date
 }
 
 function dayNumber(value) {
@@ -98,7 +103,12 @@ export function validateStayInput(input) {
 export function calculateStayPricing(input) {
   const { nights } = validateStayInput(input)
   const adults = Number(input.adults)
-  const childAges = Array.isArray(input.childAges) ? input.childAges.map(Number) : []
+  const rawChildAges = Array.isArray(input.childAges) ? input.childAges : []
+  if (rawChildAges.some((age) => typeof age === 'string' && !age.trim())) {
+    throw new PmsValidationError('Enter one age for every child so occupancy and pricing can be verified.')
+  }
+  const childAges = rawChildAges.map(Number)
+  const children = input.children === undefined ? childAges.length : Number(input.children)
   const ratePerNight = Number(input.ratePerNight)
   const standardOccupancy = Number(input.standardOccupancy ?? SANDBOX_RULES.standardOccupancy)
   const maxOccupancy = Number(input.maxOccupancy ?? SANDBOX_RULES.maxOccupancy)
@@ -107,6 +117,9 @@ export function calculateStayPricing(input) {
 
   if (!Number.isInteger(adults) || adults < 1) {
     throw new PmsValidationError('At least one adult is required.')
+  }
+  if (!Number.isInteger(children) || children < 0) {
+    throw new PmsValidationError('Children must be a non-negative whole number.')
   }
   if (!Number.isFinite(ratePerNight) || ratePerNight <= 0) {
     throw new PmsValidationError('Rate per night must be greater than zero.')
@@ -117,11 +130,14 @@ export function calculateStayPricing(input) {
   if (!Number.isInteger(maxOccupancy) || maxOccupancy < standardOccupancy) {
     throw new PmsValidationError('Maximum occupancy must be at least the standard occupancy.')
   }
-  if (childAges.some((age) => !Number.isInteger(age) || age < 0)) {
-    throw new PmsValidationError('Child ages must be valid non-negative numbers.')
+  if (childAges.some((age) => !Number.isInteger(age) || age < 0 || age > 17)) {
+    throw new PmsValidationError('Child ages must be whole numbers from 0 to 17.')
+  }
+  if (childAges.length !== children) {
+    throw new PmsValidationError('Enter one age for every child so occupancy and pricing can be verified.')
   }
 
-  const totalGuests = adults + childAges.length
+  const totalGuests = adults + children
   if (totalGuests > maxOccupancy) {
     throw new PmsValidationError(`Maximum occupancy is ${maxOccupancy} guests per room.`)
   }

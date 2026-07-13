@@ -982,6 +982,7 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
     roomType: 'TWIN' as 'TWIN' | 'DOUBLE',
     adults: 1,
     children: 0,
+    childAges: [] as string[],
     ratePerNight: 0,
     source: 'DIRECT' as BookingSource,
     specialRequests: '',
@@ -994,6 +995,16 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
   const handleSubmit = () => {
     if (!formData.firstName || !formData.lastName) {
       toast.error('Please fill in guest name')
+      return
+    }
+
+    const childAges = formData.childAges.map(Number)
+    if (
+      childAges.length !== formData.children
+      || formData.childAges.some((age) => !age.trim())
+      || childAges.some((age) => !Number.isInteger(age) || age < 0 || age > 17)
+    ) {
+      toast.error('Enter one age from 0 to 17 for every child')
       return
     }
 
@@ -1032,7 +1043,7 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
       actualCheckOut: null,
       adults: formData.adults,
       children: formData.children,
-      childAges: null,
+      childAges,
       ratePerNight: formData.ratePerNight,
       totalAmount,
       depositAmount,
@@ -1056,6 +1067,7 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
       roomType: 'TWIN',
       adults: 1,
       children: 0,
+      childAges: [],
       ratePerNight: 0,
       source: 'DIRECT',
       specialRequests: '',
@@ -1189,11 +1201,40 @@ function NewReservationDialog({ open, onClose, onSubmit }: NewReservationDialogP
                   type="number"
                   min="0"
                   value={formData.children}
-                  onChange={(e) => setFormData(prev => ({ ...prev, children: parseInt(e.target.value) || 0 }))}
+                  onChange={(e) => setFormData((prev) => {
+                    const children = Math.max(0, parseInt(e.target.value, 10) || 0)
+                    return {
+                      ...prev,
+                      children,
+                      childAges: Array.from({ length: children }, (_, index) => prev.childAges[index] ?? ''),
+                    }
+                  })}
                   className="mt-2"
                 />
               </div>
             </div>
+
+            {formData.childAges.length > 0 && (
+              <div className="grid grid-cols-2 gap-4">
+                {formData.childAges.map((age, index) => (
+                  <div key={index}>
+                    <Label htmlFor={`reservation-child-age-${index}`}>Child {index + 1} age</Label>
+                    <Input
+                      id={`reservation-child-age-${index}`}
+                      type="number"
+                      min="0"
+                      max="17"
+                      value={age}
+                      onChange={(event) => setFormData((prev) => ({
+                        ...prev,
+                        childAges: prev.childAges.map((currentAge, ageIndex) => ageIndex === index ? event.target.value : currentAge),
+                      }))}
+                      className="mt-2"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div>

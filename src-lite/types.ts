@@ -1,5 +1,8 @@
 export type LiteRole = 'ADMIN' | 'MANAGER' | 'FRONT_DESK' | 'HOUSEKEEPING' | 'CASHIER' | 'CAFE_STAFF'
 
+/** Integer Thai baht subunits. API writes reject fractional and unsafe values at runtime. */
+export type MoneySatang = number
+
 export type LiteUser = {
   id: string
   username: string
@@ -24,6 +27,10 @@ export type GuestSummary = {
   firstName: string
   lastName: string
   displayName: string
+  nationality: string | null
+  idType: string | null
+  identityComplete: boolean
+  idNumberLast4: string | null
   vip: boolean
   blacklisted: boolean
 }
@@ -61,7 +68,33 @@ export type FolioSummary = {
   paidSatang: number
   balanceSatang: number
   paymentState: 'SETTLED' | 'PARTIAL' | 'UNPAID'
+  charges: FolioCharge[]
+  payments: FolioPayment[]
   updatedAt: string | null
+}
+
+export type FolioCharge = {
+  id: string
+  date: string
+  description: string
+  category: string
+  amountSatang: MoneySatang
+  quantity: number
+  totalSatang: MoneySatang
+  void: boolean
+  voidReason: string | null
+  createdBy: string
+  createdAt: string | null
+}
+
+export type FolioPayment = {
+  id: string
+  amountSatang: MoneySatang
+  method: string
+  reference: string | null
+  notes: string | null
+  processedBy: string
+  createdAt: string | null
 }
 
 export type ReservationSummary = {
@@ -75,6 +108,7 @@ export type ReservationSummary = {
   status: string
   adults: number
   children: number
+  childAges: number[]
   source: string
   providerCode: string | null
   externalReservationId: string | null
@@ -102,7 +136,7 @@ export type PendingReviewEmailEvent = {
   checkIn: string | null
   checkOut: string | null
   amountSatang: number | null
-  currency: string
+  currency: string | null
   confidence: number
   linkedToReservation: boolean
 }
@@ -198,9 +232,6 @@ export type HousekeepingStay = {
   checkIn: string
   checkOut: string
   status: string
-  guest: {
-    displayName: string
-  }
 }
 
 export type HousekeepingPayload = {
@@ -218,7 +249,6 @@ export type HousekeepingPayload = {
     turnover: number
   }
   rooms: HousekeepingRoom[]
-  pendingReviewEmail: PendingReviewEmailSummary
 }
 
 /** Authorized review DTO for Channel Desk. Raw email, headers and parsedDetails stay server-side. */
@@ -235,13 +265,33 @@ export type BookingEmailEvent = {
   checkOut: string | null
   roomType: string | null
   amountSatang: number | null
-  currency: string
+  currency: string | null
   confidence: number
   reviewReason: string | null
   errorReason: string | null
+  adults: number | null
+  children: number | null
+  childAges: number[]
 }
 
 export type ManualChannelProviderCode = 'booking_com' | 'agoda' | 'trip_com'
+
+export type ManualChannelRoomType = {
+  id: string
+  code: string
+  name: string
+  physicalRoomCount: number
+}
+
+export type ManualChannelMapping = {
+  id: string
+  roomTypeId: string
+  roomTypeName: string | null
+  externalRoomTypeId: string
+  externalRoomTypeName: string
+  externalRatePlanId: string | null
+  active: boolean
+}
 
 export type ManualChannelConnection = {
   id: string
@@ -252,15 +302,27 @@ export type ManualChannelConnection = {
   extranetUrl: string | null
   enabled: boolean
   configured: boolean
-  mappings: Array<{
-    id: string
-    roomTypeId: string
-    roomTypeName: string | null
-    externalRoomTypeId: string
-    externalRoomTypeName: string
-    externalRatePlanId: string | null
-    active: boolean
-  }>
+  mappings: ManualChannelMapping[]
+}
+
+export type SaveManualChannelConnectionInput = {
+  displayName?: string
+  deliveryMode: 'MANUAL'
+  externalPropertyId: string | null
+  extranetUrl: string | null
+  enabled: boolean
+  initialReconcileDays?: number
+  reason: string
+}
+
+export type SaveManualChannelMappingInput = {
+  connectionId: string
+  roomTypeId: string
+  externalRoomTypeId: string
+  externalRoomTypeName: string
+  externalRatePlanId: string | null
+  active: boolean
+  reason: string
 }
 
 export type ManualChannelTask = {
@@ -285,6 +347,24 @@ export type ManualChannelTask = {
   lastErrorMessage: string | null
 }
 
+export type ManualChannelReconcileResult = {
+  created: ManualChannelTask[]
+  superseded: ManualChannelTask[]
+  retargeted: ManualChannelTask[]
+  coalesced: ManualChannelTask[]
+  unchanged: ManualChannelTask[]
+  unmapped: Array<{
+    connectionId: string
+    providerCode: ManualChannelProviderCode
+    roomTypeId: string
+    stayDateKeys: string[]
+    cellCount: number
+    errorCode: string
+  }>
+  unmappedCellCount: number
+  skippedPastCellCount: number
+}
+
 export type ChannelDeskPayload = {
   syncHealth: {
     enabled: boolean
@@ -302,8 +382,23 @@ export type ChannelDeskPayload = {
   }
   reviewEvents: BookingEmailEvent[]
   connections: ManualChannelConnection[]
+  roomTypes: ManualChannelRoomType[]
   tasks: ManualChannelTask[]
-  counts: Record<string, number>
+  pagination: {
+    reviewEvents: { limit: number; returned: number; total: number; truncated: boolean }
+    tasks: { limit: number; returned: number; total: number; truncated: boolean }
+  }
+  counts: {
+    reviewEvents: number
+    parserErrors: number
+    activeReviewWork: number
+    pendingTasks: number
+    inProgressTasks: number
+    failedTasks: number
+    activeTasks: number
+    pendingDeliveries: number
+    failedDeliveries: number
+  }
   warning: string
 }
 

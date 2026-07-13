@@ -114,6 +114,16 @@ The server persists a unique delivery before acknowledging it. A Pub/Sub message
 
 All Gmail push, history, reconciliation, and maintenance ingestion is forced to review-only. Booking email content and parser output are untrusted. A new/modification/cancellation/payment event cannot mutate PMS state until an authenticated, authorized staff member approves it through the existing service. Processed events cannot be reprocessed. Modification and cancellation approvals require an operational reason and audit evidence.
 
+Payment, cancellation, modification, and other non-new-booking email writes require an explicit or trusted exact-linked reservation id. Guest name and stay dates may suggest a possible duplicate but are never write authority. Link mode carries no ignored edited details. Reprocess derives provider authentication, parsed fields, and reservation matching again from immutable raw text and stored Gmail `Authentication-Results`; it cannot preserve a stale parser result or stale reservation id.
+
+Approval mode is allowlisted and cannot retype a cancellation/modification into reservation creation. The service rechecks `create:reservation`, `edit:reservation`, `cancel:reservation`, or `process:payment` according to the actual event action; a generic review-screen permission is not mutation authority. When a new or modified booking declares children, approval requires one verified age per child before pricing or capacity changes.
+
+Email-derived money keeps persisted parser semantics: a stay total cannot be sourced from a deposit/payment label, and a payment cannot be sourced from a stay-total label. An unmarked amount has no invented currency, and multiple distinct values carrying the same semantic label are ambiguous. Approval uses the persisted amount only; input cannot replace it or relabel its currency/kind, and the currency must match the configured property currency. Verified OTA stay totals are inclusive exact-satang values with persistent reservation provenance; public reservation inputs cannot inject or replace that provenance. Staff cannot create additional `ROOM` charges, and repricing requires exactly one active system-managed room charge.
+
+`sourceEmailEventId` is internal evidence provenance. Public charge, payment, walk-in, check-in, and checkout payloads are rejected if they attempt to set it. Cumulative exact payments set `depositPaid` only after crossing a positive deposit threshold; provider repricing re-evaluates that threshold. Checkout releases physical room-date inventory before publishing any early-checkout availability increase.
+
+Completed, ignored, or already-past rows that predate the Lite review boundary are marked `legacyReadOnly`. They remain evidence but cannot be approved, rejected, reprocessed, or replayed into operational reservations. Unresolved `NEEDS_REVIEW` or `ERROR` rows with an active, future, or unknown checkout remain actionable after migration so Gmail message-id deduplication cannot strand a live booking or cancellation.
+
 The five-minute maintenance cron renews watches, retries durable deliveries, and reconciles Gmail history. It improves recovery but is neither a security bypass nor a delivery guarantee. If the watch or push identity is misconfigured, the correct response is to repair configuration or rely on reviewed manual intake—not to disable OIDC or review controls.
 
 ### Manual Channel Queue Is Non-Credential Coordination
@@ -122,9 +132,11 @@ Manual channel configuration may contain provider codes, verified property/room/
 
 Manual availability tasks do not authorize browser automation or OTA writes. Completion records an operator attestation, timestamp, exact availability, revision, and optional notes; it is not independent OTA state proof. Stale revisions and mismatched values are rejected. Configuration/reconciliation/reopen is Manager/Admin-only; completion is limited to Front Desk, Manager, or Admin.
 
-An enabled manual connection must have an active mapping for every room type that owns a physical room, including temporarily non-sellable rooms. Active external room-type/rate-plan targets are unique per connection at the database boundary. Reconciliation never guesses an external target: missing mappings skip task creation and produce an aggregated audit record for the provider, PMS room type, and affected date range.
+An enabled manual connection must have an active mapping for every room type that owns a physical room, including temporarily non-sellable rooms. Active external room-type/rate-plan targets are unique per connection at the database boundary. A disabled-to-enabled transition cannot commit until it stages a bounded 1–90-day absolute-availability baseline for that connection, with aggregate audit evidence. Reconciliation never guesses an external target: missing mappings skip task creation and produce an aggregated audit record for the provider, PMS room type, and affected date range.
 
 The source OTA for an approved email is also reconciled with current absolute PMS availability. This prevents stale source-provider tasks from remaining actionable; it is still manual coordination and is not evidence that the provider's broader inventory is synchronized. Every enabled provider remains exposed to staff delay.
+
+Every task revision stores an immutable external room/rate-plan target. Completion rejects a task when the active mapping has changed, and retry/reopen recalculates current absolute availability before creating an audited revision against the current mapping. Channel Desk returns true aggregate counts even when its PII-safe work lists are bounded.
 
 `DISABLED_CHANNEX_ADAPTER` must remain disabled until a certified channel account, backend-only secrets, provider/property/room mappings, sandbox test evidence, error/retry policy, audit output, emergency stop, and owner approval exist. No Channex credential belongs in the client or manual mapping records.
 
@@ -143,5 +155,7 @@ Lite remains staging-only until owner/live proof exists for Render configuration
 ### Money Integrity
 
 Lite read DTOs require the integer-satang fields, and PMS writers calculate in satang before deriving legacy Float rollback parity. Missing required satang values fail closed instead of silently converting Float at the boundary. This repository contract is not production proof: production money cutover remains blocked until the nullable expansion/backfill migration, zero-difference reconciliation, restore proof, representative staging workflows, and rollback-period requirements are evidenced. No migration should be applied to production without a fresh recovery point and successful disposable restore test.
+
+The full guest ID/passport value remains in the protected backend guest record. Lite operational reads expose only identity-complete state and the last four characters to authorized front-desk/booking roles; the Housekeeping DTO contains no guest name, email metadata, document identifier, rate, folio, or payment data. Active stays keep an open folio for incidentals. A settled checkout closes it; a reasoned unpaid-checkout override leaves it open so a later payment can settle and close the folio.
 
 See `docs/LITE_ARCHITECTURE.md` for the complete Lite data flow and rollout boundaries.

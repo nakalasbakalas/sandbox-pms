@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, liteApi } from '../api'
@@ -8,7 +8,10 @@ import type {
   BookingEmailEvent,
   ChannelDeskPayload,
   Language,
+  LiteRole,
   ManualChannelConnection,
+  ManualChannelProviderCode,
+  ManualChannelRoomType,
   ManualChannelTask,
 } from '../types'
 
@@ -60,6 +63,9 @@ type DeskCopy = {
   rejectTitle: string
   confirmApprove: string
   confirmReject: string
+  reprocess: string
+  reprocessSaved: string
+  parserRecovery: string
   incompleteEvent: string
   reviewCount: string
   taskCount: string
@@ -94,6 +100,52 @@ type DeskCopy = {
   selectReservation: string
   noCandidateReservations: string
   linkRequired: string
+  configure: string
+  configurationTitle: string
+  configurationIntro: string
+  externalPropertyId: string
+  extranetUrl: string
+  officialUrlHelp: string
+  officialUrlRequired: string
+  officialUrlInvalid: string
+  enableAfterSave: string
+  enableAfterSaveHelp: string
+  initialReconcileDays: string
+  initialReconcileDaysHelp: string
+  initialReconcileDaysInvalid: string
+  externalRoomTypeName: string
+  mappingCoverage: string
+  physicalRooms: string
+  saveConfiguration: string
+  configurationSaved: string
+  configurationFailedDisabled: string
+  mappingRequired: string
+  noPhysicalRoomTypes: string
+  credentialsProhibited: string
+  managerOnly: string
+  reconcile: string
+  reconcileTitle: string
+  reconcileIntro: string
+  fromDate: string
+  throughDate: string
+  rangeHelp: string
+  runReconciliation: string
+  reconciliationSaved: string
+  rangeInvalid: string
+  rangeTooLong: string
+  setupReasonPlaceholder: string
+  reconcileReasonPlaceholder: string
+  retryTask: string
+  retryTitle: string
+  retryIntro: string
+  retrySaved: string
+  retryReasonPlaceholder: string
+  failedQueue: string
+  noFailedTasks: string
+  returnedOfTotal: string
+  listTruncated: string
+  immutableTarget: string
+  lastFailure: string
 }
 
 const deskCopy: Record<Language, DeskCopy> = {
@@ -126,7 +178,7 @@ const deskCopy: Record<Language, DeskCopy> = {
     lastReconciled: 'Last reconciliation',
     pendingDeliveries: 'Pending deliveries',
     mailboxIssue: 'Mailbox synchronization requires attention. Sensitive provider errors are hidden here.',
-    parserErrors: 'email events could not be parsed and need manager review in the full Booking Inbox.',
+    parserErrors: 'email events could not be parsed and are visible below for recovery.',
     failedTasks: 'availability tasks failed and must be reconciled by a manager before they can be completed.',
     reviewHelp: 'Nothing changes a reservation until an authorized staff member reviews and applies the event.',
     availabilityHelp: 'Enter the displayed availability in the OTA Extranet, verify it there, then complete the matching revision.',
@@ -143,6 +195,9 @@ const deskCopy: Record<Language, DeskCopy> = {
     rejectTitle: 'Reject inbound event',
     confirmApprove: 'Confirm approval',
     confirmReject: 'Confirm rejection',
+    reprocess: 'Retry parsing',
+    reprocessSaved: 'The email was reparsed and its current review state was confirmed by the server.',
+    parserRecovery: 'Parsing failed. No booking changed. Retry parsing or reject the event with an operational reason.',
     incompleteEvent: 'Required booking details or an exact reservation reference are missing. Review or reject this event instead of applying it.',
     reviewCount: 'Awaiting review',
     taskCount: 'Availability tasks',
@@ -174,6 +229,52 @@ const deskCopy: Record<Language, DeskCopy> = {
     selectReservation: 'Select the verified PMS reservation',
     noCandidateReservations: 'No candidate reservation was found. Verify the OTA reference, then create or locate the booking in Bookings before applying this event.',
     linkRequired: 'Select the reservation you verified in the official OTA Extranet.',
+    configure: 'Configure',
+    configurationTitle: 'Configure manual OTA connection',
+    configurationIntro: 'The connection is saved disabled first. Every physical room type is then mapped before the connection can be enabled.',
+    externalPropertyId: 'OTA property ID (optional)',
+    extranetUrl: 'Official Extranet URL',
+    officialUrlHelp: 'Use the official HTTPS Extranet domain only; links with credentials, query parameters, or fragments are refused.',
+    officialUrlRequired: 'Enter an official {domain} HTTPS Extranet URL before enabling this connection.',
+    officialUrlInvalid: 'This is not a safe official {domain} Extranet URL.',
+    enableAfterSave: 'Enable after all mappings save',
+    enableAfterSaveHelp: 'If any mapping or initial availability staging fails, the provider remains disabled and no success is assumed.',
+    initialReconcileDays: 'Initial availability horizon',
+    initialReconcileDaysHelp: 'Enabling stages absolute availability tasks from today through this many stay dates (1–90).',
+    initialReconcileDaysInvalid: 'Initial availability must cover 1 to 90 stay dates.',
+    externalRoomTypeName: 'OTA room type name',
+    mappingCoverage: 'Mapping coverage',
+    physicalRooms: 'physical rooms',
+    saveConfiguration: 'Save setup',
+    configurationSaved: 'Connection and mappings were confirmed. When enabled, its initial availability tasks were staged in the same transaction.',
+    configurationFailedDisabled: 'Setup did not finish. The connection was left disabled for safety.',
+    mappingRequired: 'Enter the verified OTA room ID and OTA room name for every physical PMS room type.',
+    noPhysicalRoomTypes: 'No physical room types are available to map. Add rooms before enabling an OTA connection.',
+    credentialsProhibited: 'Never enter an OTA password, cookie, token, API key, or 2FA code. This form stores no credentials.',
+    managerOnly: 'Connection setup, reconciliation, and task recovery are available only to managers and administrators.',
+    reconcile: 'Reconcile queue',
+    reconcileTitle: 'Recalculate availability tasks',
+    reconcileIntro: 'Recalculate absolute PMS availability for every physical room type across a bounded future stay-date range.',
+    fromDate: 'First stay date',
+    throughDate: 'Last stay date',
+    rangeHelp: 'Choose 1 to 90 stay dates. The end date is included.',
+    runReconciliation: 'Run reconciliation',
+    reconciliationSaved: 'Availability tasks were recalculated and confirmed by the server.',
+    rangeInvalid: 'The last stay date must be on or after the first stay date.',
+    rangeTooLong: 'Reconciliation is limited to 90 stay dates.',
+    setupReasonPlaceholder: 'Why this provider setup or mapping is being changed',
+    reconcileReasonPlaceholder: 'Why this availability range is being reconciled',
+    retryTask: 'Retry task',
+    retryTitle: 'Retry failed availability task',
+    retryIntro: 'The failed revision will be superseded and a new pending revision will snapshot the current OTA mapping.',
+    retrySaved: 'A new pending task revision was confirmed by the server.',
+    retryReasonPlaceholder: 'What was checked or corrected before retrying',
+    failedQueue: 'Failed task recovery',
+    noFailedTasks: 'No failed availability task requires recovery.',
+    returnedOfTotal: '{returned} shown of {total}',
+    listTruncated: 'This list is truncated. The totals include all matching work; resolve the visible oldest work or refresh after changes.',
+    immutableTarget: 'This task keeps the OTA room/rate target captured for this revision.',
+    lastFailure: 'Last failure',
   },
   th: {
     desiredAvailability: 'จำนวนห้องว่างที่ต้องตั้ง',
@@ -204,7 +305,7 @@ const deskCopy: Record<Language, DeskCopy> = {
     lastReconciled: 'ตรวจสอบซ้ำล่าสุด',
     pendingDeliveries: 'รายการ Push ที่รอ',
     mailboxIssue: 'การซิงก์กล่องอีเมลต้องได้รับการตรวจสอบ รายละเอียดผู้ให้บริการที่ละเอียดอ่อนถูกซ่อนไว้',
-    parserErrors: 'อีเมลไม่สามารถแยกข้อมูลได้ และผู้จัดการต้องตรวจสอบใน Booking Inbox แบบเต็ม',
+    parserErrors: 'อีเมลไม่สามารถแยกข้อมูลได้ และแสดงด้านล่างเพื่อดำเนินการแก้ไข',
     failedTasks: 'งานอัปเดตห้องว่างล้มเหลว และผู้จัดการต้องตรวจสอบก่อนจึงจะยืนยันได้',
     reviewHelp: 'ระบบจะไม่เปลี่ยนแปลงการจองจนกว่าพนักงานที่มีสิทธิ์จะตรวจสอบและยืนยันรายการ',
     availabilityHelp: 'กรอกจำนวนห้องว่างตามที่แสดงใน Extranet ตรวจสอบผล แล้วจึงยืนยันงานตามเลข revision',
@@ -221,6 +322,9 @@ const deskCopy: Record<Language, DeskCopy> = {
     rejectTitle: 'ปฏิเสธรายการจากอีเมล',
     confirmApprove: 'ยืนยันการอนุมัติ',
     confirmReject: 'ยืนยันการปฏิเสธ',
+    reprocess: 'ลองแยกข้อมูลอีกครั้ง',
+    reprocessSaved: 'เซิร์ฟเวอร์ยืนยันการแยกข้อมูลใหม่และสถานะตรวจสอบปัจจุบันแล้ว',
+    parserRecovery: 'การแยกข้อมูลล้มเหลวและยังไม่มีการเปลี่ยนแปลงการจอง โปรดลองอีกครั้งหรือปฏิเสธพร้อมระบุเหตุผล',
     incompleteEvent: 'ข้อมูลการจองหรือเลขอ้างอิงที่ตรงกันยังไม่ครบ กรุณาตรวจสอบหรือปฏิเสธแทนการนำไปใช้',
     reviewCount: 'รอตรวจสอบ',
     taskCount: 'งานอัปเดตห้องว่าง',
@@ -252,6 +356,52 @@ const deskCopy: Record<Language, DeskCopy> = {
     selectReservation: 'เลือกการจองใน PMS ที่ตรวจสอบแล้ว',
     noCandidateReservations: 'ไม่พบการจองที่อาจตรงกัน โปรดตรวจสอบเลขอ้างอิงใน OTA Extranet แล้วสร้างหรือค้นหาการจองในหน้าการจองก่อนนำรายการนี้ไปใช้',
     linkRequired: 'เลือกการจองที่คุณตรวจสอบแล้วใน OTA Extranet',
+    configure: 'ตั้งค่า',
+    configurationTitle: 'ตั้งค่าการเชื่อมต่อ OTA แบบดำเนินการเอง',
+    configurationIntro: 'ระบบจะบันทึกช่องทางเป็นปิดใช้งานก่อน จากนั้นจึงบันทึก mapping ของห้องจริงทุกประเภท และเปิดใช้งานได้เมื่อข้อมูลครบเท่านั้น',
+    externalPropertyId: 'รหัสที่พักใน OTA (ไม่บังคับ)',
+    extranetUrl: 'URL Extranet อย่างเป็นทางการ',
+    officialUrlHelp: 'ใช้เฉพาะโดเมน Extranet แบบ HTTPS อย่างเป็นทางการ ระบบจะปฏิเสธลิงก์ที่มีรหัสผ่าน พารามิเตอร์ หรือ fragment',
+    officialUrlRequired: 'กรุณาระบุ URL Extranet แบบ HTTPS ของ {domain} ก่อนเปิดใช้งานช่องทางนี้',
+    officialUrlInvalid: 'URL นี้ไม่ใช่ Extranet อย่างเป็นทางการและปลอดภัยของ {domain}',
+    enableAfterSave: 'เปิดใช้งานหลังบันทึก mapping ครบ',
+    enableAfterSaveHelp: 'หาก mapping หรือการสร้างงานห้องว่างเริ่มต้นไม่สำเร็จ ช่องทางจะยังคงปิดเพื่อความปลอดภัย และระบบจะไม่ถือว่าสำเร็จ',
+    initialReconcileDays: 'ช่วงวันห้องว่างเริ่มต้น',
+    initialReconcileDaysHelp: 'เมื่อเปิดใช้งาน ระบบจะสร้างงานจำนวนห้องว่างจริงตั้งแต่วันนี้ตามจำนวนวันเข้าพักนี้ (1–90 วัน)',
+    initialReconcileDaysInvalid: 'ช่วงวันห้องว่างเริ่มต้นต้องอยู่ระหว่าง 1 ถึง 90 วันเข้าพัก',
+    externalRoomTypeName: 'ชื่อประเภทห้องใน OTA',
+    mappingCoverage: 'ความครบถ้วนของ mapping',
+    physicalRooms: 'ห้องจริง',
+    saveConfiguration: 'บันทึกการตั้งค่า',
+    configurationSaved: 'เซิร์ฟเวอร์ยืนยันการเชื่อมต่อและ mapping แล้ว หากเปิดใช้งาน ระบบจะสร้างงานห้องว่างเริ่มต้นใน transaction เดียวกัน',
+    configurationFailedDisabled: 'การตั้งค่ายังไม่เสร็จ ระบบคงช่องทางไว้เป็นปิดใช้งานเพื่อความปลอดภัย',
+    mappingRequired: 'กรอกรหัสห้องและชื่อห้องใน OTA ที่ตรวจสอบแล้วสำหรับประเภทห้องจริงทุกประเภทใน PMS',
+    noPhysicalRoomTypes: 'ไม่มีประเภทห้องจริงสำหรับทำ mapping กรุณาเพิ่มห้องก่อนเปิดใช้งาน OTA',
+    credentialsProhibited: 'ห้ามกรอกรหัสผ่าน คุกกี้ โทเคน API key หรือรหัส 2FA ของ OTA แบบฟอร์มนี้ไม่จัดเก็บข้อมูลเข้าสู่ระบบ',
+    managerOnly: 'เฉพาะผู้จัดการและผู้ดูแลระบบเท่านั้นที่ตั้งค่าช่องทาง ตรวจสอบคิว และกู้งานได้',
+    reconcile: 'ตรวจสอบคิวใหม่',
+    reconcileTitle: 'คำนวณงานอัปเดตห้องว่างใหม่',
+    reconcileIntro: 'คำนวณจำนวนห้องว่างจริงจาก PMS สำหรับประเภทห้องจริงทุกประเภทในช่วงวันที่เข้าพักที่จำกัด',
+    fromDate: 'วันที่เข้าพักวันแรก',
+    throughDate: 'วันที่เข้าพักวันสุดท้าย',
+    rangeHelp: 'เลือก 1 ถึง 90 วันเข้าพัก โดยรวมวันสุดท้ายด้วย',
+    runReconciliation: 'เริ่มตรวจสอบคิวใหม่',
+    reconciliationSaved: 'เซิร์ฟเวอร์ยืนยันการคำนวณงานอัปเดตห้องว่างใหม่แล้ว',
+    rangeInvalid: 'วันที่เข้าพักวันสุดท้ายต้องไม่น้อยกว่าวันแรก',
+    rangeTooLong: 'ตรวจสอบคิวได้สูงสุด 90 วันเข้าพัก',
+    setupReasonPlaceholder: 'เหตุผลที่เปลี่ยนการตั้งค่าช่องทางหรือ mapping นี้',
+    reconcileReasonPlaceholder: 'เหตุผลที่ตรวจสอบจำนวนห้องว่างในช่วงวันนี้ใหม่',
+    retryTask: 'ลองงานอีกครั้ง',
+    retryTitle: 'ลองงานอัปเดตห้องว่างที่ล้มเหลวอีกครั้ง',
+    retryIntro: 'ระบบจะยกเลิก revision ที่ล้มเหลวและสร้าง revision ใหม่ที่บันทึกเป้าหมายห้อง/แผนราคา OTA ปัจจุบัน',
+    retrySaved: 'เซิร์ฟเวอร์ยืนยันงาน revision ใหม่ที่รอดำเนินการแล้ว',
+    retryReasonPlaceholder: 'ตรวจสอบหรือแก้ไขสิ่งใดก่อนลองอีกครั้ง',
+    failedQueue: 'กู้งานที่ล้มเหลว',
+    noFailedTasks: 'ไม่มีงานอัปเดตห้องว่างที่ล้มเหลวและต้องกู้',
+    returnedOfTotal: 'แสดง {returned} จากทั้งหมด {total}',
+    listTruncated: 'รายการนี้ถูกจำกัดจำนวน ยอดรวมครอบคลุมงานที่ตรงเงื่อนไขทั้งหมด โปรดจัดการรายการเก่าที่แสดงอยู่หรือรีเฟรชหลังเปลี่ยนแปลง',
+    immutableTarget: 'งานนี้ใช้เป้าหมายห้อง/แผนราคา OTA ที่บันทึกไว้สำหรับ revision นี้',
+    lastFailure: 'ข้อผิดพลาดล่าสุด',
   },
 }
 
@@ -264,6 +414,79 @@ type TaskDraft = {
   revision: number
   availability: string
   notes: string
+}
+
+type MappingDraft = {
+  externalRoomTypeId: string
+  externalRoomTypeName: string
+  externalRatePlanId: string
+}
+
+type ConnectionDraft = {
+  externalPropertyId: string
+  extranetUrl: string
+  enableAfterSave: boolean
+  initialReconcileDays: number
+  reason: string
+  mappings: Record<string, MappingDraft>
+}
+
+class ConnectionSetupFailure extends Error {
+  causeError: unknown
+  safelyDisabled: boolean
+
+  constructor(causeError: unknown, safelyDisabled: boolean) {
+    super('Manual channel setup failed.')
+    this.name = 'ConnectionSetupFailure'
+    this.causeError = causeError
+    this.safelyDisabled = safelyDisabled
+  }
+}
+
+function dateKeyInBangkok() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function addDateKey(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function inclusiveDateCount(from: string, through: string) {
+  const start = new Date(`${from}T00:00:00.000Z`).getTime()
+  const end = new Date(`${through}T00:00:00.000Z`).getTime()
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return Number.NaN
+  return Math.floor((end - start) / 86_400_000) + 1
+}
+
+function copyWithCounts(template: string, returned: number, total: number) {
+  return template.replace('{returned}', String(returned)).replace('{total}', String(total))
+}
+
+function initialConnectionDraft(connection: ManualChannelConnection, roomTypes: ManualChannelRoomType[]): ConnectionDraft {
+  const mappings: Record<string, MappingDraft> = {}
+  for (const roomType of roomTypes) {
+    const mapping = connection.mappings.find((candidate) => candidate.roomTypeId === roomType.id)
+    mappings[roomType.id] = {
+      externalRoomTypeId: mapping?.externalRoomTypeId || '',
+      externalRoomTypeName: mapping?.externalRoomTypeName || '',
+      externalRatePlanId: mapping?.externalRatePlanId || '',
+    }
+  }
+  return {
+    externalPropertyId: connection.externalPropertyId || '',
+    extranetUrl: connection.extranetUrl || '',
+    enableAfterSave: connection.enabled || connection.mappings.length === 0,
+    initialReconcileDays: 90,
+    reason: '',
+    mappings,
+  }
 }
 
 function normalizedProviderCode(value: string | null | undefined) {
@@ -289,6 +512,10 @@ const safeProviderDomains: Record<string, string[]> = {
   agoda: ['agoda.com'],
   trip_com: ['trip.com'],
   tripcom: ['trip.com'],
+}
+
+function officialProviderDomain(providerCode: string | null | undefined) {
+  return safeProviderDomains[normalizedProviderCode(providerCode)]?.[0] || providerLabel(providerCode)
 }
 
 function safeExtranetUrl(value: string | null | undefined, providerCode: string | null | undefined) {
@@ -328,7 +555,14 @@ function formatDateTime(value: string | null | undefined, language: Language) {
   }).format(date)
 }
 
-function formatCurrencySatang(value: number, currency: string, language: Language) {
+function formatCurrencySatang(value: number, currency: string | null, language: Language) {
+  if (!currency) {
+    const amount = new Intl.NumberFormat(language === 'th' ? 'th-TH' : 'en-GB', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value / 100)
+    return `${amount} (${language === 'th' ? 'ไม่ทราบสกุลเงิน' : 'currency unknown'})`
+  }
   try {
     return new Intl.NumberFormat(language === 'th' ? 'th-TH' : 'en-GB', {
       style: 'currency',
@@ -358,6 +592,13 @@ function eventCanBeApproved(event: BookingEmailEvent) {
   }
   if (event.eventType === 'MODIFICATION' || event.eventType === 'CANCELLATION') {
     return Boolean(event.channelRef || (event.guestName && event.checkIn && event.checkOut))
+  }
+  if (event.eventType === 'PAYMENT_NOTICE') {
+    return Boolean(
+      event.amountSatang !== null
+      && event.currency
+      && (event.reservationId || event.channelRef || (event.guestName && event.checkIn && event.checkOut)),
+    )
   }
   return false
 }
@@ -404,16 +645,21 @@ function ReviewEventCard({
   language,
   text,
   busy,
+  canApply,
   openAction,
+  reprocess,
 }: {
   event: BookingEmailEvent
   language: Language
   text: DeskCopy
   busy: boolean
+  canApply: boolean
   openAction: (kind: EmailAction['kind'], event: BookingEmailEvent) => void
+  reprocess: (event: BookingEmailEvent) => void
 }) {
-  const canApprove = eventCanBeApproved(event)
-  const summaryReason = safeSummary(event.reviewReason)
+  const parserError = event.status === 'ERROR'
+  const canApprove = canApply && eventCanBeApproved(event)
+  const summaryReason = safeSummary(parserError ? event.errorReason : event.reviewReason)
 
   return (
     <article className="channel-card channel-card--review">
@@ -435,17 +681,31 @@ function ReviewEventCard({
       </dl>
 
       {summaryReason ? <p className="notice notice--subtle">{summaryReason}</p> : null}
-      {!canApprove ? <p className="notice notice--warning">{text.incompleteEvent}</p> : null}
+      {parserError ? <p className="notice notice--warning">{text.parserRecovery}</p> : !canApply ? <p className="notice notice--warning">{text.forbidden}</p> : !canApprove ? <p className="notice notice--warning">{text.incompleteEvent}</p> : null}
 
       <footer className="channel-card__actions">
-        <button className="button" disabled={!canApprove || busy} onClick={() => openAction('approve', event)}>{text.confirmApprove}</button>
+        {parserError
+          ? <button className="button" disabled={busy} onClick={() => reprocess(event)}>{text.reprocess}</button>
+          : <button className="button" disabled={!canApprove || busy} onClick={() => openAction('approve', event)}>{text.confirmApprove}</button>}
         <button className="button button--secondary" disabled={busy} onClick={() => openAction('reject', event)}>{text.confirmReject}</button>
       </footer>
     </article>
   )
 }
 
-function ConnectionCard({ connection, text }: { connection: ManualChannelConnection; text: DeskCopy }) {
+function ConnectionCard({
+  connection,
+  text,
+  physicalRoomTypeCount,
+  canManage,
+  configure,
+}: {
+  connection: ManualChannelConnection
+  text: DeskCopy
+  physicalRoomTypeCount: number
+  canManage: boolean
+  configure: () => void
+}) {
   const safeUrl = safeExtranetUrl(connection.extranetUrl, connection.providerCode)
   const activeMappings = connection.mappings?.filter((mapping) => mapping.active).length || 0
   return (
@@ -459,12 +719,15 @@ function ConnectionCard({ connection, text }: { connection: ManualChannelConnect
           {connection.enabled ? text.connectionEnabled : text.connectionDisabled}
         </HealthBadge>
       </header>
-      <p className="muted">{activeMappings} {text.mappings}</p>
-      {safeUrl ? (
-        <a className="button button--secondary" href={safeUrl} target="_blank" rel="noopener noreferrer">{text.openExtranet}</a>
-      ) : (
-        <span className="muted">{text.unsafeLink}</span>
-      )}
+      <p className="muted">{text.mappingCoverage}: {activeMappings}/{physicalRoomTypeCount} · {text.physicalRooms}</p>
+      <footer className="channel-card__actions">
+        {safeUrl ? (
+          <a className="button button--secondary" href={safeUrl} target="_blank" rel="noopener noreferrer">{text.openExtranet}</a>
+        ) : (
+          <span className="muted">{text.unsafeLink}</span>
+        )}
+        {canManage ? <button className="button" onClick={configure}>{text.configure}</button> : null}
+      </footer>
     </article>
   )
 }
@@ -509,6 +772,7 @@ function TaskCard({
         <div><span>{text.externalRoomTypeId}</span><strong>{task.externalRoomTypeId || '—'}</strong></div>
         <div><span>{text.externalRatePlanId}</span><strong>{task.externalRatePlanId || '—'}</strong></div>
       </div>
+      <p className="notice notice--subtle">{text.immutableTarget}</p>
       {!task.externalRoomTypeId ? <p className="notice notice--warning">{text.mappingMissing}</p> : null}
 
       <div className="task-form-grid">
@@ -548,17 +812,390 @@ function TaskCard({
   )
 }
 
-export function ChannelDeskView() {
+function FailedTaskCard({
+  task,
+  language,
+  text,
+  canManage,
+  retry,
+}: {
+  task: ManualChannelTask
+  language: Language
+  text: DeskCopy
+  canManage: boolean
+  retry: () => void
+}) {
+  const safeUrl = safeExtranetUrl(task.extranetUrl, task.providerCode)
+  return (
+    <article className="channel-card channel-card--task channel-card--failed">
+      <header className="channel-card__header">
+        <div>
+          <strong>{providerLabel(task.providerCode)} · {task.roomTypeName || task.roomTypeId}</strong>
+          <span className="muted">{text.taskDate}: {formatDate(task.stayDate, language)} · {text.revision} {task.revision}</span>
+        </div>
+        <StatusPill value={task.status} />
+      </header>
+      <div className="availability-target">
+        <span>{text.desiredAvailability}</span>
+        <strong>{task.desiredAvailability}</strong>
+      </div>
+      <div className="detail-list">
+        <div><span>{text.externalRoomType}</span><strong>{task.externalRoomTypeName || '—'}</strong></div>
+        <div><span>{text.externalRoomTypeId}</span><strong>{task.externalRoomTypeId || '—'}</strong></div>
+        <div><span>{text.externalRatePlanId}</span><strong>{task.externalRatePlanId || '—'}</strong></div>
+      </div>
+      <p className="notice notice--subtle">{text.immutableTarget}</p>
+      {task.lastErrorMessage || task.lastErrorCode ? (
+        <p className="notice notice--error"><strong>{text.lastFailure}:</strong> {safeSummary(task.lastErrorMessage) || task.lastErrorCode}</p>
+      ) : null}
+      <footer className="channel-card__actions">
+        {safeUrl ? <a className="button button--secondary" href={safeUrl} target="_blank" rel="noopener noreferrer">{text.openExtranet}</a> : null}
+        {canManage ? <button className="button" onClick={retry}>{text.retryTask}</button> : null}
+      </footer>
+    </article>
+  )
+}
+
+function ConnectionSetupModal({
+  connection,
+  roomTypes,
+  language,
+  text,
+  closeLabel,
+  close,
+  saved,
+}: {
+  connection: ManualChannelConnection
+  roomTypes: ManualChannelRoomType[]
+  language: Language
+  text: DeskCopy
+  closeLabel: string
+  close: () => void
+  saved: () => void
+}) {
+  const [draft, setDraft] = useState(() => initialConnectionDraft(connection, roomTypes))
+  const [error, setError] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: async (prepared: {
+      reason: string
+      extranetUrl: string | null
+      mappings: Array<MappingDraft & { roomTypeId: string }>
+    }) => {
+      let safelyDisabled = !connection.enabled
+      const connectionInput = {
+        displayName: connection.displayName || providerLabel(connection.providerCode),
+        deliveryMode: 'MANUAL' as const,
+        externalPropertyId: draft.externalPropertyId.trim() || null,
+        extranetUrl: prepared.extranetUrl,
+        reason: prepared.reason,
+      }
+      try {
+        const disabled = await liteApi.saveConnection(connection.providerCode, { ...connectionInput, enabled: false })
+        safelyDisabled = true
+        for (const mapping of prepared.mappings) {
+          await liteApi.saveChannelMapping({
+            connectionId: disabled.id,
+            roomTypeId: mapping.roomTypeId,
+            externalRoomTypeId: mapping.externalRoomTypeId,
+            externalRoomTypeName: mapping.externalRoomTypeName,
+            externalRatePlanId: mapping.externalRatePlanId || null,
+            active: true,
+            reason: prepared.reason,
+          })
+        }
+        if (!draft.enableAfterSave) return disabled
+        return liteApi.saveConnection(connection.providerCode, {
+          ...connectionInput,
+          enabled: true,
+          initialReconcileDays: draft.initialReconcileDays,
+        })
+      } catch (causeError) {
+        throw new ConnectionSetupFailure(causeError, safelyDisabled)
+      }
+    },
+    onSuccess: saved,
+    onError: (failure) => {
+      if (failure instanceof ConnectionSetupFailure) {
+        const detail = safeErrorMessage(failure.causeError, language)
+        setError(failure.safelyDisabled ? `${text.configurationFailedDisabled} ${detail}` : detail)
+        return
+      }
+      setError(safeErrorMessage(failure, language))
+    },
+  })
+
+  function updateMapping(roomTypeId: string, patch: Partial<MappingDraft>) {
+    setDraft((current) => ({
+      ...current,
+      mappings: {
+        ...current.mappings,
+        [roomTypeId]: { ...current.mappings[roomTypeId], ...patch },
+      },
+    }))
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    const reason = draft.reason.trim()
+    if (reason.length < MIN_REASON_LENGTH) {
+      setError(text.reasonRequired)
+      return
+    }
+    if (roomTypes.length === 0) {
+      setError(text.noPhysicalRoomTypes)
+      return
+    }
+    const rawUrl = draft.extranetUrl.trim()
+    const officialUrl = rawUrl ? safeExtranetUrl(rawUrl, connection.providerCode) : null
+    const domain = officialProviderDomain(connection.providerCode)
+    if (rawUrl && !officialUrl) {
+      setError(text.officialUrlInvalid.replace('{domain}', domain))
+      return
+    }
+    if (draft.enableAfterSave && !officialUrl) {
+      setError(text.officialUrlRequired.replace('{domain}', domain))
+      return
+    }
+    if (draft.enableAfterSave
+      && (!Number.isInteger(draft.initialReconcileDays)
+        || draft.initialReconcileDays < 1
+        || draft.initialReconcileDays > 90)) {
+      setError(text.initialReconcileDaysInvalid)
+      return
+    }
+    const mappings = roomTypes.map((roomType) => ({
+      roomTypeId: roomType.id,
+      externalRoomTypeId: draft.mappings[roomType.id]?.externalRoomTypeId.trim() || '',
+      externalRoomTypeName: draft.mappings[roomType.id]?.externalRoomTypeName.trim() || '',
+      externalRatePlanId: draft.mappings[roomType.id]?.externalRatePlanId.trim() || '',
+    }))
+    if (mappings.some((mapping) => !mapping.externalRoomTypeId || !mapping.externalRoomTypeName)) {
+      setError(text.mappingRequired)
+      return
+    }
+    setError(null)
+    mutation.mutate({ reason, extranetUrl: officialUrl, mappings })
+  }
+
+  return (
+    <Modal title={`${text.configurationTitle} · ${providerLabel(connection.providerCode)}`} close={() => !mutation.isPending && close()}>
+      <form onSubmit={submit}>
+        <div className="modal__body setup-form">
+          <p>{text.configurationIntro}</p>
+          <p className="notice notice--warning">{text.credentialsProhibited}</p>
+          <div className="setup-form__connection">
+            <label className="field">
+              <span>{text.externalPropertyId}</span>
+              <input maxLength={200} value={draft.externalPropertyId} onChange={(event) => setDraft((current) => ({ ...current, externalPropertyId: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>{text.extranetUrl}</span>
+              <input type="url" inputMode="url" maxLength={1000} placeholder={`https://…${officialProviderDomain(connection.providerCode)}/`} value={draft.extranetUrl} onChange={(event) => setDraft((current) => ({ ...current, extranetUrl: event.target.value }))} />
+              <small>{text.officialUrlHelp}</small>
+            </label>
+          </div>
+          <div className="mapping-editor" aria-label={text.mappingCoverage}>
+            {roomTypes.length === 0 ? <EmptyBlock>{text.noPhysicalRoomTypes}</EmptyBlock> : roomTypes.map((roomType) => {
+              const mapping = draft.mappings[roomType.id] || { externalRoomTypeId: '', externalRoomTypeName: '', externalRatePlanId: '' }
+              return (
+                <fieldset key={roomType.id} className="mapping-row">
+                  <legend>{roomType.name} · {roomType.code} · {roomType.physicalRoomCount} {text.physicalRooms}</legend>
+                  <label className="field"><span>{text.externalRoomTypeId}</span><input required maxLength={200} value={mapping.externalRoomTypeId} onChange={(event) => updateMapping(roomType.id, { externalRoomTypeId: event.target.value })} /></label>
+                  <label className="field"><span>{text.externalRoomTypeName}</span><input required maxLength={200} value={mapping.externalRoomTypeName} onChange={(event) => updateMapping(roomType.id, { externalRoomTypeName: event.target.value })} /></label>
+                  <label className="field"><span>{text.externalRatePlanId}</span><input maxLength={200} value={mapping.externalRatePlanId} onChange={(event) => updateMapping(roomType.id, { externalRatePlanId: event.target.value })} /></label>
+                </fieldset>
+              )
+            })}
+          </div>
+          <label className="field checkbox-field">
+            <input type="checkbox" checked={draft.enableAfterSave} onChange={(event) => setDraft((current) => ({ ...current, enableAfterSave: event.target.checked }))} />
+            <span>{text.enableAfterSave}</span>
+          </label>
+          <p className="form-note">{text.enableAfterSaveHelp}</p>
+          {draft.enableAfterSave ? (
+            <label className="field">
+              <span>{text.initialReconcileDays}</span>
+              <input
+                type="number"
+                min={1}
+                max={90}
+                step={1}
+                required
+                value={draft.initialReconcileDays}
+                onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  initialReconcileDays: Number(event.target.value),
+                }))}
+              />
+              <small>{text.initialReconcileDaysHelp}</small>
+            </label>
+          ) : null}
+          <label className="field">
+            <span>{text.reason} *</span>
+            <textarea rows={3} maxLength={1000} placeholder={text.setupReasonPlaceholder} value={draft.reason} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} />
+          </label>
+          {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
+        </div>
+        <footer className="modal__footer">
+          <button type="button" className="button button--secondary" disabled={mutation.isPending} onClick={close}>{closeLabel}</button>
+          <button className="button" disabled={mutation.isPending || roomTypes.length === 0}>{mutation.isPending ? text.completing : text.saveConfiguration}</button>
+        </footer>
+      </form>
+    </Modal>
+  )
+}
+
+function ReconcileModal({
+  roomTypes,
+  text,
+  language,
+  closeLabel,
+  close,
+  saved,
+}: {
+  roomTypes: ManualChannelRoomType[]
+  text: DeskCopy
+  language: Language
+  closeLabel: string
+  close: () => void
+  saved: () => void
+}) {
+  const today = dateKeyInBangkok()
+  const [from, setFrom] = useState(today)
+  const [through, setThrough] = useState(addDateKey(today, 13))
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: () => liteApi.reconcileChannelTasks({
+      from,
+      through,
+      roomTypeIds: roomTypes.map((roomType) => roomType.id),
+      reason: reason.trim(),
+    }),
+    onSuccess: saved,
+    onError: (cause) => setError(safeErrorMessage(cause, language)),
+  })
+  const dayCount = inclusiveDateCount(from, through)
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    if (reason.trim().length < MIN_REASON_LENGTH) {
+      setError(text.reasonRequired)
+      return
+    }
+    if (!Number.isFinite(dayCount) || dayCount < 1) {
+      setError(text.rangeInvalid)
+      return
+    }
+    if (dayCount > 90) {
+      setError(text.rangeTooLong)
+      return
+    }
+    if (roomTypes.length === 0) {
+      setError(text.noPhysicalRoomTypes)
+      return
+    }
+    setError(null)
+    mutation.mutate()
+  }
+
+  return (
+    <Modal title={text.reconcileTitle} close={() => !mutation.isPending && close()}>
+      <form onSubmit={submit}>
+        <div className="modal__body setup-form">
+          <p>{text.reconcileIntro}</p>
+          <div className="setup-form__connection">
+            <label className="field"><span>{text.fromDate}</span><input type="date" min={today} value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+            <label className="field"><span>{text.throughDate}</span><input type="date" min={from || today} max={from ? addDateKey(from, 89) : undefined} value={through} onChange={(event) => setThrough(event.target.value)} /></label>
+          </div>
+          <p className="form-note">{text.rangeHelp} ({Number.isFinite(dayCount) && dayCount > 0 ? dayCount : '—'})</p>
+          <label className="field"><span>{text.reason} *</span><textarea rows={4} maxLength={1000} placeholder={text.reconcileReasonPlaceholder} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
+        </div>
+        <footer className="modal__footer">
+          <button type="button" className="button button--secondary" disabled={mutation.isPending} onClick={close}>{closeLabel}</button>
+          <button className="button" disabled={mutation.isPending || roomTypes.length === 0}>{mutation.isPending ? text.completing : text.runReconciliation}</button>
+        </footer>
+      </form>
+    </Modal>
+  )
+}
+
+function RetryTaskModal({
+  task,
+  text,
+  language,
+  closeLabel,
+  close,
+  saved,
+}: {
+  task: ManualChannelTask
+  text: DeskCopy
+  language: Language
+  closeLabel: string
+  close: () => void
+  saved: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const mutation = useMutation({
+    mutationFn: () => liteApi.reopenChannelTask(task.id, reason.trim()),
+    onSuccess: saved,
+    onError: (cause) => setError(safeErrorMessage(cause, language)),
+  })
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    if (reason.trim().length < MIN_REASON_LENGTH) {
+      setError(text.reasonRequired)
+      return
+    }
+    setError(null)
+    mutation.mutate()
+  }
+
+  return (
+    <Modal title={`${text.retryTitle} · ${providerLabel(task.providerCode)}`} close={() => !mutation.isPending && close()}>
+      <form onSubmit={submit}>
+        <div className="modal__body setup-form">
+          <p>{text.retryIntro}</p>
+          <div className="detail-list">
+            <div><span>{text.taskDate}</span><strong>{formatDate(task.stayDate, language)}</strong></div>
+            <div><span>{text.externalRoomType}</span><strong>{task.externalRoomTypeName || task.externalRoomTypeId || '—'}</strong></div>
+            <div><span>{text.desiredAvailability}</span><strong>{task.desiredAvailability}</strong></div>
+          </div>
+          <label className="field"><span>{text.reason} *</span><textarea rows={4} maxLength={1000} autoFocus placeholder={text.retryReasonPlaceholder} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          {error ? <p className="notice notice--error" role="alert">{error}</p> : null}
+        </div>
+        <footer className="modal__footer">
+          <button type="button" className="button button--secondary" disabled={mutation.isPending} onClick={close}>{closeLabel}</button>
+          <button className="button" disabled={mutation.isPending}>{mutation.isPending ? text.completing : text.retryTask}</button>
+        </footer>
+      </form>
+    </Modal>
+  )
+}
+
+export function ChannelDeskView({ role }: { role: LiteRole }) {
   const { language, t } = useI18n()
   const text = deskCopy[language]
   const queryClient = useQueryClient()
   const [emailAction, setEmailAction] = useState<EmailAction | null>(null)
   const [selectedReservationId, setSelectedReservationId] = useState('')
   const [actionReason, setActionReason] = useState('')
+  const [actionAdults, setActionAdults] = useState('')
+  const [actionChildren, setActionChildren] = useState('')
+  const [actionChildAges, setActionChildAges] = useState<string[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [taskDrafts, setTaskDrafts] = useState<Record<string, TaskDraft>>({})
   const [taskErrors, setTaskErrors] = useState<Record<string, string>>({})
+  const [setupConnection, setSetupConnection] = useState<ManualChannelConnection | null>(null)
+  const [reconcileOpen, setReconcileOpen] = useState(false)
+  const [retryTask, setRetryTask] = useState<ManualChannelTask | null>(null)
+  const canManage = role === 'ADMIN' || role === 'MANAGER'
+  const canOperateBookings = ['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(role)
+  const canProcessPayments = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'CASHIER'].includes(role)
 
   const deskQuery = useQuery({
     queryKey: ['lite', 'channel-desk'],
@@ -576,7 +1213,7 @@ export function ChannelDeskView() {
   })
 
   const emailMutation = useMutation({
-    mutationFn: async ({ kind, event, reason, reservationId }: EmailAction & { reason: string; reservationId?: string }) => {
+    mutationFn: async ({ kind, event, reason, reservationId, editedDetails }: EmailAction & { reason: string; reservationId?: string; editedDetails?: Record<string, unknown> }) => {
       if (kind === 'reject') return liteApi.rejectEmailEvent(event.id, reason)
       const linkedReservationId = reservationId || event.reservationId || undefined
       const mode = event.eventType === 'NEW_BOOKING'
@@ -586,12 +1223,16 @@ export function ChannelDeskView() {
         mode,
         reservationId: linkedReservationId,
         reason: reason || undefined,
+        editedDetails,
       })
     },
     onSuccess: async () => {
       setEmailAction(null)
       setSelectedReservationId('')
       setActionReason('')
+      setActionAdults('')
+      setActionChildren('')
+      setActionChildAges([])
       setActionError(null)
       setSuccessMessage(text.actionSaved)
       await queryClient.invalidateQueries({ queryKey: ['lite'] })
@@ -627,6 +1268,21 @@ export function ChannelDeskView() {
     },
   })
 
+  const reprocessEmailMutation = useMutation({
+    mutationFn: (event: BookingEmailEvent) => liteApi.reprocessEmailEvent(event.id),
+    onSuccess: async () => {
+      setActionError(null)
+      setSuccessMessage(text.reprocessSaved)
+      await queryClient.invalidateQueries({ queryKey: ['lite', 'channel-desk'] })
+    },
+    onError: async (error) => {
+      setActionError(safeErrorMessage(error, language))
+      if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        await queryClient.invalidateQueries({ queryKey: ['lite', 'channel-desk'] })
+      }
+    },
+  })
+
   useEffect(() => {
     const tasks = deskQuery.data?.tasks || []
     setTaskDrafts((current) => {
@@ -649,16 +1305,41 @@ export function ChannelDeskView() {
     () => (deskQuery.data?.tasks || []).filter((task) => task.status === 'PENDING'),
     [deskQuery.data?.tasks],
   )
+  const failedTasks = useMemo(
+    () => (deskQuery.data?.tasks || []).filter((task) => task.status === 'FAILED'),
+    [deskQuery.data?.tasks],
+  )
   const reviewEvents = useMemo(
-    () => (deskQuery.data?.reviewEvents || []).filter((event) => event.status === 'NEEDS_REVIEW' && ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION'].includes(event.eventType)),
+    () => (deskQuery.data?.reviewEvents || []).filter((event) => (
+      event.status === 'ERROR'
+      || (event.status === 'NEEDS_REVIEW' && ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE'].includes(event.eventType))
+    )),
     [deskQuery.data?.reviewEvents],
   )
   const enabledConnections = deskQuery.data?.connections.filter((connection) => connection.enabled).length || 0
+  const linkingNewBooking = Boolean(
+    emailAction?.kind === 'approve'
+    && emailAction.event.eventType === 'NEW_BOOKING'
+    && (selectedReservationId || emailAction.event.reservationId),
+  )
+
+  async function finishManagementAction(message: string) {
+    setSetupConnection(null)
+    setReconcileOpen(false)
+    setRetryTask(null)
+    setSuccessMessage(message)
+    await queryClient.invalidateQueries({ queryKey: ['lite', 'channel-desk'] })
+  }
 
   function openEmailAction(kind: EmailAction['kind'], event: BookingEmailEvent) {
     setEmailAction({ kind, event })
     setSelectedReservationId(event.reservationId || '')
     setActionReason('')
+    setActionAdults(event.adults == null ? (event.eventType === 'NEW_BOOKING' ? '1' : '') : String(event.adults))
+    setActionChildren(event.children == null ? (event.eventType === 'NEW_BOOKING' ? '0' : '') : String(event.children))
+    setActionChildAges(Array.from({ length: event.children || 0 }, (_, index) => (
+      event.childAges[index] == null ? '' : String(event.childAges[index])
+    )))
     setActionError(null)
     setSuccessMessage(null)
   }
@@ -674,7 +1355,7 @@ export function ChannelDeskView() {
     if (
       emailAction.kind === 'approve' &&
       (
-        ['MODIFICATION', 'CANCELLATION'].includes(emailAction.event.eventType) ||
+        ['MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE'].includes(emailAction.event.eventType) ||
         (emailAction.event.eventType === 'NEW_BOOKING' && /possible duplicate/i.test(emailAction.event.reviewReason || ''))
       ) &&
       !(selectedReservationId || emailAction.event.reservationId)
@@ -682,8 +1363,42 @@ export function ChannelDeskView() {
       setActionError(text.linkRequired)
       return
     }
+    let editedDetails: Record<string, unknown> | undefined
+    const linkedReservationId = selectedReservationId || emailAction.event.reservationId
+    if (
+      emailAction.kind === 'approve'
+      && (
+        emailAction.event.eventType === 'MODIFICATION'
+        || (emailAction.event.eventType === 'NEW_BOOKING' && !linkedReservationId)
+      )
+    ) {
+      const adultsRequired = emailAction.event.eventType === 'NEW_BOOKING'
+      const adultsText = actionAdults.trim()
+      const childrenText = actionChildren.trim()
+      const adults = adultsText ? Number(adultsText) : null
+      const children = childrenText ? Number(childrenText) : adultsRequired ? 0 : null
+      if ((adultsRequired || adultsText) && (!Number.isSafeInteger(adults) || Number(adults) < 1)) {
+        setActionError(language === 'th' ? 'กรุณาระบุจำนวนผู้ใหญ่ที่ถูกต้อง' : 'Enter a valid adult count.')
+        return
+      }
+      if (children !== null && (!Number.isSafeInteger(children) || Number(children) < 0)) {
+        setActionError(language === 'th' ? 'กรุณาระบุจำนวนเด็กที่ถูกต้อง' : 'Enter a valid child count.')
+        return
+      }
+      const childCount = children === null ? 0 : Number(children)
+      const childAgeInputs = actionChildAges.slice(0, childCount)
+      const childAges = childAgeInputs.map(Number)
+      if (childAgeInputs.some((value) => !value.trim()) || childAges.length !== childCount || childAges.some((age) => !Number.isSafeInteger(age) || age < 0 || age > 17)) {
+        setActionError(language === 'th' ? 'กรุณาระบุอายุ 0–17 ปีสำหรับเด็กทุกคน' : 'Enter an age from 0 to 17 for every child.')
+        return
+      }
+      editedDetails = {
+        ...(adults !== null ? { adults } : {}),
+        ...(children !== null ? { children, childAges } : {}),
+      }
+    }
     setActionError(null)
-    emailMutation.mutate({ ...emailAction, reason, reservationId: selectedReservationId || undefined })
+    emailMutation.mutate({ ...emailAction, reason, reservationId: selectedReservationId || undefined, editedDetails })
   }
 
   function completeTask(task: ManualChannelTask) {
@@ -736,6 +1451,7 @@ export function ChannelDeskView() {
         </div>
         <div className="page-actions">
           <span className="muted">{text.refreshed}: {formatDateTime(new Date(deskQuery.dataUpdatedAt).toISOString(), language)}</span>
+          {canManage ? <button className="button" onClick={() => { setSuccessMessage(null); setReconcileOpen(true) }}>{text.reconcile}</button> : null}
           <button className="button button--secondary" disabled={deskQuery.isFetching} onClick={() => void deskQuery.refetch()}>{t('refresh')}</button>
         </div>
       </header>
@@ -747,12 +1463,14 @@ export function ChannelDeskView() {
 
       {deskQuery.error ? <p className="notice notice--error" role="alert">{text.refreshFailed}</p> : null}
       {successMessage ? <p className="notice notice--success" role="status">{successMessage}</p> : null}
+      {actionError && !emailAction ? <p className="notice notice--error" role="alert">{actionError}</p> : null}
+      {!canManage ? <p className="notice notice--subtle">{text.managerOnly}</p> : null}
       {(data.counts.parserErrors || 0) > 0 ? <p className="notice notice--error" role="alert"><strong>{data.counts.parserErrors}</strong> {text.parserErrors}</p> : null}
       {(data.counts.failedTasks || 0) > 0 ? <p className="notice notice--error" role="alert"><strong>{data.counts.failedTasks}</strong> {text.failedTasks}</p> : null}
 
       <section className="stats-grid" aria-label={text.title}>
-        <StatCard label={text.reviewCount} value={reviewEvents.length} tone={reviewEvents.length > 0 ? 'warning' : 'success'} />
-        <StatCard label={text.taskCount} value={actionableTasks.length} tone={actionableTasks.length > 0 ? 'warning' : 'success'} />
+        <StatCard label={text.reviewCount} value={data.counts.activeReviewWork} tone={data.counts.activeReviewWork > 0 ? 'warning' : 'success'} />
+        <StatCard label={text.taskCount} value={data.counts.pendingTasks} tone={data.counts.pendingTasks > 0 ? 'warning' : 'success'} />
         <StatCard label={text.activeConnections} value={enabledConnections} />
         <StatCard label={text.pendingDeliveries} value={data.syncHealth.pendingDeliveries || 0} tone={(data.syncHealth.pendingDeliveries || 0) > 0 ? 'warning' : 'success'} />
       </section>
@@ -794,8 +1512,9 @@ export function ChannelDeskView() {
             <h2 id="review-inbox-title">{t('reviewInbox')}</h2>
             <p>{text.reviewHelp}</p>
           </div>
-          <strong>{reviewEvents.length}</strong>
+          <strong>{copyWithCounts(text.returnedOfTotal, reviewEvents.length, data.counts.activeReviewWork)}</strong>
         </header>
+        {data.pagination.reviewEvents.truncated ? <p className="notice notice--warning">{text.listTruncated}</p> : null}
         {reviewEvents.length === 0 ? (
           <EmptyBlock>{text.noReviewEvents}</EmptyBlock>
         ) : (
@@ -806,8 +1525,18 @@ export function ChannelDeskView() {
                 event={event}
                 language={language}
                 text={text}
-                busy={emailMutation.isPending}
+                busy={emailMutation.isPending || reprocessEmailMutation.isPending}
+                canApply={event.eventType === 'CANCELLATION'
+                  ? canManage
+                  : event.eventType === 'PAYMENT_NOTICE'
+                    ? canProcessPayments
+                    : canOperateBookings}
                 openAction={openEmailAction}
+                reprocess={(event) => {
+                  setActionError(null)
+                  setSuccessMessage(null)
+                  reprocessEmailMutation.mutate(event)
+                }}
               />
             ))}
           </div>
@@ -820,8 +1549,9 @@ export function ChannelDeskView() {
             <h2 id="availability-queue-title">{t('availabilityQueue')}</h2>
             <p>{text.availabilityHelp}</p>
           </div>
-          <strong>{actionableTasks.length}</strong>
+          <strong>{copyWithCounts(text.returnedOfTotal, actionableTasks.length, data.counts.pendingTasks)}</strong>
         </header>
+        {data.pagination.tasks.truncated ? <p className="notice notice--warning">{text.listTruncated}</p> : null}
         {actionableTasks.length === 0 ? (
           <EmptyBlock>{text.noAvailabilityTasks}</EmptyBlock>
         ) : (
@@ -849,6 +1579,32 @@ export function ChannelDeskView() {
         )}
       </section>
 
+      <section className="panel" aria-labelledby="failed-queue-title">
+        <header className="panel__header">
+          <div>
+            <h2 id="failed-queue-title">{text.failedQueue}</h2>
+            <p>{text.retryIntro}</p>
+          </div>
+          <strong>{copyWithCounts(text.returnedOfTotal, failedTasks.length, data.counts.failedTasks)}</strong>
+        </header>
+        {failedTasks.length === 0 ? (
+          <EmptyBlock>{text.noFailedTasks}</EmptyBlock>
+        ) : (
+          <div className="channel-card-grid">
+            {failedTasks.map((task) => (
+              <FailedTaskCard
+                key={task.id}
+                task={task}
+                language={language}
+                text={text}
+                canManage={canManage}
+                retry={() => { setSuccessMessage(null); setRetryTask(task) }}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
       <section className="panel" aria-labelledby="connections-title">
         <header className="panel__header">
           <div>
@@ -860,10 +1616,55 @@ export function ChannelDeskView() {
           <EmptyBlock>{text.noConnections}</EmptyBlock>
         ) : (
           <div className="channel-card-grid channel-card-grid--connections">
-            {data.connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} text={text} />)}
+            {data.connections.map((connection) => (
+              <ConnectionCard
+                key={connection.id}
+                connection={connection}
+                text={text}
+                physicalRoomTypeCount={data.roomTypes.length}
+                canManage={canManage}
+                configure={() => { setSuccessMessage(null); setSetupConnection(connection) }}
+              />
+            ))}
           </div>
         )}
       </section>
+
+      {setupConnection && canManage ? (
+        <ConnectionSetupModal
+          key={setupConnection.id}
+          connection={setupConnection}
+          roomTypes={data.roomTypes}
+          language={language}
+          text={text}
+          closeLabel={t('close')}
+          close={() => setSetupConnection(null)}
+          saved={() => void finishManagementAction(text.configurationSaved)}
+        />
+      ) : null}
+
+      {reconcileOpen && canManage ? (
+        <ReconcileModal
+          roomTypes={data.roomTypes}
+          language={language}
+          text={text}
+          closeLabel={t('close')}
+          close={() => setReconcileOpen(false)}
+          saved={() => void finishManagementAction(text.reconciliationSaved)}
+        />
+      ) : null}
+
+      {retryTask && canManage ? (
+        <RetryTaskModal
+          key={retryTask.id}
+          task={retryTask}
+          language={language}
+          text={text}
+          closeLabel={t('close')}
+          close={() => setRetryTask(null)}
+          saved={() => void finishManagementAction(text.retrySaved)}
+        />
+      ) : null}
 
       {emailAction ? (
         <Modal
@@ -894,6 +1695,56 @@ export function ChannelDeskView() {
                   ? <small className="inline-error">{text.noCandidateReservations}</small>
                   : null}
               </label>
+            ) : null}
+            {emailAction.kind === 'approve' && ['NEW_BOOKING', 'MODIFICATION'].includes(emailAction.event.eventType) && !linkingNewBooking ? (
+              <>
+                <div className="setup-form__connection">
+                  <label className="field">
+                    <span>{language === 'th' ? 'จำนวนผู้ใหญ่' : 'Adults'}</span>
+                    <input
+                      required={emailAction.event.eventType === 'NEW_BOOKING'}
+                      min="1"
+                      step="1"
+                      type="number"
+                      value={actionAdults}
+                      onChange={(event) => setActionAdults(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>{language === 'th' ? 'จำนวนเด็ก' : 'Children'}</span>
+                    <input
+                      required={emailAction.event.eventType === 'NEW_BOOKING'}
+                      min="0"
+                      step="1"
+                      type="number"
+                      value={actionChildren}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setActionChildren(value)
+                        const count = Number(value)
+                        if (Number.isSafeInteger(count) && count >= 0) {
+                          setActionChildAges((current) => Array.from({ length: count }, (_, index) => current[index] || ''))
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+                {actionChildAges.map((age, index) => (
+                  <label className="field" key={index}>
+                    <span>{language === 'th' ? `อายุเด็กคนที่ ${index + 1}` : `Child ${index + 1} age`}</span>
+                    <input
+                      required
+                      min="0"
+                      max="17"
+                      step="1"
+                      type="number"
+                      value={age}
+                      onChange={(event) => setActionChildAges((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}
+                    />
+                  </label>
+                ))}
+                <p className="form-note">{language === 'th' ? 'ตรวจสอบจำนวนผู้เข้าพักและอายุเด็กกับ OTA ก่อนอนุมัติ เพื่อคำนวณราคาและความจุอย่างถูกต้อง' : 'Verify occupancy and every child age against the OTA before approval so capacity and pricing are exact.'}</p>
+              </>
             ) : null}
             <p>{text.actionReasonHelp}</p>
             <label className="field">

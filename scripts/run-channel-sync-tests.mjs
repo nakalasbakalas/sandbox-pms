@@ -507,12 +507,28 @@ async function run() {
   releaseSlowSync()
   await firstRun
 
-  const policy = getChannelSyncV2Policy({ CHANNEL_MANAGER_PROVIDER: 'channex' })
-  assert.equal(policy.outboundAvailability.mode, 'manual_queue')
-  assert.equal(policy.outboundAvailability.autoDispatch, false)
-  assert.equal(policy.trueTwoWay.zeroLagRequired, true)
-  assert.equal(policy.trueTwoWay.channelOnlyProvider, 'channex')
-  assert.deepEqual(policy.directApiApplications.map((item) => item.provider), ['agoda', 'trip'])
+  const litePolicy = getChannelSyncV2Policy({
+    PMS_UI_VARIANT: 'lite',
+    CHANNEL_MANAGER_PROVIDER: 'channex',
+  })
+  assert.equal(litePolicy.queueBackend, 'lite_manual')
+  assert.equal(litePolicy.inbound.mode, 'gmail_pubsub_with_reconciliation')
+  assert.equal(litePolicy.outboundAvailability.mode, 'manual_queue')
+  assert.equal(litePolicy.outboundAvailability.backend, 'lite_manual')
+  assert.equal(litePolicy.outboundAvailability.autoDispatch, false)
+  assert.equal(litePolicy.trueTwoWay.zeroLagRequired, true)
+  assert.equal(litePolicy.trueTwoWay.channelOnlyProvider, 'channex')
+  assert.deepEqual(litePolicy.directApiApplications.map((item) => item.provider), ['agoda', 'trip'])
+
+  const legacyPolicy = getChannelSyncV2Policy({})
+  assert.equal(legacyPolicy.queueBackend, 'hotel_ops_legacy')
+  assert.equal(legacyPolicy.inbound.mode, 'near_live_email_polling')
+  assert.equal(legacyPolicy.outboundAvailability.backend, 'hotel_ops_legacy')
+
+  assert.throws(
+    () => getChannelSyncV2Policy({ CHANNEL_SYNC_QUEUE_BACKEND: 'unknown_backend' }),
+    /CHANNEL_SYNC_QUEUE_BACKEND must be lite_manual or hotel_ops_legacy/,
+  )
 
   console.log('Channel sync lite finalization tests passed.')
 }

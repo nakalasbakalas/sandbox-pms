@@ -608,14 +608,27 @@ export async function cancelAvailabilityQueueItem(prisma, taskId, input = {}, ac
 
 export function getChannelSyncV2Policy(env = process.env) {
   const requestedProvider = normalizeText(env.CHANNEL_MANAGER_PROVIDER || 'channex').toLowerCase()
+  const requestedQueueBackend = normalizeText(env.CHANNEL_SYNC_QUEUE_BACKEND).toLowerCase()
+  const queueBackend = requestedQueueBackend || (
+    normalizeText(env.PMS_UI_VARIANT).toLowerCase() === 'lite'
+      ? 'lite_manual'
+      : 'hotel_ops_legacy'
+  )
+  if (!['lite_manual', 'hotel_ops_legacy'].includes(queueBackend)) {
+    throw new PmsValidationError('CHANNEL_SYNC_QUEUE_BACKEND must be lite_manual or hotel_ops_legacy.')
+  }
   return {
     version: POLICY_VERSION,
+    queueBackend,
     inbound: {
-      mode: 'near_live_email_polling',
+      mode: queueBackend === 'lite_manual'
+        ? 'gmail_pubsub_with_reconciliation'
+        : 'near_live_email_polling',
       appliesOperationalChangesAutomatically: false,
     },
     outboundAvailability: {
       mode: 'manual_queue',
+      backend: queueBackend,
       autoDispatch: false,
       approvalRequired: true,
       providerReferenceRequiredToComplete: true,

@@ -21,7 +21,7 @@ function StayNotice({ label, reservation }: { label: string; reservation: Housek
   return (
     <div className="occupancy-note">
       <span>{label}</span>
-      <strong>{reservation.guest.displayName}</strong>
+      <strong>{reservation.status.replaceAll('_', ' ')}</strong>
       <span>{reservation.checkIn} → {reservation.checkOut}</span>
     </div>
   )

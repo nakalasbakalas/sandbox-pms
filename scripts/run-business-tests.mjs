@@ -17,7 +17,7 @@ import { buildOpsWorkerTaskPayload, executeOpsWorkerTask } from '../server/ops-w
 import { opsWorkerConfigured, runSignedMockOtaWorkerTask, signOpsWorkerRequest, verifyOpsWorkerRequest } from '../server/ops-worker-auth.mjs'
 import { createBookingComAdapter, executeBookingComTask } from '../server/ota-adapters/booking-com.mjs'
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
-import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
+import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, ingestBookingEmailEvents as syncBookingEmail, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail as publicSyncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
@@ -1261,6 +1261,16 @@ for (const fixture of bookingEmailNoiseFixtures) {
   assert.match(parsed.reviewReason || '', /event type/i, `${fixture.name} remains queued for manual classification`)
 }
 
+const publicInjectionFixture = createBookingEmailPrismaFixture()
+await assert.rejects(
+  () => publicSyncBookingEmail(publicInjectionFixture.prisma, {
+    events: [{ ...bookingEmailParserFixtures[0].input, sourceMessageId: 'forged-public-event' }],
+  }, { id: 'front-desk-forgery-test', username: 'front.desk', role: 'FRONT_DESK' }),
+  /cannot inject events/i,
+  'public booking-email sync cannot inject caller-supplied provider evidence',
+)
+assert.equal(publicInjectionFixture.events.length, 0, 'rejected public event injection does not persist evidence')
+
 const duplicateScopeFixture = createBookingEmailPrismaFixture()
 const duplicateScopeActor = { id: 'front-desk-booking', username: 'front.desk', role: 'FRONT_DESK' }
 const sameReferencePaymentFixture = {
@@ -1339,6 +1349,73 @@ const ignoredReplayResult = await syncBookingEmail(ignoredReplayFixture.prisma, 
 assert.equal(ignoredReplayResult.events[0].status, 'IGNORED', 'Gmail replay keeps explicitly rejected booking-email events ignored')
 assert.equal(ignoredReplayFixture.events[0].subject, ignoredSubject, 'Gmail replay does not overwrite rejected booking-email evidence')
 
+const providerLifecycleFixture = createBookingEmailPrismaFixture()
+const providerLifecycleCases = [
+  {
+    providerCode: 'booking_com',
+    sender: 'Booking.com <notification@booking.com>',
+    authenticationResults: 'mx.google.com; dkim=pass header.d=booking.com; dmarc=pass header.from=booking.com',
+    referencePrefix: 'BKG',
+  },
+  {
+    providerCode: 'agoda',
+    sender: 'Agoda <notification@agoda.com>',
+    authenticationResults: 'mx.google.com; dkim=pass header.d=agoda.com; dmarc=pass header.from=agoda.com',
+    referencePrefix: 'AGO',
+  },
+  {
+    providerCode: 'trip_com',
+    sender: 'Trip.com <notification@trip.com>',
+    authenticationResults: 'mx.google.com; dkim=pass header.d=trip.com; dmarc=pass header.from=trip.com',
+    referencePrefix: 'TRP',
+  },
+].flatMap((provider, providerIndex) => [
+  {
+    ...provider,
+    eventType: 'NEW_BOOKING',
+    actionLabel: 'create',
+    subjectPrefix: 'New booking confirmed',
+    details: 'Guest name: Parser Create Check-in: 2026-08-10 Check-out: 2026-08-12 Room type: Double Room Adults: 2 Total amount: THB 4200',
+    reference: `${provider.referencePrefix}-${providerIndex + 1}001`,
+  },
+  {
+    ...provider,
+    eventType: 'MODIFICATION',
+    actionLabel: 'modify',
+    subjectPrefix: 'Booking modified',
+    details: 'Guest name: Parser Modify Check-in: 2026-08-11 Check-out: 2026-08-14 Room type: Twin Room Adults: 2 Total amount: THB 5100',
+    reference: `${provider.referencePrefix}-${providerIndex + 1}002`,
+  },
+  {
+    ...provider,
+    eventType: 'CANCELLATION',
+    actionLabel: 'cancel',
+    subjectPrefix: 'Reservation cancelled',
+    details: 'Guest name: Parser Cancel Arrival: 2026-08-15 Departure: 2026-08-17 Room type: Double Room',
+    reference: `${provider.referencePrefix}-${providerIndex + 1}003`,
+  },
+])
+const providerLifecycleResult = await syncBookingEmail(providerLifecycleFixture.prisma, {
+  sourceId: providerLifecycleFixture.sources[0].id,
+  reviewOnly: true,
+  events: providerLifecycleCases.map((fixture, index) => ({
+    subject: `${fixture.subjectPrefix} ${fixture.reference}`,
+    rawText: `${fixture.details} Reservation ID: ${fixture.reference}`,
+    sender: fixture.sender,
+    sourceMessageId: `gmail-provider-lifecycle-${index + 1}`,
+    rawHeaders: { authenticationResults: fixture.authenticationResults },
+  })),
+}, duplicateScopeActor)
+assert.equal(providerLifecycleResult.events.length, 9, 'Booking.com, Agoda, and Trip.com create/modify/cancel fixtures are all imported')
+for (const [index, fixture] of providerLifecycleCases.entries()) {
+  const event = providerLifecycleResult.events[index]
+  assert.equal(event.eventType, fixture.eventType, `${fixture.providerCode} ${fixture.actionLabel} email keeps its lifecycle attribution`)
+  assert.equal(event.providerCode, fixture.providerCode, `${fixture.providerCode} ${fixture.actionLabel} email keeps provider attribution`)
+  assert.equal(event.channelRef, fixture.reference, `${fixture.providerCode} ${fixture.actionLabel} email keeps its reservation reference`)
+  assert.equal(event.externalReservationId, fixture.reference, `${fixture.providerCode} ${fixture.actionLabel} email keeps a provider-scoped external id`)
+  assert.equal(event.status, 'NEEDS_REVIEW', `${fixture.providerCode} ${fixture.actionLabel} email remains review-only`)
+}
+
 const tripNormalizationFixture = createBookingEmailPrismaFixture()
 const tripNormalizationResult = await syncBookingEmail(tripNormalizationFixture.prisma, {
   sourceId: tripNormalizationFixture.sources[0].id,
@@ -1378,6 +1455,7 @@ const unauthenticatedTripResult = await syncBookingEmail(unauthenticatedTripFixt
     ...bookingEmailParserFixtures[0].input,
     sender: 'Trip.com <notification@trip.com>',
     sourceMessageId: 'gmail-unauthenticated-trip-provider',
+    rawHeaders: { authenticationResults: 'attacker.example; dmarc=pass header.from=trip.com' },
   }],
 }, duplicateScopeActor)
 assert.equal(unauthenticatedTripResult.events[0].providerCode, undefined, 'an official-looking OTA sender is not trusted without aligned Gmail authentication results')
@@ -1469,11 +1547,12 @@ const paginatedGmailEvents = await fetchGmailEventsForSource({
       payload: {
         mimeType: 'text/plain',
         headers: [
-          { name: 'from', value: 'Booking.com <booking@example.test>' },
+          { name: 'from', value: 'Booking.com <notification@booking.com>' },
           { name: 'to', value: 'booking@sandboxhotel.com' },
           { name: 'subject', value: `Booking confirmation ${id}` },
           { name: 'date', value: 'Wed, 01 Jul 2026 08:00:00 +0000' },
           { name: 'message-id', value: `<${id}@example.test>` },
+          { name: 'authentication-results', value: 'mx.google.com; dmarc=pass header.from=booking.com' },
         ],
         body: {
           data: gmailBody('Guest: Example Guest Check in: 2026-07-10 Check out: 2026-07-12 Double THB 3200'),
@@ -1485,6 +1564,13 @@ const paginatedGmailEvents = await fetchGmailEventsForSource({
 assert.equal(paginatedGmailEvents.length, 2, 'booking-email Gmail fetch follows bounded pagination')
 assert.equal(gmailListPageRequests, 2, 'booking-email Gmail fetch requests additional pages when needed')
 assert.equal(paginatedGmailEvents[0].sourceMessageId, 'gmail-page-1', 'booking-email Gmail fetch keeps source message ids for dedupe')
+assert.match(paginatedGmailEvents[0].rawHeaders.authenticationResults, /dmarc=pass/i, 'trusted Gmail fetch retains Authentication-Results evidence')
+const fetchedProviderFixture = createBookingEmailPrismaFixture()
+const fetchedProviderResult = await syncBookingEmail(fetchedProviderFixture.prisma, {
+  sourceId: fetchedProviderFixture.sources[0].id,
+  events: [paginatedGmailEvents[0]],
+}, duplicateScopeActor)
+assert.equal(fetchedProviderResult.events[0].providerCode, 'booking_com', 'trusted Gmail Authentication-Results evidence verifies the provider during ingestion')
 
 const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
   id: 'email-event-1',
@@ -1510,24 +1596,48 @@ const bookingEmailForm = bookingEmailWorkflow.bookingEmailDetailsForm({
 assert.equal(bookingEmailForm.guestName, 'Parsed Guest', 'booking-email edit form prefers parsed guest details')
 assert.equal(bookingEmailForm.amount, '4400', 'booking-email edit form falls back to event amount')
 assert.equal(bookingEmailForm.channelRef, 'OTA-123', 'booking-email edit form carries channel reference')
+assert.equal(bookingEmailWorkflow.bookingEmailDetailsForm({
+  id: 'email-event-currency-missing',
+  source: 'Booking.com',
+  sender: 'booking@example.test',
+  receivedAt: '2026-07-01T08:00:00.000Z',
+  eventType: 'NEW_BOOKING',
+  status: 'NEEDS_REVIEW',
+  amount: 4400,
+}).currency, '', 'booking-email edit form does not invent THB when source currency is missing')
 
 const editedBookingEmailPayload = bookingEmailWorkflow.buildBookingEmailApprovePayload({
   mode: 'apply_parsed',
   form: {
     ...bookingEmailForm,
-    amount: '4500',
     adults: '2',
     children: '0',
+    childAges: [],
     paymentMethod: 'ONLINE',
     notes: 'Corrected by front desk.',
   },
-  reason: 'Corrected extracted total before creating reservation.',
+  reason: 'Corrected non-money details before creating reservation.',
 })
 assert.equal(editedBookingEmailPayload.mode, 'apply_parsed', 'booking-email edited details use apply mode')
-assert.equal(editedBookingEmailPayload.editedDetails.amount, 4500, 'booking-email edited details parse amount')
+assert.equal(Object.hasOwn(editedBookingEmailPayload.editedDetails, 'amount'), false, 'booking-email approval payload cannot replace source amount')
+assert.equal(Object.hasOwn(editedBookingEmailPayload.editedDetails, 'currency'), false, 'booking-email approval payload cannot relabel source currency')
 assert.equal(editedBookingEmailPayload.editedDetails.children, 0, 'booking-email edited details preserve zero children')
 assert.equal(editedBookingEmailPayload.editedDetails.paymentMethod, 'ONLINE', 'booking-email edited details preserve payment method')
-assert.equal(editedBookingEmailPayload.reason, 'Corrected extracted total before creating reservation.', 'booking-email edited apply payload carries audit reason')
+assert.equal(editedBookingEmailPayload.reason, 'Corrected non-money details before creating reservation.', 'booking-email edited apply payload carries audit reason')
+
+const childBookingEmailPayload = bookingEmailWorkflow.buildBookingEmailApprovePayload({
+  mode: 'apply_parsed',
+  form: { ...bookingEmailForm, children: '1', childAges: ['8'] },
+})
+assert.deepEqual(childBookingEmailPayload.editedDetails.childAges, [8], 'booking-email approval carries one verified age per child')
+assert.throws(
+  () => bookingEmailWorkflow.buildBookingEmailApprovePayload({
+    mode: 'apply_parsed',
+    form: { ...bookingEmailForm, children: '1', childAges: [''] },
+  }),
+  /one age for every child/i,
+  'booking-email approval rejects child occupancy without an age for every child',
+)
 
 assert.throws(
   () => bookingEmailWorkflow.buildBookingEmailApprovePayload({ mode: 'link_reservation', form: bookingEmailForm, reservationId: ' ' }),
@@ -1540,6 +1650,7 @@ const linkBookingEmailPayload = bookingEmailWorkflow.buildBookingEmailApprovePay
   reservationId: 'reservation-1',
 })
 assert.equal(linkBookingEmailPayload.reservationId, 'reservation-1', 'booking-email link payload targets the selected reservation')
+assert.equal(Object.hasOwn(linkBookingEmailPayload, 'editedDetails'), false, 'booking-email linking does not require incomplete OTA child-age details')
 assert.equal(
   bookingEmailWorkflow.bookingEmailDefaultApprovalMode({ eventType: 'NEW_BOOKING', reservationId: 'reservation-1' }),
   'link_reservation',
@@ -1556,9 +1667,14 @@ assert.equal(
   'booking-email cancellation actions require an operational reason',
 )
 assert.equal(
+  bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'MODIFICATION' }),
+  true,
+  'booking-email modification actions require an operational reason',
+)
+assert.equal(
   bookingEmailWorkflow.bookingEmailActionRequiresReason({ eventType: 'NEW_BOOKING' }),
   false,
-  'booking-email non-cancellation actions do not require a cancellation reason',
+  'booking-email new-booking actions do not require an operational reason',
 )
 
 const notificationDrafts = buildOpsNotificationDrafts({

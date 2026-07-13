@@ -111,11 +111,11 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
     : route === 'bookings'
       ? <BookingsView role={user.role} />
       : route === 'board'
-        ? <BoardView />
+        ? <BoardView role={user.role} />
         : route === 'housekeeping'
           ? <HousekeepingView />
           : route === 'channel-desk'
-            ? <ChannelDeskView />
+            ? <ChannelDeskView role={user.role} />
             : <SettingsView user={user} />
 
   return (

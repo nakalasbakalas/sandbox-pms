@@ -68,6 +68,7 @@ const RESERVATION_SELECT = {
   status: true,
   adults: true,
   children: true,
+  childAges: true,
   ratePerNightSatang: true,
   totalAmountSatang: true,
   depositAmountSatang: true,
@@ -84,6 +85,9 @@ const RESERVATION_SELECT = {
       id: true,
       firstName: true,
       lastName: true,
+      nationality: true,
+      idType: true,
+      idNumber: true,
       vipStatus: true,
       blacklisted: true,
     },
@@ -118,6 +122,34 @@ const RESERVATION_SELECT = {
       paidSatang: true,
       balanceSatang: true,
       updatedAt: true,
+      charges: {
+        select: {
+          id: true,
+          date: true,
+          description: true,
+          category: true,
+          amountSatang: true,
+          quantity: true,
+          totalSatang: true,
+          void: true,
+          voidReason: true,
+          createdBy: true,
+          createdAt: true,
+        },
+        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      },
+      payments: {
+        select: {
+          id: true,
+          amountSatang: true,
+          method: true,
+          reference: true,
+          notes: true,
+          processedBy: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      },
     },
   },
 }
@@ -128,12 +160,6 @@ const HOUSEKEEPING_STAY_SELECT = {
   checkIn: true,
   checkOut: true,
   status: true,
-  guest: {
-    select: {
-      firstName: true,
-      lastName: true,
-    },
-  },
 }
 
 const ROOM_SELECT = {
@@ -151,6 +177,24 @@ const ROOM_SELECT = {
       code: true,
       name: true,
       baseRateSatang: true,
+    },
+  },
+}
+
+const HOUSEKEEPING_ROOM_SELECT = {
+  id: true,
+  roomTypeId: true,
+  number: true,
+  floor: true,
+  operationalStatus: true,
+  currentStatus: true,
+  blockedUntil: true,
+  updatedAt: true,
+  roomType: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
     },
   },
 }
@@ -312,6 +356,12 @@ function safeCurrency(value, fallback = 'THB') {
   return /^[A-Z]{3}$/.test(code) ? code : fallback
 }
 
+function safeNullableCurrency(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null
+  const code = String(value).trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(code) ? code : null
+}
+
 function mapProperty(property) {
   return {
     id: property.id,
@@ -362,6 +412,10 @@ function mapGuest(guest) {
     firstName,
     lastName,
     displayName: [firstName, lastName].filter(Boolean).join(' ') || 'Guest',
+    nationality: guest.nationality || null,
+    idType: guest.idType || null,
+    identityComplete: Boolean(String(guest.nationality || '').trim() && String(guest.idNumber || '').trim()),
+    idNumberLast4: guest.idNumber ? String(guest.idNumber).slice(-4) : null,
     vip: Boolean(guest.vipStatus),
     blacklisted: Boolean(guest.blacklisted),
   }
@@ -383,6 +437,28 @@ function mapFolio(folio) {
     paidSatang,
     balanceSatang,
     paymentState: balanceSatang <= 0 ? 'SETTLED' : paidSatang > 0 ? 'PARTIAL' : 'UNPAID',
+    charges: (folio.charges || []).map((charge) => ({
+      id: charge.id,
+      date: isoDateKey(charge.date),
+      description: charge.description,
+      category: charge.category,
+      amountSatang: storedMoneySatang(charge.amountSatang, 'charge amount'),
+      quantity: charge.quantity,
+      totalSatang: storedMoneySatang(charge.totalSatang, 'charge total'),
+      void: Boolean(charge.void),
+      voidReason: charge.voidReason || null,
+      createdBy: charge.createdBy,
+      createdAt: isoTimestamp(charge.createdAt),
+    })),
+    payments: (folio.payments || []).map((payment) => ({
+      id: payment.id,
+      amountSatang: storedMoneySatang(payment.amountSatang, 'payment amount'),
+      method: payment.method,
+      reference: payment.reference || null,
+      notes: payment.notes || null,
+      processedBy: payment.processedBy,
+      createdAt: isoTimestamp(payment.createdAt),
+    })),
     updatedAt: isoTimestamp(folio.updatedAt),
   }
 }
@@ -413,6 +489,7 @@ function mapReservation(reservation) {
     nights: daysBetween(checkIn, checkOut),
     adults: reservation.adults,
     children: reservation.children,
+    childAges: Array.isArray(reservation.childAges) ? reservation.childAges.map(Number) : [],
     source: reservation.source,
     providerCode: safeProviderCode(reservation.providerCode),
     channelRef: reservation.channelRef || null,
@@ -445,8 +522,8 @@ function incrementCount(target, key) {
   target[key] = (target[key] || 0) + 1
 }
 
-async function loadPendingReviewEmailMetadata(prisma, propertyId, currency) {
-  const where = { propertyId, status: 'NEEDS_REVIEW' }
+async function loadPendingReviewEmailMetadata(prisma, propertyId) {
+  const where = { propertyId, status: 'NEEDS_REVIEW', legacyReadOnly: false }
   const [total, events] = await Promise.all([
     prisma.bookingEmailEvent.count({ where }),
     prisma.bookingEmailEvent.findMany({
@@ -492,7 +569,7 @@ async function loadPendingReviewEmailMetadata(prisma, propertyId, currency) {
       checkIn: event.checkIn ? isoDateKey(event.checkIn) : null,
       checkOut: event.checkOut ? isoDateKey(event.checkOut) : null,
       amountSatang: storedMoneySatang(event.amountSatang, 'booking email amount', { nullable: true }),
-      currency: safeCurrency(event.currency, currency),
+      currency: safeNullableCurrency(event.currency),
       confidence: Number.isFinite(Number(event.confidence)) ? Number(event.confidence) : 0,
       linkedToReservation: Boolean(event.reservationId),
     })),
@@ -552,7 +629,7 @@ export async function getLiteFrontDesk(prisma, input = {}) {
       select: ROOM_SELECT,
       orderBy: [{ floor: 'asc' }, { number: 'asc' }],
     }),
-    loadPendingReviewEmailMetadata(prisma, property.id, property.currency),
+    loadPendingReviewEmailMetadata(prisma, property.id),
   ])
 
   const arrivals = arrivalRows.map(mapReservation)
@@ -671,7 +748,7 @@ export async function listLiteBookings(prisma, input = {}) {
       take: limit + 1,
     }),
     prisma.reservation.count({ where }),
-    loadPendingReviewEmailMetadata(prisma, property.id, property.currency),
+    loadPendingReviewEmailMetadata(prisma, property.id),
   ])
 
   const hasMore = rows.length > limit
@@ -745,7 +822,7 @@ export async function getLiteBoard(prisma, input = {}) {
       select: RESERVATION_SELECT,
       orderBy: [{ checkIn: 'asc' }, { checkOut: 'asc' }, { id: 'asc' }],
     }),
-    loadPendingReviewEmailMetadata(prisma, property.id, property.currency),
+    loadPendingReviewEmailMetadata(prisma, property.id),
   ])
 
   const segments = reservations.map((reservation) => clipSegment(reservation, range.from, range.to))
@@ -795,8 +872,23 @@ function mapHousekeepingStay(reservation) {
     checkIn: isoDateKey(reservation.checkIn),
     checkOut: isoDateKey(reservation.checkOut),
     status: reservation.status,
-    guest: {
-      displayName: `${reservation.guest?.firstName || ''} ${reservation.guest?.lastName || ''}`.trim() || 'Guest',
+  }
+}
+
+function mapHousekeepingRoom(room) {
+  return {
+    id: room.id,
+    roomTypeId: room.roomTypeId,
+    number: room.number,
+    floor: room.floor,
+    operationalStatus: room.operationalStatus,
+    housekeepingStatus: room.currentStatus,
+    blockedUntil: isoTimestamp(room.blockedUntil),
+    statusUpdatedAt: isoTimestamp(room.updatedAt),
+    roomType: {
+      id: room.roomType.id,
+      code: room.roomType.code,
+      name: room.roomType.name,
     },
   }
 }
@@ -810,10 +902,10 @@ export async function getLiteHousekeeping(prisma, input = {}) {
   const nextDay = dateFromKey(addDays(hotelDate, 1))
   const property = await resolveProperty(prisma)
 
-  const [rooms, reservations, pendingReviewEmail] = await Promise.all([
+  const [rooms, reservations] = await Promise.all([
     prisma.room.findMany({
       where: { propertyId: property.id },
-      select: ROOM_SELECT,
+      select: HOUSEKEEPING_ROOM_SELECT,
       orderBy: [{ floor: 'asc' }, { number: 'asc' }],
     }),
     prisma.reservation.findMany({
@@ -827,7 +919,6 @@ export async function getLiteHousekeeping(prisma, input = {}) {
       select: HOUSEKEEPING_STAY_SELECT,
       orderBy: [{ checkIn: 'asc' }, { id: 'asc' }],
     }),
-    loadPendingReviewEmailMetadata(prisma, property.id, property.currency),
   ])
 
   const reservationsByRoom = new Map()
@@ -848,7 +939,7 @@ export async function getLiteHousekeeping(prisma, input = {}) {
     const inHouse = stays.filter((reservation) => reservation.status === 'CHECKED_IN')
     const priority = housekeepingPriority(room, arrivals, departures)
     return {
-      ...mapRoom(room),
+      ...mapHousekeepingRoom(room),
       priority: priority.code,
       priorityRank: priority.rank,
       readyForArrival: roomIsReady(room),
@@ -877,7 +968,6 @@ export async function getLiteHousekeeping(prisma, input = {}) {
       turnover: queue.filter((room) => room.priority === 'TURNOVER').length,
     },
     rooms: queue,
-    pendingReviewEmail,
   }
 }
 
@@ -888,7 +978,16 @@ function safeManualProviderCode(value) {
   return LITE_MANUAL_CHANNELS.some((provider) => provider.providerCode === normalized) ? normalized : null
 }
 
-function mapChannelDeskEvent(event, propertyCurrency) {
+function mapChannelDeskEvent(event) {
+  const parsedDetails = event.parsedDetails && typeof event.parsedDetails === 'object' && !Array.isArray(event.parsedDetails)
+    ? event.parsedDetails
+    : {}
+  const adults = Number(parsedDetails.adults)
+  const children = Number(parsedDetails.children)
+  const parsedChildAges = Array.isArray(parsedDetails.childAges) ? parsedDetails.childAges.map(Number) : []
+  const childAges = parsedChildAges.every((age) => Number.isInteger(age) && age >= 0 && age <= 17)
+    ? parsedChildAges
+    : []
   return {
     id: event.id,
     eventType: event.eventType,
@@ -904,8 +1003,11 @@ function mapChannelDeskEvent(event, propertyCurrency) {
     checkOut: event.checkOut ? isoDateKey(event.checkOut) : null,
     roomType: event.roomType || null,
     amountSatang: storedMoneySatang(event.amountSatang, 'booking email amount', { nullable: true }),
-    currency: safeCurrency(event.currency, propertyCurrency),
+    currency: safeNullableCurrency(event.currency),
     confidence: Number.isFinite(Number(event.confidence)) ? Number(event.confidence) : 0,
+    adults: Number.isInteger(adults) && adults > 0 ? adults : null,
+    children: Number.isInteger(children) && children >= 0 ? children : null,
+    childAges,
   }
 }
 
@@ -944,6 +1046,11 @@ function mapManualConnection(connection, fallback) {
   }
 }
 
+function groupedStatusCount(rows, status) {
+  const row = (rows || []).find((item) => item.status === status)
+  return Number(row?._count?._all || 0)
+}
+
 /**
  * Channel Desk is deliberately a composite read. It exposes review work and
  * manual Extranet tasks, but never OTA credentials or email bodies.
@@ -955,20 +1062,47 @@ export async function getLiteChannelDesk(prisma, options = {}) {
   const property = await resolveProperty(prisma)
   const today = dateFromKey(getBangkokDateKey(new Date()))
 
-  const [source, reviewEvents, storedConnections, tasks, pendingDeliveries, failedDeliveries] = await Promise.all([
-    prisma.bookingEmailSource.findFirst({
-      where: { propertyId: property.id, provider: 'GMAIL', enabled: true },
-      orderBy: [{ createdAt: 'asc' }],
-    }),
-    prisma.bookingEmailEvent.findMany({
-      where: {
-        propertyId: property.id,
-        status: { in: ['NEEDS_REVIEW', 'ERROR'] },
+  const reviewEventWhere = {
+    propertyId: property.id,
+    legacyReadOnly: false,
+    AND: [
+      {
         OR: [
           { checkIn: null },
           { checkOut: { gte: today } },
         ],
       },
+      {
+        OR: [
+          { status: 'ERROR' },
+          { status: 'NEEDS_REVIEW', eventType: { in: ['NEW_BOOKING', 'MODIFICATION', 'CANCELLATION', 'PAYMENT_NOTICE'] } },
+        ],
+      },
+    ],
+  }
+  const taskWhere = {
+    propertyId: property.id,
+    status: { in: ['PENDING', 'IN_PROGRESS', 'FAILED'] },
+    stayDate: { gte: today },
+  }
+
+  const [
+    source,
+    reviewEvents,
+    reviewEventStatusCounts,
+    storedConnections,
+    roomTypes,
+    tasks,
+    taskStatusCounts,
+    pendingDeliveries,
+    failedDeliveries,
+  ] = await Promise.all([
+    prisma.bookingEmailSource.findFirst({
+      where: { propertyId: property.id, provider: 'GMAIL', enabled: true },
+      orderBy: [{ createdAt: 'asc' }],
+    }),
+    prisma.bookingEmailEvent.findMany({
+      where: reviewEventWhere,
       select: {
         id: true,
         eventType: true,
@@ -986,9 +1120,15 @@ export async function getLiteChannelDesk(prisma, options = {}) {
         amountSatang: true,
         currency: true,
         confidence: true,
+        parsedDetails: true,
       },
       orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
       take: CHANNEL_DESK_EVENT_LIMIT,
+    }),
+    prisma.bookingEmailEvent.groupBy({
+      by: ['status'],
+      where: reviewEventWhere,
+      _count: { _all: true },
     }),
     prisma.manualChannelConnection.findMany({
       where: { propertyId: property.id },
@@ -1000,18 +1140,32 @@ export async function getLiteChannelDesk(prisma, options = {}) {
       },
       orderBy: { providerCode: 'asc' },
     }),
-    prisma.manualChannelTask.findMany({
+    prisma.roomType.findMany({
       where: {
         propertyId: property.id,
-        status: { in: ['PENDING', 'IN_PROGRESS', 'FAILED'] },
-        stayDate: { gte: today },
+        rooms: { some: {} },
       },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        _count: { select: { rooms: true } },
+      },
+      orderBy: [{ code: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.manualChannelTask.findMany({
+      where: taskWhere,
       include: {
         connection: true,
         roomType: { select: { id: true, name: true } },
       },
       orderBy: [{ stayDate: 'asc' }, { createdAt: 'asc' }],
       take: CHANNEL_DESK_TASK_LIMIT,
+    }),
+    prisma.manualChannelTask.groupBy({
+      by: ['status'],
+      where: taskWhere,
+      _count: { _all: true },
     }),
     prisma.bookingEmailPushDelivery?.count?.({
       where: { source: { propertyId: property.id }, status: { in: ['PENDING', 'PROCESSING'] } },
@@ -1023,13 +1177,8 @@ export async function getLiteChannelDesk(prisma, options = {}) {
 
   const connectionByProvider = new Map(storedConnections.map((connection) => [connection.providerCode, connection]))
   const connections = LITE_MANUAL_CHANNELS.map((fallback) => mapManualConnection(connectionByProvider.get(fallback.providerCode), fallback))
-  const activeMappingByTaskTarget = new Map()
-  for (const connection of storedConnections) {
-    for (const mapping of connection.mappings || []) {
-      if (!mapping.active) continue
-      activeMappingByTaskTarget.set(`${connection.id}\u0000${mapping.roomTypeId}`, mapping)
-    }
-  }
+  const reviewEventTotal = (reviewEventStatusCounts || []).reduce((total, row) => total + Number(row?._count?._all || 0), 0)
+  const taskTotal = (taskStatusCounts || []).reduce((total, row) => total + Number(row?._count?._all || 0), 0)
   const pubsubConfig = normalized.pubsubConfig && typeof normalized.pubsubConfig === 'object' ? normalized.pubsubConfig : {}
   const credentialStatus = normalized.credentialStatus && typeof normalized.credentialStatus === 'object' ? normalized.credentialStatus : {}
 
@@ -1048,19 +1197,24 @@ export async function getLiteChannelDesk(prisma, options = {}) {
       consecutiveFailures: Number(source?.consecutiveFailures || 0),
       missingConfiguration: [...new Set([...(credentialStatus.missing || []), ...(pubsubConfig.missing || [])])],
     },
-    reviewEvents: reviewEvents.map((event) => mapChannelDeskEvent(event, property.currency)),
+    reviewEvents: reviewEvents.map((event) => mapChannelDeskEvent(event)),
     connections,
+    roomTypes: roomTypes.map((roomType) => ({
+      id: roomType.id,
+      code: roomType.code,
+      name: roomType.name,
+      physicalRoomCount: Number(roomType._count?.rooms || 0),
+    })),
     tasks: tasks.map((task) => {
-      const mapping = activeMappingByTaskTarget.get(`${task.connectionId}\u0000${task.roomTypeId}`)
       return {
         id: task.id,
         providerCode: safeManualProviderCode(task.connection.providerCode),
         connectionId: task.connectionId,
         roomTypeId: task.roomTypeId,
         roomTypeName: task.roomType.name,
-        externalRoomTypeId: mapping?.externalRoomTypeId || null,
-        externalRoomTypeName: mapping?.externalRoomTypeName || null,
-        externalRatePlanId: mapping?.externalRatePlanId || null,
+        externalRoomTypeId: task.targetExternalRoomTypeId,
+        externalRoomTypeName: task.targetExternalRoomTypeName,
+        externalRatePlanId: task.targetExternalRatePlanId || null,
         stayDate: isoDateKey(task.stayDate),
         desiredAvailability: task.desiredAvailability,
         confirmedAvailability: task.confirmedAvailability,
@@ -1074,11 +1228,28 @@ export async function getLiteChannelDesk(prisma, options = {}) {
         lastErrorMessage: task.lastErrorMessage || null,
       }
     }),
+    pagination: {
+      reviewEvents: {
+        limit: CHANNEL_DESK_EVENT_LIMIT,
+        returned: reviewEvents.length,
+        total: reviewEventTotal,
+        truncated: reviewEventTotal > reviewEvents.length,
+      },
+      tasks: {
+        limit: CHANNEL_DESK_TASK_LIMIT,
+        returned: tasks.length,
+        total: taskTotal,
+        truncated: taskTotal > tasks.length,
+      },
+    },
     counts: {
-      reviewEvents: reviewEvents.filter((event) => event.status === 'NEEDS_REVIEW').length,
-      parserErrors: reviewEvents.filter((event) => event.status === 'ERROR').length,
-      pendingTasks: tasks.filter((task) => task.status === 'PENDING').length,
-      failedTasks: tasks.filter((task) => task.status === 'FAILED').length,
+      reviewEvents: groupedStatusCount(reviewEventStatusCounts, 'NEEDS_REVIEW'),
+      parserErrors: groupedStatusCount(reviewEventStatusCounts, 'ERROR'),
+      activeReviewWork: reviewEventTotal,
+      pendingTasks: groupedStatusCount(taskStatusCounts, 'PENDING'),
+      inProgressTasks: groupedStatusCount(taskStatusCounts, 'IN_PROGRESS'),
+      failedTasks: groupedStatusCount(taskStatusCounts, 'FAILED'),
+      activeTasks: taskTotal,
       pendingDeliveries: Number(pendingDeliveries || 0),
       failedDeliveries: Number(failedDeliveries || 0),
     },

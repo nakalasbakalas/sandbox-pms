@@ -9,7 +9,7 @@ import { resolveApiRouteContract } from './api-routes.mjs'
 import { loginThrottle, resolveClientIp } from './login-throttle.mjs'
 import { createPrismaClient } from './prisma-client.mjs'
 import { canViewRoute, requirePermission } from './rbac.mjs'
-import { SANDBOX_RULES } from './pms-domain.mjs'
+import { PmsValidationError, SANDBOX_RULES } from './pms-domain.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
@@ -114,6 +114,7 @@ import {
   getRoomSetup,
   getSetupStatus,
   getTodayData,
+  ingestBookingEmailEvents,
   listBookingEmailEvents,
   listBookingEmailSources,
   listGuests,
@@ -404,7 +405,7 @@ async function litePropertyId(db) {
 }
 
 async function ingestReviewOnlyBookingEmailEvents(db, input, actor) {
-  const result = await syncBookingEmail(db, { ...input, reviewOnly: true }, actor)
+  const result = await ingestBookingEmailEvents(db, { ...input, reviewOnly: true }, actor)
   await processEmailOpsCommandEvents(db, result.opsCommandEvents || result.events, {
     env: process.env,
     submitCommand: submitOpsCommand,
@@ -1277,7 +1278,12 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/booking-email/sync' && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
-    const result = await syncBookingEmail(db, await readJson(request), user)
+    const input = await readJson(request)
+    const unsupportedFields = Object.keys(input).filter((field) => field !== 'limit')
+    if (unsupportedFields.length > 0) {
+      throw new PmsValidationError(`Booking-email sync does not accept: ${unsupportedFields.join(', ')}.`)
+    }
+    const result = await syncBookingEmail(db, { limit: input.limit }, user)
     const opsCommandResults = await processEmailOpsCommandEvents(db, result.opsCommandEvents || result.events, {
       env: process.env,
       submitCommand: submitOpsCommand,
@@ -1322,7 +1328,7 @@ async function handleApi(request, response, url) {
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/approve$/)
   if (params && request.method === 'POST') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'view:reservations')
     const event = await approveBookingEmailEvent(db, params.id, await readJson(request), user)
     realtimeHub.publish('booking-email.changed', { entityId: event.id, reason: 'approved' })
     if (event.reservationId) publishReservationMutation(event.reservationId, 'email_event_approved')
@@ -1355,7 +1361,7 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/booking-email/sources' && request.method === 'POST') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'manage:channels')
     const source = await createBookingEmailSource(db, await readJson(request), user)
     sendJson(response, 201, { ok: true, data: source, message: 'Booking email source saved.' })
     return true
@@ -1363,7 +1369,7 @@ async function handleApi(request, response, url) {
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/sources\/(?<id>[^/]+)$/)
   if (params && request.method === 'PATCH') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'manage:channels')
     const source = await updateBookingEmailSource(db, params.id, await readJson(request), user)
     sendJson(response, 200, { ok: true, data: source, message: 'Booking email source updated.' })
     return true
@@ -1486,7 +1492,9 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const body = await readJson(request)
-    const reservation = await assignRoom(db, params.id, body.roomId, user)
+    const reservation = await assignRoom(db, params.id, body.roomId, user, {
+      expectedUpdatedAt: body.expectedUpdatedAt,
+    })
     publishReservationMutation(reservation.id, 'room_assigned')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
     return true

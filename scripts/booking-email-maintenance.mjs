@@ -4,7 +4,7 @@ import { createPrismaClient } from '../server/prisma-client.mjs'
 import {
   bookingEmailGmailCredentialStatus,
   resolveBookingEmailGmailAccessToken,
-  syncBookingEmail,
+  ingestBookingEmailEvents,
 } from '../server/pms-service.mjs'
 import {
   bookingEmailPubSubConfig,
@@ -36,7 +36,7 @@ async function main() {
     const summary = await runBookingEmailMaintenance(prisma, {
       env: process.env,
       getAccessToken: ({ env }) => resolveBookingEmailGmailAccessToken({ env }),
-      ingestEvents: (db, input, actor) => syncBookingEmail(db, {
+      ingestEvents: (db, input, actor) => ingestBookingEmailEvents(db, {
         ...input,
         reviewOnly: true,
       }, actor),

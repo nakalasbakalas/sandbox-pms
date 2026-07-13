@@ -8,6 +8,7 @@ import {
   decodeBookingEmailPubSubEnvelope,
   processPendingBookingEmailDeliveries,
   recordBookingEmailPushDelivery,
+  renewBookingEmailWatch,
   syncBookingEmailHistory,
   verifyBookingEmailPubSubRequest,
 } from '../server/booking-email-gmail-sync.mjs'
@@ -25,6 +26,15 @@ function jsonResponse(payload) {
   return {
     ok: true,
     status: 200,
+    headers: { get: () => null },
+    json: async () => payload,
+  }
+}
+
+function gmailResponse(status, payload) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
     headers: { get: () => null },
     json: async () => payload,
   }
@@ -64,6 +74,80 @@ test('authenticated Pub/Sub envelope is restricted to the configured mailbox and
 
   assert.equal(decoded.emailAddress, config.mailbox)
   assert.equal(decoded.notificationHistoryId, notification.historyId)
+})
+
+test('Pub/Sub OIDC rejects missing, unverifiable, or mis-scoped identities', async () => {
+  const config = bookingEmailPubSubConfig(pubsubEnv)
+  await assert.rejects(
+    () => verifyBookingEmailPubSubRequest({ config, authorization: '' }),
+    (error) => error?.code === 'PUBSUB_AUTH_REQUIRED' && error?.statusCode === 401,
+  )
+  await assert.rejects(
+    () => verifyBookingEmailPubSubRequest({
+      config,
+      authorization: 'Bearer bad-signature',
+      verifyIdToken: async () => { throw new Error('signature rejected token=must-not-surface') },
+    }),
+    (error) => error?.code === 'PUBSUB_AUTH_INVALID' && error?.statusCode === 401,
+  )
+
+  const validClaims = {
+    iss: 'https://accounts.google.com',
+    aud: config.audience,
+    email: config.serviceAccountEmail,
+    email_verified: true,
+    sub: 'service-account-subject',
+  }
+  const invalidClaims = [
+    [{ ...validClaims, iss: 'https://issuer.invalid' }, 'PUBSUB_AUTH_ISSUER_INVALID'],
+    [{ ...validClaims, aud: 'https://other.example.test/push' }, 'PUBSUB_AUTH_AUDIENCE_INVALID'],
+    [{ ...validClaims, email: 'other@example.iam.gserviceaccount.com' }, 'PUBSUB_AUTH_SERVICE_ACCOUNT_INVALID'],
+    [{ ...validClaims, email_verified: false }, 'PUBSUB_AUTH_SERVICE_ACCOUNT_INVALID'],
+  ]
+  for (const [claims, expectedCode] of invalidClaims) {
+    await assert.rejects(
+      () => verifyBookingEmailPubSubRequest({
+        config,
+        authorization: 'Bearer structurally-valid-token',
+        verifyIdToken: async () => claims,
+      }),
+      (error) => error?.code === expectedCode && error?.statusCode === 403,
+    )
+  }
+})
+
+test('Pub/Sub envelope rejects malformed wrappers and cross-mailbox deliveries', () => {
+  const config = bookingEmailPubSubConfig(pubsubEnv)
+  const validData = Buffer.from(JSON.stringify({
+    emailAddress: config.mailbox,
+    historyId: '12345678901234567890',
+  })).toString('base64url')
+  const envelope = ({ message = {}, ...overrides } = {}) => ({
+    subscription: config.subscription,
+    message: {
+      messageId: 'pubsub-envelope-negative',
+      publishTime: '2026-07-13T04:00:00.000Z',
+      data: validData,
+      ...message,
+    },
+    ...overrides,
+  })
+
+  const cases = [
+    [{}, 'PUBSUB_ENVELOPE_INVALID'],
+    [envelope({ subscription: 'projects/example/subscriptions/other' }), 'PUBSUB_SUBSCRIPTION_INVALID'],
+    [envelope({ message: { messageId: '' } }), 'PUBSUB_MESSAGE_ID_INVALID'],
+    [envelope({ message: { data: Buffer.from('not-json').toString('base64url') } }), 'PUBSUB_DATA_INVALID'],
+    [envelope({ message: { data: 'x'.repeat(8_193) } }), 'PUBSUB_DATA_INVALID'],
+    [envelope({ message: { data: Buffer.from(JSON.stringify({ emailAddress: 'other@example.com', historyId: '123' })).toString('base64url') } }), 'PUBSUB_MAILBOX_INVALID'],
+    [envelope({ message: { data: Buffer.from(JSON.stringify({ emailAddress: config.mailbox, historyId: 'not-a-number' })).toString('base64url') } }), 'INVALID_GMAIL_HISTORY_ID'],
+  ]
+  for (const [candidate, expectedCode] of cases) {
+    assert.throws(
+      () => decodeBookingEmailPubSubEnvelope(candidate, { config }),
+      (error) => error?.code === expectedCode && error?.retryable === false,
+    )
+  }
 })
 
 test('durable Pub/Sub insert is idempotent and duplicate delivery does not reset state', async () => {
@@ -224,6 +308,234 @@ test('delivery processing reclaims an abandoned PROCESSING claim after the timeo
   assert.equal(claimWhere.OR[1].status, 'PROCESSING')
   assert.equal(completion.status, 'COALESCED')
   assert.equal(summary.coalesced, 1)
+})
+
+test('Gmail watch renewal skips healthy watches and rejects an invalid renewal response', async () => {
+  const config = bookingEmailPubSubConfig(pubsubEnv)
+  const now = new Date('2026-07-13T04:00:00.000Z')
+  const healthySource = {
+    id: 'source-watch-healthy',
+    provider: 'GMAIL',
+    enabled: true,
+    mailbox: config.mailbox,
+    watchRenewedAt: new Date('2026-07-13T03:30:00.000Z'),
+    watchExpiresAt: new Date('2026-07-18T04:00:00.000Z'),
+  }
+  let healthyMutationCalled = false
+  const healthyResult = await renewBookingEmailWatch({
+    bookingEmailSource: {
+      findUnique: async () => healthySource,
+      updateMany: async () => {
+        healthyMutationCalled = true
+        return { count: 1 }
+      },
+    },
+  }, {
+    sourceId: healthySource.id,
+    config,
+    now: () => now,
+    getAccessToken: async () => { throw new Error('healthy watch must not request an OAuth token') },
+  })
+  assert.deepEqual(healthyResult, {
+    skipped: true,
+    reason: 'not_due',
+    expiresAt: healthySource.watchExpiresAt.toISOString(),
+  })
+  assert.equal(healthyMutationCalled, false)
+
+  const dueSource = {
+    ...healthySource,
+    id: 'source-watch-invalid',
+    watchRenewedAt: null,
+    watchExpiresAt: null,
+    consecutiveFailures: 0,
+  }
+  let failureRecorded = null
+  const duePrisma = {
+    bookingEmailSource: {
+      findUnique: async () => dueSource,
+      updateMany: async ({ data }) => {
+        if (data.consecutiveFailures) failureRecorded = data
+        if (data.syncLeaseOwner) dueSource.syncLeaseOwner = data.syncLeaseOwner
+        return { count: 1 }
+      },
+    },
+  }
+  await assert.rejects(
+    () => renewBookingEmailWatch(duePrisma, {
+      sourceId: dueSource.id,
+      config,
+      now: () => now,
+      getAccessToken: async () => 'test-access-token',
+      fetchImpl: async () => jsonResponse({
+        historyId: '500',
+        expiration: String(now.getTime() - 1),
+      }),
+      logger: { info() {}, warn() {}, error() {} },
+    }),
+    (error) => error?.code === 'GMAIL_WATCH_RESPONSE_INVALID',
+  )
+  assert.deepEqual(failureRecorded?.consecutiveFailures, { increment: 1 })
+  assert.equal(failureRecorded?.syncLeaseOwner, null)
+  assert.match(failureRecorded?.lastError || '', /watch expiration is invalid/i)
+})
+
+test('due Gmail watch renewal uses the configured topic and records its new high-water cursor', async () => {
+  const config = bookingEmailPubSubConfig(pubsubEnv)
+  const now = new Date('2026-07-13T04:00:00.000Z')
+  const expiresAt = new Date('2026-07-20T04:00:00.000Z')
+  const source = {
+    id: 'source-watch-due',
+    provider: 'GMAIL',
+    enabled: true,
+    mailbox: config.mailbox,
+    watchRenewedAt: null,
+    watchExpiresAt: null,
+  }
+  let watchUpdate = null
+  const prisma = {
+    bookingEmailSource: {
+      findUnique: async () => source,
+      updateMany: async ({ data }) => {
+        if (data.syncLeaseOwner) source.syncLeaseOwner = data.syncLeaseOwner
+        if (data.watchHistoryId) watchUpdate = data
+        return { count: 1 }
+      },
+    },
+  }
+  const result = await renewBookingEmailWatch(prisma, {
+    sourceId: source.id,
+    config,
+    now: () => now,
+    getAccessToken: async () => 'test-access-token',
+    fetchImpl: async (requestUrl, request) => {
+      assert.equal(String(requestUrl).endsWith('/watch'), true)
+      assert.equal(request.method, 'POST')
+      assert.deepEqual(JSON.parse(request.body), {
+        topicName: config.topicName,
+        labelIds: ['INBOX'],
+        labelFilterBehavior: 'INCLUDE',
+      })
+      return jsonResponse({ historyId: '90071992547409931235', expiration: String(expiresAt.getTime()) })
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  })
+
+  assert.equal(result.skipped, false)
+  assert.equal(result.watchHistoryId, '90071992547409931235')
+  assert.equal(result.expiresAt, expiresAt.toISOString())
+  assert.equal(watchUpdate.watchHistoryId, result.watchHistoryId)
+  assert.equal(watchUpdate.watchExpiresAt.toISOString(), result.expiresAt)
+  assert.equal(watchUpdate.watchRenewedAt.toISOString(), now.toISOString())
+  assert.equal(watchUpdate.syncLeaseOwner, null)
+})
+
+test('expired Gmail history cursor falls back to bounded reconciliation before committing a new cursor', async () => {
+  const source = {
+    id: 'source-stale-history',
+    provider: 'GMAIL',
+    enabled: true,
+    mailbox: 'booking@sandboxhotel.com',
+    query: 'from:booking.com newer_than:30d',
+    lastSyncCursor: '100',
+    consecutiveFailures: 0,
+  }
+  const requests = []
+  let committedCursor = null
+  const prisma = {
+    bookingEmailSource: {
+      findUnique: async () => source,
+      updateMany: async ({ data }) => {
+        if (data.syncLeaseOwner) source.syncLeaseOwner = data.syncLeaseOwner
+        if (data.lastSyncCursor) {
+          committedCursor = data.lastSyncCursor
+        }
+        return { count: 1 }
+      },
+    },
+  }
+  const result = await syncBookingEmailHistory(prisma, {
+    sourceId: source.id,
+    getAccessToken: async () => 'test-access-token',
+    fetchImpl: async (requestUrl) => {
+      const url = new URL(String(requestUrl))
+      requests.push(url.pathname)
+      if (url.pathname.endsWith('/history')) {
+        return gmailResponse(404, { error: { message: 'History record no longer available.' } })
+      }
+      if (url.pathname.endsWith('/profile')) return jsonResponse({ historyId: '500' })
+      if (url.pathname.endsWith('/messages')) return jsonResponse({ messages: [] })
+      throw new Error(`Unexpected recovery URL: ${url}`)
+    },
+    ingestEvents: async () => { throw new Error('empty reconciliation must not call the ingester') },
+    logger: { info() {}, warn() {}, error() {} },
+  })
+
+  assert.equal(result.mode, 'full_reconciliation')
+  assert.equal(result.previousCursor, '100')
+  assert.equal(result.nextCursor, '500')
+  assert.equal(result.eventsIngested, 0)
+  assert.equal(committedCursor, '500')
+  assert.deepEqual(requests.map((path) => path.split('/').at(-1)), ['history', 'profile', 'messages'])
+})
+
+test('out-of-order Pub/Sub cursors at or behind the committed Gmail cursor are coalesced without OAuth work', async () => {
+  const source = {
+    id: 'source-out-of-order',
+    provider: 'GMAIL',
+    enabled: true,
+    mailbox: 'booking@sandboxhotel.com',
+    lastSyncCursor: '500',
+  }
+  const candidates = [
+    {
+      id: 'delivery-newer-created',
+      sourceId: source.id,
+      pubsubMessageId: 'message-older-cursor',
+      notificationHistoryId: '498',
+      publishedAt: new Date('2026-07-13T03:00:00.000Z'),
+      status: 'PENDING',
+      attempts: 0,
+      createdAt: new Date('2026-07-13T03:05:00.000Z'),
+    },
+    {
+      id: 'delivery-older-created',
+      sourceId: source.id,
+      pubsubMessageId: 'message-equal-cursor',
+      notificationHistoryId: '500',
+      publishedAt: new Date('2026-07-13T03:01:00.000Z'),
+      status: 'PENDING',
+      attempts: 0,
+      createdAt: new Date('2026-07-13T03:02:00.000Z'),
+    },
+  ]
+  const completionOrder = []
+  const prisma = {
+    bookingEmailPushDelivery: {
+      findMany: async ({ orderBy }) => {
+        assert.deepEqual(orderBy, [{ publishedAt: 'asc' }, { createdAt: 'asc' }])
+        return candidates
+      },
+      updateMany: async () => ({ count: 1 }),
+      update: async ({ where, data }) => {
+        if (data.status === 'COALESCED') completionOrder.push(where.id)
+        return { ...candidates.find((candidate) => candidate.id === where.id), ...data }
+      },
+    },
+    bookingEmailSource: {
+      findUnique: async () => source,
+    },
+  }
+  const summary = await processPendingBookingEmailDeliveries(prisma, {
+    getAccessToken: async () => { throw new Error('stale deliveries must not request OAuth') },
+    logger: { info() {}, warn() {}, error() {} },
+  })
+
+  assert.equal(summary.checked, 2)
+  assert.equal(summary.coalesced, 2)
+  assert.equal(summary.processed, 0)
+  assert.equal(summary.eventsIngested, 0)
+  assert.deepEqual(completionOrder, candidates.map((candidate) => candidate.id))
 })
 
 test('history traversal stops before an unbounded Gmail page chain can advance the cursor', async () => {

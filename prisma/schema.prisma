@@ -159,13 +159,15 @@ model Reservation {
   children  Int   @default(0)
   childAges Int[]
 
-  ratePerNight        Float
-  ratePerNightSatang  Int?
-  totalAmount         Float
-  totalAmountSatang   Int?
-  depositAmount       Float   @default(0)
-  depositAmountSatang Int?
-  depositPaid         Boolean @default(false)
+  ratePerNight          Float
+  ratePerNightSatang    Int?
+  totalAmount           Float
+  totalAmountSatang     Int?
+  depositAmount         Float   @default(0)
+  depositAmountSatang   Int?
+  providerTotalSatang   Int?
+  providerTotalCurrency String?
+  depositPaid           Boolean @default(false)
 
   source                BookingSource      @default(DIRECT)
   channelRef            String?
@@ -522,6 +524,7 @@ model BookingEmailEvent {
   processedAt           DateTime?
   processedBy           String?
   rejectedAt            DateTime?
+  legacyReadOnly        Boolean                 @default(false)
   createdAt             DateTime                @default(now())
   updatedAt             DateTime                @updatedAt
 
@@ -532,6 +535,7 @@ model BookingEmailEvent {
   @@index([eventType, status])
   @@index([channelRef])
   @@index([propertyId, providerCode, externalReservationId])
+  @@index([propertyId, legacyReadOnly, status, receivedAt])
 }
 
 enum BookingEmailEventStatus {
@@ -999,37 +1003,40 @@ model ManualChannelRoomMapping {
 }
 
 model ManualChannelTask {
-  id                        String                  @id @default(cuid())
-  propertyId                String
-  property                  Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  connectionId              String
-  connection                ManualChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-  roomTypeId                String
-  roomType                  RoomType                @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
-  stayDate                  DateTime                @db.Date
-  desiredAvailability       Int
-  confirmedAvailability     Int?
-  status                    ManualChannelTaskStatus @default(PENDING)
-  revision                  Int                     @default(1)
-  activeKey                 String?                 @unique
-  triggerType               String
-  sourceProviderCode        String?
-  sourceReservationId       String?
-  sourceReservation         Reservation?            @relation(fields: [sourceReservationId], references: [id], onDelete: SetNull)
-  sourceBookingEmailEventId String?
-  sourceBookingEmailEvent   BookingEmailEvent?      @relation(fields: [sourceBookingEmailEventId], references: [id], onDelete: SetNull)
-  supersedesTaskId          String?                 @unique
-  supersedesTask            ManualChannelTask?      @relation("ManualChannelTaskSupersession", fields: [supersedesTaskId], references: [id], onDelete: SetNull)
-  supersededBy              ManualChannelTask?      @relation("ManualChannelTaskSupersession")
-  createdBy                 String
-  completedBy               String?
-  completedAt               DateTime?
-  completionNotes           String?
-  lastAttemptAt             DateTime?
-  lastErrorCode             String?
-  lastErrorMessage          String?
-  createdAt                 DateTime                @default(now())
-  updatedAt                 DateTime                @updatedAt
+  id                         String                  @id @default(cuid())
+  propertyId                 String
+  property                   Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  connectionId               String
+  connection                 ManualChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  roomTypeId                 String
+  roomType                   RoomType                @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  stayDate                   DateTime                @db.Date
+  desiredAvailability        Int
+  confirmedAvailability      Int?
+  targetExternalRoomTypeId   String
+  targetExternalRoomTypeName String
+  targetExternalRatePlanId   String?
+  status                     ManualChannelTaskStatus @default(PENDING)
+  revision                   Int                     @default(1)
+  activeKey                  String?                 @unique
+  triggerType                String
+  sourceProviderCode         String?
+  sourceReservationId        String?
+  sourceReservation          Reservation?            @relation(fields: [sourceReservationId], references: [id], onDelete: SetNull)
+  sourceBookingEmailEventId  String?
+  sourceBookingEmailEvent    BookingEmailEvent?      @relation(fields: [sourceBookingEmailEventId], references: [id], onDelete: SetNull)
+  supersedesTaskId           String?                 @unique
+  supersedesTask             ManualChannelTask?      @relation("ManualChannelTaskSupersession", fields: [supersedesTaskId], references: [id], onDelete: SetNull)
+  supersededBy               ManualChannelTask?      @relation("ManualChannelTaskSupersession")
+  createdBy                  String
+  completedBy                String?
+  completedAt                DateTime?
+  completionNotes            String?
+  lastAttemptAt              DateTime?
+  lastErrorCode              String?
+  lastErrorMessage           String?
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
 
   @@index([propertyId, status, stayDate])
   @@index([connectionId, roomTypeId, stayDate, createdAt])

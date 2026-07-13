@@ -8,6 +8,8 @@ import {
 } from './pms-domain.mjs'
 
 const MAX_RECONCILE_CELLS = 2_500
+const DEFAULT_INITIAL_RECONCILE_DAYS = 90
+const MAX_INITIAL_RECONCILE_DAYS = 90
 const MANUAL_CHANNEL_MANAGEMENT_ROLES = new Set(['ADMIN', 'MANAGER'])
 const MANUAL_CHANNEL_COMPLETION_ROLES = new Set(['ADMIN', 'MANAGER', 'FRONT_DESK'])
 
@@ -100,6 +102,19 @@ function requireReason(value, label = 'This action') {
   return reason
 }
 
+function boundedWholeNumber(value, label, minimum, maximum, defaultValue) {
+  if (value === undefined || value === null || value === '') return defaultValue
+  const text = String(value).trim()
+  if (!/^\d+$/.test(text)) {
+    throw new PmsValidationError(`${label} must be a whole number from ${minimum} to ${maximum}.`)
+  }
+  const number = Number(text)
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) {
+    throw new PmsValidationError(`${label} must be a whole number from ${minimum} to ${maximum}.`)
+  }
+  return number
+}
+
 function assertAllowedFields(input, allowedFields, label) {
   const allowed = new Set(allowedFields)
   const unknown = Object.keys(input || {}).filter((key) => !allowed.has(key))
@@ -159,6 +174,22 @@ async function serializableTransaction(prisma, callback) {
 
 function manualChannelMappingTargetKey(mapping) {
   return `${mapping.externalRoomTypeId}\u0000${mapping.externalRatePlanId || ''}`
+}
+
+function manualChannelTaskTargetSnapshot(mapping) {
+  return {
+    targetExternalRoomTypeId: requiredString(mapping?.externalRoomTypeId, 'External room type id', 200),
+    targetExternalRoomTypeName: requiredString(mapping?.externalRoomTypeName, 'External room type name', 200),
+    targetExternalRatePlanId: normalizeNullableString(mapping?.externalRatePlanId, 200),
+  }
+}
+
+function manualChannelTaskTargetMatchesMapping(task, mapping) {
+  if (!task || !mapping) return false
+  const snapshot = manualChannelTaskTargetSnapshot(mapping)
+  return task.targetExternalRoomTypeId === snapshot.targetExternalRoomTypeId
+    && task.targetExternalRoomTypeName === snapshot.targetExternalRoomTypeName
+    && (task.targetExternalRatePlanId || null) === snapshot.targetExternalRatePlanId
 }
 
 async function physicalRoomTypesInTransaction(tx, propertyId) {
@@ -234,6 +265,12 @@ function validCalendarDateKey(value) {
 function nextDateKey(key) {
   const date = dateFromKey(key)
   date.setUTCDate(date.getUTCDate() + 1)
+  return date.toISOString().slice(0, 10)
+}
+
+function dateKeyAfter(key, days) {
+  const date = dateFromKey(key)
+  date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
 }
 
@@ -335,8 +372,15 @@ export async function ensureManualChannelConnectionsInTransaction(tx, propertyId
 
   for (const providerCode of MANUAL_CHANNEL_PROVIDER_CODES) {
     if (existingCodes.has(providerCode)) continue
-    const connection = await tx.manualChannelConnection.create({
-      data: {
+    const connection = await tx.manualChannelConnection.upsert({
+      where: {
+        propertyId_providerCode: {
+          propertyId: cleanPropertyId,
+          providerCode,
+        },
+      },
+      update: {},
+      create: {
         propertyId: cleanPropertyId,
         providerCode,
         displayName: MANUAL_CHANNEL_PROVIDERS[providerCode].displayName,
@@ -371,6 +415,7 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
     'externalPropertyId',
     'extranetUrl',
     'enabled',
+    'initialReconcileDays',
     'reason',
   ], 'Manual channel connection')
 
@@ -386,6 +431,13 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
   }
 
   const enabled = Boolean(input.enabled)
+  const initialReconcileDays = boundedWholeNumber(
+    input.initialReconcileDays,
+    'Initial availability horizon',
+    1,
+    MAX_INITIAL_RECONCILE_DAYS,
+    DEFAULT_INITIAL_RECONCILE_DAYS,
+  )
   const extranetUrl = input.extranetUrl ? validateManualChannelExtranetUrl(input.extranetUrl, providerCode) : null
   if (enabled && !extranetUrl) throw new PmsValidationError('An official Extranet URL is required before enabling a manual channel connection.')
   const displayName = normalizeNullableString(input.displayName, 100) || MANUAL_CHANNEL_PROVIDERS[providerCode].displayName
@@ -396,8 +448,9 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
     if (!property) throw new PmsValidationError('Property was not found.', 404)
     const existingConnection = await tx.manualChannelConnection.findUnique({
       where: { propertyId_providerCode: { propertyId, providerCode } },
-      select: { id: true },
+      select: { id: true, enabled: true },
     })
+    let mappingCoverage = null
     if (enabled) {
       if (!existingConnection) {
         throw new PmsValidationError(
@@ -405,7 +458,7 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
           409,
         )
       }
-      await assertManualChannelMappingCoverageInTransaction(tx, {
+      mappingCoverage = await assertManualChannelMappingCoverageInTransaction(tx, {
         propertyId,
         connectionId: existingConnection.id,
       })
@@ -430,6 +483,44 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
       },
       include: { mappings: true },
     })
+    let initialReconciliation = null
+    if (enabled && !existingConnection.enabled) {
+      const todayKey = getBangkokDateKey(new Date())
+      initialReconciliation = await reconcileManualChannelTasksInTransaction(tx, {
+        propertyId,
+        triggerType: 'MANUAL_CHANNEL_CONNECTION_ENABLED',
+        affected: mappingCoverage.physicalRoomTypes.map((roomType) => ({
+          roomTypeId: roomType.id,
+          dateStart: todayKey,
+          dateEnd: dateKeyAfter(todayKey, initialReconcileDays),
+        })),
+      }, actor, { targetConnectionId: connection.id })
+      const expectedCellCount = mappingCoverage.physicalRoomTypes.length * initialReconcileDays
+      const stagedCellCount = initialReconciliation.created.length
+        + initialReconciliation.coalesced.length
+        + initialReconciliation.unchanged.length
+      if (initialReconciliation.unmappedCellCount > 0 || stagedCellCount !== expectedCellCount) {
+        throw new PmsValidationError(
+          'The initial availability baseline could not be staged completely. The channel connection remains disabled.',
+          409,
+        )
+      }
+      await createManualChannelAudit(tx, actor, 'MANUAL_CHANNEL_INITIAL_BASELINE_STAGED', 'manualChannelConnection', connection.id, {
+        propertyId,
+        providerCode,
+        stayDateStart: todayKey,
+        stayDateEnd: dateKeyAfter(todayKey, initialReconcileDays - 1),
+        stayDateCount: initialReconcileDays,
+        roomTypeCount: mappingCoverage.physicalRoomTypes.length,
+        createdCount: initialReconciliation.created.length,
+        supersededCount: initialReconciliation.superseded.length,
+        retargetedCount: initialReconciliation.retargeted.length,
+        coalescedCount: initialReconciliation.coalesced.length,
+        unchangedCount: initialReconciliation.unchanged.length,
+        unmappedCellCount: initialReconciliation.unmappedCellCount,
+        reason,
+      })
+    }
     await createManualChannelAudit(tx, actor, 'MANUAL_CHANNEL_CONNECTION_SAVED', 'manualChannelConnection', connection.id, {
       propertyId,
       providerCode,
@@ -438,6 +529,8 @@ export async function saveManualChannelConnection(prisma, input = {}, actor) {
       externalPropertyId,
       extranetUrl,
       enabled,
+      initialReconcileDays: initialReconciliation ? initialReconcileDays : null,
+      initialBaselineStaged: Boolean(initialReconciliation),
       reason,
     })
     return connection
@@ -664,13 +757,21 @@ export async function calculateManualChannelAvailabilityInTransaction(tx, input 
   return result
 }
 
-export async function reconcileManualChannelTasksInTransaction(tx, input = {}, actor = { id: 'system', role: 'SYSTEM' }) {
+export async function reconcileManualChannelTasksInTransaction(
+  tx,
+  input = {},
+  actor = { id: 'system', role: 'SYSTEM' },
+  options = {},
+) {
   const propertyId = requiredString(input.propertyId, 'Property id')
   const triggerType = requiredString(input.triggerType, 'Trigger type', 100).toUpperCase().replace(/[^A-Z0-9_]+/g, '_')
   const sourceProviderCode = input.sourceProviderCode ? normalizeManualChannelProviderCode(input.sourceProviderCode) : null
   const sourceProviderAlreadyUpdated = Boolean(input.sourceProviderAlreadyUpdated)
   const sourceReservationId = normalizeNullableString(input.sourceReservationId, 200)
   const sourceBookingEmailEventId = normalizeNullableString(input.sourceBookingEmailEventId, 200)
+  const targetConnectionId = options.targetConnectionId
+    ? requiredString(options.targetConnectionId, 'Target connection id')
+    : null
   const todayKey = getBangkokDateKey(input.now || new Date())
   const requestedCells = affectedCells(input)
   const cells = requestedCells.filter((cell) => cell.dateKey >= todayKey)
@@ -680,6 +781,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
     return {
       created: [],
       superseded: [],
+      retargeted: [],
       coalesced: [],
       unchanged: [],
       unmapped: [],
@@ -696,6 +798,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
     tx.manualChannelConnection.findMany({
       where: {
         propertyId,
+        ...(targetConnectionId ? { id: targetConnectionId } : {}),
         enabled: true,
         providerCode: {
           in: MANUAL_CHANNEL_PROVIDER_CODES,
@@ -722,6 +825,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
     return {
       created: [],
       superseded: [],
+      retargeted: [],
       coalesced: [],
       unchanged: [],
       unmapped: [],
@@ -759,6 +863,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
   const result = {
     created: [],
     superseded: [],
+    retargeted: [],
     coalesced: [],
     unchanged: [],
     unmapped: [],
@@ -819,8 +924,10 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
       const activeTask = currentByLogicalKey.get(logicalKey)
       const latestCompleted = latestCompletedByLogicalKey.get(logicalKey)
       const latestTask = latestByLogicalKey.get(logicalKey)
+      const targetSnapshot = manualChannelTaskTargetSnapshot(mapping)
+      const activeTaskTargetsCurrentMapping = manualChannelTaskTargetMatchesMapping(activeTask, mapping)
 
-      if (activeTask && activeTask.desiredAvailability === cell.desiredAvailability) {
+      if (activeTask && activeTaskTargetsCurrentMapping && activeTask.desiredAvailability === cell.desiredAvailability) {
         result.coalesced.push(activeTask)
         await createManualChannelAudit(tx, actor, 'MANUAL_CHANNEL_TASK_COALESCED', 'manualChannelTask', activeTask.id, {
           propertyId,
@@ -833,14 +940,16 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
           sourceProviderAlreadyUpdated,
           sourceReservationId,
           sourceBookingEmailEventId,
-          externalRoomTypeId: mapping.externalRoomTypeId,
-          externalRoomTypeName: mapping.externalRoomTypeName,
-          externalRatePlanId: mapping.externalRatePlanId,
+          externalRoomTypeId: activeTask.targetExternalRoomTypeId,
+          externalRoomTypeName: activeTask.targetExternalRoomTypeName,
+          externalRatePlanId: activeTask.targetExternalRatePlanId,
         })
         continue
       }
 
-      if (!activeTask && latestCompleted?.confirmedAvailability === cell.desiredAvailability) {
+      if (!activeTask
+        && latestCompleted?.confirmedAvailability === cell.desiredAvailability
+        && manualChannelTaskTargetMatchesMapping(latestCompleted, mapping)) {
         result.unchanged.push(latestCompleted)
         continue
       }
@@ -858,6 +967,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
         })
         supersedesTaskId = activeTask.id
         result.superseded.push(activeTask)
+        if (!activeTaskTargetsCurrentMapping) result.retargeted.push(activeTask)
       }
 
       const task = await tx.manualChannelTask.create({
@@ -867,6 +977,7 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
           roomTypeId: cell.roomTypeId,
           stayDate: dateFromKey(cell.dateKey),
           desiredAvailability: cell.desiredAvailability,
+          ...targetSnapshot,
           status: 'PENDING',
           revision: Number(latestTask?.revision || 0) + 1,
           activeKey: activeTaskKey(connection.id, cell.roomTypeId, cell.dateKey),
@@ -890,6 +1001,13 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
           stayDate: cell.dateKey,
           previousDesiredAvailability: activeTask.desiredAvailability,
           desiredAvailability: cell.desiredAvailability,
+          mappingChanged: !activeTaskTargetsCurrentMapping,
+          previousExternalRoomTypeId: activeTask.targetExternalRoomTypeId || null,
+          previousExternalRoomTypeName: activeTask.targetExternalRoomTypeName || null,
+          previousExternalRatePlanId: activeTask.targetExternalRatePlanId || null,
+          externalRoomTypeId: targetSnapshot.targetExternalRoomTypeId,
+          externalRoomTypeName: targetSnapshot.targetExternalRoomTypeName,
+          externalRatePlanId: targetSnapshot.targetExternalRatePlanId,
           supersededByTaskId: task.id,
           triggerType,
           sourceProviderCode,
@@ -908,9 +1026,9 @@ export async function reconcileManualChannelTasksInTransaction(tx, input = {}, a
         sourceProviderAlreadyUpdated,
         sourceReservationId,
         sourceBookingEmailEventId,
-        externalRoomTypeId: mapping.externalRoomTypeId,
-        externalRoomTypeName: mapping.externalRoomTypeName,
-        externalRatePlanId: mapping.externalRatePlanId,
+        externalRoomTypeId: targetSnapshot.targetExternalRoomTypeId,
+        externalRoomTypeName: targetSnapshot.targetExternalRoomTypeName,
+        externalRatePlanId: targetSnapshot.targetExternalRatePlanId,
       })
     }
   }
@@ -931,6 +1049,7 @@ export async function reconcileManualChannelTasks(prisma, input = {}, actor) {
       reason,
       createdCount: result.created.length,
       supersededCount: result.superseded.length,
+      retargetedCount: result.retargeted.length,
       coalescedCount: result.coalesced.length,
       unchangedCount: result.unchanged.length,
       unmappedGroupCount: result.unmapped.length,
@@ -980,6 +1099,12 @@ export async function completeManualChannelTask(prisma, taskId, input = {}, acto
       where: { connectionId: task.connectionId, roomTypeId: task.roomTypeId, active: true },
     })
     if (!mapping) throw new PmsValidationError('Map this PMS room type to the OTA room type before completing the task.', 409)
+    if (!manualChannelTaskTargetMatchesMapping(task, mapping)) {
+      throw new PmsValidationError(
+        'This task targets an earlier OTA room or rate-plan mapping. Run reconciliation before completing it.',
+        409,
+      )
+    }
 
     const completedAt = new Date()
     const update = await tx.manualChannelTask.updateMany({
@@ -1007,9 +1132,9 @@ export async function completeManualChannelTask(prisma, taskId, input = {}, acto
       providerCode: task.connection.providerCode,
       roomTypeId: task.roomTypeId,
       roomTypeName: task.roomType.name,
-      externalRoomTypeId: mapping.externalRoomTypeId,
-      externalRoomTypeName: mapping.externalRoomTypeName,
-      externalRatePlanId: mapping.externalRatePlanId,
+      externalRoomTypeId: task.targetExternalRoomTypeId,
+      externalRoomTypeName: task.targetExternalRoomTypeName,
+      externalRatePlanId: task.targetExternalRatePlanId,
       stayDate: getBangkokDateKey(task.stayDate),
       confirmedAvailability,
       revision,
@@ -1032,7 +1157,9 @@ export async function reopenManualChannelTask(prisma, taskId, input = {}, actor)
   return serializableTransaction(prisma, async (tx) => {
     const task = await tx.manualChannelTask.findUnique({ where: { id: cleanTaskId }, include: { connection: true } })
     if (!task) throw new PmsValidationError('Manual channel task was not found.', 404)
-    if (task.status !== 'COMPLETED') throw new PmsValidationError('Only a completed channel task can be reopened.', 409)
+    if (!['COMPLETED', 'FAILED'].includes(task.status)) {
+      throw new PmsValidationError('Only a completed or failed channel task can be reopened or retried.', 409)
+    }
     if (!task.connection.enabled) throw new PmsValidationError('This channel connection is disabled.', 409)
     if (task.connection.deliveryMode !== 'MANUAL') {
       throw new PmsValidationError('Automatic channel tasks cannot be reopened through the manual workflow.', 409)
@@ -1042,41 +1169,109 @@ export async function reopenManualChannelTask(prisma, taskId, input = {}, actor)
       where: { connectionId: task.connectionId, roomTypeId: task.roomTypeId, active: true },
     })
     if (!mapping) throw new PmsValidationError('Map this PMS room type to the OTA room type before reopening the task.', 409)
+    const targetSnapshot = manualChannelTaskTargetSnapshot(mapping)
     const dateKey = getBangkokDateKey(task.stayDate)
+    const currentAvailability = await calculateManualChannelAvailabilityInTransaction(tx, {
+      propertyId: task.propertyId,
+      roomTypeId: task.roomTypeId,
+      date: dateKey,
+    })
     const key = activeTaskKey(task.connectionId, task.roomTypeId, dateKey)
-    const current = await tx.manualChannelTask.findUnique({ where: { activeKey: key } })
-    if (current) throw new PmsValidationError('A current channel task already exists for this provider, room type, and date.', 409)
-    const reopened = await tx.manualChannelTask.create({
-      data: {
-        propertyId: task.propertyId,
+    const latest = await tx.manualChannelTask.findFirst({
+      where: {
         connectionId: task.connectionId,
         roomTypeId: task.roomTypeId,
         stayDate: task.stayDate,
-        desiredAvailability: task.desiredAvailability,
-        status: 'PENDING',
-        revision: task.revision + 1,
-        activeKey: key,
-        triggerType: 'MANUAL_REOPEN',
-        sourceProviderCode: task.sourceProviderCode,
-        sourceReservationId: task.sourceReservationId,
-        sourceBookingEmailEventId: task.sourceBookingEmailEventId,
-        supersedesTaskId: task.id,
-        createdBy: actorLabel(actor),
       },
+      orderBy: [{ revision: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true, revision: true },
     })
-    await createManualChannelAudit(tx, actor, 'MANUAL_CHANNEL_TASK_REOPENED', 'manualChannelTask', reopened.id, {
+    if (!latest || latest.id !== task.id) {
+      throw new PmsValidationError('A newer channel task revision already exists. Refresh the Channel Desk.', 409)
+    }
+    const current = await tx.manualChannelTask.findUnique({ where: { activeKey: key } })
+    if (current && current.id !== task.id) {
+      throw new PmsValidationError('A current channel task already exists for this provider, room type, and date.', 409)
+    }
+    if (task.status === 'COMPLETED' && current) {
+      throw new PmsValidationError('A current channel task already exists for this provider, room type, and date.', 409)
+    }
+    if (task.status === 'FAILED') {
+      if (!task.activeKey || task.activeKey !== key || current?.id !== task.id) {
+        throw new PmsValidationError('This failed task is no longer the current revision. Refresh the Channel Desk.', 409)
+      }
+      const superseded = await tx.manualChannelTask.updateMany({
+        where: {
+          id: task.id,
+          status: 'FAILED',
+          revision: task.revision,
+          activeKey: key,
+        },
+        data: {
+          status: 'SUPERSEDED',
+          activeKey: null,
+        },
+      })
+      if (superseded.count !== 1) {
+        throw new PmsValidationError('This failed task changed before retry. Refresh the Channel Desk.', 409)
+      }
+    }
+    const nextRevision = Number(latest.revision) + 1
+    let reopened
+    try {
+      reopened = await tx.manualChannelTask.create({
+        data: {
+          propertyId: task.propertyId,
+          connectionId: task.connectionId,
+          roomTypeId: task.roomTypeId,
+          stayDate: task.stayDate,
+          desiredAvailability: currentAvailability.desiredAvailability,
+          ...targetSnapshot,
+          status: 'PENDING',
+          revision: nextRevision,
+          activeKey: key,
+          triggerType: task.status === 'FAILED' ? 'MANUAL_RETRY' : 'MANUAL_REOPEN',
+          sourceProviderCode: task.sourceProviderCode,
+          sourceReservationId: task.sourceReservationId,
+          sourceBookingEmailEventId: task.sourceBookingEmailEventId,
+          supersedesTaskId: task.id,
+          createdBy: actorLabel(actor),
+        },
+      })
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        throw new PmsValidationError(
+          'A current or newer channel task revision already exists. Refresh the Channel Desk.',
+          409,
+        )
+      }
+      throw error
+    }
+    await createManualChannelAudit(
+      tx,
+      actor,
+      task.status === 'FAILED' ? 'MANUAL_CHANNEL_TASK_RETRIED' : 'MANUAL_CHANNEL_TASK_REOPENED',
+      'manualChannelTask',
+      reopened.id,
+      {
       propertyId: task.propertyId,
       providerCode: task.connection.providerCode,
       roomTypeId: task.roomTypeId,
       stayDate: dateKey,
-      desiredAvailability: task.desiredAvailability,
+      previousDesiredAvailability: task.desiredAvailability,
+      desiredAvailability: currentAvailability.desiredAvailability,
       revision: reopened.revision,
       previousTaskId: task.id,
-      externalRoomTypeId: mapping.externalRoomTypeId,
-      externalRoomTypeName: mapping.externalRoomTypeName,
-      externalRatePlanId: mapping.externalRatePlanId,
+      previousStatus: task.status,
+      previousExternalRoomTypeId: task.targetExternalRoomTypeId || null,
+      previousExternalRoomTypeName: task.targetExternalRoomTypeName || null,
+      previousExternalRatePlanId: task.targetExternalRatePlanId || null,
+      externalRoomTypeId: targetSnapshot.targetExternalRoomTypeId,
+      externalRoomTypeName: targetSnapshot.targetExternalRoomTypeName,
+      externalRatePlanId: targetSnapshot.targetExternalRatePlanId,
       reason,
-    })
+      },
+    )
     return reopened
   })
 }
