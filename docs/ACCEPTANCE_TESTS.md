@@ -119,3 +119,98 @@ $env:ALLOW_DB_E2E='true'
 $env:E2E_DATABASE_URL='postgresql://...disposable...'
 npm.cmd run test:e2e:db
 ```
+
+## Lite V1 Acceptance Plan
+
+Lite V1 remains a staging candidate until every applicable item below has evidence for the exact reviewed commit. A passing unit test does not substitute for database, staging, provider, staff, recovery, or public-edge proof.
+
+### Build And Compatibility
+
+- `npm.cmd run typecheck:lite` passes.
+- `npm.cmd run test:lite` passes.
+- `npm.cmd test`, `npm.cmd run typecheck`, `npm.cmd run lint`, `npx.cmd prisma validate`, `npm.cmd run build`, `npm.cmd run build:lite`, and `git diff --check` pass.
+- Legacy UI behavior remains available during the pilot.
+- Lite initial JavaScript is measured against the 250 KB gzip target; secondary screens are lazy-loaded where required. A build pass without an asset-size measurement is insufficient.
+
+Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/tests/pms-channel-integration.mjs`, `scripts/run-business-tests.mjs`, and the server-mode E2E harness. Record actual command output separately; listing a test file here is not a pass claim.
+
+### Lite Operational Reads And UI
+
+- Front Desk separates arrivals, departures, and in-house stays and shows room/payment blockers.
+- Bookings supports bounded pagination plus date, status, source, and text filters.
+- Board returns separate `rooms`, complete `reservationSegments`, and `unassignedBookings`; two future reservations on one room are both visible.
+- Board supports a 14-day default and validated ranges up to 90 days, including a configured room type that is neither Twin nor Double.
+- Housekeeping supports dirty -> cleaning -> clean -> inspected according to backend transition rules.
+- Channel Desk exposes non-secret mailbox/watch health, review-required events, mappings, and pending/failed manual tasks.
+- Settings is permission-filtered and does not expose credentials.
+- Clearing browser storage loses no booking, room, folio, payment, housekeeping, email-review, or channel-task state.
+- Two browser sessions observe committed changes through SSE-triggered refetch or fallback polling.
+- A failed backend mutation never displays success.
+- Desktop and tablet layouts plus Thai and English core routes/actions/statuses/errors pass staff review. Thai-speaking staff acceptance is required.
+
+### Gmail Push And Review Gate
+
+- Push rejects missing/invalid OIDC, issuer, audience, service account, subscription, mailbox, message id, oversized/invalid data, and invalid history id.
+- A valid push is durably stored before HTTP `202`.
+- Replaying the same Pub/Sub message id is idempotent and does not reset attempts or completion state.
+- A stale `PROCESSING` claim is reclaimed after its timeout; retries remain visible and errors are redacted.
+- Gmail watch renewal records a future expiry; an invalid/expired history cursor uses bounded reconciliation without silently advancing past an incomplete scan.
+- Push, history, reconciliation, explicit Gmail sync, and five-minute maintenance all call the PMS ingester with `reviewOnly: true`.
+- Booking.com, Agoda, and Trip.com fixtures cover new booking, modification, cancellation, duplicates, out-of-order notification/history delivery, parser errors, and failed review actions.
+- Receipt of any fixture creates/updates `NEEDS_REVIEW` evidence and makes no reservation, inventory, payment, or room mutation.
+- An authorized approval uses the existing PMS transaction, reason/audit rules, and exact provider-scoped reference. Modification and cancellation approvals require a reason.
+- A processed event cannot be reprocessed.
+- A missed/failed push is recovered by a later maintenance run without duplicate event/reservation creation.
+- SSE emitted for email changes contains no guest, sender, recipient, subject, room, payment, body, or credential data.
+
+Automated tests currently target Pub/Sub authentication/envelope handling, durable idempotency, review-only history ingestion, stale claim recovery, Trip.com exact-reference handling, modification/cancellation reasons, absolute source-provider reconciliation, and processed-event reprocess denial. Staging watch/push/cron evidence remains separately required.
+
+### Manual Channel Queue
+
+- Only `booking_com`, `agoda`, and `trip_com` provider codes are accepted.
+- Credential-shaped fields and non-official/non-HTTPS Extranet URLs are rejected.
+- Enabling a connection fails until every room type with at least one physical room has an active mapping, including room types whose rooms are temporarily out of service.
+- Two PMS room types cannot share the same active external room-type/rate-plan target on one connection; both service preflight and the database concurrency constraint reject the conflict.
+- Reconciliation creates no task for an unmapped provider/room cell, returns the gap, and persists an aggregated `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` audit record.
+- Each Channel Desk task displays its external room type id/name and rate-plan id; a legacy task with no current mapping cannot be completed.
+- Direct and walk-in inventory changes create cells for all enabled manual connections.
+- An approved OTA email reconciles every enabled connection, including the originating provider, with current absolute PMS availability and supersedes stale source-provider work.
+- Creation, inventory-changing edit, cancellation/no-show, and reviewed modification/cancellation recalculate every affected stay date inside the PMS transaction.
+- Identical desired values coalesce; changed values supersede the active task and increment revision.
+- A stale revision, wrong availability, disabled connection, missing mapping, or non-manual mode cannot be completed.
+- Front Desk/Manager/Admin may complete a current task; only Manager/Admin may configure, reconcile, or reopen.
+- Completion persists exact availability, operator, timestamp, notes, and audit evidence.
+- Reopen requires a reason and cannot conflict with an already-current task.
+- Pending/failed task age and retry/error visibility are usable by staff.
+- The disabled Channex boundary reports `CHANNEX_NOT_CONFIGURED` and cannot perform a push.
+
+No acceptance result may describe the manual queue as automatic, two-way, live, zero-lag, or overbooking-proof.
+
+### Money Precision Blocker
+
+Repository tests for exact satang reads, dual writes, pricing, deposits, tax/void arithmetic, partial payments, and exact zero balance are necessary but insufficient. Production Lite folio/payment acceptance additionally requires:
+
+- nullable integer-satang columns for every scoped money field and integer basis points for tax configuration;
+- audited Float-to-satang backfill and reconciliation report;
+- dual-write parity tests for creates/edits, partial and multiple payments, taxes, voids, deposits, and zero-balance checkout;
+- zero unexplained folio/payment discrepancies;
+- fresh Render recovery point and successful disposable restore;
+- Lite authoritative satang reads/writes; and
+- a 30-day rollback period before Float authority is removed.
+
+The schema now contains nullable integer-satang authority fields while retaining Float rollback-parity columns. This acceptance section remains open until the migration is applied to a disposable restore/staging target and `npm.cmd run money:reconcile` reports zero unexplained differences after representative workflows. Do not infer production completion from repository tests alone.
+
+### Provider And Staging Proof
+
+- Booking.com is documented and operated as manual; no ordinary individual-property direct Connectivity API access is claimed.
+- Agoda and Trip.com application packets contain only owner-verified facts. Submission, provider response, sandbox credentials, certification, and production approval each require separate owner/provider evidence.
+- Channex remains disabled unless the complete certified integration gate in `docs/OTA_ADAPTER_GUIDE.md` passes.
+- A separate Render Lite staging service uses a sanitized disposable/staging database and the exact reviewed commit.
+- Staging proves migrations, `/healthz?deep=1`, `/api/version`, asset identity, auth/RBAC, review-only Gmail watch/push, five-minute cron, manual queue, logs, and rollback.
+- Cloudflare DNS/proxy/WAF traffic-path evidence is recorded before any Lite public hostname is treated as protected.
+- Seven consecutive days of Gmail/parser shadow comparison and a 14-day staff pilot pass before domain cutover.
+- Every active/future booking, mapping, opening inventory/rate plan, duplicate risk, inventory drift, and unresolved task is reconciled.
+- OTA disconnect happens one provider at a time in an owner-controlled maintenance window, with an approved booking/modification/cancellation test and 48-hour observation before the next provider.
+- Legacy access/exports remain available through the 30-day rollback period.
+
+Repository/local checks cannot close these live/provider/owner items. See `docs/LITE_ARCHITECTURE.md` for the release boundary.

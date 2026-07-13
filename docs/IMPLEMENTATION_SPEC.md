@@ -219,9 +219,9 @@ The Booking Inbox is a staff-facing exception queue for email-derived booking ev
 
 - Approve uses `apply_parsed` for payment/modification/cancellation-style events and links matched new bookings to avoid duplicate reservations.
 - Edit Parsed Details Then Apply submits corrected `editedDetails` through the same approval route.
-- Reprocess reruns the deterministic parser against stored email text, clears stale `processedBy`/`processedAt` state, and returns the event to `NEEDS_REVIEW`; it does not auto-approve or bypass staff review.
+- Reprocess is limited to eligible `NEEDS_REVIEW` / `ERROR` events, reruns the deterministic parser against stored email text, clears stale error/review state, and returns the event to `NEEDS_REVIEW`; it does not auto-approve or bypass staff review. A processed event is rejected with conflict instead of being reopened.
 - Link/Create requires an explicit reservation id for linking; unmatched new-booking events can create a reservation from parsed details.
-- Cancellation email actions require an operational reason so the audit trail captures the staff decision.
+- Modification and cancellation email actions require an operational reason so the audit trail captures the staff decision.
 - Mailbox sync remains separate from event review; Gmail sync requires server-side Gmail API credentials, either an OAuth access token or backend OAuth refresh-token credentials, and must not use a pasted mailbox password. `GET /api/booking-email/status` returns non-secret diagnostics for OAuth client presence, refresh token presence, target mailbox presence, missing key names, last sync state, and Gmail API profile connectivity. Render setup should use the booking-specific `BOOKING_EMAIL_GMAIL_*` env vars plus either the `gmail-oauth:render` code-exchange/apply helper or the dry-run-first `render:gmail-oauth` helper when applying credentials from a secure shell.
 
 ## Notifications
@@ -235,3 +235,68 @@ Notifications are backend records:
 - Notification text and metadata are sanitized before persistence.
 - The shared PMS header notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
 - Read and dismiss actions call backend acknowledgment routes, persist actor/timestamp fields, and create audit records. This acknowledgment state is separate from provider delivery status.
+
+## Lite V1 Core Operations
+
+Lite V1 is built in parallel under `src-lite/` and selected at build/runtime with the Lite Vite configuration and `PMS_UI_VARIANT=lite`. It must continue to use the existing `server/pms-service.mjs` transaction and policy functions for every operational mutation. It must not fork reservation, folio, payment, check-in/out, housekeeping, authentication, or RBAC authority into the browser.
+
+Lite read routes:
+
+- `GET /api/lite/v1/front-desk?date=YYYY-MM-DD`
+- `GET /api/lite/v1/bookings?from=&to=&status=&source=&query=&cursor=&limit=`
+- `GET /api/lite/v1/board?from=&to=`
+- `GET /api/lite/v1/housekeeping?date=YYYY-MM-DD`
+- `GET /api/lite/v1/channel-desk`
+- `GET /api/version`
+- `GET /api/realtime/events`
+
+Manual channel routes:
+
+- `PUT /api/lite/v1/channels/connections/:provider`
+- `POST /api/lite/v1/channels/mappings`
+- `POST /api/lite/v1/channel-tasks/reconcile`
+- `POST /api/lite/v1/channel-tasks/:id/complete`
+- `POST /api/lite/v1/channel-tasks/:id/reopen`
+
+The existing audited reservation, assignment, check-in/out, cancellation/no-show, housekeeping, charge, and payment routes remain the write contract. Configuration and reconciliation require `manage:channels`; current task completion is limited by the service to Front Desk, Manager, or Admin and requires the exact current revision and desired availability.
+
+### Gmail Push And Reconciliation
+
+`POST /api/booking-email/gmail/push` is intentionally outside PMS session authentication because Google Pub/Sub calls it. It is not anonymous: the handler requires a Google-signed OIDC bearer token and verifies issuer, audience, verified service-account email, configured subscription, mailbox identity, bounded envelope size, message id, and numeric Gmail history id.
+
+The handler persists a unique `BookingEmailPushDelivery` before acknowledging with `202`, then schedules bounded processing. Delivery states are `PENDING`, `PROCESSING`, `SUCCEEDED`, `COALESCED`, and `FAILED`. Source leases and retry availability prevent concurrent history work from being treated as success. A stale processing claim can be reclaimed.
+
+`npm.cmd run booking-email:maintenance` is the Render cron contract. Each run:
+
+1. renews Gmail watches that are missing or nearing expiry;
+2. drains/retries durable push deliveries;
+3. performs bounded Gmail history reconciliation for each enabled Gmail source; and
+4. emits only redacted aggregate output.
+
+Every Gmail ingestion call is forced to `reviewOnly: true`, including the push, history, reconciliation, and explicit Gmail sync paths. New, modified, and cancelled bookings must remain `NEEDS_REVIEW` until authorized staff approve them. A processed event cannot be reprocessed. Modification and cancellation approvals require an operational reason and use the existing PMS transaction functions.
+
+### Provider Attribution And Manual Availability
+
+Supported manual provider codes are extensible text validated against `booking_com`, `agoda`, and `trip_com`. Reservations and booking-email events carry `providerCode` and `externalReservationId`; a property/provider/reference key supports idempotent exact matching before legacy or fuzzy suggestions.
+
+An inventory-changing create, edit, cancellation/no-show, walk-in, or reviewed OTA action reconciles manual channel cells within the PMS transaction. Every change targets all enabled manual channels. An approved OTA email also reconciles its source provider with current absolute PMS availability so stale source-provider tasks are coalesced, superseded, or replaced instead of remaining actionable. The queue stores one active logical cell per provider/room type/date, coalesces an identical desired value, and supersedes an older active revision when availability changes.
+
+The queue is outbound work coordination only. It does not log in to or mutate any OTA. Staff open an official-domain Extranet URL, enter the exact desired availability, and complete the matching revision. There is no zero-lag or overbooking guarantee.
+
+Manual connection activation requires active mapping coverage for every `RoomType` that owns at least one physical `Room`. This includes room types whose rooms are temporarily out of service because those rooms can become sellable again. One active external room-type/rate-plan target may map to only one PMS room type per connection; a partial database unique index is the concurrency guard. If a later room-type change leaves an enabled connection without a mapping, reconciliation creates no unusable task for those cells and records an aggregated `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` audit event. Channel Desk task DTOs show the current external room type id/name and rate-plan id.
+
+Booking.com remains manual because an ordinary individual-property Extranet account is not direct Connectivity API access. Agoda and Trip.com direct API routes require provider partner onboarding and testing; application submission and approval remain owner-gated. Channex delivery is represented by a disabled boundary that returns `CHANNEX_NOT_CONFIGURED` and refuses automatic pushes.
+
+### Realtime Invalidation
+
+The authenticated SSE endpoint accepts only users with `view:board`. It publishes allowlisted invalidation signals, never booking payloads. Permitted fields are event type, occurrence time, optional opaque entity id, and optional reason code. The client refetches authorized API data and retains a polling fallback. The current in-process hub is suitable only for a single server instance; it has no replay and is not a durable cross-instance event bus.
+
+### Money Contract
+
+`server/lite-service.mjs` reads nullable integer-satang fields as the authoritative Lite monetary contract and rejects required rows whose satang value is missing. `server/pms-service.mjs` derives satang plus legacy Float rollback parity from the same validated integer for property fees/tax, room-type rates, booking-email amounts, reservation pricing/deposits, folios, payments, and charges. Folio totals and balances are recomputed in satang. `prisma/migrations/20260713100000_money_satang_expand/` adds and backfills the integer fields and basis-point tax field; `npm.cmd run money:reconcile` performs a read-only parity check.
+
+Do not represent the production exact-money cutover as complete until a fresh recovery point, disposable restore, applied migration, reconciliation report, zero unexplained folio/payment discrepancies, and the rollback/contract phases are proven. Satang is the implemented Lite/runtime authority; existing Float fields remain required rollback parity during the pilot, and production Lite folio/payment sign-off stays open until the environment evidence exists.
+
+### Release Contract
+
+Lite must be deployed first as a separate staging service with a sanitized disposable/staging database. A five-minute Gmail maintenance cron, Pub/Sub watch/push, migrations, review-only events, manual queue, roles, Thai/English flows, exact release metadata, and recovery must be proven there. Repository/local validation does not establish Render deployment, Cloudflare routing/WAF, provider approval, production data safety, or staff acceptance. See `docs/LITE_ARCHITECTURE.md` for the complete boundary.

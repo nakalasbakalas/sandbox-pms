@@ -90,7 +90,7 @@ Booking Inbox operators:
 2. Use Approve & Apply only when the extracted guest, dates, room type, amount, and reservation match are clear.
 3. Use Edit Parsed Details Then Apply when the parser is close but needs corrected stay, payment, or guest fields.
 4. Use Link / Create Reservation to link matched events by reservation id or create only clearly unmatched new bookings.
-5. Enter an operational reason for cancellation email actions.
+5. Enter an operational reason for modification and cancellation email actions.
 6. Use Reprocess only for stale `NEEDS_REVIEW` or `ERROR` events after parser changes; reprocess returns the event to the review queue and does not auto-approve it.
 7. Treat missing mailbox sync credentials as a provider setup issue; existing imported events can still be reviewed if backend routes are available.
 
@@ -311,3 +311,195 @@ npm.cmd run test:e2e:db
 ```
 
 Never run DB-mutating E2E against production data.
+
+## Lite V1 Staging Runbook
+
+Lite rollout is staging-first. Do not point an unverified Lite service, migration, cron, or DB-mutating E2E command at production data.
+
+### Build And Local Validation
+
+```powershell
+npm.cmd ci --include=dev
+npm.cmd run db:generate
+npm.cmd run typecheck:lite
+npm.cmd run test:lite
+npm.cmd test
+npm.cmd run lint
+npx.cmd prisma validate
+npm.cmd run build:lite
+git diff --check
+```
+
+`npm.cmd run test:e2e` is the normal non-mutating server-mode boundary. `npm.cmd run test:e2e:lite` is deliberately database-mutating: it refuses to start without `ALLOW_DB_E2E=true` and an unmistakably disposable/staging `E2E_DATABASE_URL`, creates a unique temporary schema, applies migrations, seeds test-only users, runs real browser workflows plus money reconciliation, and drops the schema afterward. Never reuse a production-like URL.
+
+Build the Lite client with `npm.cmd run build:lite`. The server selects `dist-lite` only when `PMS_UI_VARIANT=lite`; otherwise it serves the legacy build. Keep the legacy path available during the pilot.
+
+### Staging Configuration
+
+`render-lite.yaml` is the free-instance staging baseline: one Free web service
+plus one disposable Free Postgres database in Singapore. It creates no paid
+instance resource, but workspace quotas and bandwidth/build overages still apply.
+It has manual deploys
+(`autoDeployTrigger: off`), pins Node `22.12.0`, serves the Lite build, runs
+idempotent migrations before each start, and uses `/healthz?deep=1` so Render
+checks database connectivity. It does not contain the paid maintenance cron and
+does not reference the production PMS database.
+
+Render Free Postgres is staging-only: it expires after 30 days, has no backups,
+and Render permits only one active Free Postgres database per workspace. A Free
+web service can spin down and has no shell, SSH, one-off-job, or pre-deploy-command
+support. Do not treat this disposable pilot as production or recovery evidence.
+
+Render generates `SESSION_SECRET` once when the service is created and preserves
+the existing value on later Blueprint syncs. Before applying the Blueprint, the
+owner must provide these user-supplied `sync: false` values
+in the Render creation form without pasting them into repo files, logs, or chat:
+
+- `SEED_USERS_JSON`: a JSON array containing at least one approved `ADMIN` with
+  `passwordHash`; never include a `password` field;
+- Gmail OAuth and Pub/Sub values only when the staging mailbox integration is
+  ready to be exercised.
+
+The `initialDeployHook` runs `scripts/render-lite-staging-bootstrap.mjs` once after
+the first successful deploy. It refuses any database other than
+`sandbox_pms_lite_staging`, any non-empty PMS database, plaintext seed password
+variables, and any seed payload without a hash-only admin. The prod-safe seed
+creates staging property/room-type/login foundations but does not create demo room
+inventory. Verify the first admin login, then remove `SEED_USERS_JSON` from Render;
+later restarts run migrations only and never reseed or reset the database. Public
+first-run setup remains disabled.
+
+Minimum runtime configuration remains:
+
+```env
+DATABASE_URL=postgresql://...disposable-or-staging...
+SESSION_SECRET=...
+PMS_UI_VARIANT=lite
+```
+
+Render supplies `RENDER_EXTERNAL_URL`, which the server uses for its initial
+same-origin boundary. If a separate staging custom domain is added later, update
+both `APP_URL` and `ALLOWED_ORIGINS` in Render before routing traffic to it.
+
+Gmail history sync still requires the backend Gmail OAuth tuple described earlier in this runbook. Near-live push additionally requires:
+
+```env
+BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED=true
+BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC=projects/<project>/topics/<topic>
+BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION=projects/<project>/subscriptions/<subscription>
+BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE=https://<staging-host>/api/booking-email/gmail/push
+BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL=<push-service-account>
+```
+
+The push subscription must use Google authenticated push with the configured service-account identity and exact audience. Do not paste or print OIDC tokens, OAuth values, message ids, raw messages, or guest/payment data while configuring or proving the path.
+
+### Database Migration Gate
+
+Before applying the Lite schema migrations:
+
+1. Confirm the target database is disposable/staging and independently resettable.
+2. Generate and validate Prisma locally.
+3. Take or verify the applicable staging recovery point.
+4. Apply with `npm.cmd run db:migrate`.
+5. Run `npm.cmd run db:status` and focused Lite/Gmail/manual-channel tests.
+6. Run `npm.cmd run money:reconcile` with the same target `DATABASE_URL` and require `status=PASS` with zero unexplained differences.
+7. Inspect only redacted aggregate counts and migration state.
+
+The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill, and database-enforced active OTA mapping-target uniqueness. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+
+### Gmail Watch, Push, And Five-Minute Fallback
+
+Near-live authenticated Pub/Sub push is the primary path and does not require the
+Render cron. The fallback cron is isolated in
+`render-lite-cron-opt-in.yaml`. Applying that second Blueprint creates a billable
+Render Cron Job with a current USD 1/month minimum. Do not apply it without
+explicit owner cost approval. Apply `render-lite.yaml` first; the opt-in cron then
+references the named Lite staging web service and staging database, never the
+production database.
+
+After approval, configure the opt-in cron on the same reviewed commit and staging
+database:
+
+```text
+Schedule: */5 * * * *
+Command: npm.cmd run booking-email:maintenance
+```
+
+Render's Linux runtime may invoke the package script as `npm run booking-email:maintenance`; the repository's Windows validation convention remains `npm.cmd`. Capture the actual Render command and schedule in deployment evidence.
+
+Validate structure before any apply:
+
+```powershell
+render blueprints validate render-lite.yaml
+render blueprints validate render-lite-cron-opt-in.yaml
+```
+
+The branch must already exist on GitHub for Render's remote validation. The cron
+manifest also requires the base staging web/database resources to exist in the
+selected Render workspace because it references them across Blueprints. A missing
+branch or missing external staging resource is an apply-order blocker, not YAML
+schema proof and not permission to substitute production resources.
+
+One maintenance run renews due Gmail watches, drains/retries durable Pub/Sub deliveries, and performs bounded history reconciliation. Run once manually on staging before enabling the schedule:
+
+```powershell
+npm.cmd run booking-email:maintenance
+```
+
+Expected output is redacted aggregate JSON. A healthy run has at least one enabled source, no errors, no delivery failures, and no reconciliation failures. This proves only that run. It does not prove continuous push delivery or zero-lag synchronization.
+
+To prove the end-to-end path safely:
+
+1. Verify `/api/booking-email/status` and Channel Desk show non-secret Gmail readiness.
+2. Verify the Gmail watch has a future expiry without recording its secret values.
+3. Send or identify one owner-approved non-production provider fixture through the staging mailbox.
+4. Confirm a durable push delivery reaches `SUCCEEDED` or is safely `COALESCED` by history reconciliation.
+5. Confirm the booking email appears as `NEEDS_REVIEW` and no reservation/inventory changed before approval.
+6. Approve only a staging fixture with an operational reason and verify the PMS audit plus absolute-availability reconciliation for every enabled OTA, including stale-task supersession on the source provider.
+7. Test a missed/failed push and confirm the five-minute maintenance run recovers it without duplicate reservation creation.
+
+If Pub/Sub is unhealthy, leave the review queue enabled, keep the maintenance cron running, and treat intake as reconciliation-based rather than near-live. If Gmail OAuth or reconciliation is unhealthy, stop relying on mailbox intake and use the existing manual booking process until the source is healthy. Never bypass the review gate to compensate for delay.
+
+### Manual Channel Desk Operation
+
+Manager/Admin setup:
+
+1. Create/save only the intended provider connection and leave it disabled during mapping setup.
+2. Store a provider property id only when verified; never store credentials.
+3. Save an official HTTPS Extranet URL without query parameters, fragments, embedded credentials, or non-standard ports.
+4. While the connection is disabled, map every PMS room type that has at least one physical room to verified OTA room/rate-plan identifiers. Temporarily out-of-service rooms still count because they can return to sale.
+5. Confirm that no two PMS room types use the same active OTA room-type/rate-plan target, then enable the connection. The backend and database reject incomplete or conflicting activation.
+6. Run reconciliation with an operational reason and review the resulting task counts.
+
+Front Desk/Manager/Admin completion:
+
+1. Refresh Channel Desk and open the current task.
+2. Confirm provider, PMS room type, displayed external room type id/name, rate-plan id, stay date, revision, and desired availability.
+3. Open the official Extranet and update the value manually.
+4. Return to Lite and complete the task using the same current revision and exact confirmed availability.
+5. If the task changed, refresh; do not complete a stale revision.
+
+Manager/Admin may reopen a completed task only with an operational reason. A newer PMS inventory state may supersede an open task. Completed means a staff operator attested that the Extranet was updated; it is not an independent OTA API read-back.
+
+Escalate overdue or failed tasks immediately because the workflow cannot guarantee zero-lag inventory or prevent overbooking while Extranets differ. Booking.com stays manual. Agoda and Trip.com partner application submission/approval require owner-controlled business/legal details and provider testing. The Channex path must remain disabled until a certified account, secret handling, mappings, sandbox tests, and owner acceptance are complete.
+
+If `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` appears in audit logs, keep the affected inventory under manual control, add/repair the active mapping, and run reconciliation again. The service deliberately creates no task for an unknown external target; an audit record is evidence of the gap, not proof that the OTA was updated.
+
+### SSE And Client Recovery
+
+`GET /api/realtime/events` is an authenticated invalidation signal, not a booking data feed. If SSE disconnects, the client receives `sync-required` on reconnect and continues fallback polling. Verify mutations by refetching the authoritative API; do not infer success from an SSE signal. For more than one server instance, add a shared event bus before relying on cross-instance live refresh.
+
+### Release And Cutover Gate
+
+Do not promote Lite beyond staging until all of these are recorded for the exact commit:
+
+- green Lite, legacy, business, lint, Prisma, build, and approved disposable DB E2E checks;
+- successful staging migration plus recovery/restore evidence;
+- Gmail OAuth/watch/push/cron/reconciliation proof with review-only behavior;
+- Booking.com, Agoda, and Trip.com parser/review fixtures and duplicate/out-of-order handling;
+- manual task coalescing, supersession, absolute source-provider reconciliation, completion, age, and audit proof;
+- completed exact-money migration/reconciliation, not merely API satang projection;
+- role, tablet/desktop, Thai/English, and Thai-speaking staff acceptance;
+- provider application decisions, Cloudflare routing/WAF evidence, and owner go/no-go.
+
+Use a separate pilot hostname and manual Render release before any public domain move. Keep the existing service available during the pilot and retain a tested rollback for 30 days. See `docs/LITE_ARCHITECTURE.md` for the sequential OTA and domain cutover boundary.

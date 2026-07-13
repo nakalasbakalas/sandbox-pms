@@ -1,0 +1,88 @@
+# FREE-INSTANCE STAGING BASELINE ONLY.
+# This Blueprint creates one free web service and one disposable free Postgres
+# database. It intentionally does not create the billable five-minute cron.
+# Render workspace quotas and any bandwidth/build overages still apply.
+# See render-lite-cron-opt-in.yaml only after explicit owner cost approval.
+previews:
+  generation: off
+
+services:
+  - type: web
+    name: sandbox-hotel-pms-lite-staging
+    runtime: node
+    repo: https://github.com/nakalasbakalas/sandbox-pms
+    plan: free
+    region: singapore
+    branch: codex/sandbox-pms-lite-v1
+    autoDeployTrigger: off
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm run db:generate && npm run build:lite
+    # Free web services do not support Render pre-deploy commands. Staging runs
+    # additive/idempotent migrations before starting; production must use a paid
+    # service plus a pre-deploy migration after recovery-point proof.
+    startCommand: npm run db:migrate && npm start
+    # Runs once for this staging service, after its first successful deploy.
+    # The helper refuses production-like databases, plaintext seed passwords,
+    # non-empty databases, and seed payloads without a hash-only ADMIN user.
+    initialDeployHook: node scripts/render-lite-staging-bootstrap.mjs
+    healthCheckPath: /healthz?deep=1
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: NODE_ENV
+        value: production
+      - key: PMS_DEPLOYMENT_TIER
+        value: staging
+      - key: PMS_UI_VARIANT
+        value: lite
+      - key: PMS_WRITE_MODE
+        value: active
+      - key: SEED_MODE
+        value: prod-safe
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-lite-staging-db
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      # Required only for the one-time initialDeployHook. Supply a JSON array
+      # containing at least one ADMIN with passwordHash (never password), then
+      # remove this variable from Render after first login is verified.
+      - key: SEED_USERS_JSON
+        sync: false
+      - key: ALLOW_PUBLIC_SETUP
+        value: false
+      - key: ALLOW_DB_E2E
+        value: false
+      - key: TRUST_PROXY_HEADERS
+        value: true
+      - key: BOOKING_EMAIL_PRIMARY_MAILBOX
+        value: booking@sandboxhotel.com
+      - key: BOOKING_EMAIL_GMAIL_USER_ID
+        value: me
+      - key: BOOKING_EMAIL_GMAIL_SCOPES
+        value: https://www.googleapis.com/auth/gmail.readonly
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_ID
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+        value: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
+        sync: false
+
+databases:
+  - name: sandbox-hotel-pms-lite-staging-db
+    databaseName: sandbox_pms_lite_staging
+    user: sandbox_pms_lite_staging
+    plan: free
+    region: singapore
+    postgresMajorVersion: "17"
+    ipAllowList: []

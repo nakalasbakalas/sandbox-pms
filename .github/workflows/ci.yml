@@ -5,13 +5,20 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      run_lite_db_e2e:
+        description: Run the destructive Lite E2E suite against an ephemeral PostgreSQL service
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Install, test, build, and launch-check
+  verify-fast:
+    name: Fast checks (no database mutations)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -34,20 +41,88 @@ jobs:
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/sandbox_ci?schema=public
+        run: npx prisma validate
+
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
+      - name: Typecheck full PMS
         run: npm run typecheck
+
+      - name: Typecheck PMS Lite
+        run: npm run typecheck:lite
 
       - name: Business tests
         run: npm test
 
-      - name: E2E smoke tests
+      - name: PMS Lite unit tests
+        run: npm run test:lite
+
+      - name: Existing browser, contract, and server-mode smoke tests
         run: npm run test:e2e
 
-      - name: Build
+      - name: Build full PMS
         run: npm run build
+
+      - name: Build PMS Lite in server mode
+        env:
+          VITE_PMS_API_MODE: server
+          PMS_UI_VARIANT: lite
+        run: npm run build:lite
 
       - name: Launch gate
         run: npm run launch:check
+
+      - name: Record validation boundary
+        run: echo "Fast CI completed without a database. It is not proof of Lite database workflows." >> "$GITHUB_STEP_SUMMARY"
+
+  lite-db-e2e:
+    name: PMS Lite E2E (ephemeral PostgreSQL)
+    needs: verify-fast
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_lite_db_e2e }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: lite_e2e
+          POSTGRES_PASSWORD: lite-e2e-container-only
+          POSTGRES_DB: sandbox_lite_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lite_e2e -d sandbox_lite_e2e"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      ALLOW_DB_E2E: "true"
+      E2E_DATABASE_URL: postgresql://lite_e2e:lite-e2e-container-only@127.0.0.1:5432/sandbox_lite_e2e?schema=public
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run guarded PMS Lite database E2E
+        run: node scripts/run-lite-e2e-tests.mjs
+
+      - name: Record database proof scope
+        if: ${{ always() }}
+        run: echo "Lite E2E was requested explicitly and targeted the job-scoped ephemeral PostgreSQL service; it never targeted production." >> "$GITHUB_STEP_SUMMARY"

@@ -280,6 +280,7 @@ function startApiServer(port) {
       HOST: '127.0.0.1',
       PORT: String(port),
       NODE_ENV: 'test',
+      DATABASE_URL: 'postgresql://health:health@127.0.0.1:1/lite_health_test?schema=public',
       OTA_WORKER_SHARED_SECRET: 'route-test-worker-secret',
       OTA_WORKER_BASE_URL: `http://127.0.0.1:${port}/api/internal/ops/worker/tasks`,
       BOOKING_USERNAME: 'route-test-booking-user',
@@ -586,6 +587,13 @@ async function runInternalWorkerRouteSmoke() {
   try {
     await waitForHttp(`${baseUrl}/api/health`, server)
 
+    const failedDeepHealth = await fetch(`${baseUrl}/healthz?deep=1`)
+    assert.equal(failedDeepHealth.status, 503, 'deep health returns 503 when PostgreSQL is unavailable')
+    const failedDeepHealthPayload = await failedDeepHealth.json()
+    assert.equal(failedDeepHealthPayload.ok, false, 'deep health top-level status follows database failure')
+    assert.equal(failedDeepHealthPayload.database?.error, 'Database health check failed.', 'public deep health keeps database errors generic')
+    assert.equal(JSON.stringify(failedDeepHealthPayload).includes('health:health'), false, 'deep health never exposes database credentials')
+
     const unsignedResponse = await fetch(`${baseUrl}/api/internal/ops/worker/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -690,11 +698,13 @@ assert.equal(canViewRoute(housekeeping, 'ops-chat'), false, 'housekeeping cannot
 assert.equal(canViewRoute(housekeeping, 'ops-approvals'), false, 'housekeeping cannot approve Hotel Ops tasks')
 assert.equal(canViewRoute(manager, 'ops-settings'), false, 'manager cannot change Hotel Ops settings')
 assert.equal(canViewRoute(frontDesk, 'user-management'), false, 'front desk cannot view user management')
-assert.equal(canViewRoute(frontDesk, 'channels'), false, 'front desk cannot view channel management')
+assert.equal(canViewRoute(frontDesk, 'channels'), true, 'front desk can view manual channel work')
+assert.equal(canPerformAction(frontDesk, 'manage:channels'), false, 'front desk cannot configure channel connections or mappings')
 assert.equal(canViewRoute(manager, 'channels'), true, 'manager can view channel management')
 assert.equal(canViewRoute(housekeeping, 'tablet-housekeeping'), true, 'housekeeping can view tablet housekeeping')
 assert.equal(canViewRoute(frontDesk, 'does-not-exist'), false, 'unknown routes are denied by default')
 assert.equal(canPerformAction(frontDesk, 'check-in:guest'), true, 'front desk can check in guests')
+assert.equal(canPerformAction(housekeeping, 'view:realtime'), true, 'housekeeping receives PII-free Lite invalidation signals')
 assert.equal(canPerformAction(frontDesk, 'override:check-in'), false, 'front desk cannot override check-in blockers')
 assert.equal(canPerformAction(admin, 'override:check-out'), true, 'admin can override checkout blockers')
 assert.equal(canPerformAction(manager, 'edit:rates'), true, 'manager server permissions match rate UI access')

@@ -16,27 +16,79 @@ import {
 } from './pms-domain.mjs'
 import { canPerformAction } from './rbac.mjs'
 import { createPasswordHash } from './security.mjs'
+import {
+  MONEY_SATANG_MIN,
+  assertMoneySatang,
+  dualWriteMoneyFromSatang,
+  dualWriteMoneyFromThb,
+  dualWriteTaxRateFromPercent,
+  sumMoneySatang,
+} from './money-satang.mjs'
+import {
+  MANUAL_CHANNEL_PROVIDERS,
+  buildManualChannelExternalReferenceKey,
+  manualChannelProviderFromEmailSender,
+  normalizeManualChannelProviderCode,
+  reconcileManualChannelTasksInTransaction,
+} from './manual-channel-service.mjs'
+
+const reservationBookingEmailEventSelect = {
+  id: true,
+  sourceId: true,
+  sourceName: true,
+  sourceMailbox: true,
+  sourceMessageId: true,
+  sender: true,
+  subject: true,
+  receivedAt: true,
+  eventType: true,
+  status: true,
+  channelRef: true,
+  providerCode: true,
+  externalReservationId: true,
+  guestName: true,
+  checkIn: true,
+  checkOut: true,
+  roomType: true,
+  amount: true,
+  amountSatang: true,
+  currency: true,
+  confidence: true,
+  proposedAction: true,
+  completedAction: true,
+  reviewReason: true,
+  errorReason: true,
+  rawEmailUrl: true,
+  reservationId: true,
+  duplicateOfEventId: true,
+  processedAt: true,
+  processedBy: true,
+  rejectedAt: true,
+  createdAt: true,
+  updatedAt: true,
+}
 
 const reservationInclude = {
   guest: true,
   roomType: true,
   assignedRoom: true,
-  sourceEmailEvent: true,
+  sourceEmailEvent: { select: reservationBookingEmailEventSelect },
   folio: {
     include: {
       charges: {
         include: {
-          sourceEmailEvent: true,
+          sourceEmailEvent: { select: reservationBookingEmailEventSelect },
         },
       },
       payments: {
         include: {
-          sourceEmailEvent: true,
+          sourceEmailEvent: { select: reservationBookingEmailEventSelect },
         },
       },
     },
   },
   bookingEmailEvents: {
+    select: reservationBookingEmailEventSelect,
     orderBy: { receivedAt: 'desc' },
     take: 10,
   },
@@ -66,6 +118,179 @@ function normalizeNullableString(value) {
   return trimmed || null
 }
 
+function moneyValidationError(error) {
+  if (error instanceof PmsValidationError) return error
+  return new PmsValidationError(error?.message || 'Enter a valid monetary amount.')
+}
+
+function moneyPairFromThb(value, label, {
+  nullable = false,
+  minimum = 0,
+} = {}) {
+  try {
+    return dualWriteMoneyFromThb(value, { label, nullable, minimum })
+  } catch (error) {
+    throw moneyValidationError(error)
+  }
+}
+
+function moneyPairFromSatang(value, label, {
+  nullable = false,
+  minimum = 0,
+} = {}) {
+  try {
+    return dualWriteMoneyFromSatang(value, { label, nullable, minimum })
+  } catch (error) {
+    throw moneyValidationError(error)
+  }
+}
+
+function taxRatePairFromPercent(value, label = 'Tax rate') {
+  try {
+    return dualWriteTaxRateFromPercent(value, { label })
+  } catch (error) {
+    throw moneyValidationError(error)
+  }
+}
+
+function storedMoneyPair(record, satangField, thbField, label, options = {}) {
+  // Satang is the runtime authority. The Float fallback is retained only for
+  // legacy rows/test fixtures during the expand-and-backfill rollback window.
+  if (record?.[satangField] !== null && record?.[satangField] !== undefined) {
+    return moneyPairFromSatang(record[satangField], label, options)
+  }
+  return moneyPairFromThb(record?.[thbField], label, options)
+}
+
+function multiplyMoneySatang(value, quantity, label) {
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    throw new PmsValidationError(`${label} quantity must be a non-negative integer.`)
+  }
+  const product = BigInt(assertMoneySatang(value, { label, minimum: 0 })) * BigInt(quantity)
+  if (product > 2_147_483_647n) {
+    throw new PmsValidationError(`${label} is outside the supported PostgreSQL INTEGER range.`)
+  }
+  return Number(product)
+}
+
+function percentageMoneySatang(value, basisPoints, label) {
+  const satang = assertMoneySatang(value, { label, minimum: 0 })
+  if (!Number.isInteger(basisPoints) || basisPoints < 0 || basisPoints > 10_000) {
+    throw new PmsValidationError(`${label} percentage is invalid.`)
+  }
+  const numerator = BigInt(satang) * BigInt(basisPoints)
+  const denominator = 10_000n
+  const rounded = (numerator + (denominator / 2n)) / denominator
+  return moneyPairFromSatang(Number(rounded), label, { minimum: 0 })
+}
+
+export function calculateStayMoney(input) {
+  const pricing = calculateStayPricing(input)
+  const ratePerNight = moneyPairFromThb(input.ratePerNight, 'Rate per night', { minimum: 1 })
+  const extraGuestFeePerNight = moneyPairFromThb(
+    input.extraGuestFeePerNight ?? SANDBOX_RULES.extraGuestFeePerNight,
+    'Extra guest fee per night',
+  )
+  const childSharingFeePerNight = moneyPairFromThb(
+    input.childSharingFeePerNight ?? SANDBOX_RULES.childSharingFeePerNight,
+    'Child sharing fee per night',
+  )
+  const adults = Number(input.adults)
+  const standardOccupancy = Number(input.standardOccupancy ?? SANDBOX_RULES.standardOccupancy)
+  const childAges = Array.isArray(input.childAges) ? input.childAges.map(Number) : []
+  const extraAdults = Math.max(0, adults - standardOccupancy)
+  const chargedChildren = childAges.filter((age) => (
+    age > SANDBOX_RULES.childFreeMaxAge && age <= SANDBOX_RULES.childSharingMaxAge
+  )).length
+  const roomSubtotalSatang = multiplyMoneySatang(ratePerNight.satang, pricing.nights, 'Room subtotal')
+  const extraGuestFeeSatang = multiplyMoneySatang(
+    extraGuestFeePerNight.satang,
+    extraAdults * pricing.nights,
+    'Extra guest fee',
+  )
+  const childFeeSatang = multiplyMoneySatang(
+    childSharingFeePerNight.satang,
+    chargedChildren * pricing.nights,
+    'Child sharing fee',
+  )
+  let totalSatang
+  try {
+    totalSatang = sumMoneySatang(roomSubtotalSatang, extraGuestFeeSatang, childFeeSatang)
+  } catch (error) {
+    throw moneyValidationError(error)
+  }
+  const total = moneyPairFromSatang(totalSatang, 'Stay total', { minimum: 0 })
+  const deposit = percentageMoneySatang(total.satang, 3_000, 'Reservation deposit')
+
+  return {
+    nights: pricing.nights,
+    ratePerNight: ratePerNight.thb,
+    ratePerNightSatang: ratePerNight.satang,
+    roomSubtotal: roomSubtotalSatang / 100,
+    roomSubtotalSatang,
+    extraGuestFee: extraGuestFeeSatang / 100,
+    extraGuestFeeSatang,
+    childFee: childFeeSatang / 100,
+    childFeeSatang,
+    total: total.thb,
+    totalSatang: total.satang,
+    depositAmount: deposit.thb,
+    depositAmountSatang: deposit.satang,
+  }
+}
+
+export function buildChargeMoneyFields(amount, quantity = 1, explicitTotal = undefined) {
+  const unit = moneyPairFromThb(amount, 'Charge amount', { minimum: 1 })
+  const totalSatang = explicitTotal === undefined
+    ? multiplyMoneySatang(unit.satang, quantity, 'Charge total')
+    : moneyPairFromThb(explicitTotal, 'Charge total', { minimum: 0 }).satang
+  const total = moneyPairFromSatang(totalSatang, 'Charge total', { minimum: 0 })
+  return {
+    amount: unit.thb,
+    amountSatang: unit.satang,
+    total: total.thb,
+    totalSatang: total.satang,
+  }
+}
+
+export function buildFolioMoneyFields(charges, payments, { taxSatang = 0 } = {}) {
+  const chargeValues = (Array.isArray(charges) ? charges : [])
+    .filter((charge) => !charge.void)
+    .map((charge) => storedMoneyPair(charge, 'totalSatang', 'total', 'Charge total', { minimum: 0 }).satang)
+  const paymentValues = (Array.isArray(payments) ? payments : [])
+    .map((payment) => storedMoneyPair(payment, 'amountSatang', 'amount', 'Payment amount', { minimum: 0 }).satang)
+  let subtotalValue
+  let paidValue
+  let totalValue
+  let balanceValue
+  try {
+    subtotalValue = sumMoneySatang(...chargeValues)
+    paidValue = sumMoneySatang(...paymentValues)
+    const normalizedTax = assertMoneySatang(taxSatang, { label: 'Folio tax', minimum: 0 })
+    totalValue = sumMoneySatang(subtotalValue, normalizedTax)
+    balanceValue = sumMoneySatang(totalValue, -paidValue)
+  } catch (error) {
+    throw moneyValidationError(error)
+  }
+  const subtotal = moneyPairFromSatang(subtotalValue, 'Folio subtotal', { minimum: 0 })
+  const tax = moneyPairFromSatang(taxSatang, 'Folio tax', { minimum: 0 })
+  const total = moneyPairFromSatang(totalValue, 'Folio total', { minimum: 0 })
+  const paid = moneyPairFromSatang(paidValue, 'Folio paid', { minimum: 0 })
+  const balance = moneyPairFromSatang(balanceValue, 'Folio balance', { minimum: MONEY_SATANG_MIN })
+  return {
+    subtotal: subtotal.thb,
+    subtotalSatang: subtotal.satang,
+    tax: tax.thb,
+    taxSatang: tax.satang,
+    total: total.thb,
+    totalSatang: total.satang,
+    paid: paid.thb,
+    paidSatang: paid.satang,
+    balance: balance.thb,
+    balanceSatang: balance.satang,
+  }
+}
+
 function normalizePaymentReferenceFingerprint(method, reference) {
   const normalizedReference = normalizeNullableString(reference)
   if (!normalizedReference) return null
@@ -73,11 +298,17 @@ function normalizePaymentReferenceFingerprint(method, reference) {
 }
 
 function pricingRulesFor(property, roomType) {
+  const extraGuestFee = property
+    ? storedMoneyPair(property, 'extraGuestFeeSatang', 'extraGuestFee', 'Extra guest fee', { minimum: 0 }).thb
+    : SANDBOX_RULES.extraGuestFeePerNight
+  const childFee = property
+    ? storedMoneyPair(property, 'childFeeSatang', 'childFee', 'Child sharing fee', { minimum: 0 }).thb
+    : SANDBOX_RULES.childSharingFeePerNight
   return {
     standardOccupancy: roomType?.standardOcc ?? SANDBOX_RULES.standardOccupancy,
     maxOccupancy: roomType?.maxOccupancy ?? SANDBOX_RULES.maxOccupancy,
-    extraGuestFeePerNight: property?.extraGuestFee ?? SANDBOX_RULES.extraGuestFeePerNight,
-    childSharingFeePerNight: property?.childFee ?? SANDBOX_RULES.childSharingFeePerNight,
+    extraGuestFeePerNight: extraGuestFee,
+    childSharingFeePerNight: childFee,
   }
 }
 
@@ -284,6 +515,23 @@ function validateSetupPayload(input) {
     throw new PmsValidationError('Admin password must be at least 12 characters.')
   }
 
+  const taxRate = taxRatePairFromPercent(property.taxRate ?? property.taxRatePercent ?? 0, 'Property tax rate')
+  const extraGuestFee = moneyPairFromThb(
+    property.extraGuestFee ?? roomTypes[0]?.extraGuestFee ?? 0,
+    'Extra guest fee',
+    { minimum: 0 },
+  )
+  const childFee = moneyPairFromThb(
+    property.childFee ?? roomTypes[0]?.childFee ?? 0,
+    'Child fee',
+    { minimum: 0 },
+  )
+  const inventoryMinimumRate = moneyPairFromThb(
+    property.inventoryMinimumRate ?? null,
+    'Inventory minimum rate',
+    { nullable: true, minimum: 0 },
+  )
+
   return {
     property: {
       code: SANDBOX_RULES.propertyCode,
@@ -295,9 +543,14 @@ function validateSetupPayload(input) {
       defaultCheckIn: setupString(property.defaultCheckIn, 'Default check-in time'),
       defaultCheckOut: setupString(property.defaultCheckOut, 'Default check-out time'),
       currency: setupString(property.currency, 'Currency').toUpperCase(),
-      taxRate: 0,
-      extraGuestFee: setupNumber(roomTypes[0]?.extraGuestFee ?? 0, 'Extra guest fee'),
-      childFee: setupNumber(roomTypes[0]?.childFee ?? 0, 'Child fee'),
+      taxRate: taxRate.percent,
+      taxRateBps: taxRate.basisPoints,
+      extraGuestFee: extraGuestFee.thb,
+      extraGuestFeeSatang: extraGuestFee.satang,
+      childFee: childFee.thb,
+      childFeeSatang: childFee.satang,
+      inventoryMinimumRate: inventoryMinimumRate.thb,
+      inventoryMinimumRateSatang: inventoryMinimumRate.satang,
     },
     roomTypes,
     rooms,
@@ -520,13 +773,204 @@ function normalizeRoomTypeCode(value) {
   return text.replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 16) || undefined
 }
 
-function normalizeBookingSourceFromEmail(sender, sourceName) {
-  const text = `${sender || ''} ${sourceName || ''}`.toLowerCase()
+function normalizeBookingSourceFromEmail(sender, sourceName, verifiedProviderCode = null) {
+  if (verifiedProviderCode === 'booking_com') return 'BOOKING_COM'
+  if (verifiedProviderCode === 'agoda') return 'AGODA'
+  if (verifiedProviderCode === 'trip_com') return 'TRIP_COM'
+  const senderText = String(sender || '').trim().toLowerCase()
+  const senderAddress = senderText.match(/<([^<>]+)>/)?.[1] || senderText.match(/\b[^\s<>@]+@[^\s<>]+\b/)?.[0] || ''
+  const senderHostname = senderAddress.split('@').at(-1)?.replace(/[>,;]+$/g, '') || ''
+  if (senderHostname === 'expedia.com' || senderHostname.endsWith('.expedia.com')) return 'EXPEDIA'
+  if (senderHostname === 'airbnb.com' || senderHostname.endsWith('.airbnb.com')) return 'AIRBNB'
+  const text = String(sourceName || '').toLowerCase()
   if (text.includes('booking.com') || text.includes('bookingcom')) return 'BOOKING_COM'
   if (text.includes('agoda')) return 'AGODA'
+  if (text.includes('trip.com') || text.includes('tripcom')) return 'TRIP_COM'
   if (text.includes('expedia')) return 'EXPEDIA'
   if (text.includes('airbnb')) return 'AIRBNB'
   return 'EMAIL'
+}
+
+const MANUAL_CHANNEL_PROVIDER_BY_BOOKING_SOURCE = Object.freeze({
+  BOOKING_COM: 'booking_com',
+  AGODA: 'agoda',
+  TRIP_COM: 'trip_com',
+})
+
+const BOOKING_CONFIRMATION_PREFIX_BY_PROVIDER = Object.freeze({
+  booking_com: 'BKG',
+  agoda: 'AGO',
+  trip_com: 'TRP',
+})
+
+function bookingSourceProviderCode(source) {
+  return MANUAL_CHANNEL_PROVIDER_BY_BOOKING_SOURCE[String(source || '').trim().toUpperCase()] || null
+}
+
+function senderEmailHostname(value) {
+  const text = String(value || '').trim().toLowerCase()
+  const address = text.match(/<([^<>]+)>/)?.[1] || text.match(/\b[^\s<>@]+@[^\s<>]+\b/)?.[0] || ''
+  return address.split('@').at(-1)?.replace(/[>,;]+$/g, '').replace(/\.$/, '') || ''
+}
+
+function hostnameMatchesProvider(hostname, providerCode) {
+  const allowedDomains = MANUAL_CHANNEL_PROVIDERS[providerCode]?.allowedExtranetDomains || []
+  return allowedDomains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+}
+
+function authenticationResultDomain(segment, key) {
+  const expression = new RegExp(`\\b${key.replace('.', '\\.')}=([^\\s;()]+)`, 'i')
+  const raw = String(segment || '').match(expression)?.[1] || ''
+  const addressDomain = raw.includes('@') ? raw.split('@').at(-1) : raw
+  return addressDomain.toLowerCase().replace(/[>,;]+$/g, '').replace(/\.$/, '')
+}
+
+function verifiedProviderFromAuthenticationResults(sender, rawHeaders = {}) {
+  const senderProvider = manualChannelProviderFromEmailSender(sender)
+  if (!senderProvider) return { providerCode: null, senderProvider: null, verified: false, reason: 'not_known_provider_sender' }
+  const senderHostname = senderEmailHostname(sender)
+  if (!hostnameMatchesProvider(senderHostname, senderProvider)) {
+    return { providerCode: null, senderProvider, verified: false, reason: 'sender_domain_not_allowed' }
+  }
+
+  // Only Authentication-Results generated by the Gmail receiving path is used.
+  // ARC headers are intentionally not sufficient because they can describe a
+  // forwarded hop rather than an aligned provider identity.
+  const authenticationResults = String(safeJsonObject(rawHeaders).authenticationResults || '').toLowerCase()
+  const segments = authenticationResults.split(';')
+  const alignedDmarc = segments.some((segment) => {
+    if (!/\bdmarc=pass\b/.test(segment)) return false
+    return hostnameMatchesProvider(authenticationResultDomain(segment, 'header.from'), senderProvider)
+  })
+  const alignedDkim = segments.some((segment) => {
+    if (!/\bdkim=pass\b/.test(segment)) return false
+    const signingDomain = authenticationResultDomain(segment, 'header.d') || authenticationResultDomain(segment, 'header.i')
+    return hostnameMatchesProvider(signingDomain, senderProvider)
+  })
+  const verified = alignedDmarc || alignedDkim
+  return {
+    providerCode: verified ? senderProvider : null,
+    senderProvider,
+    verified,
+    reason: verified ? (alignedDmarc ? 'aligned_dmarc_pass' : 'aligned_dkim_pass') : 'aligned_authentication_missing',
+  }
+}
+
+function bookingEmailChannelProviderCode(input = {}) {
+  if (input.providerCode) return normalizeManualChannelProviderCode(input.providerCode)
+  return verifiedProviderFromAuthenticationResults(input.sender, input.rawHeaders).providerCode
+}
+
+function reservationExternalReferenceData(propertyId, input = {}) {
+  const externalReservationId = normalizeNullableString(input.externalReservationId || input.channelRef)
+  const providerCode = input.providerCode
+    ? normalizeManualChannelProviderCode(input.providerCode)
+    : bookingSourceProviderCode(input.source)
+  if (!providerCode || !externalReservationId) {
+    return {
+      providerCode: providerCode || null,
+      externalReservationId: null,
+      externalReferenceKey: null,
+    }
+  }
+  return {
+    providerCode,
+    externalReservationId,
+    externalReferenceKey: buildManualChannelExternalReferenceKey(propertyId, providerCode, externalReservationId),
+  }
+}
+
+function requireOperationalReason(value, label) {
+  const reason = normalizeNullableString(value)
+  if (!reason) throw new PmsValidationError(`${label} requires an operational reason.`)
+  return reason
+}
+
+function manualChannelAffectedStay(roomTypeId, checkIn, checkOut) {
+  const dateStart = [getBangkokDateKey(new Date()), getBangkokDateKey(checkIn)].sort().at(-1)
+  const dateEnd = getBangkokDateKey(checkOut)
+  return dateStart < dateEnd ? { roomTypeId, dateStart, dateEnd } : null
+}
+
+// Lite V1 reconciles room-capacity changes for the next 90 sell nights, starting
+// with today in Bangkok. A room-type move can affect at most two types, so one
+// mutation contributes at most 180 room-date cells (below the service cap).
+// Beyond-horizon capacity is covered by manual/scheduled maintenance until the
+// queue can fan out asynchronously without extending a foreground transaction.
+const MANUAL_CHANNEL_ROOM_CAPACITY_HORIZON_DAYS = 90
+
+function dateKeyPlusDays(dateKey, days) {
+  const date = dateFromKey(dateKey)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function manualChannelFutureCapacityStay(roomTypeId, now = new Date()) {
+  const dateStart = getBangkokDateKey(now)
+  return {
+    roomTypeId,
+    dateStart,
+    dateEnd: dateKeyPlusDays(dateStart, MANUAL_CHANNEL_ROOM_CAPACITY_HORIZON_DAYS),
+  }
+}
+
+function manualChannelRemainingStay(roomTypeId, checkIn, checkOut, now = new Date()) {
+  const todayKey = getBangkokDateKey(now)
+  const dateStart = [todayKey, getBangkokDateKey(checkIn)].sort().at(-1)
+  const dateEnd = getBangkokDateKey(checkOut)
+  return dateStart < dateEnd ? { roomTypeId, dateStart, dateEnd } : null
+}
+
+function roomCapacityAffectedStays(beforeRoom, afterRoom, now = new Date()) {
+  const capacityDeltaByRoomType = new Map()
+  if (isOperationallySellableRoom(beforeRoom)) {
+    capacityDeltaByRoomType.set(beforeRoom.roomTypeId, (capacityDeltaByRoomType.get(beforeRoom.roomTypeId) || 0) - 1)
+  }
+  if (isOperationallySellableRoom(afterRoom)) {
+    capacityDeltaByRoomType.set(afterRoom.roomTypeId, (capacityDeltaByRoomType.get(afterRoom.roomTypeId) || 0) + 1)
+  }
+  return [...capacityDeltaByRoomType.entries()]
+    .filter(([, delta]) => delta !== 0)
+    .map(([roomTypeId]) => manualChannelFutureCapacityStay(roomTypeId, now))
+}
+
+async function reconcileReservationAvailabilityInTransaction(tx, input, actor) {
+  const affected = Array.isArray(input.affected) ? input.affected.filter(Boolean) : []
+  if (affected.length === 0) return null
+  const context = safeJsonObject(input.manualChannelContext)
+  return reconcileManualChannelTasksInTransaction(tx, {
+    propertyId: input.propertyId,
+    affected,
+    triggerType: context.triggerType || input.triggerType,
+    sourceProviderCode: context.sourceProviderCode || input.sourceProviderCode || undefined,
+    sourceProviderAlreadyUpdated: Boolean(context.sourceProviderAlreadyUpdated || input.sourceProviderAlreadyUpdated),
+    sourceReservationId: input.sourceReservationId,
+    sourceBookingEmailEventId: context.sourceBookingEmailEventId || input.sourceBookingEmailEventId || undefined,
+  }, actor)
+}
+
+async function reconcileRoomCapacityInTransaction(tx, input, actor) {
+  const affected = roomCapacityAffectedStays(input.beforeRoom, input.afterRoom)
+  if (affected.length === 0) return null
+  return reconcileReservationAvailabilityInTransaction(tx, {
+    propertyId: input.propertyId,
+    affected,
+    triggerType: input.triggerType,
+  }, actor)
+}
+
+function rejectInternalReservationFields(input, operation) {
+  const internalFields = [
+    'manualChannelContext',
+    'sourceEmailEventId',
+    'providerCode',
+    'externalReservationId',
+    'externalReferenceKey',
+  ]
+  const supplied = internalFields.filter((field) => Object.hasOwn(input || {}, field))
+  if (supplied.length > 0) {
+    throw new PmsValidationError(`${operation} cannot set internal integration fields: ${supplied.join(', ')}.`)
+  }
 }
 
 function splitGuestName(value) {
@@ -682,8 +1126,10 @@ export function parseBookingEmailDetails(input = {}) {
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
   const money = parseMoney(combined)
   const amount = Number(input.amount ?? parsedInput.amount ?? money.amount)
-  const adults = Number(input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 1)
-  const children = Number(input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1] ?? 0)
+  const rawAdults = input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1]
+  const rawChildren = input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1]
+  const adults = rawAdults === undefined ? undefined : Number(rawAdults)
+  const children = rawChildren === undefined ? undefined : Number(rawChildren)
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
   const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
@@ -720,8 +1166,8 @@ export function parseBookingEmailDetails(input = {}) {
     checkIn,
     checkOut,
     roomType,
-    adults: Number.isInteger(adults) && adults > 0 ? adults : 1,
-    children: Number.isInteger(children) && children >= 0 ? children : 0,
+    adults: Number.isInteger(adults) && adults > 0 ? adults : undefined,
+    children: Number.isInteger(children) && children >= 0 ? children : undefined,
     amount: Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : undefined,
     currency: normalizeNullableString(input.currency || parsedInput.currency || money.currency) || 'THB',
     paymentStatus: paymentStatus || undefined,
@@ -800,6 +1246,12 @@ function bookingEmailSourceResponse(source) {
 
 function bookingEmailEventResponse(event) {
   const parsedDetails = safeJsonObject(event.parsedDetails)
+  const amount = event.amountSatang !== null && event.amountSatang !== undefined
+    ? moneyPairFromSatang(event.amountSatang, 'Booking email amount', {
+        nullable: true,
+        minimum: MONEY_SATANG_MIN,
+      }).thb
+    : event.amount ?? parsedDetails.amount
   return {
     id: event.id,
     sourceId: event.sourceId || undefined,
@@ -811,11 +1263,13 @@ function bookingEmailEventResponse(event) {
     eventType: event.eventType,
     status: event.status,
     channelRef: event.channelRef || undefined,
+    providerCode: event.providerCode || undefined,
+    externalReservationId: event.externalReservationId || undefined,
     guestName: event.guestName || parsedDetails.guestName || undefined,
     checkIn: dateKeyOrUndefined(event.checkIn || parsedDetails.checkIn),
     checkOut: dateKeyOrUndefined(event.checkOut || parsedDetails.checkOut),
     roomType: event.roomType || parsedDetails.roomType || undefined,
-    amount: event.amount ?? parsedDetails.amount,
+    amount,
     currency: event.currency || parsedDetails.currency || undefined,
     paymentStatus: event.paymentStatus || parsedDetails.paymentStatus || undefined,
     confidence: event.confidence,
@@ -1005,7 +1459,7 @@ export async function fetchGmailEventsForSource(source, options = {}) {
   return messages
 }
 
-async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, eventId) {
+async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, eventId, providerCode = null) {
   const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
   if (sourceMessageId) {
     const exactSourceMessage = await tx.bookingEmailEvent.findFirst({
@@ -1026,6 +1480,7 @@ async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, event
       sourceId: sourceId || undefined,
       channelRef: parsed.channelRef,
       eventType: parsed.eventType,
+      providerCode: providerCode || undefined,
     },
     orderBy: { receivedAt: 'asc' },
     take: 25,
@@ -1051,7 +1506,7 @@ async function findDuplicateBookingEmailEvent(tx, sourceId, parsed, input, event
   return null
 }
 
-async function findReservationForBookingEmailEvent(tx, event, details = safeJsonObject(event.parsedDetails)) {
+async function findExactReservationForBookingEmailEvent(tx, event) {
   if (event.reservationId) {
     const reservation = await tx.reservation.findUnique({
       where: { id: event.reservationId },
@@ -1060,17 +1515,40 @@ async function findReservationForBookingEmailEvent(tx, event, details = safeJson
     if (reservation) return reservation
   }
 
-  if (event.channelRef) {
-    const reservation = await tx.reservation.findFirst({
+  const providerCode = event.providerCode || bookingEmailChannelProviderCode(event)
+  const externalReservationId = normalizeNullableString(event.externalReservationId || event.channelRef)
+  if (providerCode && externalReservationId) {
+    const externalReferenceKey = buildManualChannelExternalReferenceKey(event.propertyId, providerCode, externalReservationId)
+    const exactExternalReservation = await tx.reservation.findUnique({
+      where: { externalReferenceKey },
+      include: reservationInclude,
+    })
+    if (exactExternalReservation && !['CANCELLED', 'NO_SHOW'].includes(exactExternalReservation.status)) {
+      return exactExternalReservation
+    }
+
+    const providerScopedLegacyReservations = await tx.reservation.findMany({
       where: {
         propertyId: event.propertyId,
-        channelRef: event.channelRef,
+        providerCode,
+        OR: [
+          { externalReservationId: { equals: externalReservationId, mode: 'insensitive' } },
+          { channelRef: { equals: externalReservationId, mode: 'insensitive' } },
+        ],
         status: { notIn: ['CANCELLED', 'NO_SHOW'] },
       },
       include: reservationInclude,
+      take: 2,
     })
-    if (reservation) return reservation
+    if (providerScopedLegacyReservations.length === 1) return providerScopedLegacyReservations[0]
   }
+
+  return null
+}
+
+async function findReservationForBookingEmailEvent(tx, event, details = safeJsonObject(event.parsedDetails)) {
+  const exactReservation = await findExactReservationForBookingEmailEvent(tx, event)
+  if (exactReservation) return exactReservation
 
   if (details.guestName && details.checkIn && details.checkOut) {
     const [firstName, ...lastNameParts] = String(details.guestName).trim().split(/\s+/)
@@ -1095,16 +1573,43 @@ async function findReservationForBookingEmailEvent(tx, event, details = safeJson
 
 async function buildBookingEmailEventData(tx, source, input, existingEventId = undefined) {
   const parsed = parseBookingEmailDetails(input)
-  const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed, input, existingEventId)
+  const parsedAmount = moneyPairFromThb(parsed.details.amount ?? null, 'Booking email amount', {
+    nullable: true,
+    minimum: MONEY_SATANG_MIN,
+  })
+  const parsedDetails = { ...parsed.details }
+  if (parsedAmount.thb === null) delete parsedDetails.amount
+  else parsedDetails.amount = parsedAmount.thb
+  const rawHeaders = safeJsonObject(input.rawHeaders)
+  const providerVerification = String(source.provider || '').toUpperCase() === 'GMAIL'
+    ? verifiedProviderFromAuthenticationResults(input.sender, rawHeaders)
+    : {
+        providerCode: input.providerCode ? normalizeManualChannelProviderCode(input.providerCode) : null,
+        senderProvider: null,
+        verified: Boolean(input.providerCode),
+        reason: input.providerCode ? 'trusted_non_gmail_source' : 'provider_not_supplied',
+      }
+  const providerCode = bookingEmailChannelProviderCode({
+    sender: input.sender,
+    rawHeaders,
+    providerCode: String(source.provider || '').toUpperCase() === 'GMAIL' ? undefined : input.providerCode,
+  })
+  const duplicateEvent = await findDuplicateBookingEmailEvent(tx, source.id, parsed, input, existingEventId, providerCode)
   const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
+  const externalReservationId = providerCode
+    ? normalizeNullableString(input.externalReservationId || parsed.channelRef)
+    : null
   const status = normalizeBookingEmailStatus(input.status, 'NEEDS_REVIEW')
   const reviewReason = [
     normalizeNullableString(input.reviewReason),
     parsed.reviewReason,
+    providerVerification.senderProvider && !providerVerification.verified
+      ? 'Provider sender authentication could not be verified. Confirm the OTA reference in the official Extranet before linking or applying this event.'
+      : null,
     duplicateEvent ? `Possible duplicate of email event ${duplicateEvent.id}.` : null,
   ].filter(Boolean).join(' ') || null
 
-  return {
+  const data = {
     propertyId: source.propertyId,
     sourceId: source.id,
     sourceName: source.name,
@@ -1120,42 +1625,68 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
     status,
     confidence: Number(input.confidence ?? parsed.confidence),
     channelRef: parsed.channelRef,
+    providerCode,
+    externalReservationId,
     guestName: parsed.details.guestName || null,
     checkIn: parsed.details.checkIn ? dateFromKey(parsed.details.checkIn) : null,
     checkOut: parsed.details.checkOut ? dateFromKey(parsed.details.checkOut) : null,
     roomType: parsed.details.roomType || null,
-    amount: parsed.details.amount ?? null,
+    amount: parsedAmount.thb,
+    amountSatang: parsedAmount.satang,
     currency: parsed.details.currency || null,
     paymentStatus: parsed.details.paymentStatus || null,
     proposedAction: normalizeNullableString(input.proposedAction) || proposedBookingEmailAction(parsed.eventType),
     completedAction: normalizeNullableString(input.completedAction),
     reviewReason,
     errorReason: normalizeNullableString(input.errorReason),
-    parsedDetails: parsed.details,
-    rawHeaders: safeJsonObject(input.rawHeaders),
+    parsedDetails,
+    rawHeaders: {
+      ...rawHeaders,
+      providerVerification: {
+        status: providerVerification.verified ? 'VERIFIED' : 'UNVERIFIED',
+        reason: providerVerification.reason,
+        providerCode: providerVerification.providerCode,
+      },
+    },
     rawText: normalizeNullableString(input.rawText || input.body || input.snippet),
     duplicateOfEventId: duplicateEvent?.id || null,
+  }
+
+  const exactReservation = await findExactReservationForBookingEmailEvent(tx, data)
+  return {
+    ...data,
+    reservationId: exactReservation?.id || null,
   }
 }
 
 async function upsertBookingEmailEvent(tx, source, input) {
-  const data = await buildBookingEmailEventData(tx, source, input)
-  if (data.sourceMessageId) {
+  const sourceMessageId = normalizeNullableString(input.sourceMessageId || input.sourceEmailId || input.gmailMessageId || input.messageId)
+  if (sourceMessageId) {
+    const existing = await tx.bookingEmailEvent.findUnique({
+      where: {
+        sourceId_sourceMessageId: {
+          sourceId: source.id,
+          sourceMessageId,
+        },
+      },
+      include: bookingEmailEventInclude(),
+    })
+    if (existing?.status === 'PROCESSED' || existing?.processedAt || existing?.status === 'IGNORED' || existing?.rejectedAt) return existing
+
+    const data = await buildBookingEmailEventData(tx, source, input, existing?.id)
     return tx.bookingEmailEvent.upsert({
       where: {
         sourceId_sourceMessageId: {
           sourceId: source.id,
-          sourceMessageId: data.sourceMessageId,
+          sourceMessageId,
         },
       },
-      update: {
-        ...data,
-        status: data.status === 'PROCESSED' ? 'PROCESSED' : undefined,
-      },
+      update: data,
       create: data,
       include: bookingEmailEventInclude(),
     })
   }
+  const data = await buildBookingEmailEventData(tx, source, input)
   return tx.bookingEmailEvent.create({
     data,
     include: bookingEmailEventInclude(),
@@ -1185,8 +1716,18 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
   })
   if (!roomType) throw new PmsValidationError('Parsed room type does not match a configured PMS room type.')
   const { nights } = validateStayInput({ checkIn: details.checkIn, checkOut: details.checkOut })
-  const amount = Number(details.amount || event.amount)
-  const ratePerNight = Number.isFinite(amount) && amount > 0 ? roundMoney(amount / nights) : roomType.baseRate
+  const emailAmount = details.amount !== undefined && details.amount !== null
+    ? moneyPairFromThb(details.amount, 'Booking email amount', { minimum: 0 })
+    : storedMoneyPair(event, 'amountSatang', 'amount', 'Booking email amount', { nullable: true, minimum: 0 })
+  const roomTypeRate = storedMoneyPair(roomType, 'baseRateSatang', 'baseRate', 'Room type base rate', { minimum: 1 })
+  const ratePerNight = emailAmount.thb !== null && emailAmount.thb > 0
+    ? moneyPairFromThb(emailAmount.thb / nights, 'Booking email rate per night', { minimum: 1 }).thb
+    : roomTypeRate.thb
+  const source = normalizeBookingSourceFromEmail(event.sender, event.sourceName, event.providerCode)
+  const providerCode = event.providerCode || bookingEmailChannelProviderCode(event)
+  const externalReservationId = providerCode
+    ? normalizeNullableString(event.externalReservationId || event.channelRef)
+    : null
 
   return {
     guest: {
@@ -1194,7 +1735,9 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
       email: normalizeNullableString(details.guestEmail),
       phone: normalizeNullableString(details.guestPhone),
     },
-    confirmationCode: event.channelRef || undefined,
+    confirmationCode: event.channelRef && providerCode
+      ? `${BOOKING_CONFIRMATION_PREFIX_BY_PROVIDER[providerCode]}-${event.channelRef}`
+      : event.channelRef || undefined,
     checkIn: details.checkIn,
     checkOut: details.checkOut,
     roomTypeCode,
@@ -1202,26 +1745,44 @@ async function reservationInputFromBookingEmailEvent(tx, event, details) {
     children: Number(details.children || 0),
     childAges: Array.isArray(details.childAges) ? details.childAges.map(Number) : [],
     ratePerNight,
-    source: normalizeBookingSourceFromEmail(event.sender, event.sourceName),
+    source,
     channelRef: event.channelRef || undefined,
+    providerCode,
+    externalReservationId,
     sourceEmailEventId: event.id,
+    manualChannelContext: {
+      triggerType: 'BOOKING_EMAIL_NEW_BOOKING_APPROVED',
+      sourceProviderCode: providerCode,
+      sourceProviderAlreadyUpdated: Boolean(providerCode),
+      sourceBookingEmailEventId: event.id,
+    },
     notes: [details.notes, `Created from booking email event ${event.id}`].filter(Boolean).join('\n'),
     specialRequests: normalizeNullableString(details.specialRequests),
   }
 }
 
 async function approveNewBookingEmailEvent(tx, event, details, actor) {
+  const exactReservation = await findExactReservationForBookingEmailEvent(tx, event)
+  if (exactReservation) {
+    return linkBookingEmailEventToReservation(tx, event, exactReservation.id, actor)
+  }
   const duplicateReservation = await findReservationForBookingEmailEvent(tx, event, details)
   if (duplicateReservation) {
-    await tx.bookingEmailEvent.update({
+    const reviewEvent = await tx.bookingEmailEvent.update({
       where: { id: event.id },
       data: {
         status: 'NEEDS_REVIEW',
-        reservationId: duplicateReservation.id,
+        reservationId: null,
         reviewReason: `Possible duplicate of reservation ${duplicateReservation.confirmationCode}. Link instead of creating a new booking.`,
       },
+      include: bookingEmailEventInclude(),
     })
-    throw new PmsValidationError(`Reservation ${duplicateReservation.confirmationCode} already appears to match this email.`, 409)
+    await createAudit(tx, actor, 'BOOKING_EMAIL_DUPLICATE_REVIEW_REQUIRED', 'bookingEmailEvent', event.id, {
+      reservationId: duplicateReservation.id,
+      confirmationCode: duplicateReservation.confirmationCode,
+      sourceMessageId: event.sourceMessageId,
+    })
+    return reviewEvent
   }
 
   const reservation = await createReservationInTransaction(tx, await reservationInputFromBookingEmailEvent(tx, event, details), actor)
@@ -1257,11 +1818,13 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
   if (!reservation) throw new PmsValidationError('Link this payment notice to a reservation before applying it.')
   if (!reservation.folio?.id) throw new PmsValidationError('Matched reservation does not have a folio.')
 
-  const amount = Number(details.amount || event.amount)
-  if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Payment amount is required before applying this email.')
+  const amount = details.amount !== undefined && details.amount !== null
+    ? moneyPairFromThb(details.amount, 'Payment amount', { minimum: 1 })
+    : storedMoneyPair(event, 'amountSatang', 'amount', 'Payment amount', { nullable: true, minimum: 1 })
+  if (amount.thb === null || amount.thb <= 0) throw new PmsValidationError('Payment amount is required before applying this email.')
   const reference = normalizeNullableString(details.paymentReference || event.channelRef || event.sourceMessageId)
   const result = await recordPaymentInTransaction(tx, reservation.folio.id, {
-    amount,
+    amount: amount.thb,
     method: details.paymentMethod || 'ONLINE',
     reference,
     notes: `Payment notice from booking email event ${event.id}`,
@@ -1295,27 +1858,28 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
 }
 
 async function approveCancellationEmailEvent(tx, event, details, actor, reservationId, reason) {
+  const operationalReason = requireOperationalReason(reason, 'Approving a booking-email cancellation')
   const reservation = reservationId
     ? await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     : await findReservationForBookingEmailEvent(tx, event, details)
   if (!reservation) throw new PmsValidationError('Link this cancellation to a reservation before applying it.')
-  if (reservation.status === 'CHECKED_IN') throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
-
-  await tx.roomDateInventory.deleteMany({ where: { reservationId: reservation.id } })
-  const updatedReservation = await tx.reservation.update({
-    where: { id: reservation.id },
-    data: {
-      status: 'CANCELLED',
-      notes: [reservation.notes, reason || `Cancelled from booking email event ${event.id}`].filter(Boolean).join('\n'),
+  if (reservation.propertyId !== event.propertyId) throw new PmsValidationError('The linked reservation belongs to a different property.', 409)
+  const providerCode = event.providerCode || bookingEmailChannelProviderCode(event)
+  const updatedReservation = await cancelReservationInTransaction(
+    tx,
+    reservation.id,
+    actor,
+    'CANCELLED',
+    operationalReason,
+    {
+      manualChannelContext: {
+        triggerType: 'BOOKING_EMAIL_CANCELLATION_APPROVED',
+        sourceProviderCode: providerCode,
+        sourceProviderAlreadyUpdated: Boolean(providerCode),
+        sourceBookingEmailEventId: event.id,
+      },
     },
-    include: reservationInclude,
-  })
-  await createReservationLog(tx, reservation.id, 'CANCELLED', actor, {
-    fromStatus: reservation.status,
-    toStatus: 'CANCELLED',
-    notes: reason || `Cancelled from booking email event ${event.id}.`,
-    changes: { sourceEmailEventId: event.id, sourceMessageId: event.sourceMessageId },
-  })
+  )
   const updated = await tx.bookingEmailEvent.update({
     where: { id: event.id },
     data: {
@@ -1333,9 +1897,89 @@ async function approveCancellationEmailEvent(tx, event, details, actor, reservat
     reservationId: reservation.id,
     confirmationCode: reservation.confirmationCode,
     sourceMessageId: event.sourceMessageId,
-    reason,
+    reason: operationalReason,
   })
   return updated
+}
+
+async function approveModificationEmailEvent(tx, event, details, actor, reservationId, reason) {
+  const operationalReason = requireOperationalReason(reason, 'Approving a booking-email modification')
+  const reservation = reservationId
+    ? await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
+    : await findReservationForBookingEmailEvent(tx, event, details)
+  if (!reservation) throw new PmsValidationError('Link this modification to a reservation before applying it.')
+  if (reservation.propertyId !== event.propertyId) throw new PmsValidationError('The linked reservation belongs to a different property.', 409)
+
+  const update = {}
+  if (details.checkIn) {
+    update.checkIn = dateKeyOrUndefined(details.checkIn)
+    if (!update.checkIn) throw new PmsValidationError('The modified check-in date is invalid.')
+  }
+  if (details.checkOut) {
+    update.checkOut = dateKeyOrUndefined(details.checkOut)
+    if (!update.checkOut) throw new PmsValidationError('The modified check-out date is invalid.')
+  }
+  if (details.roomType) {
+    update.roomTypeCode = normalizeRoomTypeCode(details.roomType)
+    if (!update.roomTypeCode) throw new PmsValidationError('The modified room type is invalid.')
+  }
+  if (details.adults !== undefined && details.adults !== null && Number.isInteger(Number(details.adults)) && Number(details.adults) > 0) {
+    update.adults = Number(details.adults)
+  }
+  if (details.children !== undefined && details.children !== null && Number.isInteger(Number(details.children)) && Number(details.children) >= 0) {
+    update.children = Number(details.children)
+  }
+  if (Array.isArray(details.childAges)) update.childAges = details.childAges.map(Number)
+  if (normalizeNullableString(details.specialRequests)) update.specialRequests = normalizeNullableString(details.specialRequests)
+  if (normalizeNullableString(details.notes)) update.notes = normalizeNullableString(details.notes)
+
+  const amount = details.amount !== undefined && details.amount !== null
+    ? moneyPairFromThb(details.amount, 'Modified booking amount', { minimum: 1 })
+    : storedMoneyPair(event, 'amountSatang', 'amount', 'Modified booking amount', { nullable: true, minimum: 1 })
+  if (amount.thb !== null && amount.thb > 0) {
+    const { nights } = validateStayInput({
+      checkIn: update.checkIn || reservation.checkIn,
+      checkOut: update.checkOut || reservation.checkOut,
+    })
+    update.ratePerNight = moneyPairFromThb(amount.thb / nights, 'Modified rate per night', { minimum: 1 }).thb
+  }
+
+  const appliedFields = Object.keys(update)
+  if (appliedFields.length === 0) {
+    throw new PmsValidationError('No supported reservation changes were parsed. Edit the dates, room type, occupancy, total, requests, or notes before approval.')
+  }
+
+  const providerCode = event.providerCode || bookingEmailChannelProviderCode(event)
+  const updatedReservation = await updateReservationInTransaction(tx, reservation.id, {
+    ...update,
+    manualChannelContext: {
+      triggerType: 'BOOKING_EMAIL_MODIFICATION_APPROVED',
+      sourceProviderCode: providerCode,
+      sourceProviderAlreadyUpdated: Boolean(providerCode),
+      sourceBookingEmailEventId: event.id,
+    },
+  }, actor)
+  const updatedEvent = await tx.bookingEmailEvent.update({
+    where: { id: event.id },
+    data: {
+      status: 'PROCESSED',
+      reservationId: updatedReservation.id,
+      completedAction: `Updated reservation ${updatedReservation.confirmationCode}.`,
+      reviewReason: null,
+      errorReason: null,
+      processedAt: new Date(),
+      processedBy: actorName(actor),
+    },
+    include: bookingEmailEventInclude(),
+  })
+  await createAudit(tx, actor, 'BOOKING_EMAIL_MODIFIED_RESERVATION', 'bookingEmailEvent', event.id, {
+    reservationId: updatedReservation.id,
+    confirmationCode: updatedReservation.confirmationCode,
+    sourceMessageId: event.sourceMessageId,
+    appliedFields,
+    reason: operationalReason,
+  })
+  return updatedEvent
 }
 
 function validateGuestInput(guest) {
@@ -1479,19 +2123,13 @@ async function recomputeFolio(tx, folioId) {
     tx.charge.findMany({ where: { folioId, void: false } }),
     tx.payment.findMany({ where: { folioId } }),
   ])
-  const subtotal = roundMoney(charges.reduce((sum, charge) => sum + charge.total, 0))
-  const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0))
-  const balance = roundMoney(subtotal - paid)
+  const money = buildFolioMoneyFields(charges, payments)
 
   return tx.folio.update({
     where: { id: folioId },
     data: {
-      subtotal,
-      tax: 0,
-      total: subtotal,
-      paid,
-      balance,
-      status: balance <= 0 ? 'CLOSED' : 'OPEN',
+      ...money,
+      status: money.balanceSatang <= 0 ? 'CLOSED' : 'OPEN',
     },
     include: {
       charges: true,
@@ -1508,10 +2146,11 @@ async function recomputeFolio(tx, folioId) {
 }
 
 async function recordPaymentInTransaction(tx, folioId, input, actor) {
-  const amount = Number(input?.amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const rawAmount = Number(input?.amount)
+  if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
     throw new PmsValidationError('Payment amount must be greater than zero.')
   }
+  const amount = moneyPairFromThb(input.amount, 'Payment amount', { minimum: 1 })
   const method = normalizePaymentMethod(input.method)
   const reference = normalizeNullableString(input.reference)
   if (paymentMethodRequiresReference(method) && !reference) {
@@ -1520,7 +2159,8 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   const referenceFingerprint = normalizePaymentReferenceFingerprint(method, reference)
   const folio = await tx.folio.findUnique({ where: { id: folioId } })
   if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-  if (amount > folio.balance && !input.allowOverpayment) {
+  const folioBalance = storedMoneyPair(folio, 'balanceSatang', 'balance', 'Folio balance', { minimum: MONEY_SATANG_MIN })
+  if (amount.satang > folioBalance.satang && !input.allowOverpayment) {
     throw new PmsValidationError('Payment cannot exceed the remaining balance.')
   }
   if (referenceFingerprint) {
@@ -1540,7 +2180,8 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   const payment = await tx.payment.create({
     data: {
       folioId: folio.id,
-      amount: roundMoney(amount),
+      amount: amount.thb,
+      amountSatang: amount.satang,
       method,
       reference,
       referenceFingerprint,
@@ -1765,13 +2406,19 @@ export async function completeInitialSetup(prisma, input) {
 
     for (const [index, roomType] of setup.roomTypes.entries()) {
       const rate = setup.rates.get(roomType.id)
+      const baseRate = moneyPairFromThb(
+        setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 }),
+        `Base rate for ${roomType.name}`,
+        { minimum: 1 },
+      )
       const createdRoomType = await tx.roomType.create({
         data: {
           propertyId: property.id,
           code: setupRoomTypeCode(roomType, index, usedCodes),
           name: setupString(roomType.name, 'Room type name'),
           description: null,
-          baseRate: setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 }),
+          baseRate: baseRate.thb,
+          baseRateSatang: baseRate.satang,
           maxOccupancy: setupNumber(roomType.maxOccupancy, 'Max occupancy', { min: 1 }),
           standardOcc: setupNumber(roomType.baseOccupancy, 'Base occupancy', { min: 1 }),
         },
@@ -1832,8 +2479,7 @@ export async function listReservations(prisma) {
   })
 }
 
-export async function updateReservation(prisma, reservationId, input, actor) {
-  return prisma.$transaction(async (tx) => {
+async function updateReservationInTransaction(tx, reservationId, input, actor) {
     const current = await tx.reservation.findUnique({
       where: { id: reservationId },
       include: reservationInclude,
@@ -1860,12 +2506,27 @@ export async function updateReservation(prisma, reservationId, input, actor) {
 
     const checkIn = input.checkIn ?? current.checkIn
     const checkOut = input.checkOut ?? current.checkOut
-    const ratePerNight = input.ratePerNight ?? current.ratePerNight
+    const currentRate = storedMoneyPair(current, 'ratePerNightSatang', 'ratePerNight', 'Rate per night', { minimum: 1 })
+    const ratePerNight = input.ratePerNight ?? currentRate.thb
     const adults = input.adults ?? current.adults
     const children = input.children ?? current.children
     const childAges = input.childAges ?? current.childAges
     const { checkInKey, checkOutKey } = validateStayInput({ checkIn, checkOut })
-    const pricing = calculateStayPricing({
+    const previousCheckInKey = getBangkokDateKey(current.checkIn)
+    const previousCheckOutKey = getBangkokDateKey(current.checkOut)
+    const source = input.source || current.source
+    const channelRef = input.channelRef ?? current.channelRef
+    const externalReference = reservationExternalReferenceData(property.id, {
+      source,
+      channelRef,
+      providerCode: input.providerCode ?? current.providerCode,
+      externalReservationId: input.externalReservationId !== undefined
+        ? input.externalReservationId
+        : input.channelRef !== undefined
+          ? input.channelRef
+          : current.externalReservationId,
+    })
+    const pricing = calculateStayMoney({
       checkIn,
       checkOut,
       ratePerNight,
@@ -1897,11 +2558,17 @@ export async function updateReservation(prisma, reservationId, input, actor) {
         adults: Number(adults),
         children: Number(children || 0),
         childAges: Array.isArray(childAges) ? childAges.map(Number) : [],
-        ratePerNight: Number(ratePerNight),
+        ratePerNight: pricing.ratePerNight,
+        ratePerNightSatang: pricing.ratePerNightSatang,
         totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
-        source: input.source || current.source,
-        channelRef: input.channelRef ?? current.channelRef,
+        totalAmountSatang: pricing.totalSatang,
+        depositAmount: pricing.depositAmount,
+        depositAmountSatang: pricing.depositAmountSatang,
+        source,
+        channelRef,
+        providerCode: externalReference.providerCode,
+        externalReservationId: externalReference.externalReservationId,
+        externalReferenceKey: externalReference.externalReferenceKey,
         sourceEmailEventId: input.sourceEmailEventId === undefined ? current.sourceEmailEventId : normalizeNullableString(input.sourceEmailEventId),
         notes: input.notes ?? current.notes,
         specialRequests: input.specialRequests ?? current.specialRequests,
@@ -1921,13 +2588,16 @@ export async function updateReservation(prisma, reservationId, input, actor) {
         orderBy: { createdAt: 'asc' },
       })
       if (roomCharge) {
+        const roomChargeMoney = buildChargeMoneyFields(pricing.ratePerNight, pricing.nights, pricing.total)
         await tx.charge.update({
           where: { id: roomCharge.id },
           data: {
             date: dateFromKey(checkInKey),
-            amount: Number(ratePerNight),
+            amount: roomChargeMoney.amount,
+            amountSatang: roomChargeMoney.amountSatang,
             quantity: pricing.nights,
-            total: pricing.total,
+            total: roomChargeMoney.total,
+            totalSatang: roomChargeMoney.totalSatang,
           },
         })
       }
@@ -1936,8 +2606,27 @@ export async function updateReservation(prisma, reservationId, input, actor) {
 
     await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: input })
     await createAudit(tx, actor, 'MODIFIED', 'reservation', current.id, input)
+    const inventoryChanged = current.roomTypeId !== roomTypeId
+      || previousCheckInKey !== checkInKey
+      || previousCheckOutKey !== checkOutKey
+    if (inventoryChanged && activeReservationStatuses().includes(current.status)) {
+      await reconcileReservationAvailabilityInTransaction(tx, {
+        propertyId: property.id,
+        affected: [
+          manualChannelAffectedStay(current.roomTypeId, previousCheckInKey, previousCheckOutKey),
+          manualChannelAffectedStay(roomTypeId, checkInKey, checkOutKey),
+        ],
+        triggerType: 'RESERVATION_UPDATED',
+        sourceReservationId: current.id,
+        manualChannelContext: input.manualChannelContext,
+      }, actor)
+    }
     return updated
-  })
+}
+
+export async function updateReservation(prisma, reservationId, input, actor) {
+  rejectInternalReservationFields(input, 'Reservation updates')
+  return serializableTransaction(prisma, (tx) => updateReservationInTransaction(tx, reservationId, input, actor))
 }
 
 export async function listRooms(prisma) {
@@ -1963,13 +2652,21 @@ function normalizeSetupRoomTypeInput(input, existing = undefined) {
   const name = setupString(input?.name, 'Room type name')
   const standardOcc = setupNumber(input?.baseOccupancy ?? input?.standardOcc ?? existing?.standardOcc, 'Base occupancy', { min: 1 })
   const maxOccupancy = setupNumber(input?.maxOccupancy ?? existing?.maxOccupancy, 'Max occupancy', { min: standardOcc })
-  const baseRate = setupNumber(input?.baseRate ?? existing?.baseRate, 'Base rate', { min: 1 })
+  const existingBaseRate = existing
+    ? storedMoneyPair(existing, 'baseRateSatang', 'baseRate', 'Base rate', { minimum: 1 }).thb
+    : undefined
+  const baseRate = moneyPairFromThb(
+    setupNumber(input?.baseRate ?? existingBaseRate, 'Base rate', { min: 1 }),
+    'Base rate',
+    { minimum: 1 },
+  )
 
   return {
     code: normalizeSetupRoomTypeCode(input),
     name,
     description: setupString(input?.description ?? existing?.description, 'Room type description', false),
-    baseRate,
+    baseRate: baseRate.thb,
+    baseRateSatang: baseRate.satang,
     maxOccupancy,
     standardOcc,
   }
@@ -2113,6 +2810,12 @@ export async function createSetupRoom(prisma, input, actor) {
       include: { roomType: true },
     })
     await createAudit(tx, actor, 'ROOM_CREATED', 'room', room.id, data)
+    await reconcileRoomCapacityInTransaction(tx, {
+      propertyId: property.id,
+      beforeRoom: null,
+      afterRoom: room,
+      triggerType: 'ROOM_CREATED',
+    }, actor)
     return room
   })
 }
@@ -2157,6 +2860,12 @@ export async function updateSetupRoom(prisma, roomId, input, actor) {
       include: { roomType: true },
     })
     await createAudit(tx, actor, 'ROOM_UPDATED', 'room', room.id, { ...data, roomTypeId })
+    await reconcileRoomCapacityInTransaction(tx, {
+      propertyId: property.id,
+      beforeRoom: existing,
+      afterRoom: room,
+      triggerType: 'ROOM_UPDATED',
+    }, actor)
     return room
   })
 }
@@ -2181,6 +2890,12 @@ export async function deleteSetupRoom(prisma, roomId, actor) {
   return prisma.$transaction(async (tx) => {
     await tx.room.delete({ where: { id: roomId } })
     await createAudit(tx, actor, 'ROOM_DELETED', 'room', roomId, { number: existing.number })
+    await reconcileRoomCapacityInTransaction(tx, {
+      propertyId: property.id,
+      beforeRoom: existing,
+      afterRoom: null,
+      triggerType: 'ROOM_DELETED',
+    }, actor)
     return existing
   })
 }
@@ -2204,6 +2919,7 @@ export async function listGuests(prisma) {
 async function createReservationInTransaction(tx, input, actor) {
     const property = await getProperty(tx)
     const { checkInKey, checkOutKey } = validateStayInput(input)
+    const externalReference = reservationExternalReferenceData(property.id, input)
 
     const roomType = await tx.roomType.findFirst({
       where: {
@@ -2212,7 +2928,7 @@ async function createReservationInTransaction(tx, input, actor) {
       },
     })
     if (!roomType) throw new PmsValidationError('Selected room type was not found.')
-    const pricing = calculateStayPricing({
+    const pricing = calculateStayMoney({
       ...input,
       ...pricingRulesFor(property, roomType),
     })
@@ -2234,12 +2950,18 @@ async function createReservationInTransaction(tx, input, actor) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ratePerNight: Number(input.ratePerNight),
+        ratePerNight: pricing.ratePerNight,
+        ratePerNightSatang: pricing.ratePerNightSatang,
         totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
+        totalAmountSatang: pricing.totalSatang,
+        depositAmount: pricing.depositAmount,
+        depositAmountSatang: pricing.depositAmountSatang,
         depositPaid: false,
         source: input.source || 'DIRECT',
         channelRef: input.channelRef || null,
+        providerCode: externalReference.providerCode,
+        externalReservationId: externalReference.externalReservationId,
+        externalReferenceKey: externalReference.externalReferenceKey,
         sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
         notes: input.notes || null,
         specialRequests: input.specialRequests || null,
@@ -2259,32 +2981,44 @@ async function createReservationInTransaction(tx, input, actor) {
       await createReservationLog(tx, reservation.id, 'ASSIGNED_ROOM', actor, { changes: { roomNumber: room.number } })
     }
 
+    const initialFolioMoney = buildFolioMoneyFields([
+      { totalSatang: pricing.totalSatang, void: false },
+    ], [])
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        subtotal: pricing.total,
-        tax: 0,
-        total: pricing.total,
-        paid: 0,
-        balance: pricing.total,
+        ...initialFolioMoney,
       },
     })
 
+    const roomChargeMoney = buildChargeMoneyFields(pricing.ratePerNight, pricing.nights, pricing.total)
     await tx.charge.create({
       data: {
         folioId: folio.id,
         date: dateFromKey(checkInKey),
         description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
         category: 'ROOM',
-        amount: Number(input.ratePerNight),
+        amount: roomChargeMoney.amount,
+        amountSatang: roomChargeMoney.amountSatang,
         quantity: pricing.nights,
-        total: pricing.total,
+        total: roomChargeMoney.total,
+        totalSatang: roomChargeMoney.totalSatang,
         createdBy: actorName(actor),
       },
     })
 
     await createReservationLog(tx, reservation.id, 'CREATED', actor, { toStatus: assignedReservation.status })
     await createAudit(tx, actor, 'CREATED', 'reservation', reservation.id, { confirmationCode: reservation.confirmationCode })
+
+    if (activeReservationStatuses().includes(assignedReservation.status)) {
+      await reconcileReservationAvailabilityInTransaction(tx, {
+        propertyId: property.id,
+        affected: [manualChannelAffectedStay(roomType.id, checkInKey, checkOutKey)],
+        triggerType: 'RESERVATION_CREATED',
+        sourceReservationId: reservation.id,
+        manualChannelContext: input.manualChannelContext,
+      }, actor)
+    }
 
     return tx.reservation.findUnique({
       where: { id: reservation.id },
@@ -2293,6 +3027,7 @@ async function createReservationInTransaction(tx, input, actor) {
 }
 
 export async function createReservation(prisma, input, actor) {
+  rejectInternalReservationFields(input, 'Reservation creation')
   return serializableTransaction(prisma, async (tx) => createReservationInTransaction(tx, input, actor))
 }
 
@@ -2497,7 +3232,6 @@ async function autoProcessBookingEmailEvent(tx, event, source, actor) {
 }
 
 export async function syncBookingEmail(prisma, input = {}, actor) {
-  const reviewOnly = Boolean(input.reviewOnly)
   const source = await prisma.$transaction(async (tx) => {
     if (input.sourceId) {
       const existing = await tx.bookingEmailSource.findUnique({ where: { id: input.sourceId } })
@@ -2506,6 +3240,7 @@ export async function syncBookingEmail(prisma, input = {}, actor) {
     }
     return ensurePrimaryBookingEmailSource(tx)
   })
+  const reviewOnly = String(source.provider || '').toUpperCase() === 'GMAIL' || Boolean(input.reviewOnly)
 
   let importedEvents = Array.isArray(input.events) ? input.events : null
   if (!importedEvents) {
@@ -2615,6 +3350,9 @@ export async function approveBookingEmailEvent(prisma, eventId, input = {}, acto
     if (event.eventType === 'CANCELLATION') {
       return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
     }
+    if (event.eventType === 'MODIFICATION') {
+      return bookingEmailEventResponse(await approveModificationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
+    }
 
     if (!input.reservationId) {
       throw new PmsValidationError('This email type needs a linked reservation and staff notes before it can be marked processed.')
@@ -2629,6 +3367,9 @@ export async function rejectBookingEmailEvent(prisma, eventId, input = {}, actor
     if (!reason) throw new PmsValidationError('Rejecting or ignoring an email event requires a reason.')
     const event = await tx.bookingEmailEvent.findUnique({ where: { id: eventId } })
     if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    if (event.status === 'PROCESSED' || event.processedAt) {
+      throw new PmsValidationError('Processed booking email events cannot be rejected or ignored.', 409)
+    }
     const updated = await tx.bookingEmailEvent.update({
       where: { id: eventId },
       data: {
@@ -2656,6 +3397,9 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
       include: bookingEmailEventInclude(),
     })
     if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    if (event.status === 'PROCESSED' || event.processedAt) {
+      throw new PmsValidationError('Processed booking email events cannot be reprocessed.', 409)
+    }
     const data = await buildBookingEmailEventData(tx, event.source || {
       id: event.sourceId,
       propertyId: event.propertyId,
@@ -2703,7 +3447,7 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       },
     })
     if (!roomType) throw new PmsValidationError('Selected room type was not found.')
-    const pricing = calculateStayPricing({
+    const pricing = calculateStayMoney({
       ...input,
       ...pricingRulesFor(property, roomType),
     })
@@ -2732,9 +3476,12 @@ export async function createWalkInCheckIn(prisma, input, actor) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ratePerNight: Number(input.ratePerNight),
+        ratePerNight: pricing.ratePerNight,
+        ratePerNightSatang: pricing.ratePerNightSatang,
         totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
+        totalAmountSatang: pricing.totalSatang,
+        depositAmount: pricing.depositAmount,
+        depositAmountSatang: pricing.depositAmountSatang,
         depositPaid: false,
         source: 'WALK_IN',
         channelRef: null,
@@ -2770,26 +3517,28 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       data: { assignedRoomId: room.id },
     })
 
+    const initialFolioMoney = buildFolioMoneyFields([
+      { totalSatang: pricing.totalSatang, void: false },
+    ], [])
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        subtotal: pricing.total,
-        tax: 0,
-        total: pricing.total,
-        paid: 0,
-        balance: pricing.total,
+        ...initialFolioMoney,
       },
     })
 
+    const roomChargeMoney = buildChargeMoneyFields(pricing.ratePerNight, pricing.nights, pricing.total)
     await tx.charge.create({
       data: {
         folioId: folio.id,
         date: dateFromKey(checkInKey),
         description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
         category: 'ROOM',
-        amount: Number(input.ratePerNight),
+        amount: roomChargeMoney.amount,
+        amountSatang: roomChargeMoney.amountSatang,
         quantity: pricing.nights,
-        total: pricing.total,
+        total: roomChargeMoney.total,
+        totalSatang: roomChargeMoney.totalSatang,
         createdBy: actorName(actor),
       },
     })
@@ -2799,8 +3548,14 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       await recordPaymentInTransaction(tx, folio.id, input.payment, actor)
     }
     const settledFolio = await tx.folio.findUnique({ where: { id: folio.id } })
-    const remainingBalance = roundMoney(settledFolio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalance = storedMoneyPair(
+      settledFolio || { balance: 0 },
+      'balanceSatang',
+      'balance',
+      'Folio balance',
+      { minimum: MONEY_SATANG_MIN },
+    )
+    if (remainingBalance.satang > 0) {
       if (input.allowPayLater) {
         requireOverride(actor, 'override:check-in', input.payLaterReason || input.overrideReason, 'Pay-later walk-in check-in')
       } else {
@@ -2848,6 +3603,12 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       newState: { reservationStatus: 'CHECKED_IN', roomStatus: toStatus },
       overrideReason: input.overrideReason || input.payLaterReason || input.recordIdentityLaterReason || null,
     })
+    await reconcileReservationAvailabilityInTransaction(tx, {
+      propertyId: property.id,
+      affected: [manualChannelAffectedStay(roomType.id, checkInKey, checkOutKey)],
+      triggerType: 'WALK_IN_CHECKED_IN',
+      sourceReservationId: reservation.id,
+    }, actor)
 
     return tx.reservation.findUnique({
       where: { id: reservation.id },
@@ -2926,8 +3687,14 @@ export async function checkInReservation(prisma, reservationId, actor, options =
       reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     }
 
-    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalance = storedMoneyPair(
+      reservation.folio || { balance: 0 },
+      'balanceSatang',
+      'balance',
+      'Folio balance',
+      { minimum: MONEY_SATANG_MIN },
+    )
+    if (remainingBalance.satang > 0) {
       if (options.allowPayLater) {
         requireOverride(actor, 'override:check-in', options.payLaterReason || options.overrideReason, 'Pay-later check-in')
       } else {
@@ -3031,8 +3798,14 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
       reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     }
 
-    const remainingBalance = roundMoney(reservation.folio?.balance || 0)
-    if (remainingBalance > 0) {
+    const remainingBalance = storedMoneyPair(
+      reservation.folio || { balance: 0 },
+      'balanceSatang',
+      'balance',
+      'Folio balance',
+      { minimum: MONEY_SATANG_MIN },
+    )
+    if (remainingBalance.satang > 0) {
       if (options.allowUnpaidOverride) {
         requireOverride(actor, 'override:check-out', options.overrideReason, 'Unpaid checkout override')
       } else {
@@ -3095,7 +3868,7 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
     await createAudit(tx, actor, 'CHECKED_OUT', 'reservation', reservation.id, {
       roomId: room.id,
       roomNumber: room.number,
-      previousState: { reservationStatus: reservation.status, roomStatus: room.currentStatus, balance: remainingBalance },
+      previousState: { reservationStatus: reservation.status, roomStatus: room.currentStatus, balance: remainingBalance.thb },
       newState: { reservationStatus: 'CHECKED_OUT', roomStatus: 'VACANT_DIRTY' },
       overrideReason: options.overrideReason || null,
       overrides: {
@@ -3107,6 +3880,19 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
         priorityTurnover: false,
       },
     })
+    const remainingStay = manualChannelRemainingStay(
+      reservation.roomTypeId,
+      reservation.checkIn,
+      reservation.checkOut,
+    )
+    if (remainingStay) {
+      await reconcileReservationAvailabilityInTransaction(tx, {
+        propertyId: reservation.propertyId,
+        affected: [remainingStay],
+        triggerType: 'RESERVATION_EARLY_CHECKOUT',
+        sourceReservationId: reservation.id,
+      }, actor)
+    }
     return tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
@@ -3114,13 +3900,13 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
   })
 }
 
-export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined) {
-  return prisma.$transaction(async (tx) => {
-    const reservation = await tx.reservation.findUnique({ where: { id: reservationId } })
-    if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
+async function cancelReservationInTransaction(tx, reservationId, actor, status = 'CANCELLED', notes = undefined, options = {}) {
     if (!['CANCELLED', 'NO_SHOW'].includes(status)) {
       throw new PmsValidationError('Cancellation status must be CANCELLED or NO_SHOW.')
     }
+    const reason = requireOperationalReason(notes, status === 'NO_SHOW' ? 'Marking a reservation no-show' : 'Cancelling a reservation')
+    const reservation = await tx.reservation.findUnique({ where: { id: reservationId } })
+    if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     if (reservation.status === 'CHECKED_IN') {
       throw new PmsValidationError('Checked-in reservations must be checked out before cancellation.')
     }
@@ -3128,17 +3914,35 @@ export async function cancelReservation(prisma, reservationId, actor, status = '
     await tx.roomDateInventory.deleteMany({ where: { reservationId } })
     const updated = await tx.reservation.update({
       where: { id: reservation.id },
-      data: { status, notes: notes || reservation.notes },
+      data: {
+        status,
+        notes: [
+          normalizeNullableString(reservation.notes),
+          `${status === 'NO_SHOW' ? 'No-show' : 'Cancellation'} reason: ${reason}`,
+        ].filter(Boolean).join('\n'),
+      },
       include: reservationInclude,
     })
     await createReservationLog(tx, reservation.id, status === 'NO_SHOW' ? 'NO_SHOW' : 'CANCELLED', actor, {
       fromStatus: reservation.status,
       toStatus: status,
-      notes,
+      notes: reason,
     })
-    await createAudit(tx, actor, status, 'reservation', reservation.id, { notes })
+    await createAudit(tx, actor, status, 'reservation', reservation.id, { notes: reason })
+    if (activeReservationStatuses().includes(reservation.status)) {
+      await reconcileReservationAvailabilityInTransaction(tx, {
+        propertyId: reservation.propertyId,
+        affected: [manualChannelAffectedStay(reservation.roomTypeId, reservation.checkIn, reservation.checkOut)],
+        triggerType: status === 'NO_SHOW' ? 'RESERVATION_NO_SHOW' : 'RESERVATION_CANCELLED',
+        sourceReservationId: reservation.id,
+        manualChannelContext: options.manualChannelContext,
+      }, actor)
+    }
     return updated
-  })
+}
+
+export async function cancelReservation(prisma, reservationId, actor, status = 'CANCELLED', notes = undefined) {
+  return serializableTransaction(prisma, (tx) => cancelReservationInTransaction(tx, reservationId, actor, status, notes))
 }
 
 export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, actor, notes = undefined) {
@@ -3165,6 +3969,12 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
       include: { roomType: true },
     })
     await createAudit(tx, actor, 'HOUSEKEEPING_STATUS_UPDATED', 'room', room.id, { cleanStatus, toStatus })
+    await reconcileRoomCapacityInTransaction(tx, {
+      propertyId: room.propertyId,
+      beforeRoom: room,
+      afterRoom: updated,
+      triggerType: 'HOUSEKEEPING_MAINTENANCE',
+    }, actor)
     return updated
   })
 }
@@ -3197,6 +4007,12 @@ export async function updateRoomOperationalStatus(prisma, roomId, operationalSta
     })
     await createRoomStatusLog(tx, updated, currentStatus, actor, notes || `Room marked ${operationalStatus.toLowerCase().replaceAll('_', ' ')}.`)
     await createAudit(tx, actor, 'ROOM_OPERATIONAL_STATUS_UPDATED', 'room', room.id, { operationalStatus })
+    await reconcileRoomCapacityInTransaction(tx, {
+      propertyId: room.propertyId,
+      beforeRoom: room,
+      afterRoom: updated,
+      triggerType: 'ROOM_OPERATIONAL_STATUS_UPDATED',
+    }, actor)
     return updated
   })
 }
@@ -3232,6 +4048,7 @@ export async function createCharge(prisma, input, actor) {
     if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
     if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Charge amount must be greater than zero.')
     if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
+    const chargeMoney = buildChargeMoneyFields(input.amount, quantity)
 
     const charge = await tx.charge.create({
       data: {
@@ -3239,9 +4056,11 @@ export async function createCharge(prisma, input, actor) {
         date: input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date())),
         description,
         category,
-        amount: roundMoney(amount),
+        amount: chargeMoney.amount,
+        amountSatang: chargeMoney.amountSatang,
         quantity,
-        total: roundMoney(amount * quantity),
+        total: chargeMoney.total,
+        totalSatang: chargeMoney.totalSatang,
         sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
         createdBy: actorName(actor),
       },

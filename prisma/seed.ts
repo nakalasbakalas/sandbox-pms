@@ -1,5 +1,9 @@
 import { PrismaClient, type RoomType, type UserRole } from '@prisma/client'
 import { pbkdf2Sync, randomBytes } from 'node:crypto'
+import {
+  dualWriteMoneyFromThb,
+  dualWriteTaxRateFromPercent,
+} from '../server/money-satang.mjs'
 
 const prisma = new PrismaClient()
 
@@ -14,6 +18,20 @@ type SeedUser = {
   password?: string
   passwordHash?: string
 }
+
+const propertyTaxRate = dualWriteTaxRateFromPercent(0, { label: 'Seed property tax rate' })
+const propertyExtraGuestFee = dualWriteMoneyFromThb(300, {
+  label: 'Seed property extra guest fee',
+  minimum: 0,
+})
+const propertyChildFee = dualWriteMoneyFromThb(300, {
+  label: 'Seed property child fee',
+  minimum: 0,
+})
+const propertyInventoryMinimumRate = dualWriteMoneyFromThb(550, {
+  label: 'Seed property inventory minimum rate',
+  minimum: 0,
+})
 
 const propertySeed = {
   code: 'SANDBOX',
@@ -30,10 +48,14 @@ const propertySeed = {
   defaultCheckIn: '14:00',
   defaultCheckOut: '12:00',
   currency: 'THB',
-  taxRate: 0,
-  extraGuestFee: 300,
-  childFee: 300,
-  inventoryMinimumRate: 550,
+  taxRate: propertyTaxRate.percent,
+  taxRateBps: propertyTaxRate.basisPoints,
+  extraGuestFee: propertyExtraGuestFee.thb,
+  extraGuestFeeSatang: propertyExtraGuestFee.satang,
+  childFee: propertyChildFee.thb,
+  childFeeSatang: propertyChildFee.satang,
+  inventoryMinimumRate: propertyInventoryMinimumRate.thb,
+  inventoryMinimumRateSatang: propertyInventoryMinimumRate.satang,
   taxConfiguration: {
     enabled: false,
     pricesIncludeTax: false,
@@ -123,7 +145,17 @@ const roomTypeSeeds = [
     maxOccupancy: 4,
     standardOcc: 2,
   },
-]
+].map((roomType) => {
+  const baseRate = dualWriteMoneyFromThb(roomType.baseRate, {
+    label: `Seed room type ${roomType.code} base rate`,
+    minimum: 0,
+  })
+  return {
+    ...roomType,
+    baseRate: baseRate.thb,
+    baseRateSatang: baseRate.satang,
+  }
+})
 
 const passwordEnvByRole: Record<UserRole, string | undefined> = {
   ADMIN: process.env.SEED_ADMIN_PASSWORD,

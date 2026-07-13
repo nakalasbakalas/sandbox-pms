@@ -157,3 +157,68 @@ When security challenge handling is required, return:
 ```
 
 After the authorized person completes the challenge, staff should use the PMS `Human done` action with an operational reason. That records audit evidence and requeues the task; it does not bypass the challenge or run the worker automatically.
+
+## Lite V1 Manual Channel Path
+
+The Lite Channel Desk does not use the experimental OTA browser adapters above. It uses `server/manual-channel-service.mjs`, which is a durable manual work queue for Booking.com, Agoda, and Trip.com. This distinction must remain visible in UI, operations, tests, and launch evidence:
+
+| Path | Reads OTA state | Writes OTA state | Current role |
+| --- | --- | --- | --- |
+| Gmail booking intake | Reads provider emails through Gmail API | No | Near-live/reconciled inbound signal; always review-required |
+| Manual channel queue | Calculates desired inventory from PMS | No | Tells staff exactly what to enter in each Extranet |
+| Existing OTA adapter skeletons | Dry-run placeholders only | No production writes | Hotel Ops experimentation; not Lite synchronization |
+| Channex boundary | No | No | Disabled future certified channel rail |
+
+Manual channel records may store only non-secret provider/property/room/rate mapping metadata and an official HTTPS Extranet link. They must never store OTA usernames, passwords, cookies, session state, API tokens, 2FA material, or CAPTCHA answers.
+
+Keep a connection disabled until every PMS room type with one or more physical rooms has an active provider mapping. This scope includes temporarily out-of-service rooms because they can return to sale. Per connection, an active external room-type/rate-plan target may belong to only one PMS room type; a database partial unique index is the concurrency backstop. If mapping coverage is later lost, reconciliation skips the affected provider/room cells, records `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED`, and creates no task with an unknown external target. Channel Desk displays the external room type id/name and rate-plan id on executable tasks.
+
+An enabled manual connection participates in inventory reconciliation. Booking creation, inventory-changing edits, cancellation/no-show, and walk-in changes calculate affected room-type/date cells inside the PMS transaction. Every change reconciles all enabled providers. After staff approve an OTA-originated email, the originating provider is reconciled too using current absolute PMS availability, which coalesces or supersedes stale pending source-provider work instead of leaving it actionable.
+
+Tasks coalesce when the desired availability has not changed. When it changes, the active task is superseded and a higher revision becomes current. Staff must enter the value in the official Extranet, then confirm the exact value and revision in Lite. A completion record is an operator attestation and audit event; it is not a provider API read-back.
+
+Manual work cannot guarantee zero-lag synchronization or prevent overbooking during the interval before every affected Extranet is updated. The Channel Desk must expose pending/failed task age and must never label this workflow `live sync`, `automatic sync`, or `two-way sync`.
+
+## Direct Connectivity Decision
+
+### Booking.com
+
+An ordinary individual-property Extranet account is not a direct Connectivity API route. Booking.com's official connectivity onboarding is for connectivity providers: [Booking.com Connectivity](https://connect.booking.com/?lang=en). Lite V1 therefore keeps Booking.com on the manual queue unless a certified connectivity route is later contracted and verified.
+
+Do not substitute browser automation for missing API access. The no-CAPTCHA/2FA-bypass rule and account terms remain controlling.
+
+### Agoda
+
+Agoda direct connectivity requires formal partner onboarding and testing: [Become an Agoda Connectivity Partner](https://www.agodaconnectivity.com/become-a-partner). The application requires owner-controlled legal, business, contact, property, and technical details. A drafted application packet or code support does not prove submission, acceptance, credentials, certification, or live access.
+
+Until the provider approves and tests the integration, Agoda remains manual.
+
+### Trip.com
+
+Trip.com direct connectivity requires formal partner onboarding against the [Trip.com Open Platform](https://connect.trip.com/opendoc/3024822.html). The application requires owner-controlled legal, business, contact, property, and technical details. A drafted application packet or code support does not prove submission, acceptance, credentials, certification, or live access.
+
+Until the provider approves and tests the integration, Trip.com remains manual. Trip.com is now a first-class booking source/provider code in Lite; that attribution is not API connectivity.
+
+### Channex
+
+`DISABLED_CHANNEX_ADAPTER` is the provider-neutral seam for a future channel-only rail. It reports `CHANNEX_NOT_CONFIGURED` and rejects availability pushes. No account, contract, certification, mapping, secret, sandbox result, production write, or health is implied.
+
+If automatic, near-zero-lag distribution becomes a business requirement, evaluate a channel-only certified rail such as [Channex](https://docs.channex.io/about-channex-and-faq) instead of buying a second complete PMS. Enabling it requires:
+
+1. owner-approved contract and provider account;
+2. backend-only credential storage and rotation;
+3. property, room, rate-plan, and restriction mappings;
+4. idempotent outbound batches, retries, dead-letter visibility, and reconciliation reads;
+5. emergency stop, approval/risk policy, audit output, and source-provider loop prevention;
+6. sandbox certification and owner-approved live test dates; and
+7. staged cutover/rollback evidence.
+
+The manual queue remains authoritative until every applicable item is complete and live behavior is proven.
+
+## Gmail Is Inbound Evidence, Not An OTA API
+
+Gmail Pub/Sub can signal new provider email near-live, and the five-minute maintenance command renews watches, retries deliveries, and reconciles history. All resulting events remain review-only. Email delivery can be delayed, duplicated, reordered, incomplete, or differently formatted; Gmail cannot supply authoritative live room inventory and cannot push inventory back to an OTA.
+
+Provider-scoped external references reduce duplicate/mismatched booking risk, but staff review remains mandatory. A successful Gmail watch, push, or reconciliation is mailbox evidence only, not Booking.com, Agoda, or Trip.com API proof.
+
+See `docs/LITE_ARCHITECTURE.md` for the complete workflow and staging proof boundary.

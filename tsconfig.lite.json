@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.lite.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "@lite/*": ["./src-lite/*"]
+    }
+  },
+  "include": ["src-lite"]
+}

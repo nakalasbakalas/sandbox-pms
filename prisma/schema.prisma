@@ -8,79 +8,88 @@ datasource db {
 }
 
 model Property {
-  id              String     @id @default(cuid())
-  code            String     @unique
-  name            String
-  address         String?
-  phone           String?
-  email           String?
-  publicWebsite   String?
-  lineId          String?
-  lineUrl         String?
-  supportHours    String?
-  reservationAlertEmail String?
-  timezone        String     @default("Asia/Bangkok")
-  defaultCheckIn  String     @default("14:00")
-  defaultCheckOut String     @default("12:00")
-  currency        String     @default("THB")
-  taxRate         Float      @default(0)
-  extraGuestFee   Float      @default(200)
-  childFee        Float      @default(100)
-  inventoryMinimumRate Float?
-  taxConfiguration Json?
-  policies        Json?
-  operationalSettings Json?
-  sourceNotes     Json?
-  rooms           Room[]
-  roomTypes       RoomType[]
-  bookingEmailSources BookingEmailSource[]
-  bookingEmailEvents  BookingEmailEvent[]
-  hotelOpsTasks        HotelOpsTask[]
-  hotelOpsTrendAlerts  HotelOpsTrendAlert[]
-  hotelOpsEmergencyStop HotelOpsEmergencyStop?
-  hotelOpsNotifications HotelOpsNotification[]
-  hotelOpsScanSnapshots HotelOpsScanSnapshot[]
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                         String                    @id @default(cuid())
+  code                       String                    @unique
+  name                       String
+  address                    String?
+  phone                      String?
+  email                      String?
+  publicWebsite              String?
+  lineId                     String?
+  lineUrl                    String?
+  supportHours               String?
+  reservationAlertEmail      String?
+  timezone                   String                    @default("Asia/Bangkok")
+  defaultCheckIn             String                    @default("14:00")
+  defaultCheckOut            String                    @default("12:00")
+  currency                   String                    @default("THB")
+  taxRate                    Float                     @default(0)
+  taxRateBps                 Int?
+  extraGuestFee              Float                     @default(200)
+  extraGuestFeeSatang        Int?
+  childFee                   Float                     @default(100)
+  childFeeSatang             Int?
+  inventoryMinimumRate       Float?
+  inventoryMinimumRateSatang Int?
+  taxConfiguration           Json?
+  policies                   Json?
+  operationalSettings        Json?
+  sourceNotes                Json?
+  rooms                      Room[]
+  roomTypes                  RoomType[]
+  bookingEmailSources        BookingEmailSource[]
+  bookingEmailEvents         BookingEmailEvent[]
+  hotelOpsTasks              HotelOpsTask[]
+  hotelOpsTrendAlerts        HotelOpsTrendAlert[]
+  hotelOpsEmergencyStop      HotelOpsEmergencyStop?
+  hotelOpsNotifications      HotelOpsNotification[]
+  hotelOpsScanSnapshots      HotelOpsScanSnapshot[]
+  manualChannelConnections   ManualChannelConnection[]
+  manualChannelTasks         ManualChannelTask[]
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
 }
 
 model RoomType {
-  id             String        @id @default(cuid())
-  propertyId     String
-  property       Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  code           String
-  name           String
-  description    String?
-  baseRate       Float
-  maxOccupancy   Int
-  standardOcc    Int
-  rooms          Room[]
-  reservations   Reservation[]
-  holds          InventoryHold[]
-  
+  id                    String                     @id @default(cuid())
+  propertyId            String
+  property              Property                   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  code                  String
+  name                  String
+  description           String?
+  baseRate              Float
+  baseRateSatang        Int?
+  maxOccupancy          Int
+  standardOcc           Int
+  rooms                 Room[]
+  reservations          Reservation[]
+  holds                 InventoryHold[]
+  manualChannelMappings ManualChannelRoomMapping[]
+  manualChannelTasks    ManualChannelTask[]
+
   @@unique([propertyId, code])
   @@index([propertyId])
 }
 
 model Room {
-  id                 String              @id @default(cuid())
-  propertyId         String
-  property           Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  roomTypeId         String
-  roomType           RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
-  number             String
-  floor              Int
-  operationalStatus  RoomOpStatus        @default(AVAILABLE)
-  currentStatus      RoomStatus          @default(VACANT_CLEAN)
-  currentReservation String?             @unique
-  blockedUntil       DateTime?
-  notes              String?
-  inventory          RoomDateInventory[]
-  statusHistory      RoomStatusLog[]
-  assignedReservations Reservation[]     @relation("AssignedRoom")
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  
+  id                   String              @id @default(cuid())
+  propertyId           String
+  property             Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  roomTypeId           String
+  roomType             RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  number               String
+  floor                Int
+  operationalStatus    RoomOpStatus        @default(AVAILABLE)
+  currentStatus        RoomStatus          @default(VACANT_CLEAN)
+  currentReservation   String?             @unique
+  blockedUntil         DateTime?
+  notes                String?
+  inventory            RoomDateInventory[]
+  statusHistory        RoomStatusLog[]
+  assignedReservations Reservation[]       @relation("AssignedRoom")
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
   @@unique([propertyId, number])
   @@index([propertyId])
   @@index([roomTypeId])
@@ -105,7 +114,7 @@ enum RoomStatus {
 }
 
 model Guest {
-  id           String        @id @default(cuid())
+  id           String          @id @default(cuid())
   firstName    String
   lastName     String
   email        String?
@@ -114,68 +123,76 @@ model Guest {
   idType       String?
   idNumber     String?
   dateOfBirth  DateTime?
-  vipStatus    Boolean       @default(false)
-  blacklisted  Boolean       @default(false)
+  vipStatus    Boolean         @default(false)
+  blacklisted  Boolean         @default(false)
   preferences  Json?
   notes        String?
   reservations Reservation[]
   documents    GuestDocument[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
   @@index([email])
   @@index([phone])
   @@index([lastName, firstName])
 }
 
 model Reservation {
-  id                String              @id @default(cuid())
-  confirmationCode  String              @unique @default(cuid())
-  propertyId        String
-  guestId           String
-  guest             Guest               @relation(fields: [guestId], references: [id], onDelete: Restrict)
-  roomTypeId        String
-  roomType          RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
-  assignedRoomId    String?
-  assignedRoom      Room?               @relation("AssignedRoom", fields: [assignedRoomId], references: [id], onDelete: SetNull)
-  
-  checkIn           DateTime            @db.Date
-  checkOut          DateTime            @db.Date
-  actualCheckIn     DateTime?
-  actualCheckOut    DateTime?
-  
-  status            ReservationStatus   @default(CONFIRMED)
-  
-  adults            Int
-  children          Int                 @default(0)
-  childAges         Int[]
-  
-  ratePerNight      Float
-  totalAmount       Float
-  depositAmount     Float               @default(0)
-  depositPaid       Boolean             @default(false)
-  
-  source            BookingSource       @default(DIRECT)
-  channelRef        String?
-  sourceEmailEventId String?             @unique
-  sourceEmailEvent  BookingEmailEvent?   @relation("ReservationSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
-  
-  notes             String?
-  specialRequests   String?
-  
-  inventory         RoomDateInventory[]
-  folio             Folio?
-  history           ReservationLog[]
+  id               String   @id @default(cuid())
+  confirmationCode String   @unique @default(cuid())
+  propertyId       String
+  guestId          String
+  guest            Guest    @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  roomTypeId       String
+  roomType         RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  assignedRoomId   String?
+  assignedRoom     Room?    @relation("AssignedRoom", fields: [assignedRoomId], references: [id], onDelete: SetNull)
+
+  checkIn        DateTime  @db.Date
+  checkOut       DateTime  @db.Date
+  actualCheckIn  DateTime?
+  actualCheckOut DateTime?
+
+  status ReservationStatus @default(CONFIRMED)
+
+  adults    Int
+  children  Int   @default(0)
+  childAges Int[]
+
+  ratePerNight        Float
+  ratePerNightSatang  Int?
+  totalAmount         Float
+  totalAmountSatang   Int?
+  depositAmount       Float   @default(0)
+  depositAmountSatang Int?
+  depositPaid         Boolean @default(false)
+
+  source                BookingSource      @default(DIRECT)
+  channelRef            String?
+  providerCode          String?
+  externalReservationId String?
+  externalReferenceKey  String?            @unique
+  sourceEmailEventId    String?            @unique
+  sourceEmailEvent      BookingEmailEvent? @relation("ReservationSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
+
+  notes           String?
+  specialRequests String?
+
+  inventory          RoomDateInventory[]
+  folio              Folio?
+  history            ReservationLog[]
   bookingEmailEvents BookingEmailEvent[] @relation("BookingEmailEventReservation")
-  documents         GuestDocument[]
-  
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  
+  manualChannelTasks ManualChannelTask[]
+  documents          GuestDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([propertyId, checkIn, checkOut])
   @@index([guestId])
   @@index([status, checkIn])
   @@index([assignedRoomId])
+  @@index([propertyId, providerCode, externalReservationId])
 }
 
 enum ReservationStatus {
@@ -196,32 +213,34 @@ enum BookingSource {
   WEBSITE
   BOOKING_COM
   AGODA
+  TRIP_COM
   EXPEDIA
   AIRBNB
   OTHER
 }
 
 model RoomDateInventory {
-  id            String          @id @default(cuid())
-  propertyId    String
-  roomId        String
-  room          Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  date          DateTime        @db.Date
-  
+  id         String   @id @default(cuid())
+  propertyId String
+  roomId     String
+  room       Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  date       DateTime @db.Date
+
   reservationId String?
-  reservation   Reservation?    @relation(fields: [reservationId], references: [id], onDelete: SetNull)
-  
-  status        InventoryStatus @default(AVAILABLE)
-  
-  holdId        String?
-  hold          InventoryHold?  @relation(fields: [holdId], references: [id], onDelete: SetNull)
-  
-  rate          Float?
-  notes         String?
-  
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  
+  reservation   Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  status InventoryStatus @default(AVAILABLE)
+
+  holdId String?
+  hold   InventoryHold? @relation(fields: [holdId], references: [id], onDelete: SetNull)
+
+  rate       Float?
+  rateSatang Int?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@unique([roomId, date])
   @@index([propertyId, date, status])
   @@index([reservationId])
@@ -252,7 +271,7 @@ model InventoryHold {
   inventory  RoomDateInventory[]
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
-  
+
   @@index([expiresAt, status])
   @@index([propertyId, status])
 }
@@ -268,21 +287,26 @@ model Folio {
   id            String      @id @default(cuid())
   reservationId String      @unique
   reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
-  
-  subtotal      Float       @default(0)
-  tax           Float       @default(0)
-  total         Float       @default(0)
-  paid          Float       @default(0)
-  balance       Float       @default(0)
-  
-  status        FolioStatus @default(OPEN)
-  
-  charges       Charge[]
-  payments      Payment[]
-  
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  
+
+  subtotal       Float @default(0)
+  subtotalSatang Int?
+  tax            Float @default(0)
+  taxSatang      Int?
+  total          Float @default(0)
+  totalSatang    Int?
+  paid           Float @default(0)
+  paidSatang     Int?
+  balance        Float @default(0)
+  balanceSatang  Int?
+
+  status FolioStatus @default(OPEN)
+
+  charges  Charge[]
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([status])
 }
 
@@ -293,22 +317,24 @@ enum FolioStatus {
 }
 
 model Charge {
-  id          String         @id @default(cuid())
-  folioId     String
-  folio       Folio          @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  id                 String             @id @default(cuid())
+  folioId            String
+  folio              Folio              @relation(fields: [folioId], references: [id], onDelete: Cascade)
   sourceEmailEventId String?
-  sourceEmailEvent BookingEmailEvent? @relation("ChargeSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
-  date        DateTime       @db.Date
-  description String
-  category    ChargeCategory
-  amount      Float
-  quantity    Int            @default(1)
-  total       Float
-  void        Boolean        @default(false)
-  voidReason  String?
-  createdBy   String
-  createdAt   DateTime       @default(now())
-  
+  sourceEmailEvent   BookingEmailEvent? @relation("ChargeSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
+  date               DateTime           @db.Date
+  description        String
+  category           ChargeCategory
+  amount             Float
+  amountSatang       Int?
+  quantity           Int                @default(1)
+  total              Float
+  totalSatang        Int?
+  void               Boolean            @default(false)
+  voidReason         String?
+  createdBy          String
+  createdAt          DateTime           @default(now())
+
   @@index([folioId])
   @@index([sourceEmailEventId])
   @@index([date])
@@ -326,19 +352,20 @@ enum ChargeCategory {
 }
 
 model Payment {
-  id          String        @id @default(cuid())
-  folioId     String
-  folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
-  amount      Float
-  method      PaymentMethod
-  reference   String?
-  referenceFingerprint String? @unique
-  sourceEmailEventId String?   @unique
-  sourceEmailEvent BookingEmailEvent? @relation("PaymentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
-  notes       String?
-  processedBy String
-  createdAt   DateTime      @default(now())
-  
+  id                   String             @id @default(cuid())
+  folioId              String
+  folio                Folio              @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  amount               Float
+  amountSatang         Int?
+  method               PaymentMethod
+  reference            String?
+  referenceFingerprint String?            @unique
+  sourceEmailEventId   String?            @unique
+  sourceEmailEvent     BookingEmailEvent? @relation("PaymentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
+  notes                String?
+  processedBy          String
+  createdAt            DateTime           @default(now())
+
   @@index([folioId])
   @@index([reference])
 }
@@ -352,47 +379,59 @@ enum PaymentMethod {
 }
 
 model GuestDocument {
-  id          String   @id @default(cuid())
-  guestId     String
-  guest       Guest    @relation(fields: [guestId], references: [id], onDelete: Cascade)
-  reservationId String?
-  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  id                 String             @id @default(cuid())
+  guestId            String
+  guest              Guest              @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  reservationId      String?
+  reservation        Reservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
   sourceEmailEventId String?
-  sourceEmailEvent BookingEmailEvent? @relation("GuestDocumentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
-  type        String
-  fileName    String
-  fileUrl     String
-  uploadedBy  String
-  notes       String?
-  createdAt   DateTime @default(now())
-  
+  sourceEmailEvent   BookingEmailEvent? @relation("GuestDocumentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
+  type               String
+  fileName           String
+  fileUrl            String
+  uploadedBy         String
+  notes              String?
+  createdAt          DateTime           @default(now())
+
   @@index([guestId])
   @@index([reservationId])
   @@index([sourceEmailEventId])
 }
 
 model BookingEmailSource {
-  id          String               @id @default(cuid())
-  propertyId  String
-  property    Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  name        String
-  provider    BookingEmailProvider @default(GMAIL)
-  mailbox     String
-  enabled     Boolean              @default(true)
-  autoProcessSafeEvents Boolean    @default(false)
-  reviewThreshold Float            @default(0.85)
-  query       String?
-  credentialsRef String?
-  lastSyncAt  DateTime?
-  lastSyncCursor String?
-  lastError   String?
-  events      BookingEmailEvent[]
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
+  id                    String                     @id @default(cuid())
+  propertyId            String
+  property              Property                   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  name                  String
+  provider              BookingEmailProvider       @default(GMAIL)
+  mailbox               String
+  enabled               Boolean                    @default(true)
+  autoProcessSafeEvents Boolean                    @default(false)
+  reviewThreshold       Float                      @default(0.85)
+  query                 String?
+  credentialsRef        String?
+  lastSyncAt            DateTime?
+  lastSyncCursor        String?
+  lastReconciledAt      DateTime?
+  lastPushAt            DateTime?
+  lastError             String?
+  lastErrorAt           DateTime?
+  consecutiveFailures   Int                        @default(0)
+  syncLeaseOwner        String?
+  syncLeaseUntil        DateTime?
+  watchHistoryId        String?
+  watchRenewedAt        DateTime?
+  watchExpiresAt        DateTime?
+  events                BookingEmailEvent[]
+  pushDeliveries        BookingEmailPushDelivery[]
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
 
   @@unique([propertyId, mailbox])
   @@index([propertyId, enabled])
   @@index([provider])
+  @@index([provider, enabled, watchExpiresAt])
+  @@index([syncLeaseUntil])
 }
 
 enum BookingEmailProvider {
@@ -403,53 +442,88 @@ enum BookingEmailProvider {
   OTHER
 }
 
+enum BookingEmailPushDeliveryStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  COALESCED
+  FAILED
+}
+
+model BookingEmailPushDelivery {
+  id                    String                         @id @default(cuid())
+  sourceId              String
+  source                BookingEmailSource             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  pubsubMessageId       String                         @unique
+  subscription          String
+  notificationHistoryId String
+  emailAddress          String
+  publishedAt           DateTime?
+  status                BookingEmailPushDeliveryStatus @default(PENDING)
+  attempts              Int                            @default(0)
+  availableAt           DateTime                       @default(now())
+  claimedAt             DateTime?
+  completedAt           DateTime?
+  lastError             String?
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
+
+  @@index([status, availableAt])
+  @@index([sourceId, status, publishedAt])
+  @@index([claimedAt])
+}
+
 model BookingEmailEvent {
-  id          String                  @id @default(cuid())
-  propertyId  String
-  property    Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  sourceId    String?
-  source      BookingEmailSource?     @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  sourceName  String?
-  sourceMailbox String?
-  sourceMessageId String?
-  threadId    String?
-  rawEmailUrl String?
-  sender      String
-  recipient   String?
-  subject     String?
-  receivedAt  DateTime
-  eventType   BookingEmailEventType   @default(UNKNOWN)
-  status      BookingEmailEventStatus @default(NEEDS_REVIEW)
-  confidence  Float                   @default(0)
-  channelRef  String?
-  guestName   String?
-  checkIn     DateTime?               @db.Date
-  checkOut    DateTime?               @db.Date
-  roomType    String?
-  amount      Float?
-  currency    String?
-  paymentStatus String?
-  proposedAction String?
-  completedAction String?
-  reviewReason String?
-  errorReason String?
-  parsedDetails Json?
-  rawHeaders  Json?
-  rawText     String?
-  reservationId String?
-  reservation Reservation?            @relation("BookingEmailEventReservation", fields: [reservationId], references: [id], onDelete: SetNull)
-  sourceReservation Reservation?      @relation("ReservationSourceEmail")
-  sourcePayment Payment?              @relation("PaymentSourceEmail")
-  sourceCharges Charge[]              @relation("ChargeSourceEmail")
-  sourceDocuments GuestDocument[]     @relation("GuestDocumentSourceEmail")
-  duplicateOfEventId String?
-  duplicateOfEvent BookingEmailEvent? @relation("DuplicateBookingEmailEvent", fields: [duplicateOfEventId], references: [id], onDelete: SetNull)
-  duplicateEvents BookingEmailEvent[] @relation("DuplicateBookingEmailEvent")
-  processedAt DateTime?
-  processedBy String?
-  rejectedAt  DateTime?
-  createdAt   DateTime                @default(now())
-  updatedAt   DateTime                @updatedAt
+  id                    String                  @id @default(cuid())
+  propertyId            String
+  property              Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sourceId              String?
+  source                BookingEmailSource?     @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceName            String?
+  sourceMailbox         String?
+  sourceMessageId       String?
+  threadId              String?
+  rawEmailUrl           String?
+  sender                String
+  recipient             String?
+  subject               String?
+  receivedAt            DateTime
+  eventType             BookingEmailEventType   @default(UNKNOWN)
+  status                BookingEmailEventStatus @default(NEEDS_REVIEW)
+  confidence            Float                   @default(0)
+  channelRef            String?
+  providerCode          String?
+  externalReservationId String?
+  guestName             String?
+  checkIn               DateTime?               @db.Date
+  checkOut              DateTime?               @db.Date
+  roomType              String?
+  amount                Float?
+  amountSatang          Int?
+  currency              String?
+  paymentStatus         String?
+  proposedAction        String?
+  completedAction       String?
+  reviewReason          String?
+  errorReason           String?
+  parsedDetails         Json?
+  rawHeaders            Json?
+  rawText               String?
+  reservationId         String?
+  reservation           Reservation?            @relation("BookingEmailEventReservation", fields: [reservationId], references: [id], onDelete: SetNull)
+  sourceReservation     Reservation?            @relation("ReservationSourceEmail")
+  sourcePayment         Payment?                @relation("PaymentSourceEmail")
+  sourceCharges         Charge[]                @relation("ChargeSourceEmail")
+  sourceDocuments       GuestDocument[]         @relation("GuestDocumentSourceEmail")
+  duplicateOfEventId    String?
+  duplicateOfEvent      BookingEmailEvent?      @relation("DuplicateBookingEmailEvent", fields: [duplicateOfEventId], references: [id], onDelete: SetNull)
+  duplicateEvents       BookingEmailEvent[]     @relation("DuplicateBookingEmailEvent")
+  manualChannelTasks    ManualChannelTask[]
+  processedAt           DateTime?
+  processedBy           String?
+  rejectedAt            DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
 
   @@unique([sourceId, sourceMessageId])
   @@index([propertyId, status, receivedAt])
@@ -457,6 +531,7 @@ model BookingEmailEvent {
   @@index([reservationId])
   @@index([eventType, status])
   @@index([channelRef])
+  @@index([propertyId, providerCode, externalReservationId])
 }
 
 enum BookingEmailEventStatus {
@@ -486,7 +561,7 @@ model ReservationLog {
   performedBy   String
   notes         String?
   createdAt     DateTime           @default(now())
-  
+
   @@index([reservationId, createdAt])
 }
 
@@ -512,25 +587,25 @@ model RoomStatusLog {
   changedBy  String
   notes      String?
   createdAt  DateTime    @default(now())
-  
+
   @@index([roomId, createdAt])
 }
 
 model User {
-  id                  String   @id @default(cuid())
-  email               String?  @unique
-  username            String   @unique
+  id                  String    @id @default(cuid())
+  email               String?   @unique
+  username            String    @unique
   passwordHash        String
   firstName           String
   lastName            String
-  role                UserRole @default(FRONT_DESK)
-  active              Boolean  @default(true)
-  failedLoginAttempts Int      @default(0)
+  role                UserRole  @default(FRONT_DESK)
+  active              Boolean   @default(true)
+  failedLoginAttempts Int       @default(0)
   lockedAt            DateTime?
   lastLogin           DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
   @@index([email])
   @@index([username])
   @@index([lockedAt])
@@ -547,38 +622,38 @@ enum UserRole {
 }
 
 model HotelOpsTask {
-  id                 String                  @id @default(cuid())
+  id                 String                 @id @default(cuid())
   propertyId         String
-  property           Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   requesterUserId    String
   requesterLabel     String?
   rawMessage         String
-  sourceChannel      HotelOpsSourceChannel   @default(web)
+  sourceChannel      HotelOpsSourceChannel  @default(web)
   taskType           HotelOpsTaskType
-  platform           HotelOpsPlatform        @default(unknown)
+  platform           HotelOpsPlatform       @default(unknown)
   hotelId            String
   roomType           String?
-  dateStart          DateTime?               @db.Date
-  dateEnd            DateTime?               @db.Date
+  dateStart          DateTime?              @db.Date
+  dateEnd            DateTime?              @db.Date
   rateAmount         Float?
   rateCurrency       String?
   availabilityRooms  Int?
   availabilityStatus String?
   message            String?
   riskLevel          HotelOpsRiskLevel
-  approvalRequired   Boolean                 @default(false)
-  confidence         Float                   @default(0)
+  approvalRequired   Boolean                @default(false)
+  confidence         Float                  @default(0)
   missingFields      String[]
   rationale          String
-  status             HotelOpsTaskStatus      @default(DRAFT)
-  idempotencyKey     String                  @unique
+  status             HotelOpsTaskStatus     @default(DRAFT)
+  idempotencyKey     String                 @unique
   permissionDecision Json?
   proofScreenshots   Json?
   executionSummary   String?
   errorCode          String?
   errorMessage       String?
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
   approvals          HotelOpsTaskApproval[]
   logs               HotelOpsTaskLog[]
   notifications      HotelOpsNotification[]
@@ -618,25 +693,25 @@ model HotelOpsTaskLog {
 }
 
 model HotelOpsTrendAlert {
-  id                 String                   @id @default(cuid())
-  propertyId         String
-  property           Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  scanSnapshotId     String?
-  scanSnapshot       HotelOpsScanSnapshot?    @relation(fields: [scanSnapshotId], references: [id], onDelete: SetNull)
-  alertType          HotelOpsTrendAlertType
-  severity           HotelOpsAlertSeverity
-  title              String
-  summary            String
-  platform           HotelOpsPlatform?
-  roomType           String?
-  dateStart          DateTime?                @db.Date
-  dateEnd            DateTime?                @db.Date
-  metrics            Json
-  recommendedAction  Json?
-  status             HotelOpsTrendAlertStatus @default(CREATED)
-  createdAt          DateTime                 @default(now())
-  updatedAt          DateTime                 @updatedAt
-  notifications      HotelOpsNotification[]
+  id                String                   @id @default(cuid())
+  propertyId        String
+  property          Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  scanSnapshotId    String?
+  scanSnapshot      HotelOpsScanSnapshot?    @relation(fields: [scanSnapshotId], references: [id], onDelete: SetNull)
+  alertType         HotelOpsTrendAlertType
+  severity          HotelOpsAlertSeverity
+  title             String
+  summary           String
+  platform          HotelOpsPlatform?
+  roomType          String?
+  dateStart         DateTime?                @db.Date
+  dateEnd           DateTime?                @db.Date
+  metrics           Json
+  recommendedAction Json?
+  status            HotelOpsTrendAlertStatus @default(CREATED)
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  notifications     HotelOpsNotification[]
 
   @@index([propertyId, status, createdAt])
   @@index([scanSnapshotId])
@@ -644,23 +719,23 @@ model HotelOpsTrendAlert {
 }
 
 model HotelOpsScanSnapshot {
-  id                 String                 @id @default(cuid())
+  id                 String                @id @default(cuid())
   propertyId         String
-  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  sourceChannel      HotelOpsSourceChannel  @default(system)
+  property           Property              @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  sourceChannel      HotelOpsSourceChannel @default(system)
   triggeredBy        String?
   force              String?
-  windowStart        DateTime               @db.Date
-  windowEnd          DateTime               @db.Date
-  scannedAt          DateTime               @default(now())
-  activeReservations Int                    @default(0)
-  sellableRooms      Int                    @default(0)
-  cancellationLogs   Int                    @default(0)
-  alertsCreated      Int                    @default(0)
-  alertsUpdated      Int                    @default(0)
+  windowStart        DateTime              @db.Date
+  windowEnd          DateTime              @db.Date
+  scannedAt          DateTime              @default(now())
+  activeReservations Int                   @default(0)
+  sellableRooms      Int                   @default(0)
+  cancellationLogs   Int                   @default(0)
+  alertsCreated      Int                   @default(0)
+  alertsUpdated      Int                   @default(0)
   metrics            Json
   alerts             HotelOpsTrendAlert[]
-  createdAt          DateTime               @default(now())
+  createdAt          DateTime              @default(now())
 
   @@index([propertyId, scannedAt])
   @@index([sourceChannel, scannedAt])
@@ -678,16 +753,16 @@ model HotelOpsEmergencyStop {
 }
 
 model HotelOpsNotification {
-  id               String                       @id @default(cuid())
+  id               String                      @id @default(cuid())
   propertyId       String
-  property         Property                     @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property         Property                    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   taskId           String?
-  task             HotelOpsTask?                @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task             HotelOpsTask?               @relation(fields: [taskId], references: [id], onDelete: Cascade)
   trendAlertId     String?
-  trendAlert       HotelOpsTrendAlert?          @relation(fields: [trendAlertId], references: [id], onDelete: Cascade)
+  trendAlert       HotelOpsTrendAlert?         @relation(fields: [trendAlertId], references: [id], onDelete: Cascade)
   type             HotelOpsNotificationType
   channel          HotelOpsNotificationChannel
-  status           HotelOpsNotificationStatus   @default(RECORDED)
+  status           HotelOpsNotificationStatus  @default(RECORDED)
   recipientRole    HotelOpsRole?
   recipientUserId  String?
   recipientAddress String?
@@ -700,7 +775,7 @@ model HotelOpsNotification {
   readBy           String?
   dismissedAt      DateTime?
   dismissedBy      String?
-  createdAt        DateTime                     @default(now())
+  createdAt        DateTime                    @default(now())
 
   @@index([propertyId, status, createdAt])
   @@index([propertyId, dismissedAt, createdAt])
@@ -826,22 +901,22 @@ enum HotelOpsNotificationStatus {
 }
 
 model RateRule {
-  id          String       @id @default(cuid())
-  propertyId  String
-  roomTypeId  String?
-  name        String
-  description String?
-  priority    Int          @default(0)
-  startDate   DateTime?    @db.Date
-  endDate     DateTime?    @db.Date
-  daysOfWeek  Int[]
-  adjustment  Float
+  id             String             @id @default(cuid())
+  propertyId     String
+  roomTypeId     String?
+  name           String
+  description    String?
+  priority       Int                @default(0)
+  startDate      DateTime?          @db.Date
+  endDate        DateTime?          @db.Date
+  daysOfWeek     Int[]
+  adjustment     Float
   adjustmentType RateAdjustmentType @default(PERCENTAGE)
-  active      Boolean      @default(true)
-  createdBy   String
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  
+  active         Boolean            @default(true)
+  createdBy      String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
   @@index([propertyId, active])
   @@index([startDate, endDate])
 }
@@ -853,43 +928,133 @@ enum RateAdjustmentType {
 }
 
 model RateCalendar {
-  id         String   @id @default(cuid())
-  propertyId String
-  roomTypeId String
-  date       DateTime @db.Date
-  rate       Float
-  minStay    Int?
-  maxStay    Int?
-  stopSell   Boolean  @default(false)
-  closeToArrival Boolean @default(false)
-  closeToDeparture Boolean @default(false)
-  notes      String?
-  createdBy  String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  
+  id               String   @id @default(cuid())
+  propertyId       String
+  roomTypeId       String
+  date             DateTime @db.Date
+  rate             Float
+  minStay          Int?
+  maxStay          Int?
+  stopSell         Boolean  @default(false)
+  closeToArrival   Boolean  @default(false)
+  closeToDeparture Boolean  @default(false)
+  notes            String?
+  createdBy        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
   @@unique([roomTypeId, date])
   @@index([propertyId, date])
 }
 
+enum ManualChannelDeliveryMode {
+  MANUAL
+  CHANNEX
+}
+
+enum ManualChannelTaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SUPERSEDED
+  FAILED
+}
+
+model ManualChannelConnection {
+  id                 String                     @id @default(cuid())
+  propertyId         String
+  property           Property                   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  providerCode       String
+  displayName        String
+  deliveryMode       ManualChannelDeliveryMode  @default(MANUAL)
+  externalPropertyId String?
+  extranetUrl        String?
+  credentialRef      String?
+  enabled            Boolean                    @default(false)
+  mappings           ManualChannelRoomMapping[]
+  tasks              ManualChannelTask[]
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  @@unique([propertyId, providerCode])
+  @@index([propertyId, enabled])
+  @@index([deliveryMode, enabled])
+}
+
+model ManualChannelRoomMapping {
+  id                   String                  @id @default(cuid())
+  connectionId         String
+  connection           ManualChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  roomTypeId           String
+  roomType             RoomType                @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  externalRoomTypeId   String
+  externalRoomTypeName String
+  externalRatePlanId   String?
+  active               Boolean                 @default(true)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  @@unique([connectionId, roomTypeId])
+  @@index([roomTypeId, active])
+}
+
+model ManualChannelTask {
+  id                        String                  @id @default(cuid())
+  propertyId                String
+  property                  Property                @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  connectionId              String
+  connection                ManualChannelConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  roomTypeId                String
+  roomType                  RoomType                @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  stayDate                  DateTime                @db.Date
+  desiredAvailability       Int
+  confirmedAvailability     Int?
+  status                    ManualChannelTaskStatus @default(PENDING)
+  revision                  Int                     @default(1)
+  activeKey                 String?                 @unique
+  triggerType               String
+  sourceProviderCode        String?
+  sourceReservationId       String?
+  sourceReservation         Reservation?            @relation(fields: [sourceReservationId], references: [id], onDelete: SetNull)
+  sourceBookingEmailEventId String?
+  sourceBookingEmailEvent   BookingEmailEvent?      @relation(fields: [sourceBookingEmailEventId], references: [id], onDelete: SetNull)
+  supersedesTaskId          String?                 @unique
+  supersedesTask            ManualChannelTask?      @relation("ManualChannelTaskSupersession", fields: [supersedesTaskId], references: [id], onDelete: SetNull)
+  supersededBy              ManualChannelTask?      @relation("ManualChannelTaskSupersession")
+  createdBy                 String
+  completedBy               String?
+  completedAt               DateTime?
+  completionNotes           String?
+  lastAttemptAt             DateTime?
+  lastErrorCode             String?
+  lastErrorMessage          String?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  @@index([propertyId, status, stayDate])
+  @@index([connectionId, roomTypeId, stayDate, createdAt])
+  @@index([sourceReservationId])
+  @@index([sourceBookingEmailEventId])
+}
+
 model Channel {
-  id            String        @id @default(cuid())
-  propertyId    String
-  provider      ChannelProvider
-  name          String
-  hotelId       String?
-  credentials   Json
-  active        Boolean       @default(false)
-  sandboxMode   Boolean       @default(true)
-  lastSync      DateTime?
+  id             String           @id @default(cuid())
+  propertyId     String
+  provider       ChannelProvider
+  name           String
+  hotelId        String?
+  credentials    Json
+  active         Boolean          @default(false)
+  sandboxMode    Boolean          @default(true)
+  lastSync       DateTime?
   lastSyncStatus String?
-  syncEnabled   Boolean       @default(false)
-  config        Json?
-  mappings      ChannelMapping[]
-  logs          ChannelSyncLog[]
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  
+  syncEnabled    Boolean          @default(false)
+  config         Json?
+  mappings       ChannelMapping[]
+  logs           ChannelSyncLog[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
   @@index([propertyId, active])
 }
 
@@ -902,33 +1067,33 @@ enum ChannelProvider {
 }
 
 model ChannelMapping {
-  id                String @id @default(cuid())
-  channelId         String
-  channel           Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  roomTypeId        String
+  id                 String   @id @default(cuid())
+  channelId          String
+  channel            Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  roomTypeId         String
   externalRoomTypeId String
   externalRatePlanId String?
-  active            Boolean @default(true)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
   @@unique([channelId, roomTypeId])
   @@index([channelId])
 }
 
 model ChannelSyncLog {
-  id         String         @id @default(cuid())
-  channelId  String
-  channel    Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  syncType   ChannelSyncType
-  status     String
-  recordsProcessed Int       @default(0)
-  errorCount Int            @default(0)
-  errorSummary String?
-  duration   Int?
-  startedAt  DateTime
-  completedAt DateTime?
-  
+  id               String          @id @default(cuid())
+  channelId        String
+  channel          Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  syncType         ChannelSyncType
+  status           String
+  recordsProcessed Int             @default(0)
+  errorCount       Int             @default(0)
+  errorSummary     String?
+  duration         Int?
+  startedAt        DateTime
+  completedAt      DateTime?
+
   @@index([channelId, startedAt])
 }
 
@@ -940,22 +1105,22 @@ enum ChannelSyncType {
 }
 
 model Message {
-  id          String        @id @default(cuid())
-  propertyId  String
-  recipientId String?
+  id            String         @id @default(cuid())
+  propertyId    String
+  recipientId   String?
   recipientType String
-  channel     MessageChannel
-  templateId  String?
-  subject     String?
-  body        String
-  status      MessageStatus @default(PENDING)
-  sentAt      DateTime?
-  deliveredAt DateTime?
-  failedAt    DateTime?
-  errorMessage String?
-  metadata    Json?
-  createdAt   DateTime      @default(now())
-  
+  channel       MessageChannel
+  templateId    String?
+  subject       String?
+  body          String
+  status        MessageStatus  @default(PENDING)
+  sentAt        DateTime?
+  deliveredAt   DateTime?
+  failedAt      DateTime?
+  errorMessage  String?
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+
   @@index([propertyId, status])
   @@index([recipientId])
 }
@@ -975,7 +1140,7 @@ enum MessageStatus {
 }
 
 model MessageTemplate {
-  id          String   @id @default(cuid())
+  id          String         @id @default(cuid())
   propertyId  String
   name        String
   description String?
@@ -983,11 +1148,11 @@ model MessageTemplate {
   subject     String?
   body        String
   variables   String[]
-  active      Boolean  @default(true)
+  active      Boolean        @default(true)
   createdBy   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
   @@index([propertyId, channel, active])
 }
 
@@ -1001,7 +1166,7 @@ model AuditLog {
   ipAddress  String?
   userAgent  String?
   createdAt  DateTime @default(now())
-  
+
   @@index([userId, createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])

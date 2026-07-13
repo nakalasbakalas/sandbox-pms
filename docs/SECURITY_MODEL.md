@@ -98,3 +98,50 @@ The PMS normalizes proof kinds, caps persisted proof count, redacts credential-l
 - No production claim for email delivery unless a real provider is configured and tested.
 - No production claim that historical bookings are loaded into operational reservations until imported Booking Email Events are reviewed and approved through the PMS.
 - No launch-ready claim from local tests alone.
+
+## Lite V1 Trust Boundaries
+
+### Gmail Push Is Authenticated Intake, Not Mutation Authority
+
+`POST /api/booking-email/gmail/push` is reachable without a PMS user session so Google Pub/Sub can call it, but it must reject requests unless all of these checks pass:
+
+- Pub/Sub support is explicitly enabled and fully configured.
+- The bearer token is a valid Google-signed OIDC identity token.
+- Issuer, audience, verified service-account email, subscription, and mailbox equal the configured values.
+- The envelope is bounded, the Pub/Sub message id is present, and the Gmail history id is numeric.
+
+The server persists a unique delivery before acknowledging it. A Pub/Sub message id is an idempotency key, not authority to update a booking. The Gmail API access token is resolved only on the backend. Errors are redacted before storage or output.
+
+All Gmail push, history, reconciliation, and maintenance ingestion is forced to review-only. Booking email content and parser output are untrusted. A new/modification/cancellation/payment event cannot mutate PMS state until an authenticated, authorized staff member approves it through the existing service. Processed events cannot be reprocessed. Modification and cancellation approvals require an operational reason and audit evidence.
+
+The five-minute maintenance cron renews watches, retries durable deliveries, and reconciles Gmail history. It improves recovery but is neither a security bypass nor a delivery guarantee. If the watch or push identity is misconfigured, the correct response is to repair configuration or rely on reviewed manual intake—not to disable OIDC or review controls.
+
+### Manual Channel Queue Is Non-Credential Coordination
+
+Manual channel configuration may contain provider codes, verified property/room/rate identifiers, and official HTTPS Extranet links. It must reject password-, token-, cookie-, session-, secret-, API-key-, 2FA-, or credential-shaped fields. Extranet URLs may not contain embedded credentials, query strings, fragments, or non-standard ports and must resolve under the configured provider's official domain.
+
+Manual availability tasks do not authorize browser automation or OTA writes. Completion records an operator attestation, timestamp, exact availability, revision, and optional notes; it is not independent OTA state proof. Stale revisions and mismatched values are rejected. Configuration/reconciliation/reopen is Manager/Admin-only; completion is limited to Front Desk, Manager, or Admin.
+
+An enabled manual connection must have an active mapping for every room type that owns a physical room, including temporarily non-sellable rooms. Active external room-type/rate-plan targets are unique per connection at the database boundary. Reconciliation never guesses an external target: missing mappings skip task creation and produce an aggregated audit record for the provider, PMS room type, and affected date range.
+
+The source OTA for an approved email is also reconciled with current absolute PMS availability. This prevents stale source-provider tasks from remaining actionable; it is still manual coordination and is not evidence that the provider's broader inventory is synchronized. Every enabled provider remains exposed to staff delay.
+
+`DISABLED_CHANNEX_ADAPTER` must remain disabled until a certified channel account, backend-only secrets, provider/property/room mappings, sandbox test evidence, error/retry policy, audit output, emergency stop, and owner approval exist. No Channex credential belongs in the client or manual mapping records.
+
+### PII-Safe Realtime Invalidation
+
+`GET /api/realtime/events` requires an authenticated session and the narrow `view:realtime` operational permission. This lets Housekeeping receive room-state invalidations without granting access to the guest booking board. The server allows only named invalidation event types and emits only occurrence time, optional opaque entity id, and optional reason code. Guest names, email data, room data, payment data, message content, credentials, and arbitrary caller payloads are excluded. The client must refetch authorized endpoints after a signal.
+
+SSE is in-process and non-replaying. It is an availability optimization, not a source of truth or authorization decision. Reconnect emits `sync-required`; polling remains the fallback. A multi-instance deployment requires a shared invalidation bus to avoid instance-local blind spots.
+
+### Provider And Production Authority
+
+An ordinary Booking.com individual-property Extranet account is not direct Connectivity API authorization. Agoda and Trip.com application material requires owner-controlled legal/business information and provider testing. Repository code, a drafted packet, or an opened form is not application submission or approval.
+
+Lite remains staging-only until owner/live proof exists for Render configuration, database recovery, Gmail OAuth/watch/Pub/Sub, cron operation, provider decisions, Cloudflare proxy/WAF traffic path, staff roles, Thai/English acceptance, exact money, and rollback. Do not place credentials or production guest data in test fixtures or evidence.
+
+### Money Integrity
+
+Lite read DTOs require the integer-satang fields, and PMS writers calculate in satang before deriving legacy Float rollback parity. Missing required satang values fail closed instead of silently converting Float at the boundary. This repository contract is not production proof: production money cutover remains blocked until the nullable expansion/backfill migration, zero-difference reconciliation, restore proof, representative staging workflows, and rollback-period requirements are evidenced. No migration should be applied to production without a fresh recovery point and successful disposable restore test.
+
+See `docs/LITE_ARCHITECTURE.md` for the complete Lite data flow and rollout boundaries.

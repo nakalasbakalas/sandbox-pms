@@ -229,12 +229,13 @@ function createBookingEmailPrismaFixture(options = {}) {
   const events = []
   const audits = []
   const roomTypes = Array.isArray(options.roomTypes) ? options.roomTypes : []
+  const reservations = Array.isArray(options.reservations) ? options.reservations : []
   let eventCounter = 0
 
   const withEventRelations = (event) => event ? {
     ...event,
     source: sources.find((source) => source.id === event.sourceId) || null,
-    reservation: null,
+    reservation: reservations.find((reservation) => reservation.id === event.reservationId) || null,
   } : null
 
   const matchesEventWhere = (event, where = {}) => {
@@ -284,7 +285,21 @@ function createBookingEmailPrismaFixture(options = {}) {
     },
     reservation: {
       findFirst: async () => null,
-      findUnique: async () => null,
+      findUnique: async ({ where = {} } = {}) => reservations.find((reservation) => (
+        (where.id && reservation.id === where.id)
+        || (where.externalReferenceKey && reservation.externalReferenceKey === where.externalReferenceKey)
+      )) || null,
+      findMany: async ({ where = {}, take } = {}) => reservations.filter((reservation) => {
+        if (where.propertyId && reservation.propertyId !== where.propertyId) return false
+        if (where.providerCode && reservation.providerCode !== where.providerCode) return false
+        if (where.status?.notIn?.includes(reservation.status)) return false
+        if (Array.isArray(where.OR) && !where.OR.some((condition) => {
+          const [field, comparison] = Object.entries(condition)[0] || []
+          if (!field || !comparison?.equals) return false
+          return String(reservation[field] || '').toLowerCase() === String(comparison.equals).toLowerCase()
+        })) return false
+        return true
+      }).slice(0, take || reservations.length),
     },
     reservationLog: {
       create: async ({ data }) => data,
@@ -341,7 +356,14 @@ function createBookingEmailPrismaFixture(options = {}) {
       findMany: async ({ where = {}, orderBy = [], take } = {}) => sortEvents(events.filter((event) => matchesEventWhere(event, where)), orderBy)
         .slice(0, take || events.length)
         .map(withEventRelations),
-      findUnique: async ({ where }) => withEventRelations(events.find((event) => event.id === where?.id) || null),
+      findUnique: async ({ where }) => withEventRelations(events.find((event) => (
+        (where?.id && event.id === where.id)
+        || (
+          where?.sourceId_sourceMessageId
+          && event.sourceId === where.sourceId_sourceMessageId.sourceId
+          && event.sourceMessageId === where.sourceId_sourceMessageId.sourceMessageId
+        )
+      )) || null),
       create: async ({ data }) => {
         const created = {
           id: `booking-event-${++eventCounter}`,
@@ -1268,6 +1290,141 @@ await syncBookingEmail(duplicateReplayFixture.prisma, {
 }, duplicateScopeActor)
 assert.equal(Boolean(duplicateReplayFixture.events[1].duplicateOfEventId), true, 'booking-email duplicate scope still flags same-type resend content as a duplicate')
 
+const processedReplayFixture = createBookingEmailPrismaFixture()
+await syncBookingEmail(processedReplayFixture.prisma, {
+  sourceId: processedReplayFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{ ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-processed-replay' }],
+}, duplicateScopeActor)
+Object.assign(processedReplayFixture.events[0], {
+  status: 'PROCESSED',
+  processedAt: new Date('2026-07-01T02:00:00.000Z'),
+  completedAction: 'Created reservation SBX-processed.',
+})
+const processedSubject = processedReplayFixture.events[0].subject
+const processedReplayResult = await syncBookingEmail(processedReplayFixture.prisma, {
+  sourceId: processedReplayFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sourceMessageId: 'gmail-processed-replay',
+    subject: 'Changed replay payload must not overwrite processed evidence',
+  }],
+}, duplicateScopeActor)
+assert.equal(processedReplayResult.events[0].status, 'PROCESSED', 'Gmail replay keeps already-processed booking-email events processed')
+assert.equal(processedReplayFixture.events[0].subject, processedSubject, 'Gmail replay does not overwrite processed booking-email evidence')
+assert.equal(processedReplayFixture.events[0].completedAction, 'Created reservation SBX-processed.', 'Gmail replay preserves the recorded completed action')
+
+const ignoredReplayFixture = createBookingEmailPrismaFixture()
+await syncBookingEmail(ignoredReplayFixture.prisma, {
+  sourceId: ignoredReplayFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{ ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-ignored-replay' }],
+}, duplicateScopeActor)
+Object.assign(ignoredReplayFixture.events[0], {
+  status: 'IGNORED',
+  rejectedAt: new Date('2026-07-01T03:00:00.000Z'),
+  reviewReason: 'Rejected after official Extranet verification.',
+})
+const ignoredSubject = ignoredReplayFixture.events[0].subject
+const ignoredReplayResult = await syncBookingEmail(ignoredReplayFixture.prisma, {
+  sourceId: ignoredReplayFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sourceMessageId: 'gmail-ignored-replay',
+    subject: 'Replay must not reopen rejected evidence',
+  }],
+}, duplicateScopeActor)
+assert.equal(ignoredReplayResult.events[0].status, 'IGNORED', 'Gmail replay keeps explicitly rejected booking-email events ignored')
+assert.equal(ignoredReplayFixture.events[0].subject, ignoredSubject, 'Gmail replay does not overwrite rejected booking-email evidence')
+
+const tripNormalizationFixture = createBookingEmailPrismaFixture()
+const tripNormalizationResult = await syncBookingEmail(tripNormalizationFixture.prisma, {
+  sourceId: tripNormalizationFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sender: 'Trip.com <notification@trip.com>',
+    sourceMessageId: 'gmail-trip-provider-normalization',
+    rawHeaders: {
+      authenticationResults: 'mx.google.com; dkim=pass header.d=trip.com; dmarc=pass header.from=trip.com',
+    },
+  }],
+}, duplicateScopeActor)
+assert.equal(tripNormalizationResult.events[0].providerCode, 'trip_com', 'Trip.com booking emails normalize to the canonical manual-channel provider code')
+assert.equal(
+  tripNormalizationResult.events[0].externalReservationId,
+  bookingEmailParserFixtures[0].expected.channelRef,
+  'Trip.com booking references are retained as provider-scoped external reservation ids',
+)
+const spoofedTripFixture = createBookingEmailPrismaFixture()
+const spoofedTripResult = await syncBookingEmail(spoofedTripFixture.prisma, {
+  sourceId: spoofedTripFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sender: 'Trip.com <attacker@evil.example>',
+    sourceMessageId: 'gmail-spoofed-trip-provider',
+  }],
+}, duplicateScopeActor)
+assert.equal(spoofedTripResult.events[0].providerCode, undefined, 'OTA provider attribution requires an official sender domain, not a spoofable display name')
+
+const unauthenticatedTripFixture = createBookingEmailPrismaFixture()
+const unauthenticatedTripResult = await syncBookingEmail(unauthenticatedTripFixture.prisma, {
+  sourceId: unauthenticatedTripFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sender: 'Trip.com <notification@trip.com>',
+    sourceMessageId: 'gmail-unauthenticated-trip-provider',
+  }],
+}, duplicateScopeActor)
+assert.equal(unauthenticatedTripResult.events[0].providerCode, undefined, 'an official-looking OTA sender is not trusted without aligned Gmail authentication results')
+assert.match(unauthenticatedTripResult.events[0].reviewReason, /authentication could not be verified/i, 'unverified OTA-looking email requires explicit Extranet verification')
+
+const legacyTripReference = bookingEmailParserFixtures[0].expected.channelRef
+const legacyTripReservation = {
+  id: 'legacy-trip-reservation-1',
+  propertyId: 'property-booking-email-test',
+  providerCode: 'trip_com',
+  externalReferenceKey: null,
+  externalReservationId: null,
+  channelRef: legacyTripReference,
+  confirmationCode: `TRP-${legacyTripReference}`,
+  status: 'CONFIRMED',
+}
+const singleLegacyTripFixture = createBookingEmailPrismaFixture({ reservations: [legacyTripReservation] })
+const singleLegacyTripResult = await syncBookingEmail(singleLegacyTripFixture.prisma, {
+  sourceId: singleLegacyTripFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sender: 'Trip.com <notification@trip.com>',
+    sourceMessageId: 'gmail-single-legacy-trip-match',
+    rawHeaders: { authenticationResults: 'mx.google.com; dmarc=pass header.from=trip.com' },
+  }],
+}, duplicateScopeActor)
+assert.equal(singleLegacyTripResult.events[0].reservationId, legacyTripReservation.id, 'one provider-scoped legacy reference can be linked for review')
+
+const ambiguousLegacyTripFixture = createBookingEmailPrismaFixture({
+  reservations: [
+    legacyTripReservation,
+    { ...legacyTripReservation, id: 'legacy-trip-reservation-2', confirmationCode: `TRP-DUP-${legacyTripReference}` },
+  ],
+})
+const ambiguousLegacyTripResult = await syncBookingEmail(ambiguousLegacyTripFixture.prisma, {
+  sourceId: ambiguousLegacyTripFixture.sources[0].id,
+  reviewOnly: true,
+  events: [{
+    ...bookingEmailParserFixtures[0].input,
+    sender: 'Trip.com <notification@trip.com>',
+    sourceMessageId: 'gmail-ambiguous-legacy-trip-match',
+    rawHeaders: { authenticationResults: 'mx.google.com; dmarc=pass header.from=trip.com' },
+  }],
+}, duplicateScopeActor)
+assert.equal(ambiguousLegacyTripResult.events[0].reservationId, undefined, 'multiple provider-scoped legacy matches remain unlinked for explicit staff review')
+
 const autoProcessFixture = createBookingEmailPrismaFixture({
   autoProcessSafeEvents: true,
 })
@@ -1278,8 +1435,9 @@ const autoProcessResult = await syncBookingEmail(autoProcessFixture.prisma, {
     { ...bookingEmailParserFixtures[0].input, sourceMessageId: 'gmail-auto-process-fixture' },
   ],
 }, duplicateScopeActor)
-assert.equal(autoProcessResult.events[0].status, 'ERROR', 'booking-email auto-process persists async approval failures onto the event')
-assert.match(autoProcessResult.events[0].errorReason || '', /room type/i, 'booking-email auto-process keeps the approval failure reason on the event')
+assert.equal(autoProcessResult.events[0].status, 'NEEDS_REVIEW', 'Gmail booking-email intake remains review-only even when auto-process is enabled')
+assert.equal(autoProcessResult.events[0].errorReason, undefined, 'Gmail review-only intake does not attempt an asynchronous reservation mutation')
+assert.equal(autoProcessFixture.audits.at(-1)?.changes?.reviewOnly, true, 'Gmail sync audit records the enforced review-only boundary')
 
 function gmailBody(value) {
   return Buffer.from(value, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
@@ -3380,5 +3538,7 @@ const housekeepingPaymentAnswer = assistantTools.runAssistantTool(
 assert.equal(housekeepingPaymentAnswer.directAnswer.includes('cannot view'), true, 'housekeeping cannot see payment details')
 assert.equal(assistantGuards.hasAssistantPermission({ role: 'front-desk' }, 'check-in:guest'), true, 'front desk can see check-in actions')
 assert.equal(assistantGuards.hasAssistantPermission({ role: 'housekeeping' }, 'process:payment'), false, 'housekeeping cannot process payment actions')
+
+await import('./tests/pms-channel-integration.mjs')
 
 console.log('Business rule tests passed')

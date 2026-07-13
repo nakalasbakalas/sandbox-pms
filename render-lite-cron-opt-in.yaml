@@ -1,0 +1,86 @@
+# OWNER APPROVAL REQUIRED: APPLYING THIS BLUEPRINT CREATES A BILLABLE CRON JOB.
+# Render currently charges a USD 1/month minimum per cron service. Do not apply
+# this file until the owner explicitly accepts that recurring cost. Apply
+# render-lite.yaml first; this job references only its named staging resources.
+# It does not define or reference the production PMS database.
+previews:
+  generation: off
+
+services:
+  - type: cron
+    name: sandbox-hotel-pms-lite-email-maintenance-staging
+    runtime: node
+    repo: https://github.com/nakalasbakalas/sandbox-pms
+    plan: starter
+    region: singapore
+    branch: codex/sandbox-pms-lite-v1
+    autoDeployTrigger: off
+    schedule: "*/5 * * * *"
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm run db:generate
+    startCommand: npm run booking-email:maintenance
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: NODE_ENV
+        value: production
+      - key: PMS_DEPLOYMENT_TIER
+        value: staging
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sandbox-hotel-pms-lite-staging-db
+          property: connectionString
+      - key: BOOKING_EMAIL_PRIMARY_MAILBOX
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_PRIMARY_MAILBOX
+      - key: BOOKING_EMAIL_GMAIL_USER_ID
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_USER_ID
+      - key: BOOKING_EMAIL_GMAIL_SCOPES
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_SCOPES
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_ID
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_CLIENT_ID
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
+      - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
+        fromService:
+          type: web
+          name: sandbox-hotel-pms-lite-staging
+          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
