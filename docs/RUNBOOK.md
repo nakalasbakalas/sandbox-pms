@@ -431,9 +431,11 @@ Near-live authenticated Pub/Sub push is the primary path and does not require th
 Render cron. The fallback cron is isolated in
 `render-lite-cron-opt-in.yaml`. Applying that second Blueprint creates a billable
 Render Cron Job with a current USD 1/month minimum. Do not apply it without
-explicit owner cost approval. Apply `render-lite.yaml` first; the opt-in cron then
-references the named Lite staging web service and staging database, never the
-production database.
+explicit owner cost approval. Apply `render-lite.yaml` first. The opt-in cron is
+an independently valid Blueprint with no implicit service/database binding; its
+Render creation form requires the owner to supply the Lite staging database URL
+and reviewed Gmail configuration. Never substitute the production database or
+copy values into the repository, terminal output, logs, or chat.
 
 After approval, configure the opt-in cron on the same reviewed commit and staging
 database:
@@ -452,11 +454,11 @@ render blueprints validate render-lite.yaml
 render blueprints validate render-lite-cron-opt-in.yaml
 ```
 
-The branch must already exist on GitHub for Render's remote validation. The cron
-manifest also requires the base staging web/database resources to exist in the
-selected Render workspace because it references them across Blueprints. A missing
-branch or missing external staging resource is an apply-order blocker, not YAML
-schema proof and not permission to substitute production resources.
+The branch must already exist on GitHub for Render's remote validation. Both
+Blueprints must validate independently in the selected Render workspace before
+apply. A missing branch, an unavailable Free Postgres slot, or an unreviewed
+staging secret is an apply blocker, not permission to substitute production
+resources.
 
 One maintenance run renews due Gmail watches, drains/retries durable Pub/Sub deliveries, and performs bounded history reconciliation. Run once manually on staging before enabling the schedule:
 

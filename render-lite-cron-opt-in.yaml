@@ -1,8 +1,10 @@
 # OWNER APPROVAL REQUIRED: APPLYING THIS BLUEPRINT CREATES A BILLABLE CRON JOB.
 # Render currently charges a USD 1/month minimum per cron service. Do not apply
 # this file until the owner explicitly accepts that recurring cost. Apply
-# render-lite.yaml first; this job references only its named staging resources.
-# It does not define or reference the production PMS database.
+# render-lite.yaml first, then supply only the Lite staging database URL and the
+# reviewed Gmail values in Render's secret-entry form. This standalone Blueprint
+# deliberately has no implicit binding to any existing (especially production)
+# service or database.
 previews:
   generation: off
 
@@ -28,61 +30,26 @@ services:
       - key: CHANNEL_SYNC_QUEUE_BACKEND
         value: lite_manual
       - key: DATABASE_URL
-        fromDatabase:
-          name: sandbox-hotel-pms-lite-staging-db
-          property: connectionString
+        sync: false
       - key: BOOKING_EMAIL_PRIMARY_MAILBOX
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_PRIMARY_MAILBOX
+        value: booking@sandboxhotel.com
       - key: BOOKING_EMAIL_GMAIL_USER_ID
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_USER_ID
+        value: me
       - key: BOOKING_EMAIL_GMAIL_SCOPES
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_SCOPES
+        value: https://www.googleapis.com/auth/gmail.readonly
       - key: BOOKING_EMAIL_GMAIL_CLIENT_ID
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_CLIENT_ID
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
+        sync: false
       - key: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
-        fromService:
-          type: web
-          name: sandbox-hotel-pms-lite-staging
-          envVarKey: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
+        sync: false
