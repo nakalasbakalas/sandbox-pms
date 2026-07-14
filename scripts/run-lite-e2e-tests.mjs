@@ -317,7 +317,7 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
   await folioDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
   assert.equal(await folioDialog.getByLabel('Amount (THB)', { exact: true }).inputValue(), '12.34')
   await folioDialog.getByRole('button', { name: 'Save', exact: true }).click()
-  await visible(folioDialog.getByText('CASH', { exact: true }).last(), 'persisted folio payment')
+  await visible(folioDialog.getByText('Cash', { exact: true }).last(), 'persisted localized folio payment')
   ;[current] = await queryBookings(adminContext, baseUrl, reservation.confirmationCode)
   assert.equal(current.folio.balanceSatang, 0)
   assert.equal(current.folio.payments.some((payment) => payment.amountSatang === 1_234), true)
