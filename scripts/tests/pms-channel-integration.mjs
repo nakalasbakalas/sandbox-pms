@@ -170,6 +170,7 @@ function createMutationFixture(eventType) {
   const connectionQueries = []
   const externalReferenceQueries = []
   const providerScopedLegacyQueries = []
+  let newerProcessedLifecycleEvent = null
   const folio = {
     id: 'folio-channel-test',
     reservationId: reservation.id,
@@ -275,7 +276,12 @@ function createMutationFixture(eventType) {
     },
     bookingEmailEvent: {
       findUnique: async ({ where }) => (where?.id === event.id ? withEventRelations() : null),
-      findFirst: async () => null,
+      findFirst: async ({ where } = {}) => {
+        if (where?.reservationId === reservation.id && where?.status === 'PROCESSED') {
+          return newerProcessedLifecycleEvent
+        }
+        return null
+      },
       findMany: async () => [],
       update: async ({ where, data }) => {
         assert.equal(where.id, event.id)
@@ -316,6 +322,9 @@ function createMutationFixture(eventType) {
     externalReferenceQueries,
     providerScopedLegacyQueries,
     externalReferenceKey,
+    setNewerProcessedLifecycleEvent(value) {
+      newerProcessedLifecycleEvent = value
+    },
   }
 }
 
@@ -378,6 +387,37 @@ assert.deepEqual(
   ['booking_com', 'agoda', 'trip_com'],
   'approved cancellations reconcile every manual OTA, including the source provider',
 )
+
+for (const staleEventType of ['MODIFICATION', 'CANCELLATION']) {
+  const staleLifecycle = createMutationFixture(staleEventType)
+  const originalCheckIn = staleLifecycle.reservation.checkIn.toISOString()
+  const originalCheckOut = staleLifecycle.reservation.checkOut.toISOString()
+  staleLifecycle.setNewerProcessedLifecycleEvent({
+    id: `newer-${staleEventType.toLowerCase()}`,
+    eventType: staleEventType === 'MODIFICATION' ? 'CANCELLATION' : 'MODIFICATION',
+    receivedAt: new Date(staleLifecycle.event.receivedAt.getTime() + 60_000),
+  })
+
+  await assert.rejects(
+    () => approveBookingEmailEvent(staleLifecycle.prisma, staleLifecycle.event.id, {
+      reservationId: staleLifecycle.reservation.id,
+      reason: 'Provider timeline review for stale lifecycle protection.',
+    }, actor),
+    /same-time or newer provider modification\/cancellation/i,
+    `an older ${staleEventType.toLowerCase()} cannot overwrite a newer processed lifecycle event`,
+  )
+  assert.equal(staleLifecycle.event.status, 'NEEDS_REVIEW', 'stale lifecycle email remains review work')
+  assert.equal(staleLifecycle.reservation.status, 'CONFIRMED', 'stale lifecycle email does not change reservation status')
+  assert.equal(staleLifecycle.reservation.checkIn.toISOString(), originalCheckIn, 'stale lifecycle email does not change check-in')
+  assert.equal(staleLifecycle.reservation.checkOut.toISOString(), originalCheckOut, 'stale lifecycle email does not change check-out')
+  assert.equal(staleLifecycle.connectionQueries.length, 0, 'stale lifecycle email does not enqueue manual OTA work')
+  assert.equal(staleLifecycle.audits.length, 1, 'stale lifecycle email records one durable denial audit')
+  assert.equal(staleLifecycle.audits[0].action, 'BOOKING_EMAIL_LIFECYCLE_DENIED')
+  assert.equal(staleLifecycle.audits[0].entityId, staleLifecycle.event.id)
+  assert.equal(staleLifecycle.audits[0].changes.reasonCode, 'STALE_PROVIDER_LIFECYCLE_EVENT')
+  assert.equal(staleLifecycle.audits[0].changes.reservationId, staleLifecycle.reservation.id)
+  assert.equal(staleLifecycle.audits[0].changes.attemptedEventType, staleEventType)
+}
 
 const modificationCurrencyMismatch = createMutationFixture('MODIFICATION')
 modificationCurrencyMismatch.event.parsedDetails.currency = 'USD'

@@ -166,7 +166,7 @@ Evidence locations include `tests/booking-email-gmail-sync.test.mjs`, `scripts/t
 - Gmail watch renewal records a future expiry; an invalid/expired history cursor uses bounded reconciliation without silently advancing past an incomplete scan.
 - Push, history, reconciliation, explicit Gmail sync, and five-minute maintenance all call the PMS ingester with `reviewOnly: true`.
 - Every booking-email row present at the Lite migration boundary is immutable `legacyReadOnly` evidence; only post-cutover ingestion can enter the actionable review queue.
-- Booking.com, Agoda, and Trip.com fixtures cover new booking, modification, cancellation, duplicates, out-of-order notification/history delivery, parser errors, and failed review actions.
+- Booking.com, Agoda, and Trip.com fixtures cover new booking, modification, cancellation, duplicates, out-of-order notification/history delivery, parser errors, and failed review actions. Service-level lifecycle tests also prove that a stale modification or cancellation cannot mutate a reservation when an equal-time/newer processed lifecycle event exists and that the rejected attempt persists exactly one sanitized denial audit after rollback.
 - Parser-error rows and true aggregate totals remain visible in Channel Desk; authorized staff can retry parsing or reject with a reason.
 - Approval mode cannot retype an event, cancellation requires `cancel:reservation`, payment requires `process:payment`, and a declared child count cannot be applied without one verified age per child.
 - Payment, cancellation, modification, and other non-new-booking email writes with no explicit or persisted exact reservation id fail without mutation; a guest-name/date heuristic is never write authority. Cross-property, cancelled, and no-show links also fail without mutation.
@@ -212,6 +212,7 @@ No acceptance result may describe the manual queue as automatic, two-way, live, 
 Repository tests for exact satang reads, dual writes, pricing, deposits, tax/void arithmetic, partial payments, and exact zero balance are necessary but insufficient. Production Lite folio/payment acceptance additionally requires:
 
 - nullable integer-satang columns for every scoped money field and integer basis points for tax configuration;
+- exact `RateCalendar.rateSatang` backfill and reconciliation alongside room-type rates;
 - audited Float-to-satang backfill and reconciliation report;
 - dual-write parity tests for creates/edits, partial and multiple payments, taxes, voids, deposits, and zero-balance checkout;
 - applied migration and runtime proof for the provider-total satang/currency provenance pair;
@@ -220,7 +221,7 @@ Repository tests for exact satang reads, dual writes, pricing, deposits, tax/voi
 - Lite authoritative satang reads/writes; and
 - a 30-day rollback period before Float authority is removed.
 
-The schema now contains nullable integer-satang authority fields while retaining Float rollback-parity columns. An isolated local PostgreSQL schema has passed all migrations, representative browser workflows, pre/post money reconciliation, and automatic cleanup. This acceptance section remains open for a fresh Render recovery point, disposable restore or isolated staging database, live migration/reconciliation evidence, and the rollback period. Do not infer production completion from local E2E alone.
+The schema now contains nullable integer-satang authority fields while retaining Float rollback-parity columns. `npm.cmd run test:money-backfill:db` is the guarded populated-legacy proof: it requires `ALLOW_DB_E2E=true` plus a disposable `E2E_DATABASE_URL`, creates an isolated schema, seeds Float-only/invalid legacy rows, applies the money migrations, asserts exact backfill/quarantine, runs read-only reconciliation, and removes the schema. This acceptance section remains open until that command and the broader Lite E2E pass for the exact commit, followed by a fresh Render recovery point, disposable restore or isolated staging database, live migration/reconciliation evidence, and the rollback period. Do not infer production completion from local or CI E2E alone.
 
 ### Provider And Staging Proof
 

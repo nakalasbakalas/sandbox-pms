@@ -211,7 +211,66 @@ export function statusLabel(value: string, language: Language) {
     COMPLETED: ['Completed', 'เสร็จแล้ว'],
     SUPERSEDED: ['Replaced', 'ถูกแทนที่'],
     FAILED: ['Failed', 'ไม่สำเร็จ'],
+    ENABLED: ['Enabled', 'เปิดใช้งาน'],
+    DISABLED: ['Disabled', 'ปิดใช้งาน'],
+    READY: ['Ready', 'พร้อม'],
+    NOT_READY: ['Not ready', 'ยังไม่พร้อม'],
+    WATCHING: ['Watching', 'กำลังเฝ้าดู'],
+    FALLBACK: ['Fallback active', 'ใช้ระบบสำรอง'],
+    CONFIGURED: ['Configured', 'ตั้งค่าแล้ว'],
+    NOT_CONFIGURED: ['Not configured', 'ยังไม่ตั้งค่า'],
+    OPEN: ['Open', 'เปิดอยู่'],
+    CLOSED: ['Closed', 'ปิดแล้ว'],
+    REFUNDED: ['Refunded', 'คืนเงินแล้ว'],
+    SETTLED: ['Settled', 'ชำระครบแล้ว'],
+    PARTIAL: ['Part-paid', 'ชำระบางส่วน'],
+    UNPAID: ['Unpaid', 'ยังไม่ชำระ'],
+    DIRECT: ['Direct', 'จองตรง'],
+    WALK_IN: ['Walk-in', 'วอล์กอิน'],
+    PHONE: ['Phone', 'โทรศัพท์'],
+    EMAIL: ['Email', 'อีเมล'],
+    WEBSITE: ['Website', 'เว็บไซต์'],
+    BOOKING_COM: ['Booking.com', 'Booking.com'],
+    AGODA: ['Agoda', 'Agoda'],
+    TRIP_COM: ['Trip.com', 'Trip.com'],
+    EXPEDIA: ['Expedia', 'Expedia'],
+    AIRBNB: ['Airbnb', 'Airbnb'],
+    OTHER: ['Other', 'อื่น ๆ'],
+    ADMIN: ['Administrator', 'ผู้ดูแลระบบ'],
+    MANAGER: ['Manager', 'ผู้จัดการ'],
+    FRONT_DESK: ['Front desk', 'ฟรอนต์ออฟฟิศ'],
+    HOUSEKEEPING: ['Housekeeping', 'แม่บ้าน'],
+    CASHIER: ['Cashier', 'แคชเชียร์'],
+    CAFE_STAFF: ['Cafe staff', 'พนักงานคาเฟ่'],
+    CASH: ['Cash', 'เงินสด'],
+    CARD: ['Card', 'บัตร'],
+    BANK_TRANSFER: ['Bank transfer', 'โอนเงินผ่านธนาคาร'],
+    ONLINE: ['Online payment', 'ชำระออนไลน์'],
+    ROOM: ['Room', 'ค่าห้อง'],
+    CAFE: ['Cafe', 'คาเฟ่'],
+    MINIBAR: ['Minibar', 'มินิบาร์'],
+    LAUNDRY: ['Laundry', 'ซักรีด'],
+    DAMAGE: ['Damage', 'ค่าเสียหาย'],
+    EXTRA_GUEST: ['Extra guest', 'ผู้เข้าพักเพิ่มเติม'],
+    CHILD: ['Child', 'เด็ก'],
+    PASSPORT: ['Passport', 'หนังสือเดินทาง'],
+    NATIONAL_ID: ['National ID', 'บัตรประจำตัวประชาชน'],
+    DRIVERS_LICENSE: ["Driver's licence", 'ใบขับขี่'],
+    MANUAL: ['Manual', 'ดำเนินการเอง'],
+    CHANNEX: ['Certified channel rail', 'ระบบเชื่อมต่อช่องทางที่ได้รับการรับรอง'],
+    LITE: ['Lite', 'Lite'],
+    LEGACY: ['Legacy', 'ระบบเดิม'],
+    UNKNOWN: ['Unknown', 'ยังไม่ทราบ'],
   }
   const label = labels[value]
   return label ? label[language === 'th' ? 1 : 0] : value.replaceAll('_', ' ').toLowerCase()
+}
+
+export function providerLabel(value: string | null | undefined) {
+  const normalized = String(value || '').trim().toLowerCase().replaceAll('.', '_').replaceAll('-', '_')
+  if (normalized === 'booking_com' || normalized === 'bookingcom') return 'Booking.com'
+  if (normalized === 'agoda') return 'Agoda'
+  if (normalized === 'trip_com' || normalized === 'tripcom') return 'Trip.com'
+  if (normalized === 'little_hotelier' || normalized === 'littlehotelier') return 'Little Hotelier'
+  return value ? String(value).replaceAll('_', ' ') : '—'
 }

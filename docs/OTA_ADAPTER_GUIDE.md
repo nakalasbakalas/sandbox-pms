@@ -173,6 +173,8 @@ For Lite deployments, set `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`. The older `H
 
 Manual channel records may store only non-secret provider/property/room/rate mapping metadata and an official HTTPS Extranet link. They must never store OTA usernames, passwords, cookies, session state, API tokens, 2FA material, or CAPTCHA answers.
 
+Provider codes use extensible text columns so future certified adapters do not require a destructive database enum change. That storage choice does not enable a provider: current Lite connection/task mutations still allowlist only Booking.com, Agoda, and Trip.com, and every new adapter must pass the full provider gate below.
+
 Keep a connection disabled until every PMS room type with one or more physical rooms has an active provider mapping. This scope includes temporarily out-of-service rooms because they can return to sale. Per connection, an active external room-type/rate-plan target may belong to only one PMS room type; a database partial unique index is the concurrency backstop. If mapping coverage is later lost, reconciliation skips the affected provider/room cells, records `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED`, and creates no task with an unknown external target. Channel Desk displays the external room type id/name and rate-plan id on executable tasks.
 
 An enabled manual connection participates in inventory reconciliation. Booking creation, inventory-changing edits, cancellation/no-show, and walk-in changes calculate affected room-type/date cells inside the PMS transaction. Every change reconciles all enabled providers. After staff approve an OTA-originated email, the originating provider is reconciled too using current absolute PMS availability, which coalesces or supersedes stale pending source-provider work instead of leaving it actionable.
@@ -226,6 +228,8 @@ The manual queue remains authoritative until every applicable item is complete a
 Gmail Pub/Sub can signal new provider email near-live, and the five-minute maintenance command renews watches, retries deliveries, and reconciles history. All resulting events remain review-only. Email delivery can be delayed, duplicated, reordered, incomplete, or differently formatted; Gmail cannot supply authoritative live room inventory and cannot push inventory back to an OTA.
 
 Provider-scoped external references reduce duplicate/mismatched booking risk, but staff review remains mandatory. A successful Gmail watch, push, or reconciliation is mailbox evidence only, not Booking.com, Agoda, or Trip.com API proof.
+
+iCal is recovery-only delayed date-block compatibility. It is unsuitable as the primary multi-room booking/cancellation/inventory/rate path and cannot close a Gmail, direct API, channel rail, or cutover gate. Follow `docs/ical-ota-setup-guide.md` only during an owner-approved incident.
 
 Only a Gmail-retained `Authentication-Results` header whose authentication service id is `mx.google.com` can establish provider sender alignment. Reprocess uses that immutable header and raw content, discards stale parsed fields, and recomputes the reservation match. Payment, cancellation, and modification writes require the resulting exact persisted match or an explicit staff-selected reservation id; guest/date similarity is review guidance only.
 

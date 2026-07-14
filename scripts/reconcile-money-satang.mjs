@@ -41,6 +41,12 @@ const rawSpecs = [
     ],
   },
   {
+    table: 'RateCalendar',
+    fields: [
+      { source: 'rate', shadow: 'rateSatang', scale: 100, minimum: 0, maximum: MONEY_SATANG_MAX },
+    ],
+  },
+  {
     table: 'Folio',
     fields: [
       { source: 'subtotal', shadow: 'subtotalSatang', scale: 100, minimum: 0, maximum: MONEY_SATANG_MAX },

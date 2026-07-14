@@ -2201,9 +2201,49 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
   return updated
 }
 
+async function assertLatestBookingEmailLifecycleEvent(tx, event, reservation, label) {
+  const conflictingEvent = await tx.bookingEmailEvent.findFirst({
+    where: {
+      id: { not: event.id },
+      propertyId: event.propertyId,
+      reservationId: reservation.id,
+      status: 'PROCESSED',
+      eventType: { in: ['MODIFICATION', 'CANCELLATION'] },
+      receivedAt: { gte: event.receivedAt },
+    },
+    orderBy: [
+      { receivedAt: 'desc' },
+      { processedAt: 'desc' },
+    ],
+    select: {
+      id: true,
+      eventType: true,
+      receivedAt: true,
+    },
+  })
+
+  if (conflictingEvent) {
+    const error = new PmsValidationError(
+      `${label} cannot be applied because a same-time or newer provider modification/cancellation has already been processed. Review the provider timeline and reject or reprocess the stale event.`,
+      409,
+    )
+    error.bookingEmailLifecycleDenialAudit = {
+      reasonCode: 'STALE_PROVIDER_LIFECYCLE_EVENT',
+      reservationId: reservation.id,
+      attemptedEventType: event.eventType,
+      attemptedReceivedAt: event.receivedAt.toISOString(),
+      conflictingEventId: conflictingEvent.id,
+      conflictingEventType: conflictingEvent.eventType,
+      conflictingReceivedAt: conflictingEvent.receivedAt.toISOString(),
+    }
+    throw error
+  }
+}
+
 async function approveCancellationEmailEvent(tx, event, details, actor, reservationId, reason) {
   const operationalReason = requireOperationalReason(reason, 'Approving a booking-email cancellation')
   const reservation = await requireLinkedReservationForBookingEmailWrite(tx, event, reservationId, 'cancellation')
+  await assertLatestBookingEmailLifecycleEvent(tx, event, reservation, 'This cancellation')
   const providerCode = event.providerCode || bookingEmailChannelProviderCode(event)
   const updatedReservation = await cancelReservationInTransaction(
     tx,
@@ -2245,6 +2285,7 @@ async function approveCancellationEmailEvent(tx, event, details, actor, reservat
 async function approveModificationEmailEvent(tx, event, details, actor, reservationId, reason) {
   const operationalReason = requireOperationalReason(reason, 'Approving a booking-email modification')
   const reservation = await requireLinkedReservationForBookingEmailWrite(tx, event, reservationId, 'modification')
+  await assertLatestBookingEmailLifecycleEvent(tx, event, reservation, 'This modification')
 
   const update = {}
   if (details.checkIn) {
@@ -3841,53 +3882,68 @@ export async function ingestBookingEmailEvents(prisma, input = {}, actor) {
 }
 
 export async function approveBookingEmailEvent(prisma, eventId, input = {}, actor) {
-  return serializableTransaction(prisma, async (tx) => {
-    const event = await tx.bookingEmailEvent.findUnique({
-      where: { id: eventId },
-      include: bookingEmailEventInclude(),
-    })
-    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
-    assertActionableBookingEmailEvent(event)
-    if (event.status === 'PROCESSED') throw new PmsValidationError('This booking email event has already been processed.', 409)
-    if (event.status === 'IGNORED') throw new PmsValidationError('Ignored booking email events must be reprocessed before approval.', 409)
+  try {
+    return await serializableTransaction(prisma, async (tx) => {
+      const event = await tx.bookingEmailEvent.findUnique({
+        where: { id: eventId },
+        include: bookingEmailEventInclude(),
+      })
+      if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+      assertActionableBookingEmailEvent(event)
+      if (event.status === 'PROCESSED') throw new PmsValidationError('This booking email event has already been processed.', 409)
+      if (event.status === 'IGNORED') throw new PmsValidationError('Ignored booking email events must be reprocessed before approval.', 409)
 
-    const details = detailsForApproval(event, input.editedDetails)
-    const mode = String(input.mode || 'apply_parsed')
-    if (!['apply_parsed', 'link_reservation', 'create_reservation'].includes(mode)) {
-      throw new PmsValidationError('Select a valid booking-email approval mode.')
-    }
-    if (mode === 'create_reservation' && event.eventType !== 'NEW_BOOKING') {
-      throw new PmsValidationError('Only a new-booking email can create a reservation.')
-    }
-    if (mode === 'link_reservation') {
+      const details = detailsForApproval(event, input.editedDetails)
+      const mode = String(input.mode || 'apply_parsed')
+      if (!['apply_parsed', 'link_reservation', 'create_reservation'].includes(mode)) {
+        throw new PmsValidationError('Select a valid booking-email approval mode.')
+      }
+      if (mode === 'create_reservation' && event.eventType !== 'NEW_BOOKING') {
+        throw new PmsValidationError('Only a new-booking email can create a reservation.')
+      }
+      if (mode === 'link_reservation') {
+        requireActorPermission(actor, 'edit:reservation', 'Linking a booking email')
+        if (!input.reservationId) throw new PmsValidationError('Select a reservation to link this email event.')
+        return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
+      }
+
+      if (event.eventType === 'NEW_BOOKING') {
+        requireActorPermission(actor, 'create:reservation', 'Creating a reservation from booking email')
+        return bookingEmailEventResponse(await approveNewBookingEmailEvent(tx, event, details, actor))
+      }
+      if (event.eventType === 'PAYMENT_NOTICE') {
+        requireActorPermission(actor, 'process:payment', 'Applying a booking-email payment')
+        return bookingEmailEventResponse(await approvePaymentEmailEvent(tx, event, details, actor, input.reservationId))
+      }
+      if (event.eventType === 'CANCELLATION') {
+        requireActorPermission(actor, 'cancel:reservation', 'Applying a booking-email cancellation')
+        return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
+      }
+      if (event.eventType === 'MODIFICATION') {
+        requireActorPermission(actor, 'edit:reservation', 'Applying a booking-email modification')
+        return bookingEmailEventResponse(await approveModificationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
+      }
+
       requireActorPermission(actor, 'edit:reservation', 'Linking a booking email')
-      if (!input.reservationId) throw new PmsValidationError('Select a reservation to link this email event.')
+      if (!input.reservationId) {
+        throw new PmsValidationError('This email type needs a linked reservation and staff notes before it can be marked processed.')
+      }
       return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
+    })
+  } catch (error) {
+    const denialEvidence = error?.bookingEmailLifecycleDenialAudit
+    if (denialEvidence) {
+      try {
+        await createAudit(prisma, actor, 'BOOKING_EMAIL_LIFECYCLE_DENIED', 'bookingEmailEvent', eventId, denialEvidence)
+      } catch {
+        throw new PmsValidationError(
+          'The booking-email action was denied, but required audit evidence could not be recorded. No reservation changes were applied.',
+          500,
+        )
+      }
     }
-
-    if (event.eventType === 'NEW_BOOKING') {
-      requireActorPermission(actor, 'create:reservation', 'Creating a reservation from booking email')
-      return bookingEmailEventResponse(await approveNewBookingEmailEvent(tx, event, details, actor))
-    }
-    if (event.eventType === 'PAYMENT_NOTICE') {
-      requireActorPermission(actor, 'process:payment', 'Applying a booking-email payment')
-      return bookingEmailEventResponse(await approvePaymentEmailEvent(tx, event, details, actor, input.reservationId))
-    }
-    if (event.eventType === 'CANCELLATION') {
-      requireActorPermission(actor, 'cancel:reservation', 'Applying a booking-email cancellation')
-      return bookingEmailEventResponse(await approveCancellationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
-    }
-    if (event.eventType === 'MODIFICATION') {
-      requireActorPermission(actor, 'edit:reservation', 'Applying a booking-email modification')
-      return bookingEmailEventResponse(await approveModificationEmailEvent(tx, event, details, actor, input.reservationId, input.reason))
-    }
-
-    requireActorPermission(actor, 'edit:reservation', 'Linking a booking email')
-    if (!input.reservationId) {
-      throw new PmsValidationError('This email type needs a linked reservation and staff notes before it can be marked processed.')
-    }
-    return bookingEmailEventResponse(await linkBookingEmailEventToReservation(tx, event, input.reservationId, actor))
-  })
+    throw error
+  }
 }
 
 export async function rejectBookingEmailEvent(prisma, eventId, input = {}, actor) {

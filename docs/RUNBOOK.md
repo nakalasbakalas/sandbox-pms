@@ -430,7 +430,17 @@ Before applying the Lite schema migrations:
 6. Run `npm.cmd run money:reconcile` with the same target `DATABASE_URL` and require `status=PASS` with zero unexplained differences.
 7. Inspect only redacted aggregate counts and migration state.
 
-The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill, database-enforced active OTA mapping-target uniqueness, immutable task target snapshots, read-only legacy email evidence, and the exact provider-total satang/currency provenance pair. The immutable-target migration reopens folios that the older runtime auto-closed for still-active stays. It marks every historical task target unverified rather than inferring it from a newer mapping, so reconciliation must supersede that work before completion. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill (including `RateCalendar.rateSatang`), database-enforced active OTA mapping-target uniqueness, immutable task target snapshots, read-only legacy email evidence, and the exact provider-total satang/currency provenance pair. The rate-calendar/provider-storage follow-up removes rigid provider `CHECK` constraints while the backend allowlist remains the authority for enabled adapters. The immutable-target migration reopens folios that the older runtime auto-closed for still-active stays. It marks every historical task target unverified rather than inferring it from a newer mapping, so reconciliation must supersede that work before completion. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+
+Before any staging migration, prove populated legacy backfill against a disposable database:
+
+```powershell
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
+npm.cmd run test:money-backfill:db
+```
+
+The command creates and removes an isolated schema. It must refuse a production-like URL and must never be pointed at production. Passing it proves repository migration behavior, not the fresh Render recovery/restore or live reconciliation gate.
 
 ### Core Hotel Operation
 

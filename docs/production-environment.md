@@ -32,11 +32,11 @@ The preflight verifies production mode, server auth mode, safe seed mode, a real
 
 ## Render Environment
 
-The intended Render web service is connected to `https://github.com/nakalasbakalas/sandbox-pms`, branch `main`. Confirm the live Render service connection before running migrations or production seed.
+The intended Render web service is connected to `https://github.com/nakalasbakalas/sandbox-pms`. Confirm the exact live service, branch, and commit before running migrations or production seed; repository intent is not live-provider proof.
 
 The committed Blueprint defines the intended production resources:
 
-- web service: `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`)
+- Blueprint web service name: `sandbox-hotel-pms`
 - managed PostgreSQL database: `sandbox-hotel-pms-db-v43m`
 - health check: `/healthz`
 - production auth mode: `VITE_PMS_API_MODE=server`
@@ -45,7 +45,9 @@ The committed Blueprint defines the intended production resources:
 - production seed mode: `SEED_MODE=prod-safe`
 - generated session secret: `SESSION_SECRET`
 
-Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). Current Render metadata shows the public custom domain `https://book.sandboxhotel.com` and staff domain `https://staff.sandboxhotel.com` attached to `sandbox-hotel-pms`; keep the committed Blueprint and the live service env aligned to that mapping so browser-origin checks continue to accept the public site.
+Live evidence is recorded in [live-environment-proof.md](live-environment-proof.md). A fresh provider inspection on 2026-07-14 identified `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) as the current public service, with live deploy `dep-d966aj9kh4rs73d9h10g` at commit `d18ea06eb974621281c43a57cf4d5a41994c2775`. The separate `sandbox-hotel-pms` service is older/stale and must not be treated as the current rollback target. The public `book.sandboxhotel.com` and `staff.sandboxhotel.com` DNS records point at the `-v43m` Render host; keep the actual live service environment aligned with both browser origins.
+
+This mapping is a dated provider observation, not permanent configuration. Re-check it immediately before migration, deploy, or rollback. `/api/version` was not available on the current legacy runtime during the 2026-07-14 inspection, so exact Lite release identity still requires a separate staging deployment and endpoint proof.
 
 Apply a new Blueprint only from a repository branch that contains the current `render.yaml`. The Dashboard path is:
 

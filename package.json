@@ -21,6 +21,7 @@
         "test:lite": "node --test tests/*.test.mjs",
         "test:e2e": "node scripts/run-e2e-tests.mjs",
         "test:e2e:lite": "node scripts/run-lite-e2e-tests.mjs",
+        "test:money-backfill:db": "node scripts/prove-money-satang-backfill.mjs",
         "test:e2e:db": "node scripts/run-e2e-tests.mjs",
         "remediation:check": "npm run launch:check",
         "council:check": "node scripts/council-remediation-check.mjs",

@@ -27,9 +27,9 @@ export function StatusPill({ value }: { value: string }) {
   const { language } = useI18n()
   const tone = /ERROR|FAILED|CANCEL|OUT_OF/.test(value)
     ? 'danger'
-    : /PENDING|REVIEW|DIRTY|HOLD|BLOCK/.test(value)
+    : /PENDING|REVIEW|DIRTY|HOLD|BLOCK|DISABLED|NOT_READY|NOT_CONFIGURED|FALLBACK/.test(value)
       ? 'warning'
-      : /CONFIRMED|CHECKED_IN|AVAILABLE|CLEAN|INSPECTED|COMPLETED|PROCESSED/.test(value)
+      : /CONFIRMED|CHECKED_IN|AVAILABLE|CLEAN|INSPECTED|COMPLETED|PROCESSED|ENABLED|READY|WATCHING|CONFIGURED/.test(value)
         ? 'success'
         : 'neutral'
   return <span className={`status status--${tone}`}>{statusLabel(value, language)}</span>

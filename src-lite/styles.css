@@ -156,6 +156,17 @@ tbody tr:hover { background: #fbfaf5; }
 .folio-form { margin: 0 -18px -18px; border-top: 1px solid var(--line); }
 .booking-detail { display: grid; gap: 15px; padding: 18px; }
 .booking-detail .audit-timeline, .folio-detail .audit-timeline { padding-top: 6px; border-top: 1px solid var(--line); }
+.booking-profile { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbfaf5; }
+.booking-profile__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.booking-profile__header > div { display: grid; gap: 2px; }
+.booking-profile__header > div span { color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; }
+.booking-profile__header > div strong { font-size: 17px; }
+.booking-profile__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.booking-profile__grid article { min-width: 0; padding: 11px; border: 1px solid #e6e3da; border-radius: 8px; background: var(--paper); }
+.booking-profile__grid h3 { margin: 0 0 9px; font-size: 13px; }
+.booking-profile__grid dl { display: grid; gap: 6px; margin: 0; }
+.booking-profile__grid dl div { display: flex; justify-content: space-between; gap: 10px; }
+.booking-profile__grid dd { max-width: 62%; overflow-wrap: anywhere; text-align: right; }
 .audit-timeline { display: grid; gap: 0; }
 .audit-timeline__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 9px 0; }
 .audit-timeline__heading h3 { margin: 0; font-size: 14px; }
@@ -210,6 +221,9 @@ tbody tr:hover { background: #fbfaf5; }
 .settings-card > span:first-child { color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; }
 .settings-card > strong { font-size: 21px; }
 .settings-card p { margin: 0; color: var(--muted); font-size: 12px; }
+.settings-card__title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.settings-card__title > strong { font-size: 17px; }
+.settings-card__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; }
 .settings-card dl, .release-grid { margin: 0; display: grid; gap: 7px; }
 .settings-card dl div, .release-grid div { display: flex; justify-content: space-between; gap: 12px; }
 dt { color: var(--muted); font-size: 12px; }
@@ -218,6 +232,9 @@ dd { margin: 0; font-size: 12px; font-weight: 750; word-break: break-word; }
 .mini-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px; border-bottom: 1px solid #ebe8e0; }
 .mini-list > div:last-child { border-bottom: 0; }
 .mini-list small { display: block; color: var(--muted); }
+.settings-card .mini-list { margin: 0 -14px; border-top: 1px solid #ebe8e0; border-bottom: 1px solid #ebe8e0; }
+.settings-room-list > div > span:last-child { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.settings-mapping-list > div { align-items: flex-start; }
 .mini-list--wrap { display: flex; flex-wrap: wrap; gap: 5px; }
 .room-number { padding: 5px 7px; border-radius: 6px; background: #e9eee9; font-size: 11px; font-weight: 760; }
 .release-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px; }

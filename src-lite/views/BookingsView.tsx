@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatusPill } from '../components'
-import { useI18n } from '../i18n'
+import { providerLabel, statusLabel, useI18n } from '../i18n'
 import { ReservationBookingForm } from '../reservation-booking-form'
 import type { BookingDetail, LiteRole, ReservationAuditEvent, ReservationSummary } from '../types'
 
@@ -32,7 +32,73 @@ function auditActionLabel(event: ReservationAuditEvent, language: string) {
     DEPOSIT_PAID: 'บันทึกเงินมัดจำแล้ว',
     WALK_IN_CHECKED_IN: 'สร้างและเช็คอิน Walk-in',
   }
-  return labels[event.action] || event.label
+  return labels[event.action] || 'อัปเดตการจอง'
+}
+
+function maskedIdentitySuffix(value: string | null) {
+  const suffix = String(value || '').replace(/\s+/g, '').slice(-4)
+  return suffix ? `•••• ${suffix}` : '—'
+}
+
+function localizedError(error: unknown, language: string, englishFallback: string, thaiFallback: string) {
+  if (language === 'th') return thaiFallback
+  return error instanceof Error && error.message ? error.message : englishFallback
+}
+
+function yesNo(value: boolean, language: string) {
+  if (language === 'th') return value ? 'ใช่' : 'ไม่ใช่'
+  return value ? 'Yes' : 'No'
+}
+
+function BookingProfile({ reservation }: { reservation: ReservationSummary }) {
+  const { language, t } = useI18n()
+  const guest = reservation.guest
+  return (
+    <section className="booking-profile" aria-label={language === 'th' ? 'ข้อมูลผู้เข้าพักและแหล่งการจอง' : 'Guest and booking source details'}>
+      <header className="booking-profile__header">
+        <div><span>{t('guest')}</span><strong>{guest.displayName}</strong></div>
+        <StatusPill value={reservation.status} />
+      </header>
+      <div className="booking-profile__grid">
+        <article>
+          <h3>{language === 'th' ? 'ข้อมูลผู้เข้าพัก' : 'Guest profile'}</h3>
+          <dl>
+            <div><dt>{t('firstName')}</dt><dd>{guest.firstName || '—'}</dd></div>
+            <div><dt>{t('lastName')}</dt><dd>{guest.lastName || '—'}</dd></div>
+            <div><dt>{language === 'th' ? 'สัญชาติ' : 'Nationality'}</dt><dd>{guest.nationality || '—'}</dd></div>
+            <div><dt>{language === 'th' ? 'ประเภทเอกสาร' : 'Identity type'}</dt><dd>{guest.idType ? statusLabel(guest.idType, language) : '—'}</dd></div>
+            <div><dt>{language === 'th' ? 'เลขเอกสาร' : 'Identity number'}</dt><dd>{maskedIdentitySuffix(guest.idNumberLast4)}</dd></div>
+            <div><dt>{language === 'th' ? 'ข้อมูลยืนยันตัวตนครบ' : 'Identity complete'}</dt><dd>{yesNo(guest.identityComplete, language)}</dd></div>
+            <div><dt>VIP</dt><dd>{yesNo(guest.vip, language)}</dd></div>
+            <div><dt>{language === 'th' ? 'บัญชีเฝ้าระวัง' : 'Watchlist'}</dt><dd>{yesNo(guest.blacklisted, language)}</dd></div>
+          </dl>
+        </article>
+        <article>
+          <h3>{language === 'th' ? 'แหล่งที่มาและเลขอ้างอิง' : 'Source and references'}</h3>
+          <dl>
+            <div><dt>{t('source')}</dt><dd>{statusLabel(reservation.source, language)}</dd></div>
+            <div><dt>{t('provider')}</dt><dd>{providerLabel(reservation.providerCode)}</dd></div>
+            <div><dt>{t('confirmation')}</dt><dd>{reservation.confirmationCode}</dd></div>
+            <div><dt>{language === 'th' ? 'เลขอ้างอิง OTA' : 'OTA reference'}</dt><dd>{reservation.channelRef || '—'}</dd></div>
+            <div><dt>{language === 'th' ? 'รหัสการจองภายนอก' : 'External reservation ID'}</dt><dd>{reservation.externalReservationId || '—'}</dd></div>
+            <div><dt>{language === 'th' ? 'เชื่อมโยงจากอีเมล' : 'Linked from email'}</dt><dd>{yesNo(Boolean(reservation.sourceEmailEventId), language)}</dd></div>
+          </dl>
+        </article>
+        <article>
+          <h3>{language === 'th' ? 'รายละเอียดการเข้าพัก' : 'Stay details'}</h3>
+          <dl>
+            <div><dt>{t('stay')}</dt><dd>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</dd></div>
+            <div><dt>{t('roomType')}</dt><dd>{reservation.roomType.name}</dd></div>
+            <div><dt>{t('assignedRoom')}</dt><dd>{reservation.assignedRoom?.number || t('unassigned')}</dd></div>
+            <div><dt>{language === 'th' ? 'ผู้เข้าพัก' : 'Occupancy'}</dt><dd>{reservation.adults} {t('adults')} · {reservation.children} {t('children')}</dd></div>
+            <div><dt>{language === 'th' ? 'ราคาต่อคืน' : 'Nightly rate'}</dt><dd>{formatMoney(reservation.ratePerNightSatang, language)}</dd></div>
+            <div><dt>{language === 'th' ? 'ยอดการจอง' : 'Booking total'}</dt><dd>{formatMoney(reservation.totalAmountSatang, language)}</dd></div>
+          </dl>
+        </article>
+      </div>
+      {guest.blacklisted ? <p className="notice notice--error">{language === 'th' ? 'โปรไฟล์นี้อยู่ในบัญชีเฝ้าระวัง โปรดให้ผู้จัดการตรวจสอบก่อนดำเนินการ' : 'This guest profile is on the watchlist. Ask a manager to review it before proceeding.'}</p> : null}
+    </section>
+  )
 }
 
 function auditTime(value: string | null, language: string) {
@@ -109,9 +175,10 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
     },
   })
 
-  if (!folio) return <div className="booking-detail"><div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div><AuditTimeline timeline={detail.auditTimeline} /><div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button></div></div>
+  if (!folio) return <div className="booking-detail"><BookingProfile reservation={reservation} /><div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div><AuditTimeline timeline={detail.auditTimeline} /><div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button></div></div>
   return (
     <div className="folio-detail">
+      <BookingProfile reservation={reservation} />
       <div className="folio-summary">
         <div><span>{language === 'th' ? 'ยอดรวม' : 'Total'}</span><strong>{formatMoney(folio.totalSatang, language)}</strong></div>
         <div><span>{language === 'th' ? 'ชำระแล้ว' : 'Paid'}</span><strong>{formatMoney(folio.paidSatang, language)}</strong></div>
@@ -121,7 +188,7 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
         <h3>{language === 'th' ? 'รายการค่าใช้จ่าย' : 'Charges'}</h3>
         {folio.charges.length === 0 ? <EmptyBlock /> : folio.charges.map((charge) => (
           <div className={`ledger-row ${charge.void ? 'is-void' : ''}`} key={charge.id}>
-            <div><strong>{charge.description}</strong><span>{charge.date} · {charge.category.replaceAll('_', ' ')}</span></div>
+            <div><strong>{charge.description}</strong><span>{charge.date} · {statusLabel(charge.category, language)}</span></div>
             <span>{charge.quantity} × {formatMoney(charge.amountSatang, language)}</span>
             <strong>{formatMoney(charge.totalSatang, language)}</strong>
           </div>
@@ -131,7 +198,7 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
         <h3>{language === 'th' ? 'การชำระเงิน' : 'Payments'}</h3>
         {folio.payments.length === 0 ? <EmptyBlock /> : folio.payments.map((payment) => (
           <div className="ledger-row" key={payment.id}>
-            <div><strong>{payment.method.replaceAll('_', ' ')}</strong><span>{payment.reference || payment.processedBy}</span></div>
+            <div><strong>{statusLabel(payment.method, language)}</strong><span>{payment.reference || payment.processedBy}</span></div>
             <span />
             <strong>{formatMoney(payment.amountSatang, language)}</strong>
           </div>
@@ -149,17 +216,17 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
           {action === 'charge' ? (
             <>
               <label>{language === 'th' ? 'รายละเอียด' : 'Description'}<input required value={description} onChange={(event) => setDescription(event.target.value)} /></label>
-              <label>{language === 'th' ? 'หมวดหมู่' : 'Category'}<select value={category} onChange={(event) => setCategory(event.target.value)}>{['OTHER', 'CAFE', 'MINIBAR', 'LAUNDRY', 'DAMAGE', 'EXTRA_GUEST', 'CHILD'].map((value) => <option key={value}>{value}</option>)}</select></label>
+              <label>{language === 'th' ? 'หมวดหมู่' : 'Category'}<select value={category} onChange={(event) => setCategory(event.target.value)}>{['OTHER', 'CAFE', 'MINIBAR', 'LAUNDRY', 'DAMAGE', 'EXTRA_GUEST', 'CHILD'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
               <label>{language === 'th' ? 'จำนวน' : 'Quantity'}<input required min="1" step="1" type="number" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label>
             </>
           ) : (
             <>
-              <label>{language === 'th' ? 'วิธีชำระ' : 'Method'}<select value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value}>{value}</option>)}</select></label>
+              <label>{language === 'th' ? 'วิธีชำระ' : 'Method'}<select value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
               {method !== 'CASH' && method !== 'OTHER' ? <label>{language === 'th' ? 'เลขอ้างอิง' : 'Reference'}<input required value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
             </>
           )}
           <label>{language === 'th' ? 'จำนวนเงิน (บาท)' : 'Amount (THB)'}<input required min="0.01" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-          {mutation.error ? <div className="form-error">{mutation.error.message}</div> : null}
+          {mutation.error ? <div className="form-error">{localizedError(mutation.error, language, 'The folio entry could not be saved.', 'ไม่สามารถบันทึกรายการโฟลิโอได้')}</div> : null}
           <footer className="form-actions"><button type="button" className="button button--secondary" onClick={() => setAction(null)}>{t('cancel')}</button><button className="button button--primary" disabled={mutation.isPending}>{t('save')}</button></footer>
         </form>
       ) : (
@@ -230,18 +297,18 @@ export function BookingsView({ role }: { role: LiteRole }) {
         <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder={t('search')} />
         <select value={status} onChange={(event) => { setCursor(null); setStatus(event.target.value) }}>
           <option value="">{t('allStatuses')}</option>
-          {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].map((item) => <option key={item}>{item}</option>)}
+          {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
         </select>
         <select value={source} onChange={(event) => { setCursor(null); setSource(event.target.value) }}>
           <option value="">{t('allSources')}</option>
-          {['DIRECT', 'WALK_IN', 'PHONE', 'EMAIL', 'WEBSITE', 'BOOKING_COM', 'AGODA', 'TRIP_COM'].map((item) => <option key={item}>{item}</option>)}
+          {['DIRECT', 'WALK_IN', 'PHONE', 'EMAIL', 'WEBSITE', 'BOOKING_COM', 'AGODA', 'TRIP_COM'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
         </select>
         <button className="button button--secondary">{t('search').split(' ')[0]}</button>
       </form>
       {setup.error && canCreateOrEdit ? <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดประเภทห้องได้ ปิดการแก้ไขการจองไว้ชั่วคราว' : 'Room types could not be loaded, so booking edits are temporarily disabled.'} retry={() => setup.refetch()} /> : null}
-      {cancelMutation.error ? <ErrorBlock error={cancelMutation.error} /> : null}
-      {noShowMutation.error ? <ErrorBlock error={noShowMutation.error} /> : null}
-      {query.isLoading ? <LoadingBlock /> : query.error || !query.data ? <ErrorBlock error={query.error || 'Bookings unavailable.'} retry={() => query.refetch()} /> : (
+      {cancelMutation.error ? <ErrorBlock error={localizedError(cancelMutation.error, language, 'The booking could not be cancelled.', 'ไม่สามารถยกเลิกการจองได้')} /> : null}
+      {noShowMutation.error ? <ErrorBlock error={localizedError(noShowMutation.error, language, 'The booking could not be marked as a no-show.', 'ไม่สามารถบันทึกสถานะไม่เข้าพักได้')} /> : null}
+      {query.isLoading ? <LoadingBlock /> : query.error || !query.data ? <ErrorBlock error={localizedError(query.error, language, 'Bookings are unavailable.', 'ไม่สามารถโหลดรายการจองได้')} retry={() => query.refetch()} /> : (
         query.data.items.length === 0 ? <EmptyBlock /> : (
           <section className="panel table-panel">
             <div className="table-scroll">
@@ -253,7 +320,7 @@ export function BookingsView({ role }: { role: LiteRole }) {
                       <td><GuestStay reservation={reservation} compact /></td>
                       <td>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</td>
                       <td>{reservation.roomType.name}<span className="muted">{reservation.assignedRoom?.number || t('unassigned')}</span></td>
-                      <td>{reservation.source.replaceAll('_', ' ')}</td>
+                      <td>{statusLabel(reservation.source, language)}</td>
                       <td><StatusPill value={reservation.status} /></td>
                       <td>{formatMoney(reservation.folio?.balanceSatang, language)}</td>
                       <td className="row-actions">
@@ -281,7 +348,7 @@ export function BookingsView({ role }: { role: LiteRole }) {
       ) : null}
       {detailId ? (
         <Modal title={`${language === 'th' ? 'รายละเอียดการจอง' : 'Booking details'} · ${detailQuery.data?.reservation.confirmationCode || detailReservation?.confirmationCode || '…'}`} close={() => setDetailId(null)}>
-          {detailQuery.isLoading ? <LoadingBlock /> : detailQuery.error || !detailQuery.data ? <ErrorBlock error={detailQuery.error || 'Booking details unavailable.'} retry={() => detailQuery.refetch()} /> : <FolioPanel detail={detailQuery.data} role={role} close={() => setDetailId(null)} />}
+          {detailQuery.isLoading ? <LoadingBlock /> : detailQuery.error || !detailQuery.data ? <ErrorBlock error={localizedError(detailQuery.error, language, 'Booking details are unavailable.', 'ไม่สามารถโหลดรายละเอียดการจองได้')} retry={() => detailQuery.refetch()} /> : <FolioPanel detail={detailQuery.data} role={role} close={() => setDetailId(null)} />}
         </Modal>
       ) : null}
     </div>

@@ -1,8 +1,10 @@
 # Launch Proof Matrix
 
-Status date: 2026-07-07.
+Status date: 2026-07-14.
 
 Verdict: owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218` and is live on Render deploy `dep-d966aj9kh4rs73d9h10g`. Post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status passed on 2026-07-07. Issues `#137`, `#138`, `#140`, and `#142` are closed by owner directive. This matrix still separates verified proof from accepted risk: Cloudflare WAF/rate-limit rule IDs, Render backup/recovery metadata, credentialed password-based production auth proof, staff parser review, and manual route/localization acceptance were not independently verified by Codex.
+
+Scope boundary: the verdict above is for the existing legacy production release. It does not sign off PMS Lite V1. The Lite branch/PR remains staging-only until its exact commit passes ephemeral-PostgreSQL CI, Render/Gmail/Cloudflare proof, direct-provider decisions, seven-day shadow, 14-day pilot, and 30-day rollback gates recorded in `docs/LITE_PILOT_ACCEPTANCE.md`.
 
 ## P0 Matrix
 
@@ -28,7 +30,7 @@ Owner-proof intake aid: `docs/launch/evidence/P0_OWNER_PROOF_HANDOFF.md` lists t
 | Area | Launch Posture | Proof Boundary |
 | --- | --- | --- |
 | LINE messaging | Optional/manual unless required by owner. | If required, record credentials configured, signed webhook verification, and send-test proof without exposing secrets. |
-| OTA automation | iCal/manual metadata only. | No live Booking.com, Agoda, Expedia, Airbnb, or other OTA API/browser automation claim without adapter evidence, challenge handling, dry-run/default safety, and account-owner approval. |
+| OTA automation | Legacy remains manual; Lite adds review-gated Gmail inbound evidence plus a manual outbound queue. iCal is recovery-only. | No live/two-way Booking.com, Agoda, Trip.com, or other OTA automation claim without provider authorization and end-to-end evidence. Agoda/Trip.com applications remain owner/provider-gated; Booking.com stays manual; Channex stays disabled until certified. |
 | Payments | PMS-recorded payments only. | No live card, PromptPay, bank-transfer collection, or gateway claim without provider credentials, callback proof, reconciliation proof, and finance owner acceptance. |
 | Booking email capture | Loaded for staff review; review-only until accepted. | Slice 5BW configures Render backend Gmail OAuth with the booking-specific refresh-token tuple `ready=true`, deploys chunked confirmed backfill handling as `dep-d94reknlk1mc73bqndq0`, and imports 1000 provider-query messages into `/booking-inbox` as review-only events. `npm run booking-email:proof` then reported 1000 total/source-message events, all `NEEDS_REVIEW`, 0 processed, 0 errors, and 0 ignored. Output omitted message ids, senders, recipients, subjects, raw email text, guest data, payment data, and credentials. Nick accepted the expert posture that imported events remain review-only until Nick and staff accept parser quality; no reservation, cancellation, payment, or guest-message action is applied until staff approval. |
 

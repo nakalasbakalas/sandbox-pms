@@ -3,6 +3,9 @@ export type LiteRole = 'ADMIN' | 'MANAGER' | 'FRONT_DESK' | 'HOUSEKEEPING' | 'CA
 /** Integer Thai baht subunits. API writes reject fractional and unsafe values at runtime. */
 export type MoneySatang = number
 
+/** Extensible provider identifier. Supported write targets are validated by the API. */
+export type ProviderCode = string
+
 export type LiteUser = {
   id: string
   username: string
@@ -39,7 +42,7 @@ export type RoomTypeSummary = {
   id: string
   code: string
   name: string
-  baseRateSatang: number
+  baseRateSatang: MoneySatang
   maxOccupancy?: number
   standardOccupancy?: number
 }
@@ -62,11 +65,11 @@ export type RoomSummary = AssignedRoomSummary & {
 export type FolioSummary = {
   id: string
   status: string
-  subtotalSatang: number
-  taxSatang: number
-  totalSatang: number
-  paidSatang: number
-  balanceSatang: number
+  subtotalSatang: MoneySatang
+  taxSatang: MoneySatang
+  totalSatang: MoneySatang
+  paidSatang: MoneySatang
+  balanceSatang: MoneySatang
   paymentState: 'SETTLED' | 'PARTIAL' | 'UNPAID'
   charges: FolioCharge[]
   payments: FolioPayment[]
@@ -110,13 +113,13 @@ export type ReservationSummary = {
   children: number
   childAges: number[]
   source: string
-  providerCode: string | null
+  providerCode: ProviderCode | null
   externalReservationId: string | null
   channelRef: string | null
   sourceEmailEventId: string | null
-  ratePerNightSatang: number
-  totalAmountSatang: number
-  depositAmountSatang: number
+  ratePerNightSatang: MoneySatang
+  totalAmountSatang: MoneySatang
+  depositAmountSatang: MoneySatang
   depositPaid: boolean
   guest: GuestSummary
   roomType: RoomTypeSummary
@@ -131,11 +134,11 @@ export type PendingReviewEmailEvent = {
   id: string
   eventType: string
   status: 'NEEDS_REVIEW'
-  providerCode: string | null
+  providerCode: ProviderCode | null
   receivedAt: string | null
   checkIn: string | null
   checkOut: string | null
-  amountSatang: number | null
+  amountSatang: MoneySatang | null
   currency: string | null
   confidence: number
   linkedToReservation: boolean
@@ -231,7 +234,7 @@ export type ReservationSegment = ReservationSummary & {
   segmentEnd: string
 }
 
-export type BoardPayload = {
+export type BoardRangeDto = {
   property: PropertySummary
   range: {
     from: string
@@ -270,6 +273,9 @@ export type HousekeepingStay = {
   status: string
 }
 
+/** Backwards-compatible client name for the public board range DTO. */
+export type BoardPayload = BoardRangeDto
+
 export type HousekeepingPayload = {
   property: PropertySummary
   hotelDate: string
@@ -292,7 +298,7 @@ export type BookingEmailEvent = {
   id: string
   eventType: 'NEW_BOOKING' | 'MODIFICATION' | 'CANCELLATION' | 'PAYMENT_NOTICE' | 'GUEST_MESSAGE' | 'UNKNOWN'
   status: 'NEEDS_REVIEW' | 'PROCESSED' | 'ERROR' | 'IGNORED'
-  providerCode: string | null
+  providerCode: ProviderCode | null
   receivedAt: string | null
   channelRef: string | null
   reservationId: string | null
@@ -300,7 +306,7 @@ export type BookingEmailEvent = {
   checkIn: string | null
   checkOut: string | null
   roomType: string | null
-  amountSatang: number | null
+  amountSatang: MoneySatang | null
   currency: string | null
   confidence: number
   reviewReason: string | null
@@ -310,7 +316,8 @@ export type BookingEmailEvent = {
   childAges: number[]
 }
 
-export type ManualChannelProviderCode = 'booking_com' | 'agoda' | 'trip_com'
+/** @deprecated Use ProviderCode. Retained while older client imports migrate. */
+export type ManualChannelProviderCode = ProviderCode
 
 export type ManualChannelRoomType = {
   id: string
@@ -331,7 +338,7 @@ export type ManualChannelMapping = {
 
 export type ManualChannelConnection = {
   id: string
-  providerCode: ManualChannelProviderCode
+  providerCode: ProviderCode
   displayName: string
   deliveryMode: 'MANUAL' | 'CHANNEX'
   externalPropertyId: string | null
@@ -363,7 +370,7 @@ export type SaveManualChannelMappingInput = {
 
 export type ManualChannelTask = {
   id: string
-  providerCode: ManualChannelProviderCode | null
+  providerCode: ProviderCode | null
   connectionId: string
   roomTypeId: string
   roomTypeName: string
@@ -393,7 +400,7 @@ export type ManualChannelReconcileResult = {
   unchanged: ManualChannelTask[]
   unmapped: Array<{
     connectionId: string
-    providerCode: ManualChannelProviderCode
+    providerCode: ProviderCode
     roomTypeId: string
     stayDateKeys: string[]
     cellCount: number
@@ -443,7 +450,7 @@ export type ChannelDeskPayload = {
 export type VersionPayload = {
   apiVersion: string
   dtoVersion: string
-  uiVariant: 'lite'
+  uiVariant: 'legacy' | 'lite' | 'unknown'
   commitSha: string | null
   buildTime: string | null
   assetIdentifier: string | null

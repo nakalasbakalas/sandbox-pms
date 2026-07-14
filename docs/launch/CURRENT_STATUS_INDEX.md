@@ -1,8 +1,10 @@
 # Launch Current Status Index
 
-Status date: 2026-07-07.
+Status date: 2026-07-14.
 
 Verdict: owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218` and is live on Render deploy `dep-d966aj9kh4rs73d9h10g`. Post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status passed on 2026-07-07. The remaining launch issues are closed by owner-directed accepted-risk completion, not by invented Cloudflare WAF/rate-limit rule proof, Render backup/recovery metadata, credentialed password-based auth proof, or staff manual acceptance proof.
+
+Scope boundary: that verdict describes the existing legacy production release only. PMS Lite V1 on `codex/sandbox-pms-lite-v1` remains a separate staging candidate: no Lite Render service/database/cron, public hostname, production migration, provider approval, seven-day Gmail shadow, 14-day staff pilot, or 30-day rollback completion is claimed. Use `docs/LITE_ARCHITECTURE.md` and `docs/LITE_PILOT_ACCEPTANCE.md` for the Lite gate.
 
 ## Latest Slice
 

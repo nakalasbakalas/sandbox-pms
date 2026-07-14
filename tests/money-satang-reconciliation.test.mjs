@@ -56,10 +56,10 @@ test('machine-readable reconciliation report passes only complete parity', () =>
   assert.equal(report.readAuthority, 'SATANG')
   assert.equal(report.writeContract, 'DUAL_WRITE_SATANG_WITH_FLOAT_ROLLBACK')
   assert.equal(report.floatRole, 'ROLLBACK_PARITY')
-  assert.equal(report.totals.tables, 8)
-  assert.equal(report.totals.fields, 18)
-  assert.equal(report.totals.rows, 16)
-  assert.equal(report.totals.comparedValues, 36)
+  assert.equal(report.totals.tables, 9)
+  assert.equal(report.totals.fields, 19)
+  assert.equal(report.totals.rows, 18)
+  assert.equal(report.totals.comparedValues, 38)
   assert.equal(report.totals.unexplainedDifferences, 0)
   assert.equal(report.checkedAt, '2026-07-13T00:00:00.000Z')
 })
@@ -113,7 +113,7 @@ test('database collection starts a read-only repeatable-read transaction', async
 
   assert.deepEqual(commands, ['SET TRANSACTION READ ONLY'])
   assert.equal(transactionOptions.isolationLevel, 'RepeatableRead')
-  assert.equal(queries.length, 18)
+  assert.equal(queries.length, 19)
   assert.equal(report.status, 'PASS')
 })
 

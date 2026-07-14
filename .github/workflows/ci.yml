@@ -102,6 +102,9 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Prove populated legacy money backfill in an isolated schema
+        run: npm run test:money-backfill:db
+
       - name: Run guarded PMS Lite database E2E
         run: npm run test:e2e:lite
 

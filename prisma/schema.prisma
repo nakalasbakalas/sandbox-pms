@@ -937,6 +937,7 @@ model RateCalendar {
   roomTypeId       String
   date             DateTime @db.Date
   rate             Float
+  rateSatang       Int?
   minStay          Int?
   maxStay          Int?
   stopSell         Boolean  @default(false)
