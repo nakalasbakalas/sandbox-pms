@@ -2,7 +2,7 @@
 
 Recorded: 2026-07-14 (Asia/Bangkok)
 
-Exact-head revalidation: 2026-07-15 11:34 (Asia/Bangkok)
+Exact-application revalidation: 2026-07-15 13:07 (Asia/Bangkok)
 
 ## Verdict
 
@@ -16,9 +16,9 @@ remain gated.
 - Blueprint: `render-lite.yaml`
 - Web service: `sandbox-hotel-pms-lite-staging`
 - Render service id: `srv-d9asptjeo5us73dh0270`
-- Render deploy id: `dep-d9b5qphkh4rs73chqd10`
+- Render deploy id: `dep-d9bi61vaqgkc739ellj0`
 - Branch: `codex/sandbox-pms-lite-v1`
-- Commit: `0583c6abb88deb3f02585cc08a13f50bd55c7789`
+- Reviewed application commit: `bf203398737836e680d72dbdbb5f8b915c636ce2`
 - Deploy status: `live`
 - Direct hostname: `https://sandbox-hotel-pms-lite-staging.onrender.com`
 
@@ -28,27 +28,31 @@ remain gated.
 
 - `ok: true`
 - `uiVariant: lite`
-- `writeMode: active`
 - `database.configured: true`
 - `database.ok: true`
+
+The public deep-health response is intentionally bounded to `ok`, service,
+UI variant, timestamp, and database status. It does not expose environment,
+write-mode, integration, or missing-configuration inventories.
 
 `GET /api/version` returned:
 
 - API version: `lite/v1`
 - DTO version: `lite-read-v1`
-- commit SHA: `0583c6abb88deb3f02585cc08a13f50bd55c7789`
-- asset identifier: `assets/index-CTgbifAg.js`
+- commit SHA: `bf203398737836e680d72dbdbb5f8b915c636ce2`
+- asset identifier: `assets/index-DWzxGq80.js`
 - release id: `srv-d9asptjeo5us73dh0270`
 - service name: `sandbox-hotel-pms-lite-staging`
-- build time: `2026-07-14T16:02:15.845Z`
+- environment: `staging`
+- build time: `2026-07-15T06:05:30.590Z`
 
 The root HTML referenced the same JavaScript identity plus
-`assets/index-DXlVsn94.css`.
+`assets/index-C2aq233g.css`.
 
-Render CLI reported the exact-head deploy as `live`, and both public probes
-returned HTTP 200 at 2026-07-15 11:34 Asia/Bangkok. The earlier Blueprint
-deployment `dep-d9asptreo5us73dh03b0` at commit `2b2b27dd...` is historical and
-must not be cited as the current release identity.
+Render CLI reported the exact-commit deploy as `live`, and the version, root,
+and deep-health probes returned HTTP 200 at 2026-07-15 13:07 Asia/Bangkok. The
+previous deploy `dep-d9b5qphkh4rs73chqd10` at commit `0583c6ab...` is
+deactivated and must not be cited as the current application release identity.
 
 ## Disposable database proof
 
@@ -62,18 +66,18 @@ must not be cited as the current release identity.
 - Network allowlist: empty
 - Prisma connected specifically to database `sandbox_pms_lite_staging` on the
   new Render database resource.
-- All 20 repository migrations applied successfully before the process began
+- All 22 repository migrations applied successfully before the process began
   listening on port 10000.
 
 No production database was used or mutated for this proof.
 
 ## Gmail/shadow boundary
 
-The connected Gmail profile is `booking@sandboxhotel.com`, but the new staging
+The connected Gmail profile is `booking@sandboxhotel.com`, but the staging
 service does not yet contain a usable Gmail OAuth credential tuple. The
-redacted Render status helper returned `ready: false` for staging. Deep health
-also reports Gmail Pub/Sub disabled and missing its topic, subscription,
-audience, and service-account-email settings.
+redacted Render status helper returned `ready: false` for staging. The bounded
+public deep-health response no longer exposes integration or missing-
+configuration inventories. No Gmail shadow proof is claimed.
 
 The existing non-Lite Render service still reports a complete booking-specific
 refresh-token tuple without printing values. Credentials were not copied into

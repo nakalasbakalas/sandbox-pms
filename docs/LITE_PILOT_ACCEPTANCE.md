@@ -4,19 +4,19 @@ Use this record for one exact reviewed commit. Repository tests, synthetic fixtu
 
 ## Release Identity
 
-- Reviewed commit: `0583c6abb88deb3f02585cc08a13f50bd55c7789` (PR #173 exact head; CI #202 passed)
-- Render staging service/deploy: `srv-d9asptjeo5us73dh0270` / `dep-d9b5qphkh4rs73chqd10` (`live`)
+- Reviewed application commit: `bf203398737836e680d72dbdbb5f8b915c636ce2` (PR #173; CI #204 passed both jobs)
+- Render staging service/deploy: `srv-d9asptjeo5us73dh0270` / `dep-d9bi61vaqgkc739ellj0` (`live`)
 - Disposable/staging database: `sandbox-hotel-pms-lite-staging-db` / `dpg-d9asp1jeo5us73dgus40-a` (`available`; no production database used)
-- `/healthz?deep=1` result and timestamp: HTTP 200, `ok=true`, Lite UI, active write mode, database configured/healthy at 2026-07-15 11:34 Asia/Bangkok; Gmail Pub/Sub disabled/unconfigured
-- `/api/version` commit, UI variant, build time, service, and asset identifier: exact head above, `lite`, `2026-07-14T16:02:15.845Z`, `sandbox-hotel-pms-lite-staging`, `assets/index-CTgbifAg.js`
-- Browser asset identifier matches `/api/version`: verified at 2026-07-15 11:34 Asia/Bangkok; root HTML referenced `assets/index-CTgbifAg.js`
-- Cloudflare hostname, DNS/proxy path, WAF configuration, and traffic-enforcement evidence: pending
+- `/healthz?deep=1` result and timestamp: HTTP 200, `ok=true`, Lite UI, database configured/healthy at 2026-07-15 13:07 Asia/Bangkok; the public response is bounded to service/UI/time/database fields
+- `/api/version` commit, UI variant, build time, service, and asset identifier: reviewed application commit above, `lite`, `2026-07-15T06:05:30.590Z`, `sandbox-hotel-pms-lite-staging`, `assets/index-DWzxGq80.js`
+- Browser asset identifier matches `/api/version`: verified at 2026-07-15 13:07 Asia/Bangkok; root HTML referenced `assets/index-DWzxGq80.js`
+- Cloudflare hostname, DNS/proxy path, WAF configuration, and traffic-enforcement evidence: zone rules passed read-only proof for `lite`, `book`, and `staff`; `lite.sandboxhotel.com` has no DNS record, so public traffic-path enforcement remains pending
 
 ## Data And Recovery Gate
 
 - Fresh pre-migration Render recovery point and retention window: pending
 - Disposable restore target and validation result: pending
-- All Lite migrations applied to the disposable/staging target: pending
+- All 22 repository migrations applied to the disposable staging target before deploy `dep-d9bi61vaqgkc739ellj0` became live; this is not restore or production proof
 - `npm.cmd run money:reconcile` reports `PASS` with zero unexplained differences: pending
 - Representative booking, folio, tax, void, partial/multiple payment, and exact-zero workflows pass: pending
 - Legacy Float parity remains available for the 30-day rollback period: pending

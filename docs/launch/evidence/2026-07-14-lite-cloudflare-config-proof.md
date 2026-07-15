@@ -1,5 +1,10 @@
 # Lite Cloudflare configuration proof — 2026-07-14
 
+Read-only revalidation on 2026-07-15 at approximately 13:03 Asia/Bangkok
+again passed the exact WAF and login-rate contracts for `book`, `staff`, and
+`lite`. DNS resolution still returned no record for `lite.sandboxhotel.com`.
+No Cloudflare configuration or DNS state was changed during revalidation.
+
 Verdict: the Sandbox PMS zone-level custom WAF and login rate-limit rules now
 name `lite.sandboxhotel.com`, while preserving the existing `book` and `staff`
 hostnames. This is configuration proof only. Traffic enforcement remains open
