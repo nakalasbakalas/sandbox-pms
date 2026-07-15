@@ -30,6 +30,21 @@ function PaymentFields({ amount, setAmount, method, setMethod, reference, setRef
   )
 }
 
+function stayActionErrorMessage(error: unknown, language: string) {
+  const message = error instanceof Error && error.message ? error.message : ''
+  if (language !== 'th') return message || 'The stay action could not be saved.'
+  if (/collect|payment|amount due|remaining balance|negative folio/i.test(message)) {
+    return 'ต้องรับชำระยอดคงเหลือหรือให้ผู้จัดการอนุมัติก่อนดำเนินการต่อ'
+  }
+  if (/identity|nationality|passport|id number/i.test(message)) {
+    return 'ต้องตรวจสอบสัญชาติและเลขบัตรหรือพาสปอร์ตของผู้เข้าพักก่อนดำเนินการต่อ'
+  }
+  if (/room|clean|inspected|occupancy/i.test(message)) {
+    return 'ห้องยังไม่พร้อมสำหรับการดำเนินการนี้ กรุณาตรวจสอบสถานะห้องอีกครั้ง'
+  }
+  return 'ไม่สามารถบันทึกการเช็กอินหรือเช็กเอาต์ได้ กรุณาตรวจสอบข้อมูลอีกครั้ง'
+}
+
 function StayActionDialog({ reservation, action, role, close }: { reservation: ReservationSummary; action: 'check-in' | 'check-out'; role: LiteRole; close: () => void }) {
   const { t, language } = useI18n()
   const queryClient = useQueryClient()
@@ -100,7 +115,7 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
           {override ? <label>{language === 'th' ? 'เหตุผลการอนุมัติ' : 'Override reason'}<textarea required value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label> : null}
         </>
       ) : null}
-      {mutation.error ? <div className="form-error">{language === 'th' ? 'ไม่สามารถบันทึกการเช็กอินหรือเช็กเอาต์ได้ กรุณาตรวจสอบข้อมูลอีกครั้ง' : mutation.error.message}</div> : null}
+      {mutation.error ? <div className="form-error">{stayActionErrorMessage(mutation.error, language)}</div> : null}
       <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending}>{action === 'check-in' ? t('checkIn') : t('checkOut')}</button></footer>
     </form>
   )
