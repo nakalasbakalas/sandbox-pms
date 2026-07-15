@@ -170,6 +170,7 @@ function createMutationFixture(eventType) {
   const connectionQueries = []
   const externalReferenceQueries = []
   const providerScopedLegacyQueries = []
+  const transactionOptions = []
   let newerProcessedLifecycleEvent = null
   const folio = {
     id: 'folio-channel-test',
@@ -277,7 +278,9 @@ function createMutationFixture(eventType) {
     bookingEmailEvent: {
       findUnique: async ({ where }) => (where?.id === event.id ? withEventRelations() : null),
       findFirst: async ({ where } = {}) => {
-        if (where?.reservationId === reservation.id && where?.status === 'PROCESSED') {
+        const reservationScoped = where?.reservationId === reservation.id
+          || where?.OR?.some((scope) => scope.reservationId === reservation.id)
+        if (reservationScoped && where?.status?.in?.includes(newerProcessedLifecycleEvent?.status)) {
           return newerProcessedLifecycleEvent
         }
         return null
@@ -287,6 +290,18 @@ function createMutationFixture(eventType) {
         assert.equal(where.id, event.id)
         Object.assign(event, data, { updatedAt: now })
         return withEventRelations()
+      },
+      updateMany: async ({ where, data }) => {
+        if (
+          where.id !== event.id
+          || where.status !== event.status
+          || where.updatedAt?.toISOString() !== event.updatedAt.toISOString()
+          || where.processedAt !== event.processedAt
+        ) {
+          return { count: 0 }
+        }
+        Object.assign(event, data, { updatedAt: new Date(event.updatedAt.getTime() + 1_000) })
+        return { count: 1 }
       },
     },
     manualChannelConnection: {
@@ -307,7 +322,10 @@ function createMutationFixture(eventType) {
         return data
       },
     },
-    $transaction: async (callback) => callback(prisma),
+    $transaction: async (callback, options) => {
+      transactionOptions.push(options)
+      return callback(prisma)
+    },
   }
 
   return {
@@ -321,6 +339,7 @@ function createMutationFixture(eventType) {
     connectionQueries,
     externalReferenceQueries,
     providerScopedLegacyQueries,
+    transactionOptions,
     externalReferenceKey,
     setNewerProcessedLifecycleEvent(value) {
       newerProcessedLifecycleEvent = value
@@ -389,34 +408,52 @@ assert.deepEqual(
 )
 
 for (const staleEventType of ['MODIFICATION', 'CANCELLATION']) {
-  const staleLifecycle = createMutationFixture(staleEventType)
-  const originalCheckIn = staleLifecycle.reservation.checkIn.toISOString()
-  const originalCheckOut = staleLifecycle.reservation.checkOut.toISOString()
-  staleLifecycle.setNewerProcessedLifecycleEvent({
-    id: `newer-${staleEventType.toLowerCase()}`,
-    eventType: staleEventType === 'MODIFICATION' ? 'CANCELLATION' : 'MODIFICATION',
-    receivedAt: new Date(staleLifecycle.event.receivedAt.getTime() + 60_000),
-  })
+  for (const conflictingStatus of ['NEEDS_REVIEW', 'ERROR', 'PROCESSED']) {
+    const staleLifecycle = createMutationFixture(staleEventType)
+    const originalCheckIn = staleLifecycle.reservation.checkIn.toISOString()
+    const originalCheckOut = staleLifecycle.reservation.checkOut.toISOString()
+    staleLifecycle.setNewerProcessedLifecycleEvent({
+      id: `newer-${staleEventType.toLowerCase()}-${conflictingStatus.toLowerCase()}`,
+      eventType: staleEventType === 'MODIFICATION' ? 'CANCELLATION' : 'MODIFICATION',
+      status: conflictingStatus,
+      receivedAt: new Date(staleLifecycle.event.receivedAt.getTime() + 60_000),
+    })
 
-  await assert.rejects(
-    () => approveBookingEmailEvent(staleLifecycle.prisma, staleLifecycle.event.id, {
-      reservationId: staleLifecycle.reservation.id,
-      reason: 'Provider timeline review for stale lifecycle protection.',
-    }, actor),
-    /same-time or newer provider modification\/cancellation/i,
-    `an older ${staleEventType.toLowerCase()} cannot overwrite a newer processed lifecycle event`,
-  )
-  assert.equal(staleLifecycle.event.status, 'NEEDS_REVIEW', 'stale lifecycle email remains review work')
-  assert.equal(staleLifecycle.reservation.status, 'CONFIRMED', 'stale lifecycle email does not change reservation status')
-  assert.equal(staleLifecycle.reservation.checkIn.toISOString(), originalCheckIn, 'stale lifecycle email does not change check-in')
-  assert.equal(staleLifecycle.reservation.checkOut.toISOString(), originalCheckOut, 'stale lifecycle email does not change check-out')
-  assert.equal(staleLifecycle.connectionQueries.length, 0, 'stale lifecycle email does not enqueue manual OTA work')
-  assert.equal(staleLifecycle.audits.length, 1, 'stale lifecycle email records one durable denial audit')
-  assert.equal(staleLifecycle.audits[0].action, 'BOOKING_EMAIL_LIFECYCLE_DENIED')
-  assert.equal(staleLifecycle.audits[0].entityId, staleLifecycle.event.id)
-  assert.equal(staleLifecycle.audits[0].changes.reasonCode, 'STALE_PROVIDER_LIFECYCLE_EVENT')
-  assert.equal(staleLifecycle.audits[0].changes.reservationId, staleLifecycle.reservation.id)
-  assert.equal(staleLifecycle.audits[0].changes.attemptedEventType, staleEventType)
+    await assert.rejects(
+      () => approveBookingEmailEvent(staleLifecycle.prisma, staleLifecycle.event.id, {
+        reservationId: staleLifecycle.reservation.id,
+        reason: 'Provider timeline review for stale lifecycle protection.',
+      }, actor),
+      /same-time or newer provider modification\/cancellation/i,
+      `an older ${staleEventType.toLowerCase()} cannot overwrite a newer ${conflictingStatus.toLowerCase()} lifecycle event`,
+    )
+    assert.equal(staleLifecycle.event.status, 'NEEDS_REVIEW', 'stale lifecycle email remains review work')
+    assert.equal(staleLifecycle.reservation.status, 'CONFIRMED', 'stale lifecycle email does not change reservation status')
+    assert.equal(staleLifecycle.reservation.checkIn.toISOString(), originalCheckIn, 'stale lifecycle email does not change check-in')
+    assert.equal(staleLifecycle.reservation.checkOut.toISOString(), originalCheckOut, 'stale lifecycle email does not change check-out')
+    assert.equal(staleLifecycle.connectionQueries.length, 0, 'stale lifecycle email does not enqueue manual OTA work')
+    assert.equal(staleLifecycle.audits.length, 1, 'stale lifecycle email records one durable denial audit')
+    assert.equal(staleLifecycle.audits[0].action, 'BOOKING_EMAIL_LIFECYCLE_DENIED')
+    assert.equal(staleLifecycle.audits[0].entityId, staleLifecycle.event.id)
+    assert.equal(staleLifecycle.audits[0].changes.reasonCode, 'STALE_PROVIDER_LIFECYCLE_EVENT')
+    assert.equal(staleLifecycle.audits[0].changes.reservationId, staleLifecycle.reservation.id)
+    assert.equal(staleLifecycle.audits[0].changes.attemptedEventType, staleEventType)
+    assert.equal(staleLifecycle.audits[0].changes.conflictingEventStatus, conflictingStatus)
+    assert.deepEqual(
+      Object.keys(staleLifecycle.audits[0].changes).sort(),
+      [
+        'attemptedEventType',
+        'attemptedReceivedAt',
+        'conflictingEventId',
+        'conflictingEventStatus',
+        'conflictingEventType',
+        'conflictingReceivedAt',
+        'reasonCode',
+        'reservationId',
+      ].sort(),
+      'lifecycle denial audit contains only sanitized operational identifiers and timestamps',
+    )
+  }
 }
 
 const modificationCurrencyMismatch = createMutationFixture('MODIFICATION')
@@ -729,6 +766,7 @@ verifiedReprocess.event.rawHeaders = {
 await reprocessBookingEmailEvent(verifiedReprocess.prisma, verifiedReprocess.event.id, actor)
 assert.equal(verifiedReprocess.event.providerCode, 'trip_com', 'reprocess retains provider identity only from immutable verified Gmail headers')
 assert.equal(verifiedReprocess.event.reservationId, verifiedReprocess.reservation.id, 'reprocess recomputes an exact provider-scoped reservation match')
+assert.equal(verifiedReprocess.transactionOptions[0]?.isolationLevel, 'Serializable', 'booking-email reprocess uses serializable isolation')
 
 const unverifiedReprocess = createMutationFixture('MODIFICATION')
 unverifiedReprocess.event.reservationId = unverifiedReprocess.reservation.id
@@ -755,6 +793,22 @@ assert.equal(unverifiedReprocess.event.reservationId, null, 'reprocess clears a 
 assert.equal(unverifiedReprocess.event.channelRef, null, 'reprocess clears a stale channel reference absent from immutable raw content')
 assert.equal(unverifiedReprocess.event.amountSatang, null, 'reprocess clears a stale amount absent from immutable raw content')
 assert.equal(unverifiedReprocess.event.currency, null, 'reprocess clears a stale currency absent from immutable raw content')
+
+const staleReprocess = createMutationFixture('MODIFICATION')
+staleReprocess.prisma.bookingEmailEvent.updateMany = async () => ({ count: 0 })
+await assert.rejects(
+  () => reprocessBookingEmailEvent(staleReprocess.prisma, staleReprocess.event.id, actor),
+  (error) => error?.statusCode === 409 && /changed before it could be reprocessed/i.test(error.message),
+  'reprocess rejects a stale booking-email compare-and-swap',
+)
+
+const staleReject = createMutationFixture('CANCELLATION')
+staleReject.prisma.bookingEmailEvent.updateMany = async () => ({ count: 0 })
+await assert.rejects(
+  () => rejectBookingEmailEvent(staleReject.prisma, staleReject.event.id, { reason: 'Stale rejection test.' }, actor),
+  (error) => error?.statusCode === 409 && /changed before it could be rejected/i.test(error.message),
+  'reject refuses to overwrite a concurrently approved booking email',
+)
 
 const capacityTodayKey = getBangkokDateKey(new Date())
 
@@ -813,6 +867,12 @@ function createCapacityFixture({
     notes: null,
   }
   rooms.set(room.id, room)
+  const folio = {
+    id: 'folio-capacity-test',
+    status: 'OPEN',
+    balance: 0,
+    balanceSatang: 0,
+  }
   const reservation = {
     id: 'reservation-capacity-test',
     propertyId: property.id,
@@ -840,7 +900,7 @@ function createCapacityFixture({
     sourceEmailEventId: null,
     notes: null,
     specialRequests: null,
-    folio: null,
+    folio,
     sourceEmailEvent: null,
     bookingEmailEvents: [],
   }
@@ -919,6 +979,12 @@ function createCapacityFixture({
         if (where?.id !== reservation.id || where?.status !== reservation.status) return { count: 0 }
         Object.assign(reservation, data)
         return { count: 1 }
+      },
+    },
+    folio: {
+      update: async ({ data }) => {
+        Object.assign(folio, data)
+        return folio
       },
     },
     inventoryHold: {

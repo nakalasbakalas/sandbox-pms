@@ -13,6 +13,8 @@ import {
   checkInReservation,
   checkOutReservation,
   parseBookingEmailDetails,
+  reversePayment,
+  voidCharge,
   withAuthoritativeStayTotal,
 } from '../server/pms-service.mjs'
 import { dateFromKey, getBangkokDateKey, validateStayInput } from '../server/pms-domain.mjs'
@@ -251,6 +253,13 @@ test('folio arithmetic handles tax, voided charges, partial payments, multiple p
   assert.equal(settled.paidSatang, 10_700)
   assert.equal(settled.balance, 0)
   assert.equal(settled.balanceSatang, 0)
+
+  const reversed = buildFolioMoneyFields(charges, [
+    { amount: 107, amountSatang: 10_700, entryKind: 'PAYMENT' },
+    { amount: -20, amountSatang: -2_000, entryKind: 'REVERSAL' },
+  ], { taxSatang: 700 })
+  assert.equal(reversed.paidSatang, 8_700)
+  assert.equal(reversed.balanceSatang, 2_000)
 })
 
 test('initial setup dual-writes property tax, fees, minimum rate, and room type base rate', async () => {
@@ -340,9 +349,10 @@ test('initial setup dual-writes property tax, fees, minimum rate, and room type 
   assert.equal(roomTypeWrites[0].baseRateSatang, 100_000)
 })
 
-function createLedgerPrisma({ charges, initialBalanceSatang, reservationStatus = 'CHECKED_IN', depositAmountSatang = 500 }) {
+function createLedgerPrisma({ charges, initialBalanceSatang, reservationStatus = 'CHECKED_IN', depositAmountSatang = 500, taxSatang = 0 }) {
   const payments = []
   const reservationLogs = []
+  const transactionOptions = []
   let reservation = {
     id: 'reservation-money-test',
     status: reservationStatus,
@@ -353,6 +363,8 @@ function createLedgerPrisma({ charges, initialBalanceSatang, reservationStatus =
   let folio = {
     id: 'folio-money-test',
     status: 'OPEN',
+    tax: taxSatang / 100,
+    taxSatang,
     balance: initialBalanceSatang / 100,
     balanceSatang: initialBalanceSatang,
   }
@@ -396,10 +408,120 @@ function createLedgerPrisma({ charges, initialBalanceSatang, reservationStatus =
   return {
     payments,
     reservationLogs,
+    transactionOptions,
     get folio() { return folio },
     get reservation() { return reservation },
     prisma: {
-      async $transaction(callback) { return callback(tx) },
+      async $transaction(callback, options) {
+        transactionOptions.push(options)
+        return callback(tx)
+      },
+    },
+  }
+}
+
+function createMutableMoneyLedger({
+  charges: initialCharges = [],
+  payments: initialPayments = [],
+  folioStatus = 'OPEN',
+  reservationStatus = 'CHECKED_IN',
+  depositAmountSatang = 0,
+  depositPaid = false,
+  taxSatang = 0,
+} = {}) {
+  const charges = initialCharges.map((charge) => ({ void: false, ...charge }))
+  const payments = initialPayments.map((payment) => ({ entryKind: 'PAYMENT', ...payment }))
+  const audits = []
+  const transactionOptions = []
+  let reservation = {
+    id: 'reservation-mutable-money',
+    status: reservationStatus,
+    depositAmount: depositAmountSatang / 100,
+    depositAmountSatang,
+    depositPaid,
+  }
+  const initialMoney = buildFolioMoneyFields(charges, payments, { taxSatang })
+  let folio = {
+    id: 'folio-mutable-money',
+    status: folioStatus,
+    ...initialMoney,
+  }
+  const snapshotFolio = () => ({ ...folio, charges, payments, reservation: { ...reservation } })
+  const tx = {
+    folio: {
+      async findUnique() { return snapshotFolio() },
+      async update({ data }) {
+        folio = { ...folio, ...data }
+        return snapshotFolio()
+      },
+    },
+    reservation: {
+      async update({ data }) {
+        reservation = { ...reservation, ...data }
+        return { ...reservation }
+      },
+    },
+    reservationLog: { async create({ data }) { return { id: 'reservation-log-money', ...data } } },
+    payment: {
+      async findUnique({ where }) {
+        if (where.id) return payments.find((payment) => payment.id === where.id) || null
+        if (where.clientRequestId) return payments.find((payment) => payment.clientRequestId === where.clientRequestId) || null
+        if (where.referenceFingerprint) return payments.find((payment) => payment.referenceFingerprint === where.referenceFingerprint) || null
+        if (where.sourceEmailEventId) return payments.find((payment) => payment.sourceEmailEventId === where.sourceEmailEventId) || null
+        return null
+      },
+      async findMany({ where } = {}) {
+        return where?.reversesPaymentId
+          ? payments.filter((payment) => payment.reversesPaymentId === where.reversesPaymentId && payment.entryKind === where.entryKind)
+          : payments
+      },
+      async create({ data }) {
+        const payment = { id: `mutable-payment-${payments.length + 1}`, ...data }
+        payments.push(payment)
+        return payment
+      },
+    },
+    charge: {
+      async findUnique({ where }) {
+        if (where.id) return charges.find((charge) => charge.id === where.id) || null
+        if (where.clientRequestId) return charges.find((charge) => charge.clientRequestId === where.clientRequestId) || null
+        if (where.voidRequestId) return charges.find((charge) => charge.voidRequestId === where.voidRequestId) || null
+        return null
+      },
+      async findMany({ where } = {}) {
+        return where?.void === false ? charges.filter((charge) => !charge.void) : charges
+      },
+      async create({ data }) {
+        const charge = { id: `mutable-charge-${charges.length + 1}`, void: false, ...data }
+        charges.push(charge)
+        return charge
+      },
+      async update({ where, data }) {
+        const charge = charges.find((candidate) => candidate.id === where.id)
+        Object.assign(charge, data)
+        return charge
+      },
+    },
+    auditLog: {
+      async create({ data }) {
+        const audit = { id: `mutable-audit-${audits.length + 1}`, ...data }
+        audits.push(audit)
+        return audit
+      },
+    },
+  }
+  return {
+    charges,
+    payments,
+    audits,
+    transactionOptions,
+    get folio() { return folio },
+    get reservation() { return reservation },
+    prisma: {
+      async $transaction(callback, options) {
+        transactionOptions.push(options)
+        return callback(tx)
+      },
     },
   }
 }
@@ -447,6 +569,7 @@ test('central payment writer dual-writes multiple partial payments and settles e
   assert.equal(settled.depositBecamePaid, true)
   assert.equal(ledger.reservationLogs.length, 1)
   assert.equal(ledger.reservationLogs[0].action, 'DEPOSIT_PAID')
+  assert.equal(ledger.transactionOptions.every((options) => options?.isolationLevel === 'Serializable'), true)
 })
 
 test('Lite payment writer accepts integer MoneySatang without a Float input', async () => {
@@ -479,6 +602,24 @@ test('payments do not mark a zero-deposit reservation as deposit paid', async ()
   assert.equal(result.folio.reservation.depositPaid, false)
   assert.equal(ledger.reservation.depositPaid, false)
   assert.equal(ledger.reservationLogs.length, 0)
+})
+
+test('folio recompute preserves stored tax when a payment changes the ledger', async () => {
+  const ledger = createLedgerPrisma({
+    charges: [{ id: 'charge-room', total: 10, totalSatang: 1_000, void: false }],
+    taxSatang: 70,
+    initialBalanceSatang: 1_070,
+  })
+
+  const result = await createPayment(ledger.prisma, {
+    folioId: 'folio-money-test',
+    amountSatang: 100,
+    method: 'CASH',
+  }, actor)
+
+  assert.equal(result.folio.taxSatang, 70)
+  assert.equal(result.folio.totalSatang, 1_070)
+  assert.equal(result.folio.balanceSatang, 970)
 })
 
 test('public embedded payments cannot forge booking-email provenance before transaction work starts', async () => {
@@ -538,9 +679,83 @@ test('settling an overridden unpaid checkout closes its previously open folio', 
   assert.equal(settled.folio.status, 'CLOSED')
 })
 
+test('checkout fails closed when the checked-in reservation folio is missing', async () => {
+  let roomUpdates = 0
+  const reservation = {
+    id: 'reservation-missing-folio',
+    propertyId: 'property-money-test',
+    roomTypeId: 'room-type-money-test',
+    status: 'CHECKED_IN',
+    assignedRoomId: 'room-missing-folio',
+    assignedRoom: {
+      id: 'room-missing-folio',
+      number: '102',
+      currentStatus: 'OCCUPIED_CLEAN',
+      currentReservation: 'reservation-missing-folio',
+    },
+    folio: null,
+  }
+  const tx = {
+    reservation: { findUnique: async () => reservation },
+    room: {
+      updateMany: async () => {
+        roomUpdates += 1
+        return { count: 1 }
+      },
+    },
+  }
+  const prisma = { async $transaction(callback) { return callback(tx) } }
+
+  await assert.rejects(
+    () => checkOutReservation(prisma, reservation.id, actor),
+    (error) => error?.statusCode === 409 && /folio is repaired/i.test(error.message),
+  )
+  assert.equal(roomUpdates, 0)
+})
+
+test('checkout rejects a negative folio instead of treating a credit as exact settlement', async () => {
+  let roomUpdates = 0
+  const reservation = {
+    id: 'reservation-negative-folio',
+    propertyId: 'property-money-test',
+    roomTypeId: 'room-type-money-test',
+    status: 'CHECKED_IN',
+    assignedRoomId: 'room-negative-folio',
+    assignedRoom: {
+      id: 'room-negative-folio',
+      number: '101',
+      currentStatus: 'OCCUPIED_CLEAN',
+      currentReservation: 'reservation-negative-folio',
+    },
+    folio: {
+      id: 'folio-negative-folio',
+      status: 'OPEN',
+      balance: -1,
+      balanceSatang: -100,
+    },
+  }
+  const tx = {
+    reservation: { findUnique: async () => reservation },
+    room: {
+      updateMany: async () => {
+        roomUpdates += 1
+        return { count: 1 }
+      },
+    },
+  }
+  const prisma = { async $transaction(callback) { return callback(tx) } }
+
+  await assert.rejects(
+    () => checkOutReservation(prisma, reservation.id, actor),
+    (error) => error?.statusCode === 409 && /negative folio balance/i.test(error.message),
+  )
+  assert.equal(roomUpdates, 0)
+})
+
 test('incidental charge writer derives Float rollback values from authoritative satang', async () => {
   const charges = []
-  let folio = { id: 'folio-charge-test', status: 'OPEN', balance: 0, balanceSatang: 0 }
+  const transactionOptions = []
+  let folio = { id: 'folio-charge-test', status: 'OPEN', tax: 0, taxSatang: 0, balance: 0, balanceSatang: 0 }
   const tx = {
     folio: {
       async findUnique() { return folio },
@@ -560,7 +775,12 @@ test('incidental charge writer derives Float rollback values from authoritative 
     payment: { async findMany() { return [] } },
     auditLog: { async create({ data }) { return { id: 'audit-charge-test', ...data } } },
   }
-  const prisma = { async $transaction(callback) { return callback(tx) } }
+  const prisma = {
+    async $transaction(callback, options) {
+      transactionOptions.push(options)
+      return callback(tx)
+    },
+  }
 
   await assert.rejects(
     () => createCharge(prisma, {
@@ -601,6 +821,7 @@ test('incidental charge writer derives Float rollback values from authoritative 
   assert.equal(result.charge.totalSatang, 90)
   assert.equal(result.folio.balance, 0.9)
   assert.equal(result.folio.balanceSatang, 90)
+  assert.equal(transactionOptions.every((options) => options?.isolationLevel === 'Serializable'), true)
 })
 
 test('charge helper preserves explicit reservation totals while dual-writing room-rate fields', () => {
@@ -620,4 +841,140 @@ test('Lite charge helper derives rollback THB only from integer MoneySatang', ()
     totalSatang: 180_001,
   })
   assert.throws(() => buildChargeMoneyFieldsFromSatang(75_000.5, 1), /fractional satang/i)
+})
+
+test('payment and charge client request ids replay exact writes and reject conflicting reuse', async () => {
+  const ledger = createMutableMoneyLedger({
+    charges: [{ id: 'room-charge-idempotency', category: 'ROOM', description: 'Room', amount: 10, amountSatang: 1_000, quantity: 1, total: 10, totalSatang: 1_000 }],
+  })
+
+  const paymentInput = {
+    folioId: 'folio-mutable-money',
+    amountSatang: 400,
+    method: 'CASH',
+    notes: 'First installment',
+    clientRequestId: 'payment-request-1',
+  }
+  const createdPayment = await createPayment(ledger.prisma, paymentInput, actor)
+  const replayedPayment = await createPayment(ledger.prisma, paymentInput, actor)
+  assert.equal(createdPayment.replayed, false)
+  assert.equal(replayedPayment.replayed, true)
+  assert.equal(replayedPayment.payment.id, createdPayment.payment.id)
+  assert.equal(ledger.payments.length, 1)
+  await assert.rejects(
+    () => createPayment(ledger.prisma, { ...paymentInput, amountSatang: 300 }, actor),
+    (error) => error?.statusCode === 409 && /different details/i.test(error.message),
+  )
+
+  const chargeInput = {
+    folioId: 'folio-mutable-money',
+    amountSatang: 250,
+    quantity: 2,
+    description: 'Laundry',
+    category: 'LAUNDRY',
+    date: '2026-07-15',
+    clientRequestId: 'charge-request-1',
+  }
+  const createdCharge = await createCharge(ledger.prisma, chargeInput, actor)
+  const replayedCharge = await createCharge(ledger.prisma, chargeInput, actor)
+  assert.equal(createdCharge.replayed, false)
+  assert.equal(replayedCharge.replayed, true)
+  assert.equal(replayedCharge.charge.id, createdCharge.charge.id)
+  assert.equal(ledger.charges.length, 2)
+  await assert.rejects(
+    () => createCharge(ledger.prisma, { ...chargeInput, description: 'Minibar' }, actor),
+    (error) => error?.statusCode === 409 && /different details/i.test(error.message),
+  )
+  assert.equal(ledger.transactionOptions.every((options) => options?.isolationLevel === 'Serializable'), true)
+})
+
+test('payment reversal writes immutable signed rows, bounds cumulative reversals, and replays exactly', async () => {
+  const ledger = createMutableMoneyLedger({
+    charges: [{ id: 'room-charge-reversal', category: 'ROOM', description: 'Room', amount: 10, amountSatang: 1_000, quantity: 1, total: 10, totalSatang: 1_000 }],
+    payments: [{ id: 'payment-original', folioId: 'folio-mutable-money', amount: 10, amountSatang: 1_000, method: 'CASH', processedBy: 'Cashier' }],
+    folioStatus: 'CLOSED',
+    reservationStatus: 'CHECKED_OUT',
+    depositAmountSatang: 800,
+    depositPaid: true,
+    taxSatang: 70,
+  })
+
+  const partialInput = { amountSatang: 400, reason: 'Guest refund correction', clientRequestId: 'reversal-request-1' }
+  const partial = await reversePayment(ledger.prisma, 'payment-original', partialInput, actor)
+  const replay = await reversePayment(ledger.prisma, 'payment-original', partialInput, actor)
+  assert.equal(partial.payment.entryKind, 'REVERSAL')
+  assert.equal(partial.payment.amountSatang, -400)
+  assert.equal(partial.payment.amount, -4)
+  assert.equal(partial.payment.reversesPaymentId, 'payment-original')
+  assert.equal(partial.folio.taxSatang, 70)
+  assert.equal(partial.folio.paidSatang, 600)
+  assert.equal(partial.folio.balanceSatang, 470)
+  assert.equal(partial.folio.status, 'OPEN')
+  assert.equal(partial.folio.reservation.depositPaid, false)
+  assert.equal(replay.replayed, true)
+  assert.equal(ledger.payments.length, 2)
+  await assert.rejects(
+    () => reversePayment(ledger.prisma, 'payment-original', { ...partialInput, amountSatang: 300 }, actor),
+    (error) => error?.statusCode === 409 && /different details/i.test(error.message),
+  )
+  await assert.rejects(
+    () => reversePayment(ledger.prisma, 'payment-original', { amountSatang: 601, reason: 'Too much refund' }, actor),
+    (error) => error?.statusCode === 409 && /cannot exceed/i.test(error.message),
+  )
+
+  const full = await reversePayment(ledger.prisma, 'payment-original', { reason: 'Refund remaining amount', clientRequestId: 'reversal-request-2' }, actor)
+  assert.equal(full.payment.amountSatang, -600)
+  assert.equal(full.folio.paidSatang, 0)
+  await assert.rejects(
+    () => reversePayment(ledger.prisma, 'payment-original', { amountSatang: 1, reason: 'No balance remains' }, actor),
+    (error) => error?.statusCode === 409 && /fully reversed/i.test(error.message),
+  )
+  assert.equal(ledger.audits.filter((audit) => audit.action === 'PAYMENT_REVERSED').length, 2)
+})
+
+test('payment reversal enforces refund permission and a nonblank operational reason', async () => {
+  const ledger = createMutableMoneyLedger({
+    payments: [{ id: 'payment-rbac', folioId: 'folio-mutable-money', amount: 1, amountSatang: 100, method: 'CASH' }],
+  })
+  await assert.rejects(
+    () => reversePayment(ledger.prisma, 'payment-rbac', { reason: 'Manager request' }, { ...actor, role: 'MANAGER' }),
+    (error) => error?.statusCode === 403 && /refund:payment/i.test(error.message),
+  )
+  await assert.rejects(
+    () => reversePayment(ledger.prisma, 'payment-rbac', { reason: '  ' }, actor),
+    /operational reason/i,
+  )
+  assert.equal(ledger.transactionOptions.length, 0)
+})
+
+test('elevated charge void is audited, idempotent, tax-preserving, and reopens an unsettled checked-out folio', async () => {
+  const ledger = createMutableMoneyLedger({
+    charges: [{ id: 'charge-to-void', category: 'MINIBAR', description: 'Minibar', amount: 5, amountSatang: 500, quantity: 1, total: 5, totalSatang: 500 }],
+    payments: [{ id: 'payment-for-void', folioId: 'folio-mutable-money', amount: 5.7, amountSatang: 570, method: 'CASH' }],
+    folioStatus: 'CLOSED',
+    reservationStatus: 'CHECKED_OUT',
+    taxSatang: 70,
+  })
+  const input = { reason: 'Duplicate minibar posting', clientRequestId: 'void-request-1' }
+  const result = await voidCharge(ledger.prisma, 'charge-to-void', input, actor)
+  const replay = await voidCharge(ledger.prisma, 'charge-to-void', input, actor)
+  assert.equal(result.charge.void, true)
+  assert.equal(result.charge.voidReason, input.reason)
+  assert.equal(result.charge.voidRequestId, input.clientRequestId)
+  assert.ok(result.charge.voidedAt instanceof Date)
+  assert.equal(result.charge.voidedBy, actor.name)
+  assert.equal(result.folio.subtotalSatang, 0)
+  assert.equal(result.folio.taxSatang, 70)
+  assert.equal(result.folio.balanceSatang, -500)
+  assert.equal(result.folio.status, 'OPEN')
+  assert.equal(replay.replayed, true)
+  assert.equal(ledger.audits.filter((audit) => audit.action === 'CHARGE_VOIDED').length, 1)
+  await assert.rejects(
+    () => voidCharge(ledger.prisma, 'charge-to-void', { ...input, reason: 'Different reason' }, actor),
+    (error) => error?.statusCode === 409 && /different details/i.test(error.message),
+  )
+  await assert.rejects(
+    () => voidCharge(ledger.prisma, 'charge-to-void', input, { ...actor, role: 'FRONT_DESK' }),
+    (error) => error?.statusCode === 403 && /manager or administrator/i.test(error.message),
+  )
 })

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 const DEFAULT_MAILBOX = 'booking@sandboxhotel.com'
+const DEFAULT_PROPERTY_CODE = 'SANDBOX'
 const DEFAULT_GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
 const DEFAULT_HISTORY_PAGE_SIZE = 500
 const DEFAULT_MESSAGE_PAGE_SIZE = 50
@@ -9,6 +10,7 @@ const DEFAULT_INGEST_CHUNK_SIZE = 25
 const DEFAULT_LEASE_MS = 2 * 60_000
 const DEFAULT_RETRY_BASE_MS = 30_000
 const DEFAULT_RETRY_MAX_MS = 5 * 60_000
+const DEFAULT_DELIVERY_MAX_ATTEMPTS = 8
 const DEFAULT_DELIVERY_CLAIM_TIMEOUT_MS = 15 * 60_000
 const DEFAULT_WATCH_RENEW_AFTER_MS = 24 * 60 * 60_000
 const DEFAULT_WATCH_RENEW_MARGIN_MS = 48 * 60 * 60_000
@@ -41,10 +43,25 @@ function nullableString(value) {
   return normalized || null
 }
 
+function configuredPropertyWhere(options = {}) {
+  return {
+    property: {
+      is: {
+        code: nullableString(options.propertyCode) || DEFAULT_PROPERTY_CODE,
+      },
+    },
+  }
+}
+
 function positiveInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed <= 0) return fallback
   return Math.min(parsed, maximum)
+}
+
+function nonNegativeInteger(value, fallback = 0) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
 
 function envEnabled(value) {
@@ -546,7 +563,9 @@ function deliveryDelegate(prisma) {
 async function findGmailSource(prisma, options = {}) {
   const delegate = sourceDelegate(prisma)
   if (options.sourceId) {
-    const source = await delegate.findUnique({ where: { id: options.sourceId } })
+    const source = await delegate.findFirst({
+      where: { id: options.sourceId, ...configuredPropertyWhere(options) },
+    })
     if (!source || source.enabled === false || source.provider !== 'GMAIL') {
       throw new BookingEmailSyncError('Enabled Gmail booking email source was not found.', {
         code: 'BOOKING_EMAIL_SOURCE_NOT_FOUND',
@@ -559,7 +578,7 @@ async function findGmailSource(prisma, options = {}) {
 
   const mailbox = String(options.mailbox || bookingEmailPubSubConfig(options.env).mailbox).trim().toLowerCase()
   const source = await delegate.findFirst({
-    where: { provider: 'GMAIL', enabled: true, mailbox },
+    where: { provider: 'GMAIL', enabled: true, mailbox, ...configuredPropertyWhere(options) },
     orderBy: { createdAt: 'asc' },
   })
   if (!source) {
@@ -964,6 +983,35 @@ function deliveryRetryAt(attempts, options = {}) {
   return new Date(nowDate(options).getTime() + Math.round(delay * (0.75 + random() * 0.5)))
 }
 
+export function bookingEmailDeliveryAttemptPolicy(input = {}, options = {}) {
+  const attempts = nonNegativeInteger(input.attempts)
+  const maxAttempts = positiveInteger(
+    input.maxAttempts ?? options.deliveryMaxAttempts,
+    DEFAULT_DELIVERY_MAX_ATTEMPTS,
+    100,
+  )
+  const retryable = input.retryable === undefined
+    ? input.error?.retryable !== false
+    : input.retryable !== false
+  const exhausted = attempts >= maxAttempts
+  const terminal = !retryable || exhausted
+  const terminalReason = !retryable ? 'non_retryable' : exhausted ? 'attempts_exhausted' : null
+
+  return {
+    attempts,
+    maxAttempts,
+    retryable,
+    exhausted,
+    terminal,
+    terminalReason,
+    // BookingEmailPushDelivery.availableAt is intentionally non-null in the
+    // existing schema. Terminal rows consume their attempt budget instead, so
+    // they remain FAILED and visible but cannot satisfy the claim predicate.
+    persistedAttempts: terminal ? maxAttempts : attempts,
+    nextAttemptAt: terminal ? null : deliveryRetryAt(attempts, options),
+  }
+}
+
 async function markDeliveryComplete(prisma, deliveryId, status, now) {
   await deliveryDelegate(prisma).update({
     where: { id: deliveryId },
@@ -974,10 +1022,17 @@ async function markDeliveryComplete(prisma, deliveryId, status, now) {
 export async function processPendingBookingEmailDeliveries(prisma, options = {}) {
   const now = nowDate(options)
   const limit = positiveInteger(options.deliveryLimit, 20, 100)
+  const maxAttempts = positiveInteger(options.deliveryMaxAttempts, DEFAULT_DELIVERY_MAX_ATTEMPTS, 100)
   const claimTimeoutMs = positiveInteger(options.deliveryClaimTimeoutMs, DEFAULT_DELIVERY_CLAIM_TIMEOUT_MS, 60 * 60_000)
   const staleClaimBefore = new Date(now.getTime() - claimTimeoutMs)
   const claimable = [
-    { status: { in: ['PENDING', 'FAILED'] }, availableAt: { lte: now } },
+    { status: 'PENDING', attempts: { lt: maxAttempts }, availableAt: { lte: now } },
+    {
+      status: 'FAILED',
+      attempts: { lt: maxAttempts },
+      availableAt: { lte: now },
+      NOT: { lastError: { startsWith: '[terminal:' } },
+    },
     { status: 'PROCESSING', claimedAt: { lt: staleClaimBefore } },
   ]
   const candidates = await deliveryDelegate(prisma).findMany({
@@ -1000,7 +1055,9 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
     if (claim.count !== 1) continue
 
     try {
-      const source = await sourceDelegate(prisma).findUnique({ where: { id: candidate.sourceId } })
+      const source = await sourceDelegate(prisma).findFirst({
+        where: { id: candidate.sourceId, ...configuredPropertyWhere(options) },
+      })
       if (!source || source.enabled === false) {
         await markDeliveryComplete(prisma, candidate.id, 'COALESCED', now)
         summary.coalesced += 1
@@ -1020,7 +1077,14 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
       if (result.skipped) {
         await deliveryDelegate(prisma).update({
           where: { id: candidate.id },
-          data: { status: 'PENDING', claimedAt: null, availableAt: deliveryRetryAt(candidate.attempts + 1, options) },
+          // A source lease collision means no delivery attempt ran. Restore the
+          // prior count so routine overlap cannot exhaust the retry budget.
+          data: {
+            status: 'PENDING',
+            claimedAt: null,
+            attempts: nonNegativeInteger(candidate.attempts),
+            availableAt: deliveryRetryAt(Math.max(1, nonNegativeInteger(candidate.attempts)), options),
+          },
         })
         blockedSources.add(candidate.sourceId)
         continue
@@ -1031,16 +1095,27 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
       summary.eventsIngested += Number(result.eventsIngested || 0)
     } catch (error) {
       const message = redactBookingEmailSyncError(error)
+      const policy = bookingEmailDeliveryAttemptPolicy({
+        attempts: nonNegativeInteger(candidate.attempts) + 1,
+        maxAttempts,
+        error,
+      }, options)
+      const lastError = policy.terminal
+        ? `[terminal:${policy.terminalReason}; attempts=${policy.attempts}/${policy.maxAttempts}] ${message.slice(0, 400)}`
+        : message
       await deliveryDelegate(prisma).update({
         where: { id: candidate.id },
         data: {
           status: 'FAILED',
           claimedAt: null,
-          lastError: message,
-          availableAt: deliveryRetryAt(candidate.attempts + 1, options),
+          attempts: policy.persistedAttempts,
+          lastError,
+          // Terminal rows are excluded by attempts < maxAttempts. Keep the
+          // required storage field bounded without representing it as a retry.
+          availableAt: policy.nextAttemptAt || now,
         },
       })
-      safeLogger(options.logger).error('Booking email push delivery processing failed:', message)
+      safeLogger(options.logger).error('Booking email push delivery processing failed:', lastError)
       summary.failed += 1
       blockedSources.add(candidate.sourceId)
     }
@@ -1055,7 +1130,7 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
  */
 export async function runBookingEmailMaintenance(prisma, options = {}) {
   const sources = await sourceDelegate(prisma).findMany({
-    where: { provider: 'GMAIL', enabled: true },
+    where: { provider: 'GMAIL', enabled: true, ...configuredPropertyWhere(options) },
     orderBy: { createdAt: 'asc' },
   })
   const summary = {

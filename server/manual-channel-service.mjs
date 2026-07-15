@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import {
   PmsValidationError,
+  SANDBOX_RULES,
   activeReservationStatuses,
   dateFromKey,
   getBangkokDateKey,
@@ -1078,8 +1079,11 @@ export async function completeManualChannelTask(prisma, taskId, input = {}, acto
   if (notes.length < 5) throw new PmsValidationError('Completion evidence must be at least 5 characters.')
 
   return serializableTransaction(prisma, async (tx) => {
-    const task = await tx.manualChannelTask.findUnique({
-      where: { id: cleanTaskId },
+    const task = await tx.manualChannelTask.findFirst({
+      where: {
+        id: cleanTaskId,
+        property: { is: { code: SANDBOX_RULES.propertyCode } },
+      },
       include: { connection: true, roomType: true },
     })
     if (!task) throw new PmsValidationError('Manual channel task was not found.', 404)
@@ -1155,7 +1159,13 @@ export async function reopenManualChannelTask(prisma, taskId, input = {}, actor)
   const reason = requireReason(input.reason, 'Reopening a channel task')
 
   return serializableTransaction(prisma, async (tx) => {
-    const task = await tx.manualChannelTask.findUnique({ where: { id: cleanTaskId }, include: { connection: true } })
+    const task = await tx.manualChannelTask.findFirst({
+      where: {
+        id: cleanTaskId,
+        property: { is: { code: SANDBOX_RULES.propertyCode } },
+      },
+      include: { connection: true },
+    })
     if (!task) throw new PmsValidationError('Manual channel task was not found.', 404)
     if (!['COMPLETED', 'FAILED'].includes(task.status)) {
       throw new PmsValidationError('Only a completed or failed channel task can be reopened or retried.', 409)

@@ -365,6 +365,55 @@ test('parser marks distinct same-kind stay totals as ambiguous review work', () 
   assert.match(parsed.reviewReason, /unambiguous amount/i)
 })
 
+test('parser captures a single labelled child age without inventing review work', () => {
+  const parsed = parseBookingEmailDetails({
+    subject: 'New booking confirmation CHILD-1001',
+    rawText: 'Guest name: Jane Doe Booking reference: CHILD-1001 Check-in: 2026-08-20 Check-out: 2026-08-22 Room type: Double Adults: 2 Children: 1 Child age: 8 Total: THB 3000',
+  })
+
+  assert.equal(parsed.details.children, 1)
+  assert.deepEqual(parsed.details.childAges, [8])
+  assert.equal(parsed.reviewReason, null)
+})
+
+test('parser captures multiple common child-age labels', () => {
+  for (const rawChildDetails of [
+    'Children: 2 Children ages: 4 and 11',
+    'Children: 2 (ages: 4, 11)',
+    'Adults: 2 Ages of children: 4 / 11',
+  ]) {
+    const parsed = parseBookingEmailDetails({
+      subject: 'New booking confirmation CHILD-2002',
+      rawText: `Guest name: Jane Doe Booking reference: CHILD-2002 Check-in: 2026-08-20 Check-out: 2026-08-22 Room type: Double Adults: 2 ${rawChildDetails} Total: THB 3000`,
+    })
+
+    assert.equal(parsed.details.children, 2)
+    assert.deepEqual(parsed.details.childAges, [4, 11])
+    assert.equal(parsed.reviewReason, null)
+  }
+})
+
+test('parser marks missing, mismatched, and invalid child ages as incomplete', () => {
+  const complete = parseBookingEmailDetails({
+    subject: 'New booking confirmation CHILD-3003',
+    rawText: 'Guest name: Jane Doe Booking reference: CHILD-3003 Check-in: 2026-08-20 Check-out: 2026-08-22 Room type: Double Adults: 2 Children: 2 Child ages: 4, 11 Total: THB 3000',
+  })
+  const cases = [
+    'Children: 1',
+    'Children: 2 Child age: 4',
+    'Children: 1 Child age: 18',
+  ]
+
+  for (const childDetails of cases) {
+    const parsed = parseBookingEmailDetails({
+      subject: 'New booking confirmation CHILD-3003',
+      rawText: `Guest name: Jane Doe Booking reference: CHILD-3003 Check-in: 2026-08-20 Check-out: 2026-08-22 Room type: Double Adults: 2 ${childDetails} Total: THB 3000`,
+    })
+    assert.match(parsed.reviewReason || '', /one valid age for every child/i)
+    assert.ok(parsed.confidence < complete.confidence)
+  }
+})
+
 for (const [name, fixtureOptions, approvalInput, message] of [
   [
     'deposit-only amount',

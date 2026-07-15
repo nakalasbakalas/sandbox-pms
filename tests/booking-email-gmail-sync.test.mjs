@@ -4,6 +4,7 @@ import test from 'node:test'
 import { URL } from 'node:url'
 
 import {
+  bookingEmailDeliveryAttemptPolicy,
   bookingEmailPubSubConfig,
   decodeBookingEmailPubSubEnvelope,
   processPendingBookingEmailDeliveries,
@@ -198,6 +199,30 @@ test('durable Pub/Sub insert is idempotent and duplicate delivery does not reset
   assert.equal(sourcePushUpdates, 2)
 })
 
+test('Gmail push source lookup is restricted to the configured SANDBOX property', async () => {
+  let sourceWhere = null
+  const prisma = {
+    bookingEmailSource: {
+      findFirst: async ({ where }) => {
+        sourceWhere = where
+        return null
+      },
+    },
+  }
+
+  await assert.rejects(
+    () => recordBookingEmailPushDelivery(prisma, {
+      pubsubMessageId: 'pubsub-foreign-property',
+      subscription: pubsubEnv.BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION,
+      notificationHistoryId: '123',
+      emailAddress: pubsubEnv.BOOKING_EMAIL_PRIMARY_MAILBOX,
+      publishedAt: new Date('2026-07-13T04:00:00.000Z'),
+    }),
+    (error) => error?.code === 'BOOKING_EMAIL_SOURCE_NOT_FOUND',
+  )
+  assert.equal(sourceWhere.property.is.code, 'SANDBOX')
+})
+
 test('history reconciliation can only call the PMS ingester in review-only mode', async () => {
   const source = {
     id: 'source-1',
@@ -211,6 +236,7 @@ test('history reconciliation can only call the PMS ingester in review-only mode'
   let ingestedInput = null
   const prisma = {
     bookingEmailSource: {
+      findFirst: async () => source,
       findUnique: async () => source,
       updateMany: async () => ({ count: 1 }),
     },
@@ -280,8 +306,8 @@ test('delivery processing reclaims an abandoned PROCESSING claim after the timeo
   const prisma = {
     bookingEmailPushDelivery: {
       findMany: async ({ where }) => {
-        assert.equal(where.OR[1].status, 'PROCESSING')
-        assert.deepEqual(where.OR[1].claimedAt.lt, new Date('2026-07-13T03:45:00.000Z'))
+        assert.equal(where.OR[2].status, 'PROCESSING')
+        assert.deepEqual(where.OR[2].claimedAt.lt, new Date('2026-07-13T03:45:00.000Z'))
         return [candidate]
       },
       updateMany: async ({ where }) => {
@@ -294,6 +320,7 @@ test('delivery processing reclaims an abandoned PROCESSING claim after the timeo
       },
     },
     bookingEmailSource: {
+      findFirst: async () => ({ id: candidate.sourceId, enabled: false }),
       findUnique: async () => ({ id: candidate.sourceId, enabled: false }),
     },
   }
@@ -305,9 +332,99 @@ test('delivery processing reclaims an abandoned PROCESSING claim after the timeo
   })
 
   assert.equal(claimWhere.id, candidate.id)
-  assert.equal(claimWhere.OR[1].status, 'PROCESSING')
+  assert.equal(claimWhere.OR[2].status, 'PROCESSING')
   assert.equal(completion.status, 'COALESCED')
   assert.equal(summary.coalesced, 1)
+})
+
+test('delivery attempt policy exposes no next attempt for permanent or exhausted failures', () => {
+  const now = new Date('2026-07-13T04:00:00.000Z')
+  const retry = bookingEmailDeliveryAttemptPolicy({ attempts: 1, retryable: true, maxAttempts: 3 }, {
+    now: () => now,
+    random: () => 0,
+  })
+  assert.equal(retry.terminal, false)
+  assert.ok(retry.nextAttemptAt instanceof Date)
+
+  const permanent = bookingEmailDeliveryAttemptPolicy({ attempts: 1, retryable: false, maxAttempts: 3 }, { now: () => now })
+  assert.equal(permanent.terminal, true)
+  assert.equal(permanent.terminalReason, 'non_retryable')
+  assert.equal(permanent.persistedAttempts, 3)
+  assert.equal(permanent.nextAttemptAt, null)
+
+  const exhausted = bookingEmailDeliveryAttemptPolicy({ attempts: 3, retryable: true, maxAttempts: 3 }, { now: () => now })
+  assert.equal(exhausted.terminal, true)
+  assert.equal(exhausted.terminalReason, 'attempts_exhausted')
+  assert.equal(exhausted.nextAttemptAt, null)
+})
+
+test('permanent and max-attempt Gmail delivery failures remain visible but are no longer claimable', async () => {
+  const now = new Date('2026-07-13T04:00:00.000Z')
+
+  for (const failure of [
+    { name: 'permanent', priorAttempts: 0, retryable: false, reason: 'non_retryable' },
+    { name: 'exhausted', priorAttempts: 2, retryable: true, reason: 'attempts_exhausted' },
+  ]) {
+    const candidate = {
+      id: `delivery-${failure.name}`,
+      sourceId: 'source-terminal',
+      pubsubMessageId: `message-${failure.name}`,
+      notificationHistoryId: '200',
+      publishedAt: now,
+      status: failure.priorAttempts ? 'FAILED' : 'PENDING',
+      claimedAt: null,
+      attempts: failure.priorAttempts,
+      availableAt: new Date(0),
+      createdAt: now,
+    }
+    const source = {
+      id: candidate.sourceId,
+      provider: 'GMAIL',
+      enabled: true,
+      mailbox: 'booking@sandboxhotel.com',
+      lastSyncCursor: '100',
+      consecutiveFailures: 0,
+      syncLeaseOwner: null,
+    }
+    let claimWhere = null
+    let failedUpdate = null
+    const prisma = {
+      bookingEmailPushDelivery: {
+        findMany: async ({ where }) => {
+          claimWhere = where
+          return [candidate]
+        },
+        updateMany: async () => ({ count: 1 }),
+        update: async ({ data }) => {
+          failedUpdate = data
+          return { ...candidate, ...data }
+        },
+      },
+      bookingEmailSource: {
+        findFirst: async () => source,
+        findUnique: async () => source,
+        updateMany: async () => ({ count: 1 }),
+      },
+    }
+    const oauthError = new Error(`OAuth ${failure.name} token=must-not-surface`)
+    oauthError.retryable = failure.retryable
+
+    const summary = await processPendingBookingEmailDeliveries(prisma, {
+      now: () => now,
+      deliveryMaxAttempts: 3,
+      getAccessToken: async () => { throw oauthError },
+      logger: { info() {}, warn() {}, error() {} },
+    })
+
+    assert.deepEqual(claimWhere.OR[0].attempts, { lt: 3 })
+    assert.deepEqual(claimWhere.OR[1].NOT, { lastError: { startsWith: '[terminal:' } })
+    assert.equal(summary.failed, 1)
+    assert.equal(failedUpdate.status, 'FAILED')
+    assert.equal(failedUpdate.attempts, 3)
+    assert.equal(failedUpdate.availableAt.toISOString(), now.toISOString())
+    assert.match(failedUpdate.lastError, new RegExp(`terminal:${failure.reason}`))
+    assert.doesNotMatch(failedUpdate.lastError, /must-not-surface/)
+  }
 })
 
 test('Gmail watch renewal skips healthy watches and rejects an invalid renewal response', async () => {
@@ -324,6 +441,7 @@ test('Gmail watch renewal skips healthy watches and rejects an invalid renewal r
   let healthyMutationCalled = false
   const healthyResult = await renewBookingEmailWatch({
     bookingEmailSource: {
+      findFirst: async () => healthySource,
       findUnique: async () => healthySource,
       updateMany: async () => {
         healthyMutationCalled = true
@@ -353,6 +471,7 @@ test('Gmail watch renewal skips healthy watches and rejects an invalid renewal r
   let failureRecorded = null
   const duePrisma = {
     bookingEmailSource: {
+      findFirst: async () => dueSource,
       findUnique: async () => dueSource,
       updateMany: async ({ data }) => {
         if (data.consecutiveFailures) failureRecorded = data
@@ -395,6 +514,7 @@ test('due Gmail watch renewal uses the configured topic and records its new high
   let watchUpdate = null
   const prisma = {
     bookingEmailSource: {
+      findFirst: async () => source,
       findUnique: async () => source,
       updateMany: async ({ data }) => {
         if (data.syncLeaseOwner) source.syncLeaseOwner = data.syncLeaseOwner
@@ -444,6 +564,7 @@ test('expired Gmail history cursor falls back to bounded reconciliation before c
   let committedCursor = null
   const prisma = {
     bookingEmailSource: {
+      findFirst: async () => source,
       findUnique: async () => source,
       updateMany: async ({ data }) => {
         if (data.syncLeaseOwner) source.syncLeaseOwner = data.syncLeaseOwner
@@ -523,6 +644,7 @@ test('out-of-order Pub/Sub cursors at or behind the committed Gmail cursor are c
       },
     },
     bookingEmailSource: {
+      findFirst: async () => source,
       findUnique: async () => source,
     },
   }
@@ -551,6 +673,7 @@ test('history traversal stops before an unbounded Gmail page chain can advance t
   let ingesterCalled = false
   const prisma = {
     bookingEmailSource: {
+      findFirst: async () => source,
       findUnique: async () => source,
       updateMany: async () => ({ count: 1 }),
     },

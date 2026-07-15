@@ -209,6 +209,29 @@ async function run() {
   assert.equal(enabled.batchLimit, 25)
   assert.equal(enabled.credentialMode, 'refresh_token')
 
+  const litePollingConflict = getBookingEmailSyncPolicy(bookingEmailEnv({
+    PMS_UI_VARIANT: 'lite',
+    CHANNEL_SYNC_QUEUE_BACKEND: 'lite_manual',
+  }))
+  assert.equal(litePollingConflict.enabled, false)
+  assert.equal(litePollingConflict.disabledReason, 'lite_requires_pubsub_reconciliation')
+  assert.equal(litePollingConflict.queueBackend, 'lite_manual')
+
+  const liteManualPollingConflict = getBookingEmailSyncPolicy(bookingEmailEnv({
+    PMS_UI_VARIANT: 'legacy',
+    CHANNEL_SYNC_QUEUE_BACKEND: 'lite_manual',
+  }))
+  assert.equal(liteManualPollingConflict.enabled, false)
+  assert.equal(liteManualPollingConflict.disabledReason, 'lite_requires_pubsub_reconciliation')
+
+  assert.throws(
+    () => getBookingEmailSyncPolicy(bookingEmailEnv({
+      PMS_UI_VARIANT: 'lite',
+      CHANNEL_SYNC_QUEUE_BACKEND: 'hotel_ops_legacy',
+    })),
+    /PMS_UI_VARIANT=lite requires CHANNEL_SYNC_QUEUE_BACKEND=lite_manual/,
+  )
+
   const bounded = getBookingEmailSyncPolicy(bookingEmailEnv({
     BOOKING_EMAIL_SYNC_INTERVAL_SECONDS: '2',
     BOOKING_EMAIL_SYNC_BATCH_LIMIT: '9999',
@@ -426,6 +449,27 @@ async function run() {
 
   const intervals = []
   const syncCalls = []
+  const liteIntervals = []
+  const liteScheduler = createHotelOpsScanScheduler({
+    env: bookingEmailEnv({
+      PMS_UI_VARIANT: 'lite',
+      CHANNEL_SYNC_QUEUE_BACKEND: 'lite_manual',
+    }),
+    prisma: {},
+    setIntervalFn: (callback, milliseconds) => {
+      const handle = { callback, milliseconds, unref() {} }
+      liteIntervals.push(handle)
+      return handle
+    },
+    clearIntervalFn: () => {},
+    logger: { log() {}, error() {} },
+  })
+  const liteStart = liteScheduler.start()
+  assert.equal(liteStart.bookingEmailStarted, false)
+  assert.equal(liteStart.status.bookingEmail.enabled, false)
+  assert.equal(liteStart.status.bookingEmail.disabledReason, 'lite_requires_pubsub_reconciliation')
+  assert.equal(liteIntervals.length, 0, 'Lite must not schedule the legacy near-live email poller')
+
   const scheduler = createHotelOpsScanScheduler({
     env: bookingEmailEnv(),
     prisma: {},

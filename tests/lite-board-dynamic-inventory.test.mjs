@@ -81,7 +81,7 @@ function reservationFixture({ id, confirmationCode, guestName, room, checkIn, ch
       lastName,
       nationality: null,
       idType: null,
-      idNumber: null,
+      idNumber: 'PASSPORT-3456',
       vipStatus: false,
       blacklisted: false,
     },
@@ -94,7 +94,26 @@ function reservationFixture({ id, confirmationCode, guestName, room, checkIn, ch
       operationalStatus: room.operationalStatus,
       currentStatus: room.currentStatus,
     },
-    folio: null,
+    folio: {
+      id: `folio-${id}`,
+      status: 'OPEN',
+      subtotalSatang: 360_000,
+      taxSatang: 0,
+      totalSatang: 360_000,
+      paidSatang: 100_000,
+      balanceSatang: 260_000,
+      charges: [],
+      payments: [{
+        id: `payment-${id}`,
+        amountSatang: 100_000,
+        method: 'CARD',
+        reference: 'CARD-REFERENCE-7890',
+        notes: 'Private reconciliation note',
+        processedBy: 'cashier-1',
+        createdAt: new Date('2026-01-01T01:00:00.000Z'),
+      }],
+      updatedAt: new Date('2026-01-01T01:00:00.000Z'),
+    },
   }
 }
 
@@ -225,4 +244,7 @@ test('Lite board includes a third room type and preserves non-overlapping segmen
     ],
   )
   assert.ok(familySegments[0].segmentEnd < familySegments[1].segmentStart)
+  assert.equal(Object.hasOwn(familySegments[0].guest, 'idNumberLast4'), false)
+  assert.equal(familySegments[0].folio.payments[0].reference, '••••7890')
+  assert.equal(Object.hasOwn(familySegments[0].folio.payments[0], 'notes'), false)
 })

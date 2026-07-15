@@ -596,6 +596,7 @@ test('completion rejects a pending task whose current mapping differs from its i
   }
   const prisma = {
     manualChannelTask: {
+      findFirst: async () => task,
       findUnique: async () => task,
       updateMany: async () => {
         updateCalled = true
@@ -672,7 +673,9 @@ test('manager retry safely supersedes the current failed revision and snapshots 
     },
     manualChannelTask: {
       findUnique: async ({ where }) => (where.id === task.id || where.activeKey === activeKey ? task : null),
-      findFirst: async () => ({ id: task.id, revision: task.revision }),
+      findFirst: async ({ where }) => (
+        where.id === task.id ? task : { id: task.id, revision: task.revision }
+      ),
       updateMany: async ({ where, data }) => {
         assert.equal(where.id, task.id)
         assert.equal(where.activeKey, activeKey)
@@ -720,4 +723,45 @@ test('manager retry safely supersedes the current failed revision and snapshots 
   assert.equal(audits.at(-1).changes.previousStatus, 'FAILED')
   assert.equal(audits.at(-1).changes.previousDesiredAvailability, 1)
   assert.equal(audits.at(-1).changes.desiredAvailability, 2)
+})
+
+test('manual task completion and reopen hide foreign-property task ids', async () => {
+  const taskQueries = []
+  let mutationCalled = false
+  const prisma = {
+    manualChannelTask: {
+      findFirst: async ({ where }) => {
+        taskQueries.push(where)
+        return null
+      },
+      updateMany: async () => {
+        mutationCalled = true
+        return { count: 1 }
+      },
+      create: async () => {
+        mutationCalled = true
+        return {}
+      },
+    },
+    $transaction: async (callback) => callback(prisma),
+  }
+
+  await assert.rejects(
+    () => completeManualChannelTask(prisma, 'foreign-task', {
+      revision: 1,
+      confirmedAvailability: 1,
+      notes: 'Foreign property boundary proof.',
+    }, manager),
+    (error) => error?.statusCode === 404,
+  )
+  await assert.rejects(
+    () => reopenManualChannelTask(prisma, 'foreign-task', {
+      reason: 'Foreign property boundary proof.',
+    }, manager),
+    (error) => error?.statusCode === 404,
+  )
+
+  assert.equal(taskQueries.length, 2)
+  for (const where of taskQueries) assert.equal(where.property.is.code, 'SANDBOX')
+  assert.equal(mutationCalled, false)
 })

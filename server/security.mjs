@@ -4,6 +4,8 @@ const DEFAULT_SESSION_HOURS = 8
 const PASSWORD_ITERATIONS = 310_000
 const PASSWORD_KEY_LENGTH = 32
 const PASSWORD_DIGEST = 'sha256'
+const MIN_SESSION_VERSION = 0
+const MAX_SESSION_VERSION = 2_147_483_647
 
 function base64UrlEncode(value) {
   const buffer = Buffer.isBuffer(value) ? value : Buffer.from(String(value))
@@ -52,15 +54,24 @@ function signPayload(payload) {
   return createHmac('sha256', getSessionSecret()).update(payload).digest('base64url')
 }
 
+function isValidSessionVersion(value) {
+  return Number.isInteger(value) && value >= MIN_SESSION_VERSION && value <= MAX_SESSION_VERSION
+}
+
 export function createSessionToken(user, options = {}) {
   const now = Math.floor(Date.now() / 1000)
   const expiresAt = now + Math.floor((options.hours ?? DEFAULT_SESSION_HOURS) * 60 * 60)
+  const sessionVersion = user.sessionVersion ?? MIN_SESSION_VERSION
+  if (!isValidSessionVersion(sessionVersion)) {
+    throw new TypeError('User sessionVersion must be a bounded non-negative integer.')
+  }
   const payload = base64UrlEncode(JSON.stringify({
     sub: user.id,
     email: user.email || null,
     username: user.username,
     role: user.role,
     name: `${user.firstName} ${user.lastName}`.trim(),
+    sessionVersion,
     iat: now,
     exp: expiresAt,
   }))
@@ -68,9 +79,11 @@ export function createSessionToken(user, options = {}) {
   return `${payload}.${signature}`
 }
 
-export function verifySessionToken(token) {
+export function verifySessionToken(token, options = {}) {
   if (!token || !token.includes('.')) return null
-  const [payload, signature] = token.split('.')
+  const parts = token.split('.')
+  if (parts.length !== 2) return null
+  const [payload, signature] = parts
   const expected = signPayload(payload)
   const expectedBuffer = Buffer.from(expected)
   const actualBuffer = Buffer.from(signature || '')
@@ -79,9 +92,19 @@ export function verifySessionToken(token) {
     return null
   }
 
-  const decoded = JSON.parse(base64UrlDecode(payload))
-  if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) {
+  let decoded
+  try {
+    decoded = JSON.parse(base64UrlDecode(payload))
+  } catch {
     return null
+  }
+  if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) return null
+  if (!Number.isInteger(decoded.exp) || decoded.exp < Math.floor(Date.now() / 1000)) {
+    return null
+  }
+  if (!isValidSessionVersion(decoded.sessionVersion)) {
+    if (options.allowLegacySessionVersion !== true) return null
+    decoded.sessionVersion = MIN_SESSION_VERSION
   }
   return decoded
 }

@@ -48,7 +48,7 @@ function reservation() {
       lastName: 'One',
       nationality: null,
       idType: null,
-      idNumber: null,
+      idNumber: 'PASSPORT-3456',
       vipStatus: false,
       blacklisted: false,
     },
@@ -61,7 +61,26 @@ function reservation() {
       standardOcc: 2,
     },
     assignedRoom: null,
-    folio: null,
+    folio: {
+      id: 'folio-1',
+      status: 'OPEN',
+      subtotalSatang: 200_000,
+      taxSatang: 0,
+      totalSatang: 200_000,
+      paidSatang: 50_000,
+      balanceSatang: 150_000,
+      charges: [],
+      payments: [{
+        id: 'payment-1',
+        amountSatang: 50_000,
+        method: 'BANK_TRANSFER',
+        reference: 'TRANSFER-REFERENCE-7890',
+        notes: 'Private reconciliation note',
+        processedBy: 'cashier-1',
+        createdAt: new Date('2026-07-14T01:30:00.000Z'),
+      }],
+      updatedAt: new Date('2026-07-14T01:30:00.000Z'),
+    },
   }
 }
 
@@ -141,6 +160,12 @@ test('Lite booking detail property-scopes lifecycle audit rows and returns only 
   const serializedTimeline = JSON.stringify(detail.auditTimeline)
   assert.doesNotMatch(serializedTimeline, /guest@example\.com|front\.desk@sandboxhotel\.com|4111111111111111|user-1|SECRET_GUEST_EMAIL/)
   assert.equal(Object.hasOwn(detail.auditTimeline.events[0], 'changes'), false)
+  assert.equal(Object.hasOwn(detail.reservation.guest, 'idNumberLast4'), false)
+  assert.equal(detail.reservation.folio.payments[0].reference, '••••7890')
+  assert.equal(Object.hasOwn(detail.reservation.folio.payments[0], 'notes'), false)
+
+  const identityDetail = await getLiteBookingDetail(prisma, 'reservation-1', { includeIdentitySuffix: true })
+  assert.equal(identityDetail.reservation.guest.idNumberLast4, '3456')
 })
 
 test('Lite booking detail does not read audit rows when the booking is outside the resolved property', async () => {

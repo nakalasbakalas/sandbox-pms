@@ -62,7 +62,17 @@ export function getBookingEmailSyncPolicy(env = process.env) {
   const intervalSeconds = boundedInteger(env.BOOKING_EMAIL_SYNC_INTERVAL_SECONDS, 120, 30, 3_600)
   const batchLimit = boundedInteger(env.BOOKING_EMAIL_SYNC_BATCH_LIMIT, 25, 1, 250)
   const credentials = bookingEmailGmailCredentialStatus(env)
-  const enabled = requested && credentials.configured
+  const uiVariant = String(env.PMS_UI_VARIANT || 'legacy').trim().toLowerCase()
+  const requestedQueueBackend = String(env.CHANNEL_SYNC_QUEUE_BACKEND || '').trim().toLowerCase()
+  const queueBackend = requestedQueueBackend || (uiVariant === 'lite' ? 'lite_manual' : 'hotel_ops_legacy')
+  if (!['lite_manual', 'hotel_ops_legacy'].includes(queueBackend)) {
+    throw new Error('CHANNEL_SYNC_QUEUE_BACKEND must be lite_manual or hotel_ops_legacy.')
+  }
+  if (uiVariant === 'lite' && queueBackend !== 'lite_manual') {
+    throw new Error('PMS_UI_VARIANT=lite requires CHANNEL_SYNC_QUEUE_BACKEND=lite_manual.')
+  }
+  const legacyPollingForbidden = uiVariant === 'lite' || queueBackend === 'lite_manual'
+  const enabled = requested && credentials.configured && !legacyPollingForbidden
 
   return {
     requested,
@@ -72,8 +82,12 @@ export function getBookingEmailSyncPolicy(env = process.env) {
     batchLimit,
     reviewOnly: true,
     operationalMutationsEnabled: false,
+    uiVariant,
+    queueBackend,
     disabledReason: enabled
       ? null
+      : requested && legacyPollingForbidden
+        ? 'lite_requires_pubsub_reconciliation'
       : !requested
         ? 'not_requested'
         : 'gmail_oauth_not_configured',

@@ -15,7 +15,7 @@ const actor = {
   role: 'HOUSEKEEPING',
 }
 
-function createFixture(currentStatus = 'VACANT_DIRTY', currentReservation = null) {
+function createFixture(currentStatus = 'VACANT_DIRTY', currentReservation = null, { failCas = false } = {}) {
   const roomType = {
     id: 'room-type-housekeeping',
     name: 'Housekeeping Test Room',
@@ -30,6 +30,7 @@ function createFixture(currentStatus = 'VACANT_DIRTY', currentReservation = null
     currentStatus,
     currentReservation,
     notes: null,
+    updatedAt: new Date('2026-07-15T00:00:00.000Z'),
     roomType,
   }
   const statusLogs = []
@@ -38,9 +39,19 @@ function createFixture(currentStatus = 'VACANT_DIRTY', currentReservation = null
   const tx = {
     room: {
       findUnique: async () => ({ ...room, roomType }),
-      update: async ({ data }) => {
-        room = { ...room, ...data }
-        return { ...room, roomType }
+      updateMany: async ({ where, data }) => {
+        if (
+          failCas
+          || where.id !== room.id
+          || where.updatedAt?.toISOString() !== room.updatedAt.toISOString()
+          || where.currentStatus !== room.currentStatus
+          || where.currentReservation !== room.currentReservation
+          || where.operationalStatus !== room.operationalStatus
+        ) {
+          return { count: 0 }
+        }
+        room = { ...room, ...data, updatedAt: new Date(room.updatedAt.getTime() + 1_000) }
+        return { count: 1 }
       },
     },
     roomStatusLog: {
@@ -148,6 +159,19 @@ test('maintenance requires an operational reason before any room mutation', asyn
   )
   assert.equal(fixture.currentRoom().currentStatus, 'VACANT_CLEAN')
   assert.equal(fixture.currentRoom().operationalStatus, 'AVAILABLE')
+  assert.equal(fixture.statusLogs.length, 0)
+  assert.equal(fixture.audits.length, 0)
+})
+
+test('housekeeping rejects a stale room snapshot instead of overwriting a concurrent check-in', async () => {
+  const fixture = createFixture('VACANT_CLEAN', null, { failCas: true })
+
+  await assert.rejects(
+    updateHousekeepingStatus(fixture.prisma, 'room-housekeeping', 'INSPECTED', actor),
+    (error) => error?.statusCode === 409 && /changed state before housekeeping/i.test(error.message),
+  )
+  assert.equal(fixture.currentRoom().currentStatus, 'VACANT_CLEAN')
+  assert.equal(fixture.currentRoom().currentReservation, null)
   assert.equal(fixture.statusLogs.length, 0)
   assert.equal(fixture.audits.length, 0)
 })

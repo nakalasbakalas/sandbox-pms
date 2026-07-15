@@ -334,6 +334,10 @@ model Charge {
   totalSatang        Int?
   void               Boolean            @default(false)
   voidReason         String?
+  clientRequestId    String?            @unique
+  voidRequestId      String?            @unique
+  voidedAt           DateTime?
+  voidedBy           String?
   createdBy          String
   createdAt          DateTime           @default(now())
 
@@ -353,12 +357,23 @@ enum ChargeCategory {
   OTHER
 }
 
+enum PaymentEntryKind {
+  PAYMENT
+  REVERSAL
+}
+
 model Payment {
   id                   String             @id @default(cuid())
   folioId              String
   folio                Folio              @relation(fields: [folioId], references: [id], onDelete: Cascade)
   amount               Float
   amountSatang         Int?
+  entryKind            PaymentEntryKind   @default(PAYMENT)
+  reversesPaymentId    String?
+  reversesPayment      Payment?           @relation("PaymentReversals", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversalEntries      Payment[]          @relation("PaymentReversals")
+  reversalReason       String?
+  clientRequestId      String?            @unique
   method               PaymentMethod
   reference            String?
   referenceFingerprint String?            @unique
@@ -370,6 +385,7 @@ model Payment {
 
   @@index([folioId])
   @@index([reference])
+  @@index([reversesPaymentId])
 }
 
 enum PaymentMethod {
@@ -606,6 +622,7 @@ model User {
   active              Boolean   @default(true)
   failedLoginAttempts Int       @default(0)
   lockedAt            DateTime?
+  sessionVersion      Int       @default(0)
   lastLogin           DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt

@@ -149,6 +149,8 @@ const RESERVATION_SELECT = {
           totalSatang: true,
           void: true,
           voidReason: true,
+          voidedAt: true,
+          voidedBy: true,
           createdBy: true,
           createdAt: true,
         },
@@ -158,9 +160,11 @@ const RESERVATION_SELECT = {
         select: {
           id: true,
           amountSatang: true,
+          entryKind: true,
+          reversesPaymentId: true,
+          reversalReason: true,
           method: true,
           reference: true,
-          notes: true,
           processedBy: true,
           createdAt: true,
         },
@@ -434,21 +438,37 @@ function mapRoom(room) {
   }
 }
 
-function mapGuest(guest) {
+function mapGuest(guest, options = {}) {
   const firstName = String(guest.firstName || '').trim()
   const lastName = String(guest.lastName || '').trim()
+  const displayName = [firstName, lastName].filter(Boolean).join(' ') || 'Guest'
+  if (options.paymentReconciliationOnly) {
+    return {
+      id: guest.id,
+      displayName,
+    }
+  }
   return {
     id: guest.id,
     firstName,
     lastName,
-    displayName: [firstName, lastName].filter(Boolean).join(' ') || 'Guest',
+    displayName,
     nationality: guest.nationality || null,
     idType: guest.idType || null,
     identityComplete: Boolean(String(guest.nationality || '').trim() && String(guest.idNumber || '').trim()),
-    idNumberLast4: guest.idNumber ? String(guest.idNumber).slice(-4) : null,
+    ...(options.includeIdentitySuffix
+      ? { idNumberLast4: guest.idNumber ? String(guest.idNumber).slice(-4) : null }
+      : {}),
     vip: Boolean(guest.vipStatus),
     blacklisted: Boolean(guest.blacklisted),
   }
+}
+
+function maskedPaymentReference(value) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return null
+  if (normalized.length <= 4) return '[masked]'
+  return `••••${normalized.slice(-4)}`
 }
 
 function mapFolio(folio) {
@@ -477,15 +497,19 @@ function mapFolio(folio) {
       totalSatang: storedMoneySatang(charge.totalSatang, 'charge total'),
       void: Boolean(charge.void),
       voidReason: charge.voidReason || null,
+      voidedAt: isoTimestamp(charge.voidedAt),
+      voidedBy: charge.voidedBy || null,
       createdBy: charge.createdBy,
       createdAt: isoTimestamp(charge.createdAt),
     })),
     payments: (folio.payments || []).map((payment) => ({
       id: payment.id,
       amountSatang: storedMoneySatang(payment.amountSatang, 'payment amount'),
+      entryKind: payment.entryKind || 'PAYMENT',
+      reversesPaymentId: payment.reversesPaymentId || null,
+      reversalReason: payment.reversalReason || null,
       method: payment.method,
-      reference: payment.reference || null,
-      notes: payment.notes || null,
+      reference: maskedPaymentReference(payment.reference),
       processedBy: payment.processedBy,
       createdAt: isoTimestamp(payment.createdAt),
     })),
@@ -505,7 +529,7 @@ function mapAssignedRoom(room) {
   }
 }
 
-function mapReservation(reservation) {
+function mapReservation(reservation, options = {}) {
   const checkIn = isoDateKey(reservation.checkIn)
   const checkOut = isoDateKey(reservation.checkOut)
   return {
@@ -524,8 +548,8 @@ function mapReservation(reservation) {
     providerCode: safeProviderCode(reservation.providerCode),
     channelRef: reservation.channelRef || null,
     externalReservationId: reservation.externalReservationId || null,
-    sourceEmailEventId: reservation.sourceEmailEventId || null,
-    guest: mapGuest(reservation.guest),
+    ...(options.paymentReconciliationOnly ? {} : { sourceEmailEventId: reservation.sourceEmailEventId || null }),
+    guest: mapGuest(reservation.guest, options),
     roomType: mapRoomType(reservation.roomType),
     assignedRoomId: reservation.assignedRoomId || null,
     assignedRoom: mapAssignedRoom(reservation.assignedRoom),
@@ -662,9 +686,10 @@ export async function getLiteFrontDesk(prisma, input = {}) {
     loadPendingReviewEmailMetadata(prisma, property.id),
   ])
 
-  const arrivals = arrivalRows.map(mapReservation)
-  const departures = departureRows.map(mapReservation)
-  const inHouse = inHouseRows.map(mapReservation)
+  const reservationOptions = { includeIdentitySuffix: true }
+  const arrivals = arrivalRows.map((reservation) => mapReservation(reservation, reservationOptions))
+  const departures = departureRows.map((reservation) => mapReservation(reservation, reservationOptions))
+  const inHouse = inHouseRows.map((reservation) => mapReservation(reservation, reservationOptions))
 
   return {
     property: mapProperty(property),
@@ -699,7 +724,7 @@ function bookingDateFilters(filters) {
   return { from, to }
 }
 
-export function bookingSearchWhere(query) {
+export function bookingSearchWhere(query, options = {}) {
   if (!query) return undefined
   const contains = { contains: query, mode: 'insensitive' }
   const guestNameTerms = String(query).trim().split(/\s+/).filter(Boolean)
@@ -729,8 +754,7 @@ export function bookingSearchWhere(query) {
           OR: [
             { firstName: contains },
             { lastName: contains },
-            { email: contains },
-            { phone: contains },
+            ...(options.paymentReconciliationOnly ? [] : [{ email: contains }, { phone: contains }]),
           ],
         },
       },
@@ -739,7 +763,7 @@ export function bookingSearchWhere(query) {
   ]
 }
 
-export async function listLiteBookings(prisma, input = {}) {
+export async function listLiteBookings(prisma, input = {}, options = {}) {
   requirePrisma(prisma)
   const filters = normalizeFilterObject(input)
   assertAllowedFilters(filters, new Set(['from', 'to', 'status', 'source', 'query', 'cursor', 'limit']))
@@ -765,7 +789,7 @@ export async function listLiteBookings(prisma, input = {}) {
     source: sources ? { in: sources } : undefined,
     checkOut: from ? { gt: dateFromKey(from) } : undefined,
     checkIn: to ? { lt: dateFromKey(to) } : undefined,
-    OR: bookingSearchWhere(query),
+    OR: bookingSearchWhere(query, options),
   }
 
   const [rows, total, pendingReviewEmail] = await Promise.all([
@@ -778,7 +802,7 @@ export async function listLiteBookings(prisma, input = {}) {
       take: limit + 1,
     }),
     prisma.reservation.count({ where }),
-    loadPendingReviewEmailMetadata(prisma, property.id),
+    options.paymentReconciliationOnly ? Promise.resolve(null) : loadPendingReviewEmailMetadata(prisma, property.id),
   ])
 
   const hasMore = rows.length > limit
@@ -798,12 +822,12 @@ export async function listLiteBookings(prisma, input = {}) {
       hasMore,
       nextCursor: hasMore ? pageRows.at(-1)?.id || null : null,
     },
-    items: pageRows.map(mapReservation),
-    pendingReviewEmail,
+    items: pageRows.map((reservation) => mapReservation(reservation, options)),
+    ...(pendingReviewEmail ? { pendingReviewEmail } : {}),
   }
 }
 
-export async function getLiteBookingDetail(prisma, reservationId) {
+export async function getLiteBookingDetail(prisma, reservationId, options = {}) {
   requirePrisma(prisma)
   if (!prisma.reservationLog || !prisma.user) throw new TypeError('ReservationLog and User models are required for Lite booking detail.')
   const id = parseReservationId(reservationId)
@@ -813,6 +837,15 @@ export async function getLiteBookingDetail(prisma, reservationId) {
     select: RESERVATION_SELECT,
   })
   if (!reservation) throw new PmsValidationError('Booking was not found in this property.', 404)
+  if (options.paymentReconciliationOnly) {
+    return {
+      property: mapProperty(property),
+      reservation: mapReservation(reservation, {
+        paymentReconciliationOnly: true,
+        includeIdentitySuffix: false,
+      }),
+    }
+  }
 
   const auditWhere = {
     reservationId: reservation.id,
@@ -856,7 +889,9 @@ export async function getLiteBookingDetail(prisma, reservationId) {
 
   return {
     property: mapProperty(property),
-    reservation: mapReservation(reservation),
+    reservation: mapReservation(reservation, {
+      includeIdentitySuffix: options.includeIdentitySuffix === true,
+    }),
     auditTimeline: {
       order: 'newest_first',
       total,
@@ -1181,6 +1216,23 @@ function groupedStatusCount(rows, status) {
   return Number(row?._count?._all || 0)
 }
 
+function mapChannelSyncHealth(source, pendingDeliveries, failedDeliveries, credentialStatus, pubsubConfig, now = new Date()) {
+  return {
+    enabled: Boolean(source?.enabled && pubsubConfig.enabled),
+    credentialReady: Boolean(credentialStatus.configured),
+    watchReady: Boolean(source?.watchExpiresAt && new Date(source.watchExpiresAt).getTime() > now.getTime()),
+    lastSyncAt: isoTimestamp(source?.lastSyncAt),
+    lastPushAt: isoTimestamp(source?.lastPushAt),
+    lastReconciledAt: isoTimestamp(source?.lastReconciledAt),
+    watchExpiresAt: isoTimestamp(source?.watchExpiresAt),
+    lastError: source?.lastError || null,
+    pendingDeliveries: Number(pendingDeliveries || 0),
+    failedDeliveries: Number(failedDeliveries || 0),
+    consecutiveFailures: Number(source?.consecutiveFailures || 0),
+    missingConfiguration: [...new Set([...(credentialStatus.missing || []), ...(pubsubConfig.missing || [])])],
+  }
+}
+
 /**
  * Channel Desk is deliberately a composite read. It exposes review work and
  * manual Extranet tasks, but never OTA credentials or email bodies.
@@ -1315,20 +1367,7 @@ export async function getLiteChannelDesk(prisma, options = {}) {
   const credentialStatus = normalized.credentialStatus && typeof normalized.credentialStatus === 'object' ? normalized.credentialStatus : {}
 
   return {
-    syncHealth: {
-      enabled: Boolean(source?.enabled && pubsubConfig.enabled),
-      credentialReady: Boolean(credentialStatus.configured),
-      watchReady: Boolean(source?.watchExpiresAt && new Date(source.watchExpiresAt).getTime() > Date.now()),
-      lastSyncAt: isoTimestamp(source?.lastSyncAt),
-      lastPushAt: isoTimestamp(source?.lastPushAt),
-      lastReconciledAt: isoTimestamp(source?.lastReconciledAt),
-      watchExpiresAt: isoTimestamp(source?.watchExpiresAt),
-      lastError: source?.lastError || null,
-      pendingDeliveries: Number(pendingDeliveries || 0),
-      failedDeliveries: Number(failedDeliveries || 0),
-      consecutiveFailures: Number(source?.consecutiveFailures || 0),
-      missingConfiguration: [...new Set([...(credentialStatus.missing || []), ...(pubsubConfig.missing || [])])],
-    },
+    syncHealth: mapChannelSyncHealth(source, pendingDeliveries, failedDeliveries, credentialStatus, pubsubConfig, now),
     reviewEvents: reviewEvents.map((event) => mapChannelDeskEvent(event)),
     connections,
     roomTypes: roomTypes.map((roomType) => ({
@@ -1391,6 +1430,73 @@ export async function getLiteChannelDesk(prisma, options = {}) {
   }
 }
 
+/**
+ * Settings uses a bounded projection so opening it never caches reservation,
+ * booking-email review, or manual task rows merely to show configuration.
+ */
+export async function getLiteSettings(prisma, options = {}) {
+  requirePrisma(prisma)
+  const normalized = normalizeFilterObject(options)
+  assertAllowedFilters(normalized, new Set(['credentialStatus', 'pubsubConfig', 'now']))
+  const now = normalized.now === undefined ? new Date() : new Date(normalized.now)
+  if (Number.isNaN(now.getTime())) throw new PmsValidationError('Settings now must be a valid timestamp.')
+  const property = await resolveProperty(prisma)
+  const [roomTypes, rooms, source, storedConnections, pendingDeliveries, failedDeliveries] = await Promise.all([
+    prisma.roomType.findMany({
+      where: { propertyId: property.id, rooms: { some: {} } },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        baseRateSatang: true,
+        maxOccupancy: true,
+        standardOcc: true,
+        _count: { select: { rooms: true } },
+      },
+      orderBy: [{ code: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.room.findMany({
+      where: { propertyId: property.id },
+      select: ROOM_SELECT,
+      orderBy: [{ floor: 'asc' }, { number: 'asc' }],
+    }),
+    prisma.bookingEmailSource.findFirst({
+      where: { propertyId: property.id, provider: 'GMAIL', enabled: true },
+      orderBy: [{ createdAt: 'asc' }],
+    }),
+    prisma.manualChannelConnection.findMany({
+      where: { propertyId: property.id },
+      include: {
+        mappings: {
+          include: { roomType: { select: { id: true, name: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: { providerCode: 'asc' },
+    }),
+    prisma.bookingEmailPushDelivery?.count?.({
+      where: { source: { propertyId: property.id }, status: { in: ['PENDING', 'PROCESSING'] } },
+    }) || 0,
+    prisma.bookingEmailPushDelivery?.count?.({
+      where: { source: { propertyId: property.id }, status: 'FAILED' },
+    }) || 0,
+  ])
+  const credentialStatus = normalized.credentialStatus && typeof normalized.credentialStatus === 'object' ? normalized.credentialStatus : {}
+  const pubsubConfig = normalized.pubsubConfig && typeof normalized.pubsubConfig === 'object' ? normalized.pubsubConfig : {}
+  const connectionByProvider = new Map(storedConnections.map((connection) => [connection.providerCode, connection]))
+
+  return {
+    property: mapProperty(property),
+    roomTypes: roomTypes.map((roomType) => ({
+      ...mapRoomType(roomType),
+      roomCount: Number(roomType._count?.rooms || 0),
+    })),
+    rooms: rooms.map(mapRoom),
+    syncHealth: mapChannelSyncHealth(source, pendingDeliveries, failedDeliveries, credentialStatus, pubsubConfig, now),
+    connections: LITE_MANUAL_CHANNELS.map((fallback) => mapManualConnection(connectionByProvider.get(fallback.providerCode), fallback)),
+  }
+}
+
 function safeReleaseIdentifier(value, maximumLength = 120) {
   if (value === undefined || value === null) return null
   const normalized = String(value).trim()
@@ -1430,7 +1536,7 @@ export function getLiteVersion(options = {}) {
     assetIdentifier: safeReleaseIdentifier(env.LITE_ASSET_IDENTIFIER || env.ASSET_IDENTIFIER),
     releaseId: safeReleaseIdentifier(env.RENDER_SERVICE_ID || env.RELEASE_ID),
     serviceName: safeReleaseIdentifier(env.RENDER_SERVICE_NAME),
-    environment: safeReleaseIdentifier(env.NODE_ENV, 32) || 'development',
+    environment: safeReleaseIdentifier(env.PMS_DEPLOYMENT_TIER || env.NODE_ENV, 32) || 'development',
     generatedAt: now.toISOString(),
   }
 }

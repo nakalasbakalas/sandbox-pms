@@ -42,7 +42,6 @@ const reservationBookingEmailEventSelect = {
   sourceId: true,
   sourceName: true,
   sourceMailbox: true,
-  sourceMessageId: true,
   sender: true,
   subject: true,
   receivedAt: true,
@@ -63,7 +62,6 @@ const reservationBookingEmailEventSelect = {
   completedAction: true,
   reviewReason: true,
   errorReason: true,
-  rawEmailUrl: true,
   reservationId: true,
   duplicateOfEventId: true,
   processedAt: true,
@@ -121,6 +119,29 @@ function actorName(actor) {
 function normalizeNullableString(value) {
   const trimmed = String(value || '').trim()
   return trimmed || null
+}
+
+async function serializableIdempotentTransaction(prisma, callback) {
+  try {
+    return await serializableTransaction(prisma, callback)
+  } catch (error) {
+    // A concurrent request with the same unique client key may commit between
+    // our replay lookup and insert. Re-running makes the committed row visible
+    // so the callback can return an exact replay or reject a payload conflict.
+    if (error?.code !== 'P2002') throw error
+    return serializableTransaction(prisma, callback)
+  }
+}
+
+function normalizeOptionalClientRequestId(input, label) {
+  if (!Object.hasOwn(input || {}, 'clientRequestId')) return null
+  const clientRequestId = normalizeNullableString(input.clientRequestId)
+  if (!clientRequestId) throw new PmsValidationError(`${label} client request id must not be blank.`)
+  return clientRequestId
+}
+
+function idempotencyConflict(label) {
+  throw new PmsValidationError(`${label} client request id was already used with different details.`, 409)
 }
 
 function moneyValidationError(error) {
@@ -340,7 +361,7 @@ export function buildFolioMoneyFields(charges, payments, { taxSatang = 0 } = {})
     .filter((charge) => !charge.void)
     .map((charge) => storedMoneyPair(charge, 'totalSatang', 'total', 'Charge total', { minimum: 0 }).satang)
   const paymentValues = (Array.isArray(payments) ? payments : [])
-    .map((payment) => storedMoneyPair(payment, 'amountSatang', 'amount', 'Payment amount', { minimum: 0 }).satang)
+    .map((payment) => storedMoneyPair(payment, 'amountSatang', 'amount', 'Payment amount', { minimum: MONEY_SATANG_MIN }).satang)
   let subtotalValue
   let paidValue
   let totalValue
@@ -357,7 +378,7 @@ export function buildFolioMoneyFields(charges, payments, { taxSatang = 0 } = {})
   const subtotal = moneyPairFromSatang(subtotalValue, 'Folio subtotal', { minimum: 0 })
   const tax = moneyPairFromSatang(taxSatang, 'Folio tax', { minimum: 0 })
   const total = moneyPairFromSatang(totalValue, 'Folio total', { minimum: 0 })
-  const paid = moneyPairFromSatang(paidValue, 'Folio paid', { minimum: 0 })
+  const paid = moneyPairFromSatang(paidValue, 'Folio paid', { minimum: MONEY_SATANG_MIN })
   const balance = moneyPairFromSatang(balanceValue, 'Folio balance', { minimum: MONEY_SATANG_MIN })
   return {
     subtotal: subtotal.thb,
@@ -646,11 +667,13 @@ function validateSetupPayload(input) {
 }
 
 async function getUserBySession(tx, session) {
-  if (!session?.sub) return null
+  if (!session?.sub || !Number.isInteger(session.sessionVersion)) return null
   return tx.user.findFirst({
     where: {
       id: session.sub,
       active: true,
+      lockedAt: null,
+      sessionVersion: session.sessionVersion,
     },
   })
 }
@@ -1313,6 +1336,37 @@ function hasNonBookingOperationalSignal(text) {
   return /\b(account security|security update|two-factor authentication|new sign-?in|sign(?:ed)? in from a new device|performance report|weekly performance report|partner hub|invoice\b|boost campaigns|phishing|market manager)\b/i.test(String(text || ''))
 }
 
+function parseBookingEmailChildAges(input, parsedInput, combined) {
+  const structured = input.childAges ?? parsedInput.childAges
+  const structuredSupplied = structured !== undefined && structured !== null
+  if (structuredSupplied) {
+    const rawStructuredAges = Array.isArray(structured)
+      ? structured
+      : typeof structured === 'string'
+        ? structured.match(/\d{1,2}/g) || []
+        : null
+    if (!rawStructuredAges || (typeof structured === 'string' && rawStructuredAges.length === 0)) {
+      return { ages: [], supplied: true, invalid: true }
+    }
+    const ages = rawStructuredAges.map(Number)
+    const invalid = ages.some((age) => !Number.isInteger(age) || age < 0 || age > 17)
+    return { ages: invalid ? [] : ages, supplied: true, invalid }
+  }
+
+  const ageList = String(combined || '').match(
+    /\b(?:child(?:ren)?['’]?\s*ages?|ages?\s+of\s+(?:the\s+)?children)\s*[:#-]?\s*(\d{1,2}(?:\s*(?:,|\/|&|and)\s*\d{1,2})*)/i,
+  )?.[1]
+    || String(combined || '').match(
+      /\bchildren\s*[:#-]?\s*\d+\s*\(\s*ages?\s*[:#-]?\s*(\d{1,2}(?:\s*(?:,|\/|&|and)\s*\d{1,2})*)\s*\)/i,
+    )?.[1]
+    || String(combined || '').match(/\bchild\s*\(\s*(\d{1,2})\s*(?:years?|yrs?)?\s*(?:old)?\s*\)/i)?.[1]
+  if (!ageList) return { ages: [], supplied: false, invalid: false }
+  const rawAges = ageList.match(/\d{1,2}/g) || []
+  const ages = rawAges.map(Number)
+  const invalid = ages.some((age) => !Number.isInteger(age) || age < 0 || age > 17)
+  return { ages: invalid ? [] : ages, supplied: true, invalid }
+}
+
 export function parseBookingEmailDetails(input = {}) {
   const parsedInput = safeJsonObject(input.parsedDetails)
   const rawText = String(input.rawText || input.body || input.snippet || '')
@@ -1344,9 +1398,12 @@ export function parseBookingEmailDetails(input = {}) {
     || (/\bdouble\b/i.test(combined) ? 'DOUBLE' : /\btwin\b/i.test(combined) ? 'TWIN' : undefined)
   const moneyCandidates = parseMoneyCandidates(combined)
   const rawAdults = input.adults ?? parsedInput.adults ?? combined.match(/\b(?:adults?)\s*[:#-]?\s*(\d+)/i)?.[1]
-  const rawChildren = input.children ?? parsedInput.children ?? combined.match(/\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1]
+  const rawChildren = input.children ?? parsedInput.children ?? combined.match(/(?<!of\s)(?<!the\s)\b(?:children|kids?)\s*[:#-]?\s*(\d+)/i)?.[1]
+  const parsedChildAges = parseBookingEmailChildAges(input, parsedInput, combined)
   const adults = rawAdults === undefined ? undefined : Number(rawAdults)
-  const children = rawChildren === undefined ? undefined : Number(rawChildren)
+  const children = rawChildren === undefined
+    ? parsedChildAges.supplied && !parsedChildAges.invalid ? parsedChildAges.ages.length : undefined
+    : Number(rawChildren)
   const paymentStatus = normalizeNullableString(input.paymentStatus || parsedInput.paymentStatus)
     || (/\b(payment received|paid in full|fully paid|prepaid)\b/i.test(combined) ? 'PAID' : /\bdeposit\b/i.test(combined) ? 'DEPOSIT' : null)
   const newBookingSignal = /\b(new booking|booking confirmation|reservation confirmation|confirmed booking|confirmed reservation)\b/i.test(combined)
@@ -1414,6 +1471,7 @@ export function parseBookingEmailDetails(input = {}) {
     roomType,
     adults: Number.isInteger(adults) && adults > 0 ? adults : undefined,
     children: Number.isInteger(children) && children >= 0 ? children : undefined,
+    childAges: parsedChildAges.supplied && !parsedChildAges.invalid ? parsedChildAges.ages : undefined,
     amount: Number.isFinite(amount) && amount > 0 ? roundMoney(amount) : undefined,
     amountKind,
     amountAmbiguous: amountAmbiguous || undefined,
@@ -1431,12 +1489,20 @@ export function parseBookingEmailDetails(input = {}) {
   if (details.roomType) confidence += 0.1
   if (details.amount) confidence += 0.05
   if (eventType !== 'UNKNOWN') confidence += 0.05
+  const childAgesComplete = details.children === undefined
+    ? !parsedChildAges.supplied
+    : details.children === 0
+      ? !parsedChildAges.supplied || details.childAges?.length === 0
+      : !parsedChildAges.invalid && details.childAges?.length === details.children
+  if (details.children > 0 && childAgesComplete) confidence += 0.02
+  if (!childAgesComplete) confidence -= 0.15
 
   const missing = []
   if (eventType === 'UNKNOWN') missing.push('event type')
   if (eventType === 'NEW_BOOKING' && !details.guestName) missing.push('guest name')
   if (eventType === 'NEW_BOOKING' && (!details.checkIn || !details.checkOut)) missing.push('stay dates')
   if (eventType === 'NEW_BOOKING' && !details.roomType) missing.push('room type')
+  if (!childAgesComplete) missing.push('one valid age for every child')
   if (details.amount && !details.currency) missing.push('amount currency')
   if (details.amountAmbiguous) missing.push('unambiguous amount')
   if ((eventType === 'NEW_BOOKING' || eventType === 'MODIFICATION') && details.amount && details.amountKind !== 'STAY_TOTAL') {
@@ -1454,7 +1520,7 @@ export function parseBookingEmailDetails(input = {}) {
     eventType,
     channelRef,
     details,
-    confidence: Math.min(0.99, roundMoney(confidence)),
+    confidence: Math.max(0, Math.min(0.99, roundMoney(confidence))),
     reviewReason: missing.length > 0 ? `Missing ${missing.join(', ')}.` : null,
   }
 }
@@ -1535,12 +1601,9 @@ function bookingEmailEventResponse(event) {
     completedAction: event.completedAction || undefined,
     reviewReason: event.reviewReason || undefined,
     errorReason: event.errorReason || undefined,
-    rawEmailUrl: event.rawEmailUrl || undefined,
     reservationId: event.reservationId || undefined,
     reservationConfirmation: event.reservation?.confirmationCode || undefined,
     duplicateOfEventId: event.duplicateOfEventId || undefined,
-    sourceEmailId: event.sourceMessageId || undefined,
-    parsedDetails,
     createdAt: isoOrUndefined(event.createdAt),
     updatedAt: isoOrUndefined(event.updatedAt),
   }
@@ -2202,12 +2265,21 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
 }
 
 async function assertLatestBookingEmailLifecycleEvent(tx, event, reservation, label) {
+  const providerCode = normalizeNullableString(event.providerCode || reservation.providerCode)?.toLowerCase()
+  const externalReservationId = normalizeNullableString(
+    event.externalReservationId || event.channelRef || reservation.externalReservationId,
+  )
+  const lifecycleScope = [{ reservationId: reservation.id }]
+  if (providerCode && externalReservationId) {
+    lifecycleScope.push({ providerCode, externalReservationId })
+  }
   const conflictingEvent = await tx.bookingEmailEvent.findFirst({
     where: {
       id: { not: event.id },
       propertyId: event.propertyId,
-      reservationId: reservation.id,
-      status: 'PROCESSED',
+      OR: lifecycleScope,
+      status: { in: ['NEEDS_REVIEW', 'ERROR', 'PROCESSED'] },
+      legacyReadOnly: false,
       eventType: { in: ['MODIFICATION', 'CANCELLATION'] },
       receivedAt: { gte: event.receivedAt },
     },
@@ -2218,13 +2290,14 @@ async function assertLatestBookingEmailLifecycleEvent(tx, event, reservation, la
     select: {
       id: true,
       eventType: true,
+      status: true,
       receivedAt: true,
     },
   })
 
   if (conflictingEvent) {
     const error = new PmsValidationError(
-      `${label} cannot be applied because a same-time or newer provider modification/cancellation has already been processed. Review the provider timeline and reject or reprocess the stale event.`,
+      `${label} cannot be applied because a same-time or newer provider modification/cancellation still exists in the actionable lifecycle. Review the provider timeline and reject, process, or reprocess the stale event.`,
       409,
     )
     error.bookingEmailLifecycleDenialAudit = {
@@ -2234,6 +2307,7 @@ async function assertLatestBookingEmailLifecycleEvent(tx, event, reservation, la
       attemptedReceivedAt: event.receivedAt.toISOString(),
       conflictingEventId: conflictingEvent.id,
       conflictingEventType: conflictingEvent.eventType,
+      conflictingEventStatus: conflictingEvent.status,
       conflictingReceivedAt: conflictingEvent.receivedAt.toISOString(),
     }
     throw error
@@ -2394,19 +2468,49 @@ async function ensureRoomTypeCapacity(tx, propertyId, roomTypeId, checkInKey, ch
     throw new PmsValidationError('No sellable rooms are configured for this room type.')
   }
 
+  const checkedAt = new Date()
   for (const dateKey of stayDates(checkInKey, checkOutKey)) {
-    const reserved = await tx.reservation.count({
-      where: {
-        propertyId,
-        roomTypeId,
-        id: excludeReservationId ? { not: excludeReservationId } : undefined,
-        status: { in: activeReservationStatuses() },
-        checkIn: { lt: dateFromKey(nextDateKey(dateKey)) },
-        checkOut: { gt: dateFromKey(dateKey) },
-      },
-    })
+    const date = dateFromKey(dateKey)
+    const exclusiveEnd = dateFromKey(nextDateKey(dateKey))
+    const [reserved, holds, blocks] = await Promise.all([
+      tx.reservation.count({
+        where: {
+          propertyId,
+          roomTypeId,
+          id: excludeReservationId ? { not: excludeReservationId } : undefined,
+          status: { in: activeReservationStatuses() },
+          checkIn: { lt: exclusiveEnd },
+          checkOut: { gt: date },
+        },
+      }),
+      tx.inventoryHold.findMany({
+        where: {
+          propertyId,
+          roomTypeId,
+          status: 'ACTIVE',
+          expiresAt: { gt: checkedAt },
+          checkIn: { lt: exclusiveEnd },
+          checkOut: { gt: date },
+        },
+        select: { id: true },
+      }),
+      tx.roomDateInventory.findMany({
+        where: {
+          propertyId,
+          date,
+          status: { in: ['BLOCKED', 'OUT_OF_SERVICE'] },
+          // Only subtract date-level blocks for otherwise sellable rooms. A
+          // room already removed by operationalStatus must not be counted twice.
+          room: { roomTypeId, operationalStatus: 'AVAILABLE' },
+        },
+        select: { roomId: true },
+        distinct: ['roomId'],
+      }),
+    ])
 
-    if (reserved >= sellableRooms) {
+    const blockedRooms = new Set(blocks.map((block) => block.roomId)).size
+    const availableCapacity = Math.max(0, sellableRooms - blockedRooms - holds.length)
+    if (reserved >= availableCapacity) {
       throw new PmsValidationError(`No ${sellableRooms > 1 ? 'rooms are' : 'room is'} available for ${dateKey}.`)
     }
   }
@@ -2498,11 +2602,14 @@ async function reserveRoomDates(tx, propertyId, reservationId, roomId, checkIn, 
 }
 
 async function recomputeFolio(tx, folioId) {
-  const [charges, payments] = await Promise.all([
+  const [folio, charges, payments] = await Promise.all([
+    tx.folio.findUnique({ where: { id: folioId } }),
     tx.charge.findMany({ where: { folioId, void: false } }),
     tx.payment.findMany({ where: { folioId } }),
   ])
-  const money = buildFolioMoneyFields(charges, payments)
+  if (!folio) throw new PmsValidationError('Folio was not found.', 404)
+  const tax = storedMoneyPair(folio, 'taxSatang', 'tax', 'Folio tax', { minimum: 0 })
+  const money = buildFolioMoneyFields(charges, payments, { taxSatang: tax.satang })
 
   return tx.folio.update({
     where: { id: folioId },
@@ -2534,6 +2641,27 @@ async function reconcileReservationDepositStatus(tx, reservation, folio) {
   }
 }
 
+async function reopenClosedCheckedOutFolioWithBalance(tx, folio) {
+  const balance = storedMoneyPair(folio, 'balanceSatang', 'balance', 'Folio balance', { minimum: MONEY_SATANG_MIN })
+  if (folio.status !== 'CLOSED' || folio.reservation?.status !== 'CHECKED_OUT' || balance.satang === 0) return folio
+  return tx.folio.update({
+    where: { id: folio.id },
+    data: { status: 'OPEN' },
+    include: folioRuntimeInclude,
+  })
+}
+
+async function reconcileFolioDeposit(tx, folio) {
+  const reservation = folio.reservation
+  if (!reservation?.id) return { folio, depositStatus: { changed: false, becamePaid: false, depositPaid: false } }
+  const depositStatus = await reconcileReservationDepositStatus(tx, reservation, folio)
+  if (!depositStatus.changed) return { folio, depositStatus }
+  return {
+    folio: { ...folio, reservation: { ...reservation, depositPaid: depositStatus.depositPaid } },
+    depositStatus,
+  }
+}
+
 function requireActorPermission(actor, permission, label) {
   if (!canPerformAction(actor, permission)) {
     throw new PmsValidationError(`${label} requires ${permission} permission.`, 403)
@@ -2554,6 +2682,27 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
     throw new PmsValidationError('Payment reference is required for card, bank transfer, and online payments.')
   }
   const referenceFingerprint = normalizePaymentReferenceFingerprint(method, reference)
+  const sourceEmailEventId = normalizeNullableString(input.sourceEmailEventId)
+  const notes = normalizeNullableString(input.notes)
+  const clientRequestId = normalizeOptionalClientRequestId(input, 'Payment')
+  if (clientRequestId) {
+    const replay = await tx.payment.findUnique({ where: { clientRequestId } })
+    if (replay) {
+      const replayAmount = storedMoneyPair(replay, 'amountSatang', 'amount', 'Payment amount', { minimum: 1 })
+      if (
+        replay.folioId !== folioId
+        || (replay.entryKind || 'PAYMENT') !== 'PAYMENT'
+        || replayAmount.satang !== amount.satang
+        || replay.method !== method
+        || normalizeNullableString(replay.reference) !== reference
+        || normalizeNullableString(replay.notes) !== notes
+        || normalizeNullableString(replay.sourceEmailEventId) !== sourceEmailEventId
+      ) idempotencyConflict('Payment')
+      const replayFolio = await tx.folio.findUnique({ where: { id: folioId }, include: folioRuntimeInclude })
+      if (!replayFolio) throw new PmsValidationError('Folio was not found.', 404)
+      return { payment: replay, folio: replayFolio, depositBecamePaid: false, replayed: true }
+    }
+  }
   const folio = await tx.folio.findUnique({ where: { id: folioId } })
   if (!folio) throw new PmsValidationError('Folio was not found.', 404)
   if (folio.status !== 'OPEN') {
@@ -2569,7 +2718,6 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
       throw new PmsValidationError('This payment reference has already been processed.', 409)
     }
   }
-  const sourceEmailEventId = normalizeNullableString(input.sourceEmailEventId)
   if (sourceEmailEventId) {
     const duplicateSourcePayment = await tx.payment.findUnique({ where: { sourceEmailEventId } })
     if (duplicateSourcePayment) {
@@ -2582,11 +2730,13 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
       folioId: folio.id,
       amount: amount.thb,
       amountSatang: amount.satang,
+      entryKind: 'PAYMENT',
       method,
       reference,
       referenceFingerprint,
       sourceEmailEventId,
-      notes: normalizeNullableString(input.notes),
+      notes,
+      clientRequestId,
       processedBy: actorName(actor),
     },
   })
@@ -2594,7 +2744,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   if (
     updatedFolio.status === 'OPEN'
     && updatedFolio.reservation?.status === 'CHECKED_OUT'
-    && storedMoneyPair(updatedFolio, 'balanceSatang', 'balance', 'Folio balance', { minimum: MONEY_SATANG_MIN }).satang <= 0
+    && storedMoneyPair(updatedFolio, 'balanceSatang', 'balance', 'Folio balance', { minimum: MONEY_SATANG_MIN }).satang === 0
   ) {
     updatedFolio = await tx.folio.update({
       where: { id: folio.id },
@@ -2630,7 +2780,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
     sourceEmailEventId,
     depositBecamePaid,
   })
-  return { payment, folio: updatedFolio, depositBecamePaid }
+  return { payment, folio: updatedFolio, depositBecamePaid, replayed: false }
 }
 
 export async function authenticateUser(prisma, identity, password) {
@@ -2658,6 +2808,7 @@ export async function authenticateUser(prisma, identity, password) {
       data: {
         failedLoginAttempts,
         ...(lockedAt ? { lockedAt } : {}),
+        ...(lockedAt ? { sessionVersion: { increment: 1 } } : {}),
       },
     })
     if (lockedAt) {
@@ -2666,12 +2817,12 @@ export async function authenticateUser(prisma, identity, password) {
     return null
   }
 
-  await prisma.user.update({
+  const authenticatedUser = await prisma.user.update({
     where: { id: user.id },
     data: { lastLogin: new Date(), failedLoginAttempts: 0, lockedAt: null },
   })
 
-  return user
+  return authenticatedUser
 }
 
 export async function getSetupStatus(prisma) {
@@ -2760,6 +2911,9 @@ export async function updateUser(prisma, userId, input, actor) {
     data.failedLoginAttempts = 0
     data.lockedAt = null
   }
+  if (password || (input?.role !== undefined && data.role !== existing.role) || (input?.active !== undefined && data.active !== existing.active)) {
+    data.sessionVersion = { increment: 1 }
+  }
 
   const nextUsername = data.username ?? existing.username
   const nextEmail = data.email === undefined ? existing.email : data.email
@@ -2798,7 +2952,7 @@ export async function deactivateUser(prisma, userId, actor) {
   if (!existing) throw new PmsValidationError('User was not found.', 404)
   const user = await prisma.user.update({
     where: { id: existing.id },
-    data: { active: false },
+    data: { active: false, sessionVersion: { increment: 1 } },
   })
   await createAudit(prisma, actor, 'USER_DEACTIVATED', 'user', user.id, {
     username: user.username,
@@ -3274,17 +3428,35 @@ export async function createRoomType(prisma, input, actor) {
 }
 
 export async function updateRoomType(prisma, roomTypeId, input, actor) {
-  const property = await getProperty(prisma)
-  const existing = await prisma.roomType.findFirst({
-    where: {
-      id: roomTypeId,
-      propertyId: property.id,
-    },
-  })
-  if (!existing) throw new PmsValidationError('Room type was not found.', 404)
-  const data = normalizeSetupRoomTypeInput(input, existing)
-
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx)
+    const existing = await tx.roomType.findFirst({
+      where: {
+        id: roomTypeId,
+        propertyId: property.id,
+      },
+    })
+    if (!existing) throw new PmsValidationError('Room type was not found.', 404)
+    const data = normalizeSetupRoomTypeInput(input, existing)
+    if (data.maxOccupancy < existing.maxOccupancy) {
+      const activeReservations = await tx.reservation.findMany({
+        where: {
+          propertyId: property.id,
+          roomTypeId: existing.id,
+          status: { in: activeReservationStatuses() },
+        },
+        select: { id: true, adults: true, children: true },
+      })
+      const incompatibleReservation = activeReservations.find((reservation) => (
+        Number(reservation.adults || 0) + Number(reservation.children || 0) > data.maxOccupancy
+      ))
+      if (incompatibleReservation) {
+        throw new PmsValidationError(
+          `Maximum occupancy cannot be reduced to ${data.maxOccupancy} while an active reservation exceeds that limit.`,
+          409,
+        )
+      }
+    }
     const roomType = await tx.roomType.update({
       where: { id: existing.id },
       data,
@@ -3575,7 +3747,9 @@ export async function createReservation(prisma, input, actor) {
 export async function listBookingEmailSources(prisma) {
   return prisma.$transaction(async (tx) => {
     await ensurePrimaryBookingEmailSource(tx)
+    const property = await getProperty(tx)
     const sources = await tx.bookingEmailSource.findMany({
+      where: { propertyId: property.id },
       orderBy: [{ enabled: 'desc' }, { name: 'asc' }],
     })
     return sources.map(bookingEmailSourceResponse)
@@ -3635,8 +3809,9 @@ export async function createBookingEmailSource(prisma, input, actor) {
 
 export async function updateBookingEmailSource(prisma, sourceId, input, actor) {
   return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     const existing = await tx.bookingEmailSource.findUnique({ where: { id: sourceId } })
-    if (!existing) throw new PmsValidationError('Booking email source was not found.', 404)
+    if (!existing || existing.propertyId !== property.id) throw new PmsValidationError('Booking email source was not found.', 404)
     const reviewThreshold = input.reviewThreshold === undefined ? existing.reviewThreshold : Number(input.reviewThreshold)
     if (!Number.isFinite(reviewThreshold) || reviewThreshold < 0 || reviewThreshold > 1) {
       throw new PmsValidationError('Review threshold must be between 0 and 1.')
@@ -3756,19 +3931,68 @@ export async function listBookingEmailEvents(prisma, filters = {}) {
 }
 
 export async function getBookingEmailEvent(prisma, eventId) {
-  const event = await prisma.bookingEmailEvent.findUnique({
-    where: { id: eventId },
-    include: bookingEmailEventInclude(),
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const event = await tx.bookingEmailEvent.findFirst({
+      where: { id: eventId, propertyId: property.id },
+      include: bookingEmailEventInclude(),
+    })
+    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    return bookingEmailEventResponse(event)
   })
-  if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
-  return bookingEmailEventResponse(event)
+}
+
+export async function getBookingEmailEvidence(prisma, eventId, input, actor) {
+  requireActorPermission(actor, 'view:booking-email-evidence', 'Booking email evidence access')
+  const reason = requireOperationalReason(input?.reason, 'Booking email evidence access')
+  if (reason.length > 500) throw new PmsValidationError('Booking email evidence access reason must be 500 characters or fewer.')
+
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const event = await tx.bookingEmailEvent.findFirst({
+      where: { id: eventId, propertyId: property.id },
+      select: {
+        id: true,
+        rawEmailUrl: true,
+        sourceMessageId: true,
+      },
+    })
+    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+
+    let rawEmailUrl = null
+    if (event.rawEmailUrl) {
+      try {
+        const parsedUrl = new URL(event.rawEmailUrl)
+        if (parsedUrl.protocol === 'https:' && parsedUrl.hostname === 'mail.google.com') rawEmailUrl = parsedUrl.toString()
+      } catch {
+        rawEmailUrl = null
+      }
+    }
+    if (event.rawEmailUrl && !rawEmailUrl) {
+      throw new PmsValidationError('Stored booking email evidence link is not an approved Gmail URL.', 409)
+    }
+
+    await createAudit(tx, actor, 'BOOKING_EMAIL_EVIDENCE_VIEWED', 'bookingEmailEvent', event.id, {
+      reason,
+      evidenceFields: [
+        ...(rawEmailUrl ? ['rawEmailUrl'] : []),
+        ...(event.sourceMessageId ? ['sourceEmailId'] : []),
+      ],
+    })
+    return {
+      eventId: event.id,
+      rawEmailUrl,
+      sourceEmailId: event.sourceMessageId || null,
+    }
+  })
 }
 
 async function syncBookingEmailInternal(prisma, input, actor, trustedEvents) {
   const source = await prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
     if (input.sourceId) {
       const existing = await tx.bookingEmailSource.findUnique({ where: { id: input.sourceId } })
-      if (!existing) throw new PmsValidationError('Booking email source was not found.', 404)
+      if (!existing || existing.propertyId !== property.id) throw new PmsValidationError('Booking email source was not found.', 404)
       return existing
     }
     return ensurePrimaryBookingEmailSource(tx)
@@ -3790,7 +4014,7 @@ async function syncBookingEmailInternal(prisma, input, actor, trustedEvents) {
 
   const results = await serializableTransaction(prisma, async (tx) => {
     const currentSource = await tx.bookingEmailSource.findUnique({ where: { id: source.id } })
-    if (!currentSource) throw new PmsValidationError('Booking email source was not found.', 404)
+    if (!currentSource || currentSource.propertyId !== source.propertyId) throw new PmsValidationError('Booking email source was not found.', 404)
     const events = []
     for (const inputEvent of importedEvents) {
       const event = await upsertBookingEmailEvent(tx, currentSource, inputEvent)
@@ -3884,11 +4108,12 @@ export async function ingestBookingEmailEvents(prisma, input = {}, actor) {
 export async function approveBookingEmailEvent(prisma, eventId, input = {}, actor) {
   try {
     return await serializableTransaction(prisma, async (tx) => {
+      const property = await getProperty(tx)
       const event = await tx.bookingEmailEvent.findUnique({
         where: { id: eventId },
         include: bookingEmailEventInclude(),
       })
-      if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+      if (!event || event.propertyId !== property.id) throw new PmsValidationError('Booking email event was not found.', 404)
       assertActionableBookingEmailEvent(event)
       if (event.status === 'PROCESSED') throw new PmsValidationError('This booking email event has already been processed.', 409)
       if (event.status === 'IGNORED') throw new PmsValidationError('Ignored booking email events must be reprocessed before approval.', 409)
@@ -3947,17 +4172,23 @@ export async function approveBookingEmailEvent(prisma, eventId, input = {}, acto
 }
 
 export async function rejectBookingEmailEvent(prisma, eventId, input = {}, actor) {
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx)
     const reason = normalizeNullableString(input.reason)
     if (!reason) throw new PmsValidationError('Rejecting or ignoring an email event requires a reason.')
     const event = await tx.bookingEmailEvent.findUnique({ where: { id: eventId } })
-    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    if (!event || event.propertyId !== property.id) throw new PmsValidationError('Booking email event was not found.', 404)
     assertActionableBookingEmailEvent(event)
     if (event.status === 'PROCESSED' || event.processedAt) {
       throw new PmsValidationError('Processed booking email events cannot be rejected or ignored.', 409)
     }
-    const updated = await tx.bookingEmailEvent.update({
-      where: { id: eventId },
+    const update = await tx.bookingEmailEvent.updateMany({
+      where: {
+        id: eventId,
+        status: event.status,
+        updatedAt: event.updatedAt,
+        processedAt: event.processedAt,
+      },
       data: {
         status: 'IGNORED',
         reviewReason: reason,
@@ -3966,23 +4197,30 @@ export async function rejectBookingEmailEvent(prisma, eventId, input = {}, actor
         processedBy: actorName(actor),
         completedAction: 'Rejected or ignored by staff.',
       },
-      include: bookingEmailEventInclude(),
     })
+    if (update.count !== 1) {
+      throw new PmsValidationError('This booking email changed before it could be rejected. Refresh and try again.', 409)
+    }
     await createAudit(tx, actor, 'BOOKING_EMAIL_REJECTED', 'bookingEmailEvent', event.id, {
       reason,
       sourceMessageId: event.sourceMessageId,
+    })
+    const updated = await tx.bookingEmailEvent.findUnique({
+      where: { id: event.id },
+      include: bookingEmailEventInclude(),
     })
     return bookingEmailEventResponse(updated)
   })
 }
 
 export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
+    const property = await getProperty(tx)
     const event = await tx.bookingEmailEvent.findUnique({
       where: { id: eventId },
       include: bookingEmailEventInclude(),
     })
-    if (!event) throw new PmsValidationError('Booking email event was not found.', 404)
+    if (!event || event.propertyId !== property.id) throw new PmsValidationError('Booking email event was not found.', 404)
     assertActionableBookingEmailEvent(event)
     if (event.status === 'PROCESSED' || event.processedAt) {
       throw new PmsValidationError('Processed booking email events cannot be reprocessed.', 409)
@@ -4003,8 +4241,13 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
       rawText: event.rawText,
       rawHeaders: event.rawHeaders,
     }, event.id)
-    const updated = await tx.bookingEmailEvent.update({
-      where: { id: event.id },
+    const update = await tx.bookingEmailEvent.updateMany({
+      where: {
+        id: event.id,
+        status: event.status,
+        updatedAt: event.updatedAt,
+        processedAt: event.processedAt,
+      },
       data: {
         ...data,
         status: 'NEEDS_REVIEW',
@@ -4013,10 +4256,16 @@ export async function reprocessBookingEmailEvent(prisma, eventId, actor) {
         processedBy: null,
         rejectedAt: null,
       },
-      include: bookingEmailEventInclude(),
     })
+    if (update.count !== 1) {
+      throw new PmsValidationError('This booking email changed before it could be reprocessed. Refresh and try again.', 409)
+    }
     await createAudit(tx, actor, 'BOOKING_EMAIL_REPROCESSED', 'bookingEmailEvent', event.id, {
       sourceMessageId: event.sourceMessageId,
+    })
+    const updated = await tx.bookingEmailEvent.findUnique({
+      where: { id: event.id },
+      include: bookingEmailEventInclude(),
     })
     return bookingEmailEventResponse(updated)
   })
@@ -4154,6 +4403,7 @@ export async function createWalkInCheckIn(prisma, input, actor) {
     const roomUpdate = await tx.room.updateMany({
       where: {
         id: room.id,
+        operationalStatus: 'AVAILABLE',
         currentReservation: null,
         currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
       },
@@ -4230,7 +4480,7 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
 
 export async function checkInReservation(prisma, reservationId, actor, options = {}) {
   assertNoPublicBookingEmailProvenance(options?.payment, 'Check-in payment')
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
     let reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     if (!['CONFIRMED', 'PENDING'].includes(reservation.status)) {
@@ -4243,8 +4493,12 @@ export async function checkInReservation(prisma, reservationId, actor, options =
     validateReservationDateForCheckIn(reservation, { ...options, actor })
 
     const totalGuests = Number(reservation.adults || 0) + Number(reservation.children || 0)
-    if (totalGuests > SANDBOX_RULES.maxOccupancy) {
-      throw new PmsValidationError(`Maximum occupancy is ${SANDBOX_RULES.maxOccupancy} guests per room.`)
+    const maxOccupancy = Number(reservation.roomType?.maxOccupancy)
+    if (!Number.isInteger(maxOccupancy) || maxOccupancy < 1) {
+      throw new PmsValidationError('The reservation room type has an invalid maximum occupancy. Repair room setup before check-in.', 409)
+    }
+    if (totalGuests > maxOccupancy) {
+      throw new PmsValidationError(`Maximum occupancy is ${maxOccupancy} guests per room.`)
     }
 
     const guestUpdates = {}
@@ -4308,6 +4562,7 @@ export async function checkInReservation(prisma, reservationId, actor, options =
 
     const roomWhere = {
       id: room.id,
+      operationalStatus: 'AVAILABLE',
       currentReservation: null,
       currentStatus: options.allowRoomReadinessOverride
         ? { notIn: ['OCCUPIED', 'OCCUPIED_CLEAN', 'OCCUPIED_DIRTY'] }
@@ -4372,7 +4627,7 @@ export async function checkInReservation(prisma, reservationId, actor, options =
 
 export async function checkOutReservation(prisma, reservationId, actor, options = {}) {
   assertNoPublicBookingEmailProvenance(options?.payment, 'Checkout payment')
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
     let reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     if (!reservation) throw new PmsValidationError('Reservation was not found.', 404)
     if (reservation.status !== 'CHECKED_IN') {
@@ -4381,9 +4636,11 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
     if (!reservation.assignedRoomId || !reservation.assignedRoom) {
       throw new PmsValidationError('Checked-in reservation is missing its assigned room.')
     }
+    if (!reservation.folio?.id) {
+      throw new PmsValidationError('Checkout is blocked until the reservation folio is repaired.', 409)
+    }
 
     if (options.payment && (Object.hasOwn(options.payment, 'amount') || Object.hasOwn(options.payment, 'amountSatang'))) {
-      if (!reservation.folio?.id) throw new PmsValidationError('Reservation folio was not found.')
       await recordPaymentInTransaction(tx, reservation.folio.id, options.payment, actor)
       reservation = await tx.reservation.findUnique({ where: { id: reservationId }, include: reservationInclude })
     }
@@ -4395,6 +4652,9 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
       'Folio balance',
       { minimum: MONEY_SATANG_MIN },
     )
+    if (remainingBalance.satang < 0) {
+      throw new PmsValidationError('Resolve the negative folio balance before checkout.', 409)
+    }
     if (remainingBalance.satang > 0) {
       if (options.allowUnpaidOverride) {
         requireOverride(actor, 'override:check-out', options.overrideReason, 'Unpaid checkout override')
@@ -4436,7 +4696,7 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
 
     await tx.roomDateInventory.deleteMany({ where: { reservationId: reservation.id } })
 
-    const folioClosed = Boolean(reservation.folio?.id && remainingBalance.satang <= 0)
+    const folioClosed = Boolean(reservation.folio?.id && remainingBalance.satang === 0)
     if (reservation.folio?.id) {
       await tx.folio.update({
         where: { id: reservation.folio.id },
@@ -4545,7 +4805,7 @@ export async function cancelReservation(prisma, reservationId, actor, status = '
 }
 
 export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, actor, notes = undefined) {
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
     const room = await tx.room.findUnique({ where: { id: roomId }, include: { roomType: true } })
     if (!room) throw new PmsValidationError('Room was not found.', 404)
     if (!['DIRTY', 'CLEANING', 'CLEAN', 'INSPECTED', 'MAINTENANCE'].includes(cleanStatus)) {
@@ -4563,16 +4823,25 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
       ? 'VACANT_DIRTY'
       : roomStatusForHousekeeping(room.currentStatus, cleanStatus, occupied)
 
-    await createRoomStatusLog(tx, room, toStatus, actor, operationalNotes)
-    const updated = await tx.room.update({
-      where: { id: room.id },
+    const roomUpdate = await tx.room.updateMany({
+      where: {
+        id: room.id,
+        updatedAt: room.updatedAt,
+        currentStatus: room.currentStatus,
+        currentReservation: room.currentReservation,
+        operationalStatus: room.operationalStatus,
+      },
       data: {
         currentStatus: toStatus,
         operationalStatus,
         notes: operationalNotes || room.notes,
       },
-      include: { roomType: true },
     })
+    if (roomUpdate.count !== 1) {
+      throw new PmsValidationError(`Room ${room.number} changed state before housekeeping could update it. Refresh and try again.`, 409)
+    }
+    const updated = await tx.room.findUnique({ where: { id: room.id }, include: { roomType: true } })
+    await createRoomStatusLog(tx, room, toStatus, actor, operationalNotes)
     await createAudit(tx, actor, 'HOUSEKEEPING_STATUS_UPDATED', 'room', room.id, {
       cleanStatus,
       toStatus,
@@ -4589,7 +4858,7 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
 }
 
 export async function updateRoomOperationalStatus(prisma, roomId, operationalStatus, actor, notes = undefined) {
-  return prisma.$transaction(async (tx) => {
+  return serializableTransaction(prisma, async (tx) => {
     const room = await tx.room.findUnique({ where: { id: roomId }, include: { roomType: true } })
     if (!room) throw new PmsValidationError('Room was not found.', 404)
     if (!['AVAILABLE', 'BLOCKED', 'OUT_OF_SERVICE', 'OUT_OF_ORDER'].includes(operationalStatus)) {
@@ -4605,16 +4874,25 @@ export async function updateRoomOperationalStatus(prisma, roomId, operationalSta
         ? 'VACANT_DIRTY'
         : room.currentStatus
 
-    const updated = await tx.room.update({
-      where: { id: room.id },
+    const roomUpdate = await tx.room.updateMany({
+      where: {
+        id: room.id,
+        updatedAt: room.updatedAt,
+        currentStatus: room.currentStatus,
+        currentReservation: room.currentReservation,
+        operationalStatus: room.operationalStatus,
+      },
       data: {
         operationalStatus,
         currentStatus,
         notes: notes || room.notes,
       },
-      include: { roomType: true },
     })
-    await createRoomStatusLog(tx, updated, currentStatus, actor, notes || `Room marked ${operationalStatus.toLowerCase().replaceAll('_', ' ')}.`)
+    if (roomUpdate.count !== 1) {
+      throw new PmsValidationError(`Room ${room.number} changed state before its operational status could update. Refresh and try again.`, 409)
+    }
+    const updated = await tx.room.findUnique({ where: { id: room.id }, include: { roomType: true } })
+    await createRoomStatusLog(tx, room, currentStatus, actor, notes || `Room marked ${operationalStatus.toLowerCase().replaceAll('_', ' ')}.`)
     await createAudit(tx, actor, 'ROOM_OPERATIONAL_STATUS_UPDATED', 'room', room.id, { operationalStatus })
     await reconcileRoomCapacityInTransaction(tx, {
       propertyId: room.propertyId,
@@ -4628,7 +4906,7 @@ export async function updateRoomOperationalStatus(prisma, roomId, operationalSta
 
 export async function createPayment(prisma, input, actor) {
   assertNoPublicBookingEmailProvenance(input, 'Public payment creation')
-  return prisma.$transaction(async (tx) => {
+  return serializableIdempotentTransaction(prisma, async (tx) => {
     const folio = await tx.folio.findUnique({
       where: { id: input.folioId },
       include: {
@@ -4642,13 +4920,7 @@ export async function createPayment(prisma, input, actor) {
 
 export async function createCharge(prisma, input, actor) {
   assertNoPublicBookingEmailProvenance(input, 'Public charge creation')
-  return prisma.$transaction(async (tx) => {
-    const folio = await tx.folio.findUnique({ where: { id: input.folioId } })
-    if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-    if (folio.status !== 'OPEN') {
-      throw new PmsValidationError('Charges can only be posted to an open folio.')
-    }
-
+  return serializableIdempotentTransaction(prisma, async (tx) => {
     const quantity = Number(input.quantity || 1)
     const description = normalizeNullableString(input.description)
     const category = String(input.category || 'OTHER').toUpperCase()
@@ -4668,11 +4940,37 @@ export async function createCharge(prisma, input, actor) {
         throw new PmsValidationError('Charge amount THB and MoneySatang values do not match.')
       }
     }
+    const date = input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date()))
+    const clientRequestId = normalizeOptionalClientRequestId(input, 'Charge')
+    if (clientRequestId) {
+      const replay = await tx.charge.findUnique({ where: { clientRequestId } })
+      if (replay) {
+        const replayAmount = storedMoneyPair(replay, 'amountSatang', 'amount', 'Charge amount', { minimum: 1 })
+        const replayTotal = storedMoneyPair(replay, 'totalSatang', 'total', 'Charge total', { minimum: 1 })
+        if (
+          replay.folioId !== input.folioId
+          || replayAmount.satang !== chargeMoney.amountSatang
+          || replayTotal.satang !== chargeMoney.totalSatang
+          || replay.quantity !== quantity
+          || replay.category !== category
+          || normalizeNullableString(replay.description) !== description
+          || getBangkokDateKey(replay.date) !== getBangkokDateKey(date)
+        ) idempotencyConflict('Charge')
+        const replayFolio = await tx.folio.findUnique({ where: { id: input.folioId }, include: folioRuntimeInclude })
+        if (!replayFolio) throw new PmsValidationError('Folio was not found.', 404)
+        return { charge: replay, folio: replayFolio, replayed: true }
+      }
+    }
+    const folio = await tx.folio.findUnique({ where: { id: input.folioId } })
+    if (!folio) throw new PmsValidationError('Folio was not found.', 404)
+    if (folio.status !== 'OPEN') {
+      throw new PmsValidationError('Charges can only be posted to an open folio.')
+    }
 
     const charge = await tx.charge.create({
       data: {
         folioId: folio.id,
-        date: input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date())),
+        date,
         description,
         category,
         amount: chargeMoney.amount,
@@ -4680,13 +4978,141 @@ export async function createCharge(prisma, input, actor) {
         quantity,
         total: chargeMoney.total,
         totalSatang: chargeMoney.totalSatang,
+        clientRequestId,
         sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
         createdBy: actorName(actor),
       },
     })
     const updatedFolio = await recomputeFolio(tx, folio.id)
     await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, { folioId: folio.id, amount: charge.amount, quantity, category, sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId) })
-    return { charge, folio: updatedFolio }
+    return { charge, folio: updatedFolio, replayed: false }
+  })
+}
+
+export async function reversePayment(prisma, paymentId, input, actor) {
+  requireActorPermission(actor, 'refund:payment', 'Payment reversal')
+  const reason = requireOperationalReason(input?.reason, 'Payment reversal')
+  const clientRequestId = normalizeOptionalClientRequestId(input, 'Payment reversal')
+  return serializableIdempotentTransaction(prisma, async (tx) => {
+    const original = await tx.payment.findUnique({ where: { id: paymentId } })
+    if (!original) throw new PmsValidationError('Payment was not found.', 404)
+    if ((original.entryKind || 'PAYMENT') !== 'PAYMENT' || original.reversesPaymentId) {
+      throw new PmsValidationError('Only an original payment can be reversed.')
+    }
+    if (input?.folioId && input.folioId !== original.folioId) {
+      throw new PmsValidationError('A payment reversal must remain on the original folio.', 409)
+    }
+    const originalAmount = storedMoneyPair(original, 'amountSatang', 'amount', 'Original payment amount', { minimum: 1 })
+    const requestedAmount = Object.hasOwn(input || {}, 'amountSatang') || Object.hasOwn(input || {}, 'amount')
+      ? moneyPairFromInput(input, 'amountSatang', 'amount', 'Payment reversal amount', { minimum: 1 })
+      : null
+
+    if (clientRequestId) {
+      const replay = await tx.payment.findUnique({ where: { clientRequestId } })
+      if (replay) {
+        const replayAmount = storedMoneyPair(replay, 'amountSatang', 'amount', 'Payment reversal amount', { minimum: MONEY_SATANG_MIN })
+        if (
+          replay.entryKind !== 'REVERSAL'
+          || replay.reversesPaymentId !== original.id
+          || normalizeNullableString(replay.reversalReason) !== reason
+          || normalizeNullableString(replay.notes) !== normalizeNullableString(input?.notes)
+          || replayAmount.satang >= 0
+          || (requestedAmount && replayAmount.satang !== -requestedAmount.satang)
+        ) idempotencyConflict('Payment reversal')
+        const replayFolio = await tx.folio.findUnique({ where: { id: original.folioId }, include: folioRuntimeInclude })
+        if (!replayFolio) throw new PmsValidationError('Folio was not found.', 404)
+        return { payment: replay, originalPayment: original, folio: replayFolio, replayed: true }
+      }
+    }
+
+    const priorReversals = await tx.payment.findMany({ where: { reversesPaymentId: original.id, entryKind: 'REVERSAL' } })
+    const reversedSatang = (priorReversals || [])
+      .filter((payment) => payment.reversesPaymentId === original.id && payment.entryKind === 'REVERSAL')
+      .reduce((sum, payment) => {
+        const reversal = storedMoneyPair(payment, 'amountSatang', 'amount', 'Payment reversal amount', { minimum: MONEY_SATANG_MIN })
+        if (reversal.satang >= 0) throw new PmsValidationError('Stored payment reversal rows must have a negative amount.', 409)
+        return sum + -reversal.satang
+      }, 0)
+    const remainingSatang = originalAmount.satang - reversedSatang
+    const reversalSatang = requestedAmount?.satang ?? remainingSatang
+    if (remainingSatang <= 0) throw new PmsValidationError('This payment has already been fully reversed.', 409)
+    if (reversalSatang > remainingSatang) throw new PmsValidationError('Payment reversal cannot exceed the unreversed payment amount.', 409)
+    const reversalAmount = moneyPairFromSatang(-reversalSatang, 'Payment reversal amount', { minimum: MONEY_SATANG_MIN })
+    const payment = await tx.payment.create({
+      data: {
+        folioId: original.folioId,
+        amount: reversalAmount.thb,
+        amountSatang: reversalAmount.satang,
+        entryKind: 'REVERSAL',
+        reversesPaymentId: original.id,
+        reversalReason: reason,
+        clientRequestId,
+        method: original.method,
+        reference: null,
+        referenceFingerprint: null,
+        sourceEmailEventId: null,
+        notes: normalizeNullableString(input?.notes),
+        processedBy: actorName(actor),
+      },
+    })
+    let updatedFolio = await recomputeFolio(tx, original.folioId)
+    updatedFolio = await reopenClosedCheckedOutFolioWithBalance(tx, updatedFolio)
+    const reconciled = await reconcileFolioDeposit(tx, updatedFolio)
+    updatedFolio = reconciled.folio
+    await createAudit(tx, actor, 'PAYMENT_REVERSED', 'payment', payment.id, {
+      folioId: original.folioId,
+      originalPaymentId: original.id,
+      amount: payment.amount,
+      amountSatang: payment.amountSatang,
+      reason,
+      depositPaid: reconciled.depositStatus.depositPaid,
+    })
+    return { payment, originalPayment: original, folio: updatedFolio, replayed: false }
+  })
+}
+
+export async function voidCharge(prisma, chargeId, input, actor) {
+  requireActorPermission(actor, 'post:charges', 'Charge void')
+  if (!['ADMIN', 'MANAGER'].includes(String(actor?.role || '').toUpperCase())) {
+    throw new PmsValidationError('Charge void requires manager or administrator authority.', 403)
+  }
+  const reason = requireOperationalReason(input?.reason, 'Charge void')
+  const voidRequestId = normalizeOptionalClientRequestId(input, 'Charge void')
+  return serializableIdempotentTransaction(prisma, async (tx) => {
+    if (voidRequestId) {
+      const replay = await tx.charge.findUnique({ where: { voidRequestId } })
+      if (replay) {
+        if (replay.id !== chargeId || !replay.void || normalizeNullableString(replay.voidReason) !== reason) idempotencyConflict('Charge void')
+        const replayFolio = await tx.folio.findUnique({ where: { id: replay.folioId }, include: folioRuntimeInclude })
+        if (!replayFolio) throw new PmsValidationError('Folio was not found.', 404)
+        return { charge: replay, folio: replayFolio, replayed: true }
+      }
+    }
+    const charge = await tx.charge.findUnique({ where: { id: chargeId } })
+    if (!charge) throw new PmsValidationError('Charge was not found.', 404)
+    if (charge.category === 'ROOM') throw new PmsValidationError('Room charges must be changed through the reservation pricing flow.')
+    if (charge.void) throw new PmsValidationError('This charge has already been voided.', 409)
+    const updatedCharge = await tx.charge.update({
+      where: { id: charge.id },
+      data: {
+        void: true,
+        voidReason: reason,
+        voidRequestId,
+        voidedAt: new Date(),
+        voidedBy: actorName(actor),
+      },
+    })
+    let updatedFolio = await recomputeFolio(tx, charge.folioId)
+    updatedFolio = await reopenClosedCheckedOutFolioWithBalance(tx, updatedFolio)
+    const reconciled = await reconcileFolioDeposit(tx, updatedFolio)
+    updatedFolio = reconciled.folio
+    await createAudit(tx, actor, 'CHARGE_VOIDED', 'charge', charge.id, {
+      folioId: charge.folioId,
+      amount: charge.amount,
+      amountSatang: charge.amountSatang,
+      reason,
+    })
+    return { charge: updatedCharge, folio: updatedFolio, replayed: false }
   })
 }
 

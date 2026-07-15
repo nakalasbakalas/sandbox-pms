@@ -63,11 +63,28 @@ function legacyEvent() {
   }
 }
 
+function scopedReadPrisma(event) {
+  const prisma = {
+    property: {
+      findUnique: async ({ where }) => (
+        where.code === 'SANDBOX'
+          ? { id: event.propertyId, code: 'SANDBOX', name: 'SANDBOX HOTEL' }
+          : null
+      ),
+    },
+    bookingEmailEvent: {
+      findFirst: async ({ where }) => (
+        where.id === event.id && where.propertyId === event.propertyId ? event : null
+      ),
+    },
+  }
+  prisma.$transaction = async (callback) => callback(prisma)
+  return prisma
+}
+
 test('legacy booking email evidence is labeled non-actionable in read responses', async () => {
   const event = legacyEvent()
-  const prisma = {
-    bookingEmailEvent: { findUnique: async () => event },
-  }
+  const prisma = scopedReadPrisma(event)
 
   const response = await getBookingEmailEvent(prisma, event.id)
   assert.equal(response.legacyReadOnly, true)
@@ -83,9 +100,7 @@ test('pre-cutover unresolved NEEDS_REVIEW and ERROR events remain non-actionable
       checkOut: new Date(Date.now() + 86_400_000),
       legacyReadOnly: true,
     }
-    const prisma = {
-      bookingEmailEvent: { findUnique: async () => event },
-    }
+    const prisma = scopedReadPrisma(event)
 
     const response = await getBookingEmailEvent(prisma, event.id)
     assert.equal(response.legacyReadOnly, true)
@@ -97,6 +112,11 @@ test('approve, reject, and reprocess all refuse read-only legacy booking email e
   const event = legacyEvent()
   let mutationCalled = false
   const prisma = {
+    property: {
+      findUnique: async ({ where }) => (
+        where.code === 'SANDBOX' ? { id: event.propertyId, code: 'SANDBOX' } : null
+      ),
+    },
     bookingEmailEvent: {
       findUnique: async () => event,
       update: async () => {
