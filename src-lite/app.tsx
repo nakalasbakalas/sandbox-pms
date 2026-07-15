@@ -177,7 +177,9 @@ function AppSession() {
       setLoginBusy(true)
       setError(null)
       try {
-        setUser(await liteApi.login(identity, password))
+        const authenticatedUser = await liteApi.login(identity, password)
+        queryClient.clear()
+        setUser(authenticatedUser)
       } catch (loginError) {
         setError(language === 'th' ? 'ไม่สามารถเข้าสู่ระบบได้ กรุณาตรวจสอบชื่อผู้ใช้และรหัสผ่าน' : loginError instanceof Error ? loginError.message : String(loginError))
       } finally {
@@ -185,7 +187,11 @@ function AppSession() {
       }
     }} />
   }
-  return <Shell user={user} logout={async () => { await liteApi.logout(); setUser(null) }} />
+  return <Shell user={user} logout={async () => {
+    await liteApi.logout()
+    queryClient.clear()
+    setUser(null)
+  }} />
 }
 
 export function LiteApp() {

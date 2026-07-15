@@ -140,6 +140,31 @@ function assertCashierPaymentProjection(booking) {
     assert.equal(Object.hasOwn(booking.guest, field), false, `${field} must be omitted`)
   }
   assert.equal(Object.hasOwn(booking, 'sourceEmailEventId'), false)
+  for (const field of [
+    'checkIn',
+    'checkOut',
+    'actualCheckIn',
+    'actualCheckOut',
+    'nights',
+    'adults',
+    'children',
+    'childAges',
+    'source',
+    'providerCode',
+    'channelRef',
+    'externalReservationId',
+    'roomType',
+    'assignedRoomId',
+    'assignedRoom',
+    'ratePerNightSatang',
+    'totalAmountSatang',
+    'depositAmountSatang',
+    'depositPaid',
+    'createdAt',
+    'updatedAt',
+  ]) {
+    assert.equal(Object.hasOwn(booking, field), false, `${field} must be omitted`)
+  }
   assert.equal(booking.folio.totalSatang, 200_000)
   assert.equal(booking.folio.paidSatang, 50_000)
   assert.equal(booking.folio.balanceSatang, 150_000)
@@ -181,6 +206,7 @@ test('Cashier booking search avoids guest contact fields and returns only paymen
   const serializedSearch = JSON.stringify(capturedWhere.OR)
   assert.doesNotMatch(serializedSearch, /"email"\s*:/i)
   assert.doesNotMatch(serializedSearch, /"phone"\s*:/i)
+  assert.doesNotMatch(serializedSearch, /channelRef|externalReservationId|providerCode|roomType/i)
   assert.equal(Object.hasOwn(result, 'pendingReviewEmail'), false)
   assertCashierPaymentProjection(result.items[0])
 })

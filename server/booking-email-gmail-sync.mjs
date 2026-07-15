@@ -1033,10 +1033,11 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
       availableAt: { lte: now },
       NOT: { lastError: { startsWith: '[terminal:' } },
     },
-    { status: 'PROCESSING', claimedAt: { lt: staleClaimBefore } },
+    { status: 'PROCESSING', attempts: { lt: maxAttempts }, claimedAt: { lt: staleClaimBefore } },
   ]
+  const configuredSource = { is: configuredPropertyWhere(options) }
   const candidates = await deliveryDelegate(prisma).findMany({
-    where: { OR: claimable },
+    where: { source: configuredSource, OR: claimable },
     orderBy: [{ publishedAt: 'asc' }, { createdAt: 'asc' }],
     take: limit,
   })
@@ -1048,6 +1049,7 @@ export async function processPendingBookingEmailDeliveries(prisma, options = {})
     const claim = await deliveryDelegate(prisma).updateMany({
       where: {
         id: candidate.id,
+        source: configuredSource,
         OR: claimable,
       },
       data: { status: 'PROCESSING', claimedAt: now, attempts: { increment: 1 }, lastError: null },

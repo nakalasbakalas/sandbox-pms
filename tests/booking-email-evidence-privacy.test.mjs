@@ -37,11 +37,11 @@ function bookingEmailEvent(overrides = {}) {
     amountSatang: 150_000,
     currency: 'THB',
     rawEmailUrl: 'https://mail.google.com/mail/u/0/#inbox/gmail-sensitive-message-id',
-    rawHeaders: { Authorization: 'Bearer should-never-leave-the-service' },
+    rawHeaders: { Authorization: 'test-only-sensitive-header' },
     rawText: 'Guest phone +66 81 234 5678 and private free-form body',
     parsedDetails: {
       guestName: 'Private Guest',
-      rawHeaders: { Authorization: 'Bearer nested-sensitive-value' },
+      rawHeaders: { Authorization: 'nested-test-only-sensitive-header' },
       rawText: 'Nested private email body',
     },
     legacyReadOnly: false,

@@ -344,6 +344,7 @@ dd { margin: 0; font-size: 12px; font-weight: 750; word-break: break-word; }
   .channel-task, .email-review, .connection-row { grid-template-columns: 1fr; }
   .release-grid { grid-template-columns: 1fr; }
   .table-scroll table { min-width: 880px; }
+  .table-scroll table.cashier-table { min-width: 0; }
   .folio-summary { grid-template-columns: 1fr; }
   .ledger-row { grid-template-columns: 1fr auto; }
   .ledger-row > span { display: none; }

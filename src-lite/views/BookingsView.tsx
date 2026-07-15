@@ -60,11 +60,8 @@ function BookingProfile({ reservation, role }: { reservation: ReservationSummary
             <h3>{language === 'th' ? 'ข้อมูลอ้างอิงการชำระเงิน' : 'Payment reference context'}</h3>
             <dl>
               <div><dt>{t('confirmation')}</dt><dd>{reservation.confirmationCode}</dd></div>
-              <div><dt>{t('stay')}</dt><dd>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</dd></div>
-              <div><dt>{t('source')}</dt><dd>{statusLabel(reservation.source, language)}</dd></div>
-              <div><dt>{t('provider')}</dt><dd>{providerLabel(reservation.providerCode)}</dd></div>
-              <div><dt>{language === 'th' ? 'เลขอ้างอิง OTA' : 'OTA reference'}</dt><dd>{reservation.channelRef || '—'}</dd></div>
-              <div><dt>{language === 'th' ? 'ยอดการจอง' : 'Booking total'}</dt><dd>{formatMoney(reservation.totalAmountSatang, language)}</dd></div>
+              <div><dt>{language === 'th' ? 'ยอดชำระแล้ว' : 'Paid'}</dt><dd>{formatMoney(reservation.folio?.paidSatang, language)}</dd></div>
+              <div><dt>{t('balance')}</dt><dd>{formatMoney(reservation.folio?.balanceSatang, language)}</dd></div>
             </dl>
           </article>
         </div>
@@ -351,6 +348,7 @@ export function BookingsView({ role }: { role: LiteRole }) {
 
   const roomTypes = useMemo(() => setup.data?.roomTypes || [], [setup.data])
   const canCancel = ['ADMIN', 'MANAGER'].includes(role)
+  const cashierOnly = role === 'CASHIER'
   const canOpenEditor = canCreateOrEdit && roomTypes.length > 0 && !setup.error
   const cancelBooking = (reservation: ReservationSummary) => {
     const reason = window.prompt(language === 'th' ? 'ระบุเหตุผลการยกเลิก' : 'Enter the operational cancellation reason:')
@@ -374,10 +372,10 @@ export function BookingsView({ role }: { role: LiteRole }) {
           <option value="">{t('allStatuses')}</option>
           {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
         </select>
-        <select value={source} aria-label={language === 'th' ? 'กรองตามช่องทาง' : 'Filter by source'} onChange={(event) => { setCursor(null); setSource(event.target.value) }}>
+        {!cashierOnly ? <select value={source} aria-label={language === 'th' ? 'กรองตามช่องทาง' : 'Filter by source'} onChange={(event) => { setCursor(null); setSource(event.target.value) }}>
           <option value="">{t('allSources')}</option>
           {['DIRECT', 'WALK_IN', 'PHONE', 'EMAIL', 'WEBSITE', 'BOOKING_COM', 'AGODA', 'TRIP_COM'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
-        </select>
+        </select> : null}
         <button className="button button--secondary">{t('search').split(' ')[0]}</button>
       </form>
       {setup.error && canCreateOrEdit ? <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดประเภทห้องได้ ปิดการแก้ไขการจองไว้ชั่วคราว' : 'Room types could not be loaded, so booking edits are temporarily disabled.'} retry={() => setup.refetch()} /> : null}
@@ -387,15 +385,15 @@ export function BookingsView({ role }: { role: LiteRole }) {
         query.data.items.length === 0 ? <EmptyBlock /> : (
           <section className="panel table-panel">
             <div className="table-scroll">
-              <table>
-                <thead><tr><th>{t('guest')}</th><th>{t('stay')}</th><th>{t('roomType')}</th><th>{t('source')}</th><th>{t('status')}</th><th>{t('balance')}</th><th /></tr></thead>
+              <table className={cashierOnly ? 'cashier-table' : undefined}>
+                <thead><tr><th>{t('guest')}</th>{!cashierOnly ? <><th>{t('stay')}</th><th>{t('roomType')}</th><th>{t('source')}</th></> : null}<th>{t('status')}</th><th>{t('balance')}</th><th /></tr></thead>
                 <tbody>
                   {query.data.items.map((reservation) => (
                     <tr key={reservation.id}>
                       <td><GuestStay reservation={reservation} compact /></td>
-                      <td>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</td>
+                      {!cashierOnly ? <><td>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</td>
                       <td>{reservation.roomType.name}<span className="muted">{reservation.assignedRoom?.number || t('unassigned')}</span></td>
-                      <td>{statusLabel(reservation.source, language)}</td>
+                      <td>{statusLabel(reservation.source, language)}</td></> : null}
                       <td><StatusPill value={reservation.status} /></td>
                       <td>{formatMoney(reservation.folio?.balanceSatang, language)}</td>
                       <td className="row-actions">

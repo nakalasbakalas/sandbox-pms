@@ -358,6 +358,33 @@ test('delivery attempt policy exposes no next attempt for permanent or exhausted
   assert.equal(exhausted.nextAttemptAt, null)
 })
 
+test('delivery drain leaves foreign-property notifications untouched', async () => {
+  let candidateWhere = null
+  let claimCalled = false
+  const prisma = {
+    bookingEmailPushDelivery: {
+      findMany: async ({ where }) => {
+        candidateWhere = where
+        return []
+      },
+      updateMany: async () => {
+        claimCalled = true
+        return { count: 1 }
+      },
+    },
+  }
+
+  const summary = await processPendingBookingEmailDeliveries(prisma, {
+    propertyCode: 'SANDBOX',
+    now: () => new Date('2026-07-13T04:00:00.000Z'),
+  })
+
+  assert.equal(candidateWhere.source.is.property.is.code, 'SANDBOX')
+  assert.deepEqual(candidateWhere.OR[2].attempts, { lt: 8 })
+  assert.equal(claimCalled, false)
+  assert.deepEqual(summary, { checked: 0, processed: 0, coalesced: 0, failed: 0, eventsIngested: 0 })
+})
+
 test('permanent and max-attempt Gmail delivery failures remain visible but are no longer claimable', async () => {
   const now = new Date('2026-07-13T04:00:00.000Z')
 

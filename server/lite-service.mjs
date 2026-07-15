@@ -444,7 +444,6 @@ function mapGuest(guest, options = {}) {
   const displayName = [firstName, lastName].filter(Boolean).join(' ') || 'Guest'
   if (options.paymentReconciliationOnly) {
     return {
-      id: guest.id,
       displayName,
     }
   }
@@ -530,6 +529,15 @@ function mapAssignedRoom(room) {
 }
 
 function mapReservation(reservation, options = {}) {
+  if (options.paymentReconciliationOnly) {
+    return {
+      id: reservation.id,
+      confirmationCode: reservation.confirmationCode,
+      status: reservation.status,
+      guest: mapGuest(reservation.guest, options),
+      folio: mapFolio(reservation.folio),
+    }
+  }
   const checkIn = isoDateKey(reservation.checkIn)
   const checkOut = isoDateKey(reservation.checkOut)
   return {
@@ -742,23 +750,31 @@ export function bookingSearchWhere(query, options = {}) {
         },
       }
     : null
+  const guestNameMatch = {
+    guest: {
+      is: {
+        OR: [
+          { firstName: contains },
+          { lastName: contains },
+          ...(options.paymentReconciliationOnly ? [] : [{ email: contains }, { phone: contains }]),
+        ],
+      },
+    },
+  }
+  if (options.paymentReconciliationOnly) {
+    return [
+      { confirmationCode: contains },
+      guestNameMatch,
+      ...(combinedGuestNameMatch ? [combinedGuestNameMatch] : []),
+    ]
+  }
   return [
     { confirmationCode: contains },
     { channelRef: contains },
     { externalReservationId: contains },
     { providerCode: contains },
     { roomType: { is: { OR: [{ code: contains }, { name: contains }] } } },
-    {
-      guest: {
-        is: {
-          OR: [
-            { firstName: contains },
-            { lastName: contains },
-            ...(options.paymentReconciliationOnly ? [] : [{ email: contains }, { phone: contains }]),
-          ],
-        },
-      },
-    },
+    guestNameMatch,
     ...(combinedGuestNameMatch ? [combinedGuestNameMatch] : []),
   ]
 }
