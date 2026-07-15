@@ -4,12 +4,12 @@ Use this record for one exact reviewed commit. Repository tests, synthetic fixtu
 
 ## Release Identity
 
-- Reviewed commit: pending
-- Render staging service/deploy: pending
-- Disposable/staging database: pending
-- `/healthz?deep=1` result and timestamp: pending
-- `/api/version` commit, UI variant, build time, service, and asset identifier: pending
-- Browser asset identifier matches `/api/version`: pending
+- Reviewed commit: `0583c6abb88deb3f02585cc08a13f50bd55c7789` (PR #173 exact head; CI #202 passed)
+- Render staging service/deploy: `srv-d9asptjeo5us73dh0270` / `dep-d9b5qphkh4rs73chqd10` (`live`)
+- Disposable/staging database: `sandbox-hotel-pms-lite-staging-db` / `dpg-d9asp1jeo5us73dgus40-a` (`available`; no production database used)
+- `/healthz?deep=1` result and timestamp: HTTP 200, `ok=true`, Lite UI, active write mode, database configured/healthy at 2026-07-15 11:34 Asia/Bangkok; Gmail Pub/Sub disabled/unconfigured
+- `/api/version` commit, UI variant, build time, service, and asset identifier: exact head above, `lite`, `2026-07-14T16:02:15.845Z`, `sandbox-hotel-pms-lite-staging`, `assets/index-CTgbifAg.js`
+- Browser asset identifier matches `/api/version`: verified at 2026-07-15 11:34 Asia/Bangkok; root HTML referenced `assets/index-CTgbifAg.js`
 - Cloudflare hostname, DNS/proxy path, WAF configuration, and traffic-enforcement evidence: pending
 
 ## Data And Recovery Gate

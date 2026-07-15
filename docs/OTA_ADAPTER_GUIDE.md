@@ -169,7 +169,7 @@ The Lite Channel Desk does not use the experimental OTA browser adapters above. 
 | Existing OTA adapter skeletons | Dry-run placeholders only | No production writes | Hotel Ops experimentation; not Lite synchronization |
 | Channex boundary | No | No | Disabled future certified channel rail |
 
-For Lite deployments, set `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`. The older `HotelOpsTask` availability CLI is a legacy compatibility path only and must not operate beside Channel Desk. Keep the legacy in-process email poller disabled (`BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`) because Gmail Pub/Sub plus history reconciliation is the canonical Lite intake path.
+For Lite deployments, set `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`. The older `HotelOpsTask` availability CLI is a legacy compatibility path only and must not operate beside Channel Desk. Keep the legacy in-process email poller disabled (`BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`) because Gmail Pub/Sub plus history reconciliation is the canonical Lite intake path. Lite scheduler startup fails closed when the legacy 120-second poller is enabled or a non-`lite_manual` backend is selected; do not weaken that guard or run both intake paths in parallel.
 
 Manual channel records may store only non-secret provider/property/room/rate mapping metadata and an official HTTPS Extranet link. They must never store OTA usernames, passwords, cookies, session state, API tokens, 2FA material, or CAPTCHA answers.
 
@@ -184,6 +184,8 @@ OTA email money remains review evidence, not a currency-conversion feed. The par
 Choosing Booking.com, Agoda, or Trip.com in a manual reservation form is attribution only. A source label or bare provider code without an external reservation reference/provider-total/email-evidence pair is not trusted provider-pricing provenance and must not make normal manual booking edits impossible.
 
 Tasks coalesce when the desired availability has not changed. When it changes, the active task is superseded and a higher revision becomes current. Staff must enter the value in the official Extranet, then confirm the exact value and revision in Lite. A completion record is an operator attestation and audit event; it is not a provider API read-back.
+
+Manual task completion and reopen/retry resolve the task through its configured `SANDBOX` property relation. A task id from another property is not authority and returns not found before any task or availability mutation.
 
 Manual work cannot guarantee zero-lag synchronization or prevent overbooking during the interval before every affected Extranet is updated. The Channel Desk exposes each pending/failed task's creation time and raw age, prompts staff to complete open work, and escalates failed work to a manager. No overdue SLA flag is invented because no owner-approved task-age threshold exists. The UI must never label this workflow `live sync`, `automatic sync`, or `two-way sync`.
 
@@ -227,7 +229,13 @@ The manual queue remains authoritative until every applicable item is complete a
 
 Gmail Pub/Sub can signal new provider email near-live, and the five-minute maintenance command renews watches, retries deliveries, and reconciles history. All resulting events remain review-only. Email delivery can be delayed, duplicated, reordered, incomplete, or differently formatted; Gmail cannot supply authoritative live room inventory and cannot push inventory back to an OTA.
 
-Provider-scoped external references reduce duplicate/mismatched booking risk, but staff review remains mandatory. A successful Gmail watch, push, or reconciliation is mailbox evidence only, not Booking.com, Agoda, or Trip.com API proof.
+Push delivery claiming stops after a non-retryable error or the default eight-attempt ceiling. The redacted row remains visible as `FAILED` but is no longer claimable; retryable failures below the ceiling retain bounded backoff. This prevents an invalid provider/configuration state from looping forever and does not turn the failed row into OTA proof.
+
+Normal booking-email list/detail DTOs are operational review projections and omit the raw Gmail URL, source message id, headers, and body. Front Desk, Manager, and Admin may use that safe review projection. Raw evidence is a separate Manager/Admin-only, property-scoped endpoint that requires an operational reason and creates audit evidence; it returns only an allowlisted Gmail locator/source id and never a raw body. Cashier has neither booking-email review nor raw-evidence permission.
+
+Provider-scoped external references reduce duplicate/mismatched booking risk, but staff review remains mandatory. A successful local test, Gmail watch, push, or reconciliation is mailbox/repository evidence only, not Booking.com, Agoda, or Trip.com API proof. It also does not establish Cloudflare routing/WAF enforcement, account-owner sign-off, or provider approval.
+
+Lifecycle ordering is property- and provider/reservation-scoped: an older modification/cancellation cannot overtake a same-time or newer non-legacy event still in `NEEDS_REVIEW`, `ERROR`, or `PROCESSED`. Common child-age labels are parsed, but every declared child still needs exactly one valid age from 0 through 17; incomplete, invalid, or mismatched lists remain review work. Gmail source maintenance and booking-event mutations also resolve through the configured `SANDBOX` property, so a cross-property id cannot become write authority.
 
 iCal is recovery-only delayed date-block compatibility. It is unsuitable as the primary multi-room booking/cancellation/inventory/rate path and cannot close a Gmail, direct API, channel rail, or cutover gate. Follow `docs/ical-ota-setup-guide.md` only during an owner-approved incident.
 

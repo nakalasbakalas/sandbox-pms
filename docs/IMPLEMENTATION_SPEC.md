@@ -250,6 +250,7 @@ Lite read routes:
 - `GET /api/lite/v1/board?from=&to=`
 - `GET /api/lite/v1/housekeeping?date=YYYY-MM-DD`
 - `GET /api/lite/v1/channel-desk`
+- `GET /api/lite/v1/settings` (bounded configuration projection only; no reservations, booking-review rows, reservation logs, or manual task worklists)
 - `GET /api/version`
 - `GET /api/realtime/events`
 
@@ -261,13 +262,27 @@ Manual channel routes:
 - `POST /api/lite/v1/channel-tasks/:id/complete`
 - `POST /api/lite/v1/channel-tasks/:id/reopen`
 
+Wave 1 money/evidence routes:
+
+- `POST /api/payments/:id/reversals` creates an immutable full or partial reversal against the original payment.
+- `POST /api/charges/:id/void` preserves and marks a non-room charge void; only Manager/Admin may call it.
+- `POST /api/booking-email/events/:id/evidence` returns only approved raw-evidence locators after property, permission, and reason checks and records an audit event.
+
 The existing audited reservation, assignment, check-in/out, cancellation/no-show, housekeeping, charge, and payment routes remain the write contract. Public payment, charge, walk-in, check-in, and checkout inputs cannot set booking-email provenance; only the internal reviewed-email path can link that evidence. Room assignment and stay-date edits accept `expectedUpdatedAt`; stale versions return `409`, and serializable transactions plus inventory constraints arbitrate concurrent room claims. Check-in requires nationality and ID/passport evidence plus a settled balance, unless a Manager/Admin records a reasoned identity or pay-later override. No-show requires an operational reason, an active reservation, and an arrival date that is not in the future. Checkout deletes the reservation's room-date inventory in the transaction before early-checkout channel availability is reconciled. A folio remains open while the stay is active even when prepaid, closes on settled checkout, and remains open after an approved unpaid checkout until later settlement closes it. Configuration and reconciliation require `manage:channels`; current task completion is limited by the service to Front Desk, Manager, or Admin and requires the exact current revision and desired availability.
+
+Cashier no longer inherits legacy booking-board, reservation, guest, or booking-email access. Its Lite access is the narrow `view:lite-payment-reconciliation` projection: safe folio/payment reconciliation fields only, with no guest identity suffix, payment notes, raw payment reference, or reservation timeline. Front Desk/Manager/Admin retain safe booking-email review permission; raw Gmail evidence is a separate Manager/Admin permission.
+
+Front Desk and Housekeeping validate hotel-date input before enabling their queries, including the derived board range. The responsive shell exposes logout in the mobile top bar. Modal dialogs use labelled dialog semantics, initial focus, Tab/Shift+Tab containment, Escape close, and focus restoration. Housekeeping renders both arrival and departure notices for same-day turnover context; a dirty departing room retains `TURNOVER` priority. Operational timestamps and added error/status copy are localized for English/Thai and invalid timestamps render a bounded fallback rather than leaking raw values.
+
+Session tokens contain a bounded non-negative `sessionVersion`. Authentication requires the token version to equal the active, unlocked database user. Versionless or stale tokens fail closed. Account lockout, password change, role change, active-state change, explicit deactivation, and logout increment the stored version, invalidating all previously issued tokens for that user.
 
 ### Gmail Push And Reconciliation
 
 `POST /api/booking-email/gmail/push` is intentionally outside PMS session authentication because Google Pub/Sub calls it. It is not anonymous: the handler requires a Google-signed OIDC bearer token and verifies issuer, audience, verified service-account email, configured subscription, mailbox identity, bounded envelope size, message id, and numeric Gmail history id.
 
 The handler persists a unique `BookingEmailPushDelivery` before acknowledging with `202`, then schedules bounded processing. Delivery states are `PENDING`, `PROCESSING`, `SUCCEEDED`, `COALESCED`, and `FAILED`. Source leases and retry availability prevent concurrent history work from being treated as success. A stale processing claim can be reclaimed.
+
+The default delivery ceiling is eight claimed attempts. A non-retryable error or the eighth failed attempt persists a redacted terminal marker on a visible `FAILED` row and consumes the attempt budget, so the row no longer satisfies the claim predicate. Retryable failures below the ceiling receive bounded backoff. A source-lease collision restores the prior attempt count because no provider attempt ran.
 
 `npm.cmd run booking-email:maintenance` is the Render cron contract. Each run:
 
@@ -276,12 +291,20 @@ The handler persists a unique `BookingEmailPushDelivery` before acknowledging wi
 3. performs bounded Gmail history reconciliation for each enabled Gmail source; and
 4. emits only redacted aggregate output.
 
-Every Gmail ingestion call is forced to `reviewOnly: true`, including the push, history, reconciliation, and explicit Gmail sync paths. New, modified, and cancelled bookings must remain `NEEDS_REVIEW` until authorized staff approve them. A processed event cannot be reprocessed. Modification and cancellation approvals require an operational reason and use the existing PMS transaction functions. Before either lifecycle mutation, the service rejects the event if an equal-time or newer processed modification/cancellation already exists for the linked reservation. The denied write transaction rolls back, then the service persists one sanitized `BOOKING_EMAIL_LIFECYCLE_DENIED` audit outside that transaction before returning the conflict.
+Every Gmail ingestion call is forced to `reviewOnly: true`, including the push, history, reconciliation, and explicit Gmail sync paths. New, modified, and cancelled bookings must remain `NEEDS_REVIEW` until authorized staff approve them. A processed event cannot be reprocessed. Modification and cancellation approvals require an operational reason and use the existing PMS transaction functions. Before either lifecycle mutation, the service rejects the event if an equal-time or newer non-legacy modification/cancellation for the same property and linked reservation or provider reference exists in `NEEDS_REVIEW`, `ERROR`, or `PROCESSED`. The denied write transaction rolls back, then the service persists one sanitized `BOOKING_EMAIL_LIFECYCLE_DENIED` audit outside that transaction before returning the conflict.
+
+The parser captures structured child ages plus common labels such as `Child age`, `Children ages`, `Ages of children`, and parenthesized age lists. Ages must be integers from 0 through 17 and the list length must equal the declared child count. Missing, invalid, or mismatched ages lower confidence and add `one valid age for every child` to the review reason; the approval service revalidates the same complete list before any booking/pricing mutation.
+
+Normal booking-email list/detail responses contain review fields only; they omit `rawEmailUrl`, source message id, raw headers, and raw body. Raw evidence lookup uses the separate Manager/Admin-only endpoint, scopes the event to the configured property, requires a bounded operational reason, allows only an HTTPS `mail.google.com` link plus its source id, and creates `BOOKING_EMAIL_EVIDENCE_VIEWED`. The raw body is never returned. Cashier has no booking-email review or evidence permission.
 
 At the Lite migration boundary, every pre-existing `BookingEmailEvent` is marked
 `legacyReadOnly`, including unresolved rows from the bounded 1,000-message
 historical import. New post-cutover rows retain the actionable default. Legacy
 rows can be inspected but cannot be approved, rejected, reprocessed, or replayed.
+
+Lite startup requires `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual` and forbids the legacy in-process booking-email poller. Gmail Pub/Sub plus the separately scheduled `booking-email:maintenance` reconciliation command are the only Lite intake/recovery path; the retained legacy poller must not run in parallel.
+
+All Gmail source selection/maintenance uses the configured property-code relation, defaulting to `SANDBOX`. Source list/create/update/sync and booking-email list/detail/evidence/approve/reject/reprocess resolve the configured property and reject cross-property ids. This scope is mutation authority; a matching opaque id alone is insufficient.
 
 ### Provider Attribution And Manual Availability
 
@@ -291,20 +314,26 @@ An inventory-changing create, edit, cancellation/no-show, walk-in, or reviewed O
 
 The queue is outbound work coordination only. It does not log in to or mutate any OTA. Staff open an official-domain Extranet URL, enter the exact desired availability, and complete the matching revision. There is no zero-lag or overbooking guarantee.
 
+Manual task completion and reopen/retry resolve the task through its property relation and require property code `SANDBOX`; a task id from another property returns not found before status, revision, mapping, or availability mutation.
+
 Manual connection activation requires active mapping coverage for every `RoomType` that owns at least one physical `Room`. This includes room types whose rooms are temporarily out of service because those rooms can become sellable again. One active external room-type/rate-plan target may map to only one PMS room type per connection; a partial database unique index is the concurrency guard. On a disabled-to-enabled transition, the same serializable transaction stages an initial absolute-availability baseline for only that connection across a validated 1–90-day horizon (default 90). Activation rolls back if any baseline task cannot be staged; an aggregate `MANUAL_CHANNEL_INITIAL_BASELINE_STAGED` audit record captures the bounded range and result counts. If a later room-type change leaves an enabled connection without a mapping, reconciliation creates no unusable task for those cells and records an aggregated `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` audit event. Channel Desk task DTOs show the current external room type id/name and rate-plan id.
 
 Booking.com remains manual because an ordinary individual-property Extranet account is not direct Connectivity API access. Agoda and Trip.com direct API routes require provider partner onboarding and testing; application submission and approval remain owner-gated. Channex delivery is represented by a disabled boundary that returns `CHANNEX_NOT_CONFIGURED` and refuses automatic pushes.
 
 ### Realtime Invalidation
 
-The authenticated SSE endpoint accepts only users with `view:board`. It publishes allowlisted invalidation signals, never booking payloads. Permitted fields are event type, occurrence time, optional opaque entity id, and optional reason code. The client refetches authorized API data and retains a polling fallback. The current in-process hub is suitable only for a single server instance; it has no replay and is not a durable cross-instance event bus.
+The authenticated SSE endpoint accepts only users with the narrow `view:realtime` permission. It publishes allowlisted invalidation signals, never booking payloads. Permitted fields are event type, occurrence time, optional opaque entity id, and optional reason code. The client refetches authorized API data and retains a polling fallback. The current in-process hub is suitable only for a single server instance; it has no replay and is not a durable cross-instance event bus.
 
 ### Money Contract
 
 `server/lite-service.mjs` reads nullable integer-satang fields as the authoritative Lite monetary contract and rejects required rows whose satang value is missing. `server/pms-service.mjs` derives satang plus legacy Float rollback parity from the same validated integer for property fees/tax, room-type rates, booking-email amounts, reservation pricing/deposits, folios, payments, and charges. Provider-reported totals remain exact even when nightly division does not divide evenly; `providerTotalSatang` plus `providerTotalCurrency` preserve their provenance and prevent silent recomputation. A pricing mutation requires exactly one active, system-managed `ROOM` charge; staff charge entry is incidental-only. Folio totals and balances are recomputed in satang. `prisma/migrations/20260713100000_money_satang_expand/` adds and backfills the original integer fields and basis-point tax field; `20260713130000_provider_total_provenance/` adds the provider-total guard; `20260714110000_rate_calendar_satang_and_provider_text/` adds/backfills the currently dormant rate-calendar shadow and removes rigid manual-provider database checks while service validation remains controlling. Any future RateCalendar writer must dual-write its satang/Float pair before that pricing surface is enabled. `npm.cmd run test:money-backfill:db` proves populated legacy backfill in an isolated guarded database, and `npm.cmd run money:reconcile` performs the read-only parity check.
 
+`20260715150000_payment_reversal_idempotency` adds payment entry kind, reversal linkage/reason, payment/charge request ids, and charge-void metadata plus database shape/parity constraints. New payment and charge writes use serializable transactions. Reusing a request id returns the original result only when the immutable intent matches; a conflicting reuse fails. A reversal is a signed negative exact-satang row linked to an original positive payment, requires `refund:payment`, and cannot exceed its unreversed amount. Manager/Admin incidental-charge voids preserve the original charge and record reason, actor, time, request id, and audit evidence; room charges remain owned by the reservation-pricing flow. Reversal/void recomputation can reopen a checked-out folio when the adjustment creates a balance and reconciles deposit state.
+
+`20260715160000_user_session_revocation` adds `User.sessionVersion`. Both new migrations are explicit transactions, but their application is still an operational boundary: stop after a failed apply, preserve the database, record `prisma migrate status`, inspect partial state, and rehearse recovery on a disposable restore before using `prisma migrate resolve --rolled-back`. Do not treat a schema-only or local migration check as applied staging/production proof.
+
 Do not represent the production exact-money cutover as complete until a fresh recovery point, disposable restore, applied migration, reconciliation report, zero unexplained folio/payment discrepancies, and the rollback/contract phases are proven. Satang is the implemented Lite/runtime authority; existing Float fields remain required rollback parity during the pilot, and production Lite folio/payment sign-off stays open until the environment evidence exists.
 
 ### Release Contract
 
-Lite must be deployed first as a separate staging service with a sanitized disposable/staging database. A five-minute Gmail maintenance cron, Pub/Sub watch/push, migrations, review-only events, manual queue, roles, Thai/English flows, exact release metadata, and recovery must be proven there. Repository/local validation does not establish Render deployment, Cloudflare routing/WAF, provider approval, production data safety, or staff acceptance. Use `docs/LITE_PILOT_ACCEPTANCE.md` for the seven-day shadow, 14-day pilot, sequential 48-hour OTA observation, and 30-day rollback record. See `docs/LITE_ARCHITECTURE.md` for the complete boundary.
+Lite must be deployed first as a separate staging service with a sanitized disposable/staging database. Public `/healthz` and `/healthz?deep=1` output is deliberately bounded to availability-safe service/UI/database state and is not a configuration inventory. A five-minute Gmail maintenance cron, Pub/Sub watch/push, migrations, review-only events, manual queue, roles, Thai/English flows, exact release metadata, and recovery must be proven there. Repository/local validation does not establish Gmail provider operation, Render migration/recovery success, Cloudflare routing/WAF enforcement, OTA provider approval, production data safety, owner sign-off, or staff acceptance. Use `docs/LITE_PILOT_ACCEPTANCE.md` for the seven-day shadow, 14-day pilot, sequential 48-hour OTA observation, and 30-day rollback record. See `docs/LITE_ARCHITECTURE.md` for the complete boundary.

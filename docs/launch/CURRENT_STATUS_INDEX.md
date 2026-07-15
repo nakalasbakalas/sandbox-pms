@@ -1,15 +1,16 @@
 # Launch Current Status Index
 
-Status date: 2026-07-14.
+Status date: 2026-07-15.
 
 Verdict: owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218` and is live on Render deploy `dep-d966aj9kh4rs73d9h10g`. Post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status passed on 2026-07-07. The remaining launch issues are closed by owner-directed accepted-risk completion, not by invented Cloudflare WAF/rate-limit rule proof, Render backup/recovery metadata, credentialed password-based auth proof, or staff manual acceptance proof.
 
-Scope boundary: that verdict describes the existing legacy production release only. PMS Lite V1 on `codex/sandbox-pms-lite-v1` remains a separate staging candidate: no Lite Render service/database/cron, public hostname, production migration, provider approval, seven-day Gmail shadow, 14-day staff pilot, or 30-day rollback completion is claimed. Use `docs/LITE_ARCHITECTURE.md` and `docs/LITE_PILOT_ACCEPTANCE.md` for the Lite gate.
+Scope boundary: that verdict describes the existing legacy production release only. PMS Lite V1 on `codex/sandbox-pms-lite-v1` remains a separate staging candidate. Its isolated Render service `srv-d9asptjeo5us73dh0270` and disposable database `dpg-d9asp1jeo5us73dgus40-a` are healthy on exact head `0583c6abb88deb3f02585cc08a13f50bd55c7789`, current deploy `dep-d9b5qphkh4rs73chqd10`. No Lite cron, public Cloudflare hostname, production migration, provider approval, seven-day Gmail shadow, 14-day staff pilot, or 30-day rollback completion is claimed. Use `docs/LITE_ARCHITECTURE.md` and `docs/LITE_PILOT_ACCEPTANCE.md` for the Lite gate.
 
 ## Latest Slice
 
 | Slice | Status | Evidence |
 | --- | --- | --- |
+| 2026-07-15 PMS Lite exact-head staging revalidation | Engineering staging healthy at PR #173 head `0583c6a`; direct Render health/version/assets align, while Gmail, Cloudflare, recovery, staff, provider, and elapsed pilot gates remain open | [2026-07-14-lite-render-staging-deploy.md](evidence/2026-07-14-lite-render-staging-deploy.md) |
 | 2026-07-07 owner completion deploy and issue closure | Completed by owner-directed accepted-risk closure; `d18ea06` deployed live, post-deploy checks passed, external proof gaps carried as owner-managed risk | [2026-07-07-owner-completion-deploy-and-issue-closure.md](evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md) |
 | 2026-07-06 owner/provider/manual decisions | Partial; owner answers recorded, expert proof boundaries set, and three-failure account lockout implemented; production proof remains open | [2026-07-06-owner-provider-manual-decisions.md](evidence/2026-07-06-owner-provider-manual-decisions.md) |
 | 2026-07-06 issue remediation pass | Current runtime/CI/local DB proof refreshed; remaining launch issues kept open for owner/provider/manual evidence | [2026-07-06-issue-remediation-pass.md](evidence/2026-07-06-issue-remediation-pass.md) |

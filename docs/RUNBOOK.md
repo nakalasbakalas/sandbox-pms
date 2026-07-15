@@ -345,9 +345,24 @@ plus one disposable Free Postgres database in Singapore. It creates no paid
 instance resource, but workspace quotas and bandwidth/build overages still apply.
 It has manual deploys
 (`autoDeployTrigger: off`), pins Node `22.12.0`, serves the Lite build, runs
-idempotent migrations before each start, and uses `/healthz?deep=1` so Render
-checks database connectivity. It does not contain the paid maintenance cron and
-does not reference the production PMS database.
+the repository migration chain before each start, and uses `/healthz?deep=1` so
+Render checks database connectivity. Multi-statement historical migrations are
+not universally retry-safe after interruption; do not describe the chain as
+idempotent. It does not contain the paid maintenance cron and does not reference
+the production PMS database.
+
+Public health responses are deliberately bounded to service/UI identity,
+timestamp, and database configured/healthy state. They must not expose secret
+values, missing secret names, write-mode configuration, provider configuration,
+or privileged diagnostics. A healthy response is availability evidence only; it
+does not prove Gmail, Cloudflare, provider, recovery, or owner acceptance.
+
+If a migration is interrupted, stop application writes and preserve the failed
+database. Record `npx.cmd prisma migrate status`, the failed migration name, and
+the database recovery point without printing connection details. Rehearse the
+repair on a disposable restore first. Only after reviewing the partial DDL/data
+may the database owner restore the database or run `npx.cmd prisma migrate resolve --rolled-back <migration_name>`, then retry `npm.cmd run db:migrate`.
+Never use `migrate resolve` to conceal an unknown production state.
 
 Render Free Postgres is staging-only: it expires after 30 days, has no backups,
 and Render permits only one active Free Postgres database per workspace. A Free
@@ -430,7 +445,14 @@ Before applying the Lite schema migrations:
 6. Run `npm.cmd run money:reconcile` with the same target `DATABASE_URL` and require `status=PASS` with zero unexplained differences.
 7. Inspect only redacted aggregate counts and migration state.
 
-The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill (including `RateCalendar.rateSatang`), database-enforced active OTA mapping-target uniqueness, immutable task target snapshots, read-only legacy email evidence, and the exact provider-total satang/currency provenance pair. The rate-calendar/provider-storage follow-up removes rigid provider `CHECK` constraints while the backend allowlist remains the authority for enabled adapters. The immutable-target migration reopens folios that the older runtime auto-closed for still-active stays. It marks every historical task target unverified rather than inferring it from a newer mapping, so reconciliation must supersede that work before completion. PMS runtime writes keep Float in rollback parity with satang. Do not mark the production money cutover complete until the target restore/migration, reconciliation, representative workflow, and rollback-period proof is captured.
+The Lite migrations add the manual channel queue/provider attribution, Gmail watch/source state and durable push deliveries, nullable integer-satang authority fields with audited Float backfill (including `RateCalendar.rateSatang`), database-enforced active OTA mapping-target uniqueness, immutable task target snapshots, read-only legacy email evidence, and the exact provider-total satang/currency provenance pair. The rate-calendar/provider-storage follow-up removes rigid provider `CHECK` constraints while the backend allowlist remains the authority for enabled adapters. The immutable-target migration reopens folios that the older runtime auto-closed for still-active stays. It marks every historical task target unverified rather than inferring it from a newer mapping, so reconciliation must supersede that work before completion. PMS runtime writes keep Float in rollback parity with satang.
+
+Two additional migrations are part of this Wave 1 apply boundary:
+
+- `20260715150000_payment_reversal_idempotency` adds payment entry kind, reversal linkage/reason, payment/charge request ids, charge-void actor/time/request metadata, and database constraints for signed exact-satang shape plus Float-shadow parity.
+- `20260715160000_user_session_revocation` adds the non-null defaulted `User.sessionVersion` used to invalidate previously issued session tokens.
+
+Nullable satang remains permitted only for quarantined legacy rows. New writes must use exact satang and derive the legacy Float shadow from it. Do not mark the production money or auth cutover complete until the target restore/migration, reconciliation, representative workflow, role/session, and rollback-period proof is captured.
 
 Before any staging migration, prove populated legacy backfill against a disposable database:
 
@@ -450,6 +472,9 @@ Use one browser action at a time and confirm the persisted result before moving 
 2. On Booking Board, assign only a matching available room. If another user changed the booking, a `409` requires refresh; never overwrite the newer state.
 3. Before check-in, record nationality and ID/passport number, confirm room readiness, and collect the balance. Manager/Admin may use pay-later or identity-later only with an operational reason.
 4. Keep the folio open throughout an active stay, including a prepaid stay, so incidentals can be posted. Record each charge and payment from the folio and verify the exact balance. Overpayment is refused.
+   Use one client request id per payment or incidental-charge intent; a retry must reuse that id. A conflicting reuse is an error, not a second write.
+   An actor with `refund:payment` may reverse all or part of an original payment with a recorded reason. Verify a separate negative reversal row, its link to the original payment, the recalculated folio/deposit state, and `PAYMENT_REVERSED` audit evidence. Never edit or delete the original payment.
+   Manager/Admin may void a non-room charge with a reason. Verify the original row is retained with void actor/time/request metadata and `CHARGE_VOIDED` audit evidence. Room charges must be changed through reservation pricing, not the void route.
 5. Check out only at zero balance in normal operation. A Manager/Admin unpaid override requires a reason and leaves the folio open; later settlement closes it automatically.
 6. Checkout sends the room to `VACANT_DIRTY` and releases that reservation's room-date rows before early-checkout availability work is staged. Housekeeping progresses it through the permitted cleaning states without receiving guest, email, rate, folio, or payment data.
 7. Mark no-show only for an active arrival on or after its Bangkok arrival date and always record the reason. A future arrival or terminal booking must be rejected.
@@ -457,6 +482,16 @@ Use one browser action at a time and confirm the persisted result before moving 
 Generic booking edits are unavailable after check-in because changing a checked-in room/type through that form can corrupt occupied-room state. Use checkout or an owner-approved dedicated in-house extension/room-move workflow; do not work around this backend guard.
 
 For release proof, run the guarded disposable `npm.cmd run test:e2e:lite`; it directly clicks Board assign/edit, Thai check-in error and success, folio charge/payment, checkout, no-show, concurrent room assignment, and stale-edit rejection. This is engineering proof only, not staff or production acceptance.
+
+Auth and privacy checks for the staging target:
+
+1. Confirm an old or versionless session token receives `401` after the migration.
+2. Confirm lockout, password change, role change, active-state change, deactivation, and logout each invalidate already-issued sessions through `sessionVersion`.
+3. Confirm Cashier can reach only the narrow Lite payment-reconciliation booking projection and cannot call legacy reservation, guest, board, booking-email review, or booking-email evidence APIs.
+4. Confirm Front Desk/Manager/Admin normal booking-email list/detail responses contain no raw Gmail URL, source message id, headers, or body.
+5. When raw evidence is operationally necessary, Manager/Admin submits a reason to `POST /api/booking-email/events/:id/evidence`; verify property scoping and `BOOKING_EMAIL_EVIDENCE_VIEWED`. Do not copy the returned Gmail locator or source id into logs or release evidence.
+
+These checks require approved disposable/staging accounts and data. Local unit tests alone are not credentialed staging or production role proof.
 
 ### Gmail Watch, Push, And Five-Minute Fallback
 
@@ -501,6 +536,10 @@ npm.cmd run booking-email:maintenance
 
 Expected output is redacted aggregate JSON. A healthy run has at least one enabled source, no errors, no delivery failures, and no reconciliation failures. This proves only that run. It does not prove continuous push delivery or zero-lag synchronization.
 
+Lite startup fails closed if the legacy 120-second booking-email poller is enabled or if the queue backend is not `lite_manual`. Do not weaken that guard. Pub/Sub plus the separately scheduled maintenance/reconciliation command is the Lite path; the legacy poller must remain off.
+
+Delivery retries use a default maximum of eight claimed attempts. A non-retryable error or an eighth failed attempt remains visible as a redacted terminal `FAILED` row but is excluded from later claims. Do not clear or rewrite the attempt count merely to hide a failure. Investigate the provider/configuration cause, preserve the failed record, and use the reviewed reconciliation/manual intake path; a source-lease collision does not consume an attempt because no provider call ran.
+
 To prove the end-to-end path safely:
 
 1. Verify `/api/booking-email/status` and Channel Desk show non-secret Gmail readiness.
@@ -508,8 +547,12 @@ To prove the end-to-end path safely:
 3. Send or identify one owner-approved non-production provider fixture through the staging mailbox.
 4. Confirm a durable push delivery reaches `SUCCEEDED` or is safely `COALESCED` by history reconciliation.
 5. Confirm the booking email appears as `NEEDS_REVIEW` and no reservation/inventory changed before approval.
-6. Approve only a staging fixture with an operational reason and verify the PMS audit plus absolute-availability reconciliation for every enabled OTA, including stale-task supersession on the source provider.
-7. Test a missed/failed push and confirm the five-minute maintenance run recovers it without duplicate reservation creation.
+6. For any declared children, confirm the parser captured one integer age from 0 through 17 per child. A missing, invalid, or count-mismatched age list must remain review work and must not be applied until the complete list is verified.
+7. Before approving a modification/cancellation, verify no same-time or newer non-legacy lifecycle event for the same reservation/provider reference remains in `NEEDS_REVIEW`, `ERROR`, or `PROCESSED`. The older event must fail closed rather than overtake that timeline.
+8. Approve only a staging fixture with an operational reason and verify the PMS audit plus absolute-availability reconciliation for every enabled OTA, including stale-task supersession on the source provider.
+9. Test a missed/failed push and confirm the five-minute maintenance run recovers a retryable row without duplicate reservation creation; separately confirm non-retryable/exhausted rows remain visible and unclaimable.
+
+All Gmail source/event operations must resolve to the configured `SANDBOX` property. Exercise a cross-property source/event id only against disposable fixture data and require `404`/no mutation for source update/sync, event approve/reject/reprocess/evidence, and delivery processing.
 
 If Pub/Sub is unhealthy, leave the review queue enabled, keep the maintenance cron running, and treat intake as reconciliation-based rather than near-live. If Gmail OAuth or reconciliation is unhealthy, stop relying on mailbox intake and use the existing manual booking process until the source is healthy. Never bypass the review gate to compensate for delay.
 
@@ -540,21 +583,34 @@ Escalate overdue or failed tasks immediately because the workflow cannot guarant
 
 If `MANUAL_CHANNEL_TASKS_SKIPPED_UNMAPPED` appears in audit logs, keep the affected inventory under manual control, add/repair the active mapping, and run reconciliation again. The service deliberately creates no task for an unknown external target; an audit record is evidence of the gap, not proof that the OTA was updated.
 
+Completion and reopen/retry also resolve tasks through the configured `SANDBOX` property relation. A cross-property task id must return not found before any status, revision, mapping, or availability change.
+
 ### SSE And Client Recovery
 
-`GET /api/realtime/events` is an authenticated invalidation signal, not a booking data feed. If SSE disconnects, the client receives `sync-required` on reconnect and continues fallback polling. Verify mutations by refetching the authoritative API; do not infer success from an SSE signal. For more than one server instance, add a shared event bus before relying on cross-instance live refresh.
+`GET /api/realtime/events` is an authenticated invalidation signal, not a booking data feed. If SSE disconnects, the client receives `sync-required` on reconnect and continues fallback polling. Verify mutations by refetching the authoritative API; do not infer success from an SSE signal. The current hub is process-local and has no replay; keep the Lite pilot to one web instance. For more than one server instance, add and prove a shared event bus before relying on cross-instance live refresh.
+
+### Settings And Client Usability Checks
+
+Settings must use only authenticated `GET /api/lite/v1/settings` for its property, room/type, non-secret Gmail health/count, and manual mapping snapshot. Confirm opening Settings issues no booking-board/channel-worklist request and queries no reservation, booking-email review, reservation-log, or manual-task rows.
+
+On desktop and mobile, verify blank Front Desk/Housekeeping dates show a localized validation state without issuing a request; mobile exposes a working logout control; same-day Housekeeping turnover shows both departure and arrival context; every modal traps Tab/Shift+Tab, closes on Escape, and restores prior focus; operational timestamps are locale-formatted with a bounded invalid-value fallback; and the added status/error copy is reviewed in English and Thai. These checks are staff/usability evidence only after humans perform them on the exact staged build.
 
 ### Release And Cutover Gate
 
 Do not promote Lite beyond staging until all of these are recorded for the exact commit:
 
 - green Lite, legacy, business, lint, Prisma, build, and approved disposable DB E2E checks;
-- successful staging migration plus recovery/restore evidence;
+- successful staging application of the full migration chain, including payment reversal/idempotency and session revocation, plus failed-migration recovery/restore evidence;
 - Gmail OAuth/watch/push/cron/reconciliation proof with review-only behavior;
+- terminal Gmail delivery visibility/unclaimability at non-retryable or eight-attempt failure, plus lifecycle ordering and child-age review proof;
 - Booking.com, Agoda, and Trip.com parser/review fixtures and duplicate/out-of-order handling;
 - manual task coalescing, supersession, absolute source-provider reconciliation, completion, age, and audit proof;
-- completed exact-money migration/reconciliation, not merely API satang projection;
+- completed exact-money migration/reconciliation plus reasoned reversal/void and idempotent-retry proof, not merely API satang projection;
+- credentialed session revocation, Cashier least-privilege, and booking-email evidence-gate proof;
 - role, tablet/desktop, Thai/English, and Thai-speaking staff acceptance;
+- bounded Settings-query, blank-date, mobile logout, same-day turnover, modal keyboard/focus, and localized timestamp acceptance;
 - provider application decisions, Cloudflare routing/WAF evidence, and owner go/no-go.
+
+Local and CI validation cannot close Gmail provider operation, Render migration or recovery state, Cloudflare DNS/proxy/WAF enforcement, OTA approval, staff acceptance, or owner go/no-go.
 
 Use a separate pilot hostname and manual Render release before any public domain move. Keep the existing service available during the pilot and retain a tested rollback for 30 days. See `docs/LITE_ARCHITECTURE.md` for the sequential OTA and domain cutover boundary.

@@ -2,6 +2,8 @@
 
 Recorded: 2026-07-14 (Asia/Bangkok)
 
+Exact-head revalidation: 2026-07-15 11:34 (Asia/Bangkok)
+
 ## Verdict
 
 The validated free Render Blueprint is deployed and healthy on its direct
@@ -14,9 +16,9 @@ remain gated.
 - Blueprint: `render-lite.yaml`
 - Web service: `sandbox-hotel-pms-lite-staging`
 - Render service id: `srv-d9asptjeo5us73dh0270`
-- Render deploy id: `dep-d9asptreo5us73dh03b0`
+- Render deploy id: `dep-d9b5qphkh4rs73chqd10`
 - Branch: `codex/sandbox-pms-lite-v1`
-- Commit: `2b2b27dd14510afff1a65e1bf24220309de0ea40`
+- Commit: `0583c6abb88deb3f02585cc08a13f50bd55c7789`
 - Deploy status: `live`
 - Direct hostname: `https://sandbox-hotel-pms-lite-staging.onrender.com`
 
@@ -34,14 +36,19 @@ remain gated.
 
 - API version: `lite/v1`
 - DTO version: `lite-read-v1`
-- commit SHA: `2b2b27dd14510afff1a65e1bf24220309de0ea40`
+- commit SHA: `0583c6abb88deb3f02585cc08a13f50bd55c7789`
 - asset identifier: `assets/index-CTgbifAg.js`
 - release id: `srv-d9asptjeo5us73dh0270`
 - service name: `sandbox-hotel-pms-lite-staging`
-- build time: `2026-07-14T05:46:19.314Z`
+- build time: `2026-07-14T16:02:15.845Z`
 
 The root HTML referenced the same JavaScript identity plus
 `assets/index-DXlVsn94.css`.
+
+Render CLI reported the exact-head deploy as `live`, and both public probes
+returned HTTP 200 at 2026-07-15 11:34 Asia/Bangkok. The earlier Blueprint
+deployment `dep-d9asptreo5us73dh03b0` at commit `2b2b27dd...` is historical and
+must not be cited as the current release identity.
 
 ## Disposable database proof
 
