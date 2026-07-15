@@ -73,11 +73,13 @@ No production database was used or mutated for this proof.
 
 ## Gmail/shadow boundary
 
-The connected Gmail profile is `booking@sandboxhotel.com`, but the staging
-service does not yet contain a usable Gmail OAuth credential tuple. The
-redacted Render status helper returned `ready: false` for staging. The bounded
-public deep-health response no longer exposes integration or missing-
-configuration inventories. No Gmail shadow proof is claimed.
+The connected Gmail profile is `booking@sandboxhotel.com`. A redacted Render
+status check on 2026-07-15 reported the booking-specific refresh-token tuple
+as present and `ready: true` without printing values. Pub/Sub is still disabled,
+and its topic, subscription, audience, and service-account-email settings are
+absent. The bounded public deep-health response no longer exposes integration
+or missing-configuration inventories. OAuth presence alone is not intake,
+watch, missed-push recovery, or seven-day shadow proof.
 
 The existing non-Lite Render service still reports a complete booking-specific
 refresh-token tuple without printing values. Credentials were not copied into
