@@ -1,9 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { liteApi } from './api'
+import { liteApi, SESSION_EXPIRED_EVENT } from './api'
 import { ErrorBlock, LoadingBlock } from './components'
-import { I18nProvider, useI18n } from './i18n'
+import { I18nProvider, statusLabel, useI18n } from './i18n'
 import type { Language, LiteRole, LiteUser } from './types'
 import { FrontDeskView } from './views/FrontDeskView'
 
@@ -16,9 +16,9 @@ const SettingsView = lazy(() => import('./views/SettingsView').then((module) => 
 type RouteKey = 'front-desk' | 'bookings' | 'board' | 'housekeeping' | 'channel-desk' | 'settings'
 
 const routeAccess: Record<RouteKey, LiteRole[]> = {
-  'front-desk': ['ADMIN', 'MANAGER', 'FRONT_DESK', 'CASHIER'],
+  'front-desk': ['ADMIN', 'MANAGER', 'FRONT_DESK'],
   bookings: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'CASHIER'],
-  board: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'CASHIER'],
+  board: ['ADMIN', 'MANAGER', 'FRONT_DESK'],
   housekeeping: ['ADMIN', 'MANAGER', 'FRONT_DESK', 'HOUSEKEEPING'],
   'channel-desk': ['ADMIN', 'MANAGER', 'FRONT_DESK'],
   settings: ['ADMIN', 'MANAGER'],
@@ -122,13 +122,13 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar__brand"><div className="brand-mark">S</div><div><strong>Sandbox</strong><span>PMS Lite</span></div></div>
-        <nav>
+        <nav style={{ '--lite-nav-count': nav.length } as CSSProperties}>
           {nav.map(([key, label, index]) => (
             <button key={key} className={route === key ? 'is-active' : ''} onClick={() => navigate(key)}><span>{index}</span>{label}</button>
           ))}
         </nav>
         <div className="sidebar__footer">
-          <div className="staff-card"><span>{user.displayName}</span><small>{user.role.replaceAll('_', ' ')}</small></div>
+          <div className="staff-card"><span>{user.displayName}</span><small>{statusLabel(user.role, language)}</small></div>
           <button className="sidebar-logout" onClick={logout}>{t('logout')}</button>
         </div>
       </aside>
@@ -136,6 +136,7 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
         <header className="topbar">
           <div className={`live-state ${connected ? 'is-connected' : ''}`}><span />{connected ? t('networkOnline') : t('networkFallback')}</div>
           <button className="language-button" onClick={() => setLanguage(language === 'en' ? 'th' : 'en')}>{t('language')}</button>
+          <button className="topbar-logout" onClick={logout}>{t('logout')}</button>
         </header>
         <main className="workspace__main"><Suspense fallback={<LoadingBlock />}>{currentView}</Suspense></main>
       </div>
@@ -145,10 +146,24 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
 }
 
 function AppSession() {
+  const { language } = useI18n()
+  const queryClient = useQueryClient()
   const [user, setUser] = useState<LiteUser | null>(null)
   const [checking, setChecking] = useState(true)
   const [loginBusy, setLoginBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const expireSession = () => {
+      queryClient.clear()
+      setUser(null)
+      setChecking(false)
+      setLoginBusy(false)
+      setError(language === 'th' ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง' : 'Your session has expired. Please sign in again.')
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, expireSession)
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, expireSession)
+  }, [language, queryClient])
 
   useEffect(() => {
     let current = true
@@ -164,7 +179,7 @@ function AppSession() {
       try {
         setUser(await liteApi.login(identity, password))
       } catch (loginError) {
-        setError(loginError instanceof Error ? loginError.message : String(loginError))
+        setError(language === 'th' ? 'ไม่สามารถเข้าสู่ระบบได้ กรุณาตรวจสอบชื่อผู้ใช้และรหัสผ่าน' : loginError instanceof Error ? loginError.message : String(loginError))
       } finally {
         setLoginBusy(false)
       }

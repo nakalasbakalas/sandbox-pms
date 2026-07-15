@@ -3,18 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatusPill } from '../components'
+import { addDateKey } from '../date-utils'
 import { providerLabel, statusLabel, useI18n } from '../i18n'
 import { ReservationBookingForm } from '../reservation-booking-form'
 import type { BookingDetail, LiteRole, ReservationAuditEvent, ReservationSummary } from '../types'
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-}
-
-function plusDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
 }
 
 function auditActionLabel(event: ReservationAuditEvent, language: string) {
@@ -35,7 +30,7 @@ function auditActionLabel(event: ReservationAuditEvent, language: string) {
   return labels[event.action] || 'อัปเดตการจอง'
 }
 
-function maskedIdentitySuffix(value: string | null) {
+function maskedIdentitySuffix(value: string | null | undefined) {
   const suffix = String(value || '').replace(/\s+/g, '').slice(-4)
   return suffix ? `•••• ${suffix}` : '—'
 }
@@ -50,9 +45,32 @@ function yesNo(value: boolean, language: string) {
   return value ? 'Yes' : 'No'
 }
 
-function BookingProfile({ reservation }: { reservation: ReservationSummary }) {
+function BookingProfile({ reservation, role }: { reservation: ReservationSummary; role: LiteRole }) {
   const { language, t } = useI18n()
   const guest = reservation.guest
+  if (role === 'CASHIER') {
+    return (
+      <section className="booking-profile" aria-label={language === 'th' ? 'ข้อมูลสำหรับตรวจสอบการชำระเงิน' : 'Payment reconciliation context'}>
+        <header className="booking-profile__header">
+          <div><span>{t('guest')}</span><strong>{guest.displayName}</strong></div>
+          <StatusPill value={reservation.status} />
+        </header>
+        <div className="booking-profile__grid">
+          <article>
+            <h3>{language === 'th' ? 'ข้อมูลอ้างอิงการชำระเงิน' : 'Payment reference context'}</h3>
+            <dl>
+              <div><dt>{t('confirmation')}</dt><dd>{reservation.confirmationCode}</dd></div>
+              <div><dt>{t('stay')}</dt><dd>{reservation.checkIn.slice(0, 10)} → {reservation.checkOut.slice(0, 10)}</dd></div>
+              <div><dt>{t('source')}</dt><dd>{statusLabel(reservation.source, language)}</dd></div>
+              <div><dt>{t('provider')}</dt><dd>{providerLabel(reservation.providerCode)}</dd></div>
+              <div><dt>{language === 'th' ? 'เลขอ้างอิง OTA' : 'OTA reference'}</dt><dd>{reservation.channelRef || '—'}</dd></div>
+              <div><dt>{language === 'th' ? 'ยอดการจอง' : 'Booking total'}</dt><dd>{formatMoney(reservation.totalAmountSatang, language)}</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+    )
+  }
   return (
     <section className="booking-profile" aria-label={language === 'th' ? 'ข้อมูลผู้เข้าพักและแหล่งการจอง' : 'Guest and booking source details'}>
       <header className="booking-profile__header">
@@ -68,9 +86,9 @@ function BookingProfile({ reservation }: { reservation: ReservationSummary }) {
             <div><dt>{language === 'th' ? 'สัญชาติ' : 'Nationality'}</dt><dd>{guest.nationality || '—'}</dd></div>
             <div><dt>{language === 'th' ? 'ประเภทเอกสาร' : 'Identity type'}</dt><dd>{guest.idType ? statusLabel(guest.idType, language) : '—'}</dd></div>
             <div><dt>{language === 'th' ? 'เลขเอกสาร' : 'Identity number'}</dt><dd>{maskedIdentitySuffix(guest.idNumberLast4)}</dd></div>
-            <div><dt>{language === 'th' ? 'ข้อมูลยืนยันตัวตนครบ' : 'Identity complete'}</dt><dd>{yesNo(guest.identityComplete, language)}</dd></div>
-            <div><dt>VIP</dt><dd>{yesNo(guest.vip, language)}</dd></div>
-            <div><dt>{language === 'th' ? 'บัญชีเฝ้าระวัง' : 'Watchlist'}</dt><dd>{yesNo(guest.blacklisted, language)}</dd></div>
+            <div><dt>{language === 'th' ? 'ข้อมูลยืนยันตัวตนครบ' : 'Identity complete'}</dt><dd>{yesNo(Boolean(guest.identityComplete), language)}</dd></div>
+            <div><dt>VIP</dt><dd>{yesNo(Boolean(guest.vip), language)}</dd></div>
+            <div><dt>{language === 'th' ? 'บัญชีเฝ้าระวัง' : 'Watchlist'}</dt><dd>{yesNo(Boolean(guest.blacklisted), language)}</dd></div>
           </dl>
         </article>
         <article>
@@ -112,7 +130,7 @@ function auditTime(value: string | null, language: string) {
   }).format(date)
 }
 
-function AuditTimeline({ timeline }: { timeline: BookingDetail['auditTimeline'] }) {
+function AuditTimeline({ timeline }: { timeline: NonNullable<BookingDetail['auditTimeline']> }) {
   const { language } = useI18n()
   return (
     <section className="audit-timeline">
@@ -145,6 +163,8 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
   const [method, setMethod] = useState('CASH')
   const [reference, setReference] = useState('')
   const canPost = ['ADMIN', 'MANAGER', 'FRONT_DESK', 'CASHIER'].includes(role)
+  const canReversePayments = role === 'ADMIN'
+  const canVoidCharges = ['ADMIN', 'MANAGER'].includes(role)
   const mutation = useMutation({
     mutationFn: async () => {
       if (!folio) throw new Error(language === 'th' ? 'ไม่พบโฟลิโอ' : 'Folio is unavailable.')
@@ -174,11 +194,51 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
       setReference('')
     },
   })
+  const reversalMutation = useMutation({
+    mutationFn: ({ paymentId, reason }: { paymentId: string; reason: string }) => liteApi.reversePayment(paymentId, reason),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lite'] }),
+  })
+  const voidMutation = useMutation({
+    mutationFn: ({ chargeId, reason }: { chargeId: string; reason: string }) => liteApi.voidCharge(chargeId, reason),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lite'] }),
+  })
+  const reversedByPayment = useMemo(() => {
+    const totals = new Map<string, number>()
+    for (const payment of folio?.payments || []) {
+      if (payment.entryKind === 'REVERSAL' && payment.reversesPaymentId) {
+        totals.set(payment.reversesPaymentId, (totals.get(payment.reversesPaymentId) || 0) + Math.abs(payment.amountSatang))
+      }
+    }
+    return totals
+  }, [folio])
+  const requireReason = (prompt: string, missing: string) => {
+    const reason = window.prompt(prompt)
+    if (reason === null) return null
+    if (!reason.trim()) {
+      window.alert(missing)
+      return null
+    }
+    return reason.trim()
+  }
+  const reversePayment = (paymentId: string) => {
+    const reason = requireReason(
+      language === 'th' ? 'ระบุเหตุผลในการกลับรายการชำระเงินเต็มจำนวน' : 'Enter the reason for reversing the full remaining payment:',
+      language === 'th' ? 'ต้องระบุเหตุผลในการกลับรายการชำระเงิน' : 'A payment reversal reason is required.',
+    )
+    if (reason) reversalMutation.mutate({ paymentId, reason })
+  }
+  const voidCharge = (chargeId: string) => {
+    const reason = requireReason(
+      language === 'th' ? 'ระบุเหตุผลในการยกเลิกรายการค่าใช้จ่าย' : 'Enter the reason for voiding this charge:',
+      language === 'th' ? 'ต้องระบุเหตุผลในการยกเลิกรายการค่าใช้จ่าย' : 'A charge void reason is required.',
+    )
+    if (reason) voidMutation.mutate({ chargeId, reason })
+  }
 
-  if (!folio) return <div className="booking-detail"><BookingProfile reservation={reservation} /><div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div><AuditTimeline timeline={detail.auditTimeline} /><div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button></div></div>
+  if (!folio) return <div className="booking-detail"><BookingProfile reservation={reservation} role={role} /><div className="state-card">{language === 'th' ? 'ไม่พบโฟลิโอสำหรับการจองนี้' : 'No folio is available for this booking.'}</div>{detail.auditTimeline ? <AuditTimeline timeline={detail.auditTimeline} /> : null}<div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button></div></div>
   return (
     <div className="folio-detail">
-      <BookingProfile reservation={reservation} />
+      <BookingProfile reservation={reservation} role={role} />
       <div className="folio-summary">
         <div><span>{language === 'th' ? 'ยอดรวม' : 'Total'}</span><strong>{formatMoney(folio.totalSatang, language)}</strong></div>
         <div><span>{language === 'th' ? 'ชำระแล้ว' : 'Paid'}</span><strong>{formatMoney(folio.paidSatang, language)}</strong></div>
@@ -188,23 +248,37 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
         <h3>{language === 'th' ? 'รายการค่าใช้จ่าย' : 'Charges'}</h3>
         {folio.charges.length === 0 ? <EmptyBlock /> : folio.charges.map((charge) => (
           <div className={`ledger-row ${charge.void ? 'is-void' : ''}`} key={charge.id}>
-            <div><strong>{charge.description}</strong><span>{charge.date} · {statusLabel(charge.category, language)}</span></div>
+            <div>
+              <strong>{charge.description}</strong>
+              <span>{charge.date} · {statusLabel(charge.category, language)}{charge.void ? ` · ${language === 'th' ? 'ยกเลิกแล้ว' : 'Voided'}${charge.voidedBy ? ` (${charge.voidedBy})` : ''}` : ''}</span>
+              {canVoidCharges && !charge.void && charge.category !== 'ROOM' ? <button type="button" className="text-button text-button--danger" disabled={voidMutation.isPending} onClick={() => voidCharge(charge.id)}>{language === 'th' ? 'ยกเลิกรายการ' : 'Void charge'}</button> : null}
+            </div>
             <span>{charge.quantity} × {formatMoney(charge.amountSatang, language)}</span>
             <strong>{formatMoney(charge.totalSatang, language)}</strong>
           </div>
         ))}
+        {voidMutation.error ? <div className="form-error">{localizedError(voidMutation.error, language, 'The charge could not be voided.', 'ไม่สามารถยกเลิกรายการค่าใช้จ่ายได้')}</div> : null}
       </section>
       <section className="ledger-section">
         <h3>{language === 'th' ? 'การชำระเงิน' : 'Payments'}</h3>
-        {folio.payments.length === 0 ? <EmptyBlock /> : folio.payments.map((payment) => (
-          <div className="ledger-row" key={payment.id}>
-            <div><strong>{statusLabel(payment.method, language)}</strong><span>{payment.reference || payment.processedBy}</span></div>
-            <span />
-            <strong>{formatMoney(payment.amountSatang, language)}</strong>
-          </div>
-        ))}
+        {folio.payments.length === 0 ? <EmptyBlock /> : folio.payments.map((payment) => {
+          const isReversal = payment.entryKind === 'REVERSAL'
+          const remainingSatang = isReversal ? 0 : Math.max(0, payment.amountSatang - (reversedByPayment.get(payment.id) || 0))
+          return (
+            <div className="ledger-row" key={payment.id}>
+              <div>
+                <strong>{isReversal ? (language === 'th' ? 'กลับรายการชำระเงิน' : 'Payment reversal') : statusLabel(payment.method, language)}</strong>
+                <span>{isReversal ? payment.reversalReason || payment.processedBy : payment.reference || payment.processedBy}</span>
+                {canReversePayments && !isReversal && remainingSatang > 0 ? <button type="button" className="text-button text-button--danger" disabled={reversalMutation.isPending} onClick={() => reversePayment(payment.id)}>{language === 'th' ? 'กลับรายการเต็มจำนวน' : 'Reverse full payment'}</button> : null}
+              </div>
+              <span />
+              <strong>{formatMoney(payment.amountSatang, language)}</strong>
+            </div>
+          )
+        })}
+        {reversalMutation.error ? <div className="form-error">{localizedError(reversalMutation.error, language, 'The payment could not be reversed.', 'ไม่สามารถกลับรายการชำระเงินได้')}</div> : null}
       </section>
-      <AuditTimeline timeline={detail.auditTimeline} />
+      {detail.auditTimeline ? <AuditTimeline timeline={detail.auditTimeline} /> : null}
       {canPost && folio.status === 'OPEN' ? (
         <div className="folio-actions">
           <button type="button" className="button button--secondary" onClick={() => { setAction('charge'); setAmount('') }}>{language === 'th' ? 'เพิ่มค่าใช้จ่าย' : 'Add charge'}</button>
@@ -239,6 +313,7 @@ function FolioPanel({ detail, role, close }: { detail: BookingDetail; role: Lite
 export function BookingsView({ role }: { role: LiteRole }) {
   const { t, language } = useI18n()
   const queryClient = useQueryClient()
+  const canCreateOrEdit = ['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(role)
   const [draftSearch, setDraftSearch] = useState('')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('')
@@ -248,8 +323,9 @@ export function BookingsView({ role }: { role: LiteRole }) {
   const [detailId, setDetailId] = useState<string | null>(null)
   const setup = useQuery({
     queryKey: ['lite', 'booking-room-types'],
-    queryFn: () => liteApi.board(today(), plusDays(today(), 1)),
+    queryFn: () => liteApi.board(today(), addDateKey(today(), 1)),
     staleTime: 60_000,
+    enabled: canCreateOrEdit,
   })
   const query = useQuery({
     queryKey: ['lite', 'bookings', search, status, source, cursor],
@@ -274,7 +350,6 @@ export function BookingsView({ role }: { role: LiteRole }) {
   })
 
   const roomTypes = useMemo(() => setup.data?.roomTypes || [], [setup.data])
-  const canCreateOrEdit = ['ADMIN', 'MANAGER', 'FRONT_DESK'].includes(role)
   const canCancel = ['ADMIN', 'MANAGER'].includes(role)
   const canOpenEditor = canCreateOrEdit && roomTypes.length > 0 && !setup.error
   const cancelBooking = (reservation: ReservationSummary) => {
@@ -294,12 +369,12 @@ export function BookingsView({ role }: { role: LiteRole }) {
         {canCreateOrEdit ? <div className="heading-actions"><button className="button button--secondary" disabled={!canOpenEditor} onClick={() => setModal({ kind: 'walk-in' })}>{language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in'}</button><button className="button button--primary" disabled={!canOpenEditor} onClick={() => setModal({ kind: 'new' })}>{t('newBooking')}</button></div> : null}
       </header>
       <form className="filter-bar" onSubmit={(event) => { event.preventDefault(); setCursor(null); setSearch(draftSearch.trim()) }}>
-        <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder={t('search')} />
-        <select value={status} onChange={(event) => { setCursor(null); setStatus(event.target.value) }}>
+        <input value={draftSearch} onChange={(event) => setDraftSearch(event.target.value)} placeholder={t('search')} aria-label={t('search')} />
+        <select value={status} aria-label={language === 'th' ? 'กรองตามสถานะ' : 'Filter by status'} onChange={(event) => { setCursor(null); setStatus(event.target.value) }}>
           <option value="">{t('allStatuses')}</option>
           {['PENDING', 'CONFIRMED', 'CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
         </select>
-        <select value={source} onChange={(event) => { setCursor(null); setSource(event.target.value) }}>
+        <select value={source} aria-label={language === 'th' ? 'กรองตามช่องทาง' : 'Filter by source'} onChange={(event) => { setCursor(null); setSource(event.target.value) }}>
           <option value="">{t('allSources')}</option>
           {['DIRECT', 'WALK_IN', 'PHONE', 'EMAIL', 'WEBSITE', 'BOOKING_COM', 'AGODA', 'TRIP_COM'].map((item) => <option key={item} value={item}>{statusLabel(item, language)}</option>)}
         </select>

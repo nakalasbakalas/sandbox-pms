@@ -5,16 +5,6 @@ import { EmptyBlock, ErrorBlock, formatMoney, LoadingBlock, StatusPill } from '.
 import { providerLabel, statusLabel, useI18n } from '../i18n'
 import type { Language, LiteUser, ManualChannelConnection } from '../types'
 
-function today() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-}
-
-function tomorrow(value: string) {
-  const date = new Date(`${value}T12:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + 1)
-  return date.toISOString().slice(0, 10)
-}
-
 function localizedError(error: unknown, language: Language, englishFallback: string, thaiFallback: string) {
   if (language === 'th') return thaiFallback
   return error instanceof Error && error.message ? error.message : englishFallback
@@ -58,21 +48,20 @@ function safeExtranetUrl(connection: ManualChannelConnection) {
 
 export function SettingsView({ user }: { user: LiteUser }) {
   const { t, language } = useI18n()
-  const hotelDate = today()
-  const setup = useQuery({
-    queryKey: ['lite', 'settings-snapshot', hotelDate],
-    queryFn: () => liteApi.board(hotelDate, tomorrow(hotelDate)),
+  const settings = useQuery({
+    queryKey: ['lite', 'settings-snapshot'],
+    queryFn: liteApi.settings,
     staleTime: 60_000,
+    refetchInterval: 30_000,
   })
   const users = useQuery({ queryKey: ['lite', 'users'], queryFn: liteApi.users, enabled: user.role === 'ADMIN' })
   const version = useQuery({ queryKey: ['lite', 'version'], queryFn: liteApi.version, staleTime: Infinity })
-  const channels = useQuery({ queryKey: ['lite', 'channel-desk'], queryFn: liteApi.channelDesk, refetchInterval: 30_000 })
 
-  if (setup.isLoading) return <LoadingBlock />
-  if (setup.error || !setup.data) return <ErrorBlock error={localizedError(setup.error, language, 'Settings are unavailable.', 'ไม่สามารถโหลดข้อมูลการตั้งค่าได้')} retry={() => setup.refetch()} />
+  if (settings.isLoading) return <LoadingBlock />
+  if (settings.error || !settings.data) return <ErrorBlock error={localizedError(settings.error, language, 'Settings are unavailable.', 'ไม่สามารถโหลดข้อมูลการตั้งค่าได้')} retry={() => settings.refetch()} />
 
-  const property = setup.data.property
-  const health = channels.data?.syncHealth
+  const property = settings.data.property
+  const health = settings.data.syncHealth
   return (
     <div className="view-stack">
       <header className="view-heading"><div><p className="eyebrow">{user.displayName}</p><h1>{t('settings')}</h1></div></header>
@@ -93,9 +82,9 @@ export function SettingsView({ user }: { user: LiteUser }) {
           </article>
           <article className="settings-card">
             <span>{t('roomType')}</span>
-            <strong>{setup.data.roomTypes.length}</strong>
+            <strong>{settings.data.roomTypes.length}</strong>
             <div className="mini-list">
-              {setup.data.roomTypes.map((item) => (
+              {settings.data.roomTypes.map((item) => (
                 <div key={item.id}>
                   <span><strong>{item.name}</strong><small>{item.code} · {formatMoney(item.baseRateSatang, language)}</small></span>
                   <span>{item.roomCount} {language === 'th' ? 'ห้อง' : item.roomCount === 1 ? 'room' : 'rooms'}</span>
@@ -105,9 +94,9 @@ export function SettingsView({ user }: { user: LiteUser }) {
           </article>
           <article className="settings-card">
             <span>{language === 'th' ? 'ห้องจริง' : 'Physical rooms'}</span>
-            <strong>{setup.data.rooms.length}</strong>
+            <strong>{settings.data.rooms.length}</strong>
             <div className="mini-list settings-room-list">
-              {setup.data.rooms.map((item) => (
+              {settings.data.rooms.map((item) => (
                 <div key={item.id}>
                   <span><strong>{item.number}</strong><small>{item.roomType.name} · {language === 'th' ? `ชั้น ${item.floor}` : `Floor ${item.floor}`}</small></span>
                   <span><StatusPill value={item.operationalStatus} /> <StatusPill value={item.housekeepingStatus} /></span>
@@ -131,8 +120,7 @@ export function SettingsView({ user }: { user: LiteUser }) {
 
       <section className="panel">
         <header className="panel__header"><div><h2>{language === 'th' ? 'แหล่งอีเมล Gmail' : 'Gmail booking source'}</h2><p>{language === 'th' ? 'รับเฉพาะผู้ส่ง OTA ที่อนุมัติ และต้องให้พนักงานตรวจสอบก่อนเปลี่ยนการจอง' : 'Approved OTA senders only; every booking change remains staff-review gated.'}</p></div></header>
-        {channels.isLoading ? <LoadingBlock /> : channels.error || !channels.data ? <ErrorBlock error={localizedError(channels.error, language, 'Mailbox health is unavailable.', 'ไม่สามารถโหลดสถานะกล่องอีเมลได้')} retry={() => channels.refetch()} /> : (
-          <div className="settings-grid">
+        <div className="settings-grid">
             <article className="settings-card">
               <span>{language === 'th' ? 'แหล่งข้อมูล' : 'Source'}</span>
               <strong>Gmail API</strong>
@@ -166,15 +154,13 @@ export function SettingsView({ user }: { user: LiteUser }) {
               </dl>
               {health?.lastError ? <p className="notice notice--error">{language === 'th' ? 'การซิงก์กล่องอีเมลต้องได้รับการตรวจสอบ รายละเอียดที่ละเอียดอ่อนถูกซ่อนไว้' : 'Mailbox synchronization needs attention. Sensitive provider details are hidden here.'}</p> : null}
             </article>
-          </div>
-        )}
+        </div>
       </section>
 
       <section className="panel">
         <header className="panel__header"><div><h2>{language === 'th' ? 'การเชื่อมต่อและ mapping OTA' : 'Manual OTA mappings and links'}</h2><p>{t('manualWarning')}</p></div><a className="button button--secondary" href="/channel-desk">{language === 'th' ? 'เปิดหน้าช่องทาง OTA' : 'Open Channel Desk'}</a></header>
-        {channels.isLoading ? <LoadingBlock /> : channels.error || !channels.data ? <ErrorBlock error={localizedError(channels.error, language, 'OTA settings are unavailable.', 'ไม่สามารถโหลดการตั้งค่า OTA ได้')} retry={() => channels.refetch()} /> : (
-          <div className="settings-grid">
-            {channels.data.connections.map((connection) => {
+        <div className="settings-grid">
+            {settings.data.connections.map((connection) => {
               const activeMappings = connection.mappings.filter((mapping) => mapping.active)
               const extranetUrl = safeExtranetUrl(connection)
               return (
@@ -185,7 +171,7 @@ export function SettingsView({ user }: { user: LiteUser }) {
                     <div><dt>{language === 'th' ? 'โหมด' : 'Mode'}</dt><dd>{statusLabel(connection.deliveryMode, language)}</dd></div>
                     <div><dt>{language === 'th' ? 'การตั้งค่า' : 'Configuration'}</dt><dd>{statusLabel(connection.configured ? 'CONFIGURED' : 'NOT_CONFIGURED', language)}</dd></div>
                     <div><dt>{language === 'th' ? 'รหัสโรงแรมใน OTA' : 'OTA property ID'}</dt><dd>{connection.externalPropertyId || '—'}</dd></div>
-                    <div><dt>Mapping</dt><dd>{activeMappings.length}/{channels.data.roomTypes.length}</dd></div>
+                    <div><dt>Mapping</dt><dd>{activeMappings.length}/{settings.data.roomTypes.length}</dd></div>
                   </dl>
                   {connection.mappings.length ? (
                     <div className="mini-list settings-mapping-list">
@@ -198,8 +184,7 @@ export function SettingsView({ user }: { user: LiteUser }) {
                 </article>
               )
             })}
-          </div>
-        )}
+        </div>
       </section>
 
       <section className="panel">

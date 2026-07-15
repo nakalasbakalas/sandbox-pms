@@ -50,6 +50,7 @@ a { color: inherit; }
 .live-state span { width: 8px; height: 8px; border-radius: 99px; background: #c08a40; box-shadow: 0 0 0 3px rgba(192,138,64,.14); }
 .live-state.is-connected span { background: #3d936f; box-shadow: 0 0 0 3px rgba(61,147,111,.14); }
 .language-button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--paper); }
+.topbar-logout { display: none; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--paper); }
 .workspace__main { padding: 28px; }
 
 .view-stack { width: min(1380px, 100%); margin: 0 auto; display: grid; gap: 20px; }
@@ -318,12 +319,14 @@ dd { margin: 0; font-size: 12px; font-weight: 750; word-break: break-word; }
   .app-shell { display: block; padding-bottom: 66px; }
   .sidebar { position: fixed; inset: auto 0 0; z-index: 70; width: 100%; height: 66px; display: block; padding: 6px; border-top: 1px solid rgba(255,255,255,.15); }
   .sidebar__brand, .sidebar__footer { display: none; }
-  .sidebar nav { height: 100%; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; margin: 0; overflow: hidden; }
-  .sidebar nav button { min-width: 0; display: grid; justify-items: center; gap: 2px; padding: 5px 1px; font-size: 8px; line-height: 1.05; overflow-wrap: anywhere; text-align: center; }
-  .sidebar nav button span { font-size: 8px; }
+  .sidebar nav { height: 100%; display: grid; grid-template-columns: repeat(var(--lite-nav-count, 6), minmax(64px, 1fr)); gap: 2px; margin: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+  .sidebar nav button { min-width: 0; display: grid; justify-items: center; gap: 2px; padding: 5px 2px; font-size: 10px; line-height: 1.05; overflow-wrap: anywhere; text-align: center; }
+  .sidebar nav button span { font-size: 9px; }
   .sidebar nav button.is-active { box-shadow: inset 0 3px #d5aa62; }
-  .topbar { height: 50px; padding: 0 12px; }
-  .live-state { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar { height: 50px; gap: 6px; padding: 0 10px; }
+  .live-state { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-logout { display: inline-flex; align-items: center; min-height: 34px; padding: 6px 8px; font-size: 11px; }
+  .language-button { padding: 6px 8px; font-size: 11px; }
   .workspace__main { padding: 16px 11px; }
   .view-heading { align-items: flex-start; }
   .view-heading h1 { font-size: 29px; }

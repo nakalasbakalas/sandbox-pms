@@ -27,15 +27,15 @@ export type PropertySummary = {
 
 export type GuestSummary = {
   id: string
-  firstName: string
-  lastName: string
+  firstName?: string
+  lastName?: string
   displayName: string
-  nationality: string | null
-  idType: string | null
-  identityComplete: boolean
-  idNumberLast4: string | null
-  vip: boolean
-  blacklisted: boolean
+  nationality?: string | null
+  idType?: string | null
+  identityComplete?: boolean
+  idNumberLast4?: string | null
+  vip?: boolean
+  blacklisted?: boolean
 }
 
 export type RoomTypeSummary = {
@@ -86,6 +86,8 @@ export type FolioCharge = {
   totalSatang: MoneySatang
   void: boolean
   voidReason: string | null
+  voidedAt: string | null
+  voidedBy: string | null
   createdBy: string
   createdAt: string | null
 }
@@ -93,9 +95,11 @@ export type FolioCharge = {
 export type FolioPayment = {
   id: string
   amountSatang: MoneySatang
+  entryKind: 'PAYMENT' | 'REVERSAL'
+  reversesPaymentId: string | null
+  reversalReason: string | null
   method: string
   reference: string | null
-  notes: string | null
   processedBy: string
   createdAt: string | null
 }
@@ -116,7 +120,7 @@ export type ReservationSummary = {
   providerCode: ProviderCode | null
   externalReservationId: string | null
   channelRef: string | null
-  sourceEmailEventId: string | null
+  sourceEmailEventId?: string | null
   ratePerNightSatang: MoneySatang
   totalAmountSatang: MoneySatang
   depositAmountSatang: MoneySatang
@@ -190,7 +194,7 @@ export type BookingPage = {
     nextCursor: string | null
   }
   items: ReservationSummary[]
-  pendingReviewEmail: PendingReviewEmailSummary
+  pendingReviewEmail?: PendingReviewEmailSummary
 }
 
 export type ReservationAuditAction =
@@ -219,7 +223,7 @@ export type ReservationAuditEvent = {
 export type BookingDetail = {
   property: PropertySummary
   reservation: ReservationSummary
-  auditTimeline: {
+  auditTimeline?: {
     order: 'newest_first'
     total: number
     returned: number
@@ -445,6 +449,14 @@ export type ChannelDeskPayload = {
     failedDeliveries: number
   }
   warning: string
+}
+
+export type SettingsPayload = {
+  property: PropertySummary
+  roomTypes: Array<RoomTypeSummary & { roomCount: number }>
+  rooms: RoomSummary[]
+  syncHealth: ChannelDeskPayload['syncHealth']
+  connections: ManualChannelConnection[]
 }
 
 export type VersionPayload = {

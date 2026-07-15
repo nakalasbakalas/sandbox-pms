@@ -15,6 +15,7 @@ import type {
   ReservationSummary,
   SaveManualChannelConnectionInput,
   SaveManualChannelMappingInput,
+  SettingsPayload,
   VersionPayload,
 } from './types'
 
@@ -33,6 +34,8 @@ export type LiteReservationWrite = {
 }
 
 type ApiEnvelope<T> = { ok: true; data: T; message?: string }
+
+export const SESSION_EXPIRED_EVENT = 'pms-lite-session-expired'
 
 export class ApiError extends Error {
   status: number
@@ -53,8 +56,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     credentials: 'same-origin',
   })
   const payload = await response.json().catch(() => null)
+  if (response.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/me') {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
   if (!response.ok) throw new ApiError(payload?.error || `Request failed (${response.status}).`, response.status)
   return payload as T
+}
+
+function clientRequestId() {
+  if (!globalThis.crypto?.randomUUID) throw new ApiError('Secure request identifiers are unavailable in this browser.', 400)
+  return globalThis.crypto.randomUUID()
 }
 
 function query(path: string, values: Record<string, string | number | undefined | null>) {
@@ -179,19 +190,37 @@ export const liteApi = {
     })).data
   },
 
+  async settings() {
+    return (await request<ApiEnvelope<SettingsPayload>>('/api/lite/v1/settings')).data
+  },
+
   async createCharge(input: { folioId: string; description: string; category: string; amountSatang: MoneySatang; quantity: number; date?: string }) {
     assertNoLegacyMoney(input, 'amount', 'amountSatang', true)
     return (await request<ApiEnvelope<unknown>>('/api/charges', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, clientRequestId: clientRequestId() }),
     })).data
   },
 
-  async createPayment(input: { folioId: string; amountSatang: MoneySatang; method: string; reference?: string; notes?: string }) {
+  async createPayment(input: { folioId: string; amountSatang: MoneySatang; method: string; reference?: string }) {
     assertNoLegacyMoney(input, 'amount', 'amountSatang', true)
     return (await request<ApiEnvelope<unknown>>('/api/payments', {
       method: 'POST',
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, clientRequestId: clientRequestId() }),
+    })).data
+  },
+
+  async reversePayment(id: string, reason: string) {
+    return (await request<ApiEnvelope<unknown>>(`/api/payments/${encodeURIComponent(id)}/reversals`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, clientRequestId: clientRequestId() }),
+    })).data
+  },
+
+  async voidCharge(id: string, reason: string) {
+    return (await request<ApiEnvelope<unknown>>(`/api/charges/${encodeURIComponent(id)}/void`, {
+      method: 'POST',
+      body: JSON.stringify({ reason, clientRequestId: clientRequestId() }),
     })).data
   },
 

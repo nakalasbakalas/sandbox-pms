@@ -3,25 +3,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi } from '../api'
 import { EmptyBlock, ErrorBlock, GuestStay, LoadingBlock, Modal, StatusPill, formatMoney } from '../components'
-import { useI18n } from '../i18n'
+import { addDateKey, isDateKey } from '../date-utils'
+import { statusLabel, useI18n } from '../i18n'
 import type { BoardPayload, LiteRole, ReservationSummary } from '../types'
 
 function today() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
 
-function plusDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
 function datesBetween(from: string, to: string) {
+  if (!isDateKey(from) || !isDateKey(to) || from >= to) return []
   const result: string[] = []
   let current = from
   while (current < to && result.length < 90) {
     result.push(current)
-    current = plusDays(current, 1)
+    current = addDateKey(current, 1)
+    if (!current) return []
   }
   return result
 }
@@ -38,6 +35,8 @@ function BoardEditDialog({ reservation, board, mode, close }: { reservation: Res
   const [roomId, setRoomId] = useState(reservation.assignedRoomId || '')
   const [checkIn, setCheckIn] = useState(reservation.checkIn.slice(0, 10))
   const [checkOut, setCheckOut] = useState(reservation.checkOut.slice(0, 10))
+  const earliestCheckOut = addDateKey(checkIn, 1)
+  const stayDatesValid = Boolean(earliestCheckOut && isDateKey(checkOut) && checkOut >= earliestCheckOut)
   const rooms = board.rooms.filter((room) => room.roomTypeId === reservation.roomType.id && room.operationalStatus === 'AVAILABLE')
   const mutation = useMutation({
     mutationFn: () => mode === 'assign'
@@ -50,21 +49,22 @@ function BoardEditDialog({ reservation, board, mode, close }: { reservation: Res
   })
   const submit = (event: FormEvent) => {
     event.preventDefault()
+    if (mode === 'dates' && !stayDatesValid) return
     mutation.mutate()
   }
   return (
     <form className="form-grid" onSubmit={submit}>
       {mode === 'assign' ? (
-        <label>{t('assignedRoom')}<select required value={roomId} onChange={(event) => setRoomId(event.target.value)}><option value="">{t('unassigned')}</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.number} · {room.housekeepingStatus.replaceAll('_', ' ')}</option>)}</select></label>
+        <label>{t('assignedRoom')}<select required value={roomId} onChange={(event) => setRoomId(event.target.value)}><option value="">{t('unassigned')}</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.number} · {statusLabel(room.housekeepingStatus, language)}</option>)}</select></label>
       ) : (
         <>
           <label>{t('checkInDate')}<input required type="date" value={checkIn} onChange={(event) => setCheckIn(event.target.value)} /></label>
-          <label>{t('checkOutDate')}<input required type="date" min={plusDays(checkIn, 1)} value={checkOut} onChange={(event) => setCheckOut(event.target.value)} /></label>
+          <label>{t('checkOutDate')}<input required type="date" min={earliestCheckOut || undefined} value={checkOut} onChange={(event) => setCheckOut(event.target.value)} /></label>
         </>
       )}
       <p className="form-note">{language === 'th' ? 'ระบบจะตรวจสอบห้องซ้ำและเวอร์ชันล่าสุดก่อนบันทึก' : 'The server checks overlaps and the latest reservation version before saving.'}</p>
-      {mutation.error ? <div className="form-error">{mutation.error.message}</div> : null}
-      <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending || (mode === 'assign' && !roomId)}>{t('save')}</button></footer>
+      {mutation.error ? <div className="form-error">{language === 'th' ? 'ไม่สามารถบันทึกการเปลี่ยนแปลงบนกระดานการจองได้' : mutation.error.message}</div> : null}
+      <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending || (mode === 'assign' && !roomId) || (mode === 'dates' && !stayDatesValid)}>{t('save')}</button></footer>
     </form>
   )
 }
@@ -72,21 +72,33 @@ function BoardEditDialog({ reservation, board, mode, close }: { reservation: Res
 export function BoardView({ role }: { role: LiteRole }) {
   const { t, language } = useI18n()
   const [from, setFrom] = useState(today())
-  const [to, setTo] = useState(plusDays(today(), 14))
+  const [to, setTo] = useState(addDateKey(today(), 14))
   const [selected, setSelected] = useState<ReservationSummary | null>(null)
   const [editMode, setEditMode] = useState<'assign' | 'dates' | null>(null)
   const requestedRange = useMemo(() => datesBetween(from, to), [from, to])
-  const validRange = Boolean(from && to && from < to && requestedRange.length > 0 && requestedRange.length <= 90)
+  const maximumTo = addDateKey(from, 90)
+  const validRange = Boolean(isDateKey(from) && isDateKey(to) && maximumTo && from < to && to <= maximumTo && requestedRange.length > 0)
   const query = useQuery({
     queryKey: ['lite', 'board', from, to],
     queryFn: () => liteApi.board(from, to),
     enabled: validRange,
     refetchInterval: 30_000,
   })
+  const dateFilter = (
+    <div className="date-filter">
+      <label>{language === 'th' ? 'จาก' : 'From'}<input type="date" value={from} onChange={(event) => {
+        const next = event.target.value
+        setFrom(next)
+        const suggestedTo = addDateKey(next, 14)
+        if (suggestedTo && (!isDateKey(to) || to <= next)) setTo(suggestedTo)
+      }} /></label>
+      <label>{language === 'th' ? 'ถึง' : 'To'}<input type="date" min={addDateKey(from, 1) || undefined} max={maximumTo || undefined} value={to} onChange={(event) => setTo(event.target.value)} /></label>
+    </div>
+  )
 
-  if (!validRange) return <ErrorBlock error={language === 'th' ? 'ช่วงวันที่ต้องอยู่ระหว่าง 1 ถึง 90 วัน' : 'Choose a board range between 1 and 90 days.'} />
+  if (!validRange) return <div className="view-stack view-stack--wide"><header className="view-heading"><div><h1>{t('board')}</h1></div>{dateFilter}</header><ErrorBlock error={language === 'th' ? 'ช่วงวันที่ต้องอยู่ระหว่าง 1 ถึง 90 วัน' : 'Choose a board range between 1 and 90 days.'} /></div>
   if (query.isLoading) return <LoadingBlock />
-  if (query.error || !query.data) return <ErrorBlock error={query.error || 'Booking board unavailable.'} retry={() => query.refetch()} />
+  if (query.error || !query.data) return <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดกระดานการจองได้' : query.error || 'Booking board unavailable.'} retry={() => query.refetch()} />
 
   const data = query.data
   const range = data.range.days
@@ -96,10 +108,7 @@ export function BoardView({ role }: { role: LiteRole }) {
     <div className="view-stack view-stack--wide">
       <header className="view-heading">
         <div><p className="eyebrow">{data.rooms.length} {language === 'th' ? 'ห้อง' : 'rooms'}</p><h1>{t('board')}</h1></div>
-        <div className="date-filter">
-          <label>{language === 'th' ? 'จาก' : 'From'}<input type="date" value={from} onChange={(event) => { const next = event.target.value; setFrom(next); if (to <= next) setTo(plusDays(next, 14)) }} /></label>
-          <label>{language === 'th' ? 'ถึง' : 'To'}<input type="date" min={plusDays(from, 1)} max={plusDays(from, 90)} value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        </div>
+        {dateFilter}
       </header>
       {data.pendingReviewEmail.total > 0 ? (
         <div className="notice notice--warning"><strong>{data.pendingReviewEmail.total}</strong> {t('pendingReview')}</div>
@@ -130,6 +139,9 @@ export function BoardView({ role }: { role: LiteRole }) {
                         className={`stay-chip stay-chip--${reservation.status.toLowerCase()} ${reservation.checkIn.slice(0, 10) === date ? 'stay-chip--start' : ''}`}
                         onClick={() => setSelected(reservation)}
                         title={`${reservation.guest.firstName} ${reservation.guest.lastName}`}
+                        aria-label={language === 'th'
+                          ? `${reservation.guest.displayName} ห้อง ${room.number} วันที่ ${date}`
+                          : `${reservation.guest.displayName}, room ${room.number}, ${date}`}
                       >
                         {reservation.checkIn.slice(0, 10) === date ? `${reservation.guest.firstName} ${reservation.guest.lastName}` : '•'}
                       </button>
@@ -160,7 +172,7 @@ export function BoardView({ role }: { role: LiteRole }) {
             <div><span>{t('confirmation')}</span><strong>{selected.confirmationCode}</strong></div>
             <div><span>{t('stay')}</span><strong>{selected.checkIn.slice(0, 10)} → {selected.checkOut.slice(0, 10)}</strong></div>
             <div><span>{t('roomType')}</span><strong>{selected.roomType.name} · {selected.assignedRoom?.number || t('unassigned')}</strong></div>
-            <div><span>{t('source')}</span><strong>{selected.source.replaceAll('_', ' ')}</strong></div>
+            <div><span>{t('source')}</span><strong>{statusLabel(selected.source, language)}</strong></div>
             <div><span>{t('balance')}</span><strong>{formatMoney(selected.folio?.balanceSatang, language)}</strong></div>
             <div><span>{t('status')}</span><StatusPill value={selected.status} /></div>
           </div>{canEdit && !['CHECKED_IN', 'CHECKED_OUT', 'CANCELLED', 'NO_SHOW'].includes(selected.status) ? <div className="form-actions modal-footer"><button type="button" className="button button--secondary" onClick={() => setEditMode('dates')}>{language === 'th' ? 'แก้ไขวัน' : 'Edit dates'}</button><button type="button" className="button button--primary" onClick={() => setEditMode('assign')}>{language === 'th' ? 'จัดห้อง' : 'Assign room'}</button></div> : null}</>}

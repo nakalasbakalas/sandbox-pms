@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi } from '../api'
 import { EmptyBlock, ErrorBlock, LoadingBlock, StatCard, StatusPill } from '../components'
-import { useI18n } from '../i18n'
+import { isDateKey } from '../date-utils'
+import { statusLabel, useI18n } from '../i18n'
 import type { HousekeepingRoom, HousekeepingStay, Language } from '../types'
 
 function hotelDate() {
@@ -17,36 +18,34 @@ function nextAction(status: string) {
   return null
 }
 
-function StayNotice({ label, reservation }: { label: string; reservation: HousekeepingStay }) {
+function StayNotice({ label, reservation, language }: { label: string; reservation: HousekeepingStay; language: Language }) {
   return (
     <div className="occupancy-note">
       <span>{label}</span>
-      <strong>{reservation.status.replaceAll('_', ' ')}</strong>
+      <strong>{statusLabel(reservation.status, language)}</strong>
       <span>{reservation.checkIn} → {reservation.checkOut}</span>
     </div>
   )
 }
 
 function RoomOccupancy({ room, language }: { room: HousekeepingRoom; language: Language }) {
-  if (room.departures.length > 0) {
-    return <>{room.departures.map((stay) => <StayNotice key={`departure-${stay.id}`} label={language === 'th' ? 'ออกวันนี้' : 'Departure today'} reservation={stay} />)}</>
-  }
-  if (room.arrivals.length > 0) {
-    return <>{room.arrivals.map((stay) => <StayNotice key={`arrival-${stay.id}`} label={language === 'th' ? 'เข้าพักวันนี้' : 'Arrival today'} reservation={stay} />)}</>
-  }
-  if (room.inHouse.length > 0) {
-    return <>{room.inHouse.map((stay) => <StayNotice key={`in-house-${stay.id}`} label={language === 'th' ? 'ผู้เข้าพัก' : 'Guest in room'} reservation={stay} />)}</>
-  }
-  return <div className="occupancy-note muted">{language === 'th' ? 'ไม่มีผู้เข้าพัก' : 'Vacant'}</div>
+  const notices = [
+    ...room.departures.map((stay) => <StayNotice key={`departure-${stay.id}`} label={language === 'th' ? 'ออกวันนี้' : 'Departure today'} reservation={stay} language={language} />),
+    ...room.arrivals.map((stay) => <StayNotice key={`arrival-${stay.id}`} label={language === 'th' ? 'เข้าพักวันนี้' : 'Arrival today'} reservation={stay} language={language} />),
+    ...room.inHouse.map((stay) => <StayNotice key={`in-house-${stay.id}`} label={language === 'th' ? 'ผู้เข้าพัก' : 'Guest in room'} reservation={stay} language={language} />),
+  ]
+  return notices.length > 0 ? <>{notices}</> : <div className="occupancy-note muted">{language === 'th' ? 'ไม่มีผู้เข้าพัก' : 'Vacant'}</div>
 }
 
 export function HousekeepingView() {
   const { t, language } = useI18n()
   const queryClient = useQueryClient()
   const [date, setDate] = useState(hotelDate())
+  const validDate = isDateKey(date)
   const query = useQuery({
     queryKey: ['lite', 'housekeeping', date],
     queryFn: () => liteApi.housekeeping(date),
+    enabled: validDate,
     refetchInterval: 30_000,
   })
   const mutation = useMutation({
@@ -54,8 +53,9 @@ export function HousekeepingView() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['lite'] }),
   })
 
+  if (!validDate) return <div className="view-stack"><header className="view-heading"><div><h1>{t('housekeeping')}</h1></div><input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={language === 'th' ? 'วันที่งานแม่บ้าน' : 'Housekeeping date'} /></header><ErrorBlock error={language === 'th' ? 'กรุณาเลือกวันที่ที่ถูกต้อง' : 'Choose a valid housekeeping date.'} /></div>
   if (query.isLoading) return <LoadingBlock />
-  if (query.error || !query.data) return <ErrorBlock error={query.error || 'Housekeeping unavailable.'} retry={() => query.refetch()} />
+  if (query.error || !query.data) return <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดข้อมูลงานแม่บ้านได้' : query.error || 'Housekeeping unavailable.'} retry={() => query.refetch()} />
   const data = query.data
   const ordered = data.rooms
 
@@ -68,7 +68,7 @@ export function HousekeepingView() {
     <div className="view-stack">
       <header className="view-heading">
         <div><p className="eyebrow">{data.hotelDate}</p><h1>{t('housekeeping')}</h1></div>
-        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={language === 'th' ? 'วันที่งานแม่บ้าน' : 'Housekeeping date'} />
       </header>
       <div className="stats-grid stats-grid--compact">
         <StatCard label={t('dirty')} value={data.summary.dirty || 0} tone="warning" />
@@ -76,7 +76,7 @@ export function HousekeepingView() {
         <StatCard label={t('readyRooms')} value={data.summary.ready} tone="green" />
         <StatCard label={t('inspected')} value={data.summary.inspected || 0} />
       </div>
-      {mutation.error ? <ErrorBlock error={mutation.error} /> : null}
+      {mutation.error ? <ErrorBlock error={language === 'th' ? 'ไม่สามารถอัปเดตสถานะห้องได้' : mutation.error} /> : null}
       <section className="housekeeping-grid">
         {ordered.length === 0 ? <EmptyBlock /> : ordered.map((room) => {
           const next = nextAction(room.housekeepingStatus)

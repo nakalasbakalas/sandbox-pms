@@ -3,18 +3,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatCard, StatusPill } from '../components'
-import { useI18n } from '../i18n'
+import { addDateKey, isDateKey } from '../date-utils'
+import { statusLabel, useI18n } from '../i18n'
 import { ReservationBookingForm } from '../reservation-booking-form'
 import type { LiteRole, ReservationSummary, RoomSummary } from '../types'
 
 function hotelDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-}
-
-function addDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00Z`)
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
 }
 
 function PaymentFields({ amount, setAmount, method, setMethod, reference, setReference }: {
@@ -29,7 +24,7 @@ function PaymentFields({ amount, setAmount, method, setMethod, reference, setRef
   return (
     <>
       <label>{language === 'th' ? 'ยอดรับชำระ (บาท)' : 'Payment amount (THB)'}<input min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-      <label>{language === 'th' ? 'วิธีชำระ' : 'Payment method'}<select value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>{language === 'th' ? 'วิธีชำระ' : 'Payment method'}<select value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
       {method !== 'CASH' && method !== 'OTHER' ? <label>{language === 'th' ? 'เลขอ้างอิง' : 'Payment reference'}<input required value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
     </>
   )
@@ -94,7 +89,7 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
             <span>{reservation.guest.identityComplete ? (language === 'th' ? `มีเอกสารลงท้าย ${reservation.guest.idNumberLast4 || '—'} อยู่แล้ว` : `ID ending ${reservation.guest.idNumberLast4 || '—'} is already on file.`) : (language === 'th' ? 'ต้องบันทึกสัญชาติและเลขบัตร/พาสปอร์ตก่อนเช็กอิน' : 'Nationality and ID/passport number are required before check-in.')}</span>
           </div>
           <label>{language === 'th' ? 'สัญชาติ' : 'Nationality'}<input required={!reservation.guest.identityComplete} value={nationality} onChange={(event) => setNationality(event.target.value)} /></label>
-          <label>{language === 'th' ? 'ประเภทเอกสาร' : 'ID type'}<select required={!reservation.guest.identityComplete} value={idType} onChange={(event) => setIdType(event.target.value)}><option value="PASSPORT">Passport</option><option value="NATIONAL_ID">National ID</option><option value="OTHER">Other</option></select></label>
+          <label>{language === 'th' ? 'ประเภทเอกสาร' : 'ID type'}<select required={!reservation.guest.identityComplete} value={idType} onChange={(event) => setIdType(event.target.value)}><option value="PASSPORT">{statusLabel('PASSPORT', language)}</option><option value="NATIONAL_ID">{statusLabel('NATIONAL_ID', language)}</option><option value="OTHER">{statusLabel('OTHER', language)}</option></select></label>
           <label>{language === 'th' ? 'เลขบัตร/พาสปอร์ต' : 'ID/passport number'}<input required={!reservation.guest.identityComplete} autoComplete="off" value={idNumber} onChange={(event) => setIdNumber(event.target.value)} placeholder={reservation.guest.identityComplete ? (language === 'th' ? 'เว้นว่างเพื่อใช้ข้อมูลเดิม' : 'Leave blank to keep the ID on file') : ''} /></label>
         </>
       ) : null}
@@ -105,7 +100,7 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
           {override ? <label>{language === 'th' ? 'เหตุผลการอนุมัติ' : 'Override reason'}<textarea required value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label> : null}
         </>
       ) : null}
-      {mutation.error ? <div className="form-error">{mutation.error.message}</div> : null}
+      {mutation.error ? <div className="form-error">{language === 'th' ? 'ไม่สามารถบันทึกการเช็กอินหรือเช็กเอาต์ได้ กรุณาตรวจสอบข้อมูลอีกครั้ง' : mutation.error.message}</div> : null}
       <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending}>{action === 'check-in' ? t('checkIn') : t('checkOut')}</button></footer>
     </form>
   )
@@ -164,7 +159,7 @@ function ReservationActions({ reservation, rooms, role }: { reservation: Reserva
       {canOperateStay && reservation.status === 'CHECKED_IN' ? (
         <button className="button button--primary" disabled={mutation.isPending} onClick={() => setDialog('check-out')}>{t('checkOut')}</button>
       ) : null}
-      {mutation.error ? <span className="inline-error">{mutation.error.message}</span> : null}
+      {mutation.error ? <span className="inline-error">{language === 'th' ? 'ไม่สามารถอัปเดตการจองได้' : mutation.error.message}</span> : null}
       {dialog ? <Modal title={`${dialog === 'check-in' ? t('checkIn') : t('checkOut')} · ${reservation.guest.displayName}`} close={() => setDialog(null)}><StayActionDialog reservation={reservation} action={dialog} role={role} close={() => setDialog(null)} /></Modal> : null}
     </div>
   )
@@ -197,19 +192,24 @@ export function FrontDeskView({ role }: { role: LiteRole }) {
   const { t, language } = useI18n()
   const [date, setDate] = useState(hotelDate())
   const [walkInOpen, setWalkInOpen] = useState(false)
+  const validDate = isDateKey(date)
+  const boardTo = addDateKey(date, 14)
   const query = useQuery({
     queryKey: ['lite', 'front-desk', date],
     queryFn: () => liteApi.frontDesk(date),
+    enabled: validDate,
     refetchInterval: 30_000,
   })
   const board = useQuery({
-    queryKey: ['lite', 'board', date, addDays(date, 14)],
-    queryFn: () => liteApi.board(date, addDays(date, 14)),
+    queryKey: ['lite', 'board', date, boardTo],
+    queryFn: () => liteApi.board(date, boardTo),
+    enabled: validDate && Boolean(boardTo),
     refetchInterval: 30_000,
   })
 
+  if (!validDate) return <div className="view-stack"><header className="view-heading"><div><h1>{t('frontDesk')}</h1></div><input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={t('dateRange')} /></header><ErrorBlock error={language === 'th' ? 'กรุณาเลือกวันที่ที่ถูกต้อง' : 'Choose a valid hotel date.'} /></div>
   if (query.isLoading) return <LoadingBlock />
-  if (query.error || !query.data) return <ErrorBlock error={query.error || 'Front Desk data unavailable.'} retry={() => query.refetch()} />
+  if (query.error || !query.data) return <ErrorBlock error={language === 'th' ? 'ไม่สามารถโหลดข้อมูลฟรอนต์ออฟฟิศได้' : query.error || 'Front Desk data unavailable.'} retry={() => query.refetch()} />
 
   const data = query.data
   const rooms = board.data?.rooms || []

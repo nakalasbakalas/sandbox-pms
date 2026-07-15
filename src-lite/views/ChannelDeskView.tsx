@@ -567,6 +567,7 @@ function formatDateTime(value: string | null | undefined, language: Language) {
   return new Intl.DateTimeFormat(language === 'th' ? 'th-TH' : 'en-GB', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Asia/Bangkok',
   }).format(date)
 }
 
@@ -1476,7 +1477,7 @@ export function ChannelDeskView({ role }: { role: LiteRole }) {
   const health = healthState(data, text)
 
   return (
-    <main className="page channel-desk">
+    <div className="page channel-desk">
       <header className="page-header">
         <div>
           <h1>{text.title}</h1>
@@ -1801,7 +1802,7 @@ export function ChannelDeskView({ role }: { role: LiteRole }) {
           </footer>
         </Modal>
       ) : null}
-    </main>
+    </div>
   )
 }
 

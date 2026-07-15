@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 
 import { useI18n, statusLabel } from './i18n'
 import type { Language, ReservationSummary } from './types'
@@ -57,7 +57,7 @@ export function GuestStay({ reservation, compact = false }: { reservation: Reser
   return (
     <div className="guest-stay">
       <div>
-        <strong>{reservation.guest.firstName} {reservation.guest.lastName}</strong>
+        <strong>{reservation.guest.displayName || `${reservation.guest.firstName || ''} ${reservation.guest.lastName || ''}`.trim()}</strong>
         <span className="muted">{t('confirmation')} {reservation.confirmationCode}</span>
       </div>
       {!compact ? (
@@ -71,12 +71,59 @@ export function GuestStay({ reservation, compact = false }: { reservation: Reser
 }
 
 export function Modal({ title, children, close }: { title: string; children: ReactNode; close: () => void }) {
+  const { t } = useI18n()
+  const titleId = useId()
+  const dialogRef = useRef<HTMLElement>(null)
+  const closeRef = useRef(close)
+  useEffect(() => {
+    closeRef.current = close
+  }, [close])
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return undefined
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const focusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => element.getAttribute('aria-hidden') !== 'true' && element.getClientRects().length > 0)
+    const initialFocus = dialog.querySelector<HTMLElement>(
+      '[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not(.icon-button):not([disabled]), a[href]',
+    )
+    ;(initialFocus || focusableElements()[0] || dialog).focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = focusableElements()
+      if (focusable.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocus?.focus()
+    }
+  }, [])
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && close()}>
-      <section className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <header className="modal__header">
-          <h2>{title}</h2>
-          <button className="icon-button" onClick={close} aria-label="Close">×</button>
+          <h2 id={titleId}>{title}</h2>
+          <button className="icon-button" onClick={close} aria-label={t('close')}>×</button>
         </header>
         {children}
       </section>
