@@ -2,7 +2,7 @@
 
 Recorded: 2026-07-14 (Asia/Bangkok)
 
-Exact-application revalidation: 2026-07-15 13:07 (Asia/Bangkok)
+Exact-application revalidation: 2026-07-15 14:05 (Asia/Bangkok)
 
 ## Verdict
 
@@ -16,9 +16,10 @@ remain gated.
 - Blueprint: `render-lite.yaml`
 - Web service: `sandbox-hotel-pms-lite-staging`
 - Render service id: `srv-d9asptjeo5us73dh0270`
-- Render deploy id: `dep-d9bi61vaqgkc739ellj0`
+- Render deploy id: `dep-d9bj0rmcjfls738g425g`
 - Branch: `codex/sandbox-pms-lite-v1`
-- Reviewed application commit: `bf203398737836e680d72dbdbb5f8b915c636ce2`
+- Reviewed application commit: `5a7ac9254735d1280d811ff5f97ca3cab297e385`
+- GitHub CI: run #206 (`29395778538`), both jobs passed
 - Deploy status: `live`
 - Direct hostname: `https://sandbox-hotel-pms-lite-staging.onrender.com`
 
@@ -39,20 +40,21 @@ write-mode, integration, or missing-configuration inventories.
 
 - API version: `lite/v1`
 - DTO version: `lite-read-v1`
-- commit SHA: `bf203398737836e680d72dbdbb5f8b915c636ce2`
-- asset identifier: `assets/index-DWzxGq80.js`
+- commit SHA: `5a7ac9254735d1280d811ff5f97ca3cab297e385`
+- asset identifier: `assets/index-hUnVFC0e.js`
 - release id: `srv-d9asptjeo5us73dh0270`
 - service name: `sandbox-hotel-pms-lite-staging`
 - environment: `staging`
-- build time: `2026-07-15T06:05:30.590Z`
+- build time: `2026-07-15T07:02:41.918Z`
 
 The root HTML referenced the same JavaScript identity plus
-`assets/index-C2aq233g.css`.
+`assets/index-CaQiWPXh.css`.
 
 Render CLI reported the exact-commit deploy as `live`, and the version, root,
-and deep-health probes returned HTTP 200 at 2026-07-15 13:07 Asia/Bangkok. The
-previous deploy `dep-d9b5qphkh4rs73chqd10` at commit `0583c6ab...` is
-deactivated and must not be cited as the current application release identity.
+and deep-health probes returned HTTP 200 at 2026-07-15 14:05 Asia/Bangkok. The
+previous exact-application deploy `dep-d9bi61vaqgkc739ellj0` at commit
+`bf203398...` is deactivated and must not be cited as the current application
+release identity.
 
 ## Disposable database proof
 
@@ -66,8 +68,8 @@ deactivated and must not be cited as the current application release identity.
 - Network allowlist: empty
 - Prisma connected specifically to database `sandbox_pms_lite_staging` on the
   new Render database resource.
-- All 22 repository migrations applied successfully before the process began
-  listening on port 10000.
+- Startup logs reported `22 migrations found` and `No pending migrations to
+  apply` before the process began listening on port 10000.
 
 No production database was used or mutated for this proof.
 
