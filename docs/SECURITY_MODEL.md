@@ -84,6 +84,8 @@ Hotel Ops code records audit and task-log evidence for:
 - scheduler scan run
 - booking-intelligence scan snapshot creation, bounded read access, and alert refresh linkage
 - emergency stop changes
+- booking-email raw-evidence access with the requesting actor and operational reason
+- immutable payment reversal and charge-void actions with the original ledger id, exact amount, actor, and reason
 
 ## Proof Handling
 
@@ -98,3 +100,165 @@ The PMS normalizes proof kinds, caps persisted proof count, redacts credential-l
 - No production claim for email delivery unless a real provider is configured and tested.
 - No production claim that historical bookings are loaded into operational reservations until imported Booking Email Events are reviewed and approved through the PMS.
 - No launch-ready claim from local tests alone.
+
+## Lite V1 Trust Boundaries
+
+### Session Revocation Is Database-Backed
+
+Every new session token carries the user's bounded non-negative `sessionVersion`.
+Authentication succeeds only when that version equals the current active,
+unlocked database row. Versionless, malformed, or stale tokens fail closed by
+default; legacy acceptance is not enabled in the PMS request path.
+
+The backend increments `sessionVersion` on account lockout, password reset or
+change, role change, active-state change, explicit deactivation, and logout.
+One increment invalidates every previously issued stateless token for that user.
+Clearing a browser cookie is not the revocation authority, and a client-side
+route guard is not an authorization boundary.
+
+### Least-Privilege Lite Projections
+
+Cashier has the narrow `view:lite-payment-reconciliation` permission instead of
+legacy guest, reservation, booking-board, or booking-email permissions. Its
+booking projection omits guest identity suffix, payment notes, raw payment
+references, and reservation audit timeline. Payment processing remains governed
+by its separate mutation permissions; the narrow read permission does not grant
+refund, charge-void, guest, or booking-email authority.
+
+Normal booking-email list/detail DTOs omit raw Gmail URL, source message id, raw
+headers, and raw body. Front Desk, Manager, and Admin may use the safe review
+projection. Only Manager/Admin may call
+`POST /api/booking-email/events/:id/evidence`; the service scopes the event to
+the configured property, requires a bounded operational reason, allowlists an
+HTTPS `mail.google.com` locator, and creates `BOOKING_EMAIL_EVIDENCE_VIEWED`.
+The endpoint returns no raw body. Cashier has neither review nor evidence access.
+
+The configured `SANDBOX` property is part of authorization. Gmail source
+list/create/update/sync and push/history lookup, booking-event
+list/detail/evidence/approve/reject/reprocess, and manual task complete/reopen
+must resolve through that property. A valid opaque id from a different property
+returns not found and cannot authorize a mutation.
+
+Authenticated Lite Settings uses a bounded configuration DTO. It may read
+property, physical room/type configuration, non-secret Gmail health and delivery
+counts, and manual connection mappings; it must not fetch or cache reservation,
+booking-review, reservation-log, or manual-task work rows merely to render
+Settings.
+
+### Gmail Push Is Authenticated Intake, Not Mutation Authority
+
+`POST /api/booking-email/gmail/push` is reachable without a PMS user session so Google Pub/Sub can call it, but it must reject requests unless all of these checks pass:
+
+- Pub/Sub support is explicitly enabled and fully configured.
+- The bearer token is a valid Google-signed OIDC identity token.
+- Issuer, audience, verified service-account email, subscription, and mailbox equal the configured values.
+- The envelope is bounded, the Pub/Sub message id is present, and the Gmail history id is numeric.
+
+The server persists a unique delivery before acknowledging it. A Pub/Sub message id is an idempotency key, not authority to update a booking. The Gmail API access token is resolved only on the backend. Errors are redacted before storage or output.
+
+All Gmail push, history, reconciliation, and maintenance ingestion is forced to review-only. Booking email content and parser output are untrusted. A new/modification/cancellation/payment event cannot mutate PMS state until an authenticated, authorized staff member approves it through the existing service. Processed events cannot be reprocessed. Modification and cancellation approvals require an operational reason and audit evidence. The service also rejects a lifecycle write when an equal-time or newer processed modification/cancellation already exists for the linked reservation; review order is not permission to overwrite newer state. That denial is recorded after rollback with only opaque ids, event types, timestamps, and a reason code. If the denial audit cannot be persisted, the operation remains blocked and returns a hard audit failure.
+
+Payment, cancellation, modification, and other non-new-booking email writes require an explicit or trusted exact-linked reservation id. Guest name and stay dates may suggest a possible duplicate but are never write authority. Link mode carries no ignored edited details. Reprocess derives provider authentication, parsed fields, and reservation matching again from immutable raw text and stored Gmail `Authentication-Results`; it cannot preserve a stale parser result or stale reservation id.
+
+Approval mode is allowlisted and cannot retype a cancellation/modification into reservation creation. The service rechecks `create:reservation`, `edit:reservation`, `cancel:reservation`, or `process:payment` according to the actual event action; a generic review-screen permission is not mutation authority. When a new or modified booking declares children, approval requires one verified age per child before pricing or capacity changes.
+
+Email-derived money keeps persisted parser semantics: a stay total cannot be sourced from a deposit/payment label, and a payment cannot be sourced from a stay-total label. An unmarked amount has no invented currency, and multiple distinct values carrying the same semantic label are ambiguous. Approval uses the persisted amount only; input cannot replace it or relabel its currency/kind, and the currency must match the configured property currency. Verified OTA stay totals are inclusive exact-satang values with persistent reservation provenance; public reservation inputs cannot inject or replace that provenance. Staff cannot create additional `ROOM` charges, and repricing requires exactly one active system-managed room charge.
+
+`sourceEmailEventId` is internal evidence provenance. Public charge, payment, walk-in, check-in, and checkout payloads are rejected if they attempt to set it. Cumulative exact payments set `depositPaid` only after crossing a positive deposit threshold; provider repricing re-evaluates that threshold. Checkout releases physical room-date inventory before publishing any early-checkout availability increase.
+
+Every booking-email row that predates the Lite review boundary is marked `legacyReadOnly`, including unresolved rows from the bounded 1,000-message historical import. These rows remain evidence but cannot be approved, rejected, reprocessed, or replayed into operational reservations. Only messages ingested after the Lite cutover enter the actionable review queue; staff must reconcile any real active stay from authoritative OTA/PMS evidence rather than applying stale imported parser output.
+
+The five-minute maintenance cron renews watches, retries durable deliveries, and reconciles Gmail history. It improves recovery but is neither a security bypass nor a delivery guarantee. If the watch or push identity is misconfigured, the correct response is to repair configuration or rely on reviewed manual intake—not to disable OIDC or review controls.
+
+Delivery claiming has a default eight-attempt ceiling. A non-retryable provider
+error or the eighth failed attempt remains a visible, redacted `FAILED` record
+but consumes the attempt budget and is no longer claimable. Retryable failures
+below the ceiling use bounded backoff. A source-lease collision restores the
+prior count because no provider request ran. Operators must not reset terminal
+rows merely to erase failure evidence.
+
+Modification/cancellation ordering includes non-legacy events in
+`NEEDS_REVIEW`, `ERROR`, and `PROCESSED`: an older event cannot overtake a
+same-time or newer event for the same property and linked reservation/provider
+reference. Child-age parser output is also untrusted until complete; every
+declared child requires exactly one integer age from 0 through 17. Missing,
+invalid, or count-mismatched ages force review and fail again at approval.
+
+When `PMS_UI_VARIANT=lite` or `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`, startup
+forbids the legacy 120-second booking-email poller. Pub/Sub plus the separately
+scheduled maintenance/reconciliation job is the Lite path; parallel legacy
+polling would create competing ingestion authority and must remain disabled.
+
+### Manual Channel Queue Is Non-Credential Coordination
+
+Manual channel configuration may contain provider codes, verified property/room/rate identifiers, and official HTTPS Extranet links. Provider columns use extensible text storage, but current write paths still allowlist only supported adapters; extensible storage does not authorize an unknown provider. Configuration must reject password-, token-, cookie-, session-, secret-, API-key-, 2FA-, or credential-shaped fields. Extranet URLs may not contain embedded credentials, query strings, fragments, or non-standard ports and must resolve under the configured provider's official domain.
+
+Manual availability tasks do not authorize browser automation or OTA writes. Completion records an operator attestation, timestamp, exact availability, revision, and optional notes; it is not independent OTA state proof. Stale revisions and mismatched values are rejected. Configuration/reconciliation/reopen is Manager/Admin-only; completion is limited to Front Desk, Manager, or Admin.
+
+An enabled manual connection must have an active mapping for every room type that owns a physical room, including temporarily non-sellable rooms. Active external room-type/rate-plan targets are unique per connection at the database boundary. A disabled-to-enabled transition cannot commit until it stages a bounded 1–90-day absolute-availability baseline for that connection, with aggregate audit evidence. Reconciliation never guesses an external target: missing mappings skip task creation and produce an aggregated audit record for the provider, PMS room type, and affected date range.
+
+The source OTA for an approved email is also reconciled with current absolute PMS availability. This prevents stale source-provider tasks from remaining actionable; it is still manual coordination and is not evidence that the provider's broader inventory is synchronized. Every enabled provider remains exposed to staff delay.
+
+Every task revision stores an immutable external room/rate-plan target. Completion rejects a task when the active mapping has changed, and retry/reopen recalculates current absolute availability before creating an audited revision against the current mapping. Channel Desk returns true aggregate counts even when its PII-safe work lists are bounded.
+
+`DISABLED_CHANNEX_ADAPTER` must remain disabled until a certified channel account, backend-only secrets, provider/property/room mappings, sandbox test evidence, error/retry policy, audit output, emergency stop, and owner approval exist. No Channex credential belongs in the client or manual mapping records.
+
+### PII-Safe Realtime Invalidation
+
+`GET /api/realtime/events` requires an authenticated session and the narrow `view:realtime` operational permission. This lets Housekeeping receive room-state invalidations without granting access to the guest booking board. The server allows only named invalidation event types and emits only occurrence time, optional opaque entity id, and optional reason code. Guest names, email data, room data, payment data, message content, credentials, and arbitrary caller payloads are excluded. The client must refetch authorized endpoints after a signal.
+
+SSE is in-process and non-replaying. It is an availability optimization, not a source of truth or authorization decision. Reconnect emits `sync-required`; polling remains the fallback. A multi-instance deployment requires a shared invalidation bus to avoid instance-local blind spots.
+
+### Provider And Production Authority
+
+An ordinary Booking.com individual-property Extranet account is not direct Connectivity API authorization. Agoda and Trip.com application material requires owner-controlled legal/business information and provider testing. Repository code, a drafted packet, or an opened form is not application submission or approval.
+
+Lite remains staging-only until owner/live proof exists for Render configuration, database recovery, Gmail OAuth/watch/Pub/Sub, cron operation, provider decisions, Cloudflare proxy/WAF traffic path, staff roles, Thai/English acceptance, exact money, and rollback. Do not place credentials or production guest data in test fixtures or evidence.
+
+### Money Integrity
+
+Lite read DTOs require the integer-satang fields, and active PMS writers calculate in satang before deriving legacy Float rollback parity. Missing required satang values fail closed instead of silently converting Float at the boundary. The dormant `RateCalendar` table is backfilled/reconciled but must not become an active pricing writer until it dual-writes the pair. The guarded populated-legacy migration test may run only with `ALLOW_DB_E2E=true` and an unmistakably disposable `E2E_DATABASE_URL`; it creates and removes its own schema and must never target production-like data. This repository contract is not production proof: production money cutover remains blocked until the nullable expansion/backfill migration, zero-difference reconciliation, fresh restore proof, representative staging workflows, and rollback-period requirements are evidenced. No migration should be applied to production without a fresh recovery point and successful disposable restore test.
+
+The full guest ID/passport value remains in the protected backend guest record. Lite operational reads expose only identity-complete state and the last four characters to authorized front-desk/booking roles; the Housekeeping DTO contains no guest name, email metadata, document identifier, rate, folio, or payment data. Active stays keep an open folio for incidentals. A settled checkout closes it; a reasoned unpaid-checkout override leaves it open so a later payment can settle and close the folio.
+
+New payments and incidental charges are serializable and may carry a unique
+client request id. Exact replay returns the first result; reuse for a different
+immutable intent fails. Payment reversal never edits or deletes the original
+payment: it creates a signed negative exact-satang `REVERSAL` row linked to the
+positive original, bounded by its unreversed amount, with `refund:payment`, an
+operational reason, and an audit event. Charge void is Manager/Admin-only, excludes system-managed room
+charges, preserves the original row, and records reason, actor, timestamp,
+request id, and audit evidence. Reversal/void recomputation also reconciles folio
+and deposit state. Float remains only the legacy rollback shadow derived from
+authoritative satang; nullable satang is a quarantined legacy compatibility state,
+not permission for a new Float-authoritative write.
+
+`20260715150000_payment_reversal_idempotency` and
+`20260715160000_user_session_revocation` must be applied through the reviewed
+migration chain. If application fails, stop writes, preserve the failed state,
+inspect `prisma migrate status`, and rehearse recovery on a disposable restore.
+Use `migrate resolve --rolled-back` only after the partial state is understood;
+never use it to conceal an unknown production state.
+
+### Public Health And Process Topology
+
+Unauthenticated health endpoints expose only bounded availability-safe service,
+UI variant, timestamp, and database configured/healthy state. They do not expose
+secret values, missing secret names, provider configuration, write-mode details,
+or privileged diagnostics. A public `200` is not Gmail, Cloudflare, provider,
+recovery, owner, or launch proof.
+
+The SSE hub is process-local and non-replaying. The Lite pilot must remain on one
+web instance until a shared, authenticated invalidation bus is implemented and
+proven. Poll/refetch against authorized APIs remains the correctness path.
+
+See `docs/LITE_ARCHITECTURE.md` for the complete Lite data flow and rollout boundaries.
+
+### Lite operational-core boundaries
+
+- The 30-room inventory writer fails closed outside the exact Lite staging tier/UI/seed/database boundary and refuses destructive reconciliation. It never deletes an unexpected room or silently changes an existing room's type/floor.
+- Walk-in quote is read-only and authorized by both reservation-create and guest-check-in permissions. The mutation repeats rate, capacity, overlap, current-vacancy, cleanliness, identity, payment, and expected-total validation inside one serializable transaction.
+- Guest email, phone, special requests, and internal notes are returned only in the protected booking-detail projection. They remain absent from lists, board cells, Housekeeping, Cashier payment-only DTOs, and the printed folio unless a separately verified document requirement authorizes them.
+- Checkout UI cannot combine payment collection with unpaid override. Backend exact-satang and Manager/Admin reason gates remain authoritative; UI state is not an authorization boundary.
+- Guest Folio / Statement uses persisted ledger identifiers and amounts but is explicitly non-fiscal. Client timestamps are copy-preparation metadata only, never invoice numbers. Legal tax documents remain disabled until the backend owns durable numbering and verified property tax identity.
+- Maintenance, return-to-service, dirty correction, cancellation, no-show, charge void, and payment reversal use contextual reason capture and existing backend audit gates. Cancellation/no-show does not invent a refund or fee policy.

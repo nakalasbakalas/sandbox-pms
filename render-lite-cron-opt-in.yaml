@@ -1,0 +1,55 @@
+# OWNER APPROVAL REQUIRED: APPLYING THIS BLUEPRINT CREATES A BILLABLE CRON JOB.
+# Render currently charges a USD 1/month minimum per cron service. Do not apply
+# this file until the owner explicitly accepts that recurring cost. Apply
+# render-lite.yaml first, then supply only the Lite staging database URL and the
+# reviewed Gmail values in Render's secret-entry form. This standalone Blueprint
+# deliberately has no implicit binding to any existing (especially production)
+# service or database.
+previews:
+  generation: off
+
+services:
+  - type: cron
+    name: sandbox-hotel-pms-lite-email-maintenance-staging
+    runtime: node
+    repo: https://github.com/nakalasbakalas/sandbox-pms
+    plan: starter
+    region: singapore
+    branch: codex/sandbox-pms-lite-v1
+    autoDeployTrigger: off
+    schedule: "*/5 * * * *"
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm run db:generate
+    startCommand: npm run booking-email:maintenance
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: NODE_ENV
+        value: production
+      - key: PMS_DEPLOYMENT_TIER
+        value: staging
+      - key: CHANNEL_SYNC_QUEUE_BACKEND
+        value: lite_manual
+      - key: DATABASE_URL
+        sync: false
+      - key: BOOKING_EMAIL_PRIMARY_MAILBOX
+        value: booking@sandboxhotel.com
+      - key: BOOKING_EMAIL_GMAIL_USER_ID
+        value: me
+      - key: BOOKING_EMAIL_GMAIL_SCOPES
+        value: https://www.googleapis.com/auth/gmail.readonly
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_ID
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_CLIENT_SECRET
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_REFRESH_TOKEN
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_ENABLED
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_TOPIC
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SUBSCRIPTION
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_AUDIENCE
+        sync: false
+      - key: BOOKING_EMAIL_GMAIL_PUBSUB_SERVICE_ACCOUNT_EMAIL
+        sync: false

@@ -1,3 +1,7 @@
+export const BOOKING_EMAIL_REVIEW_PERMISSION = 'view:booking-email-review'
+export const BOOKING_EMAIL_EVIDENCE_PERMISSION = 'view:booking-email-evidence'
+export const LITE_PAYMENT_RECONCILIATION_PERMISSION = 'view:lite-payment-reconciliation'
+
 export const ROLE_PERMISSIONS = {
   ADMIN: [
     'view:board',
@@ -12,6 +16,9 @@ export const ROLE_PERMISSIONS = {
     'view:analytics',
     'view:night-audit',
     'view:messaging',
+    'view:realtime',
+    BOOKING_EMAIL_REVIEW_PERMISSION,
+    BOOKING_EMAIL_EVIDENCE_PERMISSION,
     'create:reservation',
     'edit:reservation',
     'cancel:reservation',
@@ -49,6 +56,10 @@ export const ROLE_PERMISSIONS = {
     'view:analytics',
     'view:night-audit',
     'view:messaging',
+    'view:realtime',
+    'view:settings',
+    BOOKING_EMAIL_REVIEW_PERMISSION,
+    BOOKING_EMAIL_EVIDENCE_PERMISSION,
     'create:reservation',
     'edit:reservation',
     'cancel:reservation',
@@ -61,6 +72,8 @@ export const ROLE_PERMISSIONS = {
     'post:charges',
     'process:payment',
     'run:night-audit',
+    'edit:settings',
+    'manage:channels',
     'view:financial-reports',
     'send:guest-messages',
     'send:staff-messages',
@@ -75,6 +88,9 @@ export const ROLE_PERMISSIONS = {
     'view:cashier',
     'view:housekeeping',
     'view:messaging',
+    'view:channels',
+    'view:realtime',
+    BOOKING_EMAIL_REVIEW_PERMISSION,
     'create:reservation',
     'edit:reservation',
     'check-in:guest',
@@ -88,20 +104,19 @@ export const ROLE_PERMISSIONS = {
     'create:ops-task',
   ],
   HOUSEKEEPING: [
-    'view:board',
     'view:housekeeping',
+    'view:realtime',
     'view:messaging',
     'edit:room-status',
     'send:staff-messages',
     'view:ops',
   ],
   CASHIER: [
-    'view:board',
-    'view:reservations',
-    'view:guests',
     'view:cashier',
     'view:reports',
     'view:messaging',
+    'view:realtime',
+    LITE_PAYMENT_RECONCILIATION_PERMISSION,
     'post:charges',
     'process:payment',
     'view:financial-reports',

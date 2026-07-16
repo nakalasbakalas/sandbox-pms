@@ -1,19 +1,21 @@
 # Channel synchronization v2
 
-Status: **lite finalization candidate on `feat/channel-sync-lite-finalize`; external provider access remains pending owner submission and provider approval**.
+Status: **legacy Hotel Ops compatibility design; not the canonical PMS Lite runtime. External provider access remains pending owner submission and provider approval.**
+
+> Runtime boundary: PMS Lite uses authenticated Gmail Pub/Sub/history reconciliation and the Prisma-backed `ManualChannelTask` workflow documented in `docs/LITE_ARCHITECTURE.md`. Select it with `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual` and keep `BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`. The queue and poller in this document may be used only by an explicitly selected legacy runtime (`CHANNEL_SYNC_QUEUE_BACKEND=hotel_ops_legacy`).
 
 ## Decision
 
-The current operating mode is:
+The legacy compatibility mode described here is:
 
 - inbound reservations and changes: near-live Gmail polling into the existing review inbox;
 - outbound availability: explicit manual queue with owner/manager approval and provider confirmation;
 - direct API access: Agoda and Trip.com application tracks run in parallel;
 - future true two-way distribution: prefer Channex as a channel-only layer rather than buying or operating a second PMS.
 
-The SANDBOX HOTEL PMS remains the sole system of record for reservations, inventory, guests, folios, payments, housekeeping, and staff workflows.
+The SANDBOX HOTEL PMS remains the sole system of record for reservations, inventory, guests, folios, payments, housekeeping, and staff workflows. This compatibility mode must not run beside the Lite queue.
 
-## What “near-live” means
+## What legacy “near-live” polling means
 
 The scheduler polls every 120 seconds by default. It is not a webhook and it is not guaranteed zero-lag delivery.
 
@@ -41,6 +43,7 @@ BOOKING_EMAIL_GMAIL_USER_ID=me
 BOOKING_EMAIL_GMAIL_CLIENT_ID=...
 BOOKING_EMAIL_GMAIL_CLIENT_SECRET=...
 BOOKING_EMAIL_GMAIL_REFRESH_TOKEN=...
+CHANNEL_SYNC_QUEUE_BACKEND=hotel_ops_legacy
 ```
 
 Polling is enabled only when the explicit flag is true **and** Gmail OAuth is complete. The interval is bounded to 30–3,600 seconds; the batch is bounded to 1–250 messages. Secret values belong in the deployment secret store.
@@ -53,9 +56,9 @@ Polling is enabled only when the explicit flag is true **and** Gmail OAuth is co
 - Repeated polling is safe because existing messages are upserted by source/message identity and duplicate booking fingerprints.
 - A Gmail failure is stored on the affected source and retried on the next interval.
 
-## Manual outbound availability queue
+## Legacy Hotel Ops manual outbound availability queue
 
-`server/availability-queue.mjs` is a constrained service over the existing `HotelOpsTask`, `HotelOpsTaskApproval`, `HotelOpsTaskLog`, and `AuditLog` models. No schema migration or second queue store is required.
+`server/availability-queue.mjs` is a constrained compatibility service over the existing `HotelOpsTask`, `HotelOpsTaskApproval`, `HotelOpsTaskLog`, and `AuditLog` models. Its CLI refuses to operate when the Lite queue backend is selected. It is not a second Lite queue.
 
 ### State flow
 

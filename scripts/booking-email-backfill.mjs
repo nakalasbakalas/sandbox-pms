@@ -8,7 +8,7 @@ import {
   fetchGmailEventsForSource,
   listBookingEmailSources,
   previewBookingEmailEvent,
-  syncBookingEmail,
+  ingestBookingEmailEvents,
 } from '../server/pms-service.mjs'
 
 loadEnvDefaults()
@@ -216,7 +216,7 @@ async function main() {
     if (confirm) {
       if (!source.id) fail('Confirmed import requires a saved booking email source.')
       for (const batch of eventBatches(fetchedEvents, importBatchSize)) {
-        const result = await syncBookingEmail(prisma, {
+        const result = await ingestBookingEmailEvents(prisma, {
           sourceId: source.id,
           events: batch,
           reviewOnly: true,

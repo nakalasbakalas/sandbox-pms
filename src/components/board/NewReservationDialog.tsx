@@ -100,6 +100,7 @@ interface ReservationFormState {
   roomType: ReservationRoomTypeCode
   adults: number
   children: number
+  childAges: string[]
   ratePerNight: number
   source: BookingSource
   specialRequests: string
@@ -134,6 +135,7 @@ function createInitialFormData(roomType?: ReservationRoomTypeOption): Reservatio
     roomType: roomType?.code || 'TWIN',
     adults: 1,
     children: 0,
+    childAges: [],
     ratePerNight: roomType?.baseRate || 0,
     source: 'DIRECT',
     specialRequests: '',
@@ -261,12 +263,16 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
   }, [open, roomTypeOptions])
 
   const nights = nightsBetween(checkIn, checkOut)
+  const childAgesForPricing = formData.childAges.map((age) => {
+    const parsed = Number(age)
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 17 ? parsed : -1
+  })
   const pricing = calculateStayPricing({
     checkIn,
     checkOut,
     ratePerNight: formData.ratePerNight,
     adults: formData.adults,
-    childAges: Array.from({ length: formData.children }, () => 0),
+    childAges: childAgesForPricing,
     standardOccupancy: selectedRoomType?.baseOccupancy,
     maxOccupancy: selectedRoomType?.maxOccupancy,
     extraGuestFeePerNight: selectedRoomType?.extraGuestFee,
@@ -297,6 +303,16 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
 
     if (formData.adults < 1) {
       toast.error('At least one adult is required.')
+      return
+    }
+
+    const childAges = formData.childAges.map(Number)
+    if (
+      childAges.length !== formData.children
+      || formData.childAges.some((age) => !age.trim())
+      || childAges.some((age) => !Number.isInteger(age) || age < 0 || age > 17)
+    ) {
+      toast.error('Enter one age from 0 to 17 for every child.')
       return
     }
 
@@ -362,7 +378,7 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
       actualCheckOut: null,
       adults: formData.adults,
       children: formData.children,
-      childAges: null,
+      childAges,
       ratePerNight: formData.ratePerNight,
       totalAmount,
       depositAmount,
@@ -572,11 +588,41 @@ export function NewReservationDialog({ open, onClose, onSubmit, prefilledData }:
                         min="0"
                         inputMode="numeric"
                         value={formData.children}
-                        onChange={(e) => setFormData(prev => ({ ...prev, children: parseNonNegativeInteger(e.target.value, prev.children) }))}
+                        onChange={(e) => setFormData((prev) => {
+                          const children = parseNonNegativeInteger(e.target.value, prev.children)
+                          return {
+                            ...prev,
+                            children,
+                            childAges: Array.from({ length: children }, (_, index) => prev.childAges[index] ?? ''),
+                          }
+                        })}
                         className="mt-2 h-11 text-base md:text-sm"
                       />
                     </div>
                   </div>
+
+                  {formData.childAges.length > 0 && (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {formData.childAges.map((age, index) => (
+                        <div key={index}>
+                          <Label htmlFor={`child-age-${index}`} className="text-sm">Child {index + 1} age</Label>
+                          <Input
+                            id={`child-age-${index}`}
+                            type="number"
+                            min="0"
+                            max="17"
+                            inputMode="numeric"
+                            value={age}
+                            onChange={(event) => setFormData((prev) => ({
+                              ...prev,
+                              childAges: prev.childAges.map((currentAge, ageIndex) => ageIndex === index ? event.target.value : currentAge),
+                            }))}
+                            className="mt-2 h-11 text-base md:text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { createReadStream } from 'node:fs'
+import { createReadStream, readFileSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
@@ -8,7 +8,15 @@ import { loadEnvDefaults } from '../scripts/env-utils.mjs'
 import { resolveApiRouteContract } from './api-routes.mjs'
 import { loginThrottle, resolveClientIp } from './login-throttle.mjs'
 import { createPrismaClient } from './prisma-client.mjs'
-import { canViewRoute, requirePermission } from './rbac.mjs'
+import {
+  BOOKING_EMAIL_EVIDENCE_PERMISSION,
+  BOOKING_EMAIL_REVIEW_PERMISSION,
+  LITE_PAYMENT_RECONCILIATION_PERMISSION,
+  canPerformAction,
+  canViewRoute,
+  requirePermission,
+} from './rbac.mjs'
+import { PmsValidationError, SANDBOX_RULES } from './pms-domain.mjs'
 import { clearSessionCookie, createSessionToken, readSessionCookie, sessionCookie, verifySessionToken } from './security.mjs'
 import { envEnabled, requireSetupPermission, setupTokenRequired } from './setup-permission.mjs'
 import {
@@ -41,6 +49,32 @@ import {
   listIcalFeedChannels,
 } from './ical-feed.mjs'
 import {
+  bookingEmailPubSubConfig,
+  decodeBookingEmailPubSubEnvelope,
+  processPendingBookingEmailDeliveries,
+  recordBookingEmailPushDelivery,
+  redactBookingEmailSyncError,
+  verifyBookingEmailPubSubRequest,
+} from './booking-email-gmail-sync.mjs'
+import {
+  completeManualChannelTask,
+  reconcileManualChannelTasks,
+  reopenManualChannelTask,
+  saveManualChannelConnection,
+  saveManualChannelRoomMapping,
+} from './manual-channel-service.mjs'
+import {
+  getLiteBoard,
+  getLiteBookingDetail,
+  getLiteChannelDesk,
+  getLiteFrontDesk,
+  getLiteHousekeeping,
+  getLiteSettings,
+  getLiteVersion,
+  listLiteBookings,
+} from './lite-service.mjs'
+import { createRealtimeEventHub } from './realtime-events.mjs'
+import {
   acknowledgeOpsTrendAlert,
   approveOpsAlertRecommendation,
   approveOpsTask,
@@ -67,6 +101,7 @@ import {
 import {
   assignRoom,
   authenticateUser,
+  bookingEmailGmailCredentialStatus,
   approveBookingEmailEvent,
   cancelReservation,
   checkInReservation,
@@ -82,12 +117,15 @@ import {
   createReservation,
   createWalkInCheckIn,
   getBookingEmailEvent,
+  getBookingEmailEvidence,
   getBookingEmailStatus,
   getAuthenticatedUser,
   getFrontDeskBoard,
+  getWalkInQuote,
   getRoomSetup,
   getSetupStatus,
   getTodayData,
+  ingestBookingEmailEvents,
   listBookingEmailEvents,
   listBookingEmailSources,
   listGuests,
@@ -95,7 +133,9 @@ import {
   listRooms,
   listUsers,
   rejectBookingEmailEvent,
+  reversePayment,
   reprocessBookingEmailEvent,
+  resolveBookingEmailGmailAccessToken,
   syncBookingEmail,
   deactivateUser,
   deleteRoomType,
@@ -108,21 +148,33 @@ import {
   updateRoomType,
   updateSetupRoom,
   updateUser,
+  voidCharge,
 } from './pms-service.mjs'
 
 loadEnvDefaults()
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const distDir = resolve(__dirname, '..', 'dist')
+const uiVariant = String(process.env.PMS_UI_VARIANT || 'legacy').trim().toLowerCase()
+if (!['legacy', 'lite'].includes(uiVariant)) throw new Error('PMS_UI_VARIANT must be legacy or lite.')
+const distDir = resolve(__dirname, '..', uiVariant === 'lite' ? 'dist-lite' : 'dist')
+let builtReleaseMetadata = {}
+try {
+  builtReleaseMetadata = JSON.parse(readFileSync(join(distDir, 'release-meta.json'), 'utf8'))
+} catch {
+  builtReleaseMetadata = {}
+}
 const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
 const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
 const PRODUCTION = process.env.NODE_ENV === 'production'
+const pmsWriteMode = String(process.env.PMS_WRITE_MODE || 'active').trim().toLowerCase()
+if (!['active', 'read-only'].includes(pmsWriteMode)) throw new Error('PMS_WRITE_MODE must be active or read-only.')
 
 let prisma
 let opsScanScheduler
+const realtimeHub = createRealtimeEventHub({ logger: console })
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -335,6 +387,77 @@ async function readRawBody(request) {
   return Buffer.concat(chunks)
 }
 
+function queryInput(searchParams) {
+  const input = {}
+  for (const [key, value] of searchParams.entries()) {
+    if (input[key] === undefined) input[key] = value
+    else input[key] = Array.isArray(input[key]) ? [...input[key], value] : [input[key], value]
+  }
+  return input
+}
+
+function readOnlyWriteAllowed(pathname) {
+  return pathname === '/api/auth/login' || pathname === '/api/auth/logout'
+}
+
+function requestWouldWrite(request, pathname) {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(request.method || '') && !readOnlyWriteAllowed(pathname)
+}
+
+async function litePropertyId(db) {
+  const property = await db.property.findUnique({
+    where: { code: SANDBOX_RULES.propertyCode },
+    select: { id: true },
+  })
+  if (!property) {
+    const error = new Error('Property setup has not been completed yet.')
+    error.statusCode = 503
+    throw error
+  }
+  return property.id
+}
+
+async function ingestReviewOnlyBookingEmailEvents(db, input, actor) {
+  const result = await ingestBookingEmailEvents(db, { ...input, reviewOnly: true }, actor)
+  await processEmailOpsCommandEvents(db, result.opsCommandEvents || result.events, {
+    env: process.env,
+    submitCommand: submitOpsCommand,
+  })
+  return result
+}
+
+function bookingEmailRuntimeOptions() {
+  return {
+    env: process.env,
+    logger: console,
+    getAccessToken: ({ env }) => resolveBookingEmailGmailAccessToken({ env }),
+    ingestEvents: ingestReviewOnlyBookingEmailEvents,
+  }
+}
+
+let bookingEmailPushDrainScheduled = false
+function scheduleBookingEmailPushDrain(db) {
+  if (bookingEmailPushDrainScheduled) return
+  bookingEmailPushDrainScheduled = true
+  setImmediate(async () => {
+    try {
+      const result = await processPendingBookingEmailDeliveries(db, bookingEmailRuntimeOptions())
+      if (result.eventsIngested > 0) {
+        realtimeHub.publish('booking-email.received', { reason: 'gmail_push' })
+      }
+    } catch (error) {
+      console.error('Booking email push drain failed:', redactBookingEmailSyncError(error))
+    } finally {
+      bookingEmailPushDrainScheduled = false
+    }
+  })
+}
+
+function publishReservationMutation(reservationId, reason) {
+  realtimeHub.publish('reservation.changed', { entityId: reservationId, reason })
+  realtimeHub.publish('manual-channel-tasks.changed', { reason: 'reservation_inventory_changed' })
+}
+
 function publicUser(user) {
   if (!user) return null
   return {
@@ -346,6 +469,12 @@ function publicUser(user) {
     active: user.active,
     lockedAt: user.lockedAt?.toISOString?.() || null,
     createdAt: user.createdAt?.toISOString?.() || null,
+  }
+}
+
+function requireAnyPermission(user, permissions) {
+  if (!permissions.some((permission) => canPerformAction(user, permission))) {
+    requirePermission(user, permissions[0])
   }
 }
 
@@ -385,11 +514,12 @@ async function databaseStatus(deep) {
     prisma = createPrismaClient()
     await prisma.$queryRaw`SELECT 1`
     return { configured: true, ok: true }
-  } catch (error) {
+  } catch {
+    console.error('Database health check failed.')
     return {
       configured: true,
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: 'Database health check failed.',
     }
   } finally {
     await prisma?.$disconnect?.()
@@ -397,24 +527,20 @@ async function databaseStatus(deep) {
 }
 
 async function healthPayload(deep = false) {
+  const database = await databaseStatus(deep)
   return {
-    ok: true,
+    ok: deep ? database.configured === true && database.ok === true : true,
     service: 'sandbox-hotel-pms',
-    environment: process.env.NODE_ENV || 'development',
+    uiVariant,
     timestamp: new Date().toISOString(),
-    database: await databaseStatus(deep),
-    integrations: {
-      lineWebhookConfigured: Boolean(process.env.LINE_CHANNEL_SECRET && process.env.LINE_CHANNEL_ACCESS_TOKEN),
-      whatsappWebhookConfigured: whatsAppWebhookStatus(process.env).appSecretConfigured,
-      hotelOpsEmailCommandIntake: emailOpsCommandIntakeStatus(process.env),
-      hotelOpsWhatsAppCommandIntake: whatsAppOpsCommandIntakeStatus(process.env),
-    },
+    database,
   }
 }
 
 async function sendHealth(request, response) {
   const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
-  sendJson(response, 200, await healthPayload(url.searchParams.get('deep') === '1'))
+  const payload = await healthPayload(url.searchParams.get('deep') === '1')
+  sendJson(response, payload.ok ? 200 : 503, payload)
 }
 
 function forbiddenPath(pathname) {
@@ -690,6 +816,22 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  if (url.pathname === '/api/version' && request.method === 'GET') {
+    sendJson(response, 200, {
+      ok: true,
+      data: getLiteVersion({
+        env: {
+          ...process.env,
+          PMS_UI_VARIANT: uiVariant,
+          LITE_BUILD_TIME: process.env.LITE_BUILD_TIME || builtReleaseMetadata.buildTime,
+          LITE_ASSET_IDENTIFIER: process.env.LITE_ASSET_IDENTIFIER || builtReleaseMetadata.assetIdentifier,
+          GIT_COMMIT_SHA: process.env.GIT_COMMIT_SHA || builtReleaseMetadata.commitSha,
+        },
+      }),
+    })
+    return true
+  }
+
   if (url.pathname === '/api/internal/ops/worker/tasks' && request.method === 'POST') {
     const rawBody = await readRawBody(request)
     const workerAuth = verifyOpsWorkerRequest({ body: rawBody, headers: request.headers })
@@ -715,6 +857,23 @@ async function handleApi(request, response, url) {
   }
 
   const db = await getPrisma()
+
+  if (url.pathname === '/api/booking-email/gmail/push' && request.method === 'POST') {
+    const config = bookingEmailPubSubConfig(process.env)
+    await verifyBookingEmailPubSubRequest({
+      config,
+      authorization: firstHeaderValue(request.headers.authorization),
+    })
+    const delivery = decodeBookingEmailPubSubEnvelope(await readJson(request), { config })
+    const recorded = await recordBookingEmailPushDelivery(db, delivery, { env: process.env, config })
+    scheduleBookingEmailPushDrain(db)
+    sendJson(response, 202, {
+      ok: true,
+      accepted: recorded.accepted,
+      duplicate: recorded.duplicate,
+    })
+    return true
+  }
 
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
     const body = await readJson(request)
@@ -756,6 +915,13 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+    const session = verifySessionToken(readSessionCookie(request))
+    if (session?.sub && Number.isInteger(session.sessionVersion)) {
+      await db.user.updateMany({
+        where: { id: session.sub, sessionVersion: session.sessionVersion },
+        data: { sessionVersion: { increment: 1 } },
+      })
+    }
     sendJson(response, 200, { ok: true }, { 'set-cookie': clearSessionCookie() })
     return true
   }
@@ -793,8 +959,131 @@ async function handleApi(request, response, url) {
 
   const user = await requireUser(request)
 
+  if (url.pathname === '/api/realtime/events' && request.method === 'GET') {
+    await realtimeHub.handle(request, response, {
+      requireUser,
+      requirePermission,
+      permission: 'view:realtime',
+    })
+    return true
+  }
+
   if (url.pathname === '/api/auth/can-view' && request.method === 'GET') {
     sendJson(response, 200, { ok: true, allowed: canViewRoute(user, url.searchParams.get('route')) })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/front-desk' && request.method === 'GET') {
+    requirePermission(user, 'view:board')
+    sendJson(response, 200, { ok: true, data: await getLiteFrontDesk(db, queryInput(url.searchParams)) })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/bookings' && request.method === 'GET') {
+    requireAnyPermission(user, ['view:reservations', LITE_PAYMENT_RECONCILIATION_PERMISSION])
+    sendJson(response, 200, {
+      ok: true,
+      data: await listLiteBookings(db, queryInput(url.searchParams), {
+        paymentReconciliationOnly: canPerformAction(user, LITE_PAYMENT_RECONCILIATION_PERMISSION)
+          && !canPerformAction(user, 'view:reservations'),
+      }),
+    })
+    return true
+  }
+
+  let liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/bookings\/(?<id>[^/]+)$/)
+  if (liteParams && request.method === 'GET') {
+    requireAnyPermission(user, ['view:reservations', LITE_PAYMENT_RECONCILIATION_PERMISSION])
+    sendJson(response, 200, {
+      ok: true,
+      data: await getLiteBookingDetail(db, liteParams.id, {
+        includeIdentitySuffix: canPerformAction(user, 'check-in:guest'),
+        paymentReconciliationOnly: canPerformAction(user, LITE_PAYMENT_RECONCILIATION_PERMISSION)
+          && !canPerformAction(user, 'view:reservations'),
+      }),
+    })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/board' && request.method === 'GET') {
+    requirePermission(user, 'view:board')
+    sendJson(response, 200, { ok: true, data: await getLiteBoard(db, queryInput(url.searchParams)) })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/walk-in-quote' && request.method === 'GET') {
+    requirePermission(user, 'create:reservation')
+    requirePermission(user, 'check-in:guest')
+    sendJson(response, 200, { ok: true, data: await getWalkInQuote(db, queryInput(url.searchParams)) })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/housekeeping' && request.method === 'GET') {
+    requirePermission(user, 'view:housekeeping')
+    sendJson(response, 200, { ok: true, data: await getLiteHousekeeping(db, queryInput(url.searchParams)) })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/channel-desk' && request.method === 'GET') {
+    requirePermission(user, 'view:channels')
+    sendJson(response, 200, {
+      ok: true,
+      data: await getLiteChannelDesk(db, {
+        credentialStatus: bookingEmailGmailCredentialStatus(process.env),
+        pubsubConfig: bookingEmailPubSubConfig(process.env),
+      }),
+    })
+    return true
+  }
+
+  liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/channels\/connections\/(?<provider>[^/]+)$/)
+  if (liteParams && request.method === 'PUT') {
+    requirePermission(user, 'manage:channels')
+    const body = await readJson(request)
+    const connection = await saveManualChannelConnection(db, {
+      ...body,
+      propertyId: await litePropertyId(db),
+      providerCode: liteParams.provider,
+    }, user)
+    realtimeHub.publish('manual-channel-tasks.changed', { entityId: connection.id, reason: 'connection_saved' })
+    sendJson(response, 200, { ok: true, data: connection, message: 'Manual channel connection saved.' })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/channels/mappings' && request.method === 'POST') {
+    requirePermission(user, 'manage:channels')
+    const mapping = await saveManualChannelRoomMapping(db, await readJson(request), user)
+    realtimeHub.publish('manual-channel-tasks.changed', { entityId: mapping.id, reason: 'mapping_saved' })
+    sendJson(response, 200, { ok: true, data: mapping, message: 'Manual channel room mapping saved.' })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/channel-tasks/reconcile' && request.method === 'POST') {
+    requirePermission(user, 'manage:channels')
+    const result = await reconcileManualChannelTasks(db, {
+      ...(await readJson(request)),
+      propertyId: await litePropertyId(db),
+    }, user)
+    realtimeHub.publish('manual-channel-tasks.changed', { reason: 'manual_reconciliation' })
+    sendJson(response, 200, { ok: true, data: result, message: 'Manual channel availability tasks reconciled.' })
+    return true
+  }
+
+  liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/channel-tasks\/(?<id>[^/]+)\/complete$/)
+  if (liteParams && request.method === 'POST') {
+    requirePermission(user, 'view:channels')
+    const task = await completeManualChannelTask(db, liteParams.id, await readJson(request), user)
+    realtimeHub.publish('manual-channel-tasks.changed', { entityId: task.id, reason: 'task_completed' })
+    sendJson(response, 200, { ok: true, data: task, message: 'Manual channel task completed.' })
+    return true
+  }
+
+  liteParams = routeParam(url.pathname, /^\/api\/lite\/v1\/channel-tasks\/(?<id>[^/]+)\/reopen$/)
+  if (liteParams && request.method === 'POST') {
+    requirePermission(user, 'manage:channels')
+    const task = await reopenManualChannelTask(db, liteParams.id, await readJson(request), user)
+    realtimeHub.publish('manual-channel-tasks.changed', { entityId: task.id, reason: 'task_reopened' })
+    sendJson(response, 200, { ok: true, data: task, message: 'Manual channel task reopened.' })
     return true
   }
 
@@ -1013,24 +1302,40 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/front-desk/walk-in' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     requirePermission(user, 'check-in:guest')
-    const reservation = await createWalkInCheckIn(db, await readJson(request), user)
+    const input = await readJson(request)
+    if (uiVariant === 'lite') {
+      if (!Object.hasOwn(input, 'expectedTotalSatang')) {
+        throw new PmsValidationError('PMS Lite walk-in check-in requires the current server quote total.')
+      }
+      if (Object.hasOwn(input, 'ratePerNight') || Object.hasOwn(input, 'ratePerNightSatang')) {
+        throw new PmsValidationError('PMS Lite walk-in rates come from the server quote and cannot be supplied by the client.')
+      }
+    }
+    const reservation = await createWalkInCheckIn(db, input, user)
+    publishReservationMutation(reservation.id, 'walk_in_created')
     sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
     return true
   }
 
   if (url.pathname === '/api/booking-email/status' && request.method === 'GET') {
-    requirePermission(user, 'view:reservations')
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     sendJson(response, 200, { ok: true, data: await getBookingEmailStatus(db) })
     return true
   }
 
   if (url.pathname === '/api/booking-email/sync' && request.method === 'POST') {
-    requirePermission(user, 'edit:reservation')
-    const result = await syncBookingEmail(db, await readJson(request), user)
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
+    const input = await readJson(request)
+    const unsupportedFields = Object.keys(input).filter((field) => field !== 'limit')
+    if (unsupportedFields.length > 0) {
+      throw new PmsValidationError(`Booking-email sync does not accept: ${unsupportedFields.join(', ')}.`)
+    }
+    const result = await syncBookingEmail(db, { limit: input.limit }, user)
     const opsCommandResults = await processEmailOpsCommandEvents(db, result.opsCommandEvents || result.events, {
       env: process.env,
       submitCommand: submitOpsCommand,
     })
+    if (result.events.length > 0) realtimeHub.publish('booking-email.received', { reason: 'manual_sync' })
     sendJson(response, 200, {
       ok: true,
       data: result.status,
@@ -1047,7 +1352,7 @@ async function handleApi(request, response, url) {
   }
 
   if (url.pathname === '/api/booking-email/events' && request.method === 'GET') {
-    requirePermission(user, 'view:reservations')
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     sendJson(response, 200, {
       ok: true,
       data: await listBookingEmailEvents(db, {
@@ -1063,43 +1368,69 @@ async function handleApi(request, response, url) {
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)$/)
   if (params && request.method === 'GET') {
-    requirePermission(user, 'view:reservations')
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     sendJson(response, 200, { ok: true, data: await getBookingEmailEvent(db, params.id) })
     return true
   }
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/approve$/)
   if (params && request.method === 'POST') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     const event = await approveBookingEmailEvent(db, params.id, await readJson(request), user)
+    realtimeHub.publish('booking-email.changed', { entityId: event.id, reason: 'approved' })
+    if (event.reservationId) publishReservationMutation(event.reservationId, 'email_event_approved')
     sendJson(response, 200, { ok: true, data: event, message: 'Booking email event applied.' })
     return true
   }
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/reject$/)
   if (params && request.method === 'POST') {
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     requirePermission(user, 'edit:reservation')
     const event = await rejectBookingEmailEvent(db, params.id, await readJson(request), user)
+    realtimeHub.publish('booking-email.changed', { entityId: event.id, reason: 'rejected' })
     sendJson(response, 200, { ok: true, data: event, message: 'Booking email event ignored.' })
     return true
   }
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/reprocess$/)
   if (params && request.method === 'POST') {
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     requirePermission(user, 'edit:reservation')
     const event = await reprocessBookingEmailEvent(db, params.id, user)
+    realtimeHub.publish('booking-email.changed', { entityId: event.id, reason: 'reprocessed' })
     sendJson(response, 200, { ok: true, data: event, message: 'Booking email event reprocessed.' })
     return true
   }
 
+  params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)\/evidence$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, BOOKING_EMAIL_EVIDENCE_PERMISSION)
+    const evidence = await getBookingEmailEvidence(db, params.id, await readJson(request), user)
+    sendJson(response, 200, { ok: true, data: evidence })
+    return true
+  }
+
+  if (url.pathname === '/api/lite/v1/settings' && request.method === 'GET') {
+    requirePermission(user, 'view:settings')
+    sendJson(response, 200, {
+      ok: true,
+      data: await getLiteSettings(db, {
+        credentialStatus: bookingEmailGmailCredentialStatus(process.env),
+        pubsubConfig: bookingEmailPubSubConfig(process.env),
+      }),
+    })
+    return true
+  }
+
   if (url.pathname === '/api/booking-email/sources' && request.method === 'GET') {
-    requirePermission(user, 'view:reservations')
+    requirePermission(user, BOOKING_EMAIL_REVIEW_PERMISSION)
     sendJson(response, 200, { ok: true, data: await listBookingEmailSources(db) })
     return true
   }
 
   if (url.pathname === '/api/booking-email/sources' && request.method === 'POST') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'manage:channels')
     const source = await createBookingEmailSource(db, await readJson(request), user)
     sendJson(response, 201, { ok: true, data: source, message: 'Booking email source saved.' })
     return true
@@ -1107,7 +1438,7 @@ async function handleApi(request, response, url) {
 
   params = routeParam(url.pathname, /^\/api\/booking-email\/sources\/(?<id>[^/]+)$/)
   if (params && request.method === 'PATCH') {
-    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'manage:channels')
     const source = await updateBookingEmailSource(db, params.id, await readJson(request), user)
     sendJson(response, 200, { ok: true, data: source, message: 'Booking email source updated.' })
     return true
@@ -1153,6 +1484,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/settings/room-types' && request.method === 'POST') {
     requirePermission(user, 'edit:settings')
     const roomType = await createRoomType(db, await readJson(request), user)
+    realtimeHub.publish('sync-required', { entityId: roomType.id, reason: 'room_type_created' })
     sendJson(response, 201, { ok: true, data: roomType, message: `Room type ${roomType.name} created.` })
     return true
   }
@@ -1161,6 +1493,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:settings')
     const roomType = await updateRoomType(db, params.id, await readJson(request), user)
+    realtimeHub.publish('sync-required', { entityId: roomType.id, reason: 'room_type_updated' })
     sendJson(response, 200, { ok: true, data: roomType, message: `Room type ${roomType.name} updated.` })
     return true
   }
@@ -1168,6 +1501,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'DELETE') {
     requirePermission(user, 'edit:settings')
     const roomType = await deleteRoomType(db, params.id, user)
+    realtimeHub.publish('sync-required', { entityId: roomType.id, reason: 'room_type_deleted' })
     sendJson(response, 200, { ok: true, data: roomType, message: `Room type ${roomType.name} deleted.` })
     return true
   }
@@ -1175,6 +1509,8 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/settings/rooms' && request.method === 'POST') {
     requirePermission(user, 'edit:settings')
     const room = await createSetupRoom(db, await readJson(request), user)
+    realtimeHub.publish('sync-required', { entityId: room.id, reason: 'room_created' })
+    realtimeHub.publish('manual-channel-tasks.changed', { reason: 'room_inventory_changed' })
     sendJson(response, 201, { ok: true, data: room, message: `Room ${room.number} created.` })
     return true
   }
@@ -1183,6 +1519,8 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:settings')
     const room = await updateSetupRoom(db, params.id, await readJson(request), user)
+    realtimeHub.publish('sync-required', { entityId: room.id, reason: 'room_updated' })
+    realtimeHub.publish('manual-channel-tasks.changed', { reason: 'room_inventory_changed' })
     sendJson(response, 200, { ok: true, data: room, message: `Room ${room.number} updated.` })
     return true
   }
@@ -1190,6 +1528,8 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'DELETE') {
     requirePermission(user, 'edit:settings')
     const room = await deleteSetupRoom(db, params.id, user)
+    realtimeHub.publish('sync-required', { entityId: room.id, reason: 'room_deleted' })
+    realtimeHub.publish('manual-channel-tasks.changed', { reason: 'room_inventory_changed' })
     sendJson(response, 200, { ok: true, data: room, message: `Room ${room.number} deleted.` })
     return true
   }
@@ -1203,6 +1543,7 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/reservations' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     const reservation = await createReservation(db, await readJson(request), user)
+    publishReservationMutation(reservation.id, 'reservation_created')
     sendJson(response, 201, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} created.` })
     return true
   }
@@ -1211,6 +1552,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:reservation')
     const reservation = await updateReservation(db, params.id, await readJson(request), user)
+    publishReservationMutation(reservation.id, 'reservation_updated')
     sendJson(response, 200, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} updated.` })
     return true
   }
@@ -1219,7 +1561,10 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const body = await readJson(request)
-    const reservation = await assignRoom(db, params.id, body.roomId, user)
+    const reservation = await assignRoom(db, params.id, body.roomId, user, {
+      expectedUpdatedAt: body.expectedUpdatedAt,
+    })
+    publishReservationMutation(reservation.id, 'room_assigned')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
     return true
   }
@@ -1228,6 +1573,7 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-in:guest')
     const reservation = await checkInReservation(db, params.id, user, await readJson(request))
+    publishReservationMutation(reservation.id, 'checked_in')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
     return true
   }
@@ -1237,6 +1583,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'check-out:guest')
     const body = await readJson(request)
     const reservation = await checkOutReservation(db, params.id, user, body)
+    publishReservationMutation(reservation.id, 'checked_out')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }
@@ -1246,6 +1593,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
     const reservation = await cancelReservation(db, params.id, user, 'CANCELLED', body.reason || body.notes)
+    publishReservationMutation(reservation.id, 'cancelled')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation cancelled.' })
     return true
   }
@@ -1255,6 +1603,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
     const reservation = await cancelReservation(db, params.id, user, 'NO_SHOW', body.reason || body.notes)
+    publishReservationMutation(reservation.id, 'no_show')
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation marked as no-show.' })
     return true
   }
@@ -1264,6 +1613,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'edit:room-status')
     const body = await readJson(request)
     const room = await updateHousekeepingStatus(db, params.id, body.status, user, body.notes)
+    realtimeHub.publish('sync-required', { entityId: room.id, reason: 'housekeeping_changed' })
     sendJson(response, 200, { ok: true, data: room, message: `Room ${room.number} housekeeping status updated.` })
     return true
   }
@@ -1273,6 +1623,8 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'edit:room-status')
     const body = await readJson(request)
     const room = await updateRoomOperationalStatus(db, params.id, body.operationalStatus, user, body.notes)
+    realtimeHub.publish('sync-required', { entityId: room.id, reason: 'room_status_changed' })
+    realtimeHub.publish('manual-channel-tasks.changed', { reason: 'room_inventory_changed' })
     sendJson(response, 200, { ok: true, data: room, message: `Room ${room.number} operational status updated.` })
     return true
   }
@@ -1280,14 +1632,34 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/payments' && request.method === 'POST') {
     requirePermission(user, 'process:payment')
     const payment = await createPayment(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: payment, message: 'Payment recorded.' })
+    realtimeHub.publish('reservation.changed', { reason: 'payment_recorded' })
+    sendJson(response, payment.replayed ? 200 : 201, { ok: true, data: payment, message: payment.replayed ? 'Payment request replayed.' : 'Payment recorded.' })
     return true
   }
 
   if (url.pathname === '/api/charges' && request.method === 'POST') {
     requirePermission(user, 'post:charges')
     const charge = await createCharge(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: charge, message: 'Charge posted.' })
+    realtimeHub.publish('reservation.changed', { reason: 'charge_posted' })
+    sendJson(response, charge.replayed ? 200 : 201, { ok: true, data: charge, message: charge.replayed ? 'Charge request replayed.' : 'Charge posted.' })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/payments\/(?<id>[^/]+)\/reversals$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'refund:payment')
+    const result = await reversePayment(db, params.id, await readJson(request), user)
+    realtimeHub.publish('reservation.changed', { reason: 'payment_reversed' })
+    sendJson(response, result.replayed ? 200 : 201, { ok: true, data: result, message: result.replayed ? 'Payment reversal request replayed.' : 'Payment reversed.' })
+    return true
+  }
+
+  params = routeParam(url.pathname, /^\/api\/charges\/(?<id>[^/]+)\/void$/)
+  if (params && request.method === 'POST') {
+    requirePermission(user, 'post:charges')
+    const result = await voidCharge(db, params.id, await readJson(request), user)
+    realtimeHub.publish('reservation.changed', { reason: 'charge_voided' })
+    sendJson(response, 200, { ok: true, data: result, message: result.replayed ? 'Charge void request replayed.' : 'Charge voided.' })
     return true
   }
 
@@ -1336,6 +1708,14 @@ const server = createServer(async (request, response) => {
         })
         return
       }
+    }
+
+    if (pmsWriteMode === 'read-only' && requestWouldWrite(request, url.pathname)) {
+      sendJson(response, 423, {
+        ok: false,
+        error: 'This PMS service is in read-only rollback mode. Use the active Lite service for operational changes.',
+      })
+      return
     }
 
     if (request.method === 'GET' && (url.pathname === '/healthz' || url.pathname === '/api/health')) {
@@ -1393,6 +1773,7 @@ server.listen(port, host, () => {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     opsScanScheduler?.stop()
+    realtimeHub.close()
     server.close(async () => {
       await prisma?.$disconnect?.()
       process.exit(0)

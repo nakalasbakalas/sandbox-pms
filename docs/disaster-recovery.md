@@ -6,10 +6,11 @@ This document defines the owner actions required before production launch sign-o
 
 - Production database: Render PostgreSQL `sandbox-hotel-pms-db-v43m`.
 - Public runtime: `https://book.sandboxhotel.com`.
-- Long-term production Render service: `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`).
-- Latest health-checked live deploy recorded before the 2026-07-06 owner-decision update: `dep-d95qsnvavr4c73aqics0`, commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0`.
-- Render Postgres point-in-time recovery status: `AVAILABLE`, with recovery starting at 2026-06-03T21:59:41Z during the 2026-06-07 provider check.
-- Disposable restore test: passed on 2026-06-07 using temporary restored database `dpg-d8ip6rdckfvc73c2qirg-a`, then deleted.
+- Current public Render service confirmed on 2026-07-14: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`).
+- Current live deploy confirmed on 2026-07-14: `dep-d966aj9kh4rs73d9h10g`, commit `d18ea06eb974621281c43a57cf4d5a41994c2775`.
+- The separate `sandbox-hotel-pms` service is older/stale and is not the current public runtime. Never use its deploy history as the rollback source for `sandbox-hotel-pms-v43m`.
+- Historical Render recovery evidence from 2026-06-07 is retained in the proof register, but it predates the Lite exact-money migrations and is not current recovery proof.
+- A fresh recovery point and a new disposable restore against the exact pre-cutover production state remain required before any Lite money migration or cutover.
 - Automated public health check: `npm run live:check`.
 - Local release gate: `npm run launch:check`.
 
@@ -37,7 +38,7 @@ Latest known owner answer as of 2026-07-06: the current backup/recovery point is
 
 A restore test must use a disposable database, never the live production database.
 
-Status as of 2026-06-07T15:57Z: a disposable restore test passed. The temporary restored database was deleted after validation. The full evidence record is in [live-environment-proof.md](live-environment-proof.md).
+Historical status: a disposable restore test passed on 2026-06-07 and its temporary database was deleted. That test does not close the Lite gate because it predates the current service/deploy and exact-money migrations. Run and record a fresh disposable restore before Lite production migration or cutover. The historical evidence is in [live-environment-proof.md](live-environment-proof.md).
 
 Record:
 

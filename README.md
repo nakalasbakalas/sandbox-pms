@@ -13,10 +13,10 @@ Automated checks can prove build, routing, business-rule, browser-smoke, API-con
 Current integration posture:
 
 - LINE: server webhook/status support exists. Live LINE messaging must stay disabled/manual unless the account owner provides credentials, webhook configuration, signature validation, and send-test proof.
-- OTA: iCal/manual metadata remains the launch-safe integration. Channel-sync v2 adds an audited **manual outbound availability queue** over existing Hotel Ops task/approval models. Queue creation and approval never call an OTA, and completion requires a human-entered provider confirmation. Direct Booking.com, Agoda, Trip.com, Expedia, Airbnb, or Channex production writes are not enabled without provider access, mappings, sandbox/certification evidence, and a reviewed adapter.
+- OTA: Lite uses its Prisma-backed `ManualChannelTask` queue for Booking.com, Agoda, and Trip.com; the older Hotel Ops availability queue remains a legacy-only compatibility path. Neither queue calls an OTA, and completion requires human evidence. Direct production writes are not enabled without provider access, mappings, sandbox/certification evidence, and a reviewed adapter.
 - Direct API access: Agoda and Trip.com application dossiers are tracked in [#168](https://github.com/nakalasbakalas/sandbox-pms/issues/168) and [#169](https://github.com/nakalasbakalas/sandbox-pms/issues/169). They are **preparing**, not submitted or approved. A channel-only Channex contingency is tracked in [#170](https://github.com/nakalasbakalas/sandbox-pms/issues/170).
 - Payments: launch posture is PMS-recorded payments only. Card, PromptPay, bank transfer, and online payment records require references, but no live gateway/PromptPay collection adapter is proven.
-- Booking email: Gmail OAuth/backfill support can import provider messages into review-only Booking Email Events. When explicitly enabled and OAuth is complete, the in-process scheduler polls enabled sources every 120 seconds by default. Scheduled passes are review-only; staff approval is still required before creating, modifying, cancelling, charging, or linking operational reservations.
+- Booking email: the Lite runtime uses authenticated Gmail Pub/Sub push plus bounded history reconciliation into review-only Booking Email Events. The older 120-second in-process poller is a legacy compatibility path and must remain disabled beside Lite. Staff approval is still required before creating, modifying, cancelling, charging, or linking operational reservations.
 - Production data: `SEED_MODE=prod-safe` must not create fake operational guests, reservations, payments, invoices, room inventory, or demo staff users. Production room inventory is imported or configured separately and still requires redacted owner/import/admin proof before full sign-off.
 
 Full production sign-off is blocked until the required V2 evidence files are completed. Start with [docs/launch/LAUNCH_PROOF_PACK_V2.md](docs/launch/LAUNCH_PROOF_PACK_V2.md), then record dated command/manual/provider proof under `docs/launch/evidence/`.
@@ -67,7 +67,20 @@ Never run DB-mutating E2E against the Render production database.
 
 ## Channel Synchronization V2
 
-The lite release boundary, audit findings, execution plan, activation checks, and rollback steps are in [docs/CHANNEL_SYNC_LITE_FINALIZATION.md](docs/CHANNEL_SYNC_LITE_FINALIZATION.md). The architecture and operator runbook remain in [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md). The executed prompts are recorded in [docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_LITE_FINALIZATION_EXECUTED_PROMPT.md) and [docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md](docs/prompts/CHANNEL_SYNC_V2_EXECUTED_PROMPT.md).
+### Lite runtime (canonical)
+
+For `PMS_UI_VARIANT=lite`, there is one inbound path and one outbound operator queue:
+
+- inbound: authenticated Gmail Pub/Sub delivery plus `booking-email:maintenance` history reconciliation;
+- outbound: `ManualChannelConnection` / `ManualChannelRoomMapping` / `ManualChannelTask`, operated through Channel Desk;
+- runtime selector: `CHANNEL_SYNC_QUEUE_BACKEND=lite_manual`;
+- legacy poller: `BOOKING_EMAIL_NEAR_LIVE_ENABLED=false`.
+
+See [docs/LITE_ARCHITECTURE.md](docs/LITE_ARCHITECTURE.md). Do not run the Hotel Ops availability CLI or the in-process email poller beside Lite; that would create two operator sources of truth.
+
+### Legacy compatibility path
+
+The earlier Hotel Ops queue and 120-second polling design is retained for legacy deployments in [docs/CHANNEL_SYNC_V2.md](docs/CHANNEL_SYNC_V2.md). It is not the Lite operating runbook.
 
 Inspect the enforced policy:
 
@@ -75,23 +88,24 @@ Inspect the enforced policy:
 npm run channel-sync:policy
 ```
 
-Use the manual outbound queue:
+Use the legacy queue only with its backend selected explicitly:
 
 ```bash
-npm run availability:queue -- help
-npm run availability:queue -- list
+CHANNEL_SYNC_QUEUE_BACKEND=hotel_ops_legacy npm run availability:queue -- help
+CHANNEL_SYNC_QUEUE_BACKEND=hotel_ops_legacy npm run availability:queue -- list
 ```
 
-Near-live inbound polling requires the following non-secret configuration plus Gmail OAuth secrets:
+Legacy near-live polling requires the following non-secret configuration plus Gmail OAuth secrets:
 
 ```env
 BOOKING_EMAIL_NEAR_LIVE_ENABLED=true
 BOOKING_EMAIL_SYNC_INTERVAL_SECONDS=120
 BOOKING_EMAIL_SYNC_BATCH_LIMIT=25
 CHANNEL_MANAGER_PROVIDER=channex
+CHANNEL_SYNC_QUEUE_BACKEND=hotel_ops_legacy
 ```
 
-“Near-live” is short-interval polling, not a zero-lag webhook. Channex is a channel-only contingency and must not become a second PMS.
+This legacy path is short-interval polling, not a zero-lag webhook. Channex is a channel-only contingency and must not become a second PMS.
 
 ## Production Data
 

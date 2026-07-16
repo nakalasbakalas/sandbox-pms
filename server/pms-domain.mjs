@@ -30,6 +30,7 @@ export class PmsValidationError extends Error {
 
 export function getBangkokDateKey(value) {
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    dateFromKey(value)
     return value
   }
 
@@ -49,7 +50,11 @@ export function dateFromKey(key) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) {
     throw new PmsValidationError('Enter dates in YYYY-MM-DD format.')
   }
-  return new Date(`${key}T00:00:00.000Z`)
+  const date = new Date(`${key}T00:00:00.000Z`)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) {
+    throw new PmsValidationError('Enter a real calendar date in YYYY-MM-DD format.')
+  }
+  return date
 }
 
 function dayNumber(value) {
@@ -98,7 +103,12 @@ export function validateStayInput(input) {
 export function calculateStayPricing(input) {
   const { nights } = validateStayInput(input)
   const adults = Number(input.adults)
-  const childAges = Array.isArray(input.childAges) ? input.childAges.map(Number) : []
+  const rawChildAges = Array.isArray(input.childAges) ? input.childAges : []
+  if (rawChildAges.some((age) => typeof age === 'string' && !age.trim())) {
+    throw new PmsValidationError('Enter one age for every child so occupancy and pricing can be verified.')
+  }
+  const childAges = rawChildAges.map(Number)
+  const children = input.children === undefined ? childAges.length : Number(input.children)
   const ratePerNight = Number(input.ratePerNight)
   const standardOccupancy = Number(input.standardOccupancy ?? SANDBOX_RULES.standardOccupancy)
   const maxOccupancy = Number(input.maxOccupancy ?? SANDBOX_RULES.maxOccupancy)
@@ -107,6 +117,9 @@ export function calculateStayPricing(input) {
 
   if (!Number.isInteger(adults) || adults < 1) {
     throw new PmsValidationError('At least one adult is required.')
+  }
+  if (!Number.isInteger(children) || children < 0) {
+    throw new PmsValidationError('Children must be a non-negative whole number.')
   }
   if (!Number.isFinite(ratePerNight) || ratePerNight <= 0) {
     throw new PmsValidationError('Rate per night must be greater than zero.')
@@ -117,11 +130,14 @@ export function calculateStayPricing(input) {
   if (!Number.isInteger(maxOccupancy) || maxOccupancy < standardOccupancy) {
     throw new PmsValidationError('Maximum occupancy must be at least the standard occupancy.')
   }
-  if (childAges.some((age) => !Number.isInteger(age) || age < 0)) {
-    throw new PmsValidationError('Child ages must be valid non-negative numbers.')
+  if (childAges.some((age) => !Number.isInteger(age) || age < 0 || age > 17)) {
+    throw new PmsValidationError('Child ages must be whole numbers from 0 to 17.')
+  }
+  if (childAges.length !== children) {
+    throw new PmsValidationError('Enter one age for every child so occupancy and pricing can be verified.')
   }
 
-  const totalGuests = adults + childAges.length
+  const totalGuests = adults + children
   if (totalGuests > maxOccupancy) {
     throw new PmsValidationError(`Maximum occupancy is ${maxOccupancy} guests per room.`)
   }
@@ -169,8 +185,60 @@ export function checkedInRoomStatus(currentStatus) {
     : 'OCCUPIED_CLEAN'
 }
 
-export function roomStatusForHousekeeping(currentStatus, cleanStatus) {
-  const occupied = currentStatus === 'OCCUPIED_CLEAN' || currentStatus === 'OCCUPIED_DIRTY' || currentStatus === 'OCCUPIED'
+const HOUSEKEEPING_STATUS_BY_ROOM_STATUS = {
+  VACANT_DIRTY: 'DIRTY',
+  OCCUPIED_DIRTY: 'DIRTY',
+  CLEANING: 'CLEANING',
+  VACANT_CLEAN: 'CLEAN',
+  OCCUPIED_CLEAN: 'CLEAN',
+  OCCUPIED: 'CLEAN',
+  INSPECTED: 'INSPECTED',
+}
+
+const NEXT_HOUSEKEEPING_STATUS = {
+  DIRTY: 'CLEANING',
+  CLEANING: 'CLEAN',
+  CLEAN: 'INSPECTED',
+}
+
+function roomStatusIndicatesOccupancy(roomStatus) {
+  return roomStatus === 'OCCUPIED_CLEAN' || roomStatus === 'OCCUPIED_DIRTY' || roomStatus === 'OCCUPIED'
+}
+
+export function assertHousekeepingTransition(currentRoomStatus, requestedStatus, options = {}) {
+  const currentStatus = HOUSEKEEPING_STATUS_BY_ROOM_STATUS[currentRoomStatus]
+  if (!currentStatus) {
+    throw new PmsValidationError('Room has an invalid housekeeping status.')
+  }
+  const occupied = options.occupied === undefined
+    ? roomStatusIndicatesOccupancy(currentRoomStatus)
+    : Boolean(options.occupied)
+
+  if (occupied && (requestedStatus === 'INSPECTED' || requestedStatus === 'MAINTENANCE')) {
+    throw new PmsValidationError(
+      `An occupied room cannot be marked ${requestedStatus}. Complete or resolve the active stay first.`,
+      409,
+    )
+  }
+
+  // Maintenance is an operational exception, while DIRTY explicitly starts a
+  // new cleaning cycle. Repeating the current state remains idempotent.
+  if (requestedStatus === 'MAINTENANCE' || requestedStatus === 'DIRTY' || requestedStatus === currentStatus) {
+    return
+  }
+
+  if (NEXT_HOUSEKEEPING_STATUS[currentStatus] !== requestedStatus) {
+    throw new PmsValidationError(
+      `Housekeeping status cannot move from ${currentStatus} to ${requestedStatus}. Follow DIRTY -> CLEANING -> CLEAN -> INSPECTED, or mark DIRTY to restart the cycle.`,
+      409,
+    )
+  }
+}
+
+export function roomStatusForHousekeeping(currentStatus, cleanStatus, occupiedOverride = undefined) {
+  const occupied = occupiedOverride === undefined
+    ? roomStatusIndicatesOccupancy(currentStatus)
+    : Boolean(occupiedOverride)
   if (cleanStatus === 'DIRTY') return occupied ? 'OCCUPIED_DIRTY' : 'VACANT_DIRTY'
   if (cleanStatus === 'CLEANING') return 'CLEANING'
   if (cleanStatus === 'INSPECTED') return 'INSPECTED'

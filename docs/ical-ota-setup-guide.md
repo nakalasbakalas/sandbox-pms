@@ -1,134 +1,69 @@
-# iCal And OTA Channel Manager Setup Guide
+# iCal OTA Recovery-Only Compatibility Guide
 
-This guide is for connecting Sandbox Hotel PMS to OTAs or a channel manager when direct OTA APIs are not available.
+iCal is a delayed date-block compatibility tool. It is not the primary Lite booking, cancellation, inventory, or rate synchronization path and must not be presented as live, automatic, two-way, or overbooking-proof.
 
-## What iCal Does
+## Approved Use
 
-iCal calendar feeds sync date blocks only:
+Use iCal only as an owner-approved recovery aid when the normal reviewed Gmail intake, direct provider connection, channel rail, or manual Channel Desk workflow is unavailable.
 
-- OTA to PMS: imports booking date blocks so staff can review and create PMS reservations.
-- PMS to OTA or channel manager: exports PMS blocked dates so OTAs do not sell already-booked inventory.
+iCal may help staff compare blocked stay dates. It does not reliably carry:
 
-iCal does not sync rates, restrictions, payments, deposits, full guest details, messages, or cancellation rules. Keep those in the OTA or channel manager unless a separate API integration exists.
+- booking lifecycle state or timely cancellations;
+- room-type inventory counts for a multi-room hotel;
+- rates, restrictions, taxes, deposits, or payments;
+- complete guest, reference, message, or modification details; or
+- proof that an OTA accepted an availability change.
 
-## Recommended Setup
+Provider polling intervals are outside PMS control. A stale calendar can leave rooms oversold or unnecessarily blocked. Staff must verify every recovery action in the authoritative OTA Extranet and PMS.
 
-Use a channel manager as the central hub when possible:
+## Safer Lite Operating Order
 
-1. OTA exports booking calendar to the channel manager.
-2. Channel manager exports one iCal feed to Sandbox PMS.
-3. Sandbox PMS publishes one hosted iCal export feed back to the channel manager.
-4. Channel manager pushes blocked dates to Booking.com, Agoda, Expedia, Airbnb, or other connected OTAs.
+1. Use authenticated Gmail API watch/history intake for near-live inbound booking and cancellation evidence.
+2. Keep every email-derived event in staff review until an authorized user approves it.
+3. Use Channel Desk absolute-availability tasks for manual outbound Booking.com, Agoda, and Trip.com updates.
+4. Pursue approved Agoda/Trip.com direct APIs or a channel-only rail when true two-way automation is required.
+5. Use iCal only during a documented recovery incident and remove or disable it when the primary path is restored.
 
-If you do not use a channel manager, connect each OTA directly with its own iCal import/export pair.
+## Recovery Setup
 
-Do not connect the same OTA both directly and through the channel manager at the same time. That can create duplicate pending imports.
-
-## Requirements
-
-For local preview:
-
-- Pasted `.ics` imports work.
-- Downloaded `.ics` exports work.
-- Hosted subscription URLs are disabled because the local browser store is not a public server.
-
-For production/server mode:
-
-- `VITE_PMS_API_MODE=server`
-- `DATABASE_URL`
-- Deployed HTTPS PMS URL
-- Logged-in admin or manager account with channel permissions
-
-The hosted PMS feed URL has this shape:
+Production/server mode requires a deployed HTTPS PMS, server auth, a database, an authorized Manager/Admin, and verified room mappings. A private export URL has this general form:
 
 ```text
 https://your-pms-domain.example/ical/<private-token>.ics
 ```
 
-Treat this URL as a secret. Anyone with the URL can read blocked dates.
+Treat the URL as a secret. Do not put it in tracked files, screenshots, chat, or public logs.
 
-## PMS Setup
+During an approved recovery incident:
 
-1. Open `Channel Manager`.
-2. Open `Room Mapping`.
-3. Choose the OTA or channel manager channel.
-4. Add each OTA room/listing:
-   - `OTA Room Name`
-   - `OTA Room ID`
-   - optional `OTA Rate Plan ID`
-   - matching PMS room type
-   - exact PMS rooms that listing is allowed to sell
-5. Save mappings until the channel shows ready.
-6. Open `Channels`.
-7. Click `Set Up iCal` or `Setup` on the channel card.
-8. Paste the OTA or channel manager export calendar URL into `OTA Import iCal URL`.
-9. If the feed cannot be fetched by the browser, paste the `.ics` file contents into `One-Time iCal Import`.
-10. Click `Save iCal Setup`.
+1. Record the incident owner, affected provider/listing, start time, and reason.
+2. Configure exactly one path per OTA listing; never connect both directly and through another hub.
+3. Map the provider listing to the exact PMS room scope.
+4. Import the provider feed or paste a downloaded `.ics` payload if browser fetch is unavailable.
+5. Review every pending date block before creating or changing a PMS reservation.
+6. Verify guest, provider reference, lifecycle state, dates, room type, money, and cancellation state in the OTA Extranet.
+7. If an export feed is used, verify the provider actually consumed it; publishing a URL is not delivery proof.
+8. Reconcile the PMS and all affected Extranets before ending the incident.
 
-In server mode, saving setup also publishes the hosted PMS export feed. If not, click `Publish URL` on the channel card.
+Never infer a cancellation from a missing calendar event. Never let an iCal event directly mutate a reservation, payment, or room assignment without staff review.
 
-## OTA Or Channel Manager Setup
+## Recovery Controls
 
-In the OTA or channel manager admin panel:
+- `Publish URL` exposes a private date-block feed in server mode only.
+- `Export .ics` creates a file for a one-time owner-controlled recovery transfer.
+- `Rotate` replaces an exposed private token; remove the previous URL from every consumer.
+- `Disconnect` disables the compatibility connection after the incident.
 
-1. Find the calendar sync, iCal, availability calendar, or external calendar section.
-2. Copy the OTA/channel-manager export calendar URL.
-3. Paste that URL into Sandbox PMS as `OTA Import iCal URL`.
-4. In Sandbox PMS, click `Publish URL`.
-5. Copy the hosted PMS iCal URL from `Hosted export feed`.
-6. Paste the PMS URL into the OTA/channel manager as an import calendar or external availability calendar.
-7. Save and run the OTA/channel-manager sync if the platform has a manual sync action.
+If availability differs, the OTA Extranet and reviewed PMS reservation evidence must be reconciled manually. If rates differ, correct them in the provider or certified channel path; iCal cannot repair rates.
 
-Different OTAs use different labels for the same concept. Look for wording like `Export calendar`, `Import calendar`, `Sync calendars`, `iCal URL`, or `External calendar`.
+## Required Evidence
 
-## Daily Operation
+Record only redacted operational evidence:
 
-1. In `Channel Manager`, click `Import iCal` on each channel or `Import All iCal`.
-2. Open `Pending Reservations`.
-3. Review each imported event.
-4. Click `Import to PMS`.
-5. Assign the reservation to a room.
-6. Confirm guest name, contact details, payment, deposit, and special requests manually.
+- incident owner and timestamps;
+- provider/listing scope;
+- number of reviewed, accepted, rejected, and unresolved blocks;
+- final PMS-versus-Extranet reconciliation result; and
+- token rotation/disconnection result.
 
-Imported iCal reservations are intentionally marked for manual confirmation because OTA feeds may not include guest or payment details.
-
-## Export Options
-
-Use `Publish URL` for production/server mode. This is the best option for OTAs and channel managers that subscribe to a URL.
-
-Use `Export .ics` for local preview or for systems that require a file upload instead of a URL.
-
-Use `Rotate` if a hosted feed URL was exposed or needs to be replaced. Rotating creates a new private token and the old URL should be removed from OTAs/channel managers.
-
-Use `Disconnect` to disable a channel's hosted feed and local iCal setup.
-
-## Troubleshooting
-
-If `Publish URL` is disabled:
-
-- You are running local/browser-only mode.
-- Deploy the PMS in server mode, then publish the feed.
-
-If `Import iCal` fails:
-
-- The OTA may block browser fetches.
-- Download the `.ics` file from the OTA and paste its contents into `One-Time iCal Import`.
-- Confirm the URL is a private iCal feed URL, not the public booking page.
-
-If bookings are duplicated:
-
-- Check whether the OTA is connected directly and through a channel manager.
-- Keep only one import path per OTA listing.
-- Use the pending import review before importing to PMS.
-
-If availability does not update in the OTA:
-
-- Confirm the hosted PMS URL is pasted into the OTA import calendar field.
-- Confirm the channel is still connected in Sandbox PMS.
-- Confirm room mappings match the OTA listing.
-- Wait for the OTA/channel manager sync interval; iCal is not real-time.
-
-If rates do not update:
-
-- This is expected. iCal does not sync rates.
-- Maintain rates and restrictions in the OTA or channel manager.
+An iCal recovery run does not satisfy the Lite Gmail, direct API, channel rail, staging, or cutover acceptance gates.

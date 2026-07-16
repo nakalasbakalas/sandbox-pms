@@ -7,6 +7,10 @@ import {
 } from './db-safety.mjs'
 import { loadEnvDefaults } from './env-utils.mjs'
 import { createPrismaClient } from '../server/prisma-client.mjs'
+import {
+  dualWriteMoneyFromThb,
+  dualWriteTaxRateFromPercent,
+} from '../server/money-satang.mjs'
 
 loadEnvDefaults()
 
@@ -66,6 +70,22 @@ function requiredTime(value, label) {
 }
 
 function normalizeProperty(property) {
+  const taxRate = dualWriteTaxRateFromPercent(0, { label: 'property.taxRate' })
+  const extraGuestFee = dualWriteMoneyFromThb(
+    requiredNumber(property?.extraGuestFee ?? 0, 'property.extraGuestFee'),
+    { label: 'property.extraGuestFee', minimum: 0 },
+  )
+  const childFee = dualWriteMoneyFromThb(
+    requiredNumber(property?.childFee ?? 0, 'property.childFee'),
+    { label: 'property.childFee', minimum: 0 },
+  )
+  const minimumRateValue = optionalNumber(property?.inventoryMinimumRate, 'property.inventoryMinimumRate')
+  const inventoryMinimumRate = dualWriteMoneyFromThb(minimumRateValue, {
+    label: 'property.inventoryMinimumRate',
+    nullable: true,
+    minimum: 0,
+  })
+
   return {
     code: requiredString(property?.code, 'property.code').toUpperCase(),
     name: requiredString(property?.name, 'property.name'),
@@ -81,14 +101,23 @@ function normalizeProperty(property) {
     defaultCheckIn: requiredTime(property?.defaultCheckIn, 'property.defaultCheckIn'),
     defaultCheckOut: requiredTime(property?.defaultCheckOut, 'property.defaultCheckOut'),
     currency: requiredString(property?.currency, 'property.currency').toUpperCase(),
-    taxRate: 0,
-    extraGuestFee: requiredNumber(property?.extraGuestFee ?? 0, 'property.extraGuestFee'),
-    childFee: requiredNumber(property?.childFee ?? 0, 'property.childFee'),
-    inventoryMinimumRate: optionalNumber(property?.inventoryMinimumRate, 'property.inventoryMinimumRate'),
+    taxRate: taxRate.percent,
+    taxRateBps: taxRate.basisPoints,
+    extraGuestFee: extraGuestFee.thb,
+    extraGuestFeeSatang: extraGuestFee.satang,
+    childFee: childFee.thb,
+    childFeeSatang: childFee.satang,
+    inventoryMinimumRate: inventoryMinimumRate.thb,
+    inventoryMinimumRateSatang: inventoryMinimumRate.satang,
   }
 }
 
 function normalizeRoomType(record, index) {
+  const baseRate = dualWriteMoneyFromThb(
+    requiredNumber(record?.baseRate, `roomTypes[${index}].baseRate`, 1),
+    { label: `roomTypes[${index}].baseRate`, minimum: 0 },
+  )
+
   return {
     code: requiredString(record?.code, `roomTypes[${index}].code`).toUpperCase(),
     sourceCode: nullableString(record?.sourceCode),
@@ -96,7 +125,8 @@ function normalizeRoomType(record, index) {
     description: nullableString(record?.description),
     baseOccupancy: requiredNumber(record?.baseOccupancy, `roomTypes[${index}].baseOccupancy`, 1),
     maxOccupancy: requiredNumber(record?.maxOccupancy, `roomTypes[${index}].maxOccupancy`, 1),
-    baseRate: requiredNumber(record?.baseRate, `roomTypes[${index}].baseRate`, 1),
+    baseRate: baseRate.thb,
+    baseRateSatang: baseRate.satang,
     minimumRate: optionalNumber(record?.minimumRate, `roomTypes[${index}].minimumRate`),
     extraAdultFee: optionalNumber(record?.extraAdultFee, `roomTypes[${index}].extraAdultFee`),
     childFee: optionalNumber(record?.childFee, `roomTypes[${index}].childFee`),
@@ -263,6 +293,7 @@ async function importRealData(prisma, payload) {
           name: roomType.name,
           description: roomType.description,
           baseRate: roomType.baseRate,
+          baseRateSatang: roomType.baseRateSatang,
           maxOccupancy: roomType.maxOccupancy,
           standardOcc: roomType.baseOccupancy,
         },

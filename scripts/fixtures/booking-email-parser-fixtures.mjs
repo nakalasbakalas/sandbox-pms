@@ -3,7 +3,7 @@ export const bookingEmailParserFixtures = [
     name: 'new booking template',
     input: {
       subject: 'New booking confirmed LH-ABCD1234',
-      rawText: 'Lead guest: Alice Tan Booking reference: LH-ABCD1234 Check-in date: 2026-07-12 Check-out date: 2026-07-14 Room type: Deluxe Double Room Adults: 2 Children: 1 Total amount: THB 6400 Payment received.',
+      rawText: 'Lead guest: Alice Tan Booking reference: LH-ABCD1234 Check-in date: 2026-07-12 Check-out date: 2026-07-14 Room type: Deluxe Double Room Adults: 2 Children: 1 Child age: 8 Total amount: THB 6400 Payment received.',
     },
     expected: {
       eventType: 'NEW_BOOKING',
