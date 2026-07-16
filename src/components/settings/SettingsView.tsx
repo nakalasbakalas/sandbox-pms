@@ -17,8 +17,26 @@ import { DataBackupExport } from '@/components/settings/DataBackupExport'
 import { Gear, Image, Buildings, Users, ChatCircle, Bell, BellRinging, ChartLine, Receipt, ArrowRight, DoorOpen } from '@phosphor-icons/react'
 import { useNavigation } from '@/hooks/use-navigation'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
+import { ServerSettingsView } from '@/components/settings/ServerSettingsView'
 
 export function SettingsView() {
+  if (SERVER_AUTH_ENABLED) return <ServerSettingsView />
+
+  if (import.meta.env.VITE_DATA_MODE === 'demo') return <DemoSettingsView />
+
+  return (
+    <div className="mx-auto max-w-3xl p-8">
+      <Card className="p-6">
+        <h1 className="text-xl font-semibold">Settings unavailable</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Configure server API mode for operational settings. Browser-backed settings are available only with explicit VITE_DATA_MODE=demo.
+        </p>
+      </Card>
+    </div>
+  )
+}
+
+function DemoSettingsView() {
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
   const { navigate } = useNavigation()
 

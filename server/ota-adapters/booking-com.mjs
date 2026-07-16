@@ -1,4 +1,5 @@
 import { PmsValidationError, stayDates } from '../pms-domain.mjs'
+import { defineProviderAdapter } from './contract.mjs'
 
 const BOOKING_COM_SELECTORS = {
   loginEmail: 'BOOKING_COM_LOGIN_EMAIL_SELECTOR',
@@ -169,7 +170,7 @@ async function loadPlaywrightForFutureRealRun(env) {
 export function createBookingComAdapter(options = {}) {
   const env = options.env || process.env
 
-  return {
+  return defineProviderAdapter({
     platform: 'booking',
 
     async healthCheck() {
@@ -178,6 +179,7 @@ export function createBookingComAdapter(options = {}) {
       return {
         platform: 'booking',
         ok: auth.authenticated,
+        configured: bookingComCredentialsConfigured(env),
         authenticated: auth.authenticated,
         requiresHuman: auth.requiresHuman,
         message: auth.message,
@@ -333,7 +335,14 @@ export function createBookingComAdapter(options = {}) {
     async takeProofScreenshot(input) {
       return proof(validateTaskId(input), input.kind || 'trace', options)
     },
-  }
+  }, {
+    providerId: 'booking',
+    label: 'Booking.com',
+    reads: ['READ_RESERVATIONS', 'READ_GUEST_MESSAGES', 'READ_RATES', 'READ_AVAILABILITY'],
+    writes: ['DRAFT_GUEST_REPLY', 'SEND_GUEST_REPLY', 'UPDATE_RATE', 'UPDATE_AVAILABILITY', 'CLOSE_ROOM', 'OPEN_ROOM', 'UPDATE_DESCRIPTION'],
+    liveWriteImplemented: false,
+    providerProof: false,
+  }, { env, now: options.now })
 }
 
 export async function executeBookingComTask(payload, options = {}) {

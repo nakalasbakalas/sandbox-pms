@@ -1,8 +1,15 @@
 # Launch Current Status Index
 
-Status date: 2026-07-07.
+Status date: 2026-07-16.
 
-Verdict: owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218` and is live on Render deploy `dep-d966aj9kh4rs73d9h10g`. Post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status passed on 2026-07-07. The remaining launch issues are closed by owner-directed accepted-risk completion, not by invented Cloudflare WAF/rate-limit rule proof, Render backup/recovery metadata, credentialed password-based auth proof, or staff manual acceptance proof.
+Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels: engineering-ready, staging-proven, owner-approved, and provider-proven. The 2026-07-07 owner-directed completion applies only to its exact historical deploy and accepted-risk decision; it does not prove the current release-foundation candidate or close the V2 gates in `LAUNCH_PROOF_PACK_V2.md`.
+
+| Evidence level | Current status |
+| --- | --- |
+| Engineering-ready | Open until the exact release-foundation commit passes fast CI and ephemeral PostgreSQL migration/seed/E2E CI. |
+| Staging-proven | Open; local disposable database evidence is not staging proof. |
+| Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
+| Provider-proven | Partial per capability; do not generalize Render/Gmail evidence into Cloudflare, OTA, payment, recovery, or credentialed RBAC proof. |
 
 ## Latest Slice
 

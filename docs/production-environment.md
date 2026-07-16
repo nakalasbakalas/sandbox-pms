@@ -32,20 +32,20 @@ The preflight verifies production mode, server auth mode, safe seed mode, a real
 
 ## Render Environment
 
-The intended Render web service is connected to `https://github.com/nakalasbakalas/sandbox-pms`, branch `main`. Confirm the live Render service connection before running migrations or production seed.
+The intended Render web service is connected to `https://github.com/nakalasbakalas/sandbox-pms`, branch `main`. Confirm the live Render service connection before running migrations or any separately approved production onboarding/import.
 
 The committed Blueprint defines the intended production resources:
 
-- web service: `sandbox-hotel-pms` (`srv-d8bchr1akrks73disaog`)
+- canonical web service: `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`)
 - managed PostgreSQL database: `sandbox-hotel-pms-db-v43m`
 - health check: `/healthz`
 - production auth mode: `VITE_PMS_API_MODE=server`
 - production app URL: `APP_URL=https://book.sandboxhotel.com`
-- browser API allowlist: `ALLOWED_ORIGINS=https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms.onrender.com`
+- browser API allowlist: `ALLOWED_ORIGINS=https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com`
 - production seed mode: `SEED_MODE=prod-safe`
 - generated session secret: `SESSION_SECRET`
 
-Live evidence gathered on 2026-05-31 is recorded in [live-environment-proof.md](live-environment-proof.md). Current Render metadata shows the public custom domain `https://book.sandboxhotel.com` and staff domain `https://staff.sandboxhotel.com` attached to `sandbox-hotel-pms`; keep the committed Blueprint and the live service env aligned to that mapping so browser-origin checks continue to accept the public site.
+Live evidence is recorded in [live-environment-proof.md](live-environment-proof.md). Later evidence identifies `sandbox-hotel-pms-v43m` as the long-term custom-domain service. Keep the committed Blueprint and live service environment aligned to that canonical target so browser-origin checks continue to accept the public and staff sites. Do not deploy the Blueprint to similarly named historical services.
 
 Apply a new Blueprint only from a repository branch that contains the current `render.yaml`. The Dashboard path is:
 
@@ -55,7 +55,7 @@ https://dashboard.render.com/blueprint/new?repo=https://github.com/nakalasbakala
 
 Fill all `sync: false` values in Render's secret manager before first deploy. Do not paste live secrets into tracked files.
 
-The committed Blueprint uses the `starter` instance type so Render can run `preDeployCommand`. If Render skips pre-deploy commands, apply migrations and `SEED_MODE=prod-safe` seed through a reviewed one-time Render build command or move the service to a supported instance type before relying on pre-deploy.
+The committed Blueprint uses the `starter` instance type so Render can run the migration-only `preDeployCommand`. If Render skips pre-deploy commands, apply migrations through a reviewed one-time Render build command or move the service to a supported instance type before relying on pre-deploy. Routine deploys must not seed; onboarding/import or a `SEED_MODE=prod-safe` recovery seed requires a separate owner-reviewed action.
 
 If a custom domain replaces the default Render host, update both `APP_URL` and `ALLOWED_ORIGINS` before deploying. The server blocks browser-origin `/api/*` requests that are not same-origin or listed in `ALLOWED_ORIGINS`; non-browser webhooks without an `Origin` header still work. For the current production mapping, `book.sandboxhotel.com` and `staff.sandboxhotel.com` must both remain in the allowlist.
 

@@ -163,13 +163,13 @@ The Blueprint deploy path is:
 
 ```bash
 npm ci --include=dev && npm run db:generate && npm run build
-npm run db:migrate && npm run db:seed
+npm run db:migrate
 npm run start
 ```
 
-`SEED_MODE=prod-safe` is set in `render.yaml`, so production seed remains limited to safe configuration and explicitly configured real users or a legacy bootstrap admin. Mutating E2E must never use the Render production database URL.
+The deploy path deliberately does not seed. Initial property data and users must be created through explicit onboarding or an owner-reviewed import. `SEED_MODE=prod-safe` remains available only for an explicitly reviewed one-time recovery/bootstrap operation. Mutating E2E must never use the Render production database URL.
 
-Render can skip `preDeployCommand` when the active service is not on a supported instance type or when the deploy target does not match the committed Blueprint. If production logs show predeploy was skipped, apply migrations and seed from inside Render with a reviewed one-time build command such as `npm ci --include=dev && npm run db:generate && npm run db:migrate && npm run db:seed && npm run build`, then restore the normal build command. Prefer keeping production on the committed `starter` plan before relying on automatic pre-deploy behavior.
+Render can skip `preDeployCommand` when the active service is not on a supported instance type or when the deploy target does not match the committed Blueprint. If production logs show predeploy was skipped, apply migrations from inside Render with a reviewed one-time build command such as `npm ci --include=dev && npm run db:generate && npm run db:migrate && npm run build`, then restore the normal build command. Do not add seeding to that recovery command unless an owner separately approves the bootstrap/import operation. Prefer keeping production on the committed `starter` plan before relying on automatic pre-deploy behavior.
 
 ## Final Launch Gates
 
@@ -192,5 +192,5 @@ Production launch also requires:
 - Render `preDeployCommand` uses `npm run db:migrate`, which runs `prisma migrate deploy`, or an explicitly reviewed one-time Render build command has applied migrations if Render skips predeploy.
 - `npm run prod:preflight` passes against the exact production env values before deploy.
 - No mutating E2E command uses the production database.
-- Production seed uses `SEED_MODE=prod-safe`.
+- Any separately approved production seed uses `SEED_MODE=prod-safe`; routine deploys do not seed.
 - Production room inventory is imported through `npm run rooms:import -- --file ./ops/rooms.production.json --confirm` with `ALLOW_PROD_ROOM_ONBOARDING=true`.

@@ -1,4 +1,5 @@
 import { PmsValidationError, stayDates } from '../pms-domain.mjs'
+import { defineProviderAdapter } from './contract.mjs'
 
 export const OTA_PLATFORM_SKELETONS = Object.freeze({
   agoda: {
@@ -189,7 +190,7 @@ export function createOtaPlatformSkeletonAdapter(platform, options = {}) {
   const env = options.env || process.env
   const label = labelFor(platform)
 
-  return {
+  return defineProviderAdapter({
     platform,
 
     async healthCheck() {
@@ -352,7 +353,14 @@ export function createOtaPlatformSkeletonAdapter(platform, options = {}) {
     async takeProofScreenshot(input) {
       return proof(platform, validateTaskId(input, label), input.kind || 'trace', options)
     },
-  }
+  }, {
+    providerId: platform,
+    label,
+    reads: ['READ_RESERVATIONS', 'READ_GUEST_MESSAGES', 'READ_RATES', 'READ_AVAILABILITY'],
+    writes: ['DRAFT_GUEST_REPLY', 'SEND_GUEST_REPLY', 'UPDATE_RATE', 'UPDATE_AVAILABILITY', 'CLOSE_ROOM', 'OPEN_ROOM', 'UPDATE_DESCRIPTION'],
+    liveWriteImplemented: false,
+    providerProof: false,
+  }, { env, now: options.now })
 }
 
 export async function executeOtaPlatformSkeletonTask(payload, options = {}) {

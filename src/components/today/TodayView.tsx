@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useKV } from '@github/spark/hooks'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import {
   Bed,
@@ -13,6 +12,7 @@ import {
   SignOut,
   Users,
   Warning,
+  ArrowsClockwise,
 } from '@phosphor-icons/react'
 import type { BoardRoomCard } from '@/types/board'
 import { Button } from '@/components/ui/button'
@@ -24,15 +24,14 @@ import { StatusPill } from '@/components/ui/status-pill'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useAuth } from '@/hooks/use-auth'
-import { useRoomSync } from '@/hooks/use-room-sync'
 import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { SERVER_AUTH_ENABLED } from '@/lib/auth-mode'
 import { hotelOpsApi } from '@/lib/hotel-ops-api-client'
+import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { formatBangkokDate, formatBangkokTime, useI18n } from '@/lib/i18n'
 import { SANDBOX_HOTEL_RULES } from '@/lib/hotel/business-rules'
 import { getOperationalRoomStatus, isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { cn } from '@/lib/utils'
-import type { PropertySetup } from '@/types/onboarding'
 import type { NavigationRoute } from '@/types/navigation'
 import type { BookingEmailEvent } from '@/types/booking-email'
 import type { HotelOpsApproval, HotelOpsNotification, HotelOpsTrendAlert } from '@/types/hotel-ops'
@@ -40,11 +39,50 @@ import type { HotelOpsApproval, HotelOpsNotification, HotelOpsTrendAlert } from 
 interface UnassignedReservation {
   id: string
   guestName: string
-  roomType: 'TWIN' | 'DOUBLE'
+  roomType: string
   checkIn?: string | Date
   checkOut?: string | Date
   source?: string
   needsAttention?: boolean
+}
+
+interface TodaySummary {
+  hotelDate: string
+  arrivals: number
+  departures: number
+  inHouse: number
+  unpaidFolios: number
+  unassignedArrivals: number
+  noShows: number
+  inboxExceptions: number
+  housekeepingBlockers: number
+  roomsTotal: number
+  roomsSellable: number
+  roomsDirty: number
+  roomsReady: number
+}
+
+interface TodayProperty {
+  name: string
+  defaultCheckIn?: string
+  defaultCheckOut?: string
+}
+
+interface TodayBoardReservation {
+  id: string
+  assignedRoomId?: string | null
+  checkIn?: string
+  checkOut?: string
+  source?: string
+  status?: string
+  guest?: { firstName?: string; lastName?: string }
+  roomType?: { code?: string; name?: string }
+}
+
+interface TodayBoardPayload {
+  property?: TodayProperty
+  rooms?: unknown[]
+  reservations?: TodayBoardReservation[]
 }
 
 interface ActionItem {
@@ -218,10 +256,13 @@ export function TodayView() {
   const { t, language } = useI18n()
   const { navigate } = useNavigation()
   const { hasAnyPermission } = useAuth()
-  const { rooms } = useRoomSync()
   const { events: bookingEmailEvents, status: bookingEmailStatus, notConfigured: bookingEmailNotConfigured } = useBookingEmailInbox()
-  const [unassignedReservations] = useKV<UnassignedReservation[]>('unassigned-reservations', [])
-  const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
+  const [rooms, setRooms] = useState<BoardRoomCard[]>([])
+  const [unassignedReservations, setUnassignedReservations] = useState<UnassignedReservation[]>([])
+  const [propertyData, setPropertyData] = useState<TodayProperty | null>(null)
+  const [todaySummary, setTodaySummary] = useState<TodaySummary | null>(null)
+  const [todayLoadError, setTodayLoadError] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [selectedDate, setSelectedDate] = useState(() => toInputDate(new Date()))
   const [lastUpdated, setLastUpdated] = useState(() => new Date())
   const [opsApprovals, setOpsApprovals] = useState<HotelOpsApproval[]>([])
@@ -230,6 +271,59 @@ export function TodayView() {
   const [opsLoadError, setOpsLoadError] = useState<string | null>(null)
   const canViewOps = SERVER_AUTH_ENABLED && hasAnyPermission(['view:ops'])
   const canApproveOps = SERVER_AUTH_ENABLED && hasAnyPermission(['approve:ops-task'])
+
+  const loadTodayData = useCallback(async () => {
+    if (!SERVER_API_ENABLED) {
+      setRooms([])
+      setUnassignedReservations([])
+      setPropertyData(null)
+      setTodaySummary(null)
+      setTodayLoadError('Server mode is disabled. Operational totals are unavailable in local demo mode.')
+      return
+    }
+
+    setIsRefreshing(true)
+    try {
+      const [todayPayload, boardPayload] = await Promise.all([
+        pmsApi<{ ok: true; data: TodaySummary }>('/api/today', null),
+        pmsApi<{ ok: true; data: TodayBoardPayload }>('/api/front-desk/board', null),
+      ])
+      const board = boardPayload.data
+      const unassigned = (board.reservations || [])
+        .filter((reservation) => !reservation.assignedRoomId)
+        .map<UnassignedReservation>((reservation) => ({
+          id: reservation.id,
+          guestName: [reservation.guest?.firstName, reservation.guest?.lastName].filter(Boolean).join(' ') || 'Guest',
+          roomType: reservation.roomType?.name || reservation.roomType?.code || 'Room type not set',
+          checkIn: reservation.checkIn,
+          checkOut: reservation.checkOut,
+          source: reservation.source,
+          needsAttention: reservation.status === 'PENDING',
+        }))
+
+      setTodaySummary(todayPayload.data)
+      setRooms(mapServerBoardRooms(board))
+      setUnassignedReservations(unassigned)
+      setPropertyData(board.property || null)
+      setSelectedDate((current) => current === toInputDate(new Date()) ? todayPayload.data.hotelDate : current)
+      setTodayLoadError(null)
+      setLastUpdated(new Date())
+    } catch (error) {
+      setTodayLoadError(error instanceof Error ? error.message : 'Today data could not be loaded from the PMS backend.')
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadTodayData()
+  }, [loadTodayData])
+
+  useEffect(() => {
+    const refresh = () => void loadTodayData()
+    window.addEventListener('pms:domain-event', refresh)
+    return () => window.removeEventListener('pms:domain-event', refresh)
+  }, [loadTodayData])
 
   useEffect(() => {
     setLastUpdated(new Date())
@@ -293,28 +387,36 @@ export function TodayView() {
     const opsActiveAlerts = opsAlerts.filter((alert) => alert.status !== 'RESOLVED')
     const opsHighAlerts = opsActiveAlerts.filter((alert) => alert.severity === 'HIGH' || alert.severity === 'CRITICAL')
 
+    const isBackendHotelDate = todaySummary?.hotelDate === selectedDate
+
     return {
       arrivals,
+      arrivalCount: isBackendHotelDate ? todaySummary.arrivals : arrivals.length,
       departures,
+      departureCount: isBackendHotelDate ? todaySummary.departures : departures.length,
       inHouse,
+      inHouseCount: isBackendHotelDate ? todaySummary.inHouse : inHouse.length,
       availableTonight,
       dirty,
+      dirtyCount: isBackendHotelDate ? todaySummary.roomsDirty : dirty.length,
       readyForArrival,
+      readyCount: isBackendHotelDate ? todaySummary.roomsReady : readyForArrival.length,
       paymentIssues,
+      paymentIssueCount: isBackendHotelDate ? todaySummary.unpaidFolios : paymentIssues.length,
       emailNeedsReview,
       emailErrors,
       outOfOrder,
       unassigned: unassignedReservations.filter((reservation) => !reservation.checkIn || isSameInputDate(reservation.checkIn, selectedDate)),
       earlyArrivals,
       lateCheckouts,
-      noShows: 0,
+      noShows: isBackendHotelDate ? todaySummary.noShows : null,
       opsApprovals: opsApprovals.length,
       opsNeedsHuman,
       opsProviderPending,
       opsActiveAlerts,
       opsHighAlerts,
     }
-  }, [bookingEmailEvents, operationalRooms, opsAlerts, opsApprovals.length, opsNotifications, selectedDate, unassignedReservations])
+  }, [bookingEmailEvents, operationalRooms, opsAlerts, opsApprovals.length, opsNotifications, selectedDate, todaySummary, unassignedReservations])
 
   const actionQueue = useMemo(
     () => buildActionQueue(
@@ -332,13 +434,13 @@ export function TodayView() {
   )
 
   const metricCards = [
-    { label: t('today.arrivals'), value: metrics.arrivals.length, icon: SignIn, tone: 'text-sky-700 bg-sky-50 border-sky-100' },
-    { label: t('today.departures'), value: metrics.departures.length, icon: SignOut, tone: 'text-amber-700 bg-amber-50 border-amber-100' },
-    { label: t('today.inHouse'), value: metrics.inHouse.length, icon: Users, tone: 'text-indigo-700 bg-indigo-50 border-indigo-100' },
+    { label: t('today.arrivals'), value: metrics.arrivalCount, icon: SignIn, tone: 'text-sky-700 bg-sky-50 border-sky-100' },
+    { label: t('today.departures'), value: metrics.departureCount, icon: SignOut, tone: 'text-amber-700 bg-amber-50 border-amber-100' },
+    { label: t('today.inHouse'), value: metrics.inHouseCount, icon: Users, tone: 'text-indigo-700 bg-indigo-50 border-indigo-100' },
     { label: t('today.availableTonight'), value: metrics.availableTonight.length, icon: House, tone: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
-    { label: t('today.dirtyRooms'), value: metrics.dirty.length, icon: Broom, tone: 'text-orange-700 bg-orange-50 border-orange-100' },
-    { label: t('today.readyRooms'), value: metrics.readyForArrival.length, icon: Bed, tone: 'text-teal-700 bg-teal-50 border-teal-100' },
-    { label: t('today.paymentIssues'), value: metrics.paymentIssues.length, icon: CurrencyCircleDollar, tone: 'text-rose-700 bg-rose-50 border-rose-100' },
+    { label: t('today.dirtyRooms'), value: metrics.dirtyCount, icon: Broom, tone: 'text-orange-700 bg-orange-50 border-orange-100' },
+    { label: t('today.readyRooms'), value: metrics.readyCount, icon: Bed, tone: 'text-teal-700 bg-teal-50 border-teal-100' },
+    { label: t('today.paymentIssues'), value: metrics.paymentIssueCount, icon: CurrencyCircleDollar, tone: 'text-rose-700 bg-rose-50 border-rose-100' },
     { label: t('today.unassigned'), value: metrics.unassigned.length, icon: Warning, tone: 'text-yellow-800 bg-yellow-50 border-yellow-100' },
     { label: 'Booking emails', value: metrics.emailNeedsReview.length + metrics.emailErrors.length, icon: EnvelopeSimple, tone: 'text-fuchsia-800 bg-fuchsia-50 border-fuchsia-100' },
     { label: 'Hotel Ops', value: metrics.opsApprovals + metrics.opsNeedsHuman.length + metrics.opsHighAlerts.length, icon: Brain, tone: 'text-violet-800 bg-violet-50 border-violet-100' },
@@ -352,7 +454,7 @@ export function TodayView() {
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[#d8a15f]">
               <CalendarBlank size={15} weight="bold" />
-              {propertyData?.name || 'Hotel'} · {propertyData?.defaultCheckIn || SANDBOX_HOTEL_RULES.checkInTime} / {propertyData?.defaultCheckOut || SANDBOX_HOTEL_RULES.checkOutTime}
+              {propertyData?.name || 'PMS property'} · {propertyData?.defaultCheckIn || SANDBOX_HOTEL_RULES.checkInTime} / {propertyData?.defaultCheckOut || SANDBOX_HOTEL_RULES.checkOutTime}
             </div>
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">{t('today.title')}</h1>
@@ -374,11 +476,27 @@ export function TodayView() {
               <div>{t('today.lastUpdated')}</div>
               <div className="font-semibold text-white">{formatBangkokTime(lastUpdated, language)}</div>
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-white/20 bg-transparent text-white hover:bg-white/10 hover:text-white"
+              onClick={() => void loadTodayData()}
+              disabled={isRefreshing || !SERVER_API_ENABLED}
+            >
+              <ArrowsClockwise className={isRefreshing ? 'animate-spin' : ''} />
+              Refresh
+            </Button>
           </div>
         </div>
       </section>
 
       <div className="mx-auto max-w-[1600px] space-y-4 px-4 py-4 lg:px-6">
+        {todayLoadError && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-semibold">Backend operational data unavailable</div>
+            <div className="mt-1">{todayLoadError} No local totals are being substituted.</div>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {metricCards.map((metric) => (
             <Card key={metric.label} className="rounded-lg border bg-white py-0 shadow-sm">
@@ -487,6 +605,7 @@ export function TodayView() {
                 <WatchItem label={t('today.earlyArrivals')} value={metrics.earlyArrivals.length} />
                 <WatchItem label={t('today.lateCheckouts')} value={metrics.lateCheckouts.length} />
                 <WatchItem label={t('today.noShows')} value={metrics.noShows} />
+                <WatchItem label="High-priority housekeeping blockers" value={todaySummary?.hotelDate === selectedDate ? todaySummary.housekeepingBlockers : null} />
                 <WatchItem label="Email processing errors" value={metrics.emailErrors.length} />
                 <WatchItem label="Mailbox not configured" value={bookingEmailNotConfigured && !bookingEmailStatus?.configured ? 1 : 0} />
                 {canViewOps && (
@@ -515,11 +634,13 @@ export function TodayView() {
   )
 }
 
-function WatchItem({ label, value }: { label: string; value: number }) {
+function WatchItem({ label, value }: { label: string; value: number | null }) {
   return (
     <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
       <span className="text-muted-foreground">{label}</span>
-      <span className={cn('font-semibold tabular-nums', value > 0 ? 'text-amber-700' : 'text-emerald-700')}>{value}</span>
+      <span className={cn('font-semibold tabular-nums', value === null ? 'text-muted-foreground' : value > 0 ? 'text-amber-700' : 'text-emerald-700')}>
+        {value === null ? 'Not reported' : value}
+      </span>
     </div>
   )
 }

@@ -1,6 +1,6 @@
-# Implementation Spec - Hotel Ops AI Command Center
+# Implementation Spec - Sandbox PMS And Hotel Ops
 
-This document describes the current Sandbox PMS implementation of the Hotel Ops package. It is intentionally scoped to what the repository actually runs today.
+This document describes the current Sandbox PMS backend and Hotel Ops implementation. Accounting V2 and direct booking are implemented as disabled-by-default engineering foundations; live-provider phases are not described as complete.
 
 ## Product Shape
 
@@ -47,6 +47,7 @@ API routes:
 - `GET /api/ops/ota/status`
 - `GET /api/ops/policy`
 - `POST /api/ops/scan/run`
+- `POST /api/ops/analyzers` for deterministic suggest-only analysis
 - `POST /api/internal/ops/worker/tasks`
 - `GET/POST /api/line/webhook` for signed LINE messaging and optional Hotel Ops command intake
 - `GET/POST /api/whatsapp/webhook` for Meta WhatsApp webhook verification, signed inbound messages, and optional Hotel Ops command intake
@@ -62,6 +63,38 @@ Booking-email API routes:
 - `POST /api/booking-email/events/:id/reprocess`
 - `GET/POST /api/booking-email/sources`
 - `PATCH /api/booking-email/sources/:id`
+
+PMS foundation API routes:
+
+- `GET /api/openapi.json`
+- `GET /api/system/capabilities`
+- `GET /api/events`
+- `GET/POST /api/rates/rules`
+- `PATCH /api/rates/rules/:id`
+- `GET/PUT /api/rates/calendar`
+- `GET /api/rates/effective`
+- `POST /api/rates/recommendations`
+- `GET/PATCH /api/settings/property`
+- `PUT /api/settings/tax`
+- `GET /api/settings/status`
+- `GET/POST /api/housekeeping/tasks`
+- `POST /api/housekeeping/tasks/:id/assign`
+
+Disabled-by-default foundation routes:
+
+- `POST /api/accounting/v2/folios`, charges, payments, cash shifts, house accounts, receivables, and journals
+- `GET /api/accounting/v2/folios/:id/balance` and `/api/accounting/v2/trial-balance`
+- `GET /api/public/v1/availability`
+- `POST /api/public/v1/quotes`
+- `POST /api/public/v1/holds`
+- `POST /api/public/v1/bookings`
+
+Accounting mutations require `ACCOUNTING_V2_ENABLED=true`, authenticated property scope, role permission, a reason, and property-scoped idempotency. Direct-booking routes require `DIRECT_BOOKING_ENABLED=true`; holds/bookings additionally require a backend-only `DIRECT_BOOKING_TOKEN_SECRET` of at least 32 characters. Neither flag is authorization to enable production use without the acceptance gates.
+- `POST /api/housekeeping/tasks/:id/status`
+- `GET/POST /api/housekeeping/issues`
+- `POST /api/housekeeping/issues/:id/status`
+- `GET /api/night-audit/runs`
+- `POST /api/night-audit/close`
 
 Auth proof operator CLI:
 
@@ -235,3 +268,54 @@ Notifications are backend records:
 - Notification text and metadata are sanitized before persistence.
 - The shared PMS header notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
 - Read and dismiss actions call backend acknowledgment routes, persist actor/timestamp fields, and create audit records. This acknowledgment state is separate from provider delivery status.
+
+## Provider Adapter Contract
+
+- Each OTA adapter is registered through `defineProviderAdapter()` with declared read and write operations. Contract construction fails when a declared operation lacks its backend method.
+- `getOtaProviderContracts()` returns strict, credential-free contract DTOs containing normalized health, dry-run capabilities, retry policy, rate-limit source, and evidence policy.
+- Live writes require all three conditions: `OTA_LIVE_WRITES_ENABLED=true`, an implemented live-write path, and verified provider proof. Current adapters intentionally declare the latter two as false.
+- Worker proof remains untrusted; provider evidence is bounded, kind-normalized, URL-sanitized, and blocked when redaction status is not safe.
+
+## Exact-Money Compatibility Contract
+
+- Money is represented internally as integer satang. JSON-facing exact fields such as `amountSatang`, `rateSatang`, and `totalSatang` are base-10 integer strings so JavaScript JSON never serializes a `BigInt` directly.
+- The additive migration keeps existing Float baht columns and adds nullable PostgreSQL `BIGINT` shadow columns plus integer basis-point fields. It backfills representable legacy values using PostgreSQL `ROUND(value * 100)` and leaves unsafe out-of-range values null for reconciliation.
+- Supported new writes call the shared money helpers to dual-write legacy baht and exact satang. If a request supplies both forms, they must represent the same rounded value or validation fails.
+- `MONEY_READ_AUTHORITY=legacy_float|satang` selects preferred reads. Missing or invalid configuration defaults to `legacy_float`; either path can fall back to the populated representation during the compatibility window.
+- Payments run in serializable transactions, re-read the folio, reject closed folios and unapproved overpayments, retry one serialization conflict, and persist an idempotency key. A replay with different payment content returns a conflict.
+- Satang authority must not be enabled in production until row-level null and variance checks plus aggregate reconciliation pass on a restored staging copy. This branch does not remove legacy columns.
+
+## Property Request Context
+
+- After session authentication, `resolveRequestContext()` resolves the configured `SANDBOX` property and requires an active `(userId, propertyId)` `UserPropertyMembership`.
+- The request context contains request id, actor, property id/code, membership id, effective role, and optional `X-Idempotency-Key`. Membership role takes precedence over the compatibility global user role.
+- The additive migration backfills existing active and inactive users into the existing `SANDBOX` property using their current role and active state. Setup and user-management services create or update the membership with the compatibility user record.
+- Property-aware services must scope every lookup and mutation by `context.propertyId`; resource identifiers from the client are never property authority.
+- The application remains a single-property product in this phase. Membership scaffolding is an isolation control, not a claim that multi-property administration or SaaS tenancy is complete.
+
+## Domain Events And SSE
+
+- Mutating services call `recordDomainEvent()` inside the same Prisma transaction as the operational change and audit record.
+- `DomainEvent.id` is a monotonic PostgreSQL `BIGSERIAL`. Catch-up reads are restricted to the authenticated request property, ordered by id, and bounded to 250 rows per query.
+- `GET /api/events` requires session authentication, active property membership, and `view:board`. It accepts `Last-Event-ID` or `?after=`, polls PostgreSQL in bounded batches, emits two-second updates and heartbeats, and can be disabled with `SSE_ENABLED=false`.
+- The public event payload intentionally omits actor id and metadata. It contains only string id, event type, aggregate type/id, and occurrence time.
+- The React bridge maps the existing reservation, room, payment, and charge event types to client refresh signals. Rates, settings, housekeeping, and night-audit views still need explicit event/refetch handling where their UI requires immediate refresh.
+
+## Rate And Settings Services
+
+- Rate rules support percentage adjustments in integer basis points and fixed/override amounts in satang. Date-specific calendar rates and computed effective rates are property/room-type scoped.
+- `POST /api/rates/recommendations` is deterministic and suggest-only. Applying a recommendation requires a separate authorized rate mutation; it cannot update an OTA or bypass Hotel Ops approval policy.
+- In server API mode, the primary Rates view uses the backend service. The older Spark `useKV` rate experience remains only on the explicit demo path.
+- Property settings accept allowlisted profile, fee, policy, operations, accounting-export, and recorded-payment-method fields. Every write requires manager/admin authority and an operational reason.
+- Tax settings use basis points and structured tax items. Credential-shaped values, URL credentials, sensitive query parameters, unknown fields, invalid time zones, and unsupported payment-gateway enablement fail validation.
+- `/api/settings/status` is sanitized and server-derived. It reports configuration and capability state, not staging, provider, recovery, or owner proof.
+
+## Persistent Operations Foundation
+
+- Housekeeping tasks persist property, room, type, priority, schedule, assignee, status, creator, completion time, reasoned status history, audit records, and domain events. Assignees must be active members of the same property.
+- Housekeeping issues persist category, severity, linked task/room, assignee, reasoned status history, and resolution evidence. Critical issue resolution or closure requires manager/admin authority.
+- Night audit stores one run per `(propertyId, businessDate)` and one attempt per `(propertyId, idempotencyKey)`. Close requires manager, admin, or system authority plus an operational reason.
+- Night audit snapshots unresolved arrivals/departures, in-house stays, open folios, housekeeping blockers, unposted room charges, and exact-satang financial totals.
+- Emergency stop and unposted room charges are non-overridable blockers. Only an admin may override other blockers and must supply an override reason.
+- Current posting mode is `VERIFY_EXISTING_CHARGES_ONLY`; the service does not create missing nightly room charges. A run cannot be marked complete when a non-overridable blocker remains.
+- These backend routes and models are a persistent foundation. The existing housekeeping and Night Audit React screens still use older browser-local workflow state and must be cut over before the staff workflows are considered complete.

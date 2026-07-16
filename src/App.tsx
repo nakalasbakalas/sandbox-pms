@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { AppLayout } from './components/navigation/AppLayout'
@@ -18,6 +18,8 @@ import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import type { NavigationRoute } from './types/navigation'
 import type { Permission } from './types/auth'
 import { Button } from './components/ui/button'
+import { SERVER_API_ENABLED } from './lib/pms-api-client'
+import { dataSyncService, type DataSyncEvent } from './lib/data-sync'
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
@@ -260,6 +262,7 @@ function AuthenticatedAppContent() {
     
     return (
         <>
+        <DomainEventBridge />
         <FrontDeskAssistantProvider>
           <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
             <Suspense fallback={<RouteLoading />}>
@@ -280,6 +283,59 @@ function AuthenticatedAppContent() {
         <KeyboardShortcutsWelcome />
         </>
     )
+}
+
+interface ServerDomainEvent {
+  id: string
+  type: string
+  aggregateType: string
+  aggregateId: string
+  occurredAt: string
+}
+
+const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
+  RESERVATION_CREATED: 'RESERVATION_CREATED',
+  RESERVATION_UPDATED: 'RESERVATION_MODIFIED',
+  RESERVATION_CANCELLED: 'RESERVATION_CANCELLED',
+  RESERVATION_NO_SHOW: 'RESERVATION_CANCELLED',
+  RESERVATION_CHECKED_IN: 'CHECK_IN',
+  RESERVATION_CHECKED_OUT: 'CHECK_OUT',
+  ROOM_HOUSEKEEPING_UPDATED: 'ROOM_STATUS_CHANGE',
+  ROOM_OPERATIONAL_STATUS_UPDATED: 'ROOM_STATUS_CHANGE',
+  PAYMENT_CREATED: 'PAYMENT_RECEIVED',
+  CHARGE_CREATED: 'FOLIO_UPDATED',
+}
+
+function DomainEventBridge() {
+  const { hasAnyPermission } = useAuth()
+  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board'])
+
+  useEffect(() => {
+    if (!canSubscribe) return
+    const source = new EventSource('/api/events', { withCredentials: true })
+    const onDomainEvent = (message: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(message.data) as ServerDomainEvent
+        window.dispatchEvent(new CustomEvent('pms:domain-event', { detail: event }))
+        const legacyType = legacyEventTypes[event.type]
+        if (legacyType) {
+          dataSyncService.emit({
+            type: legacyType,
+            source: 'server-sse',
+            timestamp: new Date(event.occurredAt),
+            data: { aggregateType: event.aggregateType, aggregateId: event.aggregateId, eventId: event.id },
+          })
+        }
+      } catch {
+        // Ignore malformed/untrusted stream payloads and let authoritative views refetch.
+      }
+    }
+
+    for (const eventType of Object.keys(legacyEventTypes)) source.addEventListener(eventType, onDomainEvent as EventListener)
+    return () => source.close()
+  }, [canSubscribe])
+
+  return null
 }
 
 function App() {

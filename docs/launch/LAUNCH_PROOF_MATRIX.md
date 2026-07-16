@@ -1,8 +1,8 @@
 # Launch Proof Matrix
 
-Status date: 2026-07-07.
+Status date: 2026-07-16.
 
-Verdict: owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218` and is live on Render deploy `dep-d966aj9kh4rs73d9h10g`. Post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status passed on 2026-07-07. Issues `#137`, `#138`, `#140`, and `#142` are closed by owner directive. This matrix still separates verified proof from accepted risk: Cloudflare WAF/rate-limit rule IDs, Render backup/recovery metadata, credentialed password-based production auth proof, staff parser review, and manual route/localization acceptance were not independently verified by Codex.
+Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) defines engineering-ready, staging-proven, owner-approved, and provider-proven. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` and deploy `dep-d966aj9kh4rs73d9h10g` retain their historical evidence, but closed issues and accepted risks do not establish those levels for a later candidate. Cloudflare rules, current recovery metadata, credentialed production RBAC, staff acceptance, live OTA writes, and payment collection remain unproven unless their rows gain exact current evidence.
 
 ## P0 Matrix
 

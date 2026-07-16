@@ -1,10 +1,14 @@
 services:
   - type: web
-    name: sandbox-hotel-pms
+    # Canonical custom-domain production service. Historical similarly named
+    # services are not deployment targets for this Blueprint.
+    name: sandbox-hotel-pms-v43m
     runtime: node
     plan: starter
     buildCommand: npm ci --include=dev && npm run db:generate && npm run build
-    preDeployCommand: npm run db:migrate && npm run db:seed
+    # Production deploys apply reviewed migrations only. Initial property/user
+    # data is handled through explicit onboarding or an owner-reviewed import.
+    preDeployCommand: npm run db:migrate
     startCommand: npm run start
     healthCheckPath: /healthz
     autoDeploy: false
@@ -13,10 +17,20 @@ services:
         value: production
       - key: VITE_PMS_API_MODE
         value: server
+      - key: MONEY_READ_AUTHORITY
+        value: legacy_float
+      - key: ACCOUNTING_V2_ENABLED
+        value: false
+      - key: DIRECT_BOOKING_ENABLED
+        value: false
+      - key: OTA_LIVE_WRITES_ENABLED
+        value: false
+      - key: SSE_ENABLED
+        value: true
       - key: APP_URL
         value: https://book.sandboxhotel.com
       - key: ALLOWED_ORIGINS
-        value: https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms.onrender.com
+        value: https://book.sandboxhotel.com,https://staff.sandboxhotel.com,https://sandbox-hotel-pms-v43m.onrender.com
       - key: ALLOW_PUBLIC_SETUP
         value: false
       - key: BOOKING_EMAIL_PRIMARY_MAILBOX
@@ -62,6 +76,8 @@ services:
       - key: LINE_CHANNEL_SECRET
         sync: false
       - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: DIRECT_BOOKING_TOKEN_SECRET
         sync: false
 
 databases:

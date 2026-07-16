@@ -19,11 +19,62 @@ import { createBookingComAdapter, executeBookingComTask } from '../server/ota-ad
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
+import { DATABASE_HEALTH_FAILURE_MESSAGE, databaseHealthFailure } from '../server/health-response.mjs'
+import { getSystemCapabilities } from '../server/capability-service.mjs'
+import { createOpenApiDocument } from '../server/openapi.mjs'
+import { listDomainEvents, publicDomainEvent } from '../server/domain-events.mjs'
+import { requestIdFromHeaders, resolveRequestContext } from '../server/request-context.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
 import { parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+
+const databaseFailure = databaseHealthFailure(new Error('postgresql://user:secret@database.internal/prod'))
+assert.deepEqual(databaseFailure, {
+  configured: true,
+  ok: false,
+  error: DATABASE_HEALTH_FAILURE_MESSAGE,
+}, 'deep health returns a stable sanitized database failure')
+assert.equal(JSON.stringify(databaseFailure).includes('secret'), false, 'deep health does not expose raw database errors')
+
+const apiContract = createOpenApiDocument({ serverUrl: 'https://pms.example.test' })
+assert.equal(apiContract.openapi, '3.1.0', 'OpenAPI contract uses version 3.1')
+assert.equal(apiContract.paths['/api/reservations'].post.security[0].cookieSession.length, 0, 'staff APIs declare cookie authentication')
+assert.deepEqual(apiContract.paths['/api/auth/login'].post.security, [], 'login API remains public')
+assert.equal(apiContract.paths['/api/internal/ops/worker/tasks'], undefined, 'signed internal worker routes are excluded from the staff contract')
+
+const systemCapabilities = getSystemCapabilities({
+  DIRECT_BOOKING_ENABLED: 'false',
+  ACCOUNTING_V2_ENABLED: 'false',
+  OTA_LIVE_WRITES_ENABLED: 'false',
+})
+assert.equal(systemCapabilities.sourceOfTruth, 'server', 'capability registry declares the backend source of truth')
+assert.equal(systemCapabilities.operations.nightAudit.status, 'available', 'persistent night audit is presented as an operational backend capability')
+assert.equal(systemCapabilities.operations.nightAudit.writeMode, 'controlled', 'night audit writes remain controlled')
+assert.equal(systemCapabilities.operations.rates.status, 'available', 'persistent rate services are presented as operational')
+assert.equal(systemCapabilities.integrations.ota.writeMode, 'dry-run', 'OTA live writes remain dry-run by default')
+
+assert.equal(requestIdFromHeaders({ 'x-request-id': 'request-1234' }), 'request-1234', 'valid request correlation IDs are preserved')
+const propertyContext = await resolveRequestContext({
+  property: { findUnique: async () => ({ id: 'property-1', code: 'SANDBOX' }) },
+  userPropertyMembership: { findUnique: async () => ({ id: 'membership-1', role: 'MANAGER', active: true }) },
+}, { id: 'user-1', role: 'FRONT_DESK' }, { requestId: 'request-1234', headers: { 'x-idempotency-key': 'attempt-1' } })
+assert.equal(propertyContext.propertyId, 'property-1', 'request context is scoped to the active property')
+assert.equal(propertyContext.role, 'MANAGER', 'property membership role overrides the compatibility role')
+assert.equal(propertyContext.idempotencyKey, 'attempt-1', 'request context carries the mutation idempotency key')
+
+const publicEvent = publicDomainEvent({ id: 12n, eventType: 'RESERVATION_UPDATED', aggregateType: 'reservation', aggregateId: 'res-1', createdAt: new Date('2026-07-16T00:00:00.000Z'), metadata: { guestName: 'must not leak' } })
+assert.equal(JSON.stringify(publicEvent).includes('guestName'), false, 'public domain events omit metadata and PII')
+const eventRows = await listDomainEvents({
+  domainEvent: { findMany: async ({ where, take }) => {
+    assert.equal(where.propertyId, 'property-1')
+    assert.equal(where.id.gt, 10n)
+    assert.equal(take, 100)
+    return [{ id: 11n, eventType: 'ROOM_HOUSEKEEPING_UPDATED', aggregateType: 'room', aggregateId: 'room-1', createdAt: new Date('2026-07-16T00:00:00.000Z') }]
+  } },
+}, { propertyId: 'property-1', after: '10' })
+assert.equal(eventRows[0].id, '11', 'domain event catch-up uses string sequence IDs')
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -721,26 +772,30 @@ assert.equal(mappedUsernameOnlyUser.email, null, 'server auth users can omit ema
 assert.equal(mappedUsernameOnlyUser.username, 'hk1', 'server auth users use username as login identifier')
 assert.equal(mappedUsernameOnlyUser.role, 'housekeeping', 'username-only server auth users map backend roles')
 
+function userCreationPrismaFixture({ expectedUsername, userId, audits }) {
+  const prisma = {
+    property: { findUnique: async () => ({ id: 'property-1', code: 'SANDBOX' }) },
+    user: {
+      findFirst: async (query) => {
+        assert.deepEqual(query.where.OR, [{ username: expectedUsername }], 'username-only user duplicate check does not require email')
+        return null
+      },
+      create: async ({ data }) => ({ id: userId, createdAt: new Date('2026-06-30T00:00:00.000Z'), ...data }),
+    },
+    userPropertyMembership: { create: async ({ data }) => data },
+    auditLog: { create: async ({ data }) => { audits.push(data); return data } },
+    domainEvent: { create: async ({ data }) => ({ id: 1n, createdAt: new Date(), ...data }) },
+    $transaction: async (callback) => callback(prisma),
+  }
+  return prisma
+}
+
 const createdAudits = []
-const usernameOnlyUser = await createUser({
-  user: {
-    findFirst: async (query) => {
-      assert.deepEqual(query.where.OR, [{ username: 'hk2' }], 'username-only user duplicate check does not require email')
-      return null
-    },
-    create: async ({ data }) => ({
-      id: 'user-hk2',
-      createdAt: new Date('2026-06-30T00:00:00.000Z'),
-      ...data,
-    }),
-  },
-  auditLog: {
-    create: async ({ data }) => {
-      createdAudits.push(data)
-      return data
-    },
-  },
-}, {
+const usernameOnlyUser = await createUser(userCreationPrismaFixture({
+  expectedUsername: 'hk2',
+  userId: 'user-hk2',
+  audits: createdAudits,
+}), {
   username: 'hk2',
   email: '',
   password: 'Temporary1234!',
@@ -753,25 +808,11 @@ assert.equal(usernameOnlyUser.role, 'HOUSEKEEPING', 'username-only server user r
 assert.equal(createdAudits[0]?.action, 'USER_CREATED', 'username-only server user creation is audited')
 
 const nullEmailUserAudits = []
-const nullEmailUser = await createUser({
-  user: {
-    findFirst: async (query) => {
-      assert.deepEqual(query.where.OR, [{ username: 'fd3' }], 'null-email user duplicate check does not require email')
-      return null
-    },
-    create: async ({ data }) => ({
-      id: 'user-fd3',
-      createdAt: new Date('2026-06-30T00:00:00.000Z'),
-      ...data,
-    }),
-  },
-  auditLog: {
-    create: async ({ data }) => {
-      nullEmailUserAudits.push(data)
-      return data
-    },
-  },
-}, {
+const nullEmailUser = await createUser(userCreationPrismaFixture({
+  expectedUsername: 'fd3',
+  userId: 'user-fd3',
+  audits: nullEmailUserAudits,
+}), {
   username: 'fd3',
   email: null,
   password: 'Temporary1234!',

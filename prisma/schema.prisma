@@ -24,9 +24,13 @@ model Property {
   defaultCheckOut String     @default("12:00")
   currency        String     @default("THB")
   taxRate         Float      @default(0)
+  taxRateBasisPoints Int?
   extraGuestFee   Float      @default(200)
+  extraGuestFeeSatang BigInt?
   childFee        Float      @default(100)
+  childFeeSatang  BigInt?
   inventoryMinimumRate Float?
+  inventoryMinimumRateSatang BigInt?
   taxConfiguration Json?
   policies        Json?
   operationalSettings Json?
@@ -40,6 +44,17 @@ model Property {
   hotelOpsEmergencyStop HotelOpsEmergencyStop?
   hotelOpsNotifications HotelOpsNotification[]
   hotelOpsScanSnapshots HotelOpsScanSnapshot[]
+  userMemberships UserPropertyMembership[]
+  domainEvents    DomainEvent[]
+  housekeepingTasks HousekeepingTask[]
+  housekeepingIssues HousekeepingIssue[]
+  nightAuditRuns  NightAuditRun[]
+  nightAuditAttempts NightAuditAttempt[]
+  accountingFolios AccountingFolio[]
+  cashShifts CashShift[]
+  houseAccounts HouseAccount[]
+  journalEntries JournalEntry[]
+  publicBookingQuotes PublicBookingQuote[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -52,11 +67,13 @@ model RoomType {
   name           String
   description    String?
   baseRate       Float
+  baseRateSatang BigInt?
   maxOccupancy   Int
   standardOcc    Int
   rooms          Room[]
   reservations   Reservation[]
   holds          InventoryHold[]
+  publicBookingQuotes PublicBookingQuote[]
   
   @@unique([propertyId, code])
   @@index([propertyId])
@@ -77,6 +94,8 @@ model Room {
   notes              String?
   inventory          RoomDateInventory[]
   statusHistory      RoomStatusLog[]
+  housekeepingTasks  HousekeepingTask[]
+  housekeepingIssues HousekeepingIssue[]
   assignedReservations Reservation[]     @relation("AssignedRoom")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -151,8 +170,11 @@ model Reservation {
   childAges         Int[]
   
   ratePerNight      Float
+  ratePerNightSatang BigInt?
   totalAmount       Float
+  totalAmountSatang BigInt?
   depositAmount     Float               @default(0)
+  depositAmountSatang BigInt?
   depositPaid       Boolean             @default(false)
   
   source            BookingSource       @default(DIRECT)
@@ -165,9 +187,11 @@ model Reservation {
   
   inventory         RoomDateInventory[]
   folio             Folio?
+  accountingFolios  AccountingFolio[]
   history           ReservationLog[]
   bookingEmailEvents BookingEmailEvent[] @relation("BookingEmailEventReservation")
   documents         GuestDocument[]
+  publicHold         InventoryHold?
   
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -217,6 +241,7 @@ model RoomDateInventory {
   hold          InventoryHold?  @relation(fields: [holdId], references: [id], onDelete: SetNull)
   
   rate          Float?
+  rateSatang    BigInt?
   notes         String?
   
   createdAt     DateTime        @default(now())
@@ -241,6 +266,13 @@ model InventoryHold {
   propertyId String
   roomTypeId String
   roomType   RoomType            @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
+  quoteId    String?
+  quote      PublicBookingQuote? @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  reservationId String?          @unique
+  reservation Reservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  publicTokenHash String?         @unique
+  idempotencyKey String?
+  conversionIdempotencyKey String?
   checkIn    DateTime            @db.Date
   checkOut   DateTime            @db.Date
   expiresAt  DateTime
@@ -255,6 +287,32 @@ model InventoryHold {
   
   @@index([expiresAt, status])
   @@index([propertyId, status])
+  @@index([quoteId])
+  @@unique([propertyId, idempotencyKey])
+  @@unique([propertyId, conversionIdempotencyKey])
+}
+
+model PublicBookingQuote {
+  id                 String          @id @default(cuid())
+  propertyId         String
+  property           Property        @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  roomTypeId         String
+  roomType           RoomType        @relation(fields: [roomTypeId], references: [id], onDelete: Restrict)
+  checkIn            DateTime        @db.Date
+  checkOut           DateTime        @db.Date
+  adults             Int
+  children           Int             @default(0)
+  ratePerNightSatang BigInt
+  totalSatang        BigInt
+  currency           String          @default("THB")
+  snapshot           Json
+  idempotencyKey     String
+  holds              InventoryHold[]
+  createdAt          DateTime        @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, roomTypeId, checkIn, checkOut])
+  @@index([createdAt])
 }
 
 enum HoldStatus {
@@ -270,10 +328,15 @@ model Folio {
   reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Restrict)
   
   subtotal      Float       @default(0)
+  subtotalSatang BigInt?
   tax           Float       @default(0)
+  taxSatang     BigInt?
   total         Float       @default(0)
+  totalSatang   BigInt?
   paid          Float       @default(0)
+  paidSatang    BigInt?
   balance       Float       @default(0)
+  balanceSatang BigInt?
   
   status        FolioStatus @default(OPEN)
   
@@ -302,8 +365,10 @@ model Charge {
   description String
   category    ChargeCategory
   amount      Float
+  amountSatang BigInt?
   quantity    Int            @default(1)
   total       Float
+  totalSatang BigInt?
   void        Boolean        @default(false)
   voidReason  String?
   createdBy   String
@@ -330,7 +395,9 @@ model Payment {
   folioId     String
   folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
   amount      Float
+  amountSatang BigInt?
   method      PaymentMethod
+  idempotencyKey String?     @unique
   reference   String?
   referenceFingerprint String? @unique
   sourceEmailEventId String?   @unique
@@ -427,6 +494,7 @@ model BookingEmailEvent {
   checkOut    DateTime?               @db.Date
   roomType    String?
   amount      Float?
+  amountSatang BigInt?
   currency    String?
   paymentStatus String?
   proposedAction String?
@@ -530,11 +598,279 @@ model User {
   lastLogin           DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+  propertyMemberships UserPropertyMembership[]
+  assignedHousekeepingTasks HousekeepingTask[] @relation("HousekeepingTaskAssignee")
+  assignedHousekeepingIssues HousekeepingIssue[] @relation("HousekeepingIssueAssignee")
   
   @@index([email])
   @@index([username])
   @@index([lockedAt])
   @@index([role, active])
+}
+
+// Accounting V2 is additive while the operational Folio relation remains the
+// compatibility source for existing routes. New accounting writes are gated by
+// ACCOUNTING_V2_ENABLED and use satang-only, append-only ledger records.
+model AccountingFolio {
+  id                 String                    @id @default(cuid())
+  propertyId         String
+  property           Property                  @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  reservationId      String
+  reservation        Reservation               @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  folioNumber        String
+  type               AccountingFolioType       @default(GUEST)
+  currency           String                    @default("THB")
+  isPrimary          Boolean                   @default(false)
+  status             AccountingFolioStatus     @default(OPEN)
+  actorId            String
+  reason             String
+  auditEvidence      Json?
+  idempotencyKey     String
+  charges            AccountingCharge[]
+  payments           AccountingPayment[]
+  receivableEntries  AccountsReceivableEntry[]
+  journalLines       JournalLine[]
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  @@unique([propertyId, folioNumber])
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, reservationId, status])
+  @@index([reservationId, isPrimary])
+}
+
+enum AccountingFolioType {
+  GUEST
+  MASTER
+  COMPANY
+  HOUSE
+}
+
+enum AccountingFolioStatus {
+  OPEN
+  CLOSED
+}
+
+model AccountingCharge {
+  id                 String                    @id @default(cuid())
+  propertyId         String
+  folioId            String
+  folio              AccountingFolio           @relation(fields: [folioId], references: [id], onDelete: Restrict)
+  kind               AccountingChargeKind      @default(CHARGE)
+  description        String
+  amountSatang       BigInt
+  originalChargeId   String?
+  originalCharge     AccountingCharge?         @relation("AccountingChargeReversal", fields: [originalChargeId], references: [id], onDelete: Restrict)
+  reversals          AccountingCharge[]         @relation("AccountingChargeReversal")
+  actorId            String
+  reason             String
+  auditEvidence      Json?
+  idempotencyKey     String
+  createdAt          DateTime                  @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, folioId, createdAt])
+  @@index([originalChargeId])
+}
+
+enum AccountingChargeKind {
+  CHARGE
+  REVERSAL
+}
+
+model AccountingPayment {
+  id                 String                    @id @default(cuid())
+  propertyId         String
+  folioId            String
+  folio              AccountingFolio           @relation(fields: [folioId], references: [id], onDelete: Restrict)
+  kind               AccountingPaymentKind     @default(PAYMENT)
+  method             PaymentMethod
+  amountSatang       BigInt
+  reference          String?
+  cashShiftId        String?
+  cashShift          CashShift?                 @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+  originalPaymentId  String?
+  originalPayment    AccountingPayment?        @relation("AccountingPaymentReversal", fields: [originalPaymentId], references: [id], onDelete: Restrict)
+  reversals          AccountingPayment[]        @relation("AccountingPaymentReversal")
+  actorId            String
+  reason             String
+  auditEvidence      Json?
+  idempotencyKey     String
+  createdAt          DateTime                  @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, folioId, createdAt])
+  @@index([cashShiftId])
+  @@index([originalPaymentId])
+}
+
+enum AccountingPaymentKind {
+  PAYMENT
+  REFUND
+  REVERSAL
+}
+
+model CashShift {
+  id                  String             @id @default(cuid())
+  propertyId          String
+  property            Property           @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  cashierId           String
+  status              CashShiftStatus    @default(OPEN)
+  currency            String             @default("THB")
+  openingFloatSatang  BigInt
+  expectedCloseSatang BigInt?
+  actualCloseSatang   BigInt?
+  varianceSatang      BigInt?
+  openedBy            String
+  closedBy            String?
+  closeReason         String?
+  auditEvidence       Json?
+  idempotencyKey      String
+  closeIdempotencyKey String?
+  movements           CashMovement[]
+  cashPayments        AccountingPayment[]
+  openedAt            DateTime           @default(now())
+  closedAt            DateTime?
+
+  @@unique([propertyId, idempotencyKey])
+  @@unique([propertyId, closeIdempotencyKey])
+  @@index([propertyId, cashierId, status])
+}
+
+enum CashShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model CashMovement {
+  id             String                @id @default(cuid())
+  propertyId     String
+  cashShiftId    String
+  cashShift      CashShift             @relation(fields: [cashShiftId], references: [id], onDelete: Restrict)
+  type           CashMovementType
+  amountSatang   BigInt
+  actorId        String
+  reason         String
+  auditEvidence  Json?
+  idempotencyKey String
+  createdAt      DateTime              @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, cashShiftId, createdAt])
+}
+
+enum CashMovementType {
+  CASH_IN
+  CASH_OUT
+}
+
+model HouseAccount {
+  id                  String                    @id @default(cuid())
+  propertyId          String
+  property            Property                  @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  accountNumber       String
+  name                String
+  currency            String                    @default("THB")
+  status              HouseAccountStatus        @default(ACTIVE)
+  createdBy           String
+  reason              String
+  auditEvidence       Json?
+  idempotencyKey      String
+  receivableEntries   AccountsReceivableEntry[]
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@unique([propertyId, accountNumber])
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, status])
+}
+
+enum HouseAccountStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+model AccountsReceivableEntry {
+  id                    String                       @id @default(cuid())
+  propertyId            String
+  houseAccountId        String
+  houseAccount          HouseAccount                 @relation(fields: [houseAccountId], references: [id], onDelete: Restrict)
+  folioId               String?
+  folio                 AccountingFolio?             @relation(fields: [folioId], references: [id], onDelete: Restrict)
+  kind                  AccountsReceivableEntryKind
+  amountSatang          BigInt
+  originalEntryId       String?
+  originalEntry         AccountsReceivableEntry?     @relation("AccountsReceivableReversal", fields: [originalEntryId], references: [id], onDelete: Restrict)
+  reversals             AccountsReceivableEntry[]     @relation("AccountsReceivableReversal")
+  actorId               String
+  reason                String
+  auditEvidence         Json?
+  idempotencyKey        String
+  createdAt             DateTime                     @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, houseAccountId, createdAt])
+  @@index([folioId])
+  @@index([originalEntryId])
+}
+
+enum AccountsReceivableEntryKind {
+  TRANSFER
+  SETTLEMENT
+  REVERSAL
+}
+
+model JournalEntry {
+  id             String              @id @default(cuid())
+  propertyId     String
+  property       Property            @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  entryNumber    String
+  businessDate   DateTime            @db.Date
+  description    String
+  actorId        String
+  reason         String
+  auditEvidence  Json?
+  idempotencyKey String
+  lines          JournalLine[]
+  postedAt       DateTime            @default(now())
+
+  @@unique([propertyId, entryNumber])
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, businessDate, postedAt])
+}
+
+model JournalLine {
+  id              String          @id @default(cuid())
+  journalEntryId  String
+  journalEntry    JournalEntry    @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  accountCode     String
+  accountName     String
+  debitSatang     BigInt          @default(0)
+  creditSatang    BigInt          @default(0)
+  folioId         String?
+  folio           AccountingFolio? @relation(fields: [folioId], references: [id], onDelete: Restrict)
+  createdAt       DateTime        @default(now())
+
+  @@index([journalEntryId])
+  @@index([accountCode])
+  @@index([folioId])
+}
+
+model UserPropertyMembership {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  role       UserRole?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, propertyId])
+  @@index([propertyId, active])
+  @@index([userId, active])
 }
 
 enum UserRole {
@@ -561,6 +897,7 @@ model HotelOpsTask {
   dateStart          DateTime?               @db.Date
   dateEnd            DateTime?               @db.Date
   rateAmount         Float?
+  rateAmountSatang   BigInt?
   rateCurrency       String?
   availabilityRooms  Int?
   availabilityStatus String?
@@ -836,6 +1173,8 @@ model RateRule {
   endDate     DateTime?    @db.Date
   daysOfWeek  Int[]
   adjustment  Float
+  adjustmentSatang BigInt?
+  adjustmentBasisPoints Int?
   adjustmentType RateAdjustmentType @default(PERCENTAGE)
   active      Boolean      @default(true)
   createdBy   String
@@ -858,6 +1197,7 @@ model RateCalendar {
   roomTypeId String
   date       DateTime @db.Date
   rate       Float
+  rateSatang BigInt?
   minStay    Int?
   maxStay    Int?
   stopSell   Boolean  @default(false)
@@ -1005,4 +1345,202 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+model HousekeepingTask {
+  id               String                   @id @default(cuid())
+  propertyId       String
+  property         Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  roomId           String
+  room             Room                     @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  kind             HousekeepingTaskKind
+  status           HousekeepingTaskStatus   @default(OPEN)
+  priority         HousekeepingPriority     @default(NORMAL)
+  title            String
+  description      String?
+  scheduledFor     DateTime?                @db.Date
+  assignedToUserId String?
+  assignedTo       User?                    @relation("HousekeepingTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy        String
+  completedAt      DateTime?
+  statusHistory    HousekeepingTaskStatusLog[]
+  issues           HousekeepingIssue[]
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([propertyId, status, scheduledFor])
+  @@index([roomId, status])
+  @@index([assignedToUserId, status])
+}
+
+enum HousekeepingTaskKind {
+  TURNOVER
+  CLEANING
+  INSPECTION
+  DEEP_CLEAN
+  LINEN
+  MAINTENANCE_FOLLOW_UP
+  OTHER
+}
+
+enum HousekeepingTaskStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum HousekeepingPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model HousekeepingTaskStatusLog {
+  id         String                  @id @default(cuid())
+  taskId     String
+  task       HousekeepingTask        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fromStatus HousekeepingTaskStatus?
+  toStatus   HousekeepingTaskStatus
+  changedBy  String
+  reason     String
+  createdAt  DateTime                @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+model HousekeepingIssue {
+  id               String                   @id @default(cuid())
+  propertyId       String
+  property         Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  roomId           String
+  room             Room                     @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  taskId           String?
+  task             HousekeepingTask?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  category         HousekeepingIssueCategory
+  severity         HousekeepingIssueSeverity @default(MEDIUM)
+  status           HousekeepingIssueStatus   @default(OPEN)
+  title            String
+  description      String
+  assignedToUserId String?
+  assignedTo       User?                    @relation("HousekeepingIssueAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  reportedBy       String
+  resolvedAt       DateTime?
+  statusHistory    HousekeepingIssueStatusLog[]
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([propertyId, status, severity])
+  @@index([roomId, status])
+  @@index([taskId])
+  @@index([assignedToUserId, status])
+}
+
+enum HousekeepingIssueCategory {
+  HOUSEKEEPING
+  MAINTENANCE
+  SAFETY
+  DAMAGE
+  SUPPLY
+  OTHER
+}
+
+enum HousekeepingIssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum HousekeepingIssueStatus {
+  OPEN
+  ACKNOWLEDGED
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+model HousekeepingIssueStatusLog {
+  id         String                  @id @default(cuid())
+  issueId    String
+  issue      HousekeepingIssue       @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  fromStatus HousekeepingIssueStatus?
+  toStatus   HousekeepingIssueStatus
+  changedBy  String
+  reason     String
+  createdAt  DateTime                @default(now())
+
+  @@index([issueId, createdAt])
+}
+
+model NightAuditRun {
+  id                         String           @id @default(cuid())
+  propertyId                 String
+  property                   Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  businessDate               DateTime         @db.Date
+  status                     NightAuditStatus @default(RUNNING)
+  initiatedBy                String
+  reason                     String
+  overrideReason             String?
+  unresolvedArrivals         Int              @default(0)
+  unresolvedDepartures       Int              @default(0)
+  inHouseReservations        Int              @default(0)
+  openFolios                 Int              @default(0)
+  housekeepingBlockers       Int              @default(0)
+  unpostedRoomCharges        Int              @default(0)
+  chargesTotalSatang         BigInt           @default(0)
+  paymentsTotalSatang        BigInt           @default(0)
+  balanceTotalSatang         BigInt           @default(0)
+  blockers                   Json?
+  startedAt                  DateTime         @default(now())
+  completedAt                DateTime?
+  updatedAt                  DateTime         @updatedAt
+  attempts                   NightAuditAttempt[]
+
+  @@unique([propertyId, businessDate])
+  @@index([propertyId, status, businessDate])
+}
+
+model NightAuditAttempt {
+  id             String           @id @default(cuid())
+  propertyId     String
+  property       Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  runId          String
+  run            NightAuditRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  idempotencyKey String
+  status         NightAuditStatus
+  initiatedBy    String
+  reason         String
+  overrideReason String?
+  outcome        Json
+  createdAt      DateTime         @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([runId, createdAt])
+}
+
+enum NightAuditStatus {
+  RUNNING
+  BLOCKED
+  COMPLETED
+  FAILED
+}
+
+model DomainEvent {
+  id            BigInt   @id @default(autoincrement())
+  propertyId    String
+  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  actorUserId   String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([propertyId, id])
+  @@index([propertyId, eventType, createdAt])
+  @@index([aggregateType, aggregateId, id])
 }

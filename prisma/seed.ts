@@ -333,9 +333,9 @@ function usersForMode(mode: SeedMode) {
   return [...usersByLogin.values()]
 }
 
-async function seedUser(user: SeedUser, passwordHash: string) {
+async function seedUser(user: SeedUser, passwordHash: string, propertyId: string) {
   const username = normalizeSeedUsername(user.username, user.email)
-  return prisma.user.upsert({
+  const seededUser = await prisma.user.upsert({
     where: { username },
     update: {
       email: user.email || null,
@@ -355,6 +355,12 @@ async function seedUser(user: SeedUser, passwordHash: string) {
       active: true,
     },
   })
+  await prisma.userPropertyMembership.upsert({
+    where: { userId_propertyId: { userId: seededUser.id, propertyId } },
+    update: { role: seededUser.role, active: seededUser.active },
+    create: { userId: seededUser.id, propertyId, role: seededUser.role, active: seededUser.active },
+  })
+  return seededUser
 }
 
 async function disableLegacyBootstrapUsers(currentSeedEmails: Set<string>) {
@@ -531,7 +537,7 @@ async function main() {
     if (user.email) currentSeedEmails.add(user.email)
     const passwordHash = configuredPasswordHashFor(user)
     if (passwordHash) {
-      const seededUser = await seedUser(user, passwordHash)
+      const seededUser = await seedUser(user, passwordHash, property.id)
       console.log('Seeded user:', seededUser.username)
       seededUserCount += 1
     }

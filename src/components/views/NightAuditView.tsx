@@ -41,6 +41,8 @@ import type { NightAuditLog, NightAuditStep, NightAuditConfig } from '@/types/ni
 import type { BoardRoomCard } from '@/types/board'
 import { toast } from 'sonner'
 import { format, addDays } from 'date-fns'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { ServerNightAuditView } from '@/components/views/ServerNightAuditView'
 
 const AUDIT_STEPS = [
   { id: 'rollover-date', name: 'Rollover System Date', description: 'Advance system date to next day' },
@@ -71,7 +73,7 @@ function deserializeAuditLog(log: NightAuditLog): NightAuditLog {
   }
 }
 
-export function NightAuditView() {
+function DemoNightAuditView() {
   const [auditLogsRaw, setAuditLogsRaw] = useKV<NightAuditLog[]>('night-audit-logs', [])
   const [roomsRaw] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [canonicalReservationsRaw, setCanonicalReservationsRaw] = useKV<Array<Record<string, unknown>>>('reservations', [])
@@ -542,4 +544,8 @@ export function NightAuditView() {
       </Dialog>
     </div>
   )
+}
+
+export function NightAuditView() {
+  return SERVER_API_ENABLED ? <ServerNightAuditView /> : <DemoNightAuditView />
 }

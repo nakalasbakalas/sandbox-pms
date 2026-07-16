@@ -1,283 +1,367 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import {
+  ArrowsClockwise,
+  CheckCircle,
+  Database,
+  Info,
+  Warning,
+  XCircle,
+} from '@phosphor-icons/react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { CheckCircle, XCircle, Warning, ArrowsClockwise, Database } from '@phosphor-icons/react'
-import { useNavigation } from '@/hooks/use-navigation'
-import {
-  checkPmsDataStores,
-  CRITICAL_PMS_DATA_STORES,
-  OPTIONAL_PMS_DATA_STORES,
-  PMS_MODULE_INTEGRATIONS,
-  type PmsDataStoreStatus,
-} from '@/lib/pms-data-stores'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { SERVER_API_ENABLED, pmsApi } from '@/lib/pms-api-client'
+import { getServerSetupStatus, type ServerSetupStatus } from '@/lib/server-auth-client'
+import { getSystemCapabilityRegistry } from '@/lib/system-capabilities-client'
+import type {
+  SystemCapability,
+  SystemCapabilityRegistry,
+  SystemCapabilityStatus,
+} from '@/types/system-capabilities'
 
-interface IntegrationStatus {
-  module: string
-  connections: string[]
-  status: 'CONNECTED' | 'PARTIAL' | 'DISCONNECTED'
-  issues: string[]
+type CapabilityState = 'VERIFIED' | 'LIMITED' | 'UNAVAILABLE' | 'UNKNOWN'
+
+type HealthPayload = {
+  ok: boolean
+  service?: string
+  environment?: string
+  timestamp?: string
+  database?: {
+    configured: boolean
+    ok: boolean | null
+    error?: string
+  }
+  integrations?: {
+    lineWebhookConfigured?: boolean
+    whatsappWebhookConfigured?: boolean
+    hotelOpsEmailCommandIntake?: { enabled?: boolean }
+    hotelOpsWhatsAppCommandIntake?: { enabled?: boolean }
+  }
 }
 
-function statusIcon(status: PmsDataStoreStatus['status']) {
-  if (status === 'OK') return <CheckCircle className="text-green-600" size={20} />
-  if (status === 'WARNING') return <Warning className="text-yellow-600" size={20} />
-  return <XCircle className="text-red-600" size={20} />
+type StatusSnapshot = {
+  health: HealthPayload | null
+  setup: ServerSetupStatus | null
+  registry: SystemCapabilityRegistry | null
+  errors: string[]
+  checkedAt: Date
 }
 
-function connectionVariant(status: IntegrationStatus['status']) {
-  if (status === 'CONNECTED') return 'default'
-  if (status === 'PARTIAL') return 'secondary'
-  return 'destructive'
+type Capability = {
+  name: string
+  category: 'Infrastructure' | 'Operations' | 'Finance' | 'Integrations'
+  state: CapabilityState
+  evidence: string
+  boundary?: string
 }
 
-function healthVariant(health: 'HEALTHY' | 'WARNING' | 'CRITICAL') {
-  if (health === 'HEALTHY') return 'default'
-  if (health === 'WARNING') return 'secondary'
-  return 'destructive'
+type RegistrySection = 'operations' | 'finance' | 'integrations'
+
+const CAPABILITY_NAMES: Record<string, string> = {
+  today: 'Today command center',
+  reservations: 'Reservations',
+  frontDesk: 'Front desk and booking board',
+  housekeeping: 'Housekeeping',
+  rates: 'Rates',
+  nightAudit: 'Night audit',
+  messaging: 'Messaging',
+  realtime: 'Real-time server events',
+  accountingV2: 'Accounting V2',
+  onlinePayments: 'Online payments',
+  bookingEmail: 'Booking Email',
+  directBooking: 'Direct booking',
+  ota: 'OTA adapters',
+  ical: 'iCal channel feeds',
 }
 
-function StoreStatusRow({ store }: { store: PmsDataStoreStatus }) {
-  return (
-    <div className="flex items-start justify-between rounded-lg border p-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{store.name}</span>
-          <Badge variant="outline" className="text-xs">
-            {store.recordCount} records
-          </Badge>
-        </div>
-        <div className="mt-1 text-xs text-muted-foreground">{store.key}</div>
-        {store.message && (
-          <div className={store.status === 'ERROR' ? 'mt-1 text-xs text-yellow-600' : 'mt-1 text-xs text-muted-foreground'}>
-            {store.message}
-          </div>
-        )}
-      </div>
-      <div className="ml-3 shrink-0">{statusIcon(store.status)}</div>
-    </div>
-  )
+const SECTION_NAMES: Record<RegistrySection, Capability['category']> = {
+  operations: 'Operations',
+  finance: 'Finance',
+  integrations: 'Integrations',
 }
 
-function StoreGroup({
-  title,
-  statuses,
-  keys,
-}: {
-  title: string
-  statuses: PmsDataStoreStatus[]
-  keys: string[]
-}) {
-  const rows = statuses.filter((status) => keys.includes(status.key))
+function capabilityVariant(state: CapabilityState) {
+  if (state === 'VERIFIED') return 'default'
+  if (state === 'LIMITED') return 'secondary'
+  if (state === 'UNAVAILABLE') return 'destructive'
+  return 'outline'
+}
 
-  return (
-    <div className="space-y-3">
-      <div className="text-sm font-semibold">{title}</div>
-      {rows.map((store) => (
-        <StoreStatusRow key={store.key} store={store} />
-      ))}
-    </div>
+function CapabilityIcon({ state }: { state: CapabilityState }) {
+  if (state === 'VERIFIED') return <CheckCircle className="text-emerald-600" size={22} weight="fill" />
+  if (state === 'LIMITED') return <Warning className="text-amber-600" size={22} weight="fill" />
+  if (state === 'UNAVAILABLE') return <XCircle className="text-rose-600" size={22} weight="fill" />
+  return <Info className="text-slate-500" size={22} weight="fill" />
+}
+
+function fulfilled<T>(result: PromiseSettledResult<T>): T | null {
+  return result.status === 'fulfilled' ? result.value : null
+}
+
+function resultError(label: string, result: PromiseSettledResult<unknown>) {
+  if (result.status === 'fulfilled') return null
+  return `${label}: ${result.reason instanceof Error ? result.reason.message : 'request failed'}`
+}
+
+function humanizeCapabilityName(key: string) {
+  return CAPABILITY_NAMES[key] || key
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, (value) => value.toUpperCase())
+}
+
+function registryCapabilityState(status: SystemCapabilityStatus, section: RegistrySection): CapabilityState {
+  if (status === 'available') return 'VERIFIED'
+  if (status === 'enabled') return section === 'integrations' ? 'LIMITED' : 'VERIFIED'
+  if (status === 'disabled') return 'UNAVAILABLE'
+  return 'LIMITED'
+}
+
+function registryCapabilityBoundary(section: RegistrySection, capability: SystemCapability) {
+  const boundaries: string[] = []
+
+  if (capability.writeMode === 'review-gated') {
+    boundaries.push('Changes require staff review or approval before they become operational.')
+  } else if (capability.writeMode === 'dry-run') {
+    boundaries.push('Dry-run only; no live provider write capability is claimed.')
+  } else if (capability.writeMode === 'disabled') {
+    boundaries.push('This capability is disabled or not implemented.')
+  } else if (capability.writeMode === 'controlled') {
+    boundaries.push('Writes must pass authenticated backend policy and audit controls.')
+  }
+
+  if (section === 'integrations' && !capability.providerProof) {
+    boundaries.push('The registry does not prove live provider access, successful provider writes, or owner approval.')
+  }
+
+  return boundaries.join(' ')
+}
+
+function registryCapabilities(registry: SystemCapabilityRegistry | null): Capability[] {
+  if (!registry) return []
+
+  return (Object.keys(SECTION_NAMES) as RegistrySection[]).flatMap((section) =>
+    Object.entries(registry[section]).map(([key, capability]) => ({
+      name: humanizeCapabilityName(key),
+      category: SECTION_NAMES[section],
+      state: registryCapabilityState(capability.status, section),
+      evidence: capability.evidence,
+      boundary: registryCapabilityBoundary(section, capability),
+    })),
   )
 }
 
 export function SystemStatusView() {
-  const [dataStoreStatuses, setDataStoreStatuses] = useState<PmsDataStoreStatus[]>([])
-  const [integrationStatuses, setIntegrationStatuses] = useState<IntegrationStatus[]>([])
+  const [snapshot, setSnapshot] = useState<StatusSnapshot | null>(null)
   const [isChecking, setIsChecking] = useState(false)
-  const { navigate } = useNavigation()
 
-  const checkIntegrations = useCallback((dataStatuses: PmsDataStoreStatus[]) => {
-    const integrations: IntegrationStatus[] = PMS_MODULE_INTEGRATIONS.map((integration) => ({
-      ...integration,
-      status: 'CONNECTED',
-      issues: [],
-    }))
-
-    integrations.forEach((integration) => {
-      const missingStores = integration.connections.filter((conn) => {
-        const storeStatus = dataStatuses.find((status) => status.key === conn)
-        return !storeStatus || !storeStatus.exists
+  const refreshStatus = useCallback(async () => {
+    if (!SERVER_API_ENABLED) {
+      setSnapshot({
+        health: null,
+        setup: null,
+        registry: null,
+        errors: ['PMS API server mode is disabled. Browser demo data is not operational evidence.'],
+        checkedAt: new Date(),
       })
+      return
+    }
 
-      if (missingStores.length > 0) {
-        integration.status = 'PARTIAL'
-        integration.issues.push(`Missing data stores: ${missingStores.join(', ')}`)
-      }
-
-      const errorStores = integration.connections.filter((conn) => {
-        const storeStatus = dataStatuses.find((status) => status.key === conn)
-        return storeStatus?.status === 'ERROR'
-      })
-
-      if (errorStores.length > 0) {
-        integration.status = 'DISCONNECTED'
-        integration.issues.push(`Error in data stores: ${errorStores.join(', ')}`)
-      }
-    })
-
-    setIntegrationStatuses(integrations)
-  }, [])
-
-  const checkDataStores = useCallback(async () => {
     setIsChecking(true)
     try {
-      const statuses = await checkPmsDataStores({ repair: true })
-      setDataStoreStatuses(statuses)
-      checkIntegrations(statuses)
+      const [healthResult, setupResult, registryResult] = await Promise.allSettled([
+        pmsApi<HealthPayload>('/api/health?deep=1', null),
+        getServerSetupStatus(),
+        getSystemCapabilityRegistry(),
+      ])
+      setSnapshot({
+        health: fulfilled(healthResult),
+        setup: fulfilled(setupResult),
+        registry: fulfilled(registryResult),
+        errors: [
+          resultError('Backend health', healthResult),
+          resultError('Property setup', setupResult),
+          resultError('Capability registry', registryResult),
+        ].filter((value): value is string => Boolean(value)),
+        checkedAt: new Date(),
+      })
     } finally {
       setIsChecking(false)
     }
-  }, [checkIntegrations])
+  }, [])
 
   useEffect(() => {
-    void checkDataStores()
-  }, [checkDataStores])
+    void refreshStatus()
+  }, [refreshStatus])
 
-  const overallHealth = useMemo(() => {
-    if (dataStoreStatuses.every((status) => status.status === 'OK')) return 'HEALTHY'
-    if (dataStoreStatuses.some((status) => status.status === 'ERROR')) return 'CRITICAL'
-    return 'WARNING'
-  }, [dataStoreStatuses])
+  const capabilities = useMemo<Capability[]>(() => {
+    if (!SERVER_API_ENABLED) {
+      return [
+        {
+          name: 'Operational PMS backend',
+          category: 'Infrastructure',
+          state: 'UNAVAILABLE',
+          evidence: 'This build is running without VITE_PMS_API_MODE=server.',
+          boundary: 'Local browser data is demo-only and is not counted as connected or healthy.',
+        },
+      ]
+    }
 
-  const criticalKeys = CRITICAL_PMS_DATA_STORES.map((store) => store.key)
-  const optionalKeys = OPTIONAL_PMS_DATA_STORES.map((store) => store.key)
-  const healthyStoreCount = dataStoreStatuses.filter((status) => status.status === 'OK').length
-  const connectedModuleCount = integrationStatuses.filter((integration) => integration.status === 'CONNECTED').length
-  const totalRecordCount = dataStoreStatuses.reduce((sum, status) => sum + status.recordCount, 0)
+    const health = snapshot?.health
+    const database = health?.database
+    const setup = snapshot?.setup
+    return [
+      {
+        name: 'PMS application server',
+        category: 'Infrastructure',
+        state: health?.ok ? 'VERIFIED' : snapshot ? 'UNAVAILABLE' : 'UNKNOWN',
+        evidence: health?.ok
+          ? `Authenticated application is responding in ${health.environment || 'an unspecified environment'}.`
+          : 'No successful backend health response was received.',
+      },
+      {
+        name: 'PostgreSQL database',
+        category: 'Infrastructure',
+        state: database?.configured && database.ok === true
+          ? 'VERIFIED'
+          : database?.configured
+            ? 'UNAVAILABLE'
+            : snapshot
+              ? 'UNAVAILABLE'
+              : 'UNKNOWN',
+        evidence: database?.ok === true
+          ? 'The backend completed a live database query during this check.'
+          : database?.configured
+            ? 'The backend is configured for a database, but the live query did not pass.'
+            : 'No backend database configuration was confirmed.',
+      },
+      {
+        name: 'Property and staff setup',
+        category: 'Infrastructure',
+        state: setup?.hasProperty && setup.hasUsers && !setup.needsSetup
+          ? 'VERIFIED'
+          : setup
+            ? 'UNAVAILABLE'
+            : 'UNKNOWN',
+        evidence: setup?.hasProperty && setup.hasUsers
+          ? `${setup.propertyName || 'The PMS property'} and at least one staff user exist in the backend.`
+          : 'Backend property and staff setup is incomplete or could not be verified.',
+      },
+      ...registryCapabilities(snapshot?.registry || null),
+    ]
+  }, [snapshot])
+
+  const counts = useMemo(() => ({
+    verified: capabilities.filter((capability) => capability.state === 'VERIFIED').length,
+    limited: capabilities.filter((capability) => capability.state === 'LIMITED').length,
+    unavailable: capabilities.filter((capability) => capability.state === 'UNAVAILABLE').length,
+  }), [capabilities])
+
+  const coreOperational = Boolean(
+    SERVER_API_ENABLED &&
+    snapshot?.health?.ok &&
+    snapshot.health.database?.ok === true &&
+    snapshot.setup?.hasProperty &&
+    snapshot.setup.hasUsers &&
+    !snapshot.setup.needsSetup &&
+    snapshot.registry?.sourceOfTruth === 'server' &&
+    ['today', 'reservations', 'frontDesk'].every(
+      (key) => snapshot.registry?.operations[key]?.status === 'available',
+    ),
+  )
 
   return (
     <div className="container mx-auto space-y-6 p-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <h1 className="text-3xl font-bold">System Status & Wiring</h1>
-          <p className="mt-1 text-muted-foreground">
-            Complete integration status for all modules and operations
+          <h1 className="text-3xl font-bold">System Status &amp; Capabilities</h1>
+          <p className="mt-1 max-w-3xl text-muted-foreground">
+            Canonical backend capability registry with live health and setup evidence. Browser storage is never used as connectivity proof.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate('data-backup')}>
-            <Database className="mr-2" />
-            Backup Data
-          </Button>
-          <Button onClick={checkDataStores} disabled={isChecking}>
-            <ArrowsClockwise className={isChecking ? 'animate-spin' : ''} />
-            Refresh Status
-          </Button>
-        </div>
+        <Button onClick={() => void refreshStatus()} disabled={isChecking || !SERVER_API_ENABLED}>
+          <ArrowsClockwise className={isChecking ? 'animate-spin' : ''} />
+          Refresh backend evidence
+        </Button>
       </div>
 
-      <Card>
+      <Card className={coreOperational ? 'border-emerald-200' : 'border-amber-300'}>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Overall System Health</CardTitle>
-            <Badge variant={healthVariant(overallHealth)}>{overallHealth}</Badge>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle>Core PMS</CardTitle>
+              <CardDescription>Health, setup, and registry-backed operational prerequisites</CardDescription>
+            </div>
+            <Badge variant={coreOperational ? 'default' : 'secondary'}>
+              {coreOperational ? 'CORE BACKEND AVAILABLE' : SERVER_API_ENABLED ? 'ATTENTION REQUIRED' : 'DEMO ONLY'}
+            </Badge>
           </div>
-          <CardDescription>
-            System-wide integration and data store status
-          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-bold">{healthyStoreCount}</div>
-              <div className="text-sm text-muted-foreground">Healthy Stores</div>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="rounded-md border bg-emerald-50 p-3">
+              <div className="text-2xl font-bold text-emerald-800">{counts.verified}</div>
+              <div className="text-xs text-emerald-800">Verified now</div>
             </div>
-            <div>
-              <div className="text-2xl font-bold">{connectedModuleCount}</div>
-              <div className="text-sm text-muted-foreground">Connected Modules</div>
+            <div className="rounded-md border bg-amber-50 p-3">
+              <div className="text-2xl font-bold text-amber-800">{counts.limited}</div>
+              <div className="text-xs text-amber-800">Limited/manual</div>
             </div>
-            <div>
-              <div className="text-2xl font-bold">{totalRecordCount}</div>
-              <div className="text-sm text-muted-foreground">Total Records</div>
+            <div className="rounded-md border bg-rose-50 p-3">
+              <div className="text-2xl font-bold text-rose-800">{counts.unavailable}</div>
+              <div className="text-xs text-rose-800">Unavailable</div>
             </div>
           </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Database size={16} />
+            Checked {snapshot?.checkedAt.toLocaleString() || 'not yet'}
+            {snapshot?.health?.service ? ` · ${snapshot.health.service}` : ''}
+            {snapshot?.registry?.generatedAt ? ` · Registry ${new Date(snapshot.registry.generatedAt).toLocaleString()}` : ''}
+          </div>
+          {snapshot?.errors.map((error) => (
+            <div key={error} className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {error}
+            </div>
+          ))}
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Data Store Status</CardTitle>
-            <CardDescription>
-              Critical and optional data stores used across the system
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[400px]">
-              <div className="space-y-4">
-                <StoreGroup title="Critical Data Stores" statuses={dataStoreStatuses} keys={criticalKeys} />
-                <Separator />
-                <StoreGroup title="Optional Data Stores" statuses={dataStoreStatuses} keys={optionalKeys} />
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Module Integration Status</CardTitle>
-            <CardDescription>
-              Data flow connections between system modules
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[400px]">
-              <div className="space-y-3">
-                {integrationStatuses.map((integration) => (
-                  <div key={integration.module} className="rounded-lg border p-3">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <span className="font-medium">{integration.module}</span>
-                      <Badge variant={connectionVariant(integration.status)}>
-                        {integration.status}
-                      </Badge>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Data stores: {integration.connections.join(', ')}
-                    </div>
-                    {integration.issues.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {integration.issues.map((issue) => (
-                          <div key={issue} className="text-xs text-yellow-600">
-                            Warning: {issue}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {capabilities.map((capability) => (
+          <Card key={capability.name}>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <CapabilityIcon state={capability.state} />
+                  <div>
+                    <CardTitle className="text-base">{capability.name}</CardTitle>
+                    <p className="mt-1 text-xs text-muted-foreground">{capability.category}</p>
                   </div>
-                ))}
+                </div>
+                <Badge variant={capabilityVariant(capability.state)}>{capability.state}</Badge>
               </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <p>{capability.evidence}</p>
+              {capability.boundary && (
+                <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                  Boundary: {capability.boundary}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Complete Wiring Overview</CardTitle>
-          <CardDescription>
-            Summary of implemented integrations and operational boundaries
-          </CardDescription>
+          <CardTitle>Evidence meaning</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {[
-              ['Check-In/Check-Out', 'Updates Board, Housekeeping, Cashier, and local channel inventory'],
-              ['Reservation Management', 'Syncs to Board timeline, local inventory, and iCal blocks'],
-              ['Bulk Operations', 'Edit/assign multiple reservations with full sync'],
-              ['Payment Processing', 'Updates folios, reservations, and accounting dashboard'],
-              ['Housekeeping Workflow', 'Room status syncs to Board with auto-notifications'],
-              ['Channel Sync', 'iCal blocks and reservation pulls only; OTA rates and restrictions remain manual'],
-              ['Night Audit', 'Automated daily processing across all modules'],
-              ['Automated Messaging', 'Draft/record workflows are local until server messaging providers are configured'],
-              ['Print Functions', 'Housekeeping, Reservations, Folios, and Receipts'],
-            ].map(([title, description]) => (
-              <div key={title} className="rounded-lg border p-4">
-                <div className="mb-2 font-semibold">{title}</div>
-                <div className="text-sm text-muted-foreground">{description}</div>
-              </div>
-            ))}
+        <CardContent className="grid gap-3 text-sm md:grid-cols-3">
+          <div><strong>Verified</strong> means the server registry reports an internal capability available or a supporting health/setup check passed.</div>
+          <div><strong>Limited</strong> means a manual, dry-run, review-only, or otherwise bounded capability exists.</div>
+          <div><strong>Unavailable</strong> means the capability is disabled, unimplemented, or failed its current check.</div>
+          <div className="md:col-span-3 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            Provider proof is separate: configured credentials or enabled flags do not prove live access, successful writes, or owner approval.
           </div>
         </CardContent>
       </Card>

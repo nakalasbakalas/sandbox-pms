@@ -16,6 +16,15 @@ import {
 } from './pms-domain.mjs'
 import { canPerformAction } from './rbac.mjs'
 import { createPasswordHash } from './security.mjs'
+import { recordDomainEvent } from './domain-events.mjs'
+import {
+  bahtToSatang,
+  dualWriteMoney,
+  readMoneySatang,
+  resolveMoneyInput,
+  satangToApiString,
+  sumMoneySatang,
+} from './money.mjs'
 
 const reservationInclude = {
   guest: true,
@@ -70,6 +79,25 @@ function normalizePaymentReferenceFingerprint(method, reference) {
   const normalizedReference = normalizeNullableString(reference)
   if (!normalizedReference) return null
   return `${normalizePaymentMethod(method)}:${normalizedReference.toUpperCase().replace(/\s+/g, '')}`
+}
+
+function normalizePaymentIdempotencyKey(value) {
+  const key = normalizeNullableString(value)
+  if (!key) return null
+  if (key.length > 200) throw new PmsValidationError('Payment idempotency key must be 200 characters or fewer.')
+  return key
+}
+
+function requiredMoneyInput(input, legacyField = 'amount', satangField = `${legacyField}Satang`) {
+  try {
+    return resolveMoneyInput(input, legacyField, satangField)
+  } catch (error) {
+    throw new PmsValidationError(error instanceof Error ? error.message : 'Enter a valid money amount.')
+  }
+}
+
+function moneyDataFromBaht(legacyField, satangField, value) {
+  return dualWriteMoney(legacyField, satangField, bahtToSatang(value, legacyField))
 }
 
 function pricingRulesFor(property, roomType) {
@@ -296,8 +324,9 @@ function validateSetupPayload(input) {
       defaultCheckOut: setupString(property.defaultCheckOut, 'Default check-out time'),
       currency: setupString(property.currency, 'Currency').toUpperCase(),
       taxRate: 0,
-      extraGuestFee: setupNumber(roomTypes[0]?.extraGuestFee ?? 0, 'Extra guest fee'),
-      childFee: setupNumber(roomTypes[0]?.childFee ?? 0, 'Child fee'),
+      taxRateBasisPoints: 0,
+      ...moneyDataFromBaht('extraGuestFee', 'extraGuestFeeSatang', setupNumber(roomTypes[0]?.extraGuestFee ?? 0, 'Extra guest fee')),
+      ...moneyDataFromBaht('childFee', 'childFeeSatang', setupNumber(roomTypes[0]?.childFee ?? 0, 'Child fee')),
     },
     roomTypes,
     rooms,
@@ -1124,7 +1153,9 @@ async function buildBookingEmailEventData(tx, source, input, existingEventId = u
     checkIn: parsed.details.checkIn ? dateFromKey(parsed.details.checkIn) : null,
     checkOut: parsed.details.checkOut ? dateFromKey(parsed.details.checkOut) : null,
     roomType: parsed.details.roomType || null,
-    amount: parsed.details.amount ?? null,
+    ...(parsed.details.amount === undefined || parsed.details.amount === null
+      ? { amount: null, amountSatang: null }
+      : moneyDataFromBaht('amount', 'amountSatang', parsed.details.amount)),
     currency: parsed.details.currency || null,
     paymentStatus: parsed.details.paymentStatus || null,
     proposedAction: normalizeNullableString(input.proposedAction) || proposedBookingEmailAction(parsed.eventType),
@@ -1479,19 +1510,19 @@ async function recomputeFolio(tx, folioId) {
     tx.charge.findMany({ where: { folioId, void: false } }),
     tx.payment.findMany({ where: { folioId } }),
   ])
-  const subtotal = roundMoney(charges.reduce((sum, charge) => sum + charge.total, 0))
-  const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0))
-  const balance = roundMoney(subtotal - paid)
+  const subtotalSatang = sumMoneySatang(charges, 'total')
+  const paidSatang = sumMoneySatang(payments, 'amount')
+  const balanceSatang = subtotalSatang - paidSatang
 
   return tx.folio.update({
     where: { id: folioId },
     data: {
-      subtotal,
-      tax: 0,
-      total: subtotal,
-      paid,
-      balance,
-      status: balance <= 0 ? 'CLOSED' : 'OPEN',
+      ...dualWriteMoney('subtotal', 'subtotalSatang', subtotalSatang),
+      ...dualWriteMoney('tax', 'taxSatang', 0n),
+      ...dualWriteMoney('total', 'totalSatang', subtotalSatang),
+      ...dualWriteMoney('paid', 'paidSatang', paidSatang),
+      ...dualWriteMoney('balance', 'balanceSatang', balanceSatang),
+      status: balanceSatang <= 0n ? 'CLOSED' : 'OPEN',
     },
     include: {
       charges: true,
@@ -1508,8 +1539,8 @@ async function recomputeFolio(tx, folioId) {
 }
 
 async function recordPaymentInTransaction(tx, folioId, input, actor) {
-  const amount = Number(input?.amount)
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const { satang: amountSatang } = requiredMoneyInput(input)
+  if (amountSatang <= 0n) {
     throw new PmsValidationError('Payment amount must be greater than zero.')
   }
   const method = normalizePaymentMethod(input.method)
@@ -1518,9 +1549,33 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
     throw new PmsValidationError('Payment reference is required for card, bank transfer, and online payments.')
   }
   const referenceFingerprint = normalizePaymentReferenceFingerprint(method, reference)
-  const folio = await tx.folio.findUnique({ where: { id: folioId } })
+  const idempotencyKey = normalizePaymentIdempotencyKey(input.idempotencyKey)
+
+  if (idempotencyKey) {
+    const existingPayment = await tx.payment.findUnique({ where: { idempotencyKey } })
+    if (existingPayment) {
+      const sameIntent = existingPayment.folioId === folioId
+        && readMoneySatang(existingPayment, 'amount') === amountSatang
+        && existingPayment.method === method
+        && existingPayment.referenceFingerprint === referenceFingerprint
+      if (!sameIntent) {
+        throw new PmsValidationError('This payment idempotency key was already used for a different payment.', 409)
+      }
+      const existingFolio = await tx.folio.findUnique({
+        where: { id: folioId },
+        include: { charges: true, payments: true },
+      })
+      return { payment: existingPayment, folio: existingFolio, idempotentReplay: true }
+    }
+  }
+
+  const folio = await tx.folio.findUnique({ where: { id: folioId }, include: { reservation: true } })
   if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-  if (amount > folio.balance && !input.allowOverpayment) {
+  if (folio.status !== 'OPEN') {
+    throw new PmsValidationError('Payments can only be recorded on an open folio.', 409)
+  }
+  const balanceSatang = readMoneySatang(folio, 'balance')
+  if (amountSatang > balanceSatang && !input.allowOverpayment) {
     throw new PmsValidationError('Payment cannot exceed the remaining balance.')
   }
   if (referenceFingerprint) {
@@ -1540,18 +1595,39 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   const payment = await tx.payment.create({
     data: {
       folioId: folio.id,
-      amount: roundMoney(amount),
+      ...dualWriteMoney('amount', 'amountSatang', amountSatang),
       method,
       reference,
       referenceFingerprint,
+      idempotencyKey,
       sourceEmailEventId,
       notes: normalizeNullableString(input.notes),
       processedBy: actorName(actor),
     },
   })
   const updatedFolio = await recomputeFolio(tx, folio.id)
-  await createAudit(tx, actor, 'PAYMENT_CREATED', 'payment', payment.id, { folioId: folio.id, amount: payment.amount, method, sourceEmailEventId })
+  await createAudit(tx, actor, 'PAYMENT_CREATED', 'payment', payment.id, {
+    folioId: folio.id,
+    amount: payment.amount,
+    amountSatang: satangToApiString(amountSatang),
+    method,
+    sourceEmailEventId,
+    idempotencyKey: idempotencyKey ? createHash('sha256').update(idempotencyKey).digest('hex') : null,
+  })
+  const paymentPropertyId = folio.reservation?.propertyId || (await getProperty(tx)).id
+  await emitOperationalEvent(tx, paymentPropertyId, 'PAYMENT_CREATED', 'payment', payment.id, actor, { folioId: folio.id })
   return { payment, folio: updatedFolio }
+}
+
+async function emitOperationalEvent(tx, propertyId, eventType, aggregateType, aggregateId, actor, metadata = undefined) {
+  return recordDomainEvent(tx, {
+    propertyId,
+    eventType,
+    aggregateType,
+    aggregateId,
+    actorUserId: actor?.id,
+    metadata,
+  })
 }
 
 export async function authenticateUser(prisma, identity, password) {
@@ -1638,24 +1714,37 @@ export async function createUser(prisma, input, actor) {
     throw new PmsValidationError(email && duplicate.email === email ? 'A user with this email already exists.' : 'A user with this username already exists.', 409)
   }
 
-  const user = await prisma.user.create({
-    data: {
-      email,
-      username,
-      passwordHash: createPasswordHash(password),
-      firstName,
-      lastName,
-      role,
-      active: input?.active === undefined ? true : Boolean(input.active),
-    },
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const user = await tx.user.create({
+      data: {
+        email,
+        username,
+        passwordHash: createPasswordHash(password),
+        firstName,
+        lastName,
+        role,
+        active: input?.active === undefined ? true : Boolean(input.active),
+      },
+    })
+    await tx.userPropertyMembership.create({
+      data: { userId: user.id, propertyId: property.id, role: user.role, active: user.active },
+    })
+    await createAudit(tx, actor, 'USER_CREATED', 'user', user.id, {
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      active: user.active,
+    })
+    await recordDomainEvent(tx, {
+      propertyId: property.id,
+      eventType: 'USER_CREATED',
+      aggregateType: 'user',
+      aggregateId: user.id,
+      actorUserId: actor?.id,
+    })
+    return user
   })
-  await createAudit(prisma, actor, 'USER_CREATED', 'user', user.id, {
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    active: user.active,
-  })
-  return user
 }
 
 export async function updateUser(prisma, userId, input, actor) {
@@ -1697,18 +1786,30 @@ export async function updateUser(prisma, userId, input, actor) {
     throw new PmsValidationError(nextEmail && duplicate.email === nextEmail ? 'A user with this email already exists.' : 'A user with this username already exists.', 409)
   }
 
-  const user = await prisma.user.update({
-    where: { id: existing.id },
-    data,
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const user = await tx.user.update({ where: { id: existing.id }, data })
+    await tx.userPropertyMembership.upsert({
+      where: { userId_propertyId: { userId: user.id, propertyId: property.id } },
+      create: { userId: user.id, propertyId: property.id, role: user.role, active: user.active },
+      update: { role: user.role, active: user.active },
+    })
+    await createAudit(tx, actor, 'USER_UPDATED', 'user', user.id, {
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      active: user.active,
+      passwordChanged: Boolean(password),
+    })
+    await recordDomainEvent(tx, {
+      propertyId: property.id,
+      eventType: 'USER_UPDATED',
+      aggregateType: 'user',
+      aggregateId: user.id,
+      actorUserId: actor?.id,
+    })
+    return user
   })
-  await createAudit(prisma, actor, 'USER_UPDATED', 'user', user.id, {
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    active: user.active,
-    passwordChanged: Boolean(password),
-  })
-  return user
 }
 
 export async function deactivateUser(prisma, userId, actor) {
@@ -1717,16 +1818,27 @@ export async function deactivateUser(prisma, userId, actor) {
   }
   const existing = await prisma.user.findUnique({ where: { id: userId } })
   if (!existing) throw new PmsValidationError('User was not found.', 404)
-  const user = await prisma.user.update({
-    where: { id: existing.id },
-    data: { active: false },
+  return prisma.$transaction(async (tx) => {
+    const property = await getProperty(tx)
+    const user = await tx.user.update({ where: { id: existing.id }, data: { active: false } })
+    await tx.userPropertyMembership.updateMany({
+      where: { userId: user.id, propertyId: property.id },
+      data: { active: false },
+    })
+    await createAudit(tx, actor, 'USER_DEACTIVATED', 'user', user.id, {
+      username: user.username,
+      email: user.email,
+      role: user.role,
+    })
+    await recordDomainEvent(tx, {
+      propertyId: property.id,
+      eventType: 'USER_DEACTIVATED',
+      aggregateType: 'user',
+      aggregateId: user.id,
+      actorUserId: actor?.id,
+    })
+    return user
   })
-  await createAudit(prisma, actor, 'USER_DEACTIVATED', 'user', user.id, {
-    username: user.username,
-    email: user.email,
-    role: user.role,
-  })
-  return user
 }
 
 export async function completeInitialSetup(prisma, input) {
@@ -1771,7 +1883,7 @@ export async function completeInitialSetup(prisma, input) {
           code: setupRoomTypeCode(roomType, index, usedCodes),
           name: setupString(roomType.name, 'Room type name'),
           description: null,
-          baseRate: setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 }),
+          ...moneyDataFromBaht('baseRate', 'baseRateSatang', setupNumber(rate?.baseRate, `Base rate for ${roomType.name}`, { min: 1 })),
           maxOccupancy: setupNumber(roomType.maxOccupancy, 'Max occupancy', { min: 1 }),
           standardOcc: setupNumber(roomType.baseOccupancy, 'Base occupancy', { min: 1 }),
         },
@@ -1811,10 +1923,21 @@ export async function completeInitialSetup(prisma, input) {
       },
     })
 
+    await tx.userPropertyMembership.create({
+      data: { userId: admin.id, propertyId: property.id, role: 'ADMIN', active: true },
+    })
+
     await createAudit(tx, admin, 'INITIAL_SETUP_COMPLETED', 'property', property.id, {
       propertyName: property.name,
       roomTypes: setup.roomTypes.length,
       rooms: setup.rooms.length,
+    })
+    await recordDomainEvent(tx, {
+      propertyId: property.id,
+      eventType: 'INITIAL_SETUP_COMPLETED',
+      aggregateType: 'property',
+      aggregateId: property.id,
+      actorUserId: admin.id,
     })
 
     return { property, admin }
@@ -1826,7 +1949,9 @@ export async function getAuthenticatedUser(prisma, session) {
 }
 
 export async function listReservations(prisma) {
+  const property = await getProperty(prisma)
   return prisma.reservation.findMany({
+    where: { propertyId: property.id },
     include: reservationInclude,
     orderBy: [{ checkIn: 'asc' }, { createdAt: 'desc' }],
   })
@@ -1897,9 +2022,9 @@ export async function updateReservation(prisma, reservationId, input, actor) {
         adults: Number(adults),
         children: Number(children || 0),
         childAges: Array.isArray(childAges) ? childAges.map(Number) : [],
-        ratePerNight: Number(ratePerNight),
-        totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
+        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(ratePerNight)),
+        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
+        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
         source: input.source || current.source,
         channelRef: input.channelRef ?? current.channelRef,
         sourceEmailEventId: input.sourceEmailEventId === undefined ? current.sourceEmailEventId : normalizeNullableString(input.sourceEmailEventId),
@@ -1925,9 +2050,9 @@ export async function updateReservation(prisma, reservationId, input, actor) {
           where: { id: roomCharge.id },
           data: {
             date: dateFromKey(checkInKey),
-            amount: Number(ratePerNight),
+            ...moneyDataFromBaht('amount', 'amountSatang', Number(ratePerNight)),
             quantity: pricing.nights,
-            total: pricing.total,
+            ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
           },
         })
       }
@@ -1936,6 +2061,7 @@ export async function updateReservation(prisma, reservationId, input, actor) {
 
     await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: input })
     await createAudit(tx, actor, 'MODIFIED', 'reservation', current.id, input)
+    await emitOperationalEvent(tx, current.propertyId, 'RESERVATION_UPDATED', 'reservation', current.id, actor)
     return updated
   })
 }
@@ -1969,7 +2095,7 @@ function normalizeSetupRoomTypeInput(input, existing = undefined) {
     code: normalizeSetupRoomTypeCode(input),
     name,
     description: setupString(input?.description ?? existing?.description, 'Room type description', false),
-    baseRate,
+    ...moneyDataFromBaht('baseRate', 'baseRateSatang', baseRate),
     maxOccupancy,
     standardOcc,
   }
@@ -2234,9 +2360,9 @@ async function createReservationInTransaction(tx, input, actor) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ratePerNight: Number(input.ratePerNight),
-        totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
+        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(input.ratePerNight)),
+        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
+        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
         depositPaid: false,
         source: input.source || 'DIRECT',
         channelRef: input.channelRef || null,
@@ -2262,11 +2388,11 @@ async function createReservationInTransaction(tx, input, actor) {
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        subtotal: pricing.total,
-        tax: 0,
-        total: pricing.total,
-        paid: 0,
-        balance: pricing.total,
+        ...moneyDataFromBaht('subtotal', 'subtotalSatang', pricing.total),
+        ...moneyDataFromBaht('tax', 'taxSatang', 0),
+        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...moneyDataFromBaht('paid', 'paidSatang', 0),
+        ...moneyDataFromBaht('balance', 'balanceSatang', pricing.total),
       },
     })
 
@@ -2276,15 +2402,16 @@ async function createReservationInTransaction(tx, input, actor) {
         date: dateFromKey(checkInKey),
         description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
         category: 'ROOM',
-        amount: Number(input.ratePerNight),
+        ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
         quantity: pricing.nights,
-        total: pricing.total,
+        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
         createdBy: actorName(actor),
       },
     })
 
     await createReservationLog(tx, reservation.id, 'CREATED', actor, { toStatus: assignedReservation.status })
     await createAudit(tx, actor, 'CREATED', 'reservation', reservation.id, { confirmationCode: reservation.confirmationCode })
+    await emitOperationalEvent(tx, property.id, 'RESERVATION_CREATED', 'reservation', reservation.id, actor)
 
     return tx.reservation.findUnique({
       where: { id: reservation.id },
@@ -2732,9 +2859,9 @@ export async function createWalkInCheckIn(prisma, input, actor) {
         adults: Number(input.adults),
         children: Number(input.children || 0),
         childAges: Array.isArray(input.childAges) ? input.childAges.map(Number) : [],
-        ratePerNight: Number(input.ratePerNight),
-        totalAmount: pricing.total,
-        depositAmount: roundMoney(pricing.total * 0.3),
+        ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(input.ratePerNight)),
+        ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
+        ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
         depositPaid: false,
         source: 'WALK_IN',
         channelRef: null,
@@ -2773,11 +2900,11 @@ export async function createWalkInCheckIn(prisma, input, actor) {
     const folio = await tx.folio.create({
       data: {
         reservationId: reservation.id,
-        subtotal: pricing.total,
-        tax: 0,
-        total: pricing.total,
-        paid: 0,
-        balance: pricing.total,
+        ...moneyDataFromBaht('subtotal', 'subtotalSatang', pricing.total),
+        ...moneyDataFromBaht('tax', 'taxSatang', 0),
+        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
+        ...moneyDataFromBaht('paid', 'paidSatang', 0),
+        ...moneyDataFromBaht('balance', 'balanceSatang', pricing.total),
       },
     })
 
@@ -2787,9 +2914,9 @@ export async function createWalkInCheckIn(prisma, input, actor) {
         date: dateFromKey(checkInKey),
         description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
         category: 'ROOM',
-        amount: Number(input.ratePerNight),
+        ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
         quantity: pricing.nights,
-        total: pricing.total,
+        ...moneyDataFromBaht('total', 'totalSatang', pricing.total),
         createdBy: actorName(actor),
       },
     })
@@ -2875,6 +3002,7 @@ export async function assignRoom(prisma, reservationId, roomId, actor) {
     })
     await createReservationLog(tx, reservation.id, 'ASSIGNED_ROOM', actor, { changes: { roomNumber: room.number } })
     await createAudit(tx, actor, 'ASSIGNED_ROOM', 'reservation', reservation.id, { roomId: room.id, roomNumber: room.number })
+    await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_ROOM_ASSIGNED', 'reservation', reservation.id, actor, { roomId: room.id })
     return updated
   })
 }
@@ -3007,6 +3135,7 @@ export async function checkInReservation(prisma, reservationId, actor, options =
         recordIdentityLater: Boolean(options.recordIdentityLater),
       },
     })
+    await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_IN', 'reservation', reservation.id, actor, { roomId: room.id })
     return tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
@@ -3107,6 +3236,7 @@ export async function checkOutReservation(prisma, reservationId, actor, options 
         priorityTurnover: false,
       },
     })
+    await emitOperationalEvent(tx, reservation.propertyId, 'RESERVATION_CHECKED_OUT', 'reservation', reservation.id, actor, { roomId: room.id })
     return tx.reservation.findUnique({
       where: { id: reservation.id },
       include: reservationInclude,
@@ -3137,6 +3267,7 @@ export async function cancelReservation(prisma, reservationId, actor, status = '
       notes,
     })
     await createAudit(tx, actor, status, 'reservation', reservation.id, { notes })
+    await emitOperationalEvent(tx, reservation.propertyId, status === 'NO_SHOW' ? 'RESERVATION_NO_SHOW' : 'RESERVATION_CANCELLED', 'reservation', reservation.id, actor)
     return updated
   })
 }
@@ -3165,6 +3296,7 @@ export async function updateHousekeepingStatus(prisma, roomId, cleanStatus, acto
       include: { roomType: true },
     })
     await createAudit(tx, actor, 'HOUSEKEEPING_STATUS_UPDATED', 'room', room.id, { cleanStatus, toStatus })
+    await emitOperationalEvent(tx, room.propertyId, 'ROOM_HOUSEKEEPING_UPDATED', 'room', room.id, actor)
     return updated
   })
 }
@@ -3197,32 +3329,37 @@ export async function updateRoomOperationalStatus(prisma, roomId, operationalSta
     })
     await createRoomStatusLog(tx, updated, currentStatus, actor, notes || `Room marked ${operationalStatus.toLowerCase().replaceAll('_', ' ')}.`)
     await createAudit(tx, actor, 'ROOM_OPERATIONAL_STATUS_UPDATED', 'room', room.id, { operationalStatus })
+    await emitOperationalEvent(tx, room.propertyId, 'ROOM_OPERATIONAL_STATUS_UPDATED', 'room', room.id, actor)
     return updated
   })
 }
 
 export async function createPayment(prisma, input, actor) {
-  return prisma.$transaction(async (tx) => {
-    const folio = await tx.folio.findUnique({
-      where: { id: input.folioId },
-      include: {
-        reservation: true,
-      },
-    })
-    if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-    return recordPaymentInTransaction(tx, folio.id, input, actor)
-  })
+  const idempotencyKey = normalizePaymentIdempotencyKey(input?.idempotencyKey)
+  try {
+    return await serializableTransaction(prisma, async (tx) => recordPaymentInTransaction(tx, input.folioId, input, actor))
+  } catch (error) {
+    // A concurrent request can pass the pre-read before the first transaction commits.
+    // Resolve the unique-key race by replaying through the same intent validation.
+    if (error?.code === 'P2002' && idempotencyKey) {
+      return serializableTransaction(prisma, async (tx) => recordPaymentInTransaction(tx, input.folioId, input, actor))
+    }
+    if (error?.code === 'P2002') {
+      throw new PmsValidationError('This payment has already been processed.', 409)
+    }
+    throw error
+  }
 }
 
 export async function createCharge(prisma, input, actor) {
-  return prisma.$transaction(async (tx) => {
-    const folio = await tx.folio.findUnique({ where: { id: input.folioId } })
+  return serializableTransaction(prisma, async (tx) => {
+    const folio = await tx.folio.findUnique({ where: { id: input.folioId }, include: { reservation: true } })
     if (!folio) throw new PmsValidationError('Folio was not found.', 404)
     if (folio.status !== 'OPEN') {
       throw new PmsValidationError('Charges can only be posted to an open folio.')
     }
 
-    const amount = Number(input.amount)
+    const { satang: amountSatang } = requiredMoneyInput(input)
     const quantity = Number(input.quantity || 1)
     const description = normalizeNullableString(input.description)
     const category = String(input.category || 'OTHER').toUpperCase()
@@ -3230,8 +3367,9 @@ export async function createCharge(prisma, input, actor) {
 
     if (!description) throw new PmsValidationError('Charge description is required.')
     if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
-    if (!Number.isFinite(amount) || amount <= 0) throw new PmsValidationError('Charge amount must be greater than zero.')
+    if (amountSatang <= 0n) throw new PmsValidationError('Charge amount must be greater than zero.')
     if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
+    const totalSatang = amountSatang * BigInt(quantity)
 
     const charge = await tx.charge.create({
       data: {
@@ -3239,15 +3377,24 @@ export async function createCharge(prisma, input, actor) {
         date: input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date())),
         description,
         category,
-        amount: roundMoney(amount),
+        ...dualWriteMoney('amount', 'amountSatang', amountSatang),
         quantity,
-        total: roundMoney(amount * quantity),
+        ...dualWriteMoney('total', 'totalSatang', totalSatang),
         sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
         createdBy: actorName(actor),
       },
     })
     const updatedFolio = await recomputeFolio(tx, folio.id)
-    await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, { folioId: folio.id, amount: charge.amount, quantity, category, sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId) })
+    await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, {
+      folioId: folio.id,
+      amount: charge.amount,
+      amountSatang: satangToApiString(amountSatang),
+      quantity,
+      category,
+      sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
+    })
+    const chargePropertyId = folio.reservation?.propertyId || (await getProperty(tx)).id
+    await emitOperationalEvent(tx, chargePropertyId, 'CHARGE_CREATED', 'charge', charge.id, actor, { folioId: folio.id })
     return { charge, folio: updatedFolio }
   })
 }
@@ -3270,12 +3417,16 @@ export async function getTodayData(prisma) {
   const todayKey = getBangkokDateKey(new Date())
   const today = dateFromKey(todayKey)
   const tomorrow = dateFromKey(nextDateKey(todayKey))
-  const [rooms, arrivals, departures, inHouse, unpaidFolios] = await Promise.all([
+  const [rooms, arrivals, departures, inHouse, unpaidFolios, unassignedArrivals, noShows, inboxExceptions, housekeepingBlockers] = await Promise.all([
     prisma.room.findMany({ where: { propertyId: property.id }, include: { roomType: true }, orderBy: [{ floor: 'asc' }, { number: 'asc' }] }),
     prisma.reservation.count({ where: { propertyId: property.id, status: { in: ['PENDING', 'CONFIRMED'] }, checkIn: { gte: today, lt: tomorrow } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: 'CHECKED_IN', checkOut: { gte: today, lt: tomorrow } } }),
     prisma.reservation.count({ where: { propertyId: property.id, status: 'CHECKED_IN' } }),
-    prisma.folio.count({ where: { balance: { gt: 0 } } }),
+    prisma.folio.count({ where: { reservation: { propertyId: property.id }, balance: { gt: 0 } } }),
+    prisma.reservation.count({ where: { propertyId: property.id, status: { in: ['PENDING', 'CONFIRMED'] }, assignedRoomId: null, checkIn: { gte: today, lt: tomorrow } } }),
+    prisma.reservation.count({ where: { propertyId: property.id, status: 'NO_SHOW', checkIn: { gte: today, lt: tomorrow } } }),
+    prisma.bookingEmailEvent.count({ where: { propertyId: property.id, status: { in: ['NEEDS_REVIEW', 'ERROR'] } } }),
+    prisma.housekeepingIssue.count({ where: { propertyId: property.id, status: { in: ['OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS'] }, severity: { in: ['HIGH', 'CRITICAL'] } } }),
   ])
 
   return {
@@ -3284,6 +3435,10 @@ export async function getTodayData(prisma) {
     departures,
     inHouse,
     unpaidFolios,
+    unassignedArrivals,
+    noShows,
+    inboxExceptions,
+    housekeepingBlockers,
     roomsTotal: rooms.length,
     roomsSellable: rooms.filter(isOperationallySellableRoom).length,
     roomsDirty: rooms.filter((room) => room.currentStatus === 'VACANT_DIRTY' || room.currentStatus === 'OCCUPIED_DIRTY').length,
