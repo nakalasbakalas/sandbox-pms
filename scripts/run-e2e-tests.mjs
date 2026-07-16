@@ -1030,3 +1030,8 @@ try {
 } finally {
   await prisma.$disconnect()
 }
+
+// Some imported integration modules keep optional background handles alive on
+// Linux runners. At this point every assertion passed and Prisma is closed, so
+// terminate explicitly instead of letting CI wait for unrelated idle handles.
+process.exit(0)
