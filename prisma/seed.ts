@@ -8,6 +8,7 @@ import {
   approvedBookingEmailProviderQuery,
   bookingEmailSourceReconciliationQuery,
 } from '../server/booking-email-query.mjs'
+import { applyLiteInventoryBaseline } from '../server/lite-inventory-baseline.mjs'
 
 const prisma = new PrismaClient()
 
@@ -128,7 +129,8 @@ const propertySeed = {
   sourceNotes: {
     authority: 'Pasted updated PMS migration data summary supplied on 2026-05-30 plus owner clarification for Double rooms and staff labels.',
     importStance: 'Staging/local import first. Do not production-import until missing live operational data is supplied and reconciled.',
-    doubleRoomInference: 'Superior Double rooms are assigned to the first 17 non-twin room numbers in the current physical numbering sequence: 201-211 and 301-306.',
+    doubleRoomInference: 'The main PMS source assigned Superior Double rooms to the first non-twin room numbers in the physical numbering sequence.',
+    liteInventoryBaseline: 'Lite local and staging inventory uses exactly 15 Superior Double and 15 Standard Twin rooms, preserving the main PMS room-type definitions and numbering order.',
   },
 }
 
@@ -476,75 +478,6 @@ async function seedRoomTypes(propertyId: string) {
   return roomTypes
 }
 
-async function seedRooms(propertyId: string, twinRoomTypeId: string, doubleRoomTypeId: string) {
-  const superiorDoubleRooms = [
-    ...Array.from({ length: 11 }, (_, index) => 201 + index),
-    ...Array.from({ length: 6 }, (_, index) => 301 + index),
-  ]
-  const standardTwinRooms = [
-    ...Array.from({ length: 8 }, (_, index) => 212 + index),
-    ...Array.from({ length: 8 }, (_, index) => 312 + index),
-  ]
-
-  for (const roomNumber of superiorDoubleRooms) {
-    const floor = Number(String(roomNumber).charAt(0))
-    await prisma.room.upsert({
-      where: {
-        propertyId_number: {
-          propertyId,
-          number: roomNumber.toString(),
-        },
-      },
-      update: {
-        roomTypeId: doubleRoomTypeId,
-        floor,
-        operationalStatus: 'AVAILABLE',
-        currentStatus: 'VACANT_CLEAN',
-        notes: 'Owner clarified Superior Double rooms are the remaining non-twin room numbers.',
-      },
-      create: {
-        propertyId,
-        roomTypeId: doubleRoomTypeId,
-        number: roomNumber.toString(),
-        floor,
-        operationalStatus: 'AVAILABLE',
-        currentStatus: 'VACANT_CLEAN',
-        notes: 'Owner clarified Superior Double rooms are the remaining non-twin room numbers.',
-      },
-    })
-  }
-
-  for (const roomNumber of standardTwinRooms) {
-    const floor = Number(String(roomNumber).charAt(0))
-    await prisma.room.upsert({
-      where: {
-        propertyId_number: {
-          propertyId,
-          number: roomNumber.toString(),
-        },
-      },
-      update: {
-        roomTypeId: twinRoomTypeId,
-        floor,
-        operationalStatus: 'AVAILABLE',
-        currentStatus: 'VACANT_CLEAN',
-        notes: 'Confirmed Standard Twin inventory. Live occupancy state not supplied.',
-      },
-      create: {
-        propertyId,
-        roomTypeId: twinRoomTypeId,
-        number: roomNumber.toString(),
-        floor,
-        operationalStatus: 'AVAILABLE',
-        currentStatus: 'VACANT_CLEAN',
-        notes: 'Confirmed Standard Twin inventory. Live occupancy state not supplied.',
-      },
-    })
-  }
-
-  console.log('Seeded local/e2e rooms: Superior Double rooms 201-211 and 301-306; Standard Twin rooms 212-219 and 312-319.')
-}
-
 async function main() {
   const seedMode = resolveSeedMode()
   assertSafeSeedMode(seedMode)
@@ -556,10 +489,11 @@ async function main() {
   const bookingEmailSource = await seedBookingEmailSource(property.id)
   console.log('Seeded booking email source:', bookingEmailSource.mailbox)
 
-  const [twinRoomType, doubleRoomType] = await seedRoomTypes(property.id)
+  await seedRoomTypes(property.id)
 
   if (seedMode === 'dev' || seedMode === 'e2e') {
-    await seedRooms(property.id, twinRoomType.id, doubleRoomType.id)
+    const inventory = await applyLiteInventoryBaseline(prisma)
+    console.log(`Seeded local/e2e Lite inventory: ${inventory.byRoomType.DOUBLE} Superior Double and ${inventory.byRoomType.TWIN} Standard Twin rooms.`)
   } else {
     console.log('Skipped room inventory in prod-safe mode.')
   }

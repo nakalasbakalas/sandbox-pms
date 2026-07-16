@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi } from '../api'
@@ -21,12 +21,6 @@ function datesBetween(from: string, to: string) {
     if (!current) return []
   }
   return result
-}
-
-function overlapsDate(reservation: ReservationSummary, date: string) {
-  const checkIn = reservation.checkIn.slice(0, 10)
-  const checkOut = reservation.checkOut.slice(0, 10)
-  return checkIn <= date && checkOut > date
 }
 
 function BoardEditDialog({ reservation, board, mode, close }: { reservation: ReservationSummary; board: BoardPayload; mode: 'assign' | 'dates'; close: () => void }) {
@@ -63,7 +57,7 @@ function BoardEditDialog({ reservation, board, mode, close }: { reservation: Res
         </>
       )}
       <p className="form-note">{language === 'th' ? 'ระบบจะตรวจสอบห้องซ้ำและเวอร์ชันล่าสุดก่อนบันทึก' : 'The server checks overlaps and the latest reservation version before saving.'}</p>
-      {mutation.error ? <div className="form-error">{language === 'th' ? 'ไม่สามารถบันทึกการเปลี่ยนแปลงบนกระดานการจองได้' : mutation.error.message}</div> : null}
+      {mutation.error ? <div className="form-error" role="alert">{language === 'th' ? 'ไม่สามารถบันทึกการเปลี่ยนแปลงบนกระดานการจองได้' : mutation.error.message}</div> : null}
       <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending || (mode === 'assign' && !roomId) || (mode === 'dates' && !stayDatesValid)}>{t('save')}</button></footer>
     </form>
   )
@@ -113,47 +107,7 @@ export function BoardView({ role }: { role: LiteRole }) {
       {data.pendingReviewEmail.total > 0 ? (
         <div className="notice notice--warning"><strong>{data.pendingReviewEmail.total}</strong> {t('pendingReview')}</div>
       ) : null}
-      <section className="board-shell" aria-label={t('board')}>
-        <div className="board-grid" style={{ gridTemplateColumns: `132px repeat(${range.length}, minmax(88px, 1fr))` }}>
-          <div className="board-cell board-cell--corner">{t('room')}</div>
-          {range.map((date) => (
-            <div key={date} className={`board-cell board-cell--date ${date === todayKey ? 'is-today' : ''}`}>
-              <strong>{new Intl.DateTimeFormat(language === 'th' ? 'th-TH' : 'en-GB', { weekday: 'short' }).format(new Date(`${date}T12:00:00Z`))}</strong>
-              <span>{date.slice(8, 10)}/{date.slice(5, 7)}</span>
-            </div>
-          ))}
-          {data.rooms.map((room) => (
-            <div className="board-row" key={room.id} style={{ display: 'contents' }}>
-              <div className="board-cell board-cell--room">
-                <strong>{room.number}</strong>
-                <span>{room.roomType.name}</span>
-                <StatusPill value={room.housekeepingStatus} />
-              </div>
-              {range.map((date) => {
-                const reservations = data.reservationSegments.filter((reservation) => reservation.assignedRoomId === room.id && overlapsDate(reservation, date))
-                return (
-                  <div key={`${room.id}-${date}`} className={`board-cell board-cell--stay ${date === todayKey ? 'is-today' : ''}`}>
-                    {reservations.map((reservation) => (
-                      <button
-                        key={reservation.id}
-                        className={`stay-chip stay-chip--${reservation.status.toLowerCase()} ${reservation.checkIn.slice(0, 10) === date ? 'stay-chip--start' : ''}`}
-                        onClick={() => setSelected(reservation)}
-                        title={`${reservation.guest.firstName} ${reservation.guest.lastName}`}
-                        aria-label={language === 'th'
-                          ? `${reservation.guest.displayName} ห้อง ${room.number} วันที่ ${date}`
-                          : `${reservation.guest.displayName}, room ${room.number}, ${date}`}
-                      >
-                        {reservation.checkIn.slice(0, 10) === date ? `${reservation.guest.firstName} ${reservation.guest.lastName}` : '•'}
-                      </button>
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="panel">
+      <section className="panel board-unassigned">
         <header className="panel__header"><h2>{t('unassignedBookings')}</h2><span className="count-badge">{data.unassignedBookings.length}</span></header>
         {data.unassignedBookings.length === 0 ? <EmptyBlock /> : (
           <div className="unassigned-grid">
@@ -165,6 +119,44 @@ export function BoardView({ role }: { role: LiteRole }) {
             ))}
           </div>
         )}
+      </section>
+      <div className="board-legend" aria-label={language === 'th' ? 'คำอธิบายสถานะบนกระดาน' : 'Board status legend'}><span><i className="legend-swatch legend-swatch--confirmed" />{statusLabel('CONFIRMED', language)}</span><span><i className="legend-swatch legend-swatch--checked-in" />{statusLabel('CHECKED_IN', language)}</span><span><i className="legend-swatch legend-swatch--pending" />{statusLabel('PENDING', language)}</span><span>{language === 'th' ? 'คลิกแถบการเข้าพักเพื่อดูหรือแก้ไข' : 'Select a stay bar to review or edit'}</span></div>
+      <section className="board-shell" aria-label={t('board')}>
+        <div className="board-grid" style={{ gridTemplateColumns: `132px repeat(${range.length}, minmax(88px, 1fr))` }}>
+          <div className="board-cell board-cell--corner">{t('room')}</div>
+          {range.map((date) => (
+            <div key={date} className={`board-cell board-cell--date ${date === todayKey ? 'is-today' : ''}`}>
+              <strong>{new Intl.DateTimeFormat(language === 'th' ? 'th-TH' : 'en-GB', { weekday: 'short' }).format(new Date(`${date}T12:00:00Z`))}</strong>
+              <span>{date.slice(8, 10)}/{date.slice(5, 7)}</span>
+            </div>
+          ))}
+          {data.rooms.map((room, roomIndex) => {
+            const gridRow = roomIndex + 2
+            const roomSegments = data.reservationSegments.filter((reservation) => reservation.assignedRoomId === room.id)
+            return <Fragment key={room.id}>
+              <div className="board-cell board-cell--room" style={{ gridColumn: 1, gridRow }}>
+                <strong>{room.number}</strong>
+                <span>{room.roomType.name}</span>
+                <StatusPill value={room.housekeepingStatus} />
+              </div>
+              {range.map((date, dateIndex) => <div key={`${room.id}-${date}`} style={{ gridColumn: dateIndex + 2, gridRow }} className={`board-cell board-cell--stay ${date === todayKey ? 'is-today' : ''}`} />)}
+              {roomSegments.map((reservation) => {
+                const start = Math.max(0, range.indexOf(reservation.segmentStart))
+                const end = Math.max(start + 1, range.indexOf(reservation.segmentEnd) === -1 ? range.length : range.indexOf(reservation.segmentEnd))
+                return <button
+                  key={reservation.id}
+                  style={{ gridColumn: `${start + 2} / ${end + 2}`, gridRow }}
+                  className={`stay-chip stay-chip--span stay-chip--${reservation.status.toLowerCase()} ${reservation.checkIn.slice(0, 10) === reservation.segmentStart ? 'stay-chip--start' : 'stay-chip--clipped'}`}
+                  onClick={() => setSelected(reservation)}
+                  title={`${reservation.guest.displayName} · ${reservation.checkIn.slice(0, 10)} → ${reservation.checkOut.slice(0, 10)}`}
+                  aria-label={language === 'th'
+                    ? `${reservation.guest.displayName} ห้อง ${room.number} ${reservation.checkIn.slice(0, 10)} ถึง ${reservation.checkOut.slice(0, 10)}`
+                    : `${reservation.guest.displayName}, room ${room.number}, ${reservation.checkIn.slice(0, 10)} to ${reservation.checkOut.slice(0, 10)}`}
+                ><strong>{reservation.guest.displayName}</strong><span>{reservation.checkIn.slice(5, 10)} → {reservation.checkOut.slice(5, 10)}</span></button>
+              })}
+            </Fragment>
+          })}
+        </div>
       </section>
       {selected ? (
         <Modal title={editMode === 'assign' ? (language === 'th' ? 'จัดห้อง' : 'Assign room') : editMode === 'dates' ? (language === 'th' ? 'แก้ไขวันเข้าพัก' : 'Edit stay dates') : `${selected.guest.firstName} ${selected.guest.lastName}`} close={() => { setSelected(null); setEditMode(null) }}>

@@ -202,3 +202,52 @@ test('Housekeeping DTO contains operational occupancy context without guest, rat
     ['assignedRoomId', 'checkIn', 'checkOut', 'id', 'status'],
   )
 })
+
+test('Housekeeping classifies a checked-out dirty room as same-day turnover without exposing guest data', async () => {
+  const hotelDate = '2030-09-01'
+  const checkIn = dateFromKey('2030-08-30')
+  const checkOut = dateFromKey(hotelDate)
+  let reservationWhere
+  const prisma = {
+    property: { findUnique: async () => property() },
+    room: {
+      findMany: async () => [{
+        id: 'room-102',
+        roomTypeId: 'room-type-double',
+        number: '102',
+        floor: 1,
+        operationalStatus: 'AVAILABLE',
+        currentStatus: 'VACANT_DIRTY',
+        blockedUntil: null,
+        updatedAt: new Date('2030-09-01T05:00:00.000Z'),
+        roomType: { id: 'room-type-double', code: 'DOUBLE', name: 'Double Room' },
+      }],
+    },
+    reservation: {
+      findMany: async ({ where, select }) => {
+        reservationWhere = where
+        assert.equal(select.guest, undefined)
+        return [{
+          id: 'reservation-departed',
+          assignedRoomId: 'room-102',
+          checkIn,
+          checkOut,
+          status: 'CHECKED_OUT',
+          guest: { firstName: 'Must', lastName: 'Remain Private' },
+        }]
+      },
+    },
+  }
+
+  const housekeeping = await getLiteHousekeeping(prisma, { date: hotelDate })
+
+  assert.equal(reservationWhere.status.in.includes('CHECKED_OUT'), true)
+  assert.equal(housekeeping.summary.turnover, 1)
+  assert.equal(housekeeping.rooms[0].priority, 'TURNOVER')
+  assert.equal(housekeeping.rooms[0].departures.length, 1)
+  assert.equal(housekeeping.rooms[0].inHouse.length, 0)
+  assert.deepEqual(
+    Object.keys(housekeeping.rooms[0].departures[0]).sort(),
+    ['assignedRoomId', 'checkIn', 'checkOut', 'id', 'status'],
+  )
+})

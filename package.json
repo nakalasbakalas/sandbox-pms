@@ -31,6 +31,7 @@
         "live:check": "node scripts/live-readiness-check.mjs",
         "security:hash-password": "node scripts/hash-password.mjs",
         "staging:credentials:lite": "node scripts/generate-lite-staging-bootstrap.mjs",
+        "staging:inventory:lite": "node scripts/apply-lite-inventory-baseline.mjs",
         "cutover:little-hotelier": "node scripts/little-hotelier-cutover.mjs",
         "prod:credentials": "node scripts/generate-production-credentials.mjs",
         "prod:preflight": "node scripts/production-preflight.mjs",

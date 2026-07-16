@@ -56,6 +56,7 @@ const API_ROUTE_CONTRACTS = [
   { pattern: /^\/api\/lite\/v1\/bookings$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/bookings\/[^/]+$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/board$/, methods: ['GET'] },
+  { pattern: /^\/api\/lite\/v1\/walk-in-quote$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/housekeeping$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/channel-desk$/, methods: ['GET'] },
   { pattern: /^\/api\/lite\/v1\/settings$/, methods: ['GET'] },

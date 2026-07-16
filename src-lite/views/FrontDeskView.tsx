@@ -1,31 +1,32 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { liteApi, thbInputToSatang } from '../api'
 import { EmptyBlock, ErrorBlock, formatMoney, GuestStay, LoadingBlock, Modal, StatCard, StatusPill } from '../components'
 import { addDateKey, isDateKey } from '../date-utils'
 import { statusLabel, useI18n } from '../i18n'
-import { ReservationBookingForm } from '../reservation-booking-form'
+import { WalkInCheckInForm } from '../walk-in-check-in-form'
 import type { LiteRole, ReservationSummary, RoomSummary } from '../types'
 
 function hotelDate() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
 
-function PaymentFields({ amount, setAmount, method, setMethod, reference, setReference }: {
+function PaymentFields({ amount, setAmount, method, setMethod, reference, setReference, disabled = false }: {
   amount: string
   setAmount: (value: string) => void
   method: string
   setMethod: (value: string) => void
   reference: string
   setReference: (value: string) => void
+  disabled?: boolean
 }) {
   const { language } = useI18n()
   return (
     <>
-      <label>{language === 'th' ? 'ยอดรับชำระ (บาท)' : 'Payment amount (THB)'}<input min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-      <label>{language === 'th' ? 'วิธีชำระ' : 'Payment method'}<select value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
-      {method !== 'CASH' && method !== 'OTHER' ? <label>{language === 'th' ? 'เลขอ้างอิง' : 'Payment reference'}<input required value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
+      <label>{language === 'th' ? 'ยอดรับชำระ (บาท)' : 'Payment amount (THB)'}<input disabled={disabled} min="0" step="0.01" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+      <label>{language === 'th' ? 'วิธีชำระ' : 'Payment method'}<select disabled={disabled} value={method} onChange={(event) => setMethod(event.target.value)}>{['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
+      {method !== 'CASH' && method !== 'OTHER' ? <label>{language === 'th' ? 'เลขอ้างอิง' : 'Payment reference'}<input disabled={disabled} required={!disabled} value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
     </>
   )
 }
@@ -57,7 +58,31 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
   const [reference, setReference] = useState('')
   const [override, setOverride] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
+  const [chargeOpen, setChargeOpen] = useState(false)
+  const [chargeDescription, setChargeDescription] = useState('')
+  const [chargeCategory, setChargeCategory] = useState('MINIBAR')
+  const [chargeAmount, setChargeAmount] = useState('')
+  const [chargeQuantity, setChargeQuantity] = useState('1')
   const canOverride = ['ADMIN', 'MANAGER'].includes(role)
+  const chargeMutation = useMutation({
+    mutationFn: async () => {
+      if (!reservation.folio) throw new Error(language === 'th' ? 'ไม่พบโฟลิโอ' : 'Folio is unavailable.')
+      return liteApi.createCharge({
+        folioId: reservation.folio.id,
+        description: chargeDescription.trim(),
+        category: chargeCategory,
+        amountSatang: thbInputToSatang(chargeAmount, language === 'th' ? 'ยอดค่าใช้จ่าย' : 'Charge amount'),
+        quantity: Number(chargeQuantity),
+      })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['lite'] })
+      setChargeOpen(false)
+      setChargeDescription('')
+      setChargeAmount('')
+      setChargeQuantity('1')
+    },
+  })
   const mutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, unknown> = {}
@@ -93,8 +118,15 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
   })
   const submit = (event: FormEvent) => {
     event.preventDefault()
+    if (chargeOpen) {
+      chargeMutation.mutate()
+      return
+    }
     mutation.mutate()
   }
+  useEffect(() => {
+    if (action === 'check-out' && !override) setAmount(balanceSatang > 0 ? (balanceSatang / 100).toFixed(2) : '')
+  }, [action, balanceSatang, override])
   return (
     <form className="form-grid" onSubmit={submit}>
       {action === 'check-in' ? (
@@ -108,15 +140,30 @@ function StayActionDialog({ reservation, action, role, close }: { reservation: R
           <label>{language === 'th' ? 'เลขบัตร/พาสปอร์ต' : 'ID/passport number'}<input required={!reservation.guest.identityComplete} autoComplete="off" value={idNumber} onChange={(event) => setIdNumber(event.target.value)} placeholder={reservation.guest.identityComplete ? (language === 'th' ? 'เว้นว่างเพื่อใช้ข้อมูลเดิม' : 'Leave blank to keep the ID on file') : ''} /></label>
         </>
       ) : null}
-      {balanceSatang > 0 ? <PaymentFields amount={amount} setAmount={setAmount} method={method} setMethod={setMethod} reference={reference} setReference={setReference} /> : <div className="notice"><strong>{language === 'th' ? 'ไม่มียอดค้างชำระ' : 'No balance due'}</strong></div>}
+      {action === 'check-out' && reservation.folio ? <section className="checkout-folio form-span">
+        <header><div><span>{language === 'th' ? 'โฟลิโอที่ต้องตรวจสอบก่อนเช็กเอาต์' : 'Review folio before checkout'}</span><strong>{formatMoney(reservation.folio.balanceSatang, language)} {language === 'th' ? 'คงเหลือ' : 'due'}</strong></div><button type="button" className="button button--secondary" onClick={() => setChargeOpen((value) => !value)}>{chargeOpen ? t('cancel') : (language === 'th' ? 'เพิ่มค่าใช้จ่าย' : 'Add extra charge')}</button></header>
+        <div className="checkout-ledger">
+          {reservation.folio.charges.filter((charge) => !charge.void).map((charge) => <div key={charge.id}><span>{charge.description}<small>{charge.quantity} × {formatMoney(charge.amountSatang, language)}</small></span><strong>{formatMoney(charge.totalSatang, language)}</strong></div>)}
+        </div>
+        <div className="checkout-totals"><span>{language === 'th' ? 'ยอดรวม' : 'Total'} <strong>{formatMoney(reservation.folio.totalSatang, language)}</strong></span><span>{language === 'th' ? 'ชำระแล้ว' : 'Paid'} <strong>{formatMoney(reservation.folio.paidSatang, language)}</strong></span><span>{t('balance')} <strong>{formatMoney(reservation.folio.balanceSatang, language)}</strong></span></div>
+        {chargeOpen ? <div className="checkout-charge-grid">
+          <label>{language === 'th' ? 'รายละเอียด' : 'Description'}<input required value={chargeDescription} onChange={(event) => setChargeDescription(event.target.value)} /></label>
+          <label>{language === 'th' ? 'หมวดหมู่' : 'Category'}<select value={chargeCategory} onChange={(event) => setChargeCategory(event.target.value)}>{['MINIBAR', 'CAFE', 'LAUNDRY', 'DAMAGE', 'EXTRA_GUEST', 'CHILD', 'OTHER'].map((value) => <option key={value} value={value}>{statusLabel(value, language)}</option>)}</select></label>
+          <label>{language === 'th' ? 'จำนวน' : 'Quantity'}<input required min="1" step="1" type="number" value={chargeQuantity} onChange={(event) => setChargeQuantity(event.target.value)} /></label>
+          <label>{language === 'th' ? 'ราคาต่อหน่วย (บาท)' : 'Unit amount (THB)'}<input required min="0.01" step="0.01" inputMode="decimal" value={chargeAmount} onChange={(event) => setChargeAmount(event.target.value)} /></label>
+          <button type="button" className="button button--primary" disabled={chargeMutation.isPending || !chargeDescription.trim() || !chargeAmount} onClick={() => chargeMutation.mutate()}>{language === 'th' ? 'บันทึกค่าใช้จ่าย' : 'Post charge'}</button>
+          {chargeMutation.error ? <div className="form-error" role="alert">{language === 'th' ? 'ไม่สามารถบันทึกค่าใช้จ่ายได้' : chargeMutation.error.message}</div> : null}
+        </div> : null}
+      </section> : null}
+      {balanceSatang > 0 ? <PaymentFields disabled={override} amount={amount} setAmount={(value) => { setAmount(value); if (value.trim()) setOverride(false) }} method={method} setMethod={setMethod} reference={reference} setReference={setReference} /> : <div className="notice form-span"><strong>{language === 'th' ? 'ไม่มียอดค้างชำระ' : 'No balance due'}</strong></div>}
       {balanceSatang > 0 && canOverride ? (
         <>
-          <label className="checkbox-field"><input type="checkbox" checked={override} onChange={(event) => setOverride(event.target.checked)} />{action === 'check-in' ? (language === 'th' ? 'ผู้จัดการอนุมัติให้ชำระภายหลัง' : 'Manager authorizes pay later') : (language === 'th' ? 'ผู้จัดการอนุมัติเช็กเอาต์พร้อมยอดค้าง' : 'Manager authorizes checkout with balance')}</label>
+          <label className="checkbox-field"><input type="checkbox" checked={override} onChange={(event) => { const checked = event.target.checked; setOverride(checked); if (checked) { setAmount(''); setReference('') } }} />{action === 'check-in' ? (language === 'th' ? 'ผู้จัดการอนุมัติให้ชำระภายหลัง' : 'Manager authorizes pay later') : (language === 'th' ? 'ผู้จัดการอนุมัติเช็กเอาต์พร้อมยอดค้าง' : 'Manager authorizes checkout with balance')}</label>
           {override ? <label>{language === 'th' ? 'เหตุผลการอนุมัติ' : 'Override reason'}<textarea required value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label> : null}
         </>
       ) : null}
-      {mutation.error ? <div className="form-error">{stayActionErrorMessage(mutation.error, language)}</div> : null}
-      <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending}>{action === 'check-in' ? t('checkIn') : t('checkOut')}</button></footer>
+      {mutation.error ? <div className="form-error" role="alert">{stayActionErrorMessage(mutation.error, language)}</div> : null}
+      <footer className="form-actions"><button type="button" className="button button--secondary" onClick={close}>{t('close')}</button><button className="button button--primary" disabled={mutation.isPending || chargeMutation.isPending || chargeOpen}>{action === 'check-in' ? t('checkIn') : t('checkOut')}</button></footer>
     </form>
   )
 }
@@ -235,7 +282,7 @@ export function FrontDeskView({ role }: { role: LiteRole }) {
       <header className="view-heading">
         <div><p className="eyebrow">{data.hotelDate}</p><h1>{t('frontDesk')}</h1></div>
         <div className="heading-actions">
-          {canCreateWalkIn ? <button className="button button--primary" disabled={board.isLoading || Boolean(board.error) || roomTypes.length === 0} onClick={() => setWalkInOpen(true)}>{language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in'}</button> : null}
+          {canCreateWalkIn ? <button className="button button--primary" disabled={board.isLoading || Boolean(board.error) || roomTypes.length === 0} onClick={() => setWalkInOpen(true)}>{language === 'th' ? 'Walk-in และเช็คอิน' : 'Walk-in check-in'}</button> : null}
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} aria-label={t('dateRange')} />
         </div>
       </header>
@@ -251,7 +298,7 @@ export function FrontDeskView({ role }: { role: LiteRole }) {
       <StaySection title={t('arrivals')} reservations={data.arrivals} rooms={rooms} role={role} />
       <StaySection title={t('departures')} reservations={data.departures} rooms={rooms} role={role} />
       <StaySection title={t('inHouse')} reservations={data.inHouse} rooms={rooms} role={role} />
-      {walkInOpen ? <Modal title={language === 'th' ? 'จอง Walk-in วันนี้' : 'Today walk-in booking'} close={() => setWalkInOpen(false)}><ReservationBookingForm walkIn roomTypes={roomTypes} close={() => setWalkInOpen(false)} /></Modal> : null}
+      {walkInOpen ? <Modal title={language === 'th' ? 'Walk-in และเช็คอินทันที' : 'Walk-in check-in'} close={() => setWalkInOpen(false)}><WalkInCheckInForm role={role} roomTypes={roomTypes} close={() => setWalkInOpen(false)} /></Modal> : null}
     </div>
   )
 }

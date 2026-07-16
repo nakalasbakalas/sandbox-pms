@@ -337,3 +337,14 @@ Do not represent the production exact-money cutover as complete until a fresh re
 ### Release Contract
 
 Lite must be deployed first as a separate staging service with a sanitized disposable/staging database. Public `/healthz` and `/healthz?deep=1` output is deliberately bounded to availability-safe service/UI/database state and is not a configuration inventory. A five-minute Gmail maintenance cron, Pub/Sub watch/push, migrations, review-only events, manual queue, roles, Thai/English flows, exact release metadata, and recovery must be proven there. Repository/local validation does not establish Gmail provider operation, Render migration/recovery success, Cloudflare routing/WAF enforcement, OTA provider approval, production data safety, owner sign-off, or staff acceptance. Use `docs/LITE_PILOT_ACCEPTANCE.md` for the seven-day shadow, 14-day pilot, sequential 48-hour OTA observation, and 30-day rollback record. See `docs/LITE_ARCHITECTURE.md` for the complete boundary.
+
+### Lite hotel-essential contract
+
+1. Property bootstrap applies exactly 30 physical rooms: 15 Superior Double and 15 Standard Twin. The staging bootstrap must stop on an unexpected room, a drifted floor/type assignment, or any database/tier/variant mismatch.
+2. A standard booking persists dates, room type, occupancy/child ages, exact nightly rate, source, optional guest contact, special requests, and internal notes. Availability and optimistic-version checks remain server-owned.
+3. Atomic walk-in requires today in the hotel timezone, a server-derived quote, an explicitly ready room, identity evidence, and either exact full payment or a reasoned Manager/Admin pay-later decision.
+4. Check-in revalidates current room vacancy/readiness, identity, and settlement. A future reservation may be assigned to a currently occupied room only when its dates do not overlap; actual check-in may not.
+5. Folios keep room and incidental charges, payment/reversal/void evidence, subtotal/tax/total/paid/balance, and open/closed state in PostgreSQL. Checkout begins with ledger review, permits authorized extras, and then requires exact settlement or a reasoned Manager/Admin unpaid override.
+6. The printable guest document is a non-fiscal Guest Folio / Statement from persisted ledger data. A legal tax invoice requires a future backend document-number sequence plus verified tax identity/configuration.
+7. Checkout marks the room dirty. Housekeeping follows dirty -> cleaning -> clean -> inspected, can record dirty correction, can take a vacant room out of service with reason, and can return it to service without falsely marking it inspected.
+8. Cancellation/no-show frees inventory and records reason/audit evidence. Financial disposition is not inferred; owner policy must define refunds, retained payments, and cancellation/no-show charges.

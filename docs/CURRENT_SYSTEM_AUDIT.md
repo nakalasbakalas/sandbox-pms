@@ -131,3 +131,13 @@ Material boundaries and open risks:
 - Reviewed application commit `5a7ac9254735d1280d811ff5f97ca3cab297e385` is live on isolated Render Lite deploy `dep-d9bj0rmcjfls738g425g`; direct root/version/deep-health probes align with that SHA and the startup log reports all 22 migrations present with none pending. This is engineering staging on the disposable Lite database only. It does not establish Gmail watch/Pub/Sub or maintenance scheduling, a Cloudflare-proxied traffic path, production migration, staff acceptance, recovery-period completion, or OTA provider approval.
 
 The full Lite boundary, rollout sequence, and outstanding proof are documented in `docs/LITE_ARCHITECTURE.md`.
+
+### 2026-07-16 Lite operational-core completion slice
+
+- Lite inventory is now a guarded, idempotent 30-room baseline: 15 `DOUBLE` Superior Double rooms and 15 `TWIN` Standard Twin rooms. It reuses the main PMS room-type definitions and physical numbering order, refuses unexpected/drifted inventory, never deletes rooms, and can target only the named disposable Lite staging database.
+- “Walk-in check-in” no longer aliases ordinary reservation creation. A read-only server quote supplies the configured base rate, occupancy fees, exact satang total, and clean ready rooms; confirmation atomically creates the guest/reservation/folio, assigns inventory, records full payment or a reasoned Manager/Admin pay-later decision, and checks the guest in.
+- Booking create/edit and protected booking detail now carry optional email, phone, guest special requests, and internal notes. These fields remain outside list, board, housekeeping, and Cashier projections.
+- Checkout is folio-first: staff review active room/incidental charges, total, paid, and balance; may post an authorized extra; then either collect the exact balance or use a reasoned Manager/Admin unpaid override. The two settlement paths are mutually exclusive in the UI.
+- Booking detail can print a server-ledger-derived **Guest Folio / Statement**. It uses persisted confirmation/folio identifiers and explicitly states that it is not a tax invoice. Durable tax-invoice numbering and verified property tax identity are not implemented or claimed.
+- Housekeeping now retains checked-out same-day departures as `TURNOVER`, supports dirty correction and reasoned maintenance/return-to-service, and keeps actual check-in vacancy checks distinct from future non-overlapping room assignment.
+- Cancellation/no-show still requires an operational reason and releases inventory. Refund, retained-payment, and cancellation-fee disposition remains an owner-approved business-policy boundary; Lite does not invent it.

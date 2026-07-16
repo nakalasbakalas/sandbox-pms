@@ -121,6 +121,7 @@ import {
   getBookingEmailStatus,
   getAuthenticatedUser,
   getFrontDeskBoard,
+  getWalkInQuote,
   getRoomSetup,
   getSetupStatus,
   getTodayData,
@@ -1010,6 +1011,13 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  if (url.pathname === '/api/lite/v1/walk-in-quote' && request.method === 'GET') {
+    requirePermission(user, 'create:reservation')
+    requirePermission(user, 'check-in:guest')
+    sendJson(response, 200, { ok: true, data: await getWalkInQuote(db, queryInput(url.searchParams)) })
+    return true
+  }
+
   if (url.pathname === '/api/lite/v1/housekeeping' && request.method === 'GET') {
     requirePermission(user, 'view:housekeeping')
     sendJson(response, 200, { ok: true, data: await getLiteHousekeeping(db, queryInput(url.searchParams)) })
@@ -1294,7 +1302,16 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/front-desk/walk-in' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     requirePermission(user, 'check-in:guest')
-    const reservation = await createWalkInCheckIn(db, await readJson(request), user)
+    const input = await readJson(request)
+    if (uiVariant === 'lite') {
+      if (!Object.hasOwn(input, 'expectedTotalSatang')) {
+        throw new PmsValidationError('PMS Lite walk-in check-in requires the current server quote total.')
+      }
+      if (Object.hasOwn(input, 'ratePerNight') || Object.hasOwn(input, 'ratePerNightSatang')) {
+        throw new PmsValidationError('PMS Lite walk-in rates come from the server quote and cannot be supplied by the client.')
+      }
+    }
+    const reservation = await createWalkInCheckIn(db, input, user)
     publishReservationMutation(reservation.id, 'walk_in_created')
     sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
     return true

@@ -242,3 +242,7 @@ iCal is recovery-only delayed date-block compatibility. It is unsuitable as the 
 Only a Gmail-retained `Authentication-Results` header whose authentication service id is `mx.google.com` can establish provider sender alignment. Reprocess uses that immutable header and raw content, discards stale parsed fields, and recomputes the reservation match. Payment, cancellation, and modification writes require the resulting exact persisted match or an explicit staff-selected reservation id; guest/date similarity is review guidance only.
 
 See `docs/LITE_ARCHITECTURE.md` for the complete workflow and staging proof boundary.
+
+### Lite 30-room availability boundary
+
+The Lite staging baseline contains exactly 15 Superior Double and 15 Standard Twin physical rooms. This changes the PMS capacity cells used to generate manual availability work; it does not prove or enable a live OTA write connection. After applying the baseline, regenerate/reconcile manual channel tasks for the exact provider mappings and date window, review absolute counts, and complete each Extranet update with evidence. Do not reuse historical 33-room totals, infer provider room/rate-plan mappings, or claim automatic distribution.

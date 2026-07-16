@@ -124,7 +124,7 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
         <div className="sidebar__brand"><div className="brand-mark">S</div><div><strong>Sandbox</strong><span>PMS Lite</span></div></div>
         <nav style={{ '--lite-nav-count': nav.length } as CSSProperties}>
           {nav.map(([key, label, index]) => (
-            <button key={key} className={route === key ? 'is-active' : ''} onClick={() => navigate(key)}><span>{index}</span>{label}</button>
+            <button key={key} aria-current={route === key ? 'page' : undefined} className={route === key ? 'is-active' : ''} onClick={() => navigate(key)}><span>{index}</span>{label}</button>
           ))}
         </nav>
         <div className="sidebar__footer">
@@ -134,7 +134,7 @@ function Shell({ user, logout }: { user: LiteUser; logout: () => void }) {
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <div className={`live-state ${connected ? 'is-connected' : ''}`}><span />{connected ? t('networkOnline') : t('networkFallback')}</div>
+          <div className={`live-state ${connected ? 'is-connected' : ''}`} role="status" aria-live="polite"><span />{connected ? t('networkOnline') : t('networkFallback')}</div>
           <button className="language-button" onClick={() => setLanguage(language === 'en' ? 'th' : 'en')}>{t('language')}</button>
           <button className="topbar-logout" onClick={logout}>{t('logout')}</button>
         </header>

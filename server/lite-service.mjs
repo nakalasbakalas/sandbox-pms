@@ -182,6 +182,19 @@ const HOUSEKEEPING_STAY_SELECT = {
   status: true,
 }
 
+const BOOKING_DETAIL_SELECT = {
+  ...RESERVATION_SELECT,
+  notes: true,
+  specialRequests: true,
+  guest: {
+    select: {
+      ...RESERVATION_SELECT.guest.select,
+      email: true,
+      phone: true,
+    },
+  },
+}
+
 const ROOM_SELECT = {
   id: true,
   roomTypeId: true,
@@ -460,6 +473,10 @@ function mapGuest(guest, options = {}) {
       : {}),
     vip: Boolean(guest.vipStatus),
     blacklisted: Boolean(guest.blacklisted),
+    ...(options.includeContactContext ? {
+      email: guest.email || null,
+      phone: guest.phone || null,
+    } : {}),
   }
 }
 
@@ -568,6 +585,10 @@ function mapReservation(reservation, options = {}) {
     folio: mapFolio(reservation.folio),
     createdAt: isoTimestamp(reservation.createdAt),
     updatedAt: isoTimestamp(reservation.updatedAt),
+    ...(options.includeContactContext ? {
+      notes: reservation.notes || null,
+      specialRequests: reservation.specialRequests || null,
+    } : {}),
   }
 }
 
@@ -850,7 +871,7 @@ export async function getLiteBookingDetail(prisma, reservationId, options = {}) 
   const property = await resolveProperty(prisma)
   const reservation = await prisma.reservation.findFirst({
     where: { id, propertyId: property.id },
-    select: RESERVATION_SELECT,
+    select: BOOKING_DETAIL_SELECT,
   })
   if (!reservation) throw new PmsValidationError('Booking was not found in this property.', 404)
   if (options.paymentReconciliationOnly) {
@@ -907,6 +928,7 @@ export async function getLiteBookingDetail(prisma, reservationId, options = {}) 
     property: mapProperty(property),
     reservation: mapReservation(reservation, {
       includeIdentitySuffix: options.includeIdentitySuffix === true,
+      includeContactContext: true,
     }),
     auditTimeline: {
       order: 'newest_first',
@@ -1093,7 +1115,7 @@ export async function getLiteHousekeeping(prisma, input = {}) {
       where: {
         propertyId: property.id,
         assignedRoomId: { not: null },
-        status: { in: activeReservationStatuses() },
+        status: { in: [...activeReservationStatuses(), 'CHECKED_OUT'] },
         checkIn: { lt: nextDay },
         checkOut: { gte: dayStart },
       },
@@ -1115,7 +1137,7 @@ export async function getLiteHousekeeping(prisma, input = {}) {
       reservation.checkIn === hotelDate && ['PENDING', 'CONFIRMED', 'HOLD'].includes(reservation.status)
     )
     const departures = stays.filter((reservation) =>
-      reservation.checkOut === hotelDate && reservation.status === 'CHECKED_IN'
+      reservation.checkOut === hotelDate && ['CHECKED_IN', 'CHECKED_OUT'].includes(reservation.status)
     )
     const inHouse = stays.filter((reservation) => reservation.status === 'CHECKED_IN')
     const priority = housekeepingPriority(room, arrivals, departures)

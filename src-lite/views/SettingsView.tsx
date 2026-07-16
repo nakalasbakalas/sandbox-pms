@@ -62,12 +62,21 @@ export function SettingsView({ user }: { user: LiteUser }) {
 
   const property = settings.data.property
   const health = settings.data.syncHealth
+  const doubleRooms = settings.data.roomTypes.find((item) => item.code === 'DOUBLE')?.roomCount || 0
+  const twinRooms = settings.data.roomTypes.find((item) => item.code === 'TWIN')?.roomCount || 0
+  const inventoryMatchesLiteContract = settings.data.rooms.length === 30 && doubleRooms === 15 && twinRooms === 15
   return (
     <div className="view-stack">
       <header className="view-heading"><div><p className="eyebrow">{user.displayName}</p><h1>{t('settings')}</h1></div></header>
 
       <section className="panel">
         <header className="panel__header"><h2>{t('propertyRooms')}</h2></header>
+        <div className={`inventory-contract ${inventoryMatchesLiteContract ? 'is-ready' : 'needs-attention'}`}>
+          <div><span>{language === 'th' ? 'สัญญารายการห้อง PMS Lite' : 'PMS Lite inventory contract'}</span><strong>{settings.data.rooms.length} {language === 'th' ? 'ห้อง' : 'rooms'}</strong></div>
+          <div><span>{language === 'th' ? 'ซูพีเรียร์ ดับเบิล' : 'Superior Double'}</span><strong>{doubleRooms} / 15</strong></div>
+          <div><span>{language === 'th' ? 'สแตนดาร์ด ทวิน' : 'Standard Twin'}</span><strong>{twinRooms} / 15</strong></div>
+          <StatusPill value={inventoryMatchesLiteContract ? 'READY' : 'NOT_READY'} />
+        </div>
         <div className="settings-grid">
           <article className="settings-card">
             <span>{language === 'th' ? 'โรงแรม' : 'Property'}</span>

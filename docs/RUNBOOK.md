@@ -614,3 +614,23 @@ Do not promote Lite beyond staging until all of these are recorded for the exact
 Local and CI validation cannot close Gmail provider operation, Render migration or recovery state, Cloudflare DNS/proxy/WAF enforcement, OTA approval, staff acceptance, or owner go/no-go.
 
 Use a separate pilot hostname and manual Render release before any public domain move. Keep the existing service available during the pilot and retain a tested rollback for 30 days. See `docs/LITE_ARCHITECTURE.md` for the sequential OTA and domain cutover boundary.
+
+### Apply and verify the Lite 30-room inventory
+
+The inventory writer is intentionally staging-specific. Run it only after the prod-safe property bootstrap and only with the Lite staging environment values already supplied through the approved secret path:
+
+```powershell
+npm.cmd run staging:inventory:lite
+```
+
+The command must report exactly 30 rooms, 15 `DOUBLE`, and 15 `TWIN`. It must refuse any database other than `sandbox_pms_lite_staging`, any non-staging tier, any non-Lite UI variant, or any seed mode other than `prod-safe`. A refusal caused by unexpected/drifted rooms is a stop condition: inspect and reconcile; do not delete or force-reassign inventory.
+
+For lifecycle proof, use only a disposable PostgreSQL target:
+
+```powershell
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable-postgresql-url>'
+npm.cmd run test:e2e:lite
+```
+
+The harness creates and removes its own isolated schema and covers standard booking/contact edit, assignment, identity/check-in, room and extra charges, payment, folio retrieval/printing, checkout, housekeeping turnover, atomic walk-in, cancellation/no-show reasons, concurrency, and stale edits. Never point it at production-like data.

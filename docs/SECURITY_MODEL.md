@@ -253,3 +253,12 @@ web instance until a shared, authenticated invalidation bus is implemented and
 proven. Poll/refetch against authorized APIs remains the correctness path.
 
 See `docs/LITE_ARCHITECTURE.md` for the complete Lite data flow and rollout boundaries.
+
+### Lite operational-core boundaries
+
+- The 30-room inventory writer fails closed outside the exact Lite staging tier/UI/seed/database boundary and refuses destructive reconciliation. It never deletes an unexpected room or silently changes an existing room's type/floor.
+- Walk-in quote is read-only and authorized by both reservation-create and guest-check-in permissions. The mutation repeats rate, capacity, overlap, current-vacancy, cleanliness, identity, payment, and expected-total validation inside one serializable transaction.
+- Guest email, phone, special requests, and internal notes are returned only in the protected booking-detail projection. They remain absent from lists, board cells, Housekeeping, Cashier payment-only DTOs, and the printed folio unless a separately verified document requirement authorizes them.
+- Checkout UI cannot combine payment collection with unpaid override. Backend exact-satang and Manager/Admin reason gates remain authoritative; UI state is not an authorization boundary.
+- Guest Folio / Statement uses persisted ledger identifiers and amounts but is explicitly non-fiscal. Client timestamps are copy-preparation metadata only, never invoice numbers. Legal tax documents remain disabled until the backend owns durable numbering and verified property tax identity.
+- Maintenance, return-to-service, dirty correction, cancellation, no-show, charge void, and payment reversal use contextual reason capture and existing backend audit gates. Cancellation/no-show does not invent a refund or fee policy.

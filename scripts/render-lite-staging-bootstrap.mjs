@@ -142,11 +142,17 @@ async function assertDatabaseEmpty() {
 async function verifyBootstrap() {
   const prisma = createPrismaClient()
   try {
-    const [properties, admins] = await prisma.$transaction([
+    const [properties, admins, rooms, doubleRooms, twinRooms] = await prisma.$transaction([
       prisma.property.count(),
       prisma.user.count({ where: { role: 'ADMIN', active: true } }),
+      prisma.room.count(),
+      prisma.room.count({ where: { roomType: { code: 'DOUBLE' } } }),
+      prisma.room.count({ where: { roomType: { code: 'TWIN' } } }),
     ])
     if (properties < 1 || admins < 1) fail('seed finished without an active property and ADMIN login.')
+    if (rooms !== 30 || doubleRooms !== 15 || twinRooms !== 15) {
+      fail('seed finished without exactly 15 DOUBLE and 15 TWIN rooms.')
+    }
   } finally {
     await prisma.$disconnect()
   }
@@ -165,8 +171,15 @@ async function main() {
   if (seed.error) throw seed.error
   if (seed.status !== 0) fail(`db:seed exited with status ${seed.status}.`)
 
+  const inventory = spawnSync(npmCommand, ['run', 'staging:inventory:lite'], {
+    env: process.env,
+    stdio: 'inherit',
+  })
+  if (inventory.error) throw inventory.error
+  if (inventory.status !== 0) fail(`staging:inventory:lite exited with status ${inventory.status}.`)
+
   await verifyBootstrap()
-  console.log('Lite staging bootstrap completed once with a hash-only ADMIN login. Remove SEED_USERS_JSON from Render after first login is verified.')
+  console.log('Lite staging bootstrap completed once with a hash-only ADMIN login and the 30-room Lite inventory. Remove SEED_USERS_JSON from Render after first login is verified.')
 }
 
 main().catch((error) => {

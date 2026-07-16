@@ -17,6 +17,8 @@ import type {
   SaveManualChannelMappingInput,
   SettingsPayload,
   VersionPayload,
+  WalkInCheckInInput,
+  WalkInQuote,
 } from './types'
 
 export type LiteReservationWrite = {
@@ -29,6 +31,8 @@ export type LiteReservationWrite = {
   ratePerNightSatang: MoneySatang
   guest?: Record<string, unknown>
   source?: string
+  notes?: string | null
+  specialRequests?: string | null
   assignedRoomId?: string
   expectedUpdatedAt?: string | null
 }
@@ -151,6 +155,29 @@ export const liteApi = {
     return (await request<ApiEnvelope<BoardPayload>>(query('/api/lite/v1/board', { from, to }))).data
   },
 
+  async walkInQuote(input: { checkIn: string; checkOut: string; roomTypeCode: string; adults: number; children: number; childAges: number[] }) {
+    return (await request<ApiEnvelope<WalkInQuote>>(query('/api/lite/v1/walk-in-quote', {
+      checkIn: input.checkIn,
+      checkOut: input.checkOut,
+      roomTypeCode: input.roomTypeCode,
+      adults: input.adults,
+      children: input.children,
+      childAges: input.childAges.join(','),
+    }))).data
+  },
+
+  async createWalkIn(input: WalkInCheckInInput) {
+    assertMoneySatang(input.expectedTotalSatang, 'expectedTotalSatang')
+    if (input.payment) assertNoLegacyMoney(input.payment, 'amount', 'amountSatang', true)
+    return (await request<ApiEnvelope<ReservationSummary>>('/api/front-desk/walk-in', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...input,
+        ...(input.payment ? { payment: { ...input.payment, clientRequestId: clientRequestId() } } : {}),
+      }),
+    })).data
+  },
+
   async housekeeping(date: string) {
     return (await request<ApiEnvelope<HousekeepingPayload>>(query('/api/lite/v1/housekeeping', { date }))).data
   },
@@ -242,6 +269,13 @@ export const liteApi = {
     return (await request<ApiEnvelope<unknown>>(`/api/booking-email/events/${encodeURIComponent(id)}/reject`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
+    })).data
+  },
+
+  async updateRoomOperationalStatus(roomId: string, operationalStatus: string, notes: string) {
+    return (await request<ApiEnvelope<unknown>>(`/api/rooms/${encodeURIComponent(roomId)}/operational-status`, {
+      method: 'POST',
+      body: JSON.stringify({ operationalStatus, notes }),
     })).data
   },
 

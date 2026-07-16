@@ -5,7 +5,7 @@ import type { Language, ReservationSummary } from './types'
 
 export function LoadingBlock() {
   const { t } = useI18n()
-  return <div className="state-card state-card--loading">{t('loading')}</div>
+  return <div className="state-card state-card--loading" role="status" aria-live="polite">{t('loading')}</div>
 }
 
 export function ErrorBlock({ error, retry }: { error: unknown; retry?: () => void }) {

@@ -263,3 +263,14 @@ The schema now contains nullable integer-satang authority fields while retaining
 - Legacy access/exports remain available through the 30-day rollback period.
 
 Repository/local checks cannot close Gmail/provider operation, Render apply/recovery, Cloudflare traffic enforcement, OTA approval, staff acceptance, or owner go/no-go. See `docs/LITE_ARCHITECTURE.md` for the release boundary.
+
+### 30-room hotel-essential acceptance additions
+
+- The guarded bootstrap creates exactly 30 rooms split 15 `DOUBLE` / 15 `TWIN`, is idempotent, and refuses the wrong environment, unexpected rooms, or drifted room assignments without deletion.
+- Standard booking create/edit persists optional contact, special requests, and internal notes; only protected booking detail returns them. Lists, board, Housekeeping, and Cashier remain privacy-minimized.
+- Atomic walk-in obtains a server quote, shows only ready rooms, requires identity, records exact payment or a reasoned authorized pay-later decision, and persists one checked-in reservation/folio transaction.
+- Checkout visibly reconciles active charges, extra charges, total, paid, and balance before completion. Collect-now and unpaid override cannot both be submitted.
+- Guest Folio / Statement prints persisted charge/payment/tax/balance data and stable booking/folio identifiers, is React-escaped, and states that it is not a tax invoice.
+- Future non-overlapping assignment to a currently occupied room succeeds, while actual check-in/walk-in into an occupied room fails before inventory/folio mutation.
+- Checked-out dirty rooms remain same-day `TURNOVER`; dirty correction, maintenance, return-to-service, cleaning, clean, and inspected transitions use the backend status rules.
+- Cancellation/no-show, maintenance/return/dirty correction, payment reversal, and charge void use contextual required reasons rather than browser prompts. Cancellation financial disposition remains an explicit owner-policy acceptance item.

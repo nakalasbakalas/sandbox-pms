@@ -2516,7 +2516,11 @@ async function ensureRoomTypeCapacity(tx, propertyId, roomTypeId, checkInKey, ch
   }
 }
 
-async function validateRoomAssignable(tx, reservation, roomId) {
+async function validateRoomAssignable(tx, reservation, roomId, { requireCurrentRoomVacancy }) {
+  if (typeof requireCurrentRoomVacancy !== 'boolean') {
+    throw new TypeError('Room assignment validation requires an explicit current-room vacancy policy.')
+  }
+
   const room = await tx.room.findUnique({
     where: { id: roomId },
     include: { roomType: true },
@@ -2538,7 +2542,7 @@ async function validateRoomAssignable(tx, reservation, roomId) {
   if (room.roomTypeId !== reservation.roomTypeId) {
     throw new PmsValidationError(`Room ${room.number} does not match the reservation room type.`)
   }
-  if (['OCCUPIED', 'OCCUPIED_CLEAN', 'OCCUPIED_DIRTY'].includes(room.currentStatus) && room.currentReservation !== reservation.id) {
+  if (requireCurrentRoomVacancy && isOccupiedRoomStatus(room.currentStatus)) {
     throw new PmsValidationError(`Room ${room.number} is occupied and cannot be assigned.`)
   }
 
@@ -3181,7 +3185,7 @@ async function updateReservationInTransaction(tx, reservationId, input, actor) {
           assignedRoomId = null
         } else {
           const candidate = { ...current, roomTypeId, checkIn: dateFromKey(checkInKey), checkOut: dateFromKey(checkOutKey) }
-          await validateRoomAssignable(tx, candidate, assignedRoomId)
+          await validateRoomAssignable(tx, candidate, assignedRoomId, { requireCurrentRoomVacancy: false })
         }
       }
     }
@@ -3291,6 +3295,20 @@ async function updateReservationInTransaction(tx, reservationId, input, actor) {
     })
     const updatedFolio = await recomputeFolio(tx, current.folio.id)
     await reconcileReservationDepositStatus(tx, updatedFolio.reservation, updatedFolio)
+  }
+
+  if (input.guest !== undefined) {
+    if (!input.guest || typeof input.guest !== 'object' || Array.isArray(input.guest)) {
+      throw new PmsValidationError('Guest changes must be an object.')
+    }
+    const guestData = validateGuestInput({
+      ...current.guest,
+      ...input.guest,
+    })
+    await tx.guest.update({
+      where: { id: current.guestId },
+      data: guestData,
+    })
   }
 
   await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: input })
@@ -3684,7 +3702,7 @@ async function createReservationInTransaction(tx, input, actor) {
 
     let assignedReservation = reservation
     if (input.assignedRoomId) {
-      const room = await validateRoomAssignable(tx, reservation, input.assignedRoomId)
+      const room = await validateRoomAssignable(tx, reservation, input.assignedRoomId, { requireCurrentRoomVacancy: false })
       await reserveRoomDates(tx, property.id, reservation.id, room.id, checkInKey, checkOutKey)
       assignedReservation = await tx.reservation.update({
         where: { id: reservation.id },
@@ -4276,6 +4294,10 @@ export async function createWalkInCheckIn(prisma, input, actor) {
   return serializableTransaction(prisma, async (tx) => {
     const property = await getProperty(tx)
     const { checkInKey, checkOutKey } = validateStayInput(input)
+    const hotelDate = getBangkokDateKey(new Date())
+    if (checkInKey !== hotelDate) {
+      throw new PmsValidationError(`Walk-in check-in must use today's hotel date (${hotelDate}).`)
+    }
     const roomType = await tx.roomType.findFirst({
       where: {
         propertyId: property.id,
@@ -4283,10 +4305,22 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       },
     })
     if (!roomType) throw new PmsValidationError('Selected room type was not found.')
+    const rateInput = Object.hasOwn(input || {}, 'ratePerNightSatang') || Object.hasOwn(input || {}, 'ratePerNight')
+      ? input
+      : {
+          ...input,
+          ratePerNightSatang: storedMoneyPair(roomType, 'baseRateSatang', 'baseRate', 'Room type base rate', { minimum: 1 }).satang,
+        }
     const pricing = calculateStayMoney({
-      ...input,
+      ...rateInput,
       ...pricingRulesFor(property, roomType),
     })
+    if (Object.hasOwn(input || {}, 'expectedTotalSatang')) {
+      const expectedTotal = moneyPairFromSatang(input.expectedTotalSatang, 'Expected stay total', { minimum: 1 })
+      if (expectedTotal.satang !== pricing.totalSatang) {
+        throw new PmsValidationError('The stay quote changed. Refresh the walk-in quote before collecting payment.', 409)
+      }
+    }
 
     await ensureRoomTypeCapacity(tx, property.id, roomType.id, checkInKey, checkOutKey)
 
@@ -4342,7 +4376,7 @@ export async function createWalkInCheckIn(prisma, input, actor) {
         })
 
     if (!candidateRoom) throw new PmsValidationError('No clean available room is ready for this walk-in.')
-    const room = await validateRoomAssignable(tx, reservation, candidateRoom.id)
+    const room = await validateRoomAssignable(tx, reservation, candidateRoom.id, { requireCurrentRoomVacancy: true })
     if (!isReadyRoomStatus(room.currentStatus)) {
       throw new PmsValidationError(`Room ${room.number} must be clean or inspected before walk-in check-in.`)
     }
@@ -4464,7 +4498,7 @@ export async function assignRoom(prisma, reservationId, roomId, actor, options =
     }
 
     const property = await getProperty(tx)
-    const room = await validateRoomAssignable(tx, reservation, roomId)
+    const room = await validateRoomAssignable(tx, reservation, roomId, { requireCurrentRoomVacancy: false })
     await reserveRoomDates(tx, property.id, reservation.id, room.id, reservation.checkIn, reservation.checkOut)
 
     const updated = await tx.reservation.update({
@@ -4545,7 +4579,7 @@ export async function checkInReservation(prisma, reservationId, actor, options =
       }
     }
 
-    const room = await validateRoomAssignable(tx, reservation, reservation.assignedRoomId)
+    const room = await validateRoomAssignable(tx, reservation, reservation.assignedRoomId, { requireCurrentRoomVacancy: true })
     if (isOccupiedRoomStatus(room.currentStatus)) {
       throw new PmsValidationError(`Room ${room.number} is occupied and cannot be checked in.`)
     }
@@ -4987,6 +5021,133 @@ export async function createCharge(prisma, input, actor) {
     await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, { folioId: folio.id, amount: charge.amount, quantity, category, sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId) })
     return { charge, folio: updatedFolio, replayed: false }
   })
+}
+
+function normalizeWalkInQuoteInput(input) {
+  const value = input && typeof input === 'object' && !Array.isArray(input) ? input : {}
+  const allowed = new Set(['checkIn', 'checkOut', 'roomTypeCode', 'adults', 'children', 'childAges'])
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key))
+  if (unknown.length > 0) {
+    throw new PmsValidationError(`Walk-in quote does not accept: ${unknown.join(', ')}.`)
+  }
+  const rawChildAges = value.childAges
+  const childAges = Array.isArray(rawChildAges)
+    ? rawChildAges
+    : String(rawChildAges || '').split(',').filter((age) => age !== '')
+  return {
+    checkIn: value.checkIn,
+    checkOut: value.checkOut,
+    roomTypeCode: String(value.roomTypeCode || '').trim(),
+    adults: Number(value.adults),
+    children: Number(value.children || 0),
+    childAges: childAges.map(Number),
+  }
+}
+
+/**
+ * Side-effect-free quote and room-readiness contract for an atomic walk-in
+ * check-in. Pricing uses the configured room-rate and property occupancy rules;
+ * the mutation repeats every validation inside its serializable transaction.
+ */
+export async function getWalkInQuote(prisma, input, options = {}) {
+  const normalized = normalizeWalkInQuoteInput(input)
+  const now = options.now === undefined ? new Date() : new Date(options.now)
+  if (Number.isNaN(now.getTime())) throw new PmsValidationError('Walk-in quote time is invalid.')
+  const property = await getProperty(prisma)
+  const hotelDate = getBangkokDateKey(now)
+  if (normalized.checkIn && getBangkokDateKey(normalized.checkIn) !== hotelDate) {
+    throw new PmsValidationError(`Walk-in check-in must use today's hotel date (${hotelDate}).`)
+  }
+  const quoteInput = { ...normalized, checkIn: hotelDate }
+  const { checkInKey, checkOutKey } = validateStayInput(quoteInput)
+  if (!normalized.roomTypeCode) throw new PmsValidationError('Select a room type for the walk-in quote.')
+  const roomType = await prisma.roomType.findFirst({
+    where: { propertyId: property.id, code: normalized.roomTypeCode },
+  })
+  if (!roomType) throw new PmsValidationError('Selected room type was not found.', 404)
+  const ratePerNightSatang = storedMoneyPair(
+    roomType,
+    'baseRateSatang',
+    'baseRate',
+    'Room type base rate',
+    { minimum: 1 },
+  ).satang
+  const pricing = calculateStayMoney({
+    ...quoteInput,
+    ratePerNightSatang,
+    ...pricingRulesFor(property, roomType),
+  })
+
+  await ensureRoomTypeCapacity(prisma, property.id, roomType.id, checkInKey, checkOutKey)
+  const stayDateValues = stayDates(checkInKey, checkOutKey).map(dateFromKey)
+  const readyRooms = await prisma.room.findMany({
+    where: {
+      propertyId: property.id,
+      roomTypeId: roomType.id,
+      operationalStatus: 'AVAILABLE',
+      currentReservation: null,
+      currentStatus: { in: ['VACANT_CLEAN', 'INSPECTED'] },
+      assignedReservations: {
+        none: {
+          status: { in: activeReservationStatuses() },
+          checkIn: { lt: dateFromKey(checkOutKey) },
+          checkOut: { gt: dateFromKey(checkInKey) },
+        },
+      },
+      inventory: {
+        none: {
+          date: { in: stayDateValues },
+          status: { in: ['RESERVED', 'HELD', 'BLOCKED', 'OUT_OF_SERVICE'] },
+        },
+      },
+    },
+    select: {
+      id: true,
+      number: true,
+      floor: true,
+      currentStatus: true,
+    },
+    orderBy: [{ floor: 'asc' }, { number: 'asc' }],
+  })
+
+  return {
+    hotelDate,
+    checkIn: checkInKey,
+    checkOut: checkOutKey,
+    currency: String(property.currency || 'THB').trim().toUpperCase(),
+    roomType: {
+      id: roomType.id,
+      code: roomType.code,
+      name: roomType.name,
+      standardOccupancy: roomType.standardOcc,
+      maxOccupancy: roomType.maxOccupancy,
+    },
+    occupancy: {
+      adults: normalized.adults,
+      children: normalized.children,
+      childAges: normalized.childAges,
+    },
+    pricing: {
+      nights: pricing.nights,
+      ratePerNightSatang: pricing.ratePerNightSatang,
+      roomSubtotalSatang: pricing.roomSubtotalSatang,
+      extraGuestFeeSatang: pricing.extraGuestFeeSatang,
+      childFeeSatang: pricing.childFeeSatang,
+      totalSatang: pricing.totalSatang,
+      depositAmountSatang: pricing.depositAmountSatang,
+    },
+    readyRooms: readyRooms.map((room) => ({
+      id: room.id,
+      number: room.number,
+      floor: room.floor,
+      housekeepingStatus: room.currentStatus,
+    })),
+    paymentPolicy: {
+      amountDueSatang: pricing.totalSatang,
+      fullPaymentRequired: true,
+      payLaterRequiresManager: true,
+    },
+  }
 }
 
 export async function reversePayment(prisma, paymentId, input, actor) {

@@ -210,6 +210,13 @@ async function queryBookings(context, baseUrl, query) {
   return payload.data.items
 }
 
+async function queryBookingDetail(context, baseUrl, reservationId) {
+  const response = await context.request.get(`${baseUrl}/api/lite/v1/bookings/${encodeURIComponent(reservationId)}`)
+  const payload = await response.json()
+  assert.equal(response.status(), 200, `booking detail query failed: ${JSON.stringify(payload)}`)
+  return payload.data
+}
+
 async function apiMutation(context, baseUrl, method, path, data, expectedStatus = 200) {
   const response = await context.request.fetch(`${baseUrl}${path}`, { method, data })
   const payload = await response.json().catch(() => null)
@@ -217,7 +224,7 @@ async function apiMutation(context, baseUrl, method, path, data, expectedStatus 
   return payload?.data
 }
 
-async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, frontDeskErrors, baseUrl, reservation, runId) {
+async function runCoreOperationsProof(adminContext, housekeepingContext, adminPage, frontDeskPage, housekeepingPage, frontDeskErrors, baseUrl, reservation, runId) {
   const today = hotelDate()
   const boardResponse = await adminContext.request.get(`${baseUrl}/api/lite/v1/board?from=${today}&to=${plusDays(today, 14)}`)
   assert.equal(boardResponse.status(), 200)
@@ -285,6 +292,13 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
   assert.equal(current.guest.identityComplete, true)
   assert.equal(current.folio.balanceSatang, 0)
 
+  const checkedInCancellation = await adminContext.request.post(`${baseUrl}/api/reservations/${reservation.id}/cancel`, {
+    data: { reason: 'E2E verifies an occupied stay cannot be cancelled.' },
+  })
+  assert.equal(checkedInCancellation.status(), 400, 'checked-in bookings must be checked out rather than cancelled')
+  ;[current] = await queryBookings(adminContext, baseUrl, reservation.confirmationCode)
+  assert.equal(current.status, 'CHECKED_IN', 'rejected cancellation must leave the in-house stay unchanged')
+
   const checkedInEdit = await adminContext.request.patch(`${baseUrl}/api/reservations/${reservation.id}`, {
     data: {
       checkIn: current.checkIn.slice(0, 10),
@@ -317,10 +331,29 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
   await folioDialog.getByRole('button', { name: 'Record payment', exact: true }).click()
   assert.equal(await folioDialog.getByLabel('Amount (THB)', { exact: true }).inputValue(), '12.34')
   await folioDialog.getByRole('button', { name: 'Save', exact: true }).click()
-  await visible(folioDialog.getByText('Cash', { exact: true }).last(), 'persisted localized folio payment')
-  ;[current] = await queryBookings(adminContext, baseUrl, reservation.confirmationCode)
+  await visible(folioDialog.locator('.ledger-section .ledger-row').filter({ hasText: 'Cash' }).first(), 'persisted localized folio payment')
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    ;[current] = await queryBookings(adminContext, baseUrl, reservation.confirmationCode)
+    if (current.folio.balanceSatang === 0) break
+    await sleep(250)
+  }
   assert.equal(current.folio.balanceSatang, 0)
   assert.equal(current.folio.payments.some((payment) => payment.amountSatang === 1_234), true)
+
+  const openFolioDetail = await queryBookingDetail(adminContext, baseUrl, reservation.id)
+  assert.equal(openFolioDetail.reservation.folio.id, current.folio.id, 'folio detail must use the persisted booking folio')
+  assert.equal(openFolioDetail.reservation.folio.status, 'OPEN', 'a settled in-house folio remains open until checkout')
+  assert.equal(openFolioDetail.reservation.folio.paymentState, 'SETTLED')
+  assert.equal(
+    openFolioDetail.reservation.folio.charges.reduce((sum, charge) => sum + (charge.void ? 0 : charge.totalSatang), 0),
+    openFolioDetail.reservation.folio.totalSatang,
+    'folio retrieval must reconcile active room and extra charges to its total',
+  )
+  assert.equal(
+    openFolioDetail.reservation.folio.payments.reduce((sum, payment) => sum + payment.amountSatang, 0),
+    openFolioDetail.reservation.folio.paidSatang,
+    'folio retrieval must reconcile payments to its paid total',
+  )
   await folioDialog.locator('.modal-footer').getByRole('button', { name: 'Close', exact: true }).click()
 
   const inHouseRow = frontDeskPage.locator('article.reservation-row').filter({ hasText: reservation.guest.displayName })
@@ -333,6 +366,50 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
   ;[current] = await queryBookings(adminContext, baseUrl, reservation.confirmationCode)
   assert.equal(current.status, 'CHECKED_OUT')
   assert.equal(current.folio.status, 'CLOSED')
+
+  const closedFolioDetail = await queryBookingDetail(adminContext, baseUrl, reservation.id)
+  assert.equal(closedFolioDetail.reservation.status, 'CHECKED_OUT')
+  assert.ok(closedFolioDetail.reservation.actualCheckOut, 'checkout must persist its actual completion timestamp')
+  assert.equal(closedFolioDetail.reservation.folio.status, 'CLOSED')
+  assert.equal(closedFolioDetail.reservation.folio.balanceSatang, 0)
+  assert.equal(closedFolioDetail.reservation.assignedRoom.housekeepingStatus, 'VACANT_DIRTY')
+  const lifecycleActions = new Set(closedFolioDetail.auditTimeline.events.map((event) => event.action))
+  for (const action of ['CREATED', 'ASSIGNED_ROOM', 'CHECKED_IN', 'CHECKED_OUT']) {
+    assert.equal(lifecycleActions.has(action), true, `booking history must include ${action}`)
+  }
+
+  const housekeepingBefore = await housekeepingContext.request.get(`${baseUrl}/api/lite/v1/housekeeping?date=${today}`)
+  assert.equal(housekeepingBefore.status(), 200)
+  const dirtyTurnover = (await housekeepingBefore.json()).data.rooms.find((candidate) => candidate.id === room.id)
+  assert.ok(dirtyTurnover, 'the checked-out room must remain visible in the housekeeping queue')
+  assert.equal(dirtyTurnover.housekeepingStatus, 'VACANT_DIRTY')
+  assert.equal(dirtyTurnover.readyForArrival, false)
+
+  const turnoverStates = [
+    ['CLEANING', 'CLEANING'],
+    ['CLEAN', 'VACANT_CLEAN'],
+    ['INSPECTED', 'INSPECTED'],
+  ]
+  for (const [requested, persisted] of turnoverStates) {
+    const updatedRoom = await apiMutation(
+      housekeepingContext,
+      baseUrl,
+      'POST',
+      `/api/housekeeping/rooms/${room.id}/status`,
+      { status: requested },
+    )
+    assert.equal(updatedRoom.currentStatus, persisted, `housekeeping ${requested} must persist as ${persisted}`)
+  }
+
+  const housekeepingAfter = await housekeepingContext.request.get(`${baseUrl}/api/lite/v1/housekeeping?date=${today}`)
+  assert.equal(housekeepingAfter.status(), 200)
+  const inspectedTurnover = (await housekeepingAfter.json()).data.rooms.find((candidate) => candidate.id === room.id)
+  assert.equal(inspectedTurnover.housekeepingStatus, 'INSPECTED')
+  assert.equal(inspectedTurnover.readyForArrival, true)
+  await housekeepingPage.reload({ waitUntil: 'domcontentloaded' })
+  const turnoverCard = housekeepingPage.locator('article.room-task').filter({ hasText: `Room ${room.number}` })
+  await visible(turnoverCard, 'checked-out room in the housekeeping workspace')
+  await visible(turnoverCard.getByText('Inspected', { exact: true }), 'inspected turnover state in the housekeeping UI')
   await openBookings(frontDeskPage)
   await visible(frontDeskPage.getByText(reservation.guest.displayName, { exact: true }), 'checked-out booking in Bookings')
 
@@ -347,11 +424,44 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
     guest: { firstName: 'No Show', lastName: runId },
     source: 'DIRECT',
   }, 201)
+  const reasonlessNoShow = await adminContext.request.post(`${baseUrl}/api/reservations/${noShow.id}/no-show`, {
+    data: {},
+  })
+  assert.equal(reasonlessNoShow.status(), 400, 'no-show requires an operational reason')
+  let [noShowRead] = await queryBookings(adminContext, baseUrl, noShow.confirmationCode)
+  assert.equal(noShowRead.status, 'CONFIRMED', 'reasonless no-show must leave the booking active')
   await apiMutation(adminContext, baseUrl, 'POST', `/api/reservations/${noShow.id}/no-show`, {
     reason: 'E2E verified guest did not arrive',
   })
-  const [noShowRead] = await queryBookings(adminContext, baseUrl, noShow.confirmationCode)
+  ;[noShowRead] = await queryBookings(adminContext, baseUrl, noShow.confirmationCode)
   assert.equal(noShowRead.status, 'NO_SHOW')
+
+  const cancellation = await apiMutation(adminContext, baseUrl, 'POST', '/api/reservations', {
+    checkIn: plusDays(today, 3),
+    checkOut: plusDays(today, 4),
+    roomTypeCode: reservation.roomType.code,
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNightSatang: reservation.roomType.baseRateSatang,
+    guest: { firstName: 'Cancelled', lastName: runId },
+    source: 'DIRECT',
+  }, 201)
+  const reasonlessCancellation = await adminContext.request.post(`${baseUrl}/api/reservations/${cancellation.id}/cancel`, {
+    data: {},
+  })
+  assert.equal(reasonlessCancellation.status(), 400, 'cancellation requires an operational reason')
+  let [cancelledRead] = await queryBookings(adminContext, baseUrl, cancellation.confirmationCode)
+  assert.equal(cancelledRead.status, 'CONFIRMED', 'reasonless cancellation must leave the booking active')
+  await apiMutation(adminContext, baseUrl, 'POST', `/api/reservations/${cancellation.id}/cancel`, {
+    reason: 'E2E guest cancelled before arrival',
+  })
+  ;[cancelledRead] = await queryBookings(adminContext, baseUrl, cancellation.confirmationCode)
+  assert.equal(cancelledRead.status, 'CANCELLED')
+  const cancelledAssignment = await adminContext.request.post(`${baseUrl}/api/reservations/${cancellation.id}/assign-room`, {
+    data: { roomId: room.id, expectedUpdatedAt: cancelledRead.updatedAt },
+  })
+  assert.equal(cancelledAssignment.status(), 400, 'cancelled bookings cannot be assigned back into sellable inventory')
 
   const concurrencyStay = {
     checkIn: plusDays(today, 5),
@@ -400,7 +510,63 @@ async function runCoreOperationsProof(adminContext, adminPage, frontDeskPage, fr
   })
   assert.equal(staleResponse.status(), 409, 'stale booking-board date edits must be rejected')
 
-  console.log('Lite core operations E2E passed: UI board assign/date edit, Thai identity/check-in, UI folio charge/payment, UI checkout, no-show, concurrent assignment, and stale board edit rejection.')
+  console.log('Lite core operations E2E passed: booking/assignment, Thai identity/check-in, room and extra charges, payments, folio retrieval, checkout, housekeeping turnover, cancellation/no-show guardrails, concurrent assignment, and stale edit rejection.')
+}
+
+async function runAtomicWalkInProof(adminContext, adminPage, baseUrl, runId) {
+  const guestName = `Atomic Walkin ${runId}`
+  const checkIn = hotelDate()
+  const checkOut = plusDays(checkIn, 1)
+  const boardResponse = await adminContext.request.get(`${baseUrl}/api/lite/v1/board?from=${checkIn}&to=${checkOut}`)
+  assert.equal(boardResponse.status(), 200)
+  const board = (await boardResponse.json()).data
+  let provenQuote = null
+  for (const roomType of board.roomTypes) {
+    const quoteResponse = await adminContext.request.get(`${baseUrl}/api/lite/v1/walk-in-quote?checkIn=${checkIn}&checkOut=${checkOut}&roomTypeCode=${encodeURIComponent(roomType.code)}&adults=1&children=0&childAges=`)
+    const quotePayload = await quoteResponse.json()
+    assert.equal(quoteResponse.status(), 200, `walk-in quote failed: ${JSON.stringify(quotePayload)}`)
+    if (quotePayload.data.readyRooms.length > 0) {
+      provenQuote = quotePayload.data
+      break
+    }
+  }
+  assert.ok(provenQuote, 'at least one room type must have a clean ready room for atomic walk-in proof')
+  await openBookings(adminPage)
+  await adminPage.getByRole('button', { name: 'Walk-in check-in', exact: true }).click()
+  const dialog = adminPage.getByRole('dialog', { name: 'Walk-in check-in', exact: true })
+  await visible(dialog, 'atomic walk-in dialog')
+  await dialog.getByLabel('First name', { exact: true }).fill('Atomic')
+  await dialog.getByLabel('Last name', { exact: true }).fill(`Walkin ${runId}`)
+  await dialog.getByLabel('Email (optional)', { exact: true }).fill(`walkin-${runId}@example.invalid`)
+  await dialog.getByLabel('Phone (optional)', { exact: true }).fill('0800000000')
+  await dialog.getByLabel('Nationality', { exact: true }).fill('Thai')
+  await dialog.getByLabel('Identity number', { exact: true }).fill(`E2E-${runId}`)
+  await dialog.locator('label').filter({ hasText: 'Room type' }).locator('select').selectOption(provenQuote.roomType.code)
+  await visible(dialog.getByText('Amount due', { exact: true }), 'server-derived walk-in quote')
+  const readyRoom = dialog.locator('label').filter({ hasText: 'Ready room' }).locator('select')
+  await readyRoom.locator('option').nth(1).waitFor({ state: 'attached' })
+  assert.notEqual(await readyRoom.inputValue(), '', 'the quote must select a clean ready room')
+  await dialog.getByRole('button', { name: 'Confirm & check in', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden' })
+
+  const persisted = await queryBookings(adminContext, baseUrl, guestName)
+  assert.equal(persisted.length, 1, 'atomic walk-in must create exactly one booking')
+  assert.equal(persisted[0].status, 'CHECKED_IN')
+  assert.equal(persisted[0].source, 'WALK_IN')
+  assert.ok(persisted[0].assignedRoomId, 'atomic walk-in must assign a ready room')
+  assert.equal(persisted[0].folio.balanceSatang, 0, 'full walk-in settlement must leave no balance')
+  assert.equal(persisted[0].folio.paidSatang, persisted[0].folio.totalSatang, 'walk-in payment must match the server quote')
+
+  const bookingRow = adminPage.locator('tbody tr').filter({ hasText: guestName })
+  await visible(bookingRow, 'atomic walk-in booking row')
+  await bookingRow.getByRole('button', { name: 'Details', exact: true }).click()
+  const detailDialog = adminPage.getByRole('dialog', { name: `Booking details · ${persisted[0].confirmationCode}`, exact: true })
+  await visible(detailDialog.getByRole('button', { name: 'Print guest folio', exact: true }), 'guest folio print action')
+  const printStatement = await detailDialog.locator('.folio-print-sheet').textContent()
+  assert.match(printStatement || '', /Guest Folio \/ Statement/)
+  assert.match(printStatement || '', /not a tax invoice/i)
+  await detailDialog.locator('.modal-footer').getByRole('button', { name: 'Close', exact: true }).click()
+  console.log('Lite atomic walk-in E2E passed: quote, ready-room selection, identity, settlement, check-in, persisted folio, and honest print statement.')
 }
 
 async function runBrowserProof(baseUrl) {
@@ -473,6 +639,10 @@ async function runBrowserProof(baseUrl) {
     await adminPage.unroute('**/api/reservations')
     await dialog.getByLabel('First name', { exact: true }).fill('Live')
     await dialog.getByLabel('Last name', { exact: true }).fill(`Sync ${runId}`)
+    await dialog.getByLabel('Email (optional)', { exact: true }).fill(`live-${runId}@example.invalid`)
+    await dialog.getByLabel('Phone (optional)', { exact: true }).fill('0811111111')
+    await dialog.getByLabel('Guest special requests', { exact: true }).fill('Quiet room if available')
+    await dialog.getByLabel('Internal notes', { exact: true }).fill('E2E contact context')
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await dialog.waitFor({ state: 'hidden' })
 
@@ -480,8 +650,29 @@ async function runBrowserProof(baseUrl) {
     const persisted = await queryBookings(adminContext, baseUrl, syncedGuest)
     assert.equal(persisted.length, 1, 'successful booking must be persisted once')
     assert.equal(persisted[0].guest.displayName, syncedGuest)
+    const createdDetail = await queryBookingDetail(adminContext, baseUrl, persisted[0].id)
+    assert.equal(createdDetail.reservation.guest.email, `live-${runId}@example.invalid`)
+    assert.equal(createdDetail.reservation.guest.phone, '0811111111')
+    assert.equal(createdDetail.reservation.specialRequests, 'Quiet room if available')
+    assert.equal(createdDetail.reservation.notes, 'E2E contact context')
 
-    await runCoreOperationsProof(adminContext, adminPage, frontDeskPage, frontDeskErrors, baseUrl, persisted[0], runId)
+    const createdRow = adminPage.locator('tbody tr').filter({ hasText: syncedGuest })
+    await createdRow.getByRole('button', { name: 'Edit', exact: true }).click()
+    const editDialog = adminPage.getByRole('dialog', { name: `Edit ${persisted[0].confirmationCode}`, exact: true })
+    await visible(editDialog, 'booking editor with protected contact detail')
+    await adminPage.waitForFunction(() => Array.from(document.querySelectorAll('input[type="tel"]')).some((input) => input.value === '0811111111'))
+    await editDialog.getByLabel('Phone (optional)', { exact: true }).fill('0822222222')
+    await editDialog.locator('label').filter({ hasText: 'Internal notes' }).locator('textarea').fill('E2E contact updated')
+    await editDialog.getByRole('button', { name: 'Save', exact: true }).click()
+    await editDialog.waitFor({ state: 'hidden' })
+    const updatedDetail = await queryBookingDetail(adminContext, baseUrl, persisted[0].id)
+    assert.equal(updatedDetail.reservation.guest.phone, '0822222222')
+    assert.equal(updatedDetail.reservation.notes, 'E2E contact updated')
+    const refreshed = await queryBookings(adminContext, baseUrl, syncedGuest)
+    persisted[0] = refreshed[0]
+
+    await runCoreOperationsProof(adminContext, housekeepingContext, adminPage, frontDeskPage, housekeepingPage, frontDeskErrors, baseUrl, persisted[0], runId)
+    await runAtomicWalkInProof(adminContext, adminPage, baseUrl, runId)
 
     const operationalLocalStorageKeys = await frontDeskPage.evaluate(() => Object.keys(window.localStorage))
     assert.deepEqual(operationalLocalStorageKeys, ['pms-lite-language'], 'only the language preference may be stored in localStorage')

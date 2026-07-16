@@ -30,6 +30,8 @@ export type GuestSummary = {
   firstName?: string
   lastName?: string
   displayName: string
+  email?: string | null
+  phone?: string | null
   nationality?: string | null
   idType?: string | null
   identityComplete?: boolean
@@ -74,6 +76,72 @@ export type FolioSummary = {
   charges: FolioCharge[]
   payments: FolioPayment[]
   updatedAt: string | null
+}
+
+export type WalkInQuote = {
+  hotelDate: string
+  checkIn: string
+  checkOut: string
+  currency: string
+  roomType: {
+    id: string
+    code: string
+    name: string
+    standardOccupancy: number
+    maxOccupancy: number
+  }
+  occupancy: {
+    adults: number
+    children: number
+    childAges: number[]
+  }
+  pricing: {
+    nights: number
+    ratePerNightSatang: MoneySatang
+    roomSubtotalSatang: MoneySatang
+    extraGuestFeeSatang: MoneySatang
+    childFeeSatang: MoneySatang
+    totalSatang: MoneySatang
+    depositAmountSatang: MoneySatang
+  }
+  readyRooms: Array<{
+    id: string
+    number: string
+    floor: number
+    housekeepingStatus: 'VACANT_CLEAN' | 'INSPECTED'
+  }>
+  paymentPolicy: {
+    amountDueSatang: MoneySatang
+    fullPaymentRequired: true
+    payLaterRequiresManager: true
+  }
+}
+
+export type WalkInCheckInInput = {
+  checkIn: string
+  checkOut: string
+  roomTypeCode: string
+  assignedRoomId: string
+  adults: number
+  children: number
+  childAges: number[]
+  expectedTotalSatang: MoneySatang
+  guest: {
+    firstName: string
+    lastName: string
+    email?: string
+    phone?: string
+    nationality: string
+    idType: string
+    idNumber: string
+  }
+  payment?: {
+    amountSatang: MoneySatang
+    method: string
+    reference?: string
+  }
+  allowPayLater?: boolean
+  payLaterReason?: string
 }
 
 export type FolioCharge = {
@@ -132,6 +200,8 @@ export type ReservationSummary = {
   folio: FolioSummary | null
   createdAt: string | null
   updatedAt: string | null
+  notes?: string | null
+  specialRequests?: string | null
 }
 
 export type PendingReviewEmailEvent = {
