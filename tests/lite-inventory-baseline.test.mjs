@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   applyLiteInventoryBaseline,
   assertLiteStagingInventoryBoundary,
+  LITE_INVENTORY_TRANSACTION_OPTIONS,
   LITE_ROOM_BASELINE,
   liteInventorySummary,
 } from '../server/lite-inventory-baseline.mjs'
@@ -67,6 +68,10 @@ function createPrismaFixture(initialRooms = []) {
 }
 
 test('Lite inventory definition is exactly 15 DOUBLE and 15 TWIN rooms with unique numbers', () => {
+  assert.deepEqual(LITE_INVENTORY_TRANSACTION_OPTIONS, {
+    maxWait: 10_000,
+    timeout: 60_000,
+  })
   const summary = liteInventorySummary()
   assert.deepEqual(summary, {
     rooms: 30,

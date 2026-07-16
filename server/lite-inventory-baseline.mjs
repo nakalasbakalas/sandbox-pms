@@ -1,5 +1,13 @@
 const EXPECTED_STAGING_DATABASE_NAME = 'sandbox_pms_lite_staging'
 
+// Render's staging database may be reached over its public TLS endpoint during
+// an owner-approved maintenance run. Keep the interactive transaction bounded,
+// but allow enough time for the guarded 30-room write and final verification.
+export const LITE_INVENTORY_TRANSACTION_OPTIONS = Object.freeze({
+  maxWait: 10_000,
+  timeout: 60_000,
+})
+
 export const LITE_ROOM_TYPE_BASELINE = Object.freeze([
   Object.freeze({
     code: 'TWIN',
@@ -186,5 +194,5 @@ export async function applyLiteInventoryBaseline(prisma, { propertyCode = 'SANDB
       existingRooms: existingRooms.length,
       ...finalSummary,
     }
-  })
+  }, LITE_INVENTORY_TRANSACTION_OPTIONS)
 }
