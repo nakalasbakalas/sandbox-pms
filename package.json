@@ -17,6 +17,7 @@
         "test:e2e": "node scripts/run-e2e-tests.mjs",
         "test:e2e:db": "node scripts/run-e2e-tests.mjs",
         "db:bootstrap": "node scripts/bootstrap-local.mjs",
+        "remediation:check": "npm run launch:check",
         "launch:check": "node scripts/launch-check.mjs",
         "launch:evidence": "node scripts/launch-evidence.mjs",
         "live:check": "node scripts/live-readiness-check.mjs",
@@ -25,6 +26,7 @@
         "prod:preflight": "node scripts/production-preflight.mjs",
         "public-edge:proof": "node scripts/prove-public-edge-posture.mjs",
         "cloudflare:waf:proof": "node scripts/prove-cloudflare-waf-rules.mjs",
+        "cloudflare:waf:ensure": "node scripts/ensure-cloudflare-waf-rules.mjs",
         "auth-rbac:proof": "node scripts/prove-auth-rbac-production.mjs",
         "owner-proof:validate": "node scripts/validate-owner-proof-intake.mjs",
         "db:up": "docker compose -f docker-compose.db.yml up -d",
@@ -138,6 +140,7 @@
     "overrides": {
         "body-parser": "1.20.5",
         "esbuild": "0.28.1",
+        "js-yaml": "4.2.0",
         "lodash": "4.18.1",
         "path-to-regexp": "8.4.2",
         "picomatch": "4.0.4",

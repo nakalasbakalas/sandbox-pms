@@ -1,9 +1,57 @@
 # Live Environment Proof Register
 
-Latest validation refresh: 2026-07-05.
-Latest external provider evidence refresh: 2026-07-05T22:20+07:00.
+Latest validation refresh: 2026-07-07.
+Latest external provider evidence refresh: 2026-07-07T08:08Z.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-07T15:29+07:00 Render Database Recovery Proof
+
+- Tester: Codex in an authenticated Chrome session on the Render dashboard.
+- Scope: read-only inspection of the database recovery page and restore modal for `sandbox-hotel-pms-db-v43m`. No restore was started, no production database shell was opened, and no secret values or data mutation were recorded.
+- The Render recovery page for `sandbox-hotel-pms-db-v43m` states Point-in-Time Recovery can restore from any timestamp in the past 3 days.
+- The restore modal showed the latest available recovery point as `2026-07-07 15:29:56` in the dashboard timezone `UTC+07:00` (`2026-07-07T08:29:56Z`).
+- The same recovery page states database export files are retained for at least 7 days.
+- Restore owner remains Nick per the documented owner assignments in `docs/disaster-recovery.md`.
+- Canonical evidence: authenticated Render dashboard inspection in Chrome.
+
+## 2026-07-07T08:08Z Cloudflare WAF Zone Proof
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: zone-level Cloudflare WAF/rate-limit ensure plus read-only proof and public edge probe for `https://book.sandboxhotel.com`. No Cloudflare API token, account ID, zone ID, R2 access key, R2 secret, raw response body, rule expression, action parameter, cookie, password, production database shell, account-level WAF add-on, paid action, or DB-mutating E2E was recorded.
+- `npm.cmd run cloudflare:waf:ensure -- --env-file .\.codex\cloudflare-waf.local.env` completed at `2026-07-07T08:08:05.593Z` for the no-extra-cost zone-level path.
+- `npm.cmd run cloudflare:waf:proof -- --env-file .\.codex\cloudflare-waf.local.env --hostname book.sandboxhotel.com --probe-url https://book.sandboxhotel.com/.env --require-rules` succeeded with local Cloudflare credentials at `2026-07-07T08:08:56.333Z` and reported `ready=true`.
+- Cloudflare zone `sandboxhotel.com` reported `active`.
+- Zone-level WAF ruleset `77454fe2d30c4220b5701f6fdfb893ba` (`Cloudflare Managed Free Ruleset`, phase `http_request_firewall_managed`, version `67`) contains `26` enabled managed rules with action `block`.
+- Custom WAF ruleset `b510ac934aa84f37b7ea399d66f2530c` contains rule `87dcf41c98fe479b9530a917d2a590cc` (`sandbox_pms_common_probe_block`) for `book.sandboxhotel.com` and `staff.sandboxhotel.com`, action `block`.
+- Rate-limit ruleset `8e6c77f729974d35ad589329bca15a77` contains rule `d9eb5af02d664b8c9764b4d815848a36` (`sandbox_pms_login_rate_limit`) for `book.sandboxhotel.com` and `staff.sandboxhotel.com`, action `block`, threshold `10` requests per `10` seconds by `cf.colo.id` and `ip.src`, mitigation timeout `10` seconds.
+- Account-level rulesets were intentionally not inspected or modified; the no-extra-cost proof uses only zone-level WAF APIs.
+- `npm.cmd run public-edge:proof` passed at `2026-07-07T06:47:59.258Z`: `/healthz?deep=1` returned `200`, and `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` through Cloudflare/Render headers with response bodies omitted.
+- Canonical evidence: `docs/launch/evidence/2026-07-07-cloudflare-waf-zone-proof.md`.
+
+No-extra-cost WAF/rate-limit launch proof is now complete. The optional API burst Cloudflare rate-limit rule is not enabled by default because Free-plan quota allows one rate-limit rule; broader API abuse protection remains in app/backend controls.
+
+## 2026-07-07T02:35Z Owner Completion Deploy And Issue Closure
+
+- Tester: Codex in local checkout `D:\sandbox-pms`.
+- Scope: owner-directed accepted-risk completion for the remaining launch issues after deploying the additive auth-lockout change and running post-deploy checks. No passwords, cookies, API tokens, raw database URLs, guest data, payment data, raw mailbox content, production database shell, WAF mutation, or DB-mutating E2E was recorded.
+- Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218`.
+- Render service `sandbox-hotel-pms-v43m` (`srv-d6ns31h4tr6s73c9i8g0`) deployed `d18ea06eb974621281c43a57cf4d5a41994c2775` as live deploy `dep-d966aj9kh4rs73d9h10g`, started `2026-07-07T02:32:45.4728Z`, and finished `2026-07-07T02:35:18.281235Z`.
+- The deploy applied the additive user-lockout migration through the service predeploy path. Codex did not open a production database shell.
+- Post-deploy checks passed after warm-up retries: `npm.cmd run live:check`, `npm.cmd run public-edge:proof`, `npm.cmd run prod:preflight`, and `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token`.
+- `https://book.sandboxhotel.com/healthz?deep=1` returned `200`; health reported production environment, database configured, and database OK.
+- Public-edge proof reported Cloudflare and Render headers, HSTS, CSP, and `X-Frame-Options`. Common probe paths `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` with bodies omitted.
+- Redacted Render Gmail OAuth status remained `ready=true` for the booking-specific refresh-token tuple, with all secret values omitted.
+- `npm.cmd run cloudflare:waf:proof` failed safe because no `CLOUDFLARE_API_TOKEN`/`CF_API_TOKEN` or `CLOUDFLARE_ZONE_ID`/`CF_ZONE_ID` was present. This preserves the boundary that public edge/header proof is current, but privileged WAF/rate-limit rule IDs and thresholds were not Codex-verified.
+- GitHub issues `#137`, `#138`, `#140`, and `#142` were closed by owner-directed accepted-risk completion. Closure accepts unavailable external-provider proof as owner-managed risk; it does not convert those gaps into verified provider facts.
+- Canonical evidence: `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.
+
+Still carried as owner-managed operational risk after this refresh:
+
+- Cloudflare WAF/rate-limit rule IDs, thresholds, and protected-hostname coverage.
+- Latest Render database backup/recovery point and retention metadata.
+- Credentialed role-by-role production login/logout proof.
+- Staff Booking Inbox parser review, Thai/English label review, and demo/sample cleanup.
 
 ## 2026-07-05T22:20+07:00 Active Custom-Domain Service Sync
 

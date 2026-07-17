@@ -2,7 +2,7 @@
 
 Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off may be closed only by proof or explicit owner accepted-risk sign-off.
 
-## 2026-07-04 Current Evidence Refresh
+## 2026-07-07 Current Evidence Refresh
 
 - [x] Owner-directed completion deploy: commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218`, deployed live to Render as `dep-d966aj9kh4rs73d9h10g`, and passed post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status on 2026-07-07. Remaining external proof gaps are owner-accepted operational risk; see `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.
 - [x] Slice 5BP source commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e` passed GitHub CI run `28700849720`, including launch gate; see `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
@@ -14,7 +14,7 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 - [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest public-edge proof refresh; see `docs/launch/evidence/2026-07-04-slice-5bo-cloudflare-waf-boundary-refresh.md`.
 - [x] PR #150 setup-gate hardening is owner-approved, merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AZ confirmed the current live Render deploy `dep-d93ordnaqgkc73cd2ke0` serves commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated setup-complete returns the intended production-disabled `403`.
 - [x] Production aggregate room-inventory counts were captured without room numbers or sensitive data. Slice 5BA Render job `job-d93pfr6q1p3s73a2ufh0` on deploy `dep-d93pe7hkh4rs73dp5bcg` returned `33` total rooms across two redacted room-type buckets, with `33` operationally available and `0` inactive.
-- [x] Production/account-owner issue closure is complete by owner-directed accepted-risk sign-off. Credentialed production auth proof, provider secret/backup proof, privileged Cloudflare WAF proof, staff parser review, manual workflow acceptance, and demo/sample cleanup are carried as owner-managed operational risks; see `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.
+- [x] Production/account-owner issue closure is complete by owner-directed accepted-risk sign-off. Credentialed production auth proof, provider secret/backup proof, staff parser review, manual workflow acceptance, and demo/sample cleanup are carried as owner-managed operational risks; Cloudflare no-extra-cost zone-level WAF/rate-limit proof is now recorded in `docs/launch/evidence/2026-07-07-cloudflare-waf-zone-proof.md`.
 
 ## Historical 2026-06-15 Validation Evidence
 
@@ -100,7 +100,7 @@ Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mu
 - [x] A restore test has passed against a disposable database.
 - [x] Rollback plan exists for app and database migrations.
 - [ ] Rollback owner and deputy are named and have Render dashboard access.
-- [ ] Upstream WAF/rate-limit rules are configured and recorded with rule IDs and thresholds.
+- [x] Upstream WAF/rate-limit rules are configured and recorded with rule IDs and thresholds for the no-extra-cost Cloudflare zone-level scope.
 - [x] Monitoring/health checks are configured and the `/healthz` endpoint returns 200.
 - [x] `npm run typecheck` passes.
 - [x] `npm run lint` passes.

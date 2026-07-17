@@ -4,9 +4,11 @@ Boutique hotel property-management system for front desk, rooms, reservations, h
 
 ## Current Launch Status
 
-Status date: 2026-06-15.
+Status date: 2026-07-07.
 
-The codebase is in launch-hardening, not final launch sign-off. Automated checks can prove build, routing, business-rule, browser-smoke, API-contract, database-connectivity, and live-health behavior. They do not prove account-owner decisions, production user approval, provider credential ownership, role-by-role manual acceptance, WAF configuration, or launch go/no-go.
+The codebase is in owner-directed completion with accepted external-provider risk. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218`, deployed live to Render as `dep-d966aj9kh4rs73d9h10g`, and passed post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status on 2026-07-07.
+
+This is not independent proof of every provider-owned launch item. Cloudflare no-extra-cost zone-level WAF/rate-limit rule metadata is now Codex-verified, but latest Render backup/recovery metadata, credentialed role-by-role production auth proof, staff Booking Inbox parser review, Thai/English label review, and demo/sample cleanup remain owner-managed operational risks rather than Codex-verified facts.
 
 Current integration posture:
 
@@ -15,7 +17,7 @@ Current integration posture:
 - Payments: launch posture is PMS-recorded payments only. Card, PromptPay, bank transfer, and online payment records require references, but no live gateway/PromptPay collection adapter is proven.
 - Production data: `SEED_MODE=prod-safe` must not create fake operational guests, reservations, payments, invoices, room inventory, or demo staff users. Production room inventory is imported or configured separately.
 
-Open launch proof work is tracked in GitHub issues #136-#142. Scope decisions and go/no-go boundaries are documented in [docs/launch-scope-decisions.md](docs/launch-scope-decisions.md). The checklist is [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md).
+Current launch proof, accepted-risk boundaries, and go/no-go history are documented in [LAUNCH_CHECKLIST.md](LAUNCH_CHECKLIST.md), [docs/launch/CURRENT_STATUS_INDEX.md](docs/launch/CURRENT_STATUS_INDEX.md), [docs/launch/LAUNCH_PROOF_MATRIX.md](docs/launch/LAUNCH_PROOF_MATRIX.md), and [docs/launch-scope-decisions.md](docs/launch-scope-decisions.md).
 
 ## Local Development
 

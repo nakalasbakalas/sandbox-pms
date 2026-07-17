@@ -2,7 +2,7 @@
 
 Last refreshed: 2026-07-06.
 
-Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BW. Slice 5BW configures the booking-specific Gmail OAuth refresh-token tuple on Render and confirms the supported credential path is `ready=true` with values omitted; it also imports booking-email history as review-only PMS events. Nick now owns Cloudflare, Render, Gmail/OAuth, database backups, and emergency recovery. The latest recovery point is unknown and must be set up or freshly verified. Slice 5BU adds the owner-run Cloudflare WAF/rate-limit proof helper, but privileged Cloudflare WAF/rate-limit inspection is still unavailable from the current tools/env. This is not enough for launch sign-off. Live provider secret key inventory, rotation metadata, latest recovery-point proof, and WAF/rate-limit rule evidence remain account-owner/provider-gated.
+Verdict: partial/open. Safe repository, Render resource, deploy, live-health, public-edge, and redacted Gmail OAuth status evidence is current through Slice 5BW. Slice 5BW configures the booking-specific Gmail OAuth refresh-token tuple on Render and confirms the supported credential path is `ready=true` with values omitted; it also imports booking-email history as review-only PMS events. Nick now owns Cloudflare, Render, Gmail/OAuth, database backups, and emergency recovery. The latest recovery point is now verified in the Render dashboard, but secret inventory/rotation evidence remains incomplete. Slice 5BU adds the owner-run Cloudflare WAF/rate-limit proof helper, but privileged Cloudflare WAF/rate-limit inspection is still unavailable from the current tools/env. This is not enough for launch sign-off. Live provider secret key inventory, rotation metadata, and WAF/rate-limit rule evidence remain account-owner/provider-gated.
 
 ## Current Evidence
 
@@ -16,7 +16,7 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, pu
 | Disposable restore test | Historical pass | `docs/live-environment-proof.md` records a disposable Render Postgres restore test that passed on 2026-06-07 and deleted the temporary database afterward. |
 | Render CLI env-var/secret metadata | Not available through this CLI path | Slice 5AV confirmed `render --help` exposes no top-level env-var/secret-manager command; `render services --help` exposes only `create` and `instances`; `render services env --help` returned services help only; `render ea --help` exposes object storage only. No safe CLI secret inventory or rotation metadata command was exposed in this session. |
 | Booking-email Gmail OAuth env-var metadata | Ready for booking sync | Slice 5BW configures `BOOKING_EMAIL_GMAIL_CLIENT_ID`, `BOOKING_EMAIL_GMAIL_CLIENT_SECRET`, and `BOOKING_EMAIL_GMAIL_REFRESH_TOKEN` on `sandbox-hotel-pms-v43m` using the redacted `gmail-oauth:render` helper. `npm.cmd run render:gmail-oauth:status -- --use-render-cli-token` at `2026-07-05T01:48:28.733Z` reported the booking-specific refresh-token tuple `ready=true`. Values and Render auth tokens were omitted. This is credential-path readiness, not full provider secret inventory or rotation proof. |
-| Render CLI backup/recovery metadata | Not available through this CLI path | `render backups --help` returned `unknown command "backups" for "render"`; no safe CLI recovery-point or retention metadata command was exposed in this session. |
+| Render dashboard backup/recovery metadata | Verified in dashboard | The authenticated Render dashboard recovery page for `sandbox-hotel-pms-db-v43m` shows point-in-time recovery from any timestamp in the past 3 days, export retention of at least 7 days, and the latest available recovery point as `2026-07-07 15:29:56` UTC+07:00 (`2026-07-07T08:29:56Z`). |
 | Recovery/rollback owners | Partially assigned | Nick owns Render rollback, database recovery, Cloudflare/WAF, Gmail/OAuth, backups, and emergency recovery. Rollback deputy is not assigned unless Nick appoints one. |
 
 ## Boundaries
@@ -34,5 +34,4 @@ Verdict: partial/open. Safe repository, Render resource, deploy, live-health, pu
 - Cleanup/retention decision for legacy or compatibility env keys, including rollback impact.
 - Named rollback owner and deputy with Render dashboard access.
 - Named database recovery owner with Render PostgreSQL access.
-- Latest recovery point and retention window from Render dashboard or API, values redacted where needed.
 - WAF/rate-limit owner, provider/zone, rule IDs, thresholds, protected hostnames, and an owner-approved non-destructive test result.

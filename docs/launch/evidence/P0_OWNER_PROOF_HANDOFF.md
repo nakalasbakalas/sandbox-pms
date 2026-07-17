@@ -141,7 +141,7 @@ npm.cmd run booking-email:proof
 
 ## Secrets, Recovery, Rollback, WAF
 
-Current status: partial/open. Nick owns Cloudflare, Render, Gmail/OAuth, database backups, and emergency recovery. Latest recovery point is unknown and must be set up or freshly verified. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only. Slice 5BU adds an owner-run Cloudflare Rulesets API helper, but it still requires a Cloudflare token and zone ID from an owner shell.
+Current status: partial/open. Nick owns Cloudflare, Render, Gmail/OAuth, database backups, and emergency recovery. Latest recovery point is verified in the authenticated Render dashboard recovery modal as `2026-07-07 15:29:56` UTC+07:00 (`2026-07-07T08:29:56Z`), with PITR available for the past 3 days and exports retained for at least 7 days. `WAF_PROVIDER_POSTURE.md` records safe Render metadata, public edge probes, and the current local Cloudflare tooling/env gap only. Slice 5BU adds an owner-run Cloudflare Rulesets API helper, but it still requires a Cloudflare token and zone ID from an owner shell.
 
 Required evidence to close:
 
@@ -152,7 +152,7 @@ Required evidence to close:
 | Rollback owner | Named owner with Render dashboard access confirmation. | Passwords or invite links. |
 | Rollback deputy | Named deputy with Render dashboard access confirmation. | Passwords or invite links. |
 | Database recovery owner | Named owner with Render PostgreSQL/recovery access confirmation. | Database URLs or credentials. |
-| Recovery point/retention | Render dashboard/API metadata showing current backup/recovery status and retention window. | Recovery URLs or credentials. |
+| Recovery point/retention | Render dashboard metadata showing the latest available recovery point `2026-07-07 15:29:56` UTC+07:00 (`2026-07-07T08:29:56Z`), PITR coverage for the past 3 days, and export retention of at least 7 days. | Recovery URLs or credentials. |
 | Rollback path | Tested rollback or owner-approved dry-run/accepted risk with latest known-good deploy ID. | Credentials. |
 | WAF/rate-limit rules | Edge provider, zone/account, rule IDs, protected hostnames, thresholds/actions, and non-destructive test result. | Cloudflare/API tokens. |
 
