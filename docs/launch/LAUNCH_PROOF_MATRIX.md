@@ -1,8 +1,10 @@
 # Launch Proof Matrix
 
-Status date: 2026-07-16.
+Status date: 2026-07-17.
 
 Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) defines engineering-ready, staging-proven, owner-approved, and provider-proven. Commit `d18ea06eb974621281c43a57cf4d5a41994c2775` and deploy `dep-d966aj9kh4rs73d9h10g` retain their historical evidence, but closed issues and accepted risks do not establish those levels for a later candidate. Cloudflare rules, current recovery metadata, credentialed production RBAC, staff acceptance, live OTA writes, and payment collection remain unproven unless their rows gain exact current evidence.
+
+PR #174 head `4c1659d` passed the two required GitHub checks on 2026-07-16. That proof does not transfer to the subsequent property-scope and acceptance-test remediation; merge remains gated on both jobs passing at the replacement exact commit. The candidate Blueprint removes routine production seed from predeploy, but provider-side Render command alignment remains an open deploy gate.
 
 ## P0 Matrix
 

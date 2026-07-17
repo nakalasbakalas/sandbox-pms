@@ -109,5 +109,14 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sandbox_hotel_e2e?schema=public
 
+      - name: Build authenticated server-mode frontend
+        run: npm run build
+        env:
+          VITE_PMS_API_MODE: server
+          VITE_DATA_MODE: server
+
       - name: Run guarded database workflow E2E
         run: npm run test:e2e:db
+
+      - name: Prove server-mode reload and error truth
+        run: npm run test:e2e:server

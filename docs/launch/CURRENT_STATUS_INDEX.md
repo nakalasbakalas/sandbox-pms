@@ -1,15 +1,17 @@
 # Launch Current Status Index
 
-Status date: 2026-07-16.
+Status date: 2026-07-17.
 
 Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels: engineering-ready, staging-proven, owner-approved, and provider-proven. The 2026-07-07 owner-directed completion applies only to its exact historical deploy and accepted-risk decision; it does not prove the current release-foundation candidate or close the V2 gates in `LAUNCH_PROOF_PACK_V2.md`.
 
 | Evidence level | Current status |
 | --- | --- |
-| Engineering-ready | Open until the exact release-foundation commit passes fast CI and ephemeral PostgreSQL migration/seed/E2E CI. |
+| Engineering-ready | PR #174 head `4c1659d` passed fast CI and ephemeral PostgreSQL migration/seed/E2E CI on 2026-07-16. Property-scope and expanded acceptance remediation passed the local disposable-PostgreSQL, exact combined DB E2E, server-mode build, reload/error-truth, and SSE gates on 2026-07-17; the replacement exact commit must still rerun both required GitHub jobs before merge. |
 | Staging-proven | Open; local disposable database evidence is not staging proof. |
 | Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
 | Provider-proven | Partial per capability; do not generalize Render/Gmail evidence into Cloudflare, OTA, payment, recovery, or credentialed RBAC proof. |
+
+The committed release-foundation Blueprint is migration-only at predeploy. The active Render service must be checked before deployment because historical live deploy evidence still records `npm run db:migrate && npm run db:seed`. This repository change is not proof that the provider-side command has changed.
 
 ## Latest Slice
 

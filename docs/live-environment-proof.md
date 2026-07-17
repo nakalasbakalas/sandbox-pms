@@ -1,9 +1,19 @@
 # Live Environment Proof Register
 
-Latest validation refresh: 2026-07-05.
+Latest repository release-candidate refresh: 2026-07-17.
 Latest external provider evidence refresh: 2026-07-05T22:20+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
+
+## 2026-07-17 Release-Foundation Merge Boundary
+
+- Scope: read-only comparison of PR #174 with `origin/main`, GitHub check/protection inspection, and guarded acceptance-test remediation in the clean release worktree. No merge, deploy, restart, production database access, provider mutation, credential use, or live HTTP mutation was performed.
+- PR #174 head `4c1659d` passed `Fast checks and launch gate` and `PostgreSQL migrations, seed, and guarded E2E` on 2026-07-16. Subsequent remediation is a new candidate and must pass those jobs at its own exact commit.
+- The committed candidate `render.yaml` specifies migration-only predeploy (`npm run db:migrate`) and disables automatic deployment. Historical sections below accurately record that earlier live deploys used migration plus `prod-safe` seed; they are not evidence that the active provider-side command already matches the candidate.
+- Before any release-foundation deployment, verify a fresh recovery point, active Render predeploy alignment, restored-data migration/reconciliation, credentialed RBAC, staff workflow acceptance, and current provider gates.
+- `MONEY_READ_AUTHORITY=legacy_float`, `ACCOUNTING_V2_ENABLED=false`, `DIRECT_BOOKING_ENABLED=false`, `OTA_LIVE_WRITES_ENABLED=false`, and booking-email near-live automation must remain off unless their independent staging/owner/provider gates pass.
+- Local-only acceptance evidence on 2026-07-17: a freshly recreated disposable PostgreSQL database applied all 19 migrations and the guarded E2E seed; `npm run test:e2e:release-db` passed property isolation, membership-role, forged-ID, audit/idempotency, concurrent payment, exact-money, last-room hold, housekeeping, night-audit, and domain-event gates. A server-mode `npm run build` and `npm run test:e2e:server` also passed reload persistence, truthful error recovery, SSE authentication, property filtering, and catch-up. This is engineering evidence only, not staging, owner, provider, restored-production-copy, or live-service proof.
+- The exact combined `npm run test:e2e:db` command passed locally after its existing browser smoke exposed and the frontend corrected the primary Front Desk heading and the server-mode `/tablet-housekeeping` alias. The replacement exact commit still requires both required GitHub jobs; local success alone does not make the candidate merge-ready.
 
 ## 2026-07-05T22:20+07:00 Active Custom-Domain Service Sync
 
