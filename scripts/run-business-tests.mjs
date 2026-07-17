@@ -469,10 +469,112 @@ const assistantTools = await importTypeScriptModule(resolve('src/lib/assistant/t
 const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
 const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
+const durableAttemptKey = await importTypeScriptModule(resolve('src/lib/durable-attempt-key.ts'))
 const bookingEmailCapabilities = await importTypeScriptModule(resolve('src/lib/booking-email-capabilities.ts'))
 const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booking-email-workflow.ts'))
 const opsNotificationDisplay = await importTypeScriptModule(resolve('src/lib/ops-notification-display.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
+const durableAttemptKeySource = await readFile(resolve('src/lib/durable-attempt-key.ts'), 'utf8')
+assert.equal(/(?:localStorage|sessionStorage)/.test(durableAttemptKeySource), false, 'server-mode attempt keys never use browser persistence')
+const cashierAttemptSource = await readFile(resolve('src/components/views/CashierView.tsx'), 'utf8')
+assert.match(
+  cashierAttemptSource,
+  /operation: 'cashier-charge'[\s\S]{0,1000}pmsApi\('\/api\/charges'[\s\S]{0,300}headers: \{ 'x-idempotency-key': idempotencyKey \}/,
+  'Cashier charge submissions send the durable attempt key through the backend idempotency header contract',
+)
+for (const paymentSurface of [
+  'src/components/front-desk/FrontDeskView.tsx',
+  'src/components/views/ReservationsView.tsx',
+  'src/components/board/Board.tsx',
+]) {
+  const source = await readFile(resolve(paymentSurface), 'utf8')
+  assert.match(source, /operation: 'check-in-payment'/, `${paymentSurface} uses durable check-in payment attempts`)
+  assert.match(source, /operation: 'check-out-payment'/, `${paymentSurface} uses durable check-out payment attempts`)
+  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${paymentSurface} clears attempt keys only after confirmed success`)
+}
+
+const durableAttemptStorageRows = new Map()
+const durableAttemptStorage = {
+  getItem: (key) => durableAttemptStorageRows.get(key) ?? null,
+  setItem: (key, value) => durableAttemptStorageRows.set(key, value),
+  removeItem: (key) => durableAttemptStorageRows.delete(key),
+}
+let durableAttemptSequence = 0
+const durableAttemptManager = new durableAttemptKey.DurableAttemptKeyManager({
+  storage: durableAttemptStorage,
+  randomId: () => `opaque-attempt-${++durableAttemptSequence}`,
+})
+const uncertainPaymentAttempt = {
+  operation: 'cashier-payment',
+  entityId: 'folio-sensitive-guest-123',
+  material: {
+    folioId: 'folio-sensitive-guest-123',
+    amount: 1250,
+    method: 'BANK_TRANSFER',
+    reference: 'private-bank-reference-456',
+    guestEmail: 'guest-private@example.test',
+    password: 'must-never-be-persisted',
+  },
+}
+const uncertainPaymentKey = await durableAttemptManager.getOrCreate(uncertainPaymentAttempt)
+assert.equal(
+  await durableAttemptManager.getOrCreate(uncertainPaymentAttempt),
+  uncertainPaymentKey,
+  'identical uncertain payment retries reuse the same durable attempt key',
+)
+assert.equal(
+  await durableAttemptManager.getOrCreate({
+    ...uncertainPaymentAttempt,
+    material: {
+      password: uncertainPaymentAttempt.material.password,
+      guestEmail: uncertainPaymentAttempt.material.guestEmail,
+      reference: uncertainPaymentAttempt.material.reference,
+      method: uncertainPaymentAttempt.material.method,
+      amount: uncertainPaymentAttempt.material.amount,
+      folioId: uncertainPaymentAttempt.material.folioId,
+    },
+  }),
+  uncertainPaymentKey,
+  'material fingerprinting is stable across harmless object key ordering differences',
+)
+const persistedAttemptEvidence = JSON.stringify([...durableAttemptStorageRows.entries()])
+for (const forbiddenValue of [
+  uncertainPaymentAttempt.entityId,
+  uncertainPaymentAttempt.material.reference,
+  uncertainPaymentAttempt.material.guestEmail,
+  uncertainPaymentAttempt.material.password,
+]) {
+  assert.equal(persistedAttemptEvidence.includes(forbiddenValue), false, 'attempt-key storage persists no credentials, PII, references, or raw entity identifiers')
+}
+assert.match(uncertainPaymentKey, /^pms-cashier-payment:opaque-attempt-\d+$/, 'attempt keys contain only an allowlisted operation and opaque nonce')
+
+const changedPaymentAttempt = {
+  ...uncertainPaymentAttempt,
+  material: { ...uncertainPaymentAttempt.material, amount: 1300 },
+}
+const changedPaymentKey = await durableAttemptManager.getOrCreate(changedPaymentAttempt)
+assert.notEqual(changedPaymentKey, uncertainPaymentKey, 'material payment input changes rotate the attempt key')
+await durableAttemptManager.confirmSuccess(uncertainPaymentAttempt)
+assert.equal(
+  await durableAttemptManager.getOrCreate(changedPaymentAttempt),
+  changedPaymentKey,
+  'confirmation for an older fingerprint cannot clear a newer material attempt',
+)
+await durableAttemptManager.confirmSuccess(changedPaymentAttempt)
+assert.notEqual(
+  await durableAttemptManager.getOrCreate(changedPaymentAttempt),
+  changedPaymentKey,
+  'confirmed payment success clears the durable attempt key before a future submission',
+)
+await assert.rejects(
+  durableAttemptManager.getOrCreate({
+    operation: 'guest-private@example.test',
+    entityId: 'folio-1',
+    material: { amount: 100 },
+  }),
+  /Unsupported attempt operation/,
+  'attempt-key storage rejects non-allowlisted operation labels that could contain PII',
+)
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-26'), 0, 'rejects zero-night stays')

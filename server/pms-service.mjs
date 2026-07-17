@@ -17,6 +17,7 @@ import {
 import { canPerformAction } from './rbac.mjs'
 import { createPasswordHash } from './security.mjs'
 import { recordDomainEvent } from './domain-events.mjs'
+import { chargeIntentFingerprint } from './charge-idempotency.mjs'
 import {
   bahtToSatang,
   dualWriteMoney,
@@ -85,6 +86,13 @@ function normalizePaymentIdempotencyKey(value) {
   const key = normalizeNullableString(value)
   if (!key) throw new PmsValidationError('Payment idempotency key is required.')
   if (key.length > 200) throw new PmsValidationError('Payment idempotency key must be 200 characters or fewer.')
+  return key
+}
+
+function normalizeChargeIdempotencyKey(value) {
+  const key = normalizeNullableString(value)
+  if (!key) throw new PmsValidationError('Charge idempotency key is required.')
+  if (key.length > 200) throw new PmsValidationError('Charge idempotency key must be 200 characters or fewer.')
   return key
 }
 
@@ -2464,11 +2472,23 @@ async function createReservationInTransaction(tx, input, actor) {
       },
     })
 
+    const roomChargeIdempotencyKey = `reservation-room-charge:${property.id}:${reservation.id}`
+    const roomChargeDescription = `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`
     await tx.charge.create({
       data: {
+        propertyId: property.id,
         folioId: folio.id,
+        idempotencyKey: roomChargeIdempotencyKey,
+        intentFingerprint: chargeIntentFingerprint({
+          folioId: folio.id,
+          dateKey: checkInKey,
+          description: roomChargeDescription,
+          category: 'ROOM',
+          amountSatang: bahtToSatang(Number(input.ratePerNight)),
+          quantity: pricing.nights,
+        }),
         date: dateFromKey(checkInKey),
-        description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
+        description: roomChargeDescription,
         category: 'ROOM',
         ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
         quantity: pricing.nights,
@@ -2987,11 +3007,23 @@ export async function createWalkInCheckIn(prisma, input, actor) {
       },
     })
 
+    const roomChargeIdempotencyKey = `walk-in-room-charge:${property.id}:${reservation.id}`
+    const roomChargeDescription = `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`
     await tx.charge.create({
       data: {
+        propertyId: property.id,
         folioId: folio.id,
+        idempotencyKey: roomChargeIdempotencyKey,
+        intentFingerprint: chargeIntentFingerprint({
+          folioId: folio.id,
+          dateKey: checkInKey,
+          description: roomChargeDescription,
+          category: 'ROOM',
+          amountSatang: bahtToSatang(Number(input.ratePerNight)),
+          quantity: pricing.nights,
+        }),
         date: dateFromKey(checkInKey),
-        description: `${roomType.name} ${pricing.nights} night${pricing.nights === 1 ? '' : 's'}`,
+        description: roomChargeDescription,
         category: 'ROOM',
         ...moneyDataFromBaht('amount', 'amountSatang', Number(input.ratePerNight)),
         quantity: pricing.nights,
@@ -3435,56 +3467,111 @@ export async function createPayment(prisma, input, actor) {
   }
 }
 
-export async function createCharge(prisma, input, actor) {
-  return serializableTransaction(prisma, async (tx) => {
-    const property = await getProperty(tx, actor)
-    const folio = await tx.folio.findFirst({
-      where: { id: input.folioId, reservation: { propertyId: property.id } },
-      include: { reservation: true },
-    })
-    if (!folio) throw new PmsValidationError('Folio was not found.', 404)
-    if (folio.status !== 'OPEN') {
-      throw new PmsValidationError('Charges can only be posted to an open folio.')
-    }
-
-    const { satang: amountSatang } = requiredMoneyInput(input)
-    const quantity = Number(input.quantity || 1)
-    const description = normalizeNullableString(input.description)
-    const category = String(input.category || 'OTHER').toUpperCase()
-    const validCategories = ['ROOM', 'EXTRA_GUEST', 'CHILD', 'CAFE', 'MINIBAR', 'LAUNDRY', 'DAMAGE', 'OTHER']
-
-    if (!description) throw new PmsValidationError('Charge description is required.')
-    if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
-    if (amountSatang <= 0n) throw new PmsValidationError('Charge amount must be greater than zero.')
-    if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
-    const totalSatang = amountSatang * BigInt(quantity)
-    const sourceEmailEventId = await validateSourceEmailEventId(tx, property.id, input.sourceEmailEventId)
-
-    const charge = await tx.charge.create({
-      data: {
-        folioId: folio.id,
-        date: input.date ? dateFromKey(getBangkokDateKey(input.date)) : dateFromKey(getBangkokDateKey(new Date())),
-        description,
-        category,
-        ...dualWriteMoney('amount', 'amountSatang', amountSatang),
-        quantity,
-        ...dualWriteMoney('total', 'totalSatang', totalSatang),
-        sourceEmailEventId,
-        createdBy: actorName(actor),
+async function chargeFolioSnapshot(tx, folioId, propertyId) {
+  return tx.folio.findFirst({
+    where: { id: folioId, reservation: { propertyId } },
+    include: {
+      charges: true,
+      payments: true,
+      reservation: {
+        include: {
+          guest: true,
+          roomType: true,
+          assignedRoom: true,
+        },
       },
-    })
-    const updatedFolio = await recomputeFolio(tx, folio.id)
-    await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, {
-      folioId: folio.id,
-      amount: charge.amount,
-      amountSatang: satangToApiString(amountSatang),
-      quantity,
-      category,
-      sourceEmailEventId,
-    })
-    await emitOperationalEvent(tx, property.id, 'CHARGE_CREATED', 'charge', charge.id, actor, { folioId: folio.id })
-    return { charge, folio: updatedFolio }
+    },
   })
+}
+
+async function recordChargeInTransaction(tx, input, actor) {
+  const property = await getProperty(tx, actor)
+  const idempotencyKey = normalizeChargeIdempotencyKey(input.idempotencyKey)
+  const { satang: amountSatang } = requiredMoneyInput(input)
+  const quantity = Number(input.quantity || 1)
+  const description = normalizeNullableString(input.description)
+  const category = String(input.category || 'OTHER').toUpperCase()
+  const validCategories = ['ROOM', 'EXTRA_GUEST', 'CHILD', 'CAFE', 'MINIBAR', 'LAUNDRY', 'DAMAGE', 'OTHER']
+
+  if (!description) throw new PmsValidationError('Charge description is required.')
+  if (!validCategories.includes(category)) throw new PmsValidationError('Select a valid charge category.')
+  if (amountSatang <= 0n) throw new PmsValidationError('Charge amount must be greater than zero.')
+  if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
+
+  const requestedDateKey = input.date ? getBangkokDateKey(input.date) : null
+  const sourceEmailEventId = normalizeNullableString(input.sourceEmailEventId)
+  const intentFingerprint = chargeIntentFingerprint({
+    folioId: input.folioId,
+    dateKey: requestedDateKey,
+    description,
+    category,
+    amountSatang,
+    quantity,
+    sourceEmailEventId,
+  })
+  const existingCharge = await tx.charge.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId: property.id, idempotencyKey } },
+  })
+  if (existingCharge) {
+    if (existingCharge.intentFingerprint !== intentFingerprint) {
+      throw new PmsValidationError('This charge idempotency key was already used for a different charge.', 409)
+    }
+    const existingFolio = await chargeFolioSnapshot(tx, existingCharge.folioId, property.id)
+    if (!existingFolio) throw new PmsValidationError('Folio was not found.', 404)
+    return { charge: existingCharge, folio: existingFolio, idempotentReplay: true }
+  }
+
+  const folio = await tx.folio.findFirst({
+    where: { id: input.folioId, reservation: { propertyId: property.id } },
+    include: { reservation: true },
+  })
+  if (!folio) throw new PmsValidationError('Folio was not found.', 404)
+  if (folio.status !== 'OPEN') {
+    throw new PmsValidationError('Charges can only be posted to an open folio.')
+  }
+
+  const validatedSourceEmailEventId = await validateSourceEmailEventId(tx, property.id, sourceEmailEventId)
+  const totalSatang = amountSatang * BigInt(quantity)
+  const charge = await tx.charge.create({
+    data: {
+      propertyId: property.id,
+      folioId: folio.id,
+      idempotencyKey,
+      intentFingerprint,
+      date: dateFromKey(requestedDateKey || getBangkokDateKey(new Date())),
+      description,
+      category,
+      ...dualWriteMoney('amount', 'amountSatang', amountSatang),
+      quantity,
+      ...dualWriteMoney('total', 'totalSatang', totalSatang),
+      sourceEmailEventId: validatedSourceEmailEventId,
+      createdBy: actorName(actor),
+    },
+  })
+  const updatedFolio = await recomputeFolio(tx, folio.id)
+  await createAudit(tx, actor, 'CHARGE_CREATED', 'charge', charge.id, {
+    folioId: folio.id,
+    amount: charge.amount,
+    amountSatang: satangToApiString(amountSatang),
+    quantity,
+    category,
+    sourceEmailEventId: validatedSourceEmailEventId,
+    idempotencyKey: createHash('sha256').update(idempotencyKey).digest('hex'),
+  })
+  await emitOperationalEvent(tx, property.id, 'CHARGE_CREATED', 'charge', charge.id, actor, { folioId: folio.id })
+  return { charge, folio: updatedFolio, idempotentReplay: false }
+}
+
+export async function createCharge(prisma, input, actor) {
+  const idempotencyKey = normalizeChargeIdempotencyKey(input?.idempotencyKey)
+  try {
+    return await serializableTransaction(prisma, async (tx) => recordChargeInTransaction(tx, input, actor))
+  } catch (error) {
+    if (error?.code === 'P2002' && idempotencyKey) {
+      return serializableTransaction(prisma, async (tx) => recordChargeInTransaction(tx, input, actor))
+    }
+    throw error
+  }
 }
 
 export async function createGuest(prisma, input, actor) {

@@ -122,7 +122,10 @@ async function createReservationFixture(fixture, suffix, totalSatang = 10_000n) 
   })
   await prisma.charge.create({
     data: {
+      propertyId: fixture.property.id,
       folioId: folio.id,
+      idempotencyKey: `fixture-room-charge:${runId}:${suffix}`,
+      intentFingerprint: `fixture-room-charge-fingerprint:${runId}:${suffix}`,
       date: reservation.checkIn,
       description: 'Release gate room charge',
       category: 'ROOM',
@@ -288,6 +291,7 @@ try {
       quantity: 1,
       category: 'OTHER',
       description: 'Foreign source-link rejection fixture',
+      idempotencyKey: `foreign-source-charge-${runId}`,
       sourceEmailEventId: sourceEventB.id,
     }, actorA),
     (error) => error?.statusCode === 404 && /active property/.test(error.message),
@@ -373,6 +377,63 @@ try {
     idempotencyKey: sharedIdempotencyKey,
   }, actorB)
   assert.equal(await prisma.payment.count({ where: { idempotencyKey: sharedIdempotencyKey } }), 2, 'payment idempotency is composite property scoped')
+
+  const chargeReservationA = await createReservationFixture(fixtureA, 'CHARGE-A')
+  const chargeReservationB = await createReservationFixture(fixtureB, 'CHARGE-B')
+  const chargeInput = {
+    folioId: chargeReservationA.folio.id,
+    amountSatang: '250',
+    quantity: 2,
+    category: 'MINIBAR',
+    description: 'Charge idempotency fixture',
+    idempotencyKey: `charge-replay-${runId}`,
+  }
+  await assert.rejects(
+    createCharge(prisma, { ...chargeInput, idempotencyKey: undefined }, actorA),
+    (error) => error?.statusCode === 400 && /idempotency key is required/.test(error.message),
+    'every charge write requires an explicit idempotency key',
+  )
+  const firstCharge = await createCharge(prisma, chargeInput, actorA)
+  const replayedCharge = await createCharge(prisma, chargeInput, actorA)
+  assert.equal(replayedCharge.idempotentReplay, true, 'same charge intent replays the original result')
+  assert.equal(replayedCharge.charge.id, firstCharge.charge.id)
+  assert.equal(await prisma.charge.count({ where: { propertyId: fixtureA.property.id, idempotencyKey: chargeInput.idempotencyKey } }), 1)
+  assert.equal(await prisma.auditLog.count({ where: { entityType: 'charge', entityId: firstCharge.charge.id } }), 1, 'charge replay does not duplicate audit evidence')
+  await assert.rejects(
+    createCharge(prisma, { ...chargeInput, amountSatang: '251' }, actorA),
+    (error) => error?.statusCode === 409 && /different charge/.test(error.message),
+    'reusing a charge idempotency key for a different fingerprint is rejected',
+  )
+
+  const concurrentChargeKey = `charge-concurrent-${runId}`
+  const concurrentChargeInput = {
+    folioId: chargeReservationA.folio.id,
+    amountSatang: '125',
+    quantity: 1,
+    category: 'LAUNDRY',
+    description: 'Concurrent charge fixture',
+    idempotencyKey: concurrentChargeKey,
+  }
+  const concurrentCharges = await Promise.all([
+    createCharge(prisma, concurrentChargeInput, actorA),
+    createCharge(prisma, concurrentChargeInput, actorA),
+  ])
+  assert.equal(new Set(concurrentCharges.map((result) => result.charge.id)).size, 1, 'concurrent retries return one append-only charge')
+  assert.equal(concurrentCharges.filter((result) => result.idempotentReplay).length, 1, 'one concurrent result is an idempotent replay')
+  assert.equal(await prisma.charge.count({ where: { propertyId: fixtureA.property.id, idempotencyKey: concurrentChargeKey } }), 1)
+
+  const crossPropertyChargeKey = `charge-property-scope-${runId}`
+  await createCharge(prisma, {
+    ...chargeInput,
+    folioId: chargeReservationA.folio.id,
+    idempotencyKey: crossPropertyChargeKey,
+  }, actorA)
+  await createCharge(prisma, {
+    ...chargeInput,
+    folioId: chargeReservationB.folio.id,
+    idempotencyKey: crossPropertyChargeKey,
+  }, actorB)
+  assert.equal(await prisma.charge.count({ where: { idempotencyKey: crossPropertyChargeKey } }), 2, 'charge idempotency keys are property scoped')
 
   const housekeepingTask = await createHousekeepingTask(prisma, contextA, {
     roomId: fixtureA.room.id,

@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import { recordDomainEvent } from './domain-events.mjs'
+import { chargeIntentFingerprint } from './charge-idempotency.mjs'
 import { bahtToSatang, dualWriteMoney, parseSatang, satangToApiString } from './money.mjs'
 import { PmsValidationError } from './pms-domain.mjs'
 
@@ -504,11 +505,23 @@ export async function convertPublicHold(prisma, input, options = {}) {
         ...dualWriteMoney('balance', 'balanceSatang', quote.totalSatang),
       },
     })
+    const roomChargeIdempotencyKey = `public-booking-room-charge:${hold.propertyId}:${reservation.id}`
+    const roomChargeDescription = `${quote.roomType.name} ${nights} night${nights === 1 ? '' : 's'}`
     await tx.charge.create({
       data: {
+        propertyId: hold.propertyId,
         folioId: folio.id,
+        idempotencyKey: roomChargeIdempotencyKey,
+        intentFingerprint: chargeIntentFingerprint({
+          folioId: folio.id,
+          dateKey: quote.checkIn.toISOString().slice(0, 10),
+          description: roomChargeDescription,
+          category: 'ROOM',
+          amountSatang: quote.ratePerNightSatang,
+          quantity: nights,
+        }),
         date: quote.checkIn,
-        description: `${quote.roomType.name} ${nights} night${nights === 1 ? '' : 's'}`,
+        description: roomChargeDescription,
         category: 'ROOM',
         ...dualWriteMoney('amount', 'amountSatang', quote.ratePerNightSatang),
         quantity: nights,

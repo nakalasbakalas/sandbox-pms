@@ -21,7 +21,8 @@ import { AccountingDashboard } from '@/components/cashier/AccountingDashboard'
 import { CashReconciliation } from '@/components/cashier/CashReconciliation'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
-import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
@@ -540,17 +541,25 @@ export function CashierView() {
     setPaymentError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          folioId: paymentFolio.id,
+          amount,
+          method: paymentMethod,
+          reference: paymentReference.trim() || undefined,
+        }
+        const attempt = {
+          operation: 'cashier-payment' as const,
+          entityId: paymentFolio.id,
+          material: requestBody,
+        }
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         await pmsApi('/api/payments', authToken, {
           method: 'POST',
-          headers: { 'x-idempotency-key': createPmsIdempotencyKey(`payment:${paymentFolio.id}`) },
-          body: JSON.stringify({
-            folioId: paymentFolio.id,
-            amount,
-            method: paymentMethod,
-            reference: paymentReference.trim() || undefined,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
         const nextFolios = await refreshServerFolios()
+        await durableAttemptKeys.confirmSuccess(attempt)
         const updated = nextFolios.find((folio) => folio.id === paymentFolio.id)
         if (updated) setSelectedFolio(updated)
       } else {
@@ -610,17 +619,26 @@ export function CashierView() {
     setChargeError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          folioId: chargeFolio.id,
+          category: chargeCategory,
+          description: chargeDescription,
+          amount,
+          quantity,
+        }
+        const attempt = {
+          operation: 'cashier-charge' as const,
+          entityId: chargeFolio.id,
+          material: requestBody,
+        }
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         await pmsApi('/api/charges', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            folioId: chargeFolio.id,
-            category: chargeCategory,
-            description: chargeDescription,
-            amount,
-            quantity,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
         const nextFolios = await refreshServerFolios()
+        await durableAttemptKeys.confirmSuccess(attempt)
         const updated = nextFolios.find((folio) => folio.id === chargeFolio.id)
         if (updated) setSelectedFolio(updated)
       } else {

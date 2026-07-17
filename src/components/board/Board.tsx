@@ -59,7 +59,8 @@ import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem } from '@/ty
 import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import {
   emailReservationDocument,
   getReservationDocumentLabel,
@@ -1298,32 +1299,40 @@ export function Board() {
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }
+        const requestBody = {
+          guest: {
+            nationality: data.nationality,
+            idType: data.idNumber ? 'PASSPORT' : undefined,
+            idNumber: data.idNumber,
+          },
+          payment: data.payment ? {
+            amount: data.payment.amount,
+            method: data.payment.method,
+            reference: data.payment.reference,
+            notes: data.additionalNotes,
+          } : undefined,
+          recordIdentityLater: data.recordIdentityLater,
+          recordIdentityLaterReason: data.overrideReason,
+          allowPayLater: Boolean(data.payLaterReason),
+          payLaterReason: data.payLaterReason,
+          allowRoomReadinessOverride: data.allowRoomReadinessOverride,
+          allowDateOverride: data.allowDateOverride,
+          overrideReason: data.overrideReason,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.payment ? {
+          operation: 'check-in-payment' as const,
+          entityId: selectedArrival.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
-          headers: data.payment ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-in:${selectedArrival.reservationId}`) } : undefined,
-          body: JSON.stringify({
-            guest: {
-              nationality: data.nationality,
-              idType: data.idNumber ? 'PASSPORT' : undefined,
-              idNumber: data.idNumber,
-            },
-            payment: data.payment ? {
-              amount: data.payment.amount,
-              method: data.payment.method,
-              reference: data.payment.reference,
-              notes: data.additionalNotes,
-            } : undefined,
-            recordIdentityLater: data.recordIdentityLater,
-            recordIdentityLaterReason: data.overrideReason,
-            allowPayLater: Boolean(data.payLaterReason),
-            payLaterReason: data.payLaterReason,
-            allowRoomReadinessOverride: data.allowRoomReadinessOverride,
-            allowDateOverride: data.allowDateOverride,
-            overrideReason: data.overrideReason,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
         await refreshServerBoard()
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
         toast.success(payload.message || `Checked in: ${selectedArrival.guestName}`)
         setCheckInDialogOpen(false)
         setSelectedArrival(null)
@@ -1402,22 +1411,30 @@ export function Board() {
 
     if (SERVER_API_ENABLED) {
       try {
+        const requestBody = {
+          payment: data.paymentAmount ? {
+            amount: data.paymentAmount,
+            method: data.paymentMethod,
+            reference: data.paymentReference,
+            notes: data.additionalNotes,
+          } : undefined,
+          allowUnpaidOverride: data.forceCheckout,
+          overrideReason: data.overrideReason,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.paymentAmount ? {
+          operation: 'check-out-payment' as const,
+          entityId: selectedDeparture.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
-          headers: data.paymentAmount ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-out:${selectedDeparture.reservationId}`) } : undefined,
-          body: JSON.stringify({
-            payment: data.paymentAmount ? {
-              amount: data.paymentAmount,
-              method: data.paymentMethod,
-              reference: data.paymentReference,
-              notes: data.additionalNotes,
-            } : undefined,
-            allowUnpaidOverride: data.forceCheckout,
-            overrideReason: data.overrideReason,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
         await refreshServerBoard()
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
         toast.success(payload.message || `Checked out: ${selectedDeparture.guestName}`)
         setCheckOutDialogOpen(false)
         setSelectedDeparture(null)

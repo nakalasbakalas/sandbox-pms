@@ -65,4 +65,16 @@ assert.match(
 assert.match(propertyScopeMigration, /quarantine and reconcile those guests before retrying/)
 assert.match(propertyScopeMigration, /quarantine and reconcile those audit rows before retrying/)
 
+const chargeIdempotencyMigration = await readFile(
+  new URL('../prisma/migrations/20260717140000_charge_idempotency/migration.sql', import.meta.url),
+  'utf8',
+)
+assert.match(
+  chargeIdempotencyMigration,
+  /UPDATE "Charge" charge[\s\S]+SET "propertyId" = reservation\."propertyId"[\s\S]+JOIN "Reservation" reservation ON reservation\."id" = folio\."reservationId"/,
+  'charge migration backfills property ownership through the folio reservation',
+)
+assert.match(chargeIdempotencyMigration, /Charge_propertyId_idempotencyKey_key/)
+assert.match(chargeIdempotencyMigration, /IF EXISTS \(SELECT 1 FROM "Charge" WHERE "propertyId" IS NULL\)/)
+
 console.log('Property request-context tests passed.')

@@ -1823,8 +1823,16 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/charges' && request.method === 'POST') {
     requirePermission(user, 'post:charges')
-    const charge = await createCharge(db, await readJson(request), user)
-    sendJson(response, 201, { ok: true, data: charge, message: 'Charge posted.' })
+    const body = await readJson(request)
+    const charge = await createCharge(db, {
+      ...body,
+      idempotencyKey: body.idempotencyKey || context.idempotencyKey,
+    }, user)
+    sendJson(response, charge.idempotentReplay ? 200 : 201, {
+      ok: true,
+      data: charge,
+      message: charge.idempotentReplay ? 'Existing charge returned for this idempotency key.' : 'Charge posted.',
+    })
     return true
   }
 

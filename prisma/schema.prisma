@@ -46,6 +46,7 @@ model Property {
   hotelOpsScanSnapshots HotelOpsScanSnapshot[]
   userMemberships UserPropertyMembership[]
   guests          Guest[]
+  charges         Charge[]
   payments        Payment[]
   auditLogs       AuditLog[]
   domainEvents    DomainEvent[]
@@ -363,8 +364,12 @@ enum FolioStatus {
 
 model Charge {
   id          String         @id @default(cuid())
+  propertyId  String
+  property    Property       @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   folioId     String
   folio       Folio          @relation(fields: [folioId], references: [id], onDelete: Cascade)
+  idempotencyKey String?
+  intentFingerprint String?
   sourceEmailEventId String?
   sourceEmailEvent BookingEmailEvent? @relation("ChargeSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   date        DateTime       @db.Date
@@ -381,6 +386,8 @@ model Charge {
   createdAt   DateTime       @default(now())
   
   @@index([folioId])
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, createdAt])
   @@index([sourceEmailEventId])
   @@index([date])
 }

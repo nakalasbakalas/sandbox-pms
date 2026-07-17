@@ -44,7 +44,8 @@ import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
 import type { BookingEmailEvent } from '@/types/booking-email'
@@ -980,19 +981,27 @@ export function ReservationsView() {
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }
+        const requestBody = {
+          guest: {
+            nationality: data.nationality,
+            idType: data.idNumber ? 'PASSPORT' : undefined,
+            idNumber: data.idNumber,
+          },
+          payment: data.payment,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.payment ? {
+          operation: 'check-in-payment' as const,
+          entityId: selectedArrival.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         await pmsApi(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
-          headers: data.payment ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-in:${selectedArrival.reservationId}`) } : undefined,
-          body: JSON.stringify({
-            guest: {
-              nationality: data.nationality,
-              idType: data.idNumber ? 'PASSPORT' : undefined,
-              idNumber: data.idNumber,
-            },
-            payment: data.payment,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Check-in failed.')
         return
@@ -1065,21 +1074,29 @@ export function ReservationsView() {
 
     if (SERVER_API_ENABLED) {
       try {
+        const requestBody = {
+          payment: data.paymentAmount ? {
+            amount: data.paymentAmount,
+            method: data.paymentMethod,
+            reference: data.paymentReference,
+            notes: data.additionalNotes,
+          } : undefined,
+          allowUnpaidOverride: data.forceCheckout,
+          overrideReason: data.overrideReason,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.paymentAmount ? {
+          operation: 'check-out-payment' as const,
+          entityId: selectedDeparture.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         await pmsApi(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
-          headers: data.paymentAmount ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-out:${selectedDeparture.reservationId}`) } : undefined,
-          body: JSON.stringify({
-            payment: data.paymentAmount ? {
-              amount: data.paymentAmount,
-              method: data.paymentMethod,
-              reference: data.paymentReference,
-              notes: data.additionalNotes,
-            } : undefined,
-            allowUnpaidOverride: data.forceCheckout,
-            overrideReason: data.overrideReason,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Check-out failed.')
         return
