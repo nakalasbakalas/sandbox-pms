@@ -312,6 +312,17 @@ npm.cmd run test:e2e:db
 
 Never run DB-mutating E2E against production data.
 
+For authenticated server-mode reload and error truth, build in server mode and use the same guarded disposable database:
+
+```powershell
+$env:VITE_PMS_API_MODE='server'
+$env:VITE_DATA_MODE='server'
+npm.cmd run build
+npm.cmd run test:e2e:server
+```
+
+The CI integration job runs the empty-database migration lifecycle, disposable migration/seed lifecycle, guarded PostgreSQL concurrency/reconciliation suite, and this browser suite. Rerun both required CI jobs on the exact release commit; local execution does not replace GitHub, restored-staging, staff, provider, or owner evidence.
+
 ## OTA Provider Contract Checks
 
 Keep `OTA_LIVE_WRITES_ENABLED=false` in local, staging, and production environments until an individual provider has implemented and owner-approved live proof. `OTA_ENABLE_REAL_BROWSER_WRITES` does not override this contract gate.
@@ -343,10 +354,39 @@ node scripts/run-money-tests.mjs
 5. Quarantine and resolve any out-of-range, null, or non-zero-variance row. Do not manufacture a satang value when the migration intentionally left an unsafe legacy value null.
 6. Exercise create reservation, charge, payment, booking-email apply, rate, settings-fee, and Hotel Ops rate paths and prove both representations are written.
 7. Set `MONEY_READ_AUTHORITY=satang` in staging only. Run the full validation ladder, exact-zero checkout, payment replay/conflict, night-audit totals, reports, and staff workflow checks for one full operating cycle.
-8. If a regression appears, restore `MONEY_READ_AUTHORITY=legacy_float`; additive satang columns remain in place. Database restoration is reserved for data corruption, not a normal application rollback.
-9. Switch production only with recorded reconciliation, recovery, staff, and owner approval. Retain dual-write and legacy read compatibility for at least 30 days and one complete operating cycle.
+8. For `/api/payments` and `/api/charges`, retain the same `x-idempotency-key` while retrying one uncertain request. A same-intent charge retry must return the original row; a changed amount, quantity, category, description, folio, date, or booking-email source with the same key must return `409`. Never delete or repost a charge to repair a retry.
+9. Server-mode financial screens reuse an unchanged attempt key only within the same loaded application. The manager is memory-only and clears the key after confirmed success. If the page was reloaded after an uncertain response, inspect/refetch the authoritative folio and audit state before attempting another write; do not assume the prior key can be reconstructed.
+10. Prove in disposable PostgreSQL that concurrent overpayment permits only one valid winner, simultaneous same-intent charge retries append one charge, changed-intent replays return `409`, and the same key can be used independently in two properties.
+11. If a regression appears, restore `MONEY_READ_AUTHORITY=legacy_float`; additive satang columns remain in place. Database restoration is reserved for data corruption, not a normal application rollback.
+12. Switch production only with recorded reconciliation, recovery, staff, and owner approval. Retain dual-write and legacy read compatibility for at least 30 days and one complete operating cycle.
 
 An invalid or missing read-authority value falls back to `legacy_float`. That fallback is a compatibility control, not evidence that reconciliation succeeded.
+
+## iCal Export Token Migration And Rotation
+
+Migration `20260717141000_ical_token_hash_backfill` requires PostgreSQL `pgcrypto`, hashes the exact UTF-8 token bytes with SHA-256, stores the unpadded base64url digest, and removes the raw `Channel.config.exportToken` field in the same update.
+
+1. Apply it first to an empty database and a restored sanitized staging copy through `npx.cmd prisma migrate deploy`.
+2. Retain only a count-based postcondition; do not select or print channel config values:
+
+```sql
+SELECT COUNT(*) AS "rawTokenCount"
+FROM "Channel"
+WHERE jsonb_typeof("config") = 'object'
+  AND "config" ? 'exportToken';
+```
+
+3. Require `rawTokenCount = 0`. A migration failure or non-zero count blocks deployment and must be investigated without copying raw token values into tickets, logs, or screenshots.
+4. After migration, normal channel reads cannot recover the full feed URL. Capture a newly issued URL only from its initial issue response, or explicitly rotate the token and update the authorized provider calendar with the newly disclosed URL.
+5. Rotation invalidates the prior URL. Treat provider update/refresh behavior as separate provider evidence; a local feed test is not provider certification or proof that the provider consumed the new URL.
+
+The focused regression command is:
+
+```powershell
+node scripts/run-ical-property-scope-tests.mjs
+```
+
+That test and an empty-database migration are engineering evidence only. Do not state that legacy production tokens are removed until the exact migration and postcondition have been proven in that environment.
 
 ## Property Membership And Request Context
 

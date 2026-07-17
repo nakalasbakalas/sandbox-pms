@@ -1,6 +1,6 @@
 # Current System Audit - Sandbox PMS And Hotel Ops
 
-Last reviewed: 2026-07-16
+Last reviewed: 2026-07-17
 
 ## Repository Overview
 
@@ -49,6 +49,8 @@ Last reviewed: 2026-07-16
 - Business and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`.
 - Exact-money and payment safety: `server/money.mjs`, `scripts/run-money-tests.mjs`, and `prisma/migrations/20260716120000_exact_money_foundation`.
 - Property context and events: `server/request-context.mjs`, `server/domain-events.mjs`, and `prisma/migrations/20260716130000_property_context_domain_events`.
+- Legacy finance ownership and retry safety: `server/charge-idempotency.mjs`, `src/lib/durable-attempt-key.ts`, and migrations `20260717120000_property_scope_legacy_records` and `20260717140000_charge_idempotency`.
+- iCal bearer-token storage: `server/ical-feed.mjs` and `prisma/migrations/20260717141000_ical_token_hash_backfill`.
 - Server-backed operational services: `server/rate-service.mjs`, `server/settings-service.mjs`, `server/housekeeping-service.mjs`, `server/night-audit-service.mjs`, and `prisma/migrations/20260716140000_operations_foundation`.
 - Gated foundations: `server/accounting-service.mjs`, `server/direct-booking-service.mjs`, `server/ops-analyzers.mjs`, and migrations `20260716150000_accounting_v2_foundation` and `20260716160000_direct_booking_foundation`.
 
@@ -74,6 +76,8 @@ Last reviewed: 2026-07-16
 - Property settings and taxes persist through `/api/settings/property` and `/api/settings/tax`; `/api/settings/status` returns a sanitized server-derived status object.
 - Housekeeping task and issue routes persist assignments, constrained status transitions, operational reasons, audit evidence, and domain events. Critical issue resolution requires manager or admin authority.
 - Night audit persists one run per property/business date plus idempotent attempts. Its current posting mode is `VERIFY_EXISTING_CHARGES_ONLY`: it verifies existing room charges and blocks unsafe close conditions rather than posting missing charges.
+- Server-mode payment and charge surfaces use one shared, memory-only attempt-key manager. An unchanged attempt reuses its key through rerenders and uncertain retries in the same loaded application; a changed financial intent receives a different key, and a confirmed success clears the key. The helper never writes attempt material, guest data, payment references, or keys to `localStorage` or `sessionStorage`, so a full page reload is not a retry-key recovery mechanism.
+- iCal export feed tokens are stored only as SHA-256 base64url hashes. Existing raw `Channel.config.exportToken` values are converted and removed by deploy migration `20260717141000_ical_token_hash_backfill`; normal channel reads and ordinary configuration updates do not return the bearer feed URL. The raw URL is disclosed only in the initial issue response or an explicit token rotation response.
 
 ## Current Boundaries
 
@@ -88,11 +92,11 @@ Last reviewed: 2026-07-16
 - Production launch readiness still needs credentialed account-owner proof, production user creation/verification, provider WAF/recovery proof, manual workflow/localization acceptance, booking-email parser acceptance, and demo/sample cleanup proof.
 - Scan snapshots are PMS-derived operational evidence, not live OTA scrape proof. Live OTA snapshot quality still depends on verified adapter reads or imported booking data.
 - Exact-money rollout is expand-only. Legacy Float columns remain present and authoritative by default; no production satang cutover, reconciliation cycle, or legacy-column removal is proven by this branch alone.
-- Payment idempotency keys are currently globally unique, not composite property-scoped keys. Folio property ownership is re-read for payment handling, but broader finance property scoping and Accounting V2 remain incomplete.
-- `AuditLog` does not yet have a first-class `propertyId` column. New services place property id in structured change evidence and use property-scoped aggregates, but that is not equivalent to a schema-level audit tenant key.
+- Legacy payment and charge writes now require property-scoped idempotency keys, re-read folio ownership inside serializable transactions, and return the original result only when the normalized financial intent matches. Charge ownership is backfilled through the folio reservation; key reuse with a different charge fingerprint fails closed without appending another charge.
+- `AuditLog`, `Payment`, `Charge`, and `Guest` now have first-class property ownership. Their legacy backfill migrations fail closed when ownership cannot be derived safely; applying those migrations to production data is not proven until restored-data migration and reconciliation evidence exists.
 - The SSE client bridge currently translates a bounded set of reservation, room, payment, and charge events into legacy client refresh events. Other server event types remain durable and streamable but require view-specific refetch wiring.
-- The general Settings screen, housekeeping boards, and Night Audit screen still contain browser-local state. Backend services and routes must not be treated as completed staff workflow proof until those screens are cut over and reload-tested.
-- Direct booking, online payments, multi-folio accounting, cash shifts, A/R, and a general guest-messaging provider are not implemented by this foundation.
+- In server mode, Settings, housekeeping, and Night Audit use backend persistence; disposable-browser coverage is engineering evidence and does not replace staff workflow acceptance on the exact release candidate.
+- Accounting V2 and direct-booking foundations are implemented but capability-gated and not production-enabled. Online card payments and a live guest-messaging provider are not implemented by this foundation.
 
 ## Validation Evidence
 
@@ -109,6 +113,8 @@ Recent committed Hotel Ops validation has included:
 - GitHub CI launch gate on `main`
 
 Focused branch checks are available through `scripts/run-money-tests.mjs`, `scripts/run-rate-service-tests.mjs`, `scripts/run-settings-service-tests.mjs`, and `scripts/run-operations-foundation-tests.mjs`. Passing these local fixture checks is engineering evidence only. Database migration, staging restore/reconciliation, staff workflow, provider, recovery, WAF, and owner sign-off remain separate evidence gates.
+
+The integration CI definition now includes an empty PostgreSQL migration lifecycle, a separately migrated and seeded disposable PostgreSQL database, `scripts/run-release-foundation-db-tests.mjs`, and `scripts/run-server-mode-browser-tests.mjs`. The guarded DB suite covers effective membership roles, missing membership, forged cross-property identifiers and source links, payment/charge property-scoped idempotency, same-intent replay, concurrent overpayment and charge retry behavior, exact-money reconciliation, audit ownership, and simultaneous last-room holds. The browser suite covers authenticated server-mode reload persistence, a controlled API failure, recovery by authoritative refetch, and SSE filtering. These are CI test contracts; they are not claims that the corrected commit has passed both jobs, that migrations have succeeded on a restored staging copy, or that staff/provider/owner proof exists.
 
 ## Provider Adapter Contract Status
 

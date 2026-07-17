@@ -44,13 +44,16 @@ Domain events are an internal synchronization boundary, not an audit substitute 
 - Scheduled scans must not log credentials on failure.
 - Property settings must not be used as a secret store. The settings schemas reject credential-shaped keys/values, URL user information, and sensitive URL query parameters; OTA, Gmail, worker, and OpenAI secrets remain backend environment secrets.
 - SSE responses must remain session-authenticated, `view:board` authorized, property-scoped, `no-store`, and free of guest, financial, credential, and audit metadata.
+- iCal export tokens are bearer credentials. New and rotated tokens are stored only as SHA-256 base64url hashes; the full feed URL may be shown only in the issue/rotation response and must not be returned by later channel reads. Deploy migration `20260717141000_ical_token_hash_backfill` converts and removes legacy raw token fields atomically.
 
 ## Exact-Money And Financial Integrity
 
 - Exact values are stored as PostgreSQL `BIGINT` satang and serialized as base-10 strings. Percentages and tax rates use integer basis points.
 - Legacy Float columns remain during the compatibility window. Dual-write disagreement is rejected, and `MONEY_READ_AUTHORITY` defaults to `legacy_float` until a staged reconciliation authorizes satang reads.
-- Payment creation re-reads the folio inside a serializable transaction, rejects closed folios and unapproved overpayments, and retries one serialization conflict.
-- Payment idempotency keys are currently globally unique. A duplicate key may return only the matching payment; reuse with different content fails closed. Property-composite idempotency remains future work.
+- Payment and legacy charge creation re-read the folio inside serializable transactions and require property-scoped idempotency keys. Payments reject closed folios and unapproved overpayments; charges reject closed folios and remain append-only.
+- A duplicate payment or charge key may return only the original same-intent result. Charge intent is fingerprinted from folio, optional explicit date, description, category, exact satang amount, quantity, and booking-email source; changed intent fails closed with `409`. Serialization and unique-key races are retried through the same validation path without duplicating audit or domain-event evidence.
+- Payment and charge uniqueness is scoped by `(propertyId, idempotencyKey)`. A foreign folio or booking-email source is rejected before the financial write, audit row, or event can be created.
+- Server-mode financial forms retain opaque attempt keys only in application memory. The same unchanged attempt reuses its key through uncertain retries and rerenders, and confirmed success clears it. No attempt material or key is written to browser storage; after a full reload, staff must reconcile authoritative folio state rather than assume the previous key can be recovered.
 - No migration or environment flag is proof of financial correctness. Production satang authority requires restored-staging reconciliation, zero unresolved variance, recovery proof, staff workflow acceptance, and owner approval.
 
 ## Approval Controls
@@ -104,7 +107,7 @@ Hotel Ops code records audit and task-log evidence for:
 - housekeeping task/issue creation, assignment, and status transitions
 - night-audit blocked/completed attempts and override evidence
 
-The current `AuditLog` schema has no first-class `propertyId`. New property-aware services include property id in structured change evidence and use property-scoped resource lookups, but this is not equivalent to a database-enforced audit tenant key. Do not describe the audit store as fully multi-tenant until that schema boundary is completed and migrated.
+`AuditLog` has a required first-class `propertyId`, indexed for property/time queries and protected by a property foreign key. Migration backfill aborts when legacy audit ownership is ambiguous or cannot be derived. Services must still create and query audit evidence through authenticated property context; the column alone is not authorization and does not establish a general multi-tenant SaaS claim.
 
 ## Proof Handling
 
@@ -139,6 +142,7 @@ OTA status crosses a strict provider-adapter contract boundary. The public DTO u
 - No production claim that historical bookings are loaded into operational reservations until imported Booking Email Events are reviewed and approved through the PMS.
 - No launch-ready claim from local tests alone.
 - No production satang-authority claim before reconciliation and rollback proof.
+- No claim that legacy iCal tokens are removed in an environment until the migration is applied there and a key-only postcondition check passes.
 - No completed housekeeping or night-audit staff-workflow claim until disposable-DB reload/error-path tests and staff acceptance are attached to the release candidate.
 - No Accounting V2 or direct-booking production enablement from local fixture tests or an environment flag alone.
 - No multi-property SaaS claim from the membership foundation alone.

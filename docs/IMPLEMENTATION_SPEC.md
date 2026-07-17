@@ -282,7 +282,9 @@ Notifications are backend records:
 - The additive migration keeps existing Float baht columns and adds nullable PostgreSQL `BIGINT` shadow columns plus integer basis-point fields. It backfills representable legacy values using PostgreSQL `ROUND(value * 100)` and leaves unsafe out-of-range values null for reconciliation.
 - Supported new writes call the shared money helpers to dual-write legacy baht and exact satang. If a request supplies both forms, they must represent the same rounded value or validation fails.
 - `MONEY_READ_AUTHORITY=legacy_float|satang` selects preferred reads. Missing or invalid configuration defaults to `legacy_float`; either path can fall back to the populated representation during the compatibility window.
-- Payments run in serializable transactions, re-read the folio, reject closed folios and unapproved overpayments, retry one serialization conflict, and persist an idempotency key. A replay with different payment content returns a conflict.
+- Payments and legacy folio charges run in serializable transactions, re-read property-scoped folio ownership, require property-scoped idempotency keys, and retry serialization or unique-key races. A same-intent retry returns the original financial row without duplicating audit/domain evidence; reuse with a different payment or charge fingerprint returns `409`. Posted charges remain append-only.
+- The database uniqueness contract is `(propertyId, idempotencyKey)` for both `Payment` and `Charge`; a key used by one property cannot replay or block a different property's write. Charge intent fingerprints include folio, optional explicit date, description, category, exact amount, quantity, and optional booking-email source.
+- Server-mode cashier, front-desk, reservation, and booking-board submissions use `DurableAttemptKeyManager`. It retains only a fingerprint and opaque key in application memory, reuses the key for an unchanged uncertain attempt, rotates when material input changes, and removes it only after confirmed success. It deliberately does not use browser storage and therefore does not promise key recovery after a page reload.
 - Satang authority must not be enabled in production until row-level null and variance checks plus aggregate reconciliation pass on a restored staging copy. This branch does not remove legacy columns.
 
 ## Property Request Context
@@ -291,7 +293,15 @@ Notifications are backend records:
 - The request context contains request id, actor, property id/code, membership id, effective role, and optional `X-Idempotency-Key`. Membership role takes precedence over the compatibility global user role.
 - The additive migration backfills existing active and inactive users into the existing `SANDBOX` property using their current role and active state. Setup and user-management services create or update the membership with the compatibility user record.
 - Property-aware services must scope every lookup and mutation by `context.propertyId`; resource identifiers from the client are never property authority.
+- `Guest`, `Payment`, `Charge`, and `AuditLog` have first-class property ownership. Backfills derive ownership from reservation/folio relationships or the single `SANDBOX` compatibility boundary and abort when ambiguous or ownerless data cannot be reconciled safely.
 - The application remains a single-property product in this phase. Membership scaffolding is an isolation control, not a claim that multi-property administration or SaaS tenancy is complete.
+
+## iCal Export Token Contract
+
+- An iCal export token is a bearer credential. `Channel.config` stores `exportTokenHash`, calculated as SHA-256 over the exact UTF-8 token bytes and encoded as unpadded base64url; it does not store a newly issued raw token.
+- Migration `20260717141000_ical_token_hash_backfill` uses PostgreSQL `pgcrypto` to convert legacy `config.exportToken` values to the same digest and remove the raw field in one row update. The migration aborts if an object config still contains a raw token afterward.
+- The raw feed URL is returned only when a token is first issued or explicitly rotated. List responses, later reads, and configuration updates do not reconstruct or re-disclose it.
+- The service can opportunistically sanitize a legacy row encountered before migration completion, but that compatibility behavior does not replace running and proving the deploy migration.
 
 ## Domain Events And SSE
 
@@ -318,4 +328,12 @@ Notifications are backend records:
 - Night audit snapshots unresolved arrivals/departures, in-house stays, open folios, housekeeping blockers, unposted room charges, and exact-satang financial totals.
 - Emergency stop and unposted room charges are non-overridable blockers. Only an admin may override other blockers and must supply an override reason.
 - Current posting mode is `VERIFY_EXISTING_CHARGES_ONLY`; the service does not create missing nightly room charges. A run cannot be marked complete when a non-overridable blocker remains.
-- These backend routes and models are a persistent foundation. The existing housekeeping and Night Audit React screens still use older browser-local workflow state and must be cut over before the staff workflows are considered complete.
+- In server mode, the housekeeping and Night Audit React screens use these persistent APIs and refetch authoritative state after writes; browser-local workflow state is restricted to explicit demo mode. This implementation status is not staff workflow acceptance.
+
+## Release Verification Contract
+
+- Fast CI validates schemas, focused fixtures, typecheck, lint, build, and launch configuration.
+- Integration CI migrates an empty PostgreSQL database, migrates and seeds a separate disposable PostgreSQL database, runs guarded database workflow tests, and runs authenticated server-mode browser reload/error tests against the exact checked-out commit.
+- The PostgreSQL suite must prove two-property isolation, membership-role enforcement, first-class audit ownership, property-scoped payment/charge idempotency, replay conflicts, concurrent overpayment/charge retry behavior, exact reconciliation, and simultaneous last-room hold serialization.
+- The browser suite must prove persisted state survives reload, injected failures remain truthful, recovery refetches authoritative state, and SSE catch-up filters foreign-property events.
+- CI success is engineering evidence only. Restored-staging migrations, rollback/recovery, staff workflows, provider credentials/results, WAF, and owner approval require separate evidence.

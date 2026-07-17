@@ -120,6 +120,19 @@ $env:E2E_DATABASE_URL='postgresql://...disposable...'
 npm.cmd run test:e2e:db
 ```
 
+Authenticated server-mode browser proof, after a server-mode build:
+
+```powershell
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='postgresql://...disposable...'
+$env:VITE_PMS_API_MODE='server'
+$env:VITE_DATA_MODE='server'
+npm.cmd run build
+npm.cmd run test:e2e:server
+```
+
+These commands are engineering checks. Their existence or a local pass does not supply restored-staging, recovery, staff, provider, WAF, or owner proof.
+
 ## OTA Provider Contract
 
 - `node scripts/run-provider-adapter-tests.mjs` passes for Booking.com, Agoda, Trip.com, and Expedia.
@@ -145,10 +158,17 @@ Acceptance requires:
 - requests that supply both baht and satang reject mismatched values;
 - missing or invalid `MONEY_READ_AUTHORITY` selects `legacy_float`, while `satang` selects a populated exact shadow value;
 - a payment dual-writes legacy baht and exact satang inside a serializable transaction;
+- payment and charge rows require first-class property ownership and database uniqueness on `(propertyId, idempotencyKey)`;
 - a same-content idempotent replay returns the existing payment without duplicate payment, audit, or domain-event rows;
 - reuse of an idempotency key with different content returns `409`;
 - closed-folio and unapproved-overpayment attempts fail without a write; and
+- every legacy charge write rejects a missing idempotency key;
+- same-intent and simultaneous charge retries return one append-only charge with one audit row;
+- reuse of a charge key with a different normalized intent returns `409`; and
+- the same charge idempotency key can be used independently by two properties without cross-property replay;
 - one serialization conflict is retried without double-posting.
+- server-mode financial surfaces reuse one opaque in-memory attempt key for unchanged uncertain retries, rotate it when material input changes, clear it after confirmed success, and never write the attempt/key to `localStorage` or `sessionStorage`;
+- a full page reload is not asserted to recover an uncertain financial attempt key, so reload recovery must reconcile the authoritative folio before another write.
 
 Migration acceptance additionally requires an empty-database migration and a restored sanitized staging-copy migration, zero unresolved null/variance rows, exact aggregate reconciliation, rollback proof using `MONEY_READ_AUTHORITY=legacy_float`, and one full operating cycle on satang reads. Fixture tests alone do not satisfy migration acceptance.
 
@@ -159,6 +179,7 @@ Acceptance requires:
 - an authenticated user without an active `UserPropertyMembership` for `SANDBOX` receives `403`;
 - membership role is the effective property role without changing username/email login compatibility;
 - forged room, reservation, rate, settings, housekeeping, and night-audit identifiers from a second property return no data and cause no mutation;
+- `Guest`, `Payment`, `Charge`, and `AuditLog` have required property ownership after migration, and ambiguous/ownerless legacy backfills fail the migration rather than assigning guessed ownership;
 - `/api/openapi.json` reports OpenAPI 3.1 and matches the registered HTTP methods;
 - `/api/system/capabilities` reports `sourceOfTruth: server` without claiming provider proof;
 - `/api/events` requires session authentication, active membership, and `view:board`;
@@ -167,6 +188,20 @@ Acceptance requires:
 - the public event payload omits metadata, actor identity, guest data, money details, and credentials.
 
 The SSE reconnect test must prove an authoritative refetch after disconnection. Receiving an event is not sufficient evidence that a UI view persisted or refreshed correctly.
+
+## iCal Token Storage And Disclosure
+
+Acceptance requires:
+
+- a fixed token vector produces the same SHA-256 unpadded base64url digest in the Node service and PostgreSQL migration expression;
+- migration `20260717141000_ical_token_hash_backfill` removes `config.exportToken` and writes `config.exportTokenHash` in one row update;
+- the migration aborts if an object channel config still contains a raw token;
+- normal channel lists and ordinary configuration updates never return `exportFeedUrl`;
+- initial issue and explicit rotation may return one full URL, while a later list cannot recover it;
+- the previous token stops authorizing a feed after rotation; and
+- no migration query, log, audit row, status DTO, screenshot, or test output exposes a raw token.
+
+Focused migration/service regression evidence comes from `scripts/run-ical-property-scope-tests.mjs`. Applying the migration to an empty database is CI engineering evidence; a restored staging-copy migration and postcondition proof remain separate staging evidence.
 
 ## Rates And Settings
 

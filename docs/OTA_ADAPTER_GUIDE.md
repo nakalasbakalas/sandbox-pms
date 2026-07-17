@@ -23,6 +23,8 @@ Current dispatch:
 
 Booking-email historical backfill is not an OTA adapter and is not live OTA scrape proof. It imports Gmail-derived Booking Email Events for PMS review through `npm.cmd run booking-email:backfill`; staff approval is still required before any reservation, payment, cancellation, or room mutation. `npm.cmd run booking-email:deep-scan` and `npm.cmd run booking-email:reprocess -- --confirm` are review-queue maintenance tools only: they report redacted parser/duplicate posture and rerun the parser for existing review/error events, but they do not prove OTA reads or apply operational changes. OTA partner-admin, invoice, security, and performance-report emails must remain `UNKNOWN` unless staff explicitly reclassify them. Render Gmail OAuth setup uses `npm.cmd run gmail-oauth:render` or `npm.cmd run render:gmail-oauth` and remains a mailbox-provider setup step, not OTA proof. `/api/booking-email/status` can validate Gmail API reachability for the booking mailbox path, but that is mailbox-provider proof only. Hotel Ops scan snapshots exposed through `/ops/intelligence` are PMS-derived evidence and also do not prove live OTA scraping unless a live adapter read is separately configured and verified.
 
+Legacy PMS charge idempotency is an internal financial-safety boundary, not evidence of an OTA payment or charge integration. OTA-derived booking-email sources must still pass property ownership and staff review before a charge link can be recorded.
+
 ## Channel Synchronization V2 Boundary
 
 Channel-sync v2 adds two operational mechanisms without changing the adapter proof standard:
@@ -31,6 +33,8 @@ Channel-sync v2 adds two operational mechanisms without changing the adapter pro
 2. **Manual outbound availability queue.** `server/availability-queue.mjs` creates high-risk `UPDATE_AVAILABILITY` tasks with owner approval, deterministic idempotency, task logs, and audit logs. Queue creation and approval do not call this adapter layer. A human must update the provider and record its confirmation/reference before the item is marked complete.
 
 The queue supports Booking.com, Agoda, Trip.com, Expedia, and a Channex delivery target. Channex maps to the existing `all` platform only as metadata until a certified API adapter exists. It must not be routed to the mock worker as evidence of a real Channex update.
+
+iCal export feeds are also outside the live-write adapter contract. Their URL token is a bearer credential: the PMS stores only its SHA-256 base64url hash, and migration `20260717141000_ical_token_hash_backfill` removes legacy raw `Channel.config.exportToken` values. The full URL is disclosed only when initially issued or explicitly rotated; channel listings and later configuration reads must not return it. A working iCal feed proves only that specific feed path, not an OTA API read/write, inventory acknowledgement, or provider certification.
 
 See [CHANNEL_SYNC_V2.md](CHANNEL_SYNC_V2.md) for commands, application status, activation, and the channel-only provider decision gate.
 
