@@ -311,3 +311,141 @@ npm.cmd run test:e2e:db
 ```
 
 Never run DB-mutating E2E against production data.
+
+For authenticated server-mode reload and error truth, build in server mode and use the same guarded disposable database:
+
+```powershell
+$env:VITE_PMS_API_MODE='server'
+$env:VITE_DATA_MODE='server'
+npm.cmd run build
+npm.cmd run test:e2e:server
+```
+
+The CI integration job runs the empty-database migration lifecycle, disposable migration/seed lifecycle, guarded PostgreSQL concurrency/reconciliation suite, and this browser suite. Rerun both required CI jobs on the exact release commit; local execution does not replace GitHub, restored-staging, staff, provider, or owner evidence.
+
+## OTA Provider Contract Checks
+
+Keep `OTA_LIVE_WRITES_ENABLED=false` in local, staging, and production environments until an individual provider has implemented and owner-approved live proof. `OTA_ENABLE_REAL_BROWSER_WRITES` does not override this contract gate.
+
+Run the focused contract check with:
+
+```powershell
+node scripts/run-provider-adapter-tests.mjs
+```
+
+The check must show an empty `liveWrites` capability for every current provider, reject a non-dry-run Booking.com mutation, and prove credential-shaped evidence is removed. Provider health output is configuration evidence only, not proof of a live read or write.
+
+## Exact-Money Migration And Cutover
+
+The exact-money migration is expand-only. Do not drop or rewrite legacy Float columns during this release.
+
+1. Keep `MONEY_READ_AUTHORITY=legacy_float` in local, staging, and production before migration.
+2. Take a fresh recovery point and restore a sanitized production copy to staging. Never use production-like data for DB-mutating E2E.
+3. Validate the schema and apply the additive migrations to an empty database and the restored staging copy:
+
+```powershell
+npm.cmd run db:generate
+npx.cmd prisma validate
+npx.cmd prisma migrate deploy
+node scripts/run-money-tests.mjs
+```
+
+4. Reconcile every legacy/satang pair. The release owner must retain row counts for null satang shadows, rows where rounded legacy baht differs from satang, and aggregate totals for reservations, folios, charges, payments, rates, booking-email amounts, and Hotel Ops rate amounts.
+5. Quarantine and resolve any out-of-range, null, or non-zero-variance row. Do not manufacture a satang value when the migration intentionally left an unsafe legacy value null.
+6. Exercise create reservation, charge, payment, booking-email apply, rate, settings-fee, and Hotel Ops rate paths and prove both representations are written.
+7. Set `MONEY_READ_AUTHORITY=satang` in staging only. Run the full validation ladder, exact-zero checkout, payment replay/conflict, night-audit totals, reports, and staff workflow checks for one full operating cycle.
+8. For `/api/payments` and `/api/charges`, retain the same `x-idempotency-key` while retrying one uncertain request. A same-intent charge retry must return the original row; a changed amount, quantity, category, description, folio, date, or booking-email source with the same key must return `409`. Never delete or repost a charge to repair a retry.
+9. Server-mode financial screens reuse an unchanged attempt key only within the same loaded application. The manager is memory-only and clears the key after confirmed success. If the page was reloaded after an uncertain response, inspect/refetch the authoritative folio and audit state before attempting another write; do not assume the prior key can be reconstructed.
+10. Prove in disposable PostgreSQL that concurrent overpayment permits only one valid winner, simultaneous same-intent charge retries append one charge, changed-intent replays return `409`, and the same key can be used independently in two properties.
+11. If a regression appears, restore `MONEY_READ_AUTHORITY=legacy_float`; additive satang columns remain in place. Database restoration is reserved for data corruption, not a normal application rollback.
+12. Switch production only with recorded reconciliation, recovery, staff, and owner approval. Retain dual-write and legacy read compatibility for at least 30 days and one complete operating cycle.
+
+An invalid or missing read-authority value falls back to `legacy_float`. That fallback is a compatibility control, not evidence that reconciliation succeeded.
+
+## iCal Export Token Migration And Rotation
+
+Migration `20260717141000_ical_token_hash_backfill` requires PostgreSQL `pgcrypto`, hashes the exact UTF-8 token bytes with SHA-256, stores the unpadded base64url digest, and removes the raw `Channel.config.exportToken` field in the same update.
+
+1. Apply it first to an empty database and a restored sanitized staging copy through `npx.cmd prisma migrate deploy`.
+2. Retain only a count-based postcondition; do not select or print channel config values:
+
+```sql
+SELECT COUNT(*) AS "rawTokenCount"
+FROM "Channel"
+WHERE jsonb_typeof("config") = 'object'
+  AND "config" ? 'exportToken';
+```
+
+3. Require `rawTokenCount = 0`. A migration failure or non-zero count blocks deployment and must be investigated without copying raw token values into tickets, logs, or screenshots.
+4. After migration, normal channel reads cannot recover the full feed URL. Capture a newly issued URL only from its initial issue response, or explicitly rotate the token and update the authorized provider calendar with the newly disclosed URL.
+5. Rotation invalidates the prior URL. Treat provider update/refresh behavior as separate provider evidence; a local feed test is not provider certification or proof that the provider consumed the new URL.
+
+The focused regression command is:
+
+```powershell
+node scripts/run-ical-property-scope-tests.mjs
+```
+
+That test and an empty-database migration are engineering evidence only. Do not state that legacy production tokens are removed until the exact migration and postcondition have been proven in that environment.
+
+## Property Membership And Request Context
+
+Authenticated PMS routes require an active membership for the configured `SANDBOX` property. A valid session with no active membership returns `403`.
+
+- The membership migration backfills existing users. Setup and user-management operations maintain compatibility membership records.
+- Diagnose a membership denial by checking the user active state, the `SANDBOX` property, and the `(userId, propertyId)` membership. Do not change the global role as a shortcut for a missing membership.
+- Role and membership changes require an authorized admin workflow and audit evidence. Never insert a production membership merely to make a proof script pass.
+- Property-isolation testing must use a disposable database with at least two properties and forged cross-property resource ids.
+
+## Domain Event Stream
+
+`GET /api/events` is an authenticated, property-scoped SSE endpoint. It requires `view:board`; do not publish it as a public webhook.
+
+- `SSE_ENABLED=true` enables the endpoint. Set it to `false` to return a controlled `503` without disabling the underlying transactional event records.
+- Browser reconnect uses the last event id. Operators may use `?after=<non-negative-id>` only while authenticated; invalid or negative ids return `400`.
+- The stream sends sanitized aggregate identifiers, not metadata, actor ids, guest data, payment details, or credentials.
+- A stream interruption is recoverable. The client must reconnect/refetch authoritative data; it must not infer that the underlying transaction failed.
+- Database growth, catch-up lag, and retention need staging observation before a retention job is introduced. Do not delete event rows without a reviewed retention and recovery policy.
+
+## Server Rate And Property Settings Operation
+
+Use the server-backed Rates screen only when the PMS API is enabled. Rate writes require `edit:rates`; reads and suggest-only recommendations require `view:rates`.
+
+- Rate recommendations do not apply themselves and do not push to an OTA.
+- Property and tax settings writes require manager/admin authority and an operational reason.
+- Monetary settings use satang strings; percentages use integer basis points.
+- `/api/settings/status` and `/api/system/capabilities` report server configuration only. Provider, staging, WAF, recovery, and owner proof must be collected separately.
+- If a rate/settings mutation fails, leave the UI unchanged, retain the backend error code/message in safe form, and refetch from the server. Do not fall back to browser-local persistence in server mode.
+
+Run the focused checks with:
+
+```powershell
+node scripts/run-rate-service-tests.mjs
+node scripts/run-settings-service-tests.mjs
+```
+
+## Housekeeping And Night-Audit Foundation
+
+The persistent services are available through `/api/housekeeping/tasks`, `/api/housekeeping/issues`, `/api/night-audit/runs`, and `/api/night-audit/close`.
+
+- Every create, assignment, transition, close, or override requires authenticated property context; mutations require a non-empty operational reason.
+- Housekeeping assignees must be active members of the same property. Critical issue resolution requires manager/admin authority.
+- Night-audit close requires an explicit business date and idempotency key. Reuse the same key only when retrying the same attempt.
+- The current night audit verifies existing room charges. `UNPOSTED_ROOM_CHARGES` and `EMERGENCY_STOP` cannot be overridden; do not mark the business date complete manually.
+- In server mode, housekeeping and Night Audit use the persistent APIs and refetch after confirmed writes. Browser-local workflow state is restricted to explicit demo mode. Disposable-DB browser checks and staff acceptance remain staging gates.
+
+Run the focused fixture check with:
+
+```powershell
+node scripts/run-operations-foundation-tests.mjs
+```
+
+Passing the focused checks proves service behavior against fixtures. It does not prove migrations against real data, production scheduling, live staff acceptance, recovery, or provider readiness.
+
+## Accounting V2 And Direct Booking Gates
+
+Keep `ACCOUNTING_V2_ENABLED=false` and `DIRECT_BOOKING_ENABLED=false` until their acceptance matrices pass. Accounting uses append-only exact-satang corrections; never delete a posted financial row. Run `node scripts/run-accounting-v2-tests.mjs` before any staging exercise.
+
+Direct booking does not accept card data. Enabled staging also requires a backend-only `DIRECT_BOOKING_TOKEN_SECRET` with at least 32 characters. Run `node scripts/run-direct-booking-tests.mjs`, then prove concurrent last-room holds, idempotent replay, expiry, recovery, WAF/rate limiting, and staff handling against the exact release candidate before owner approval. Never print or persist the raw hold token after its issue response.
+
+Deterministic analyzers are read-only. Run `node scripts/run-ops-analyzer-tests.mjs`; staff must submit any accepted recommendation through `/api/ops/commands`, where the existing permission, approval, reason, audit, idempotency, and emergency-stop controls apply.

@@ -4,8 +4,7 @@ import { z } from 'zod'
 import { SANDBOX_RULES, getBangkokDateKey, PmsValidationError } from './pms-domain.mjs'
 import { opsWorkerBaseUrl, opsWorkerConfigured, opsWorkerSecret } from './ops-worker-auth.mjs'
 import { executeOpsWorkerTask } from './ops-worker-client.mjs'
-import { bookingComCredentialsConfigured } from './ota-adapters/booking-com.mjs'
-import { otaPlatformSkeletonStatuses } from './ota-adapters/platform-skeleton.mjs'
+import { getOtaProviderContracts } from './ota-adapters/index.mjs'
 import { bookingEmailGmailCredentialStatus, resolveBookingEmailGmailAccessToken } from './pms-service.mjs'
 import { isManualAvailabilityQueueTask } from './availability-queue.mjs'
 
@@ -1314,8 +1313,17 @@ async function taskLog(tx, taskId, action, message, actor, metadata) {
 }
 
 async function audit(tx, actor, action, entityType, entityId, changes) {
+  let propertyId = actor?.propertyId || changes?.propertyId || null
+  if (!propertyId && entityType === 'hotelOpsTask' && entityId) {
+    propertyId = (await tx.hotelOpsTask.findUnique({ where: { id: entityId }, select: { propertyId: true } }))?.propertyId || null
+  }
+  if (!propertyId && entityType === 'hotelOpsNotification' && entityId) {
+    propertyId = (await tx.hotelOpsNotification.findUnique({ where: { id: entityId }, select: { propertyId: true } }))?.propertyId || null
+  }
+  if (!propertyId) propertyId = (await getProperty(tx)).id
   return tx.auditLog.create({
     data: {
+      propertyId,
       userId: actor?.id || 'system',
       action,
       entityType,
@@ -2207,24 +2215,24 @@ export async function getOtaStatus(prisma, options = {}) {
   const workerBaseUrlConfigured = Boolean(opsWorkerBaseUrl())
   const workerSecretConfigured = Boolean(opsWorkerSecret())
   const signedWorkerConfigured = opsWorkerConfigured()
-  const bookingConfigured = bookingComCredentialsConfigured()
+  const providerContracts = await getOtaProviderContracts({ env: process.env })
   return {
     dryRun: String(process.env.OTA_DRY_RUN || 'true').toLowerCase() !== 'false',
     workerConfigured: signedWorkerConfigured,
     workerBaseUrlConfigured,
     workerSecretConfigured,
     scanPolicy: getOpsScanPolicy(process.env, options.schedulerStatus),
-    platforms: [
-      {
-        platform: 'booking',
-        configured: bookingConfigured,
-        status: bookingConfigured ? 'adapter-dry-run-ready' : 'credentials-needed',
-        message: bookingConfigured
-          ? 'Booking.com adapter skeleton is available for signed dry-run tasks. Real browser writes remain disabled until selectors are verified.'
-          : 'Booking.com adapter skeleton is installed, but server-side Booking.com credentials are not configured.',
-      },
-      ...otaPlatformSkeletonStatuses({ env: process.env, signedWorkerConfigured }),
-    ],
+    platforms: providerContracts.map((contract) => ({
+      platform: contract.provider.id,
+      configured: contract.health.configured,
+      status: contract.health.status === 'ready-dry-run'
+        ? 'adapter-dry-run-ready'
+        : contract.health.status === 'needs-configuration'
+          ? 'credentials-needed'
+          : contract.health.status,
+      message: contract.health.message,
+      contract,
+    })),
   }
 }
 

@@ -174,7 +174,7 @@ export function RoomsView() {
               <Broom size={16} weight="bold" />
               {t('nav.housekeeping')}
             </Button>
-            <Button onClick={() => navigate('board')}>
+            <Button onClick={() => navigate('front-desk')}>
               <SquaresFour size={16} weight="bold" />
               {t('nav.frontDeskBoard')}
             </Button>
@@ -191,7 +191,7 @@ export function RoomsView() {
         </div>
 
         {roomSections.map((section) => (
-          <RoomSection key={section.id} title={section.title} rooms={section.rooms} onOpenRoom={() => navigate('board')} />
+          <RoomSection key={section.id} title={section.title} rooms={section.rooms} onOpenRoom={() => navigate('front-desk')} />
         ))}
       </div>
     </div>

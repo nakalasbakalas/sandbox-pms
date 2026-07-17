@@ -45,6 +45,7 @@ import type { BoardRoomCard } from '@/types/board'
 
 interface Channel {
   id: string
+  serverId?: string
   name: string
   provider: 'BOOKING_COM' | 'AGODA' | 'EXPEDIA' | 'AIRBNB'
   connectionMode?: 'ICAL'
@@ -60,6 +61,7 @@ interface Channel {
     lastExportAt?: string
     lastPublishedAt?: string
     exportTokenIssuedAt?: string
+    exportTokenConfigured?: boolean
     lastError?: string
   }
   credentials?: {
@@ -112,6 +114,7 @@ interface ChannelRoomMapping {
 }
 
 interface ServerIcalChannel {
+  id: string
   provider: Channel['provider']
   name: string
   importUrl?: string
@@ -119,6 +122,7 @@ interface ServerIcalChannel {
   exportFeedUrl?: string
   lastPublishedAt?: string
   exportTokenIssuedAt?: string
+  exportTokenConfigured?: boolean
 }
 
 interface RoomTypeOption {
@@ -159,6 +163,10 @@ function externalIdFromName(value: string) {
 
 function sortByRoomNumber(a: RoomOption, b: RoomOption) {
   return a.number.localeCompare(b.number, undefined, { numeric: true })
+}
+
+function redactStoredIcalBearer(value?: string) {
+  return value?.replace(/(\/ical\/)[a-zA-Z0-9_-]{16,200}(\.ics)/g, '$1[REDACTED]$2')
 }
 
 export function ChannelsView() {
@@ -210,7 +218,8 @@ export function ChannelsView() {
   const [setupRoomTypes] = useKV<RoomTypeOption[]>('onboarding-room-types', [])
   const [boardRooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [setupRooms] = useKV<Array<{ id: string; number: string; roomTypeId: string; floor?: number; status?: string }>>('onboarding-rooms', [])
-  const [channelMappings, setChannelMappings] = useKV<ChannelRoomMapping[]>('channel-room-mappings', [])
+  const [demoChannelMappings, setDemoChannelMappings] = useKV<ChannelRoomMapping[]>('channel-room-mappings', [])
+  const [serverChannelMappings, setServerChannelMappings] = useState<ChannelRoomMapping[]>([])
   const [pmsReservations, setPmsReservations] = useKV<any[]>('reservations', [])
   const [, setReservationData] = useKV<any[]>('reservations-data', [])
   const [unassignedReservations, setUnassignedReservations] = useKV<any[]>('unassigned-reservations', [])
@@ -220,12 +229,35 @@ export function ChannelsView() {
   const [selectedMappingChannelId, setSelectedMappingChannelId] = useState('booking')
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null)
   const [mappingForm, setMappingForm] = useState<MappingFormState>(EMPTY_MAPPING_FORM)
+  const [mappingReason, setMappingReason] = useState('')
   const [showConnectDialog, setShowConnectDialog] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [publishingFeedId, setPublishingFeedId] = useState<string | null>(null)
+  const [issuedFeedUrls, setIssuedFeedUrls] = useState<Partial<Record<Channel['provider'], string>>>({})
 
   const [importUrl, setImportUrl] = useState('')
   const [icalText, setIcalText] = useState('')
+  const channelMappings = SERVER_API_ENABLED ? serverChannelMappings : demoChannelMappings || []
+  const applyChannelMappings = (updater: ChannelRoomMapping[] | ((current: ChannelRoomMapping[]) => ChannelRoomMapping[])) => {
+    if (SERVER_API_ENABLED) {
+      setServerChannelMappings((current) => typeof updater === 'function' ? updater(current) : updater)
+      return
+    }
+    setDemoChannelMappings((current) => typeof updater === 'function' ? updater(current || []) : updater)
+  }
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED) return
+    setChannels((current) => current.map((channel) => ({
+      ...channel,
+      iCal: channel.iCal ? { ...channel.iCal, exportFeedUrl: undefined } : channel.iCal,
+    })))
+    setSyncLogs((current) => current.map((entry) => ({
+      ...entry,
+      message: redactStoredIcalBearer(entry.message) || entry.message,
+      details: redactStoredIcalBearer(entry.details),
+    })))
+  }, [setChannels, setSyncLogs])
 
   const effectiveRoomTypes = useMemo(() => {
     return roomTypes.length > 0 ? roomTypes : setupRoomTypes
@@ -259,6 +291,7 @@ export function ChannelsView() {
   }, [boardRooms, setupRooms])
 
   const selectedMappingChannel = channels.find((channel) => channel.id === selectedMappingChannelId) || channels[0] || null
+  const mappingPersistenceAvailable = !SERVER_API_ENABLED || Boolean(selectedMappingChannel?.serverId)
   const connectedChannels = channels.filter(c => c.connected)
   const pendingReservations = reservations.filter(r => r.status === 'PENDING')
   const totalRoomCount = roomOptions.length
@@ -269,10 +302,14 @@ export function ChannelsView() {
   const getRoomNumber = (roomId: string) => roomOptions.find((room) => room.id === roomId)?.number || roomId
 
   const getChannelMappings = (channelId: string) => {
-    return channelMappings.filter((mapping) => mapping.channelId === channelId)
+    const channel = channels.find((item) => item.id === channelId || item.serverId === channelId)
+    const persistedChannelId = channel?.serverId
+    if (SERVER_API_ENABLED && !persistedChannelId) return []
+    return channelMappings.filter((mapping) => mapping.channelId === (persistedChannelId || channelId))
   }
 
   const providerPath = (provider: Channel['provider']) => provider.toLowerCase().replaceAll('_', '-')
+  const issuedFeedUrlFor = (channel: Channel) => issuedFeedUrls[channel.provider]
 
   const mergeServerIcalChannels = useCallback((serverChannels: ServerIcalChannel[]) => {
     setChannels((current) => current.map((channel) => {
@@ -281,6 +318,7 @@ export function ChannelsView() {
 
       return {
         ...channel,
+        serverId: serverChannel.id,
         connectionMode: 'ICAL',
         connected: true,
         status: 'ACTIVE',
@@ -289,9 +327,10 @@ export function ChannelsView() {
           ...channel.iCal,
           importUrl: serverChannel.importUrl || channel.iCal?.importUrl,
           exportFileName: serverChannel.exportFileName || channel.iCal?.exportFileName,
-          exportFeedUrl: serverChannel.exportFeedUrl || channel.iCal?.exportFeedUrl,
+          exportFeedUrl: SERVER_API_ENABLED ? undefined : channel.iCal?.exportFeedUrl,
           lastPublishedAt: serverChannel.lastPublishedAt || channel.iCal?.lastPublishedAt,
           exportTokenIssuedAt: serverChannel.exportTokenIssuedAt || channel.iCal?.exportTokenIssuedAt,
+          exportTokenConfigured: serverChannel.exportTokenConfigured,
         }
       }
     }))
@@ -313,6 +352,21 @@ export function ChannelsView() {
       cancelled = true
     }
   }, [mergeServerIcalChannels])
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED) return
+    let cancelled = false
+    void pmsApi<{ ok: true; data: ChannelRoomMapping[] }>('/api/channels/mappings', undefined)
+      .then((payload) => {
+        if (!cancelled) setServerChannelMappings(payload.data || [])
+      })
+      .catch((error) => {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Channel mappings could not be loaded.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const getMappingStats = (channelId: string) => {
     const mappings = getChannelMappings(channelId).filter((mapping) => mapping.active)
@@ -344,8 +398,15 @@ export function ChannelsView() {
   const exportFileNameForChannel = (channel: Channel) =>
     channel.iCal?.exportFileName || `${channel.id}-sandbox-hotel-blocks.ics`
 
-  const roomTypeCodeFromName = (value: string): 'TWIN' | 'DOUBLE' => {
-    return /double/i.test(value) ? 'DOUBLE' : 'TWIN'
+  const roomTypeCodeFromName = (value: string): 'TWIN' | 'DOUBLE' | null => {
+    const normalized = value.trim().toUpperCase()
+    const configured = effectiveRoomTypes.find((roomType) =>
+      [roomType.id, roomType.code, roomType.name].some((candidate) => candidate?.trim().toUpperCase() === normalized)
+    )
+    const code = (configured?.code || normalized).toUpperCase()
+    if (code.includes('TWIN')) return 'TWIN'
+    if (code.includes('DOUBLE')) return 'DOUBLE'
+    return null
   }
 
   const mapIcalEventsToReservations = (channel: Channel, events: IcalEvent[]) => {
@@ -495,6 +556,9 @@ export function ChannelsView() {
 
     const publishedAt = payload.data.lastPublishedAt || new Date().toISOString()
     mergeServerIcalChannels([payload.data])
+    if (payload.data.exportFeedUrl) {
+      setIssuedFeedUrls((current) => ({ ...current, [channel.provider]: payload.data.exportFeedUrl }))
+    }
     setSyncLogs((current) => [{
       id: `log_${Date.now()}`,
       channelId: channel.id,
@@ -503,7 +567,7 @@ export function ChannelsView() {
       status: 'SUCCESS',
       message: `${channel.name} hosted iCal URL published`,
       details: payload.data.exportFeedUrl
-        ? `OTA subscription URL is ready: ${payload.data.exportFeedUrl}`
+        ? 'A new OTA subscription URL was issued for one-time copy in this browser session.'
         : 'Hosted feed was saved but the URL was not returned by the server.',
     }, ...current])
 
@@ -521,8 +585,8 @@ export function ChannelsView() {
     setPublishingFeedId(channel.id)
     try {
       const published = await publishServerIcalFeed(channel, { rotateToken })
-      toast.success(`${channel.name} iCal URL ${rotateToken ? 'rotated' : 'published'}`, {
-        description: published.exportFeedUrl || 'The hosted feed is ready for your OTA or channel manager.',
+      toast.success(`${channel.name} iCal feed ${rotateToken ? 'rotated' : 'saved'}`, {
+        description: published.exportFeedUrl || 'No token was exposed. Rotate the feed token to issue a new copyable URL.',
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Hosted iCal feed could not be published.'
@@ -542,7 +606,7 @@ export function ChannelsView() {
   }
 
   const handleCopyIcalFeedUrl = async (channel: Channel) => {
-    const url = channel.iCal?.exportFeedUrl
+    const url = issuedFeedUrlFor(channel)
     if (!url) return
     await navigator.clipboard.writeText(url)
     toast.success(`${channel.name} iCal URL copied`)
@@ -586,6 +650,28 @@ export function ChannelsView() {
     const trimmedImportUrl = importUrl.trim()
     const pastedIcal = icalText.trim()
     const exportFileName = exportFileNameForChannel(selectedChannel)
+
+    if (SERVER_API_ENABLED) {
+      if (pastedIcal) {
+        toast.warning('Pasted iCal import is review-only and is not persisted in server mode. Configure the provider feed URL instead.')
+        return
+      }
+      try {
+        const published = await publishServerIcalFeed(selectedChannel, {
+          importUrl: trimmedImportUrl,
+          exportFileName,
+        })
+        toast.success(`${selectedChannel.name} hosted iCal configuration saved`, {
+          description: published.exportFeedUrl || 'The server confirmed the channel configuration.',
+        })
+        setImportUrl('')
+        setIcalText('')
+        setShowConnectDialog(false)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'The server did not save this iCal configuration.')
+      }
+      return
+    }
 
     setChannels(current => 
       current.map(c => 
@@ -634,23 +720,6 @@ export function ChannelsView() {
       })
     }
 
-    if (SERVER_API_ENABLED) {
-      try {
-        const published = await publishServerIcalFeed(selectedChannel, {
-          importUrl: trimmedImportUrl,
-          exportFileName,
-        })
-        toast.success(`${selectedChannel.name} hosted iCal URL published`, {
-          description: published.exportFeedUrl || 'Use the hosted URL in your OTA or channel manager.',
-        })
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Hosted feed URL could not be published.'
-        toast.warning(`${selectedChannel.name} local iCal setup saved`, {
-          description: `Server feed URL was not published: ${message}`,
-        })
-      }
-    }
-
     setImportUrl('')
     setIcalText('')
     setShowConnectDialog(false)
@@ -659,6 +728,24 @@ export function ChannelsView() {
   const handleDisconnect = async (channelId: string) => {
     const channel = channels.find(c => c.id === channelId)
     if (!channel) return
+
+    if (SERVER_API_ENABLED) {
+      try {
+        await pmsApi(`/api/channels/ical/${providerPath(channel.provider)}`, undefined, { method: 'DELETE' })
+        setIssuedFeedUrls((current) => {
+          const next = { ...current }
+          delete next[channel.provider]
+          return next
+        })
+        setChannels((current) => current.map((candidate) => candidate.id === channelId
+          ? { ...candidate, serverId: undefined, connected: false, enabled: false, status: 'DISCONNECTED', iCal: undefined }
+          : candidate))
+        toast.success(`Removed ${channel.name} iCal setup from the PMS`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'The server did not remove this iCal setup.')
+      }
+      return
+    }
 
     setChannels(current => 
       current.map(c => 
@@ -691,20 +778,15 @@ export function ChannelsView() {
 
     toast.success(`Removed ${channel.name} iCal setup`)
 
-    if (SERVER_API_ENABLED) {
-      try {
-        await pmsApi(`/api/channels/ical/${providerPath(channel.provider)}`, undefined, { method: 'DELETE' })
-      } catch (error) {
-        toast.warning(`${channel.name} was removed locally`, {
-          description: error instanceof Error ? error.message : 'The hosted feed could not be disabled on the server.',
-        })
-      }
-    }
   }
 
   const handleSync = async (channelId: string) => {
     const channel = channels.find(c => c.id === channelId)
     if (!channel) return
+    if (SERVER_API_ENABLED) {
+      toast.warning('Browser iCal import is disabled in server mode. Use the review-gated booking inbox or a backend provider sync.')
+      return
+    }
 
     const feedUrl = channel.iCal?.importUrl?.trim()
     if (!feedUrl) {
@@ -762,8 +844,16 @@ export function ChannelsView() {
   }
 
   const handleImportReservation = (reservation: ChannelReservation) => {
+    if (SERVER_API_ENABLED) {
+      toast.warning('This browser-only import is disabled in server mode. Apply imported bookings through the review-gated backend workflow.')
+      return
+    }
     const channel = channels.find(c => c.id === reservation.channelId)
     const roomTypeCode = roomTypeCodeFromName(reservation.roomType)
+    if (!roomTypeCode) {
+      toast.error(`Map ${reservation.roomType} to a supported PMS room type before importing.`)
+      return
+    }
     const checkIn = new Date(reservation.checkIn)
     const checkOut = new Date(reservation.checkOut)
     const importedAt = new Date()
@@ -833,6 +923,10 @@ export function ChannelsView() {
   }
 
   const toggleChannel = (channelId: string) => {
+    if (SERVER_API_ENABLED) {
+      toast.warning('Channel enablement requires a credentialed, audited backend provider workflow.')
+      return
+    }
     setChannels(current => 
       current.map(c => 
         c.id === channelId && c.connected
@@ -845,6 +939,7 @@ export function ChannelsView() {
   const resetMappingForm = () => {
     setEditingMappingId(null)
     setMappingForm(EMPTY_MAPPING_FORM)
+    setMappingReason('')
   }
 
   const handleSelectMappingChannel = (channelId: string) => {
@@ -869,8 +964,32 @@ export function ChannelsView() {
     }))
   }
 
-  const handleSaveMapping = () => {
+  const mappingWriteBody = (mapping: ChannelRoomMapping, reason: string) => ({
+    channelId: mapping.channelId,
+    externalRoomTypeId: mapping.externalRoomTypeId,
+    externalRoomTypeName: mapping.externalRoomTypeName,
+    externalRatePlanId: mapping.externalRatePlanId || null,
+    roomTypeId: mapping.roomTypeId,
+    roomIds: mapping.roomIds,
+    active: mapping.active,
+    reason,
+  })
+
+  const promptForMappingReason = (action: string) => {
+    const reason = window.prompt(`Operational reason required to ${action}:`)?.trim() || ''
+    if (reason.length < 3) {
+      toast.error('Enter an operational reason of at least 3 characters.')
+      return null
+    }
+    return reason
+  }
+
+  const handleSaveMapping = async () => {
     if (!selectedMappingChannel) return
+    if (SERVER_API_ENABLED && !selectedMappingChannel.serverId) {
+      toast.error('Configure this channel on the server before saving persistent mappings.')
+      return
+    }
     const externalRoomTypeName = mappingForm.externalRoomTypeName.trim()
     const externalRoomTypeId = mappingForm.externalRoomTypeId.trim() || externalIdFromName(externalRoomTypeName)
     const externalRatePlanId = mappingForm.externalRatePlanId.trim()
@@ -890,9 +1009,15 @@ export function ChannelsView() {
       return
     }
 
+    const reason = mappingReason.trim()
+    if (SERVER_API_ENABLED && reason.length < 3) {
+      toast.error('Enter an operational reason of at least 3 characters.')
+      return
+    }
+
     const mapping: ChannelRoomMapping = {
       id: editingMappingId || `map_${Date.now()}`,
-      channelId: selectedMappingChannel.id,
+      channelId: selectedMappingChannel.serverId || selectedMappingChannel.id,
       externalRoomTypeId,
       externalRoomTypeName: externalRoomTypeName || externalRoomTypeId,
       externalRatePlanId: externalRatePlanId || undefined,
@@ -902,7 +1027,27 @@ export function ChannelsView() {
       updatedAt: new Date().toISOString()
     }
 
-    setChannelMappings((current) => {
+    if (SERVER_API_ENABLED) {
+      try {
+        const path = editingMappingId
+          ? `/api/channels/mappings/${encodeURIComponent(editingMappingId)}`
+          : '/api/channels/mappings'
+        const payload = await pmsApi<{ ok: true; data: ChannelRoomMapping }>(path, undefined, {
+          method: editingMappingId ? 'PATCH' : 'POST',
+          body: JSON.stringify(mappingWriteBody(mapping, reason)),
+        })
+        applyChannelMappings((current) => editingMappingId
+          ? current.map((item) => item.id === editingMappingId ? payload.data : item)
+          : [payload.data, ...current])
+        resetMappingForm()
+        toast.success(`${selectedMappingChannel.name} room mapping saved to the PMS`)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Room mapping was not saved.')
+      }
+      return
+    }
+
+    applyChannelMappings((current) => {
       if (editingMappingId) {
         return current.map((item) => item.id === editingMappingId ? mapping : item)
       }
@@ -915,7 +1060,8 @@ export function ChannelsView() {
   }
 
   const handleEditMapping = (mapping: ChannelRoomMapping) => {
-    setSelectedMappingChannelId(mapping.channelId)
+    const channel = channels.find((item) => item.serverId === mapping.channelId || item.id === mapping.channelId)
+    setSelectedMappingChannelId(channel?.id || selectedMappingChannelId)
     setEditingMappingId(mapping.id)
     setMappingForm({
       externalRoomTypeId: mapping.externalRoomTypeId,
@@ -927,15 +1073,29 @@ export function ChannelsView() {
     setActiveTab('mapping')
   }
 
-  const handleDeleteMapping = (mappingId: string) => {
-    setChannelMappings((current) => current.filter((mapping) => mapping.id !== mappingId))
+  const handleDeleteMapping = async (mappingId: string) => {
+    if (SERVER_API_ENABLED) {
+      const reason = promptForMappingReason('remove this channel mapping')
+      if (!reason) return
+      try {
+        await pmsApi(`/api/channels/mappings/${encodeURIComponent(mappingId)}?reason=${encodeURIComponent(reason)}`, undefined, { method: 'DELETE' })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Room mapping was not removed.')
+        return
+      }
+    }
+    applyChannelMappings((current) => current.filter((mapping) => mapping.id !== mappingId))
     if (editingMappingId === mappingId) resetMappingForm()
     toast.success('Room mapping removed')
   }
 
-  const handleAutoMapChannel = (channelId: string) => {
+  const handleAutoMapChannel = async (channelId: string) => {
     const channel = channels.find((item) => item.id === channelId)
     if (!channel) return
+    if (SERVER_API_ENABLED && !channel.serverId) {
+      toast.error('Configure this channel on the server before generating persistent mappings.')
+      return
+    }
 
     if (effectiveRoomTypes.length === 0 || roomOptions.length === 0) {
       toast.error('Configure PMS room types and rooms first')
@@ -943,8 +1103,7 @@ export function ChannelsView() {
     }
 
     const existingRoomTypeIds = new Set(
-      channelMappings
-        .filter((mapping) => mapping.channelId === channelId)
+      getChannelMappings(channel.id)
         .map((mapping) => mapping.roomTypeId)
     )
 
@@ -956,7 +1115,7 @@ export function ChannelsView() {
 
         return {
           id: `map_${Date.now()}_${roomType.id}`,
-          channelId,
+          channelId: channel.serverId || channel.id,
           externalRoomTypeId: roomType.code || externalIdFromName(roomType.name),
           externalRoomTypeName: roomType.name,
           roomTypeId: roomType.id,
@@ -972,8 +1131,45 @@ export function ChannelsView() {
       return
     }
 
-    setChannelMappings((current) => [...generatedMappings, ...current])
+    if (SERVER_API_ENABLED) {
+      const autoMapReason = `Auto-map ${channel.name} room types from current PMS inventory.`
+      try {
+        const persisted = await Promise.all(generatedMappings.map(async (mapping) => {
+          const payload = await pmsApi<{ ok: true; data: ChannelRoomMapping }>('/api/channels/mappings', undefined, {
+            method: 'POST',
+            body: JSON.stringify(mappingWriteBody(mapping, autoMapReason)),
+          })
+          return payload.data
+        }))
+        applyChannelMappings((current) => [...persisted, ...current])
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Automatic mappings were not saved.')
+        return
+      }
+    } else {
+      applyChannelMappings((current) => [...generatedMappings, ...current])
+    }
     toast.success(`Added ${generatedMappings.length} ${channel.name} mapping${generatedMappings.length > 1 ? 's' : ''}`)
+  }
+
+  const handleToggleMapping = async (mapping: ChannelRoomMapping, active: boolean) => {
+    const updated = { ...mapping, active, updatedAt: new Date().toISOString() }
+    if (SERVER_API_ENABLED) {
+      const reason = promptForMappingReason(`${active ? 'activate' : 'pause'} this channel mapping`)
+      if (!reason) return
+      try {
+        const payload = await pmsApi<{ ok: true; data: ChannelRoomMapping }>(
+          `/api/channels/mappings/${encodeURIComponent(mapping.id)}`,
+          undefined,
+          { method: 'PATCH', body: JSON.stringify({ active, reason }) },
+        )
+        applyChannelMappings((current) => current.map((item) => item.id === mapping.id ? payload.data : item))
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Room mapping status was not saved.')
+      }
+      return
+    }
+    applyChannelMappings((current) => current.map((item) => item.id === mapping.id ? updated : item))
   }
 
   const getStatusColor = (status: Channel['status']) => {
@@ -1161,7 +1357,7 @@ export function ChannelsView() {
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground mb-1">Export feed</p>
-                            <p className="text-xl font-bold">{channel.iCal?.exportFeedUrl ? 'Live' : SERVER_API_ENABLED ? 'Draft' : 'File'}</p>
+                            <p className="text-xl font-bold">{issuedFeedUrlFor(channel) ? 'Issued' : channel.iCal?.exportTokenConfigured ? 'Configured' : SERVER_API_ENABLED ? 'Draft' : 'File'}</p>
                           </div>
                         </div>
 
@@ -1174,8 +1370,10 @@ export function ChannelsView() {
                             <div>
                               <p className="text-sm font-medium">Hosted export feed</p>
                               <p className="text-xs text-muted-foreground">
-                                {channel.iCal?.exportFeedUrl
-                                  ? 'Copy this URL into the OTA or channel manager calendar import.'
+                                {issuedFeedUrlFor(channel)
+                                  ? 'Copy this newly issued URL now. It will not be shown again after this session.'
+                                  : channel.iCal?.exportTokenConfigured
+                                    ? 'A hashed feed token is configured. Rotate it to issue a new copyable URL.'
                                   : SERVER_API_ENABLED
                                     ? 'Publish the server feed URL before adding this channel to an OTA.'
                                     : 'Available after deployment in server mode; local preview can download .ics files.'}
@@ -1187,11 +1385,11 @@ export function ChannelsView() {
                               </Badge>
                             )}
                           </div>
-                          {channel.iCal?.exportFeedUrl && (
+                          {issuedFeedUrlFor(channel) && (
                             <div className="mt-3 flex gap-2">
                               <Input
                                 readOnly
-                                value={channel.iCal.exportFeedUrl}
+                                value={issuedFeedUrlFor(channel) || ''}
                                 className="h-8 text-xs"
                               />
                               <Button size="sm" variant="outline" onClick={() => handleCopyIcalFeedUrl(channel)}>
@@ -1411,7 +1609,8 @@ export function ChannelsView() {
                               <Button
                                 variant="outline"
                                 className="w-full"
-                                onClick={() => handleAutoMapChannel(selectedMappingChannel.id)}
+                                disabled={!mappingPersistenceAvailable}
+                                onClick={() => void handleAutoMapChannel(selectedMappingChannel.id)}
                               >
                                 <Plus className="w-4 h-4 mr-2" />
                                 Auto-Fill Types
@@ -1429,6 +1628,11 @@ export function ChannelsView() {
                           </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-5">
+                          {!mappingPersistenceAvailable && (
+                            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                              Configure this provider through the server-backed iCal setup before creating persistent room mappings.
+                            </div>
+                          )}
                           <div className="grid grid-cols-3 gap-4">
                             <div className="space-y-2">
                               <Label htmlFor="external-room-name">OTA Room Name</Label>
@@ -1559,13 +1763,25 @@ export function ChannelsView() {
                             </ScrollArea>
                           </div>
 
+                          {SERVER_API_ENABLED && (
+                            <div className="space-y-2">
+                              <Label htmlFor="mapping-reason">Operational reason</Label>
+                              <Input
+                                id="mapping-reason"
+                                value={mappingReason}
+                                onChange={(event) => setMappingReason(event.target.value)}
+                                placeholder="Why is this OTA mapping being created or changed?"
+                              />
+                            </div>
+                          )}
+
                           <div className="flex justify-end gap-2">
                             {editingMappingId && (
                               <Button type="button" variant="outline" onClick={resetMappingForm}>
                                 Cancel Edit
                               </Button>
                             )}
-                            <Button type="button" onClick={handleSaveMapping}>
+                            <Button type="button" disabled={!mappingPersistenceAvailable} onClick={() => void handleSaveMapping()}>
                               <CheckCircle className="w-4 h-4 mr-2" />
                               Save Mapping
                             </Button>
@@ -1608,18 +1824,12 @@ export function ChannelsView() {
                                     <div className="flex items-center gap-2">
                                       <Switch
                                         checked={mapping.active}
-                                        onCheckedChange={(checked) => {
-                                          setChannelMappings((current) => current.map((item) =>
-                                            item.id === mapping.id
-                                              ? { ...item, active: Boolean(checked), updatedAt: new Date().toISOString() }
-                                              : item
-                                          ))
-                                        }}
+                                        onCheckedChange={(checked) => void handleToggleMapping(mapping, Boolean(checked))}
                                       />
                                       <Button variant="outline" size="sm" onClick={() => handleEditMapping(mapping)}>
                                         Edit
                                       </Button>
-                                      <Button variant="outline" size="sm" onClick={() => handleDeleteMapping(mapping.id)}>
+                                      <Button variant="outline" size="sm" onClick={() => void handleDeleteMapping(mapping.id)}>
                                         <XCircle className="w-4 h-4 mr-2" />
                                         Remove
                                       </Button>

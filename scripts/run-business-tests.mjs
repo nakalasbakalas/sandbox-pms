@@ -19,11 +19,63 @@ import { createBookingComAdapter, executeBookingComTask } from '../server/ota-ad
 import { createOtaPlatformSkeletonAdapter, executeOtaPlatformSkeletonTask, otaPlatformSkeletonStatuses } from '../server/ota-adapters/platform-skeleton.mjs'
 import { bookingEmailGmailCredentialStatus, authenticateUser, completeInitialSetup, createUser, fetchGmailEventsForSource, parseBookingEmailDetails, previewBookingEmailEvent, resolveBookingEmailGmailAccessToken, syncBookingEmail, testBookingEmailGmailConnection } from '../server/pms-service.mjs'
 import { createPasswordHash } from '../server/security.mjs'
+import { DATABASE_HEALTH_FAILURE_MESSAGE, databaseHealthFailure } from '../server/health-response.mjs'
+import { getSystemCapabilities } from '../server/capability-service.mjs'
+import { createOpenApiDocument } from '../server/openapi.mjs'
+import { listDomainEvents, publicDomainEvent } from '../server/domain-events.mjs'
+import { requestIdFromHeaders, resolveRequestContext } from '../server/request-context.mjs'
 import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixtures/booking-email-parser-fixtures.mjs'
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
-import { parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { assertCloudflareWafProofRequirements, buildCloudflareWafProof, isCloudflareWafProofReady, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { ensureSandboxCloudflareWafRules, sandboxCloudflareWafDesiredRules } from './ensure-cloudflare-waf-rules.mjs'
+
+const databaseFailure = databaseHealthFailure(new Error('postgresql://user:secret@database.internal/prod'))
+assert.deepEqual(databaseFailure, {
+  configured: true,
+  ok: false,
+  error: DATABASE_HEALTH_FAILURE_MESSAGE,
+}, 'deep health returns a stable sanitized database failure')
+assert.equal(JSON.stringify(databaseFailure).includes('secret'), false, 'deep health does not expose raw database errors')
+
+const apiContract = createOpenApiDocument({ serverUrl: 'https://pms.example.test' })
+assert.equal(apiContract.openapi, '3.1.0', 'OpenAPI contract uses version 3.1')
+assert.equal(apiContract.paths['/api/reservations'].post.security[0].cookieSession.length, 0, 'staff APIs declare cookie authentication')
+assert.deepEqual(apiContract.paths['/api/auth/login'].post.security, [], 'login API remains public')
+assert.equal(apiContract.paths['/api/internal/ops/worker/tasks'], undefined, 'signed internal worker routes are excluded from the staff contract')
+
+const systemCapabilities = getSystemCapabilities({
+  DIRECT_BOOKING_ENABLED: 'false',
+  ACCOUNTING_V2_ENABLED: 'false',
+  OTA_LIVE_WRITES_ENABLED: 'false',
+})
+assert.equal(systemCapabilities.sourceOfTruth, 'server', 'capability registry declares the backend source of truth')
+assert.equal(systemCapabilities.operations.nightAudit.status, 'available', 'persistent night audit is presented as an operational backend capability')
+assert.equal(systemCapabilities.operations.nightAudit.writeMode, 'controlled', 'night audit writes remain controlled')
+assert.equal(systemCapabilities.operations.rates.status, 'available', 'persistent rate services are presented as operational')
+assert.equal(systemCapabilities.integrations.ota.writeMode, 'dry-run', 'OTA live writes remain dry-run by default')
+
+assert.equal(requestIdFromHeaders({ 'x-request-id': 'request-1234' }), 'request-1234', 'valid request correlation IDs are preserved')
+const propertyContext = await resolveRequestContext({
+  property: { findUnique: async () => ({ id: 'property-1', code: 'SANDBOX' }) },
+  userPropertyMembership: { findUnique: async () => ({ id: 'membership-1', role: 'MANAGER', active: true }) },
+}, { id: 'user-1', role: 'FRONT_DESK' }, { requestId: 'request-1234', headers: { 'x-idempotency-key': 'attempt-1' } })
+assert.equal(propertyContext.propertyId, 'property-1', 'request context is scoped to the active property')
+assert.equal(propertyContext.role, 'MANAGER', 'property membership role overrides the compatibility role')
+assert.equal(propertyContext.idempotencyKey, 'attempt-1', 'request context carries the mutation idempotency key')
+
+const publicEvent = publicDomainEvent({ id: 12n, eventType: 'RESERVATION_UPDATED', aggregateType: 'reservation', aggregateId: 'res-1', createdAt: new Date('2026-07-16T00:00:00.000Z'), metadata: { guestName: 'must not leak' } })
+assert.equal(JSON.stringify(publicEvent).includes('guestName'), false, 'public domain events omit metadata and PII')
+const eventRows = await listDomainEvents({
+  domainEvent: { findMany: async ({ where, take }) => {
+    assert.equal(where.propertyId, 'property-1')
+    assert.equal(where.id.gt, 10n)
+    assert.equal(take, 100)
+    return [{ id: 11n, eventType: 'ROOM_HOUSEKEEPING_UPDATED', aggregateType: 'room', aggregateId: 'room-1', createdAt: new Date('2026-07-16T00:00:00.000Z') }]
+  } },
+}, { propertyId: 'property-1', after: '10' })
+assert.equal(eventRows[0].id, '11', 'domain event catch-up uses string sequence IDs')
 
 function createOpsCommandPrismaFixture() {
   const property = {
@@ -417,10 +469,112 @@ const assistantTools = await importTypeScriptModule(resolve('src/lib/assistant/t
 const authMode = await importTypeScriptModule(resolve('src/lib/auth-mode.ts'))
 const serverAuthClient = await importTypeScriptModule(resolve('src/lib/server-auth-client.ts'))
 const hotelOpsIdempotency = await importTypeScriptModule(resolve('src/lib/hotel-ops-idempotency.ts'))
+const durableAttemptKey = await importTypeScriptModule(resolve('src/lib/durable-attempt-key.ts'))
 const bookingEmailCapabilities = await importTypeScriptModule(resolve('src/lib/booking-email-capabilities.ts'))
 const bookingEmailWorkflow = await importTypeScriptModule(resolve('src/lib/booking-email-workflow.ts'))
 const opsNotificationDisplay = await importTypeScriptModule(resolve('src/lib/ops-notification-display.ts'))
 const ical = await importTypeScriptModule(resolve('src/lib/ical.ts'))
+const durableAttemptKeySource = await readFile(resolve('src/lib/durable-attempt-key.ts'), 'utf8')
+assert.equal(/(?:localStorage|sessionStorage)/.test(durableAttemptKeySource), false, 'server-mode attempt keys never use browser persistence')
+const cashierAttemptSource = await readFile(resolve('src/components/views/CashierView.tsx'), 'utf8')
+assert.match(
+  cashierAttemptSource,
+  /operation: 'cashier-charge'[\s\S]{0,1000}pmsApi\('\/api\/charges'[\s\S]{0,300}headers: \{ 'x-idempotency-key': idempotencyKey \}/,
+  'Cashier charge submissions send the durable attempt key through the backend idempotency header contract',
+)
+for (const paymentSurface of [
+  'src/components/front-desk/FrontDeskView.tsx',
+  'src/components/views/ReservationsView.tsx',
+  'src/components/board/Board.tsx',
+]) {
+  const source = await readFile(resolve(paymentSurface), 'utf8')
+  assert.match(source, /operation: 'check-in-payment'/, `${paymentSurface} uses durable check-in payment attempts`)
+  assert.match(source, /operation: 'check-out-payment'/, `${paymentSurface} uses durable check-out payment attempts`)
+  assert.match(source, /durableAttemptKeys\.confirmSuccess/, `${paymentSurface} clears attempt keys only after confirmed success`)
+}
+
+const durableAttemptStorageRows = new Map()
+const durableAttemptStorage = {
+  getItem: (key) => durableAttemptStorageRows.get(key) ?? null,
+  setItem: (key, value) => durableAttemptStorageRows.set(key, value),
+  removeItem: (key) => durableAttemptStorageRows.delete(key),
+}
+let durableAttemptSequence = 0
+const durableAttemptManager = new durableAttemptKey.DurableAttemptKeyManager({
+  storage: durableAttemptStorage,
+  randomId: () => `opaque-attempt-${++durableAttemptSequence}`,
+})
+const uncertainPaymentAttempt = {
+  operation: 'cashier-payment',
+  entityId: 'folio-sensitive-guest-123',
+  material: {
+    folioId: 'folio-sensitive-guest-123',
+    amount: 1250,
+    method: 'BANK_TRANSFER',
+    reference: 'private-bank-reference-456',
+    guestEmail: 'guest-private@example.test',
+    password: 'must-never-be-persisted',
+  },
+}
+const uncertainPaymentKey = await durableAttemptManager.getOrCreate(uncertainPaymentAttempt)
+assert.equal(
+  await durableAttemptManager.getOrCreate(uncertainPaymentAttempt),
+  uncertainPaymentKey,
+  'identical uncertain payment retries reuse the same durable attempt key',
+)
+assert.equal(
+  await durableAttemptManager.getOrCreate({
+    ...uncertainPaymentAttempt,
+    material: {
+      password: uncertainPaymentAttempt.material.password,
+      guestEmail: uncertainPaymentAttempt.material.guestEmail,
+      reference: uncertainPaymentAttempt.material.reference,
+      method: uncertainPaymentAttempt.material.method,
+      amount: uncertainPaymentAttempt.material.amount,
+      folioId: uncertainPaymentAttempt.material.folioId,
+    },
+  }),
+  uncertainPaymentKey,
+  'material fingerprinting is stable across harmless object key ordering differences',
+)
+const persistedAttemptEvidence = JSON.stringify([...durableAttemptStorageRows.entries()])
+for (const forbiddenValue of [
+  uncertainPaymentAttempt.entityId,
+  uncertainPaymentAttempt.material.reference,
+  uncertainPaymentAttempt.material.guestEmail,
+  uncertainPaymentAttempt.material.password,
+]) {
+  assert.equal(persistedAttemptEvidence.includes(forbiddenValue), false, 'attempt-key storage persists no credentials, PII, references, or raw entity identifiers')
+}
+assert.match(uncertainPaymentKey, /^pms-cashier-payment:opaque-attempt-\d+$/, 'attempt keys contain only an allowlisted operation and opaque nonce')
+
+const changedPaymentAttempt = {
+  ...uncertainPaymentAttempt,
+  material: { ...uncertainPaymentAttempt.material, amount: 1300 },
+}
+const changedPaymentKey = await durableAttemptManager.getOrCreate(changedPaymentAttempt)
+assert.notEqual(changedPaymentKey, uncertainPaymentKey, 'material payment input changes rotate the attempt key')
+await durableAttemptManager.confirmSuccess(uncertainPaymentAttempt)
+assert.equal(
+  await durableAttemptManager.getOrCreate(changedPaymentAttempt),
+  changedPaymentKey,
+  'confirmation for an older fingerprint cannot clear a newer material attempt',
+)
+await durableAttemptManager.confirmSuccess(changedPaymentAttempt)
+assert.notEqual(
+  await durableAttemptManager.getOrCreate(changedPaymentAttempt),
+  changedPaymentKey,
+  'confirmed payment success clears the durable attempt key before a future submission',
+)
+await assert.rejects(
+  durableAttemptManager.getOrCreate({
+    operation: 'guest-private@example.test',
+    entityId: 'folio-1',
+    material: { amount: 100 },
+  }),
+  /Unsupported attempt operation/,
+  'attempt-key storage rejects non-allowlisted operation labels that could contain PII',
+)
 
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-29'), 3, 'counts hotel nights with check-out exclusive')
 assert.equal(rules.nightsBetween('2026-05-26', '2026-05-26'), 0, 'rejects zero-night stays')
@@ -721,26 +875,30 @@ assert.equal(mappedUsernameOnlyUser.email, null, 'server auth users can omit ema
 assert.equal(mappedUsernameOnlyUser.username, 'hk1', 'server auth users use username as login identifier')
 assert.equal(mappedUsernameOnlyUser.role, 'housekeeping', 'username-only server auth users map backend roles')
 
+function userCreationPrismaFixture({ expectedUsername, userId, audits }) {
+  const prisma = {
+    property: { findUnique: async () => ({ id: 'property-1', code: 'SANDBOX' }) },
+    user: {
+      findFirst: async (query) => {
+        assert.deepEqual(query.where.OR, [{ username: expectedUsername }], 'username-only user duplicate check does not require email')
+        return null
+      },
+      create: async ({ data }) => ({ id: userId, createdAt: new Date('2026-06-30T00:00:00.000Z'), ...data }),
+    },
+    userPropertyMembership: { create: async ({ data }) => data },
+    auditLog: { create: async ({ data }) => { audits.push(data); return data } },
+    domainEvent: { create: async ({ data }) => ({ id: 1n, createdAt: new Date(), ...data }) },
+    $transaction: async (callback) => callback(prisma),
+  }
+  return prisma
+}
+
 const createdAudits = []
-const usernameOnlyUser = await createUser({
-  user: {
-    findFirst: async (query) => {
-      assert.deepEqual(query.where.OR, [{ username: 'hk2' }], 'username-only user duplicate check does not require email')
-      return null
-    },
-    create: async ({ data }) => ({
-      id: 'user-hk2',
-      createdAt: new Date('2026-06-30T00:00:00.000Z'),
-      ...data,
-    }),
-  },
-  auditLog: {
-    create: async ({ data }) => {
-      createdAudits.push(data)
-      return data
-    },
-  },
-}, {
+const usernameOnlyUser = await createUser(userCreationPrismaFixture({
+  expectedUsername: 'hk2',
+  userId: 'user-hk2',
+  audits: createdAudits,
+}), {
   username: 'hk2',
   email: '',
   password: 'Temporary1234!',
@@ -753,25 +911,11 @@ assert.equal(usernameOnlyUser.role, 'HOUSEKEEPING', 'username-only server user r
 assert.equal(createdAudits[0]?.action, 'USER_CREATED', 'username-only server user creation is audited')
 
 const nullEmailUserAudits = []
-const nullEmailUser = await createUser({
-  user: {
-    findFirst: async (query) => {
-      assert.deepEqual(query.where.OR, [{ username: 'fd3' }], 'null-email user duplicate check does not require email')
-      return null
-    },
-    create: async ({ data }) => ({
-      id: 'user-fd3',
-      createdAt: new Date('2026-06-30T00:00:00.000Z'),
-      ...data,
-    }),
-  },
-  auditLog: {
-    create: async ({ data }) => {
-      nullEmailUserAudits.push(data)
-      return data
-    },
-  },
-}, {
+const nullEmailUser = await createUser(userCreationPrismaFixture({
+  expectedUsername: 'fd3',
+  userId: 'user-fd3',
+  audits: nullEmailUserAudits,
+}), {
   username: 'fd3',
   email: null,
   password: 'Temporary1234!',
@@ -908,15 +1052,264 @@ assert.deepEqual(
   ['book.sandboxhotel.com', 'sandboxhotel.com'],
   'Cloudflare WAF proof can discover parent zone names from a protected hostname',
 )
+
+const cloudflareJsonResponse = (status, payload) => new Response(JSON.stringify(payload), {
+  status,
+  headers: {
+    'content-type': 'application/json',
+  },
+})
+const runWithMockedCloudflareFetch = async (fetchImpl, callback) => {
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = fetchImpl
+  try {
+    return await callback()
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+}
+
+const cloudflareAccountInspectionFailureProof = await runWithMockedCloudflareFetch(async (url) => {
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  if (normalized === '/zones/zone-account-fixture') {
+    return cloudflareJsonResponse(200, { result: { id: 'zone-account-fixture', name: 'book.sandboxhotel.com', status: 'active' } })
+  }
+  if (normalized === '/zones/zone-account-fixture/rulesets') {
+    return cloudflareJsonResponse(200, {
+      result: [{ id: 'zone-level-ruleset', phase: 'http_ratelimit' }],
+    })
+  }
+  if (normalized === '/zones/zone-account-fixture/rulesets/zone-level-ruleset') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'zone-level-ruleset',
+        name: 'zone-level-ruleset',
+        phase: 'http_ratelimit',
+        rules: [
+          {
+            id: 'zone-level-rule',
+            ref: 'sandbox_pms_login_rate_limit',
+            action: 'block',
+            enabled: true,
+            expression: '(http.host eq "book.sandboxhotel.com" and http.request.method eq "POST" and http.request.uri.path eq "/api/auth/login")',
+            ratelimit: {
+              period: 10,
+              requests_per_period: 10,
+              mitigation_timeout: 10,
+              characteristics: ['cf.colo.id', 'ip.src'],
+            },
+          },
+        ],
+      },
+    })
+  }
+  if (normalized === '/accounts/account-fixture/rulesets') {
+    return cloudflareJsonResponse(403, { success: false, errors: [{ message: 'forbidden' }] })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => buildCloudflareWafProof({
+  token: 'token-fixture',
+  targetZoneId: 'zone-account-fixture',
+  targetAccountId: 'account-fixture',
+  targetAccountInspectionRequested: true,
+  targetHostname: 'book.sandboxhotel.com',
+}))
+assert.equal(cloudflareAccountInspectionFailureProof.summary.requireOwnerReview, true, 'Cloudflare WAF proof flags owner review when requested account inspection fails')
+assert.equal(cloudflareAccountInspectionFailureProof.target.account.requested, true, 'Cloudflare WAF proof tracks requested account inspection in target.account.requested')
+assert.equal(cloudflareAccountInspectionFailureProof.target.account.inspected, false, 'Cloudflare WAF proof tracks failed account inspection state as not inspected')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.accountInspectionRequested, true, 'Cloudflare WAF proof summary tracks requested account inspection state')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.accountInspectionInspected, false, 'Cloudflare WAF proof summary tracks inspected state for account-level rulesets')
+assert.throws(
+  () => assertCloudflareWafProofRequirements({ proof: cloudflareAccountInspectionFailureProof }),
+  /Account-level inspection was requested but could not be completed/,
+  'Cloudflare WAF proof requires owner review and --require-rules throws on requested account inspection failure',
+)
+assert.equal(cloudflareAccountInspectionFailureProof.summary.loginRateLimitRulesCount, 1, 'Cloudflare WAF proof counts an enabled login rate-limit rule')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.targetHostnameCoveredLoginRateLimitRules, 1, 'Cloudflare WAF proof counts login rate-limit hostname coverage')
+assert.equal(isCloudflareWafProofReady({
+  ...cloudflareAccountInspectionFailureProof.summary,
+  accountInspectionRequested: false,
+  accountInspectionInspected: false,
+}), true, 'Cloudflare WAF proof is ready when an enabled login rate-limit rule covers the target hostname')
+
+const cloudflareUnrelatedWafOnlyProof = await runWithMockedCloudflareFetch(async (url) => {
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  if (normalized === '/zones/zone-unrelated-waf-fixture') {
+    return cloudflareJsonResponse(200, { result: { id: 'zone-unrelated-waf-fixture', name: 'book.sandboxhotel.com', status: 'active' } })
+  }
+  if (normalized === '/zones/zone-unrelated-waf-fixture/rulesets') {
+    return cloudflareJsonResponse(200, {
+      result: [{ id: 'unrelated-waf-ruleset', phase: 'http_request_firewall_custom' }],
+    })
+  }
+  if (normalized === '/zones/zone-unrelated-waf-fixture/rulesets/unrelated-waf-ruleset') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'unrelated-waf-ruleset',
+        name: 'Unrelated hostname-covered WAF rule',
+        phase: 'http_request_firewall_custom',
+        rules: [
+          {
+            id: 'unrelated-waf-rule',
+            ref: 'sandbox_pms_common_probe_block',
+            action: 'block',
+            enabled: true,
+            expression: '(http.host eq "book.sandboxhotel.com" and http.request.uri.path eq "/.env")',
+          },
+        ],
+      },
+    })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => buildCloudflareWafProof({
+  token: 'token-fixture',
+  targetZoneId: 'zone-unrelated-waf-fixture',
+  targetHostname: 'book.sandboxhotel.com',
+}))
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.rulesCount, 1, 'Cloudflare WAF proof sees unrelated WAF rules')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.targetHostnameCoveredRules, 1, 'Cloudflare WAF proof sees unrelated hostname coverage')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.loginRateLimitRulesCount, 0, 'Cloudflare WAF proof does not mistake unrelated WAF coverage for a login rate-limit rule')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.targetHostnameCoveredLoginRateLimitRules, 0, 'Cloudflare WAF proof reports zero required login rate-limit hostname coverage')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.requireOwnerReview, true, 'Cloudflare WAF proof remains incomplete without the required login rate-limit rule')
+assert.throws(
+  () => assertCloudflareWafProofRequirements({ proof: cloudflareUnrelatedWafOnlyProof }),
+  /enabled login rate-limit rule covering the required hostname was not found/,
+  'Cloudflare WAF --require-rules fails when only unrelated hostname-covered WAF rules exist',
+)
+assert.throws(
+  () => assertCloudflareWafProofRequirements({
+    proof: {
+      ...cloudflareUnrelatedWafOnlyProof,
+      summary: { ...cloudflareUnrelatedWafOnlyProof.summary, requireOwnerReview: false },
+    },
+  }),
+  /enabled login rate-limit rule covering the required hostname was not found/,
+  'Cloudflare WAF --require-rules independently enforces login rate-limit count and coverage',
+)
+
+const cloudflareEnsureAmbiguousDescriptionLog = []
+const cloudflareEnsureAmbiguousDescription = await runWithMockedCloudflareFetch(async (url, init = {}) => {
+  const method = init.method || 'GET'
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  cloudflareEnsureAmbiguousDescriptionLog.push({ method, path: normalized })
+  if (normalized === '/zones/zone-ensure-fixture') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'zone-ensure-fixture',
+        name: 'book.sandboxhotel.com',
+        status: 'active',
+      },
+    })
+  }
+  if (normalized === '/zones/zone-ensure-fixture/rulesets/phases/http_request_firewall_custom/entrypoint') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'entrypoint-custom',
+        phase: 'http_request_firewall_custom',
+        name: 'custom-firewall',
+        rules: [
+          {
+            id: 'custom-ambiguous-a',
+            ref: 'other-rule-a',
+            description: 'Sandbox PMS common probe block',
+            expression: '(http.host eq "book.sandboxhotel.com" and starts_with(http.request.uri.path, "/blocked"))',
+            enabled: true,
+            action: 'block',
+          },
+          {
+            id: 'custom-ambiguous-b',
+            ref: 'other-rule-b',
+            description: 'Sandbox PMS common probe block',
+            expression: '(http.host eq "book.sandboxhotel.com" and starts_with(http.request.uri.path, "/legacy"))',
+            enabled: true,
+            action: 'block',
+          },
+        ],
+      },
+    })
+  }
+  if (normalized === '/zones/zone-ensure-fixture/rulesets/phases/http_ratelimit/entrypoint') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'entrypoint-ratelimit',
+        phase: 'http_ratelimit',
+        name: 'ratelimits',
+        rules: [
+          {
+            id: 'rate-limit-existing',
+            ref: 'sandbox_pms_login_rate_limit',
+            description: 'Sandbox PMS login rate limit',
+            expression: '(http.host in {"book.sandboxhotel.com"} and http.request.method eq "POST" and http.request.uri.path eq "/api/auth/login")',
+            enabled: true,
+            action: 'block',
+            ratelimit: {
+              period: 10,
+              requests_per_period: 10,
+              mitigation_timeout: 10,
+              characteristics: ['ip.src', 'cf.colo.id'],
+              action_parameters: { response: { content: 'fixture body' } },
+              extra_provider_metadata: 'ignored',
+            },
+          },
+        ],
+      },
+    })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => ensureSandboxCloudflareWafRules({
+  token: 'token-fixture',
+  targetZoneId: 'zone-ensure-fixture',
+  dryRun: false,
+  hostnames: ['book.sandboxhotel.com'],
+}))
+const ambiguousCommonRuleResult = cloudflareEnsureAmbiguousDescription.results.find((result) => result.ruleRef === 'sandbox_pms_common_probe_block')
+assert.equal(ambiguousCommonRuleResult.operation, 'blocked-ambiguous-description-match', 'Cloudflare WAF ensure blocks ambiguous description-only matches')
+assert.equal(ambiguousCommonRuleResult.ruleId, null, 'Cloudflare WAF ensure does not mutate when description is ambiguous')
+assert.equal(ambiguousCommonRuleResult.blockReason, 'multiple rules matched description "Sandbox PMS common probe block"', 'Cloudflare WAF ensure explains ambiguous-description block reason')
+const loginRateLimitResult = cloudflareEnsureAmbiguousDescription.results.find((result) => result.ruleRef === 'sandbox_pms_login_rate_limit')
+assert.equal(loginRateLimitResult.operation, 'unchanged', 'Cloudflare WAF ensure treats reordered ratelimit characteristics and extra metadata as unchanged')
+assert.equal(cloudflareEnsureAmbiguousDescription.ready, false, 'Cloudflare WAF ensure blocks ready when ambiguous-description rule matching is non-mutating')
+assert.equal(
+  cloudflareEnsureAmbiguousDescriptionLog.every((entry) => entry.method === 'GET'),
+  true,
+  'Cloudflare WAF ensure performs no write requests when ambiguous matches force a block operation',
+)
+
 const cloudflareEnvFixture = parseCloudflareEnvFileContent(`
 # local fixture
 CLOUDFLARE_API_TOKEN="token-fixture"
 IGNORED_KEY=ignored
 CF_ZONE_ID=zone-fixture
+CLOUDFLARE_ACCOUNT_ID=account-fixture
 `)
 assert.equal(cloudflareEnvFixture.parsed.CLOUDFLARE_API_TOKEN, 'token-fixture', 'Cloudflare WAF proof parses allowed local env keys')
 assert.equal(cloudflareEnvFixture.parsed.CF_ZONE_ID, 'zone-fixture', 'Cloudflare WAF proof parses zone id from local env file')
+assert.equal(cloudflareEnvFixture.parsed.CLOUDFLARE_ACCOUNT_ID, 'account-fixture', 'Cloudflare WAF proof can parse account id without inspecting account-level rulesets by default')
 assert.deepEqual(cloudflareEnvFixture.skippedKeys, ['IGNORED_KEY'], 'Cloudflare WAF proof skips unrelated local env keys')
+
+const sandboxCloudflareDesiredRules = sandboxCloudflareWafDesiredRules(['book.sandboxhotel.com', 'staff.sandboxhotel.com'])
+assert.equal(sandboxCloudflareDesiredRules.length, 2, 'Cloudflare WAF ensure defaults to Free-plan-compatible custom probe and login rate-limit rules')
+assert.deepEqual(
+  sandboxCloudflareDesiredRules.map((desired) => desired.rule.ref),
+  ['sandbox_pms_common_probe_block', 'sandbox_pms_login_rate_limit'],
+  'Cloudflare WAF ensure uses stable rule refs',
+)
+assert.ok(
+  sandboxCloudflareDesiredRules.every((desired) => desired.rule.expression.includes('book.sandboxhotel.com') && desired.rule.expression.includes('staff.sandboxhotel.com')),
+  'Cloudflare WAF ensure scopes all rules to protected hostnames',
+)
+assert.equal(sandboxCloudflareDesiredRules[0].phase, 'http_request_firewall_custom', 'Cloudflare WAF ensure creates the custom rule in the custom firewall phase')
+assert.equal(sandboxCloudflareDesiredRules[0].rule.action, 'block', 'Cloudflare WAF ensure blocks common probe paths')
+assert.equal(sandboxCloudflareDesiredRules[1].phase, 'http_ratelimit', 'Cloudflare WAF ensure creates login limit in the rate-limit phase')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.action, 'block', 'Cloudflare WAF ensure uses Free-plan-compatible block action for login rate limiting')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.requests_per_period, 10, 'Cloudflare WAF ensure records the login rate-limit threshold')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.period, 10, 'Cloudflare WAF ensure uses the Free-plan-compatible login rate-limit period')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.mitigation_timeout, 10, 'Cloudflare WAF ensure uses a short login rate-limit mitigation timeout')
+assert.deepEqual(sandboxCloudflareDesiredRules[1].rule.ratelimit.characteristics, ['cf.colo.id', 'ip.src'], 'Cloudflare WAF ensure keys rate limits by colo and source IP')
+const sandboxCloudflarePaidQuotaRules = sandboxCloudflareWafDesiredRules(['book.sandboxhotel.com'], { includeApiBurstRateLimit: true })
+assert.equal(sandboxCloudflarePaidQuotaRules.length, 3, 'Cloudflare WAF ensure can include the optional API burst rule when rate-limit quota allows')
+assert.equal(sandboxCloudflarePaidQuotaRules[2].rule.ref, 'sandbox_pms_api_burst_rate_limit', 'Cloudflare WAF ensure keeps the optional API burst rule ref stable')
+assert.equal(sandboxCloudflarePaidQuotaRules[2].rule.ratelimit.requests_per_period, 300, 'Cloudflare WAF ensure records the optional API burst threshold')
 
 const opsEmailNotification = {
   id: 'ops-notification-email-1',

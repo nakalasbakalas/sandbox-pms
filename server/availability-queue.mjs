@@ -367,6 +367,7 @@ export async function createAvailabilityQueueItem(prisma, input = {}, actor) {
     })
     await tx.auditLog.create({
       data: {
+        propertyId: task.propertyId,
         userId: operator.id,
         action: 'AVAILABILITY_QUEUE_CREATED',
         entityType: 'hotelOpsTask',
@@ -455,6 +456,7 @@ export async function approveAvailabilityQueueItem(prisma, taskId, input = {}, a
     })
     await tx.auditLog.create({
       data: {
+        propertyId: task.propertyId,
         userId: operator.id,
         action: 'AVAILABILITY_QUEUE_APPROVED',
         entityType: 'hotelOpsTask',
@@ -514,6 +516,7 @@ export async function markAvailabilityQueueItemSent(prisma, taskId, input = {}, 
     })
     await tx.auditLog.create({
       data: {
+        propertyId: task.propertyId,
         userId: operator.id,
         action: 'AVAILABILITY_QUEUE_MARKED_SENT',
         entityType: 'hotelOpsTask',
@@ -554,6 +557,7 @@ export async function markAvailabilityQueueItemFailed(prisma, taskId, input = {}
     })
     await tx.auditLog.create({
       data: {
+        propertyId: task.propertyId,
         userId: operator.id,
         action: 'AVAILABILITY_QUEUE_FAILED',
         entityType: 'hotelOpsTask',
@@ -595,6 +599,7 @@ export async function cancelAvailabilityQueueItem(prisma, taskId, input = {}, ac
     })
     await tx.auditLog.create({
       data: {
+        propertyId: task.propertyId,
         userId: operator.id,
         action: 'AVAILABILITY_QUEUE_CANCELLED',
         entityType: 'hotelOpsTask',

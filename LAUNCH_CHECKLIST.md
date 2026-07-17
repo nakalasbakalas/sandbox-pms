@@ -2,7 +2,9 @@
 
 Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off may be closed only by proof or explicit owner accepted-risk sign-off.
 
-## 2026-07-04 Current Evidence Refresh
+Current release posture (2026-07-17): **owner-accepted pilot / launch-hardening**. Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof. PR #174 head `4c1659d` passed both required GitHub jobs on 2026-07-16, but the subsequent property-scope acceptance remediation must pass the same jobs at its own exact commit before merge.
+
+## Historical 2026-07-04 to 2026-07-07 Evidence Refresh
 
 - [x] Owner-directed completion deploy: commit `d18ea06eb974621281c43a57cf4d5a41994c2775` passed GitHub CI run `28800962218`, deployed live to Render as `dep-d966aj9kh4rs73d9h10g`, and passed post-deploy `live:check`, `public-edge:proof`, `prod:preflight`, and redacted Render Gmail OAuth status on 2026-07-07. Remaining external proof gaps are owner-accepted operational risk; see `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.
 - [x] Slice 5BP source commit `72592dacc1d6b3189fe7061aad6fd6ac932df72e` passed GitHub CI run `28700849720`, including launch gate; see `docs/launch/evidence/2026-07-04-slice-5bp-current-checkout-validation-refresh.md` and `docs/launch/evidence/LAUNCH_GATE_RESULTS.md`.
@@ -14,7 +16,7 @@ Checked command-based items reflect point-in-time evidence recorded in `docs/lau
 - [x] Public deep health for `https://book.sandboxhotel.com/healthz?deep=1` returns `200` with database OK in the latest public-edge proof refresh; see `docs/launch/evidence/2026-07-04-slice-5bo-cloudflare-waf-boundary-refresh.md`.
 - [x] PR #150 setup-gate hardening is owner-approved, merged, deployed to `sandbox-hotel-pms-v43m`, and reprobed on the public custom-domain service. Slice 5AZ confirmed the current live Render deploy `dep-d93ordnaqgkc73cd2ke0` serves commit `1c493116b7eb84ab010097903ff641cd526d8cb6`; unauthenticated setup-complete returns the intended production-disabled `403`.
 - [x] Production aggregate room-inventory counts were captured without room numbers or sensitive data. Slice 5BA Render job `job-d93pfr6q1p3s73a2ufh0` on deploy `dep-d93pe7hkh4rs73dp5bcg` returned `33` total rooms across two redacted room-type buckets, with `33` operationally available and `0` inactive.
-- [x] Production/account-owner issue closure is complete by owner-directed accepted-risk sign-off. Credentialed production auth proof, provider secret/backup proof, privileged Cloudflare WAF proof, staff parser review, manual workflow acceptance, and demo/sample cleanup are carried as owner-managed operational risks; see `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md`.
+- [x] Historical production/account-owner issue closure was recorded by owner-directed accepted-risk sign-off for deploy `dep-d966aj9kh4rs73d9h10g`. A later 2026-07-07 pass recorded zone-level Cloudflare WAF/rate-limit proof and Render recovery metadata; credentialed production auth, provider secret inventory/rotation, staff parser review, manual workflow acceptance, and demo/sample cleanup were not independently proven. See `docs/launch/evidence/2026-07-07-owner-completion-deploy-and-issue-closure.md` and `docs/launch/evidence/2026-07-07-cloudflare-waf-zone-proof.md`. This historical evidence does not approve or provider-prove a later candidate.
 
 ## Historical 2026-06-15 Validation Evidence
 
@@ -53,8 +55,8 @@ Scope decisions for LINE, OTA, payments, production users, room inventory, DB-mu
 - [x] `npm run db:doctor` reports the intended target database and no failing configured checks.
 - [x] `npm run db:migrate` has been applied to the target database.
 - [x] The Render service is connected to `nakalasbakalas/sandbox-pms`.
-- [x] The Render Blueprint preDeploy command runs `npm run db:migrate && npm run db:seed`, or a reviewed one-time Render build command has applied migrations and `prod-safe` seed if the platform skips predeploy.
-- [x] `npm run db:seed` has run in `prod-safe` mode and did not create fake guests, reservations, payments, invoices, operational room inventory, or demo staff users.
+- [x] Historical production deploys ran `npm run db:migrate && npm run db:seed` in `prod-safe` mode without creating fake guests, reservations, payments, invoices, operational room inventory, or demo staff users.
+- [ ] Before deploying the release-foundation candidate, verify the active Render service matches the committed migration-only `preDeployCommand: npm run db:migrate`. Routine production deploys must not seed; onboarding/import or recovery seeding is a separate owner-reviewed action.
 - [ ] Initial admin/staff login users exist only if explicitly seeded through approved secure credentials.
 - [ ] Production room inventory has been configured through an approved operational/onboarding flow, not fake seed data. Nick states current inventory is real; redacted source/admin proof is still required.
 - [ ] Any legacy bootstrap admin has logged in successfully and the temporary seed credential has been rotated or removed.

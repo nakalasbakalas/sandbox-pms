@@ -39,6 +39,8 @@ import { YieldManagementPanel } from './YieldManagementPanel'
 import { CompetitiveRateAnalysis } from './CompetitiveRateAnalysis'
 import { SeasonalPackagesManager } from './SeasonalPackagesManager'
 import { BulkRateUpload } from './BulkRateUpload'
+import { ServerRatesView } from './ServerRatesView'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
 
 interface RoomType {
   id: string
@@ -69,6 +71,10 @@ interface RateOverride {
 }
 
 export function RatesView() {
+  return SERVER_API_ENABLED ? <ServerRatesView /> : <DemoRatesView />
+}
+
+function DemoRatesView() {
   const [roomTypes, setRoomTypes] = useKV<RoomType[]>('room-types-config', [])
   const [rateRules, setRateRules] = useKV<RateRule[]>('rate-rules', [])
   const [rateOverrides, setRateOverrides] = useKV<RateOverride[]>('rate-overrides', [])

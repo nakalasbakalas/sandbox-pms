@@ -4,11 +4,11 @@ Boutique hotel property-management system for front desk, rooms, reservations, h
 
 ## Current Launch Status
 
-Status date: 2026-07-10.
+Status date: 2026-07-17.
 
 The codebase is an **owner-accepted pilot / launch-hardening system**, not a fully launched or independently launch-signed-off PMS. Use “owner-accepted pilot” or “launch-hardening” language until the V2 launch proof pack is complete, current, and reviewed.
 
-Automated checks can prove build, routing, business-rule, browser-smoke, API-contract, database-connectivity, and live-health behavior. They do not prove account-owner decisions, production user approval, provider credential ownership, role-by-role manual acceptance, Cloudflare WAF/rate-limit configuration, database backup/recovery point freshness, or final launch go/no-go.
+Automated checks can prove build, routing, business-rule, browser-smoke, API-contract, database-connectivity, and live-health behavior. Historical provider evidence also records the 2026-07-07 Cloudflare zone-level WAF/rate-limit configuration and Render recovery metadata for that point in time. Neither proves that the current release candidate is staging-proven, owner-approved, provider-proven, or ready for final launch go/no-go.
 
 Current integration posture:
 

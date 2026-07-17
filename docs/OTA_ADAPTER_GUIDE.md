@@ -2,6 +2,16 @@
 
 ## Adapter Boundary
 
+All OTA adapters expose the validated public contract in `server/ota-adapters/contract.mjs`. The contract reports health, declared read and dry-run-write capabilities, retry and rate-limit metadata, and the proof-artifact policy without returning selectors, environment-key names, or credential values. `getOtaProviderContracts()` returns this normalized status for Booking.com, Agoda, Trip.com, and Expedia.
+
+`OTA_LIVE_WRITES_ENABLED` defaults to `false`. Setting it to `true` only records that live writes were requested; a provider also needs an implemented live-write path and separately verified provider proof before the contract can expose a live-write capability. None of the current adapters meet those conditions, so all live-write capability lists remain empty and non-dry-run operations continue to fail closed.
+
+Proof artifacts must pass `sanitizeProviderEvidence()` before they cross a provider boundary. Unknown proof kinds are normalized, artifact counts are bounded, credential-like URL parameters are redacted, fragments and URL user information are removed, and artifacts without safe redaction status receive only a blocked mock reference.
+
+The PMS property context, rate service, and domain-event stream do not expand adapter authority. An adapter receives an already authorized typed task through the Hotel Ops worker boundary. It must not select a property from client input, read property settings as a secret store, or treat a rate recommendation/domain event as permission to write provider inventory.
+
+Exact monetary fields use base-10 satang strings at JSON boundaries. Adapters must not convert a satang string through floating-point arithmetic. During the compatibility window, any legacy baht field is informational compatibility data; the validated typed task remains authoritative for the specific dry-run request.
+
 The AI and manager UI never control the browser directly. They create controlled task records. The backend validates and approves those records, then calls a typed OTA worker payload.
 
 Current dispatch:
@@ -13,6 +23,8 @@ Current dispatch:
 
 Booking-email historical backfill is not an OTA adapter and is not live OTA scrape proof. It imports Gmail-derived Booking Email Events for PMS review through `npm.cmd run booking-email:backfill`; staff approval is still required before any reservation, payment, cancellation, or room mutation. `npm.cmd run booking-email:deep-scan` and `npm.cmd run booking-email:reprocess -- --confirm` are review-queue maintenance tools only: they report redacted parser/duplicate posture and rerun the parser for existing review/error events, but they do not prove OTA reads or apply operational changes. OTA partner-admin, invoice, security, and performance-report emails must remain `UNKNOWN` unless staff explicitly reclassify them. Render Gmail OAuth setup uses `npm.cmd run gmail-oauth:render` or `npm.cmd run render:gmail-oauth` and remains a mailbox-provider setup step, not OTA proof. `/api/booking-email/status` can validate Gmail API reachability for the booking mailbox path, but that is mailbox-provider proof only. Hotel Ops scan snapshots exposed through `/ops/intelligence` are PMS-derived evidence and also do not prove live OTA scraping unless a live adapter read is separately configured and verified.
 
+Legacy PMS charge idempotency is an internal financial-safety boundary, not evidence of an OTA payment or charge integration. OTA-derived booking-email sources must still pass property ownership and staff review before a charge link can be recorded.
+
 ## Channel Synchronization V2 Boundary
 
 Channel-sync v2 adds two operational mechanisms without changing the adapter proof standard:
@@ -21,6 +33,8 @@ Channel-sync v2 adds two operational mechanisms without changing the adapter pro
 2. **Manual outbound availability queue.** `server/availability-queue.mjs` creates high-risk `UPDATE_AVAILABILITY` tasks with owner approval, deterministic idempotency, task logs, and audit logs. Queue creation and approval do not call this adapter layer. A human must update the provider and record its confirmation/reference before the item is marked complete.
 
 The queue supports Booking.com, Agoda, Trip.com, Expedia, and a Channex delivery target. Channex maps to the existing `all` platform only as metadata until a certified API adapter exists. It must not be routed to the mock worker as evidence of a real Channex update.
+
+iCal export feeds are also outside the live-write adapter contract. Their URL token is a bearer credential: the PMS stores only its SHA-256 base64url hash, and migration `20260717141000_ical_token_hash_backfill` removes legacy raw `Channel.config.exportToken` values. The full URL is disclosed only when initially issued or explicitly rotated; channel listings and later configuration reads must not return it. A working iCal feed proves only that specific feed path, not an OTA API read/write, inventory acknowledgement, or provider certification.
 
 See [CHANNEL_SYNC_V2.md](CHANNEL_SYNC_V2.md) for commands, application status, activation, and the channel-only provider decision gate.
 
@@ -31,6 +45,10 @@ See [CHANNEL_SYNC_V2.md](CHANNEL_SYNC_V2.md) for commands, application status, a
 - Channex staging/certification evaluation is tracked in [issue #170](https://github.com/nakalasbakalas/sandbox-pms/issues/170).
 
 These are preparation/evaluation tracks. Do not mark a direct API as submitted, approved, certified, or live without an external provider reference and non-production evidence. If true two-way, operationally zero-lag synchronization becomes essential, prefer a channel-only layer such as Channex rather than purchasing or operating a second full PMS. The local PMS remains the source of truth.
+
+The server-backed PMS rate endpoints persist internal rate rules and calendars only. They do not publish to Booking.com, Agoda, Trip.com, Expedia, Channex, or another channel. Likewise, a `RATE_*` domain event proves an internal PMS transaction occurred; it is not provider acknowledgement or live-write proof.
+
+Property profile/settings endpoints intentionally reject credential-shaped values and URLs. Provider credentials must remain in backend environment or secret storage and must never be copied into `Property.operationalSettings`, adapter health DTOs, audit changes, events, screenshots, or proof URLs.
 
 ## Booking.com Adapter
 
@@ -116,6 +134,9 @@ Do not add credentials to payloads. Adapters must read credentials only from bac
 - Never execute arbitrary browser commands from user text.
 - Treat duplicate provider events and repeated outbound acknowledgements idempotently.
 - Do not let a channel manager become the owner of front-desk, folio, housekeeping, guest, or accounting state.
+- Preserve the authenticated PMS property/hotel scope supplied by the backend; never accept a client-selected property override.
+- Treat satang JSON fields as base-10 integers and avoid floating-point conversion.
+- Never interpret a domain event, capability flag, rate recommendation, or internal rate change as provider write authorization.
 
 ## Dry-Run Worker Contract
 
@@ -157,3 +178,16 @@ When security challenge handling is required, return:
 ```
 
 After the authorized person completes the challenge, staff should use the PMS `Human done` action with an operational reason. That records audit evidence and requeues the task; it does not bypass the challenge or run the worker automatically.
+
+## Provider Proof Versus PMS Engineering Proof
+
+The following are PMS engineering evidence only:
+
+- rate or settings service tests
+- a persisted rate rule/calendar row
+- an internal domain event or SSE notification
+- a provider contract reporting configured credentials
+- a dry-run proof placeholder
+- a successful local or CI adapter test
+
+Provider proof requires a separately approved account, safe test dates/inventory, verified read/write result, sanitized before/after evidence, rollback/recovery evidence, and account-owner sign-off. Until that proof exists, keep `OTA_LIVE_WRITES_ENABLED=false`, retain review-gated manual availability tasks, and describe provider state as dry-run, provider-pending, or unproven.

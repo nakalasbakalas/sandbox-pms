@@ -1,6 +1,6 @@
-# Current System Audit - Hotel Ops AI Command Center
+# Current System Audit - Sandbox PMS And Hotel Ops
 
-Last reviewed: 2026-07-06
+Last reviewed: 2026-07-17
 
 ## Repository Overview
 
@@ -18,6 +18,14 @@ Last reviewed: 2026-07-06
 - LINE command intake: signed LINE webhooks can optionally convert prefixed, allowlisted staff messages into Hotel Ops commands through the same backend task service; this is disabled by default.
 - WhatsApp command intake: signed Meta WhatsApp webhooks can optionally convert prefixed, allowlisted staff messages into Hotel Ops commands through the same backend task service; this is disabled by default.
 - Email command intake: booking mailbox sync can optionally convert prefixed, allowlisted sender messages into Hotel Ops commands through the same backend task service; this is disabled by default.
+- Exact money: nullable `BIGINT` satang shadow columns and integer basis-point fields coexist with the legacy Float contract. New supported writes dual-write both representations; `MONEY_READ_AUTHORITY` defaults to `legacy_float` until reconciliation authorizes a staged switch.
+- Property context: authenticated PMS requests resolve the active `SANDBOX` property through `UserPropertyMembership`. Existing users are backfilled by migration; inactive or missing memberships fail closed.
+- Server synchronization: selected PMS mutations write property-scoped `DomainEvent` rows in the same transaction. Authenticated `/api/events` SSE exposes only event id, type, aggregate type/id, and timestamp with bounded catch-up.
+- Rates and settings: property-scoped backend rate rules/calendar/effective-rate/recommendation endpoints and property/tax/status endpoints are implemented with strict schemas, permissions, audit records, and domain events.
+- Operations foundation: persistent housekeeping tasks/issues/status histories and an idempotent backend night-audit close service are implemented. Server-mode housekeeping and Night Audit screens now use these APIs; browser-local workflow state is demo-only.
+- Accounting V2: additive one-to-many accounting folios, append-only reversals/refunds, cash shifts, house accounts/A/R, journals, and exact-satang trial balance are implemented behind `ACCOUNTING_V2_ENABLED=false`.
+- Direct booking: versioned availability, immutable quote, 15-minute hold, and atomic booking services/routes are implemented behind `DIRECT_BOOKING_ENABLED=false`; no card data is accepted.
+- Bounded intelligence: deterministic demand, cancellation-risk, housekeeping, and rate-opportunity analyzers return explainable, suggest-only Hotel Ops recommendations and perform no mutations.
 
 ## Relevant Implementation Files
 
@@ -39,6 +47,12 @@ Last reviewed: 2026-07-06
 - LINE Ops intake bridge: `server/line-ops-intake.mjs`.
 - Email Ops intake bridge: `server/email-ops-intake.mjs`.
 - Business and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`.
+- Exact-money and payment safety: `server/money.mjs`, `scripts/run-money-tests.mjs`, and `prisma/migrations/20260716120000_exact_money_foundation`.
+- Property context and events: `server/request-context.mjs`, `server/domain-events.mjs`, and `prisma/migrations/20260716130000_property_context_domain_events`.
+- Legacy finance ownership and retry safety: `server/charge-idempotency.mjs`, `src/lib/durable-attempt-key.ts`, and migrations `20260717120000_property_scope_legacy_records` and `20260717140000_charge_idempotency`.
+- iCal bearer-token storage: `server/ical-feed.mjs` and `prisma/migrations/20260717141000_ical_token_hash_backfill`.
+- Server-backed operational services: `server/rate-service.mjs`, `server/settings-service.mjs`, `server/housekeeping-service.mjs`, `server/night-audit-service.mjs`, and `prisma/migrations/20260716140000_operations_foundation`.
+- Gated foundations: `server/accounting-service.mjs`, `server/direct-booking-service.mjs`, `server/ops-analyzers.mjs`, and migrations `20260716150000_accounting_v2_foundation` and `20260716160000_direct_booking_foundation`.
 
 ## Implemented Surface
 
@@ -56,6 +70,14 @@ Last reviewed: 2026-07-06
 - Scheduler runs in-process interval scans only when `HOTEL_OPS_SCAN_INTERVAL_MINUTES` or `OPS_SCAN_INTERVAL_MINUTES` is positive.
 - Cron expressions remain an external scheduler contract.
 - Each Hotel Ops booking-intelligence scan now persists a durable `HotelOpsScanSnapshot` with scan window, occupancy, booking velocity, cancellation, room-type, OTA distribution, and alert mutation counts. Alerts are linked to the scan snapshot that created or last refreshed them, and the latest bounded snapshots are visible through `GET /api/ops/intelligence/scans` and the `/ops/intelligence` evidence panel.
+- Server mode uses authenticated `UserPropertyMembership` context before PMS routes run. Membership role can narrow or override the compatibility `User.role` for the active property.
+- `/api/openapi.json`, `/api/system/capabilities`, and `/api/events` expose the authenticated API contract, truthful capability state, and property-scoped event stream respectively.
+- The server-backed Rates view persists rate rules and date-specific calendar rates, calculates effective rates in exact satang, and generates suggest-only recommendations. It does not push rates to an OTA.
+- Property settings and taxes persist through `/api/settings/property` and `/api/settings/tax`; `/api/settings/status` returns a sanitized server-derived status object.
+- Housekeeping task and issue routes persist assignments, constrained status transitions, operational reasons, audit evidence, and domain events. Critical issue resolution requires manager or admin authority.
+- Night audit persists one run per property/business date plus idempotent attempts. Its current posting mode is `VERIFY_EXISTING_CHARGES_ONLY`: it verifies existing room charges and blocks unsafe close conditions rather than posting missing charges.
+- Server-mode payment and charge surfaces use one shared, memory-only attempt-key manager. An unchanged attempt reuses its key through rerenders and uncertain retries in the same loaded application; a changed financial intent receives a different key, and a confirmed success clears the key. The helper never writes attempt material, guest data, payment references, or keys to `localStorage` or `sessionStorage`, so a full page reload is not a retry-key recovery mechanism.
+- iCal export feed tokens are stored only as SHA-256 base64url hashes. Existing raw `Channel.config.exportToken` values are converted and removed by deploy migration `20260717141000_ical_token_hash_backfill`; normal channel reads and ordinary configuration updates do not return the bearer feed URL. The raw URL is disclosed only in the initial issue response or an explicit token rotation response.
 
 ## Current Boundaries
 
@@ -69,6 +91,12 @@ Last reviewed: 2026-07-06
 - The parser is deterministic by default and strict-schema validated. An optional OpenAI Responses parser is available only when backend environment flags and `OPENAI_API_KEY` are configured; model output is redacted, schema-validated, policy-normalized, and falls back to deterministic parsing on provider failure.
 - Production launch readiness still needs credentialed account-owner proof, production user creation/verification, provider WAF/recovery proof, manual workflow/localization acceptance, booking-email parser acceptance, and demo/sample cleanup proof.
 - Scan snapshots are PMS-derived operational evidence, not live OTA scrape proof. Live OTA snapshot quality still depends on verified adapter reads or imported booking data.
+- Exact-money rollout is expand-only. Legacy Float columns remain present and authoritative by default; no production satang cutover, reconciliation cycle, or legacy-column removal is proven by this branch alone.
+- Legacy payment and charge writes now require property-scoped idempotency keys, re-read folio ownership inside serializable transactions, and return the original result only when the normalized financial intent matches. Charge ownership is backfilled through the folio reservation; key reuse with a different charge fingerprint fails closed without appending another charge.
+- `AuditLog`, `Payment`, `Charge`, and `Guest` now have first-class property ownership. Their legacy backfill migrations fail closed when ownership cannot be derived safely; applying those migrations to production data is not proven until restored-data migration and reconciliation evidence exists.
+- The SSE client bridge currently translates a bounded set of reservation, room, payment, and charge events into legacy client refresh events. Other server event types remain durable and streamable but require view-specific refetch wiring.
+- In server mode, Settings, housekeeping, and Night Audit use backend persistence; disposable-browser coverage is engineering evidence and does not replace staff workflow acceptance on the exact release candidate.
+- Accounting V2 and direct-booking foundations are implemented but capability-gated and not production-enabled. Online card payments and a live guest-messaging provider are not implemented by this foundation.
 
 ## Validation Evidence
 
@@ -83,3 +111,13 @@ Recent committed Hotel Ops validation has included:
 - `npm.cmd run test:e2e`
 - guarded DB E2E with `ALLOW_DB_E2E=true` and disposable `E2E_DATABASE_URL`
 - GitHub CI launch gate on `main`
+
+Focused branch checks are available through `scripts/run-money-tests.mjs`, `scripts/run-rate-service-tests.mjs`, `scripts/run-settings-service-tests.mjs`, and `scripts/run-operations-foundation-tests.mjs`. Passing these local fixture checks is engineering evidence only. Database migration, staging restore/reconciliation, staff workflow, provider, recovery, WAF, and owner sign-off remain separate evidence gates.
+
+The integration CI definition now includes an empty PostgreSQL migration lifecycle, a separately migrated and seeded disposable PostgreSQL database, `scripts/run-release-foundation-db-tests.mjs`, and `scripts/run-server-mode-browser-tests.mjs`. The guarded DB suite covers effective membership roles, missing membership, forged cross-property identifiers and source links, payment/charge property-scoped idempotency, same-intent replay, concurrent overpayment and charge retry behavior, exact-money reconciliation, audit ownership, and simultaneous last-room holds. The browser suite covers authenticated server-mode reload persistence, a controlled API failure, recovery by authoritative refetch, and SSE filtering. These are CI test contracts; they are not claims that the corrected commit has passed both jobs, that migrations have succeeded on a restored staging copy, or that staff/provider/owner proof exists.
+
+## Provider Adapter Contract Status
+
+- Booking.com, Agoda, Trip.com, and Expedia now expose one validated backend contract for health, declared reads, dry-run writes, retries, rate-limit metadata, and sanitized evidence.
+- Current adapters have no verified live-write implementation or provider proof. `OTA_LIVE_WRITES_ENABLED` defaults off, and the contract reports no live-write capabilities even if the flag is requested.
+- Provider credentials and selector details remain backend-only and are excluded from public contract DTOs. This is engineering contract evidence, not live OTA proof.

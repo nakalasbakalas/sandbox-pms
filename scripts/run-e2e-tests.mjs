@@ -242,7 +242,7 @@ async function availablePort() {
 }
 
 function startVite(port) {
-  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--force']
+  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
   const child = process.platform === 'win32'
     ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [npm, ...args].join(' ')], {
       cwd: repoRoot,
@@ -337,7 +337,10 @@ async function waitVisible(locator, label) {
 
 async function smokeAuthenticatedRoute(page, baseUrl, path) {
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+  await page.waitForFunction(() => {
+    const text = document.body.innerText.trim()
+    return text !== '' && !text.includes('Loading PMS workspace')
+  }, null, { timeout: 20_000 })
 
   const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
   assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
@@ -348,7 +351,10 @@ async function smokeAuthenticatedRoute(page, baseUrl, path) {
 
 async function assertProtectedRouteAccess(page, baseUrl, path, expectedAccess) {
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+  await page.waitForFunction(() => {
+    const text = document.body.innerText.trim()
+    return text !== '' && !text.includes('Loading PMS workspace')
+  }, null, { timeout: 20_000 })
   const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
   assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
   assert.equal(bodyText.includes('Something went wrong'), false, `${path} rendered the error boundary`)
@@ -701,6 +707,20 @@ assert.equal(canPerformAction(manager, 'edit:rates'), true, 'manager server perm
 assert.equal(canPerformAction(frontDesk, 'send:guest-messages'), true, 'front desk server permissions match guest messaging UI access')
 assert.equal(canPerformAction(housekeeping, 'process:payment'), false, 'housekeeping cannot process payments')
 assert.deepEqual(resolveApiRouteContract('/api/auth/login')?.methods, ['POST'], 'auth login only allows POST')
+assert.deepEqual(resolveApiRouteContract('/api/openapi.json')?.methods, ['GET'], 'OpenAPI contract is read only')
+assert.deepEqual(resolveApiRouteContract('/api/system/capabilities')?.methods, ['GET'], 'system capabilities are read only')
+assert.deepEqual(resolveApiRouteContract('/api/events')?.methods, ['GET'], 'domain event stream is read only')
+assert.deepEqual(resolveApiRouteContract('/api/rates/rules')?.methods, ['GET', 'POST'], 'rate rule collection exposes controlled reads and writes')
+assert.deepEqual(resolveApiRouteContract('/api/rates/rules/rule-1')?.methods, ['PATCH'], 'rate rule detail exposes controlled updates')
+assert.deepEqual(resolveApiRouteContract('/api/rates/calendar')?.methods, ['GET', 'PUT'], 'rate calendar exposes controlled reads and writes')
+assert.deepEqual(resolveApiRouteContract('/api/settings/property')?.methods, ['GET', 'PATCH'], 'property settings expose controlled reads and updates')
+assert.deepEqual(resolveApiRouteContract('/api/settings/tax')?.methods, ['PUT'], 'tax settings expose controlled replacement')
+assert.deepEqual(resolveApiRouteContract('/api/settings/status')?.methods, ['GET'], 'settings status is read only')
+assert.deepEqual(resolveApiRouteContract('/api/housekeeping/tasks')?.methods, ['GET', 'POST'], 'housekeeping tasks expose controlled reads and writes')
+assert.deepEqual(resolveApiRouteContract('/api/housekeeping/tasks/task-1/status')?.methods, ['POST'], 'housekeeping task transition is mutation only')
+assert.deepEqual(resolveApiRouteContract('/api/housekeeping/issues')?.methods, ['GET', 'POST'], 'housekeeping issues expose controlled reads and writes')
+assert.deepEqual(resolveApiRouteContract('/api/night-audit/runs')?.methods, ['GET'], 'night audit runs are read only')
+assert.deepEqual(resolveApiRouteContract('/api/night-audit/close')?.methods, ['POST'], 'night audit close is mutation only')
 assert.deepEqual(resolveApiRouteContract('/api/line/webhook')?.methods, ['GET', 'POST'], 'LINE webhook exposes status and signed delivery methods')
 assert.deepEqual(resolveApiRouteContract('/api/whatsapp/webhook')?.methods, ['GET', 'POST'], 'WhatsApp webhook exposes verification/status and signed delivery methods')
 assert.deepEqual(resolveApiRouteContract('/api/users')?.methods, ['GET', 'POST'], 'user collection exposes admin read/create methods')
@@ -918,6 +938,7 @@ try {
     payment: {
       amount: assigned.folio.balance,
       method: 'CASH',
+      idempotencyKey: `check-in-payment-${reservation.id}`,
     },
   })
   assert.equal(checkedIn.status, 'CHECKED_IN', 'check-in persists')
@@ -1016,3 +1037,8 @@ try {
 } finally {
   await prisma.$disconnect()
 }
+
+// Some imported integration modules keep optional background handles alive on
+// Linux runners. At this point every assertion passed and Prisma is closed, so
+// terminate explicitly instead of letting CI wait for unrelated idle handles.
+process.exit(0)

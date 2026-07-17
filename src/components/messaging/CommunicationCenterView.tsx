@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -38,16 +38,117 @@ import type { Message, MessageTemplate, MessageChannel, MessageType, MessageStat
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { useNavigation } from '@/hooks/use-navigation'
+import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+
+function normalizeServerMessage(record: any): Message {
+  const metadata = record.metadata && typeof record.metadata === 'object' ? record.metadata : {}
+  return {
+    id: String(record.id),
+    templateId: record.templateId || undefined,
+    channel: record.channel,
+    type: record.type || metadata.type || 'CUSTOM',
+    recipientType: record.recipientType || 'GUEST',
+    recipientId: record.recipientId || undefined,
+    recipientName: record.recipientName || metadata.recipientName || 'Guest',
+    recipientContact: record.recipientContact || metadata.recipientContact || '',
+    reservationId: record.reservationId || metadata.reservationId || undefined,
+    roomNumber: record.roomNumber || metadata.roomNumber || undefined,
+    subject: record.subject || undefined,
+    body: record.body || '',
+    status: record.status === 'PENDING' ? 'DRAFT' : record.status,
+    sentAt: record.sentAt ? new Date(record.sentAt) : undefined,
+    deliveredAt: record.deliveredAt ? new Date(record.deliveredAt) : undefined,
+    failureReason: record.errorMessage || undefined,
+    metadata,
+    createdBy: record.createdBy || metadata.createdBy || 'PMS staff',
+    createdAt: new Date(record.createdAt),
+  }
+}
+
+function normalizeServerTemplate(record: any): MessageTemplate {
+  return {
+    id: String(record.id),
+    name: record.name,
+    type: record.type || 'CUSTOM',
+    channel: record.channel,
+    subject: record.subject || undefined,
+    body: record.body,
+    variables: Array.isArray(record.variables) ? record.variables : [],
+    isActive: record.active !== false,
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+  }
+}
 
 export function CommunicationCenterView() {
   const { navigate } = useNavigation()
-  const [messages, setMessages] = useKV<Message[]>('messages', [])
-  const [templates, setTemplates] = useKV<MessageTemplate[]>('message-templates', [])
+  const [localMessages, setLocalMessages] = useKV<Message[]>('messages', [])
+  const [localTemplates] = useKV<MessageTemplate[]>('message-templates', [])
+  const [serverMessages, setServerMessages] = useState<Message[]>([])
+  const [serverTemplates, setServerTemplates] = useState<MessageTemplate[]>([])
+  const [serverError, setServerError] = useState<string | null>(null)
+  const [serverLoading, setServerLoading] = useState(SERVER_API_ENABLED)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [showNewMessage, setShowNewMessage] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<MessageTemplate | null>(null)
+  const messages = SERVER_API_ENABLED ? serverMessages : localMessages || []
+  const templates = SERVER_API_ENABLED ? serverTemplates : localTemplates || []
 
-  const filteredMessages = (messages || []).filter(msg => 
+  useEffect(() => {
+    if (!SERVER_API_ENABLED) return
+    let cancelled = false
+    setServerLoading(true)
+    setServerError(null)
+    void Promise.all([
+      pmsApi<{ ok: true; data: any[] }>('/api/messages', null),
+      pmsApi<{ ok: true; data: any[] }>('/api/message-templates', null),
+    ])
+      .then(([messagePayload, templatePayload]) => {
+        if (cancelled) return
+        setServerMessages((messagePayload.data || []).map(normalizeServerMessage))
+        setServerTemplates((templatePayload.data || []).map(normalizeServerTemplate))
+      })
+      .catch((error) => {
+        if (!cancelled) setServerError(error instanceof Error ? error.message : 'Messaging records could not be loaded.')
+      })
+      .finally(() => {
+        if (!cancelled) setServerLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const saveDraft = async (message: Message) => {
+    if (!SERVER_API_ENABLED) {
+      setLocalMessages((current) => [...(current || []), message])
+      toast.success('Message draft recorded for ' + message.channel)
+      setShowNewMessage(false)
+      return
+    }
+
+    const payload = await pmsApi<{ ok: true; data: any }>('/api/messages', null, {
+      method: 'POST',
+      body: JSON.stringify({
+        channel: message.channel,
+        type: message.type,
+        recipientType: message.recipientType,
+        recipientName: message.recipientName,
+        recipientContact: message.recipientContact,
+        roomNumber: message.roomNumber,
+        body: message.body,
+        templateId: message.templateId,
+        subject: message.subject,
+        idempotencyKey: String(message.metadata?.idempotencyKey || ''),
+      }),
+    })
+    setServerMessages((current) => [normalizeServerMessage(payload.data), ...current])
+    toast.success('Draft saved to the PMS. No provider delivery was attempted.')
+    setShowNewMessage(false)
+  }
+
+  const filteredMessages = messages.filter(msg =>
     searchQuery === '' || 
     msg.recipientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
     msg.roomNumber?.includes(searchQuery) ||
@@ -59,14 +160,14 @@ export function CommunicationCenterView() {
   const failedMessages = filteredMessages.filter(m => m.status === 'FAILED')
 
   const stats: MessageStats = {
-    totalSent: (messages || []).filter(m => m.status === 'SENT' || m.status === 'DELIVERED' || m.status === 'READ').length,
-    totalDelivered: (messages || []).filter(m => m.status === 'DELIVERED' || m.status === 'READ').length,
-    totalFailed: (messages || []).filter(m => m.status === 'FAILED').length,
+    totalSent: messages.filter(m => m.status === 'SENT' || m.status === 'DELIVERED' || m.status === 'READ').length,
+    totalDelivered: messages.filter(m => m.status === 'DELIVERED' || m.status === 'READ').length,
+    totalFailed: messages.filter(m => m.status === 'FAILED').length,
     byChannel: {
-      LINE: (messages || []).filter(m => m.channel === 'LINE').length,
-      EMAIL: (messages || []).filter(m => m.channel === 'EMAIL').length,
-      SMS: (messages || []).filter(m => m.channel === 'SMS').length,
-      WHATSAPP: (messages || []).filter(m => m.channel === 'WHATSAPP').length,
+      LINE: messages.filter(m => m.channel === 'LINE').length,
+      EMAIL: messages.filter(m => m.channel === 'EMAIL').length,
+      SMS: messages.filter(m => m.channel === 'SMS').length,
+      WHATSAPP: messages.filter(m => m.channel === 'WHATSAPP').length,
     },
     byType: {} as Record<MessageType, number>,
     deliveryRate: 0
@@ -78,6 +179,11 @@ export function CommunicationCenterView() {
 
   return (
     <div className="min-h-screen bg-background">
+      {SERVER_API_ENABLED && (serverLoading || serverError) && (
+        <div className="border-b bg-muted/40 px-6 py-3 text-sm text-muted-foreground">
+          {serverLoading ? 'Loading persistent message drafts and templates…' : `Messaging unavailable: ${serverError}`}
+        </div>
+      )}
       <div className="border-b bg-card sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between mb-6">
@@ -94,7 +200,10 @@ export function CommunicationCenterView() {
               <Button variant="outline" size="icon" onClick={() => navigate('settings')} aria-label="Communication settings">
                 <Gear size={20} />
               </Button>
-              <Dialog open={showNewMessage} onOpenChange={setShowNewMessage}>
+              <Dialog open={showNewMessage} onOpenChange={(open) => {
+                setShowNewMessage(open)
+                if (!open) setSelectedTemplate(null)
+              }}>
                 <DialogTrigger asChild>
                   <Button>
                     <Plus size={20} className="mr-2" weight="bold" />
@@ -103,13 +212,10 @@ export function CommunicationCenterView() {
                 </DialogTrigger>
                 <DialogContent className="max-w-2xl">
                   <NewMessageForm 
-                    templates={templates || []}
+                    templates={templates}
+                    initialTemplate={selectedTemplate}
                     onClose={() => setShowNewMessage(false)}
-                    onSend={(msg) => {
-                      setMessages((current) => [...(current || []), msg])
-                      toast.success('Message draft recorded for ' + msg.channel)
-                      setShowNewMessage(false)
-                    }}
+                    onSend={saveDraft}
                   />
                 </DialogContent>
               </Dialog>
@@ -171,7 +277,7 @@ export function CommunicationCenterView() {
               Failed ({failedMessages.length})
             </TabsTrigger>
             <TabsTrigger value="templates">
-              Templates ({(templates || []).length})
+              Templates ({templates.length})
             </TabsTrigger>
           </TabsList>
 
@@ -200,7 +306,14 @@ export function CommunicationCenterView() {
           </TabsContent>
 
           <TabsContent value="templates" className="mt-6">
-            <TemplateList templates={templates || []} onCreate={() => setShowNewMessage(true)} onUse={() => setShowNewMessage(true)} />
+            <TemplateList
+              templates={templates}
+              onCreate={() => toast.info('Template creation requires the dedicated audited template editor.')}
+              onUse={(template) => {
+                setSelectedTemplate(template)
+                setShowNewMessage(true)
+              }}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -292,7 +405,7 @@ function MessageList({ messages, onSelect, emptyText }: MessageListProps) {
 interface TemplateListProps {
   templates: MessageTemplate[]
   onCreate: () => void
-  onUse: () => void
+  onUse: (template: MessageTemplate) => void
 }
 
 function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
@@ -327,7 +440,7 @@ function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
             {template.body}
           </p>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="flex-1" onClick={onUse}>
+            <Button size="sm" variant="outline" className="flex-1" onClick={() => onUse(template)}>
               Use
             </Button>
           </div>
@@ -339,19 +452,25 @@ function TemplateList({ templates, onCreate, onUse }: TemplateListProps) {
 
 interface NewMessageFormProps {
   templates: MessageTemplate[]
+  initialTemplate?: MessageTemplate | null
   onClose: () => void
-  onSend: (message: Message) => void
+  onSend: (message: Message) => Promise<void> | void
 }
 
-function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
-  const [channel, setChannel] = useState<MessageChannel>('LINE')
+function NewMessageForm({ templates, initialTemplate, onClose, onSend }: NewMessageFormProps) {
+  const [channel, setChannel] = useState<MessageChannel>(initialTemplate?.channel || 'LINE')
   const [recipientName, setRecipientName] = useState('')
   const [recipientContact, setRecipientContact] = useState('')
   const [roomNumber, setRoomNumber] = useState('')
-  const [body, setBody] = useState('')
-  const [messageType, setMessageType] = useState<MessageType>('CUSTOM')
+  const [body, setBody] = useState(initialTemplate?.body || '')
+  const [messageType, setMessageType] = useState<MessageType>(initialTemplate?.type || 'CUSTOM')
+  const [templateId, setTemplateId] = useState(initialTemplate?.id || '')
+  const [isSaving, setIsSaving] = useState(false)
+  const [draftIdempotencyKey] = useState(() =>
+    globalThis.crypto?.randomUUID?.() || `message-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  )
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!recipientName || !recipientContact || !body) {
       toast.error('Please fill all required fields')
       return
@@ -359,6 +478,7 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
 
     const message: Message = {
       id: `msg-${Date.now()}`,
+      templateId: templateId || undefined,
       channel,
       type: messageType,
       recipientType: 'GUEST',
@@ -367,11 +487,19 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
       roomNumber: roomNumber || undefined,
       body,
       status: 'DRAFT',
+      metadata: { idempotencyKey: draftIdempotencyKey },
       createdBy: 'Current User',
       createdAt: new Date()
     }
 
-    onSend(message)
+    setIsSaving(true)
+    try {
+      await onSend(message)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'The draft was not saved.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -384,6 +512,28 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
       </DialogHeader>
 
       <div className="space-y-4 py-4">
+        {templates.length > 0 && (
+          <div>
+            <Label>Template (Optional)</Label>
+            <Select value={templateId || 'none'} onValueChange={(value) => {
+              setTemplateId(value === 'none' ? '' : value)
+              const template = templates.find((candidate) => candidate.id === value)
+              if (template) {
+                setChannel(template.channel)
+                setMessageType(template.type)
+                setBody(template.body)
+              }
+            }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No template</SelectItem>
+                {templates.filter((template) => template.isActive).map((template) => (
+                  <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div>
           <Label>Channel</Label>
           <Select value={channel} onValueChange={(v) => setChannel(v as MessageChannel)}>
@@ -470,12 +620,12 @@ function NewMessageForm({ templates, onClose, onSend }: NewMessageFormProps) {
       </div>
 
       <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="outline" onClick={onClose} disabled={isSaving}>
           Cancel
         </Button>
-        <Button onClick={handleSend}>
+        <Button onClick={() => void handleSend()} disabled={isSaving}>
           <PaperPlaneTilt size={20} className="mr-2" weight="bold" />
-          Save Draft
+          {isSaving ? 'Saving…' : 'Save Draft'}
         </Button>
       </DialogFooter>
     </>

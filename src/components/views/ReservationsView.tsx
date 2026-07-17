@@ -45,6 +45,7 @@ import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
 import type { BookingEmailEvent } from '@/types/booking-email'
@@ -980,18 +981,27 @@ export function ReservationsView() {
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }
+        const requestBody = {
+          guest: {
+            nationality: data.nationality,
+            idType: data.idNumber ? 'PASSPORT' : undefined,
+            idNumber: data.idNumber,
+          },
+          payment: data.payment,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.payment ? {
+          operation: 'check-in-payment' as const,
+          entityId: selectedArrival.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         await pmsApi(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            guest: {
-              nationality: data.nationality,
-              idType: data.idNumber ? 'PASSPORT' : undefined,
-              idNumber: data.idNumber,
-            },
-            payment: data.payment,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Check-in failed.')
         return
@@ -1064,20 +1074,29 @@ export function ReservationsView() {
 
     if (SERVER_API_ENABLED) {
       try {
+        const requestBody = {
+          payment: data.paymentAmount ? {
+            amount: data.paymentAmount,
+            method: data.paymentMethod,
+            reference: data.paymentReference,
+            notes: data.additionalNotes,
+          } : undefined,
+          allowUnpaidOverride: data.forceCheckout,
+          overrideReason: data.overrideReason,
+          additionalNotes: data.additionalNotes,
+        }
+        const paymentAttempt = data.paymentAmount ? {
+          operation: 'check-out-payment' as const,
+          entityId: selectedDeparture.reservationId,
+          material: requestBody,
+        } : null
+        const idempotencyKey = paymentAttempt ? await durableAttemptKeys.getOrCreate(paymentAttempt) : null
         await pmsApi(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            payment: data.paymentAmount ? {
-              amount: data.paymentAmount,
-              method: data.paymentMethod,
-              reference: data.paymentReference,
-              notes: data.additionalNotes,
-            } : undefined,
-            allowUnpaidOverride: data.forceCheckout,
-            overrideReason: data.overrideReason,
-            additionalNotes: data.additionalNotes,
-          }),
+          headers: idempotencyKey ? { 'x-idempotency-key': idempotencyKey } : undefined,
+          body: JSON.stringify(requestBody),
         })
+        if (paymentAttempt) await durableAttemptKeys.confirmSuccess(paymentAttempt)
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Check-out failed.')
         return
@@ -1307,7 +1326,7 @@ export function ReservationsView() {
                 <House size={18} weight="bold" />
                 Front Desk
               </Button>
-              <Button variant="outline" className="gap-2" onClick={() => navigate('board')}>
+              <Button variant="outline" className="gap-2" onClick={() => navigate('front-desk')}>
                 <SquaresFour size={18} weight="bold" />
                 Board
               </Button>
@@ -1593,7 +1612,7 @@ export function ReservationsView() {
         onCheckOut={(reservation) => openCheckOut(reservation, reservation.balanceDue > 0 ? 'guided' : 'express')}
         onPrint={handlePrintReservation}
         onEmail={handleEmailReservation}
-        onBoard={() => navigate('board')}
+        onBoard={() => navigate('front-desk')}
         onFrontDesk={() => navigate('front-desk')}
         onBookingInbox={() => navigate('booking-inbox')}
         onCashier={() => navigate('cashier')}

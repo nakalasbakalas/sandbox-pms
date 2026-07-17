@@ -119,3 +119,155 @@ $env:ALLOW_DB_E2E='true'
 $env:E2E_DATABASE_URL='postgresql://...disposable...'
 npm.cmd run test:e2e:db
 ```
+
+Authenticated server-mode browser proof, after a server-mode build:
+
+```powershell
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='postgresql://...disposable...'
+$env:VITE_PMS_API_MODE='server'
+$env:VITE_DATA_MODE='server'
+npm.cmd run build
+npm.cmd run test:e2e:server
+```
+
+These commands are engineering checks. Their existence or a local pass does not supply restored-staging, recovery, staff, provider, WAF, or owner proof.
+
+## OTA Provider Contract
+
+- `node scripts/run-provider-adapter-tests.mjs` passes for Booking.com, Agoda, Trip.com, and Expedia.
+- Every contract validates strictly and declares its supported reads and dry-run writes.
+- `OTA_LIVE_WRITES_ENABLED` absent or false yields no live-write capabilities.
+- Requesting the flag alone still yields no live-write capability for current unimplemented and unproven adapters.
+- A non-dry-run mutation fails closed.
+- Contract JSON contains no credential values or credential environment-key names.
+- Evidence sanitization bounds artifacts, normalizes kinds, removes URL user information/fragments, redacts sensitive query parameters, drops unknown fields, and blocks artifacts with unsafe redaction status.
+
+## Exact Money And Payment Safety
+
+Run:
+
+```powershell
+node scripts/run-money-tests.mjs
+```
+
+Acceptance requires:
+
+- decimal baht conversion uses deterministic half-up rounding, including negative half values;
+- satang values serialize as base-10 strings and never fail JSON serialization as `BigInt`;
+- requests that supply both baht and satang reject mismatched values;
+- missing or invalid `MONEY_READ_AUTHORITY` selects `legacy_float`, while `satang` selects a populated exact shadow value;
+- a payment dual-writes legacy baht and exact satang inside a serializable transaction;
+- payment and charge rows require first-class property ownership and database uniqueness on `(propertyId, idempotencyKey)`;
+- a same-content idempotent replay returns the existing payment without duplicate payment, audit, or domain-event rows;
+- reuse of an idempotency key with different content returns `409`;
+- closed-folio and unapproved-overpayment attempts fail without a write; and
+- every legacy charge write rejects a missing idempotency key;
+- same-intent and simultaneous charge retries return one append-only charge with one audit row;
+- reuse of a charge key with a different normalized intent returns `409`; and
+- the same charge idempotency key can be used independently by two properties without cross-property replay;
+- one serialization conflict is retried without double-posting.
+- server-mode financial surfaces reuse one opaque in-memory attempt key for unchanged uncertain retries, rotate it when material input changes, clear it after confirmed success, and never write the attempt/key to `localStorage` or `sessionStorage`;
+- a full page reload is not asserted to recover an uncertain financial attempt key, so reload recovery must reconcile the authoritative folio before another write.
+
+Migration acceptance additionally requires an empty-database migration and a restored sanitized staging-copy migration, zero unresolved null/variance rows, exact aggregate reconciliation, rollback proof using `MONEY_READ_AUTHORITY=legacy_float`, and one full operating cycle on satang reads. Fixture tests alone do not satisfy migration acceptance.
+
+## Property Context, OpenAPI, And Events
+
+Acceptance requires:
+
+- an authenticated user without an active `UserPropertyMembership` for `SANDBOX` receives `403`;
+- membership role is the effective property role without changing username/email login compatibility;
+- forged room, reservation, rate, settings, housekeeping, and night-audit identifiers from a second property return no data and cause no mutation;
+- `Guest`, `Payment`, `Charge`, and `AuditLog` have required property ownership after migration, and ambiguous/ownerless legacy backfills fail the migration rather than assigning guessed ownership;
+- `/api/openapi.json` reports OpenAPI 3.1 and matches the registered HTTP methods;
+- `/api/system/capabilities` reports `sourceOfTruth: server` without claiming provider proof;
+- `/api/events` requires session authentication, active membership, and `view:board`;
+- invalid or negative `Last-Event-ID`/`after` values return `400`;
+- catch-up is ordered, property-scoped, bounded, and uses string sequence ids; and
+- the public event payload omits metadata, actor identity, guest data, money details, and credentials.
+
+The SSE reconnect test must prove an authoritative refetch after disconnection. Receiving an event is not sufficient evidence that a UI view persisted or refreshed correctly.
+
+## iCal Token Storage And Disclosure
+
+Acceptance requires:
+
+- a fixed token vector produces the same SHA-256 unpadded base64url digest in the Node service and PostgreSQL migration expression;
+- migration `20260717141000_ical_token_hash_backfill` removes `config.exportToken` and writes `config.exportTokenHash` in one row update;
+- the migration aborts if an object channel config still contains a raw token;
+- normal channel lists and ordinary configuration updates never return `exportFeedUrl`;
+- initial issue and explicit rotation may return one full URL, while a later list cannot recover it;
+- the previous token stops authorizing a feed after rotation; and
+- no migration query, log, audit row, status DTO, screenshot, or test output exposes a raw token.
+
+Focused migration/service regression evidence comes from `scripts/run-ical-property-scope-tests.mjs`. Applying the migration to an empty database is CI engineering evidence; a restored staging-copy migration and postcondition proof remain separate staging evidence.
+
+## Rates And Settings
+
+Run:
+
+```powershell
+node scripts/run-rate-service-tests.mjs
+node scripts/run-settings-service-tests.mjs
+```
+
+Acceptance requires:
+
+- rate rule/calendar reads and writes are property/room-type scoped and reject unknown fields;
+- percentage adjustments use basis points and fixed/override adjustments use satang strings;
+- effective-rate precedence and date boundaries are deterministic;
+- rate recommendations are suggest-only and create no rate or OTA mutation;
+- server mode renders the backend Rates view and a reload preserves the saved rule/calendar value;
+- settings writes require manager/admin authority and a non-empty reason;
+- credential-shaped values, URL credentials, sensitive query keys, invalid time zones, unsupported gateway enablement, and excessive tax totals fail closed;
+- property fee/tax writes dual-write exact and compatibility values, create audit evidence, and emit property-scoped events; and
+- settings/status output is sanitized and distinguishes internal configuration from provider proof.
+
+## Persistent Housekeeping And Night Audit
+
+Run:
+
+```powershell
+node scripts/run-operations-foundation-tests.mjs
+```
+
+Housekeeping acceptance requires:
+
+- tasks and issues cannot reference a room or assignee from another property;
+- create, assign, transition, block, complete, resolve, and cancel follow the allowlisted state machines;
+- every mutation requires an operational reason and persists status-history, audit, and domain-event evidence;
+- critical issue resolution by a housekeeper fails, while manager/admin resolution succeeds; and
+- error paths leave the authoritative record unchanged.
+
+Night-audit acceptance requires:
+
+- one run exists per property/business date and one attempt per property/idempotency key;
+- same-key retry returns the recorded outcome without duplicate audit/event evidence;
+- exact-satang charge, payment, and balance snapshots do not use Float summation;
+- unresolved arrivals/departures and housekeeping blockers block close unless an admin supplies an approved override reason;
+- emergency stop and unposted room charges remain non-overridable; and
+- `postingMode` remains `VERIFY_EXISTING_CHARGES_ONLY` until room-charge posting is implemented and separately tested.
+
+Backend fixture acceptance is not staff workflow acceptance. The server-mode housekeeping and Night Audit screens are cut over to these APIs, but must still pass disposable-DB reload, error rollback, RBAC, and staff workflow checks before operational sign-off.
+
+## Accounting V2, Direct Booking, And Analyzers
+
+Run:
+
+```powershell
+node scripts/run-accounting-v2-tests.mjs
+node scripts/run-direct-booking-tests.mjs
+node scripts/run-ops-analyzer-tests.mjs
+```
+
+Acceptance requires append-only exact-satang corrections, balanced journals/trial balance, property-scoped idempotency, and one primary accounting folio per reservation. Direct booking must prove immutable quote snapshots, hashed-token-only persistence, 15-minute expiry, atomic conversion, idempotent replay, and exactly one winner for simultaneous last-room holds; it must reject unknown/card fields. Analyzer results must be deterministic, explainable, identifier-only, use the supported Hotel Ops taxonomy, and perform no mutation. Production enablement additionally requires restored-staging migration/recovery, WAF/rate limiting, credential handling, staff workflow, and owner proof.
+
+## Evidence Levels
+
+- **Engineering:** focused fixtures plus the standard local validation ladder pass.
+- **Staging:** migrations, restored-data reconciliation, disposable/staging DB E2E, recovery, and staff workflow evidence pass against the exact release candidate.
+- **Provider:** Gmail/OTA/edge services have credentialed, owner-approved proof for their specific capability.
+- **Production sign-off:** the owner accepts the exact release after engineering, staging, security, recovery, operational, and applicable provider evidence is attached.
+
+No lower evidence level implies a higher one, and no local result alone supports a launch-ready claim.

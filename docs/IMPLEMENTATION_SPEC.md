@@ -1,6 +1,6 @@
-# Implementation Spec - Hotel Ops AI Command Center
+# Implementation Spec - Sandbox PMS And Hotel Ops
 
-This document describes the current Sandbox PMS implementation of the Hotel Ops package. It is intentionally scoped to what the repository actually runs today.
+This document describes the current Sandbox PMS backend and Hotel Ops implementation. Accounting V2 and direct booking are implemented as disabled-by-default engineering foundations; live-provider phases are not described as complete.
 
 ## Product Shape
 
@@ -47,6 +47,7 @@ API routes:
 - `GET /api/ops/ota/status`
 - `GET /api/ops/policy`
 - `POST /api/ops/scan/run`
+- `POST /api/ops/analyzers` for deterministic suggest-only analysis
 - `POST /api/internal/ops/worker/tasks`
 - `GET/POST /api/line/webhook` for signed LINE messaging and optional Hotel Ops command intake
 - `GET/POST /api/whatsapp/webhook` for Meta WhatsApp webhook verification, signed inbound messages, and optional Hotel Ops command intake
@@ -62,6 +63,38 @@ Booking-email API routes:
 - `POST /api/booking-email/events/:id/reprocess`
 - `GET/POST /api/booking-email/sources`
 - `PATCH /api/booking-email/sources/:id`
+
+PMS foundation API routes:
+
+- `GET /api/openapi.json`
+- `GET /api/system/capabilities`
+- `GET /api/events`
+- `GET/POST /api/rates/rules`
+- `PATCH /api/rates/rules/:id`
+- `GET/PUT /api/rates/calendar`
+- `GET /api/rates/effective`
+- `POST /api/rates/recommendations`
+- `GET/PATCH /api/settings/property`
+- `PUT /api/settings/tax`
+- `GET /api/settings/status`
+- `GET/POST /api/housekeeping/tasks`
+- `POST /api/housekeeping/tasks/:id/assign`
+
+Disabled-by-default foundation routes:
+
+- `POST /api/accounting/v2/folios`, charges, payments, cash shifts, house accounts, receivables, and journals
+- `GET /api/accounting/v2/folios/:id/balance` and `/api/accounting/v2/trial-balance`
+- `GET /api/public/v1/availability`
+- `POST /api/public/v1/quotes`
+- `POST /api/public/v1/holds`
+- `POST /api/public/v1/bookings`
+
+Accounting mutations require `ACCOUNTING_V2_ENABLED=true`, authenticated property scope, role permission, a reason, and property-scoped idempotency. Direct-booking routes require `DIRECT_BOOKING_ENABLED=true`; holds/bookings additionally require a backend-only `DIRECT_BOOKING_TOKEN_SECRET` of at least 32 characters. Neither flag is authorization to enable production use without the acceptance gates.
+- `POST /api/housekeeping/tasks/:id/status`
+- `GET/POST /api/housekeeping/issues`
+- `POST /api/housekeeping/issues/:id/status`
+- `GET /api/night-audit/runs`
+- `POST /api/night-audit/close`
 
 Auth proof operator CLI:
 
@@ -235,3 +268,72 @@ Notifications are backend records:
 - Notification text and metadata are sanitized before persistence.
 - The shared PMS header notification bell/center reads `/api/ops/notifications` in server mode for users with `view:ops`, merges those records with local housekeeping alerts, and links staff back to the relevant Ops screen.
 - Read and dismiss actions call backend acknowledgment routes, persist actor/timestamp fields, and create audit records. This acknowledgment state is separate from provider delivery status.
+
+## Provider Adapter Contract
+
+- Each OTA adapter is registered through `defineProviderAdapter()` with declared read and write operations. Contract construction fails when a declared operation lacks its backend method.
+- `getOtaProviderContracts()` returns strict, credential-free contract DTOs containing normalized health, dry-run capabilities, retry policy, rate-limit source, and evidence policy.
+- Live writes require all three conditions: `OTA_LIVE_WRITES_ENABLED=true`, an implemented live-write path, and verified provider proof. Current adapters intentionally declare the latter two as false.
+- Worker proof remains untrusted; provider evidence is bounded, kind-normalized, URL-sanitized, and blocked when redaction status is not safe.
+
+## Exact-Money Compatibility Contract
+
+- Money is represented internally as integer satang. JSON-facing exact fields such as `amountSatang`, `rateSatang`, and `totalSatang` are base-10 integer strings so JavaScript JSON never serializes a `BigInt` directly.
+- The additive migration keeps existing Float baht columns and adds nullable PostgreSQL `BIGINT` shadow columns plus integer basis-point fields. It backfills representable legacy values using PostgreSQL `ROUND(value * 100)` and leaves unsafe out-of-range values null for reconciliation.
+- Supported new writes call the shared money helpers to dual-write legacy baht and exact satang. If a request supplies both forms, they must represent the same rounded value or validation fails.
+- `MONEY_READ_AUTHORITY=legacy_float|satang` selects preferred reads. Missing or invalid configuration defaults to `legacy_float`; either path can fall back to the populated representation during the compatibility window.
+- Payments and legacy folio charges run in serializable transactions, re-read property-scoped folio ownership, require property-scoped idempotency keys, and retry serialization or unique-key races. A same-intent retry returns the original financial row without duplicating audit/domain evidence; reuse with a different payment or charge fingerprint returns `409`. Posted charges remain append-only.
+- The database uniqueness contract is `(propertyId, idempotencyKey)` for both `Payment` and `Charge`; a key used by one property cannot replay or block a different property's write. Charge intent fingerprints include folio, optional explicit date, description, category, exact amount, quantity, and optional booking-email source.
+- Server-mode cashier, front-desk, reservation, and booking-board submissions use `DurableAttemptKeyManager`. It retains only a fingerprint and opaque key in application memory, reuses the key for an unchanged uncertain attempt, rotates when material input changes, and removes it only after confirmed success. It deliberately does not use browser storage and therefore does not promise key recovery after a page reload.
+- Satang authority must not be enabled in production until row-level null and variance checks plus aggregate reconciliation pass on a restored staging copy. This branch does not remove legacy columns.
+
+## Property Request Context
+
+- After session authentication, `resolveRequestContext()` resolves the configured `SANDBOX` property and requires an active `(userId, propertyId)` `UserPropertyMembership`.
+- The request context contains request id, actor, property id/code, membership id, effective role, and optional `X-Idempotency-Key`. Membership role takes precedence over the compatibility global user role.
+- The additive migration backfills existing active and inactive users into the existing `SANDBOX` property using their current role and active state. Setup and user-management services create or update the membership with the compatibility user record.
+- Property-aware services must scope every lookup and mutation by `context.propertyId`; resource identifiers from the client are never property authority.
+- `Guest`, `Payment`, `Charge`, and `AuditLog` have first-class property ownership. Backfills derive ownership from reservation/folio relationships or the single `SANDBOX` compatibility boundary and abort when ambiguous or ownerless data cannot be reconciled safely.
+- The application remains a single-property product in this phase. Membership scaffolding is an isolation control, not a claim that multi-property administration or SaaS tenancy is complete.
+
+## iCal Export Token Contract
+
+- An iCal export token is a bearer credential. `Channel.config` stores `exportTokenHash`, calculated as SHA-256 over the exact UTF-8 token bytes and encoded as unpadded base64url; it does not store a newly issued raw token.
+- Migration `20260717141000_ical_token_hash_backfill` uses PostgreSQL `pgcrypto` to convert legacy `config.exportToken` values to the same digest and remove the raw field in one row update. The migration aborts if an object config still contains a raw token afterward.
+- The raw feed URL is returned only when a token is first issued or explicitly rotated. List responses, later reads, and configuration updates do not reconstruct or re-disclose it.
+- The service can opportunistically sanitize a legacy row encountered before migration completion, but that compatibility behavior does not replace running and proving the deploy migration.
+
+## Domain Events And SSE
+
+- Mutating services call `recordDomainEvent()` inside the same Prisma transaction as the operational change and audit record.
+- `DomainEvent.id` is a monotonic PostgreSQL `BIGSERIAL`. Catch-up reads are restricted to the authenticated request property, ordered by id, and bounded to 250 rows per query.
+- `GET /api/events` requires session authentication, active property membership, and `view:board`. It accepts `Last-Event-ID` or `?after=`, polls PostgreSQL in bounded batches, emits two-second updates and heartbeats, and can be disabled with `SSE_ENABLED=false`.
+- The public event payload intentionally omits actor id and metadata. It contains only string id, event type, aggregate type/id, and occurrence time.
+- The React bridge maps the existing reservation, room, payment, and charge event types to client refresh signals. Rates, settings, housekeeping, and night-audit views still need explicit event/refetch handling where their UI requires immediate refresh.
+
+## Rate And Settings Services
+
+- Rate rules support percentage adjustments in integer basis points and fixed/override amounts in satang. Date-specific calendar rates and computed effective rates are property/room-type scoped.
+- `POST /api/rates/recommendations` is deterministic and suggest-only. Applying a recommendation requires a separate authorized rate mutation; it cannot update an OTA or bypass Hotel Ops approval policy.
+- In server API mode, the primary Rates view uses the backend service. The older Spark `useKV` rate experience remains only on the explicit demo path.
+- Property settings accept allowlisted profile, fee, policy, operations, accounting-export, and recorded-payment-method fields. Every write requires manager/admin authority and an operational reason.
+- Tax settings use basis points and structured tax items. Credential-shaped values, URL credentials, sensitive query parameters, unknown fields, invalid time zones, and unsupported payment-gateway enablement fail validation.
+- `/api/settings/status` is sanitized and server-derived. It reports configuration and capability state, not staging, provider, recovery, or owner proof.
+
+## Persistent Operations Foundation
+
+- Housekeeping tasks persist property, room, type, priority, schedule, assignee, status, creator, completion time, reasoned status history, audit records, and domain events. Assignees must be active members of the same property.
+- Housekeeping issues persist category, severity, linked task/room, assignee, reasoned status history, and resolution evidence. Critical issue resolution or closure requires manager/admin authority.
+- Night audit stores one run per `(propertyId, businessDate)` and one attempt per `(propertyId, idempotencyKey)`. Close requires manager, admin, or system authority plus an operational reason.
+- Night audit snapshots unresolved arrivals/departures, in-house stays, open folios, housekeeping blockers, unposted room charges, and exact-satang financial totals.
+- Emergency stop and unposted room charges are non-overridable blockers. Only an admin may override other blockers and must supply an override reason.
+- Current posting mode is `VERIFY_EXISTING_CHARGES_ONLY`; the service does not create missing nightly room charges. A run cannot be marked complete when a non-overridable blocker remains.
+- In server mode, the housekeeping and Night Audit React screens use these persistent APIs and refetch authoritative state after writes; browser-local workflow state is restricted to explicit demo mode. This implementation status is not staff workflow acceptance.
+
+## Release Verification Contract
+
+- Fast CI validates schemas, focused fixtures, typecheck, lint, build, and launch configuration.
+- Integration CI migrates an empty PostgreSQL database, migrates and seeds a separate disposable PostgreSQL database, runs guarded database workflow tests, and runs authenticated server-mode browser reload/error tests against the exact checked-out commit.
+- The PostgreSQL suite must prove two-property isolation, membership-role enforcement, first-class audit ownership, property-scoped payment/charge idempotency, replay conflicts, concurrent overpayment/charge retry behavior, exact reconciliation, and simultaneous last-room hold serialization.
+- The browser suite must prove persisted state survives reload, injected failures remain truthful, recovery refetches authoritative state, and SSE catch-up filters foreign-property events.
+- CI success is engineering evidence only. Restored-staging migrations, rollback/recovery, staff workflows, provider credentials/results, WAF, and owner approval require separate evidence.

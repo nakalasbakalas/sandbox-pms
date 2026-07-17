@@ -22,10 +22,12 @@ import { CashReconciliation } from '@/components/cashier/CashReconciliation'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
 import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
 import type { PropertySetup } from '@/types/onboarding'
+import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 
 function calculateTax(amount: number, taxRate: number = 7) {
   const subtotal = amount / (1 + taxRate / 100)
@@ -259,6 +261,14 @@ export function CashierView() {
   const [chargeQuantity, setChargeQuantity] = useState('1')
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
+  const { registry } = useSystemCapabilities()
+  const accountingV2Available = !SERVER_API_ENABLED || capabilityEnabled(registry?.finance.accountingV2)
+
+  useEffect(() => {
+    if (!accountingV2Available && (selectedTab === 'accounting' || selectedTab === 'reconciliation')) {
+      setSelectedTab('open')
+    }
+  }, [accountingV2Available, selectedTab])
 
   const paymentAmountNumber = Number(paymentAmount) || 0
   const paymentRemainingBalance = paymentFolio
@@ -531,16 +541,25 @@ export function CashierView() {
     setPaymentError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          folioId: paymentFolio.id,
+          amount,
+          method: paymentMethod,
+          reference: paymentReference.trim() || undefined,
+        }
+        const attempt = {
+          operation: 'cashier-payment' as const,
+          entityId: paymentFolio.id,
+          material: requestBody,
+        }
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         await pmsApi('/api/payments', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            folioId: paymentFolio.id,
-            amount,
-            method: paymentMethod,
-            reference: paymentReference.trim() || undefined,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
         const nextFolios = await refreshServerFolios()
+        await durableAttemptKeys.confirmSuccess(attempt)
         const updated = nextFolios.find((folio) => folio.id === paymentFolio.id)
         if (updated) setSelectedFolio(updated)
       } else {
@@ -600,17 +619,26 @@ export function CashierView() {
     setChargeError(null)
     try {
       if (SERVER_API_ENABLED) {
+        const requestBody = {
+          folioId: chargeFolio.id,
+          category: chargeCategory,
+          description: chargeDescription,
+          amount,
+          quantity,
+        }
+        const attempt = {
+          operation: 'cashier-charge' as const,
+          entityId: chargeFolio.id,
+          material: requestBody,
+        }
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         await pmsApi('/api/charges', authToken, {
           method: 'POST',
-          body: JSON.stringify({
-            folioId: chargeFolio.id,
-            category: chargeCategory,
-            description: chargeDescription,
-            amount,
-            quantity,
-          }),
+          headers: { 'x-idempotency-key': idempotencyKey },
+          body: JSON.stringify(requestBody),
         })
         const nextFolios = await refreshServerFolios()
+        await durableAttemptKeys.confirmSuccess(attempt)
         const updated = nextFolios.find((folio) => folio.id === chargeFolio.id)
         if (updated) setSelectedFolio(updated)
       } else {
@@ -714,22 +742,26 @@ export function CashierView() {
             <TabsTrigger value="open" className="text-xs">Open</TabsTrigger>
             <TabsTrigger value="closed" className="text-xs">Closed</TabsTrigger>
             <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-            <TabsTrigger value="accounting" className="text-xs">Accounting</TabsTrigger>
-            <TabsTrigger value="reconciliation" className="text-xs">Reconciliation</TabsTrigger>
+            {accountingV2Available && <TabsTrigger value="accounting" className="text-xs">Accounting</TabsTrigger>}
+            {accountingV2Available && <TabsTrigger value="reconciliation" className="text-xs">Reconciliation</TabsTrigger>}
           </TabsList>
         </div>
         
-        <TabsContent value="accounting" className="flex-1 m-0 p-4">
-          <ScrollArea className="h-full">
-            <AccountingDashboard />
-          </ScrollArea>
-        </TabsContent>
+        {accountingV2Available && (
+          <TabsContent value="accounting" className="flex-1 m-0 p-4">
+            <ScrollArea className="h-full">
+              <AccountingDashboard />
+            </ScrollArea>
+          </TabsContent>
+        )}
 
-        <TabsContent value="reconciliation" className="flex-1 m-0 p-4">
-          <ScrollArea className="h-full">
-            <CashReconciliation />
-          </ScrollArea>
-        </TabsContent>
+        {accountingV2Available && (
+          <TabsContent value="reconciliation" className="flex-1 m-0 p-4">
+            <ScrollArea className="h-full">
+              <CashReconciliation />
+            </ScrollArea>
+          </TabsContent>
+        )}
         
         <TabsContent value={selectedTab} className="flex-1 m-0 p-4">
           <ScrollArea className="h-full">

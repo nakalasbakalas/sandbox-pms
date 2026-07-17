@@ -2,14 +2,31 @@
 
 Status date: 2026-07-07.
 
-Verdict: partial/open. Safe Render and public-edge metadata has been refreshed through owner-directed launch completion, and the read-only owner-run Cloudflare WAF/rate-limit proof helper now creates an ignored local env template and can discover the zone ID from `book.sandboxhotel.com` when the token has zone read access. This does not close the P0 because no Cloudflare API token is available in this environment, and 2026-07-07 Cloudflare connector/tool discovery still did not expose callable Cloudflare WAF/ruleset action tools in this Codex session. Nick owns Cloudflare launch proof. Secret rotation metadata, latest recovery-point proof, and upstream WAF/rate-limit rule IDs still require account-owner/provider evidence.
+Verdict: WAF/rate-limit proof complete for the no-extra-cost zone-level Cloudflare scope. Safe Render and public-edge metadata remains current, and Cloudflare now has verified zone-level custom WAF and login rate-limit rules for `book.sandboxhotel.com` and `staff.sandboxhotel.com`. The proof helper avoids account-level WAF APIs and the paid account-level add-on path. Secret rotation metadata and latest recovery-point proof still require account-owner/provider evidence.
 
 ## Scope
 
 - Public target: `https://book.sandboxhotel.com`.
 - Render workspace observed through CLI: `My Workspace` (`tea-d6n8kq14tr6s738stj5g`) with account email `nakalastravels@gmail.com`.
-- Commands were read-only except for explicitly noted Render deploy-sync slices. No restart, SSH session, database shell, production data mutation, DB-mutating E2E, paid resource action, or secret-value access was performed.
+- Commands were read-only except for explicitly noted Render deploy-sync slices and the owner-approved zone-level Cloudflare WAF/rate-limit ensure command. No restart, SSH session, database shell, production data mutation, DB-mutating E2E, paid resource action, account-level WAF add-on, or secret-value access was performed.
 - No production secrets, raw database URLs, tokens, passwords, cookies, or screenshots were recorded.
+
+## 2026-07-07 Cloudflare WAF Zone Proof
+
+This refresh confirms real Cloudflare zone-level WAF metadata without recording Cloudflare credentials:
+
+- `npm.cmd run cloudflare:waf:proof -- --env-file .\.codex\cloudflare-waf.local.env --hostname book.sandboxhotel.com --probe-url https://book.sandboxhotel.com/.env --require-rules` succeeded when run zone-only with local Cloudflare credentials at `2026-07-07T08:08:56.333Z` and reported `ready=true`.
+- The Cloudflare zone name was `sandboxhotel.com`, status `active`; zone and account identifiers were omitted from evidence.
+- The helper found the managed WAF ruleset `77454fe2d30c4220b5701f6fdfb893ba`, `Cloudflare Managed Free Ruleset`, phase `http_request_firewall_managed`, kind `managed`, version `67`.
+- The managed ruleset contains `26` enabled rules, all with action `block`.
+- `npm.cmd run cloudflare:waf:ensure -- --env-file .\.codex\cloudflare-waf.local.env` completed at `2026-07-07T08:08:05.593Z`: custom WAF ruleset `b510ac934aa84f37b7ea399d66f2530c` / rule `87dcf41c98fe479b9530a917d2a590cc` was unchanged, and rate-limit ruleset `8e6c77f729974d35ad589329bca15a77` / rule `d9eb5af02d664b8c9764b4d815848a36` was created.
+- `rateLimitRulesCount=1`: login rate limit `10` requests per `10` seconds by `cf.colo.id` and `ip.src`, action `block`, mitigation timeout `10` seconds.
+- `targetHostnameCoveredRules=2`, covering `book.sandboxhotel.com`; the same rule expressions are scoped to `book.sandboxhotel.com` and `staff.sandboxhotel.com`.
+- Account-level rulesets were intentionally not inspected or modified. The proof output reported `rulesetLevels=["zone"]`.
+- The proof-helper probe for `https://book.sandboxhotel.com/.env` returned `404` with Cloudflare headers at `2026-07-07T08:08:56.333Z`, and `npm.cmd run public-edge:proof` passed at `2026-07-07T06:47:59.258Z`: `/healthz?deep=1` returned `200`, and `/.env`, `/wp-login.php`, `/phpmyadmin/`, and `/vendor/` returned `404` through Cloudflare/Render headers with response bodies omitted.
+- Canonical evidence: `docs/launch/evidence/2026-07-07-cloudflare-waf-zone-proof.md`.
+
+This closes the no-extra-cost Cloudflare WAF/rate-limit launch proof. The optional API burst Cloudflare rate-limit rule remains disabled by default because it would require additional rate-limit quota; broader API abuse protection remains in app/backend controls.
 
 ## 2026-07-07 Owner-Run Setup Refresh
 

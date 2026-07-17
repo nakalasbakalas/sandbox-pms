@@ -30,6 +30,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 
 type GrowthSuiteSettings = {
   bookingEngineEnabled: boolean
@@ -171,6 +173,41 @@ const campaignClass: Record<Campaign['status'], string> = {
 }
 
 export function GrowthSuiteView() {
+  if (SERVER_API_ENABLED) return <ServerGrowthSuiteStatus />
+  return <DemoGrowthSuiteView />
+}
+
+function ServerGrowthSuiteStatus() {
+  const { registry, loading, error } = useSystemCapabilities()
+  const capability = registry?.integrations.directBooking
+  const enabled = capabilityEnabled(capability)
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-4 p-6">
+      <div>
+        <h1 className="text-xl font-semibold">Direct Booking</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Server capability evidence only. Browser controls cannot publish or enable booking services.
+        </p>
+      </div>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">Backend capability</CardTitle>
+            <Badge variant={enabled ? 'outline' : 'secondary'}>{loading ? 'Checking' : enabled ? 'Enabled' : 'Disabled'}</Badge>
+          </div>
+          <CardDescription>{error || capability?.evidence || 'No capability evidence is available.'}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <p>Public availability, quote, hold, and booking endpoints are controlled by the backend feature flag.</p>
+          <p>Publishing, website, metasearch, marketplace, and provider configuration require dedicated audited server APIs and remain unavailable here.</p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function DemoGrowthSuiteView() {
   const [settings, setSettings] = useKV<GrowthSuiteSettings>('growth-suite-settings', defaultSettings)
   const [roomTypes] = useKV<Array<{ id: string; name: string; baseRate: number }>>('room-types-config', [])
   const [rooms] = useKV<BoardRoomCard[]>('pms-rooms', [])

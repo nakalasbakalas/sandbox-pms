@@ -103,7 +103,7 @@ export const globalShortcuts = (
     key: '3',
     ctrl: true,
     description: 'Go to Front Desk Board',
-    action: () => navigate('board'),
+    action: () => navigate('front-desk'),
     section: 'Navigation'
   },
   {

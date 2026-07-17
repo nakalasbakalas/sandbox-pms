@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Install, test, build, and launch-check
+  fast-checks:
+    name: Fast checks and launch gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -51,3 +51,72 @@ jobs:
 
       - name: Launch gate
         run: npm run launch:check
+
+  database-lifecycle:
+    name: PostgreSQL migrations, seed, and guarded E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sandbox_hotel_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d sandbox_hotel_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sandbox_hotel_ci?schema=public
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sandbox_hotel_e2e?schema=public
+      ALLOW_DB_E2E: 'true'
+      SEED_MODE: e2e
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Create disposable E2E database
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d sandbox_hotel_ci -v ON_ERROR_STOP=1 -c 'CREATE DATABASE sandbox_hotel_e2e;'
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Validate empty database migration lifecycle
+        run: npm run db:migrate
+
+      - name: Validate disposable E2E migration and seed lifecycle
+        run: npm run db:e2e:ready
+
+      - name: Verify migration status
+        run: npm run db:status
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sandbox_hotel_e2e?schema=public
+
+      - name: Build authenticated server-mode frontend
+        run: npm run build
+        env:
+          VITE_PMS_API_MODE: server
+          VITE_DATA_MODE: server
+
+      - name: Run guarded database workflow E2E
+        run: npm run test:e2e:db
+
+      - name: Prove server-mode reload and error truth
+        run: npm run test:e2e:server

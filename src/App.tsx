@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Toaster } from './components/ui/sonner'
 import { NavigationProvider, useNavigation } from './hooks/use-navigation'
 import { AppLayout } from './components/navigation/AppLayout'
@@ -18,6 +18,9 @@ import { OnboardingWizard } from './components/onboarding/OnboardingWizard'
 import type { NavigationRoute } from './types/navigation'
 import type { Permission } from './types/auth'
 import { Button } from './components/ui/button'
+import { SERVER_API_ENABLED } from './lib/pms-api-client'
+import { dataSyncService, type DataSyncEvent } from './lib/data-sync'
+import { capabilityEnabled, useSystemCapabilities } from './hooks/use-system-capabilities'
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
@@ -96,6 +99,22 @@ function RouteNotFound({ path }: { path: string }) {
   )
 }
 
+function CapabilityUnavailable({ title, detail }: { title: string; detail: string }) {
+  const { navigate } = useNavigation()
+
+  return (
+    <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+      <div className="max-w-lg rounded-lg border bg-background p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold">{title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
+        <div className="mt-4 flex justify-center">
+          <Button onClick={() => navigate('system-status')}>View system status</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
@@ -132,6 +151,7 @@ const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
 function AppRouter() {
   const { currentRoute, isKnownRoute, requestedPath } = useNavigation()
   const { hasAnyPermission } = useAuth()
+  const { registry, loading: capabilitiesLoading, error: capabilitiesError } = useSystemCapabilities()
 
   if (!isKnownRoute) {
     return <RouteNotFound path={`/${requestedPath || ''}`} />
@@ -147,7 +167,7 @@ function AppRouter() {
     case 'today':
       return <TodayView />
     case 'board':
-      return <Board />
+      return SERVER_API_ENABLED ? <FrontDeskView /> : <Board />
     case 'rooms':
       return <RoomsView />
     case 'booking-inbox':
@@ -161,7 +181,7 @@ function AppRouter() {
     case 'housekeeping':
       return <HousekeepingBoardView />
     case 'tablet-housekeeping':
-      return <TabletHousekeepingApp />
+      return SERVER_API_ENABLED ? <HousekeepingBoardView /> : <TabletHousekeepingApp />
     case 'cashier':
       return <CashierView />
     case 'rates':
@@ -169,6 +189,15 @@ function AppRouter() {
     case 'channels':
       return <ChannelsView />
     case 'growth-suite':
+      if (SERVER_API_ENABLED && capabilitiesLoading) return <RouteLoading />
+      if (SERVER_API_ENABLED && !capabilityEnabled(registry?.integrations.directBooking)) {
+        return (
+          <CapabilityUnavailable
+            title="Direct Booking is unavailable"
+            detail={capabilitiesError || registry?.integrations.directBooking?.evidence || 'The server capability registry did not confirm Direct Booking.'}
+          />
+        )
+      }
       return <GrowthSuiteView />
     case 'reports':
       return <ReportsView />
@@ -260,6 +289,7 @@ function AuthenticatedAppContent() {
     
     return (
         <>
+        <DomainEventBridge />
         <FrontDeskAssistantProvider>
           <AppLayout onOpenShortcuts={() => setShortcutsDialogOpen(true)}>
             <Suspense fallback={<RouteLoading />}>
@@ -280,6 +310,59 @@ function AuthenticatedAppContent() {
         <KeyboardShortcutsWelcome />
         </>
     )
+}
+
+interface ServerDomainEvent {
+  id: string
+  type: string
+  aggregateType: string
+  aggregateId: string
+  occurredAt: string
+}
+
+const legacyEventTypes: Record<string, DataSyncEvent['type']> = {
+  RESERVATION_CREATED: 'RESERVATION_CREATED',
+  RESERVATION_UPDATED: 'RESERVATION_MODIFIED',
+  RESERVATION_CANCELLED: 'RESERVATION_CANCELLED',
+  RESERVATION_NO_SHOW: 'RESERVATION_CANCELLED',
+  RESERVATION_CHECKED_IN: 'CHECK_IN',
+  RESERVATION_CHECKED_OUT: 'CHECK_OUT',
+  ROOM_HOUSEKEEPING_UPDATED: 'ROOM_STATUS_CHANGE',
+  ROOM_OPERATIONAL_STATUS_UPDATED: 'ROOM_STATUS_CHANGE',
+  PAYMENT_CREATED: 'PAYMENT_RECEIVED',
+  CHARGE_CREATED: 'FOLIO_UPDATED',
+}
+
+function DomainEventBridge() {
+  const { hasAnyPermission } = useAuth()
+  const canSubscribe = SERVER_API_ENABLED && hasAnyPermission(['view:board'])
+
+  useEffect(() => {
+    if (!canSubscribe) return
+    const source = new EventSource('/api/events', { withCredentials: true })
+    const onDomainEvent = (message: MessageEvent<string>) => {
+      try {
+        const event = JSON.parse(message.data) as ServerDomainEvent
+        window.dispatchEvent(new CustomEvent('pms:domain-event', { detail: event }))
+        const legacyType = legacyEventTypes[event.type]
+        if (legacyType) {
+          dataSyncService.emit({
+            type: legacyType,
+            source: 'server-sse',
+            timestamp: new Date(event.occurredAt),
+            data: { aggregateType: event.aggregateType, aggregateId: event.aggregateId, eventId: event.id },
+          })
+        }
+      } catch {
+        // Ignore malformed/untrusted stream payloads and let authoritative views refetch.
+      }
+    }
+
+    for (const eventType of Object.keys(legacyEventTypes)) source.addEventListener(eventType, onDomainEvent as EventListener)
+    return () => source.close()
+  }, [canSubscribe])
+
+  return null
 }
 
 function App() {
