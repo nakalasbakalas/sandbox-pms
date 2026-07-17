@@ -958,12 +958,12 @@ const cloudflareJsonResponse = (status, payload) => new Response(JSON.stringify(
   },
 })
 const runWithMockedCloudflareFetch = async (fetchImpl, callback) => {
-  const previousFetch = global.fetch
-  global.fetch = fetchImpl
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = fetchImpl
   try {
     return await callback()
   } finally {
-    global.fetch = previousFetch
+    globalThis.fetch = previousFetch
   }
 }
 
