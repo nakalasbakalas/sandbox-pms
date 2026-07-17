@@ -1,7 +1,6 @@
 import type { Command } from '@/types/command-palette'
 import type { NavigationRoute } from '@/types/navigation'
 import {
-  HouseLine,
   Calendar,
   Users,
   Bed,
@@ -39,18 +38,6 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       icon: ListChecks,
       action: () => {
         navigate?.('today')
-      },
-    },
-    {
-      id: 'nav-board',
-      label: 'Go to Front Desk Board',
-      description: 'View the compact room board',
-      category: 'navigation',
-      keywords: ['board', 'rooms', 'home', 'overview', 'calendar'],
-      shortcut: 'cmd+3',
-      icon: HouseLine,
-      action: () => {
-        navigate?.('board')
       },
     },
     {
@@ -201,7 +188,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+f',
       icon: MagnifyingGlass,
       action: () => {
-        navigate?.('board')
+        navigate?.('front-desk')
       },
     },
     {
@@ -272,7 +259,7 @@ export function createPMSCommands(navigate?: (route: NavigationRoute) => void): 
       shortcut: 'cmd+m',
       icon: ArrowsClockwise,
       action: () => {
-        navigate?.('board')
+        navigate?.('front-desk')
       },
     },
     {

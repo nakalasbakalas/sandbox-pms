@@ -20,6 +20,7 @@ import type { Permission } from './types/auth'
 import { Button } from './components/ui/button'
 import { SERVER_API_ENABLED } from './lib/pms-api-client'
 import { dataSyncService, type DataSyncEvent } from './lib/data-sync'
+import { capabilityEnabled, useSystemCapabilities } from './hooks/use-system-capabilities'
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
@@ -98,6 +99,22 @@ function RouteNotFound({ path }: { path: string }) {
   )
 }
 
+function CapabilityUnavailable({ title, detail }: { title: string; detail: string }) {
+  const { navigate } = useNavigation()
+
+  return (
+    <div className="flex min-h-full items-center justify-center bg-muted/20 p-6">
+      <div className="max-w-lg rounded-lg border bg-background p-6 text-center shadow-sm">
+        <h1 className="text-lg font-semibold">{title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{detail}</p>
+        <div className="mt-4 flex justify-center">
+          <Button onClick={() => navigate('system-status')}>View system status</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
   today: ['view:board', 'create:reservation', 'view:housekeeping'],
   board: ['view:board'],
@@ -134,6 +151,7 @@ const routePermissions: Partial<Record<NavigationRoute, Permission[]>> = {
 function AppRouter() {
   const { currentRoute, isKnownRoute, requestedPath } = useNavigation()
   const { hasAnyPermission } = useAuth()
+  const { registry, loading: capabilitiesLoading, error: capabilitiesError } = useSystemCapabilities()
 
   if (!isKnownRoute) {
     return <RouteNotFound path={`/${requestedPath || ''}`} />
@@ -149,7 +167,7 @@ function AppRouter() {
     case 'today':
       return <TodayView />
     case 'board':
-      return <Board />
+      return SERVER_API_ENABLED ? <FrontDeskView /> : <Board />
     case 'rooms':
       return <RoomsView />
     case 'booking-inbox':
@@ -163,7 +181,7 @@ function AppRouter() {
     case 'housekeeping':
       return <HousekeepingBoardView />
     case 'tablet-housekeeping':
-      return <TabletHousekeepingApp />
+      return SERVER_API_ENABLED ? <HousekeepingBoardView /> : <TabletHousekeepingApp />
     case 'cashier':
       return <CashierView />
     case 'rates':
@@ -171,6 +189,15 @@ function AppRouter() {
     case 'channels':
       return <ChannelsView />
     case 'growth-suite':
+      if (SERVER_API_ENABLED && capabilitiesLoading) return <RouteLoading />
+      if (SERVER_API_ENABLED && !capabilityEnabled(registry?.integrations.directBooking)) {
+        return (
+          <CapabilityUnavailable
+            title="Direct Booking is unavailable"
+            detail={capabilitiesError || registry?.integrations.directBooking?.evidence || 'The server capability registry did not confirm Direct Booking.'}
+          />
+        )
+      }
       return <GrowthSuiteView />
     case 'reports':
       return <ReportsView />

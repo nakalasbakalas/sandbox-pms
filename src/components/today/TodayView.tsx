@@ -568,7 +568,7 @@ export function TodayView() {
                 <CardTitle className="text-base">{t('today.quickActions')}</CardTitle>
               </CardHeader>
               <CardContent className="grid gap-2 p-4">
-                <Button className="justify-start" onClick={() => navigate('board')}>
+                <Button className="justify-start" onClick={() => navigate('front-desk')}>
                   <House size={16} weight="bold" />
                   {t('today.openBoard')}
                 </Button>

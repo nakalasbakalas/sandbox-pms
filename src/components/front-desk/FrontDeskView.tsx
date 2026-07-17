@@ -22,7 +22,7 @@ import {
   toInHouseItem,
 } from '@/lib/front-desk-workflow'
 import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
-import { Calendar, EnvelopeSimple, House, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
+import { Calendar, EnvelopeSimple, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 
@@ -808,7 +808,7 @@ export function FrontDeskView() {
               <Calendar size={15} weight="bold" />
               Front Desk Today - {todayKey}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Arrivals, stays, departures</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Front Desk Board</h1>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <div className="relative w-full sm:w-80">
@@ -828,10 +828,6 @@ export function FrontDeskView() {
               <MagnifyingGlass size={16} weight="bold" />
               Ask about today
             </Button>
-            <Button variant="outline" onClick={() => navigate('board')} className="gap-1.5">
-              <House size={16} weight="bold" />
-              Board
-            </Button>
             <Button variant="outline" onClick={() => navigate('booking-inbox')} className="gap-1.5">
               <EnvelopeSimple size={16} weight="bold" />
               Booking Inbox
@@ -841,7 +837,7 @@ export function FrontDeskView() {
       </div>
 
       <main className="mx-auto max-w-[1700px] space-y-4 px-4 py-4 lg:px-6">
-        <RoomReadinessStrip readiness={readiness} totalRooms={rooms.length} />
+        <RoomReadinessStrip readiness={readiness} rooms={rooms} />
 
         <div className="grid gap-4 xl:grid-cols-[1fr_0.95fr]">
           <section className="space-y-2">
@@ -925,15 +921,29 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
   )
 }
 
-function RoomReadinessStrip({ readiness, totalRooms }: { readiness: ReturnType<typeof buildRoomReadinessSummary>; totalRooms: number }) {
+function RoomReadinessStrip({ readiness, rooms }: { readiness: ReturnType<typeof buildRoomReadinessSummary>; rooms: BoardRoomCard[] }) {
+  const availableByRoomType = [...rooms.reduce((counts, room) => {
+    if (room.operationalStatus !== 'AVAILABLE' || isOccupied(room)) return counts
+    const label = room.roomTypeName || room.roomTypeCode || room.type
+    counts.set(label, (counts.get(label) || 0) + 1)
+    return counts
+  }, new Map<string, number>())]
+
   return (
-    <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+    <section className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
       <ReadinessTile label="Clean/inspected" value={readiness.cleanInspected} tone="ok" />
       <ReadinessTile label="Dirty" value={readiness.dirty} tone="warning" />
       <ReadinessTile label="Occupied" value={readiness.occupied} />
       <ReadinessTile label="Out of order" value={readiness.outOfOrder} tone="danger" />
-      <ReadinessTile label="Twin available" value={readiness.availableByType.TWIN} tone="ok" />
-      <ReadinessTile label="Double available" value={readiness.availableByType.DOUBLE} tone="ok" detail={`${totalRooms} rooms tracked`} />
+      {availableByRoomType.map(([roomType, count], index) => (
+        <ReadinessTile
+          key={roomType}
+          label={`${roomType} available`}
+          value={count}
+          tone="ok"
+          detail={index === availableByRoomType.length - 1 ? `${rooms.length} rooms tracked` : undefined}
+        />
+      ))}
     </section>
   )
 }

@@ -1307,7 +1307,7 @@ export function ReservationsView() {
                 <House size={18} weight="bold" />
                 Front Desk
               </Button>
-              <Button variant="outline" className="gap-2" onClick={() => navigate('board')}>
+              <Button variant="outline" className="gap-2" onClick={() => navigate('front-desk')}>
                 <SquaresFour size={18} weight="bold" />
                 Board
               </Button>
@@ -1593,7 +1593,7 @@ export function ReservationsView() {
         onCheckOut={(reservation) => openCheckOut(reservation, reservation.balanceDue > 0 ? 'guided' : 'express')}
         onPrint={handlePrintReservation}
         onEmail={handleEmailReservation}
-        onBoard={() => navigate('board')}
+        onBoard={() => navigate('front-desk')}
         onFrontDesk={() => navigate('front-desk')}
         onBookingInbox={() => navigate('booking-inbox')}
         onCashier={() => navigate('cashier')}

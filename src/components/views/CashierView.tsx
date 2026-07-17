@@ -26,6 +26,7 @@ import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
 import type { PropertySetup } from '@/types/onboarding'
+import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 
 function calculateTax(amount: number, taxRate: number = 7) {
   const subtotal = amount / (1 + taxRate / 100)
@@ -259,6 +260,14 @@ export function CashierView() {
   const [chargeQuantity, setChargeQuantity] = useState('1')
   const [chargeError, setChargeError] = useState<string | null>(null)
   const [isSubmittingCharge, setIsSubmittingCharge] = useState(false)
+  const { registry } = useSystemCapabilities()
+  const accountingV2Available = !SERVER_API_ENABLED || capabilityEnabled(registry?.finance.accountingV2)
+
+  useEffect(() => {
+    if (!accountingV2Available && (selectedTab === 'accounting' || selectedTab === 'reconciliation')) {
+      setSelectedTab('open')
+    }
+  }, [accountingV2Available, selectedTab])
 
   const paymentAmountNumber = Number(paymentAmount) || 0
   const paymentRemainingBalance = paymentFolio
@@ -714,22 +723,26 @@ export function CashierView() {
             <TabsTrigger value="open" className="text-xs">Open</TabsTrigger>
             <TabsTrigger value="closed" className="text-xs">Closed</TabsTrigger>
             <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-            <TabsTrigger value="accounting" className="text-xs">Accounting</TabsTrigger>
-            <TabsTrigger value="reconciliation" className="text-xs">Reconciliation</TabsTrigger>
+            {accountingV2Available && <TabsTrigger value="accounting" className="text-xs">Accounting</TabsTrigger>}
+            {accountingV2Available && <TabsTrigger value="reconciliation" className="text-xs">Reconciliation</TabsTrigger>}
           </TabsList>
         </div>
         
-        <TabsContent value="accounting" className="flex-1 m-0 p-4">
-          <ScrollArea className="h-full">
-            <AccountingDashboard />
-          </ScrollArea>
-        </TabsContent>
+        {accountingV2Available && (
+          <TabsContent value="accounting" className="flex-1 m-0 p-4">
+            <ScrollArea className="h-full">
+              <AccountingDashboard />
+            </ScrollArea>
+          </TabsContent>
+        )}
 
-        <TabsContent value="reconciliation" className="flex-1 m-0 p-4">
-          <ScrollArea className="h-full">
-            <CashReconciliation />
-          </ScrollArea>
-        </TabsContent>
+        {accountingV2Available && (
+          <TabsContent value="reconciliation" className="flex-1 m-0 p-4">
+            <ScrollArea className="h-full">
+              <CashReconciliation />
+            </ScrollArea>
+          </TabsContent>
+        )}
         
         <TabsContent value={selectedTab} className="flex-1 m-0 p-4">
           <ScrollArea className="h-full">

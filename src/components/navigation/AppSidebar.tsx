@@ -40,6 +40,8 @@ import type { Permission } from '@/types/auth'
 import type { NavigationRoute } from '@/types/navigation'
 import { useKV } from '@github/spark/hooks'
 import type { PropertySetup } from '@/types/onboarding'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 
 type NavItem = {
   id: NavigationRoute
@@ -97,9 +99,13 @@ export function AppSidebar() {
   const { hasPermission, hasAnyPermission } = useAuth()
   const { t } = useI18n()
   const [propertyData] = useKV<PropertySetup>('onboarding-property', {} as PropertySetup)
-  const propertyName = propertyData?.name || 'Hotel PMS'
+  const { registry } = useSystemCapabilities()
+  const propertyName = SERVER_API_ENABLED ? 'Hotel PMS' : propertyData?.name || 'Hotel PMS'
 
   const canViewItem = (item: NavItem) => {
+    if (SERVER_API_ENABLED && item.id === 'growth-suite' && !capabilityEnabled(registry?.integrations.directBooking)) {
+      return false
+    }
     if (item.permission) {
       return hasPermission(item.permission)
     }

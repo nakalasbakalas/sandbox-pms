@@ -279,7 +279,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
 
     try {
       if (actionToRun.type === 'OPEN_ROOM') {
-        navigate('board')
+        navigate('front-desk')
         toast.info(`Opened room board${actionToRun.payload?.roomNumber ? ` for Room ${actionToRun.payload.roomNumber}` : ''}.`)
         return
       }

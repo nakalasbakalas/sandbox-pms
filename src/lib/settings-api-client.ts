@@ -25,6 +25,42 @@ export type ServerTaxItem = {
   included: boolean
 }
 
+export type ServerPropertyPolicies = {
+  checkInWindow?: string | null
+  checkOutWindow?: string | null
+  smoking?: string | null
+  cancellation?: string | null
+  deposit?: string | null
+  noShow?: string | null
+  childPolicy?: string | null
+}
+
+export type ServerOperationsSettings = {
+  baseLanguage?: string
+  alertRecipients?: string[]
+  noOverbooking?: boolean
+  businessDateCutoffTime?: string
+}
+
+export type ServerAccountingSettings = {
+  exportDateFormat?: 'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD'
+  taxIdentifiersConfigured?: boolean
+  accountingMappingsConfigured?: boolean
+}
+
+export type ServerPaymentMethod = 'CASH' | 'BANK_TRANSFER' | 'PROMPTPAY' | 'CARD_RECORDED_ONLY'
+
+export type ServerPaymentSettings = {
+  paymentGatewayConfigured?: false
+  enabledMethods?: ServerPaymentMethod[]
+}
+
+export type ServerOperationalSettings = {
+  operations: ServerOperationsSettings
+  accounting: ServerAccountingSettings
+  paymentMethods: ServerPaymentSettings
+}
+
 export type ServerPropertySettings = {
   propertyId: string
   code: string
@@ -40,8 +76,8 @@ export type ServerPropertySettings = {
     rateBasisPoints: number
     taxes: ServerTaxItem[]
   }
-  policies: Record<string, unknown>
-  operationalSettings: Record<string, unknown>
+  policies: ServerPropertyPolicies
+  operationalSettings: ServerOperationalSettings
   updatedAt: string
 }
 
@@ -63,6 +99,12 @@ export type PropertySettingsPatch = {
   reason: string
   profile?: Partial<ServerPropertyProfile>
   fees?: Partial<ServerPropertySettings['fees']>
+  policies?: ServerPropertyPolicies
+  operationalSettings?: Partial<{
+    operations: ServerOperationsSettings
+    accounting: ServerAccountingSettings
+    paymentMethods: ServerPaymentSettings
+  }>
 }
 
 export type TaxSettingsWrite = {

@@ -10,7 +10,12 @@ const projectRoot = process.env.PROJECT_ROOT || import.meta.dirname
 const sparkVitePort = Number(process.env.SPARK_VITE_PORT || 5000)
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  if (mode === 'production' && process.env.VITE_DATA_MODE === 'demo') {
+    throw new Error('Production builds cannot use VITE_DATA_MODE=demo. Use the authenticated server data mode.')
+  }
+
+  return {
   plugins: [
     react(),
     tailwindcss(),
@@ -35,4 +40,5 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:10000',
     },
   },
+  }
 });
