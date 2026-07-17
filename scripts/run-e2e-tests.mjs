@@ -337,7 +337,10 @@ async function waitVisible(locator, label) {
 
 async function smokeAuthenticatedRoute(page, baseUrl, path) {
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+  await page.waitForFunction(() => {
+    const text = document.body.innerText.trim()
+    return text !== '' && !text.includes('Loading PMS workspace')
+  }, null, { timeout: 20_000 })
 
   const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
   assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
@@ -348,7 +351,10 @@ async function smokeAuthenticatedRoute(page, baseUrl, path) {
 
 async function assertProtectedRouteAccess(page, baseUrl, path, expectedAccess) {
   await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => !document.body.innerText.includes('Loading PMS workspace'), null, { timeout: 20_000 })
+  await page.waitForFunction(() => {
+    const text = document.body.innerText.trim()
+    return text !== '' && !text.includes('Loading PMS workspace')
+  }, null, { timeout: 20_000 })
   const bodyText = await page.locator('body').innerText({ timeout: 5_000 })
   assert.notEqual(bodyText.trim(), '', `${path} rendered a blank body`)
   assert.equal(bodyText.includes('Something went wrong'), false, `${path} rendered the error boundary`)
