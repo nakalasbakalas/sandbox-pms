@@ -242,7 +242,7 @@ async function availablePort() {
 }
 
 function startVite(port) {
-  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort', '--force']
+  const args = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
   const child = process.platform === 'win32'
     ? spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', [npm, ...args].join(' ')], {
       cwd: repoRoot,
