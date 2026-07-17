@@ -6,7 +6,9 @@ import { requirePermission } from '../server/rbac.mjs'
 import { resolveRequestContext } from '../server/request-context.mjs'
 import { listDomainEvents, recordDomainEvent } from '../server/domain-events.mjs'
 import {
+  createCharge,
   createPayment,
+  createReservation,
   getBookingEmailEvent,
   listGuests,
   updateHousekeepingStatus,
@@ -235,6 +237,15 @@ try {
   const reservationB = await createReservationFixture(fixtureB, 'B')
   const actorA = actorFrom(contextA)
   const actorB = actorFrom(contextB)
+  const sourceEventB = await prisma.bookingEmailEvent.create({
+    data: {
+      propertyId: fixtureB.property.id,
+      sender: `foreign-source-${runId}@example.test`,
+      receivedAt: new Date(),
+      subject: `Foreign property source ${runId}`,
+      rawText: 'Property-isolation fixture. No guest data.',
+    },
+  })
 
   const guestsA = await listGuests(prisma, actorA)
   assert.ok(guestsA.some((guest) => guest.id === reservationA.guest.id))
@@ -253,6 +264,74 @@ try {
     createPayment(prisma, { folioId: reservationB.folio.id, amountSatang: '100', method: 'CASH', idempotencyKey: `foreign-${runId}` }, actorA),
     (error) => error?.statusCode === 404,
     'forged folio id from another property is rejected',
+  )
+  await assert.rejects(
+    createPayment(prisma, { folioId: reservationA.folio.id, amountSatang: '100', method: 'CASH' }, actorA),
+    (error) => error?.statusCode === 400 && /idempotency key is required/.test(error.message),
+    'payment writes require an explicit idempotency key',
+  )
+  await assert.rejects(
+    createPayment(prisma, {
+      folioId: reservationA.folio.id,
+      amountSatang: '100',
+      method: 'CASH',
+      idempotencyKey: `foreign-source-payment-${runId}`,
+      sourceEmailEventId: sourceEventB.id,
+    }, actorA),
+    (error) => error?.statusCode === 404 && /active property/.test(error.message),
+    'payments cannot link booking-email evidence from another property',
+  )
+  await assert.rejects(
+    createCharge(prisma, {
+      folioId: reservationA.folio.id,
+      amountSatang: '100',
+      quantity: 1,
+      category: 'OTHER',
+      description: 'Foreign source-link rejection fixture',
+      sourceEmailEventId: sourceEventB.id,
+    }, actorA),
+    (error) => error?.statusCode === 404 && /active property/.test(error.message),
+    'charges cannot link booking-email evidence from another property',
+  )
+  await assert.rejects(
+    updateReservation(prisma, reservationA.reservation.id, { sourceEmailEventId: sourceEventB.id }, actorA),
+    (error) => error?.statusCode === 404 && /active property/.test(error.message),
+    'reservation updates cannot link booking-email evidence from another property',
+  )
+  await assert.rejects(
+    createReservation(prisma, {
+      guest: { firstName: 'Foreign', lastName: 'Source' },
+      roomTypeCode: fixtureA.roomType.code,
+      checkIn: '2033-01-01',
+      checkOut: '2033-01-02',
+      adults: 1,
+      children: 0,
+      ratePerNight: 1_000,
+      sourceEmailEventId: sourceEventB.id,
+    }, actorA),
+    (error) => error?.statusCode === 404 && /active property/.test(error.message),
+    'reservation creation cannot link booking-email evidence from another property',
+  )
+
+  const auditCountBeforeRejectedPatch = await prisma.auditLog.count({ where: { entityId: reservationA.reservation.id } })
+  const historyCountBeforeRejectedPatch = await prisma.reservationLog.count({ where: { reservationId: reservationA.reservation.id } })
+  const credentialMarker = `must-not-persist-${runId}`
+  await assert.rejects(
+    updateReservation(prisma, reservationA.reservation.id, { password: credentialMarker }, actorA),
+    (error) => error?.statusCode === 400
+      && error.message === 'Reservation update contains unsupported fields.'
+      && !error.message.includes(credentialMarker),
+    'reservation PATCH rejects unknown credential-shaped fields with a redacted error',
+  )
+  assert.equal(
+    await prisma.auditLog.count({ where: { entityId: reservationA.reservation.id } }),
+    auditCountBeforeRejectedPatch,
+    'rejected reservation fields create no audit row containing raw input',
+  )
+  assert.equal(
+    await prisma.reservationLog.count({ where: { reservationId: reservationA.reservation.id } }),
+    historyCountBeforeRejectedPatch,
+    'rejected reservation fields create no history row containing raw input',
   )
   await assert.rejects(
     getBookingEmailEvent(prisma, `foreign-event-${runId}`, actorA),

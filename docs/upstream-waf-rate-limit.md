@@ -28,6 +28,8 @@ Run proof:
 npm.cmd run cloudflare:waf:proof -- --env-file .\.codex\cloudflare-waf.local.env --hostname book.sandboxhotel.com --probe-url https://book.sandboxhotel.com/.env --require-rules
 ```
 
+`--require-rules` requires an enabled rate-limit rule whose expression covers both the target hostname and `/api/auth/login`. Unrelated hostname-covered WAF rules do not satisfy the login protection gate.
+
 Minimum token capability for proof: Cloudflare zone/rulesets/WAF read access for the zone that owns `book.sandboxhotel.com`; zone read access is needed if `CLOUDFLARE_ZONE_ID` is omitted and the helper must discover the zone ID. Write access is only needed if the owner chooses to create or change zone-level rules in Cloudflare outside this read-only proof command. Do not use account-level WAF for the Free-plan path.
 
 ## Owner-Run Rule Ensure

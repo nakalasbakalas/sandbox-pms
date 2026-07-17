@@ -1,7 +1,21 @@
 -- Attach legacy guest, payment, and audit records to their owning property.
 -- Existing installations contain a single SANDBOX property, but reservation/folio
 -- joins are preferred so the backfill remains correct for pre-existing test data.
+BEGIN;
+
 ALTER TABLE "Guest" ADD COLUMN "propertyId" TEXT;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT r."guestId"
+    FROM "Reservation" r
+    GROUP BY r."guestId"
+    HAVING COUNT(DISTINCT r."propertyId") > 1
+  ) THEN
+    RAISE EXCEPTION 'Cannot property-scope Guest rows: one or more guests are linked to reservations in multiple properties; quarantine and reconcile those guests before retrying';
+  END IF;
+END $$;
 
 UPDATE "Guest" g
 SET "propertyId" = owner."propertyId"
@@ -54,6 +68,19 @@ ALTER TABLE "Payment" ADD CONSTRAINT "Payment_propertyId_fkey"
 
 ALTER TABLE "AuditLog" ADD COLUMN "propertyId" TEXT;
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT a."userId"
+    FROM "AuditLog" a
+    JOIN "UserPropertyMembership" m ON m."userId" = a."userId" AND m."active" = true
+    GROUP BY a."userId"
+    HAVING COUNT(DISTINCT m."propertyId") > 1
+  ) THEN
+    RAISE EXCEPTION 'Cannot property-scope AuditLog rows: one or more audit actors have active memberships in multiple properties; quarantine and reconcile those audit rows before retrying';
+  END IF;
+END $$;
+
 UPDATE "AuditLog" a
 SET "propertyId" = membership."propertyId"
 FROM (
@@ -80,3 +107,5 @@ ALTER TABLE "AuditLog" ALTER COLUMN "propertyId" SET NOT NULL;
 CREATE INDEX "AuditLog_propertyId_createdAt_idx" ON "AuditLog"("propertyId", "createdAt");
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_propertyId_fkey"
   FOREIGN KEY ("propertyId") REFERENCES "Property"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+COMMIT;

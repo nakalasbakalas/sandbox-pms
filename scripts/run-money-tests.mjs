@@ -56,6 +56,11 @@ function paymentFixture({ status = 'OPEN', balanceSatang = 10_000n, failSerializ
         ? { id: 'property-1', code: 'SANDBOX' }
         : null,
     },
+    bookingEmailEvent: {
+      findFirst: async ({ where }) => where.id === 'source-event-1' && where.propertyId === 'property-1'
+        ? { id: 'source-event-1' }
+        : null,
+    },
     folio: {
       findUnique: async ({ where }) => where.id === folio.id ? { ...folio } : null,
       findFirst: async ({ where }) => where.id === folio.id && where.reservation?.propertyId === folio.reservation.propertyId
@@ -148,20 +153,38 @@ await assert.rejects(
   (error) => error?.statusCode === 409 && /different payment/.test(error.message),
 )
 
+await assert.rejects(
+  createPayment(paymentFixture().prisma, { folioId: 'folio-1', amount: 1, method: 'CASH' }, { id: 'cashier-1' }),
+  /idempotency key is required/,
+  'payment writes reject requests without an idempotency key',
+)
+
+await assert.rejects(
+  createPayment(paymentFixture().prisma, {
+    folioId: 'folio-1',
+    amount: 1,
+    method: 'CASH',
+    idempotencyKey: 'foreign-email-event-attempt',
+    sourceEmailEventId: 'source-event-from-another-property',
+  }, { id: 'cashier-1' }),
+  (error) => error?.statusCode === 404 && /active property/.test(error.message),
+  'payment writes reject booking-email links outside the active property',
+)
+
 const closedFixture = paymentFixture({ status: 'CLOSED', balanceSatang: 0n })
 await assert.rejects(
-  createPayment(closedFixture.prisma, { folioId: 'folio-1', amount: 1, method: 'CASH', allowOverpayment: true }, { id: 'cashier-1' }),
+  createPayment(closedFixture.prisma, { folioId: 'folio-1', amount: 1, method: 'CASH', allowOverpayment: true, idempotencyKey: 'closed-folio-attempt' }, { id: 'cashier-1' }),
   (error) => error?.statusCode === 409 && /open folio/.test(error.message),
 )
 
 const overpaymentFixture = paymentFixture({ balanceSatang: 500n })
 await assert.rejects(
-  createPayment(overpaymentFixture.prisma, { folioId: 'folio-1', amount: 5.01, method: 'CASH' }, { id: 'cashier-1' }),
+  createPayment(overpaymentFixture.prisma, { folioId: 'folio-1', amount: 5.01, method: 'CASH', idempotencyKey: 'overpayment-attempt' }, { id: 'cashier-1' }),
   /cannot exceed the remaining balance/,
 )
 
 const retryFixture = paymentFixture({ failSerializableOnce: true })
-await createPayment(retryFixture.prisma, { folioId: 'folio-1', amount: 1, method: 'CASH' }, { id: 'cashier-1' })
+await createPayment(retryFixture.prisma, { folioId: 'folio-1', amount: 1, method: 'CASH', idempotencyKey: 'serialization-retry-attempt' }, { id: 'cashier-1' })
 assert.equal(retryFixture.transactionAttempts(), 2, 'serialization conflicts are retried once')
 
 console.log('Exact-money and payment-safety tests passed.')

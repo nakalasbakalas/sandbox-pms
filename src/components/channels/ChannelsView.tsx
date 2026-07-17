@@ -61,6 +61,7 @@ interface Channel {
     lastExportAt?: string
     lastPublishedAt?: string
     exportTokenIssuedAt?: string
+    exportTokenConfigured?: boolean
     lastError?: string
   }
   credentials?: {
@@ -121,6 +122,7 @@ interface ServerIcalChannel {
   exportFeedUrl?: string
   lastPublishedAt?: string
   exportTokenIssuedAt?: string
+  exportTokenConfigured?: boolean
 }
 
 interface RoomTypeOption {
@@ -161,6 +163,10 @@ function externalIdFromName(value: string) {
 
 function sortByRoomNumber(a: RoomOption, b: RoomOption) {
   return a.number.localeCompare(b.number, undefined, { numeric: true })
+}
+
+function redactStoredIcalBearer(value?: string) {
+  return value?.replace(/(\/ical\/)[a-zA-Z0-9_-]{16,200}(\.ics)/g, '$1[REDACTED]$2')
 }
 
 export function ChannelsView() {
@@ -227,6 +233,7 @@ export function ChannelsView() {
   const [showConnectDialog, setShowConnectDialog] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [publishingFeedId, setPublishingFeedId] = useState<string | null>(null)
+  const [issuedFeedUrls, setIssuedFeedUrls] = useState<Partial<Record<Channel['provider'], string>>>({})
 
   const [importUrl, setImportUrl] = useState('')
   const [icalText, setIcalText] = useState('')
@@ -238,6 +245,19 @@ export function ChannelsView() {
     }
     setDemoChannelMappings((current) => typeof updater === 'function' ? updater(current || []) : updater)
   }
+
+  useEffect(() => {
+    if (!SERVER_API_ENABLED) return
+    setChannels((current) => current.map((channel) => ({
+      ...channel,
+      iCal: channel.iCal ? { ...channel.iCal, exportFeedUrl: undefined } : channel.iCal,
+    })))
+    setSyncLogs((current) => current.map((entry) => ({
+      ...entry,
+      message: redactStoredIcalBearer(entry.message) || entry.message,
+      details: redactStoredIcalBearer(entry.details),
+    })))
+  }, [setChannels, setSyncLogs])
 
   const effectiveRoomTypes = useMemo(() => {
     return roomTypes.length > 0 ? roomTypes : setupRoomTypes
@@ -289,6 +309,7 @@ export function ChannelsView() {
   }
 
   const providerPath = (provider: Channel['provider']) => provider.toLowerCase().replaceAll('_', '-')
+  const issuedFeedUrlFor = (channel: Channel) => issuedFeedUrls[channel.provider]
 
   const mergeServerIcalChannels = useCallback((serverChannels: ServerIcalChannel[]) => {
     setChannels((current) => current.map((channel) => {
@@ -306,9 +327,10 @@ export function ChannelsView() {
           ...channel.iCal,
           importUrl: serverChannel.importUrl || channel.iCal?.importUrl,
           exportFileName: serverChannel.exportFileName || channel.iCal?.exportFileName,
-          exportFeedUrl: serverChannel.exportFeedUrl || channel.iCal?.exportFeedUrl,
+          exportFeedUrl: SERVER_API_ENABLED ? undefined : channel.iCal?.exportFeedUrl,
           lastPublishedAt: serverChannel.lastPublishedAt || channel.iCal?.lastPublishedAt,
           exportTokenIssuedAt: serverChannel.exportTokenIssuedAt || channel.iCal?.exportTokenIssuedAt,
+          exportTokenConfigured: serverChannel.exportTokenConfigured,
         }
       }
     }))
@@ -534,6 +556,9 @@ export function ChannelsView() {
 
     const publishedAt = payload.data.lastPublishedAt || new Date().toISOString()
     mergeServerIcalChannels([payload.data])
+    if (payload.data.exportFeedUrl) {
+      setIssuedFeedUrls((current) => ({ ...current, [channel.provider]: payload.data.exportFeedUrl }))
+    }
     setSyncLogs((current) => [{
       id: `log_${Date.now()}`,
       channelId: channel.id,
@@ -542,7 +567,7 @@ export function ChannelsView() {
       status: 'SUCCESS',
       message: `${channel.name} hosted iCal URL published`,
       details: payload.data.exportFeedUrl
-        ? `OTA subscription URL is ready: ${payload.data.exportFeedUrl}`
+        ? 'A new OTA subscription URL was issued for one-time copy in this browser session.'
         : 'Hosted feed was saved but the URL was not returned by the server.',
     }, ...current])
 
@@ -560,8 +585,8 @@ export function ChannelsView() {
     setPublishingFeedId(channel.id)
     try {
       const published = await publishServerIcalFeed(channel, { rotateToken })
-      toast.success(`${channel.name} iCal URL ${rotateToken ? 'rotated' : 'published'}`, {
-        description: published.exportFeedUrl || 'The hosted feed is ready for your OTA or channel manager.',
+      toast.success(`${channel.name} iCal feed ${rotateToken ? 'rotated' : 'saved'}`, {
+        description: published.exportFeedUrl || 'No token was exposed. Rotate the feed token to issue a new copyable URL.',
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Hosted iCal feed could not be published.'
@@ -581,7 +606,7 @@ export function ChannelsView() {
   }
 
   const handleCopyIcalFeedUrl = async (channel: Channel) => {
-    const url = channel.iCal?.exportFeedUrl
+    const url = issuedFeedUrlFor(channel)
     if (!url) return
     await navigator.clipboard.writeText(url)
     toast.success(`${channel.name} iCal URL copied`)
@@ -707,6 +732,11 @@ export function ChannelsView() {
     if (SERVER_API_ENABLED) {
       try {
         await pmsApi(`/api/channels/ical/${providerPath(channel.provider)}`, undefined, { method: 'DELETE' })
+        setIssuedFeedUrls((current) => {
+          const next = { ...current }
+          delete next[channel.provider]
+          return next
+        })
         setChannels((current) => current.map((candidate) => candidate.id === channelId
           ? { ...candidate, serverId: undefined, connected: false, enabled: false, status: 'DISCONNECTED', iCal: undefined }
           : candidate))
@@ -1327,7 +1357,7 @@ export function ChannelsView() {
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground mb-1">Export feed</p>
-                            <p className="text-xl font-bold">{channel.iCal?.exportFeedUrl ? 'Live' : SERVER_API_ENABLED ? 'Draft' : 'File'}</p>
+                            <p className="text-xl font-bold">{issuedFeedUrlFor(channel) ? 'Issued' : channel.iCal?.exportTokenConfigured ? 'Configured' : SERVER_API_ENABLED ? 'Draft' : 'File'}</p>
                           </div>
                         </div>
 
@@ -1340,8 +1370,10 @@ export function ChannelsView() {
                             <div>
                               <p className="text-sm font-medium">Hosted export feed</p>
                               <p className="text-xs text-muted-foreground">
-                                {channel.iCal?.exportFeedUrl
-                                  ? 'Copy this URL into the OTA or channel manager calendar import.'
+                                {issuedFeedUrlFor(channel)
+                                  ? 'Copy this newly issued URL now. It will not be shown again after this session.'
+                                  : channel.iCal?.exportTokenConfigured
+                                    ? 'A hashed feed token is configured. Rotate it to issue a new copyable URL.'
                                   : SERVER_API_ENABLED
                                     ? 'Publish the server feed URL before adding this channel to an OTA.'
                                     : 'Available after deployment in server mode; local preview can download .ics files.'}
@@ -1353,11 +1385,11 @@ export function ChannelsView() {
                               </Badge>
                             )}
                           </div>
-                          {channel.iCal?.exportFeedUrl && (
+                          {issuedFeedUrlFor(channel) && (
                             <div className="mt-3 flex gap-2">
                               <Input
                                 readOnly
-                                value={channel.iCal.exportFeedUrl}
+                                value={issuedFeedUrlFor(channel) || ''}
                                 className="h-8 text-xs"
                               />
                               <Button size="sm" variant="outline" onClick={() => handleCopyIcalFeedUrl(channel)}>

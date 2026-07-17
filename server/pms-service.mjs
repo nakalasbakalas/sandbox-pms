@@ -83,9 +83,38 @@ function normalizePaymentReferenceFingerprint(method, reference) {
 
 function normalizePaymentIdempotencyKey(value) {
   const key = normalizeNullableString(value)
-  if (!key) return null
+  if (!key) throw new PmsValidationError('Payment idempotency key is required.')
   if (key.length > 200) throw new PmsValidationError('Payment idempotency key must be 200 characters or fewer.')
   return key
+}
+
+const RESERVATION_UPDATE_FIELDS = new Set([
+  'roomTypeCode',
+  'roomType',
+  'checkIn',
+  'checkOut',
+  'ratePerNight',
+  'adults',
+  'children',
+  'childAges',
+  'source',
+  'channelRef',
+  'sourceEmailEventId',
+  'notes',
+  'specialRequests',
+])
+
+const CREDENTIAL_FIELD_PATTERN = /(authorization|credential|password|secret|token|api[_-]?key|private[_-]?key|session|cookie)/i
+
+function validateReservationUpdateInput(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new PmsValidationError('Reservation update must be an object.')
+  }
+  const keys = Object.keys(value)
+  if (keys.some((key) => !RESERVATION_UPDATE_FIELDS.has(key) || CREDENTIAL_FIELD_PATTERN.test(key))) {
+    throw new PmsValidationError('Reservation update contains unsupported fields.')
+  }
+  return Object.fromEntries(keys.map((key) => [key, value[key]]))
 }
 
 function requiredMoneyInput(input, legacyField = 'amount', satangField = `${legacyField}Satang`) {
@@ -1301,6 +1330,7 @@ async function approvePaymentEmailEvent(tx, event, details, actor, reservationId
     amount,
     method: details.paymentMethod || 'ONLINE',
     reference,
+    idempotencyKey: `booking-email-payment:${event.propertyId}:${event.id}`,
     notes: `Payment notice from booking email event ${event.id}`,
     sourceEmailEventId: event.id,
     allowOverpayment: Boolean(details.allowOverpayment),
@@ -1603,6 +1633,7 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   }
   const sourceEmailEventId = normalizeNullableString(input.sourceEmailEventId)
   if (sourceEmailEventId) {
+    await validateSourceEmailEventId(tx, property.id, sourceEmailEventId)
     const duplicateSourcePayment = await tx.payment.findUnique({ where: { sourceEmailEventId } })
     if (duplicateSourcePayment) {
       throw new PmsValidationError('This booking email has already created a payment.', 409)
@@ -1634,6 +1665,19 @@ async function recordPaymentInTransaction(tx, folioId, input, actor) {
   })
   await emitOperationalEvent(tx, property.id, 'PAYMENT_CREATED', 'payment', payment.id, actor, { folioId: folio.id })
   return { payment, folio: updatedFolio }
+}
+
+async function validateSourceEmailEventId(tx, propertyId, value) {
+  const sourceEmailEventId = normalizeNullableString(value)
+  if (!sourceEmailEventId) return null
+  const sourceEmailEvent = await tx.bookingEmailEvent.findFirst({
+    where: { id: sourceEmailEventId, propertyId },
+    select: { id: true },
+  })
+  if (!sourceEmailEvent) {
+    throw new PmsValidationError('Booking email event was not found for the active property.', 404)
+  }
+  return sourceEmailEvent.id
 }
 
 async function emitOperationalEvent(tx, propertyId, eventType, aggregateType, aggregateId, actor, metadata = undefined) {
@@ -1975,6 +2019,7 @@ export async function listReservations(prisma, actor) {
 }
 
 export async function updateReservation(prisma, reservationId, input, actor) {
+  const update = validateReservationUpdateInput(input)
   return prisma.$transaction(async (tx) => {
     const property = await getProperty(tx, actor)
     const current = await tx.reservation.findFirst({
@@ -1988,11 +2033,11 @@ export async function updateReservation(prisma, reservationId, input, actor) {
 
     let roomTypeId = current.roomTypeId
     let pricingRoomType = current.roomType
-    if (input.roomTypeCode || input.roomType) {
+    if (update.roomTypeCode || update.roomType) {
       const roomType = await tx.roomType.findFirst({
         where: {
           propertyId: property.id,
-          code: input.roomTypeCode || input.roomType,
+          code: update.roomTypeCode || update.roomType,
         },
       })
       if (!roomType) throw new PmsValidationError('Selected room type was not found.')
@@ -2000,12 +2045,12 @@ export async function updateReservation(prisma, reservationId, input, actor) {
       pricingRoomType = roomType
     }
 
-    const checkIn = input.checkIn ?? current.checkIn
-    const checkOut = input.checkOut ?? current.checkOut
-    const ratePerNight = input.ratePerNight ?? current.ratePerNight
-    const adults = input.adults ?? current.adults
-    const children = input.children ?? current.children
-    const childAges = input.childAges ?? current.childAges
+    const checkIn = update.checkIn ?? current.checkIn
+    const checkOut = update.checkOut ?? current.checkOut
+    const ratePerNight = update.ratePerNight ?? current.ratePerNight
+    const adults = update.adults ?? current.adults
+    const children = update.children ?? current.children
+    const childAges = update.childAges ?? current.childAges
     const { checkInKey, checkOutKey } = validateStayInput({ checkIn, checkOut })
     const pricing = calculateStayPricing({
       checkIn,
@@ -2029,6 +2074,9 @@ export async function updateReservation(prisma, reservationId, input, actor) {
       }
     }
 
+    const sourceEmailEventId = update.sourceEmailEventId === undefined
+      ? current.sourceEmailEventId
+      : await validateSourceEmailEventId(tx, property.id, update.sourceEmailEventId)
     const updated = await tx.reservation.update({
       where: { id: current.id },
       data: {
@@ -2042,11 +2090,11 @@ export async function updateReservation(prisma, reservationId, input, actor) {
         ...moneyDataFromBaht('ratePerNight', 'ratePerNightSatang', Number(ratePerNight)),
         ...moneyDataFromBaht('totalAmount', 'totalAmountSatang', pricing.total),
         ...moneyDataFromBaht('depositAmount', 'depositAmountSatang', roundMoney(pricing.total * 0.3)),
-        source: input.source || current.source,
-        channelRef: input.channelRef ?? current.channelRef,
-        sourceEmailEventId: input.sourceEmailEventId === undefined ? current.sourceEmailEventId : normalizeNullableString(input.sourceEmailEventId),
-        notes: input.notes ?? current.notes,
-        specialRequests: input.specialRequests ?? current.specialRequests,
+        source: update.source || current.source,
+        channelRef: update.channelRef ?? current.channelRef,
+        sourceEmailEventId,
+        notes: update.notes ?? current.notes,
+        specialRequests: update.specialRequests ?? current.specialRequests,
       },
       include: reservationInclude,
     })
@@ -2076,8 +2124,8 @@ export async function updateReservation(prisma, reservationId, input, actor) {
       await recomputeFolio(tx, current.folio.id)
     }
 
-    await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: input })
-    await createAudit(tx, actor, 'MODIFIED', 'reservation', current.id, input)
+    await createReservationLog(tx, current.id, 'MODIFIED', actor, { changes: update })
+    await createAudit(tx, actor, 'MODIFIED', 'reservation', current.id, update)
     await emitOperationalEvent(tx, current.propertyId, 'RESERVATION_UPDATED', 'reservation', current.id, actor)
     return updated
   })
@@ -2349,6 +2397,7 @@ export async function listGuests(prisma, actor) {
 async function createReservationInTransaction(tx, input, actor) {
     const property = await getProperty(tx, actor)
     const { checkInKey, checkOutKey } = validateStayInput(input)
+    const sourceEmailEventId = await validateSourceEmailEventId(tx, property.id, input.sourceEmailEventId)
 
     const roomType = await tx.roomType.findFirst({
       where: {
@@ -2385,7 +2434,7 @@ async function createReservationInTransaction(tx, input, actor) {
         depositPaid: false,
         source: input.source || 'DIRECT',
         channelRef: input.channelRef || null,
-        sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
+        sourceEmailEventId,
         notes: input.notes || null,
         specialRequests: input.specialRequests || null,
       },
@@ -3409,6 +3458,7 @@ export async function createCharge(prisma, input, actor) {
     if (amountSatang <= 0n) throw new PmsValidationError('Charge amount must be greater than zero.')
     if (!Number.isInteger(quantity) || quantity < 1) throw new PmsValidationError('Charge quantity must be at least 1.')
     const totalSatang = amountSatang * BigInt(quantity)
+    const sourceEmailEventId = await validateSourceEmailEventId(tx, property.id, input.sourceEmailEventId)
 
     const charge = await tx.charge.create({
       data: {
@@ -3419,7 +3469,7 @@ export async function createCharge(prisma, input, actor) {
         ...dualWriteMoney('amount', 'amountSatang', amountSatang),
         quantity,
         ...dualWriteMoney('total', 'totalSatang', totalSatang),
-        sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
+        sourceEmailEventId,
         createdBy: actorName(actor),
       },
     })
@@ -3430,7 +3480,7 @@ export async function createCharge(prisma, input, actor) {
       amountSatang: satangToApiString(amountSatang),
       quantity,
       category,
-      sourceEmailEventId: normalizeNullableString(input.sourceEmailEventId),
+      sourceEmailEventId,
     })
     await emitOperationalEvent(tx, property.id, 'CHARGE_CREATED', 'charge', charge.id, actor, { folioId: folio.id })
     return { charge, folio: updatedFolio }

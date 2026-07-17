@@ -28,7 +28,7 @@ import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixture
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
-import { assertCloudflareWafProofRequirements, buildCloudflareWafProof, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { assertCloudflareWafProofRequirements, buildCloudflareWafProof, isCloudflareWafProofReady, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
 import { ensureSandboxCloudflareWafRules, sandboxCloudflareWafDesiredRules } from './ensure-cloudflare-waf-rules.mjs'
 
 const databaseFailure = databaseHealthFailure(new Error('postgresql://user:secret@database.internal/prod'))
@@ -989,7 +989,7 @@ const cloudflareAccountInspectionFailureProof = await runWithMockedCloudflareFet
             ref: 'sandbox_pms_login_rate_limit',
             action: 'block',
             enabled: true,
-            expression: '(http.host eq "book.sandboxhotel.com" and http.request.method eq "POST")',
+            expression: '(http.host eq "book.sandboxhotel.com" and http.request.method eq "POST" and http.request.uri.path eq "/api/auth/login")',
             ratelimit: {
               period: 10,
               requests_per_period: 10,
@@ -1021,6 +1021,68 @@ assert.throws(
   () => assertCloudflareWafProofRequirements({ proof: cloudflareAccountInspectionFailureProof }),
   /Account-level inspection was requested but could not be completed/,
   'Cloudflare WAF proof requires owner review and --require-rules throws on requested account inspection failure',
+)
+assert.equal(cloudflareAccountInspectionFailureProof.summary.loginRateLimitRulesCount, 1, 'Cloudflare WAF proof counts an enabled login rate-limit rule')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.targetHostnameCoveredLoginRateLimitRules, 1, 'Cloudflare WAF proof counts login rate-limit hostname coverage')
+assert.equal(isCloudflareWafProofReady({
+  ...cloudflareAccountInspectionFailureProof.summary,
+  accountInspectionRequested: false,
+  accountInspectionInspected: false,
+}), true, 'Cloudflare WAF proof is ready when an enabled login rate-limit rule covers the target hostname')
+
+const cloudflareUnrelatedWafOnlyProof = await runWithMockedCloudflareFetch(async (url) => {
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  if (normalized === '/zones/zone-unrelated-waf-fixture') {
+    return cloudflareJsonResponse(200, { result: { id: 'zone-unrelated-waf-fixture', name: 'book.sandboxhotel.com', status: 'active' } })
+  }
+  if (normalized === '/zones/zone-unrelated-waf-fixture/rulesets') {
+    return cloudflareJsonResponse(200, {
+      result: [{ id: 'unrelated-waf-ruleset', phase: 'http_request_firewall_custom' }],
+    })
+  }
+  if (normalized === '/zones/zone-unrelated-waf-fixture/rulesets/unrelated-waf-ruleset') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'unrelated-waf-ruleset',
+        name: 'Unrelated hostname-covered WAF rule',
+        phase: 'http_request_firewall_custom',
+        rules: [
+          {
+            id: 'unrelated-waf-rule',
+            ref: 'sandbox_pms_common_probe_block',
+            action: 'block',
+            enabled: true,
+            expression: '(http.host eq "book.sandboxhotel.com" and http.request.uri.path eq "/.env")',
+          },
+        ],
+      },
+    })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => buildCloudflareWafProof({
+  token: 'token-fixture',
+  targetZoneId: 'zone-unrelated-waf-fixture',
+  targetHostname: 'book.sandboxhotel.com',
+}))
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.rulesCount, 1, 'Cloudflare WAF proof sees unrelated WAF rules')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.targetHostnameCoveredRules, 1, 'Cloudflare WAF proof sees unrelated hostname coverage')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.loginRateLimitRulesCount, 0, 'Cloudflare WAF proof does not mistake unrelated WAF coverage for a login rate-limit rule')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.targetHostnameCoveredLoginRateLimitRules, 0, 'Cloudflare WAF proof reports zero required login rate-limit hostname coverage')
+assert.equal(cloudflareUnrelatedWafOnlyProof.summary.requireOwnerReview, true, 'Cloudflare WAF proof remains incomplete without the required login rate-limit rule')
+assert.throws(
+  () => assertCloudflareWafProofRequirements({ proof: cloudflareUnrelatedWafOnlyProof }),
+  /enabled login rate-limit rule covering the required hostname was not found/,
+  'Cloudflare WAF --require-rules fails when only unrelated hostname-covered WAF rules exist',
+)
+assert.throws(
+  () => assertCloudflareWafProofRequirements({
+    proof: {
+      ...cloudflareUnrelatedWafOnlyProof,
+      summary: { ...cloudflareUnrelatedWafOnlyProof.summary, requireOwnerReview: false },
+    },
+  }),
+  /enabled login rate-limit rule covering the required hostname was not found/,
+  'Cloudflare WAF --require-rules independently enforces login rate-limit count and coverage',
 )
 
 const cloudflareEnsureAmbiguousDescriptionLog = []

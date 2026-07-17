@@ -76,12 +76,18 @@ function isCloudflareWafProofAccountInspected({
 function evaluateCloudflareWafProofReadiness({
   rulesCount,
   targetHostnameCoveredRules,
+  enabledRateLimitRulesCount,
+  loginRateLimitRulesCount,
+  targetHostnameCoveredLoginRateLimitRules,
   accountInspectionRequested = false,
   accountInspectionInspected = false,
 }) {
   return !(
     rulesCount === 0
     || targetHostnameCoveredRules === 0
+    || !(enabledRateLimitRulesCount > 0)
+    || !(loginRateLimitRulesCount > 0)
+    || !(targetHostnameCoveredLoginRateLimitRules > 0)
     || (accountInspectionRequested && !accountInspectionInspected)
   )
 }
@@ -89,14 +95,18 @@ function evaluateCloudflareWafProofReadiness({
 export function isCloudflareWafProofReady({
   rulesCount,
   targetHostnameCoveredRules,
-  rateLimitRulesCount,
+  enabledRateLimitRulesCount,
+  loginRateLimitRulesCount,
+  targetHostnameCoveredLoginRateLimitRules,
   accountInspectionRequested = false,
   accountInspectionInspected = false,
 }) {
   return evaluateCloudflareWafProofReadiness({
     rulesCount,
     targetHostnameCoveredRules,
-    rateLimitRulesCount,
+    enabledRateLimitRulesCount,
+    loginRateLimitRulesCount,
+    targetHostnameCoveredLoginRateLimitRules,
     accountInspectionRequested,
     accountInspectionInspected,
   })
@@ -106,10 +116,28 @@ export function assertCloudflareWafProofRequirements({ proof }) {
   if (!proof?.summary) {
     throw new Error('Cloudflare WAF proof output is missing summary metadata.')
   }
-  if (!proof.summary.requireOwnerReview) return
-  const reason = proof.summary.accountInspectionRequested && !proof.summary.accountInspectionInspected
-    ? 'Account-level inspection was requested but could not be completed.'
-    : 'Required hostname-covered WAF coverage and rate-limit rule metadata were not found.'
+  const accountInspectionIncomplete = proof.summary.accountInspectionRequested && !proof.summary.accountInspectionInspected
+  const loginRateLimitIncomplete = (
+    !(proof.summary.loginRateLimitRulesCount > 0)
+    || !(proof.summary.targetHostnameCoveredLoginRateLimitRules > 0)
+  )
+  const generalRuleCoverageIncomplete = (
+    !(proof.summary.rulesCount > 0)
+    || !(proof.summary.targetHostnameCoveredRules > 0)
+    || !(proof.summary.enabledRateLimitRulesCount > 0)
+  )
+  if (
+    !proof.summary.requireOwnerReview
+    && !accountInspectionIncomplete
+    && !loginRateLimitIncomplete
+    && !generalRuleCoverageIncomplete
+  ) return
+  let reason = 'Required hostname-covered WAF coverage and rate-limit rule metadata were not found.'
+  if (accountInspectionIncomplete) {
+    reason = 'Account-level inspection was requested but could not be completed.'
+  } else if (loginRateLimitIncomplete) {
+    reason = 'An enabled login rate-limit rule covering the required hostname was not found.'
+  }
   throw new Error(`Cloudflare WAF/rate-limit proof is incomplete. ${reason}`)
 }
 
@@ -221,7 +249,7 @@ Optional:
   --init-env-template [path]       Create a local env template. Default: ${DEFAULT_ENV_TEMPLATE_PATH}
   --probe-url <https_url>         Run a bounded unauthenticated GET probe and omit response body.
   --probe-count <0-5>             Number of times to request --probe-url. Default: 1 when probe-url is set.
-  --require-rules                 Exit non-zero if no WAF/rate-limit rules are found.
+  --require-rules                 Exit non-zero unless an enabled login rate-limit rule covers the target hostname.
   --use-env-account-id            Inspect account-level WAF/rate-limit rulesets using CLOUDFLARE_ACCOUNT_ID/CF_ACCOUNT_ID from the environment.
 `
 }
@@ -301,6 +329,7 @@ function summarizeRatelimit(value) {
 
 function summarizeRule(rule = {}, { targetHostname, includeExpressions = false } = {}) {
   const coverage = hostnameCoverage(rule.expression, targetHostname)
+  const loginEndpointCovered = String(rule.expression || '').toLowerCase().includes('/api/auth/login')
   return {
     id: rule.id || null,
     ref: rule.ref || null,
@@ -310,6 +339,7 @@ function summarizeRule(rule = {}, { targetHostname, includeExpressions = false }
     targetHostnameCovered: coverage.targetHostnameCovered,
     coverageScope: coverage.scope,
     ratelimit: summarizeRatelimit(rule.ratelimit),
+    loginEndpointCovered,
     expression: includeExpressions ? (rule.expression || null) : 'omitted',
     actionParameters: 'omitted',
   }
@@ -403,6 +433,20 @@ export async function buildCloudflareWafProof({
   const rulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.rulesCount, 0)
   const coveredRulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.targetHostnameCoveredRules, 0)
   const rateLimitRulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.ratelimit).length, 0)
+  const enabledRateLimitRulesCount = allRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.enabled && rule.ratelimit).length,
+    0,
+  )
+  const loginRateLimitRulesCount = allRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.enabled && rule.ratelimit && rule.loginEndpointCovered).length,
+    0,
+  )
+  const targetHostnameCoveredLoginRateLimitRules = allRulesets.reduce(
+    (sum, ruleset) => sum + ruleset.rules.filter(
+      (rule) => rule.enabled && rule.ratelimit && rule.loginEndpointCovered && rule.targetHostnameCovered,
+    ).length,
+    0,
+  )
   const accountInspectionInspected = isCloudflareWafProofAccountInspected(
     {
       targetAccountId,
@@ -413,7 +457,9 @@ export async function buildCloudflareWafProof({
   const isReady = evaluateCloudflareWafProofReadiness({
     rulesCount,
     targetHostnameCoveredRules: coveredRulesCount,
-    rateLimitRulesCount,
+    enabledRateLimitRulesCount,
+    loginRateLimitRulesCount,
+    targetHostnameCoveredLoginRateLimitRules,
     accountInspectionRequested: Boolean(targetAccountInspectionRequested),
     accountInspectionInspected,
   })
@@ -447,6 +493,9 @@ export async function buildCloudflareWafProof({
       enabledRulesCount: allRulesets.reduce((sum, ruleset) => sum + ruleset.enabledRulesCount, 0),
       targetHostnameCoveredRules: coveredRulesCount,
       rateLimitRulesCount,
+      enabledRateLimitRulesCount,
+      loginRateLimitRulesCount,
+      targetHostnameCoveredLoginRateLimitRules,
       actions: [...new Set(allRulesets.flatMap((ruleset) => ruleset.actions))].sort(),
       accountInspectionRequested: Boolean(targetAccountInspectionRequested),
       accountInspectionInspected,

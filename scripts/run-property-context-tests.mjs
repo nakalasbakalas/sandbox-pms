@@ -1,5 +1,7 @@
 /* global console */
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { URL } from 'node:url'
 import { resolveRequestContext } from '../server/request-context.mjs'
 import { canPerformAction, requirePermission } from '../server/rbac.mjs'
 
@@ -45,5 +47,22 @@ await assert.rejects(
   ),
   { statusCode: 403 },
 )
+
+const propertyScopeMigration = await readFile(
+  new URL('../prisma/migrations/20260717120000_property_scope_legacy_records/migration.sql', import.meta.url),
+  'utf8',
+)
+assert.match(
+  propertyScopeMigration,
+  /GROUP BY r\."guestId"\s+HAVING COUNT\(DISTINCT r\."propertyId"\) > 1/,
+  'property migration fails before assigning one guest to an arbitrary property',
+)
+assert.match(
+  propertyScopeMigration,
+  /GROUP BY a\."userId"\s+HAVING COUNT\(DISTINCT m\."propertyId"\) > 1/,
+  'property migration fails before assigning multi-property audit evidence arbitrarily',
+)
+assert.match(propertyScopeMigration, /quarantine and reconcile those guests before retrying/)
+assert.match(propertyScopeMigration, /quarantine and reconcile those audit rows before retrying/)
 
 console.log('Property request-context tests passed.')

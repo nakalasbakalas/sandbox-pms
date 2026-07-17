@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 
 const ACTIVE_FEED_STATUSES = ['PENDING', 'CONFIRMED', 'HOLD', 'CHECKED_IN']
 const ICAL_PROVIDERS = ['BOOKING_COM', 'AGODA', 'EXPEDIA', 'AIRBNB', 'ICAL']
@@ -71,8 +71,27 @@ function dateKeyToIcalDate(value) {
   return key ? key.replaceAll('-', '') : null
 }
 
-function tokenFromChannel(channel) {
-  return cleanJsonObject(channel?.config).exportToken
+export function hashIcalFeedToken(token) {
+  return createHash('sha256').update(String(token || '')).digest('base64url')
+}
+
+function tokenHashFromChannel(channel) {
+  const config = cleanJsonObject(channel?.config)
+  return config.exportTokenHash || (config.exportToken ? hashIcalFeedToken(config.exportToken) : null)
+}
+
+function sanitizedTokenConfig(value) {
+  const config = cleanJsonObject(value)
+  if (config.exportToken && !config.exportTokenHash) config.exportTokenHash = hashIcalFeedToken(config.exportToken)
+  delete config.exportToken
+  return config
+}
+
+function tokenHashMatches(expected, actual) {
+  if (!expected || !actual) return false
+  const expectedBytes = Buffer.from(expected)
+  const actualBytes = Buffer.from(actual)
+  return expectedBytes.length === actualBytes.length && timingSafeEqual(expectedBytes, actualBytes)
 }
 
 function feedFileNameForChannel(channel) {
@@ -80,19 +99,27 @@ function feedFileNameForChannel(channel) {
   return safeFeedFileName(config.exportFileName, `${providerSlug(channel?.provider)}-sandbox-hotel-blocks.ics`)
 }
 
-function publicChannelPayload(channel, origin) {
+function publicChannelPayload(channel, origin, issuedToken = null) {
   const config = cleanJsonObject(channel.config)
-  const exportToken = tokenFromChannel(channel)
   return {
     id: channel.id,
     provider: channel.provider,
     name: channel.name,
     importUrl: config.importUrl || undefined,
     exportFileName: feedFileNameForChannel(channel),
-    exportFeedUrl: exportToken && origin ? buildIcalFeedUrl(origin, exportToken) : undefined,
+    exportFeedUrl: issuedToken && origin ? buildIcalFeedUrl(origin, issuedToken) : undefined,
+    exportTokenConfigured: Boolean(tokenHashFromChannel(channel)),
     lastPublishedAt: config.lastPublishedAt || undefined,
     exportTokenIssuedAt: config.exportTokenIssuedAt || undefined,
   }
+}
+
+async function migrateLegacyRawToken(prisma, channel) {
+  const config = cleanJsonObject(channel?.config)
+  if (!config.exportToken) return channel
+  const sanitizedConfig = sanitizedTokenConfig(config)
+  await prisma.channel.update({ where: { id: channel.id }, data: { config: sanitizedConfig } })
+  return { ...channel, config: sanitizedConfig }
 }
 
 function propertyIdFromContext(context) {
@@ -192,7 +219,8 @@ export async function listIcalFeedChannels(prisma, context, origin) {
     include: { mappings: true },
     orderBy: [{ name: 'asc' }],
   })
-  return channels.map((channel) => publicChannelPayload(channel, origin))
+  const sanitizedChannels = await Promise.all(channels.map((channel) => migrateLegacyRawToken(prisma, channel)))
+  return sanitizedChannels.map((channel) => publicChannelPayload(channel, origin))
 }
 
 export async function configureIcalFeedChannel(prisma, context, input, origin) {
@@ -207,15 +235,15 @@ export async function configureIcalFeedChannel(prisma, context, input, origin) {
     where: { propertyId: property.id, provider },
     include: { mappings: true },
   })
-  const previousConfig = cleanJsonObject(existing?.config)
-  const shouldIssueToken = input.rotateToken || !previousConfig.exportToken
-  const exportToken = shouldIssueToken ? createIcalFeedToken() : previousConfig.exportToken
+  const previousConfig = sanitizedTokenConfig(existing?.config)
+  const shouldIssueToken = input.rotateToken || !previousConfig.exportTokenHash
+  const issuedToken = shouldIssueToken ? createIcalFeedToken() : null
   const now = new Date().toISOString()
   const importUrl = String(input.importUrl || '').trim()
   const config = {
     ...previousConfig,
     connectionMode: 'ICAL',
-    exportToken,
+    exportTokenHash: issuedToken ? hashIcalFeedToken(issuedToken) : previousConfig.exportTokenHash,
     exportFileName: safeFeedFileName(input.exportFileName, `${providerSlug(provider)}-sandbox-hotel-blocks.ics`),
     exportTokenIssuedAt: shouldIssueToken ? now : previousConfig.exportTokenIssuedAt || now,
     lastPublishedAt: now,
@@ -245,7 +273,7 @@ export async function configureIcalFeedChannel(prisma, context, input, origin) {
     ? await prisma.channel.update({ where: { id: existing.id }, data, include: { mappings: true } })
     : await prisma.channel.create({ data, include: { mappings: true } })
 
-  return publicChannelPayload(channel, origin)
+  return publicChannelPayload(channel, origin, issuedToken)
 }
 
 export async function deactivateIcalFeedChannel(prisma, context, providerValue, origin) {
@@ -270,7 +298,7 @@ export async function deactivateIcalFeedChannel(prisma, context, providerValue, 
   }
 
   const config = {
-    ...cleanJsonObject(existing.config),
+    ...sanitizedTokenConfig(existing.config),
     lastDisabledAt: new Date().toISOString(),
   }
 
@@ -298,13 +326,17 @@ export async function getIcalFeedByToken(prisma, token, now = new Date()) {
     where: { active: true, provider: { in: ICAL_PROVIDERS } },
     include: { mappings: true },
   })
-  const channel = channels.find((item) => tokenFromChannel(item) === cleanToken)
+  const requestedHash = hashIcalFeedToken(cleanToken)
+  const channel = channels.find((item) => tokenHashMatches(tokenHashFromChannel(item), requestedHash))
   if (!channel) {
     throw new IcalFeedError('iCal feed was not found.', 404)
   }
 
+
+  const sanitizedChannel = await migrateLegacyRawToken(prisma, channel)
+
   return {
-    fileName: feedFileNameForChannel(channel),
-    contents: await buildIcalFeedForChannel(prisma, channel, now),
+    fileName: feedFileNameForChannel(sanitizedChannel),
+    contents: await buildIcalFeedForChannel(prisma, sanitizedChannel, now),
   }
 }
