@@ -207,6 +207,7 @@ async function requireRoomType(prisma, propertyId, roomTypeId) {
 
 function auditData(context, action, entityType, entityId, changes) {
   return {
+    propertyId: context.propertyId,
     userId: context.actorId,
     action,
     entityType,

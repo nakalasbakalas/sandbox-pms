@@ -12,6 +12,18 @@ import { createPrismaClient } from './prisma-client.mjs'
 import { databaseHealthFailure } from './health-response.mjs'
 import { createOpenApiDocument } from './openapi.mjs'
 import { listDomainEvents } from './domain-events.mjs'
+import {
+  createMessageDraft,
+  createMessageTemplate,
+  listMessages,
+  listMessageTemplates,
+} from './messaging-service.mjs'
+import {
+  createChannelMapping,
+  deleteChannelMapping,
+  listChannelMappings,
+  updateChannelMapping,
+} from './channel-mapping-service.mjs'
 import { requestIdFromHeaders, resolveRequestContext } from './request-context.mjs'
 import {
   buildRateRecommendation,
@@ -947,8 +959,9 @@ async function handleApi(request, response, url) {
     return true
   }
 
-  const user = await requireUser(request)
-  const context = await resolveRequestContext(db, user, request)
+  const authenticatedUser = await requireUser(request)
+  const context = await resolveRequestContext(db, authenticatedUser, request)
+  const user = context.actor
   request.pmsContext = context
 
   if (url.pathname === '/api/openapi.json' && request.method === 'GET') {
@@ -959,6 +972,63 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/system/capabilities' && request.method === 'GET') {
     requirePermission(user, 'view:board')
     sendJson(response, 200, { ok: true, data: getSystemCapabilities(process.env) })
+    return true
+  }
+
+  if (url.pathname === '/api/messages' && request.method === 'GET') {
+    requirePermission(user, 'view:messaging')
+    sendJson(response, 200, { ok: true, data: await listMessages(db, context) })
+    return true
+  }
+
+  if (url.pathname === '/api/messages' && request.method === 'POST') {
+    requirePermission(user, 'send:guest-messages')
+    sendJson(response, 201, {
+      ok: true,
+      data: await createMessageDraft(db, context, await readJson(request)),
+      message: 'Message draft saved. No provider delivery was attempted.',
+    })
+    return true
+  }
+
+  if (url.pathname === '/api/message-templates' && request.method === 'GET') {
+    requirePermission(user, 'view:messaging')
+    sendJson(response, 200, { ok: true, data: await listMessageTemplates(db, context) })
+    return true
+  }
+
+  if (url.pathname === '/api/message-templates' && request.method === 'POST') {
+    requirePermission(user, 'send:guest-messages')
+    sendJson(response, 201, { ok: true, data: await createMessageTemplate(db, context, await readJson(request)), message: 'Message template saved.' })
+    return true
+  }
+
+  if (url.pathname === '/api/channels/mappings' && request.method === 'GET') {
+    requirePermission(user, 'view:channels')
+    sendJson(response, 200, { ok: true, data: await listChannelMappings(db, context) })
+    return true
+  }
+
+  if (url.pathname === '/api/channels/mappings' && request.method === 'POST') {
+    requirePermission(user, 'manage:channels')
+    sendJson(response, 201, { ok: true, data: await createChannelMapping(db, context, await readJson(request)), message: 'Channel mapping saved.' })
+    return true
+  }
+
+  let channelMappingParams = routeParam(url.pathname, /^\/api\/channels\/mappings\/(?<id>[^/]+)$/)
+  if (channelMappingParams && request.method === 'PATCH') {
+    requirePermission(user, 'manage:channels')
+    sendJson(response, 200, { ok: true, data: await updateChannelMapping(db, context, channelMappingParams.id, await readJson(request)), message: 'Channel mapping updated.' })
+    return true
+  }
+
+  if (channelMappingParams && request.method === 'DELETE') {
+    requirePermission(user, 'manage:channels')
+    sendJson(response, 200, {
+      ok: true,
+      data: await deleteChannelMapping(db, context, channelMappingParams.id, { reason: url.searchParams.get('reason') }),
+      message: 'Channel mapping deleted.',
+    })
     return true
   }
 
@@ -1428,13 +1498,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/today' && request.method === 'GET') {
     requirePermission(user, 'view:board')
-    sendJson(response, 200, { ok: true, data: await getTodayData(db) })
+    sendJson(response, 200, { ok: true, data: await getTodayData(db, user) })
     return true
   }
 
   if (url.pathname === '/api/front-desk/board' && request.method === 'GET') {
     requirePermission(user, 'view:board')
-    sendJson(response, 200, { ok: true, data: await getFrontDeskBoard(db) })
+    sendJson(response, 200, { ok: true, data: await getFrontDeskBoard(db, user) })
     return true
   }
 
@@ -1448,7 +1518,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/booking-email/status' && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
-    sendJson(response, 200, { ok: true, data: await getBookingEmailStatus(db) })
+    sendJson(response, 200, { ok: true, data: await getBookingEmailStatus(db, user) })
     return true
   }
 
@@ -1482,7 +1552,7 @@ async function handleApi(request, response, url) {
         status: url.searchParams.get('status'),
         sourceId: url.searchParams.get('sourceId'),
         limit: url.searchParams.get('limit'),
-      }),
+      }, user),
     })
     return true
   }
@@ -1492,7 +1562,7 @@ async function handleApi(request, response, url) {
   params = routeParam(url.pathname, /^\/api\/booking-email\/events\/(?<id>[^/]+)$/)
   if (params && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
-    sendJson(response, 200, { ok: true, data: await getBookingEmailEvent(db, params.id) })
+    sendJson(response, 200, { ok: true, data: await getBookingEmailEvent(db, params.id, user) })
     return true
   }
 
@@ -1522,7 +1592,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/booking-email/sources' && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
-    sendJson(response, 200, { ok: true, data: await listBookingEmailSources(db) })
+    sendJson(response, 200, { ok: true, data: await listBookingEmailSources(db, user) })
     return true
   }
 
@@ -1543,13 +1613,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/rooms' && request.method === 'GET') {
     requirePermission(user, 'view:board')
-    sendJson(response, 200, { ok: true, data: await listRooms(db) })
+    sendJson(response, 200, { ok: true, data: await listRooms(db, user) })
     return true
   }
 
   if (url.pathname === '/api/channels/ical' && request.method === 'GET') {
     requirePermission(user, 'view:channels')
-    sendJson(response, 200, { ok: true, data: await listIcalFeedChannels(db, requestBaseOrigin(request)) })
+    sendJson(response, 200, { ok: true, data: await listIcalFeedChannels(db, context, requestBaseOrigin(request)) })
     return true
   }
 
@@ -1558,6 +1628,7 @@ async function handleApi(request, response, url) {
     requirePermission(user, 'manage:channels')
     const feed = await configureIcalFeedChannel(
       db,
+      context,
       { provider: params.provider, ...(await readJson(request)) },
       requestBaseOrigin(request),
     )
@@ -1567,14 +1638,14 @@ async function handleApi(request, response, url) {
 
   if (params && request.method === 'DELETE') {
     requirePermission(user, 'manage:channels')
-    const feed = await deactivateIcalFeedChannel(db, params.provider, requestBaseOrigin(request))
+    const feed = await deactivateIcalFeedChannel(db, context, params.provider, requestBaseOrigin(request))
     sendJson(response, 200, { ok: true, data: feed, message: `${feed.name} iCal feed disabled.` })
     return true
   }
 
   if (url.pathname === '/api/settings/room-setup' && request.method === 'GET') {
     requirePermission(user, 'view:settings')
-    sendJson(response, 200, { ok: true, data: await getRoomSetup(db) })
+    sendJson(response, 200, { ok: true, data: await getRoomSetup(db, user) })
     return true
   }
 
@@ -1624,7 +1695,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/reservations' && request.method === 'GET') {
     requirePermission(user, 'view:reservations')
-    sendJson(response, 200, { ok: true, data: await listReservations(db) })
+    sendJson(response, 200, { ok: true, data: await listReservations(db, user) })
     return true
   }
 
@@ -1739,7 +1810,7 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/guests' && request.method === 'GET') {
     requirePermission(user, 'view:guests')
-    sendJson(response, 200, { ok: true, data: await listGuests(db) })
+    sendJson(response, 200, { ok: true, data: await listGuests(db, user) })
     return true
   }
 
@@ -1822,9 +1893,19 @@ const server = createServer(async (request, response) => {
     sendJson(response, 405, { ok: false, error: 'Method not allowed' })
   } catch (error) {
     const statusCode = Number(error?.statusCode || 500)
+    if (statusCode >= 500) {
+      console.error('Unhandled PMS API error.', {
+        requestId: request.requestId || response.requestId || null,
+        name: error instanceof Error ? error.name : 'UnknownError',
+        code: typeof error?.code === 'string' ? error.code : null,
+      })
+    }
     sendJson(response, statusCode, {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: statusCode >= 500
+        ? 'The server could not complete this request.'
+        : error instanceof Error ? error.message : String(error),
+      ...(statusCode >= 500 ? { requestId: request.requestId || response.requestId || null } : {}),
     })
   }
 })

@@ -28,12 +28,20 @@ export async function resolveRequestContext(prisma, user, request, options = {})
   })
   if (!membership?.active) throw forbidden('The authenticated user is not assigned to the active property.')
 
-  return {
-    requestId: request?.requestId || requestIdFromHeaders(request?.headers),
-    actor: user,
+  const effectiveActor = {
+    ...user,
+    role: membership.role || user.role,
     propertyId: property.id,
     propertyCode: property.code,
-    role: membership.role || user.role,
+    membershipId: membership.id,
+  }
+
+  return {
+    requestId: request?.requestId || requestIdFromHeaders(request?.headers),
+    actor: effectiveActor,
+    propertyId: property.id,
+    propertyCode: property.code,
+    role: effectiveActor.role,
     membershipId: membership.id,
     idempotencyKey: String(request?.headers?.['x-idempotency-key'] || '').trim() || null,
   }

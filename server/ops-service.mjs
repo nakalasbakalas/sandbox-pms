@@ -1313,8 +1313,17 @@ async function taskLog(tx, taskId, action, message, actor, metadata) {
 }
 
 async function audit(tx, actor, action, entityType, entityId, changes) {
+  let propertyId = actor?.propertyId || changes?.propertyId || null
+  if (!propertyId && entityType === 'hotelOpsTask' && entityId) {
+    propertyId = (await tx.hotelOpsTask.findUnique({ where: { id: entityId }, select: { propertyId: true } }))?.propertyId || null
+  }
+  if (!propertyId && entityType === 'hotelOpsNotification' && entityId) {
+    propertyId = (await tx.hotelOpsNotification.findUnique({ where: { id: entityId }, select: { propertyId: true } }))?.propertyId || null
+  }
+  if (!propertyId) propertyId = (await getProperty(tx)).id
   return tx.auditLog.create({
     data: {
+      propertyId,
       userId: actor?.id || 'system',
       action,
       entityType,

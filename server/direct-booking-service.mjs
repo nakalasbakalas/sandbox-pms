@@ -167,7 +167,7 @@ async function acquireInventoryLock(tx, propertyId, roomTypeId) {
     throw new Error('Direct booking requires PostgreSQL transaction-lock support.')
   }
   await tx.$queryRawUnsafe(
-    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+    'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))::text AS locked',
     `direct-booking:${propertyId}:${roomTypeId}`,
   )
 }
@@ -412,6 +412,7 @@ export async function createPublicHold(prisma, input, options = {}) {
     })
     await tx.auditLog.create({
       data: {
+        propertyId: property.id,
         userId: PUBLIC_ACTOR,
         action: 'PUBLIC_BOOKING_HOLD_CREATED',
         entityType: 'inventoryHold',
@@ -464,6 +465,7 @@ export async function convertPublicHold(prisma, input, options = {}) {
     const nights = Math.round((quote.checkOut.getTime() - quote.checkIn.getTime()) / 86_400_000)
     const guest = await tx.guest.create({
       data: {
+        propertyId: property.id,
         firstName: parsed.guest.firstName,
         lastName: parsed.guest.lastName,
         email: parsed.guest.email?.toLowerCase() || null,
@@ -533,6 +535,7 @@ export async function convertPublicHold(prisma, input, options = {}) {
     })
     await tx.auditLog.create({
       data: {
+        propertyId: property.id,
         userId: PUBLIC_ACTOR,
         action: 'PUBLIC_BOOKING_CREATED',
         entityType: 'reservation',

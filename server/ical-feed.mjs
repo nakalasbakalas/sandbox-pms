@@ -95,6 +95,12 @@ function publicChannelPayload(channel, origin) {
   }
 }
 
+function propertyIdFromContext(context) {
+  const propertyId = String(context?.propertyId || '').trim()
+  if (!propertyId) throw new IcalFeedError('Authenticated property context is required.', 403)
+  return propertyId
+}
+
 export function normalizeIcalProvider(value) {
   const normalized = String(value || '')
     .trim()
@@ -179,18 +185,20 @@ export async function buildIcalFeedForChannel(prisma, channel, now = new Date())
   return generateIcalFeed(`${channel.name || labelForProvider(channel.provider)} - Sandbox Hotel Blocks`, events, now)
 }
 
-export async function listIcalFeedChannels(prisma, origin) {
+export async function listIcalFeedChannels(prisma, context, origin) {
+  const propertyId = propertyIdFromContext(context)
   const channels = await prisma.channel.findMany({
-    where: { provider: { in: ICAL_PROVIDERS } },
+    where: { propertyId, provider: { in: ICAL_PROVIDERS } },
     include: { mappings: true },
     orderBy: [{ name: 'asc' }],
   })
   return channels.map((channel) => publicChannelPayload(channel, origin))
 }
 
-export async function configureIcalFeedChannel(prisma, input, origin) {
+export async function configureIcalFeedChannel(prisma, context, input, origin) {
   const provider = normalizeIcalProvider(input.provider)
-  const property = await prisma.property.findFirst({ orderBy: { createdAt: 'asc' } })
+  const propertyId = propertyIdFromContext(context)
+  const property = await prisma.property.findUnique({ where: { id: propertyId } })
   if (!property) {
     throw new IcalFeedError('Property setup has not been completed yet.', 503)
   }
@@ -240,9 +248,10 @@ export async function configureIcalFeedChannel(prisma, input, origin) {
   return publicChannelPayload(channel, origin)
 }
 
-export async function deactivateIcalFeedChannel(prisma, providerValue, origin) {
+export async function deactivateIcalFeedChannel(prisma, context, providerValue, origin) {
   const provider = normalizeIcalProvider(providerValue)
-  const property = await prisma.property.findFirst({ orderBy: { createdAt: 'asc' } })
+  const propertyId = propertyIdFromContext(context)
+  const property = await prisma.property.findUnique({ where: { id: propertyId } })
   if (!property) {
     throw new IcalFeedError('Property setup has not been completed yet.', 503)
   }

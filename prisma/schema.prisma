@@ -45,6 +45,9 @@ model Property {
   hotelOpsNotifications HotelOpsNotification[]
   hotelOpsScanSnapshots HotelOpsScanSnapshot[]
   userMemberships UserPropertyMembership[]
+  guests          Guest[]
+  payments        Payment[]
+  auditLogs       AuditLog[]
   domainEvents    DomainEvent[]
   housekeepingTasks HousekeepingTask[]
   housekeepingIssues HousekeepingIssue[]
@@ -125,6 +128,8 @@ enum RoomStatus {
 
 model Guest {
   id           String        @id @default(cuid())
+  propertyId   String
+  property     Property      @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   firstName    String
   lastName     String
   email        String?
@@ -143,6 +148,7 @@ model Guest {
   updatedAt    DateTime      @updatedAt
   
   @@index([email])
+  @@index([propertyId, updatedAt])
   @@index([phone])
   @@index([lastName, firstName])
 }
@@ -392,14 +398,16 @@ enum ChargeCategory {
 
 model Payment {
   id          String        @id @default(cuid())
+  propertyId  String
+  property    Property      @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   folioId     String
   folio       Folio         @relation(fields: [folioId], references: [id], onDelete: Cascade)
   amount      Float
   amountSatang BigInt?
   method      PaymentMethod
-  idempotencyKey String?     @unique
+  idempotencyKey String?
   reference   String?
-  referenceFingerprint String? @unique
+  referenceFingerprint String?
   sourceEmailEventId String?   @unique
   sourceEmailEvent BookingEmailEvent? @relation("PaymentSourceEmail", fields: [sourceEmailEventId], references: [id], onDelete: SetNull)
   notes       String?
@@ -407,6 +415,9 @@ model Payment {
   createdAt   DateTime      @default(now())
   
   @@index([folioId])
+  @@unique([propertyId, idempotencyKey])
+  @@unique([propertyId, referenceFingerprint])
+  @@index([propertyId, createdAt])
   @@index([reference])
 }
 
@@ -1247,7 +1258,9 @@ model ChannelMapping {
   channel           Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   roomTypeId        String
   externalRoomTypeId String
+  externalRoomTypeName String
   externalRatePlanId String?
+  roomIds            String[]
   active            Boolean @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -1285,6 +1298,7 @@ model Message {
   recipientId String?
   recipientType String
   channel     MessageChannel
+  type        String        @default("CUSTOM")
   templateId  String?
   subject     String?
   body        String
@@ -1294,9 +1308,11 @@ model Message {
   failedAt    DateTime?
   errorMessage String?
   metadata    Json?
+  idempotencyKey String?
   createdAt   DateTime      @default(now())
   
   @@index([propertyId, status])
+  @@unique([propertyId, idempotencyKey])
   @@index([recipientId])
 }
 
@@ -1319,6 +1335,7 @@ model MessageTemplate {
   propertyId  String
   name        String
   description String?
+  type        String   @default("CUSTOM")
   channel     MessageChannel
   subject     String?
   body        String
@@ -1333,6 +1350,8 @@ model MessageTemplate {
 
 model AuditLog {
   id         String   @id @default(cuid())
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   userId     String
   action     String
   entityType String
@@ -1343,6 +1362,7 @@ model AuditLog {
   createdAt  DateTime @default(now())
   
   @@index([userId, createdAt])
+  @@index([propertyId, createdAt])
   @@index([entityType, entityId])
   @@index([createdAt])
 }

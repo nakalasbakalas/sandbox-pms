@@ -250,6 +250,7 @@ async function requireProperty(prisma, propertyId) {
 
 function auditData(context, action, changedSections, reason) {
   return {
+    propertyId: context.propertyId,
     userId: context.actorId,
     action,
     entityType: 'Property',

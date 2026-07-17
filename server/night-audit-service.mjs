@@ -152,6 +152,7 @@ function persistedSnapshot(snapshot) {
 
 async function recordAudit(tx, resolved, run, parsed, status, blockerCodes, overrideApplied) {
   await tx.auditLog.create({ data: {
+    propertyId: resolved.propertyId,
     userId: resolved.actorId,
     action: status === 'COMPLETED' ? 'NIGHT_AUDIT_COMPLETED' : 'NIGHT_AUDIT_BLOCKED',
     entityType: 'nightAuditRun',

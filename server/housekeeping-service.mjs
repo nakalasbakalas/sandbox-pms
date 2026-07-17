@@ -140,8 +140,8 @@ async function requireAssignee(tx, propertyId, userId) {
   return membership
 }
 
-async function audit(tx, actorId, action, entityType, entityId, changes) {
-  return tx.auditLog.create({ data: { userId: actorId, action, entityType, entityId, changes } })
+async function audit(tx, propertyId, actorId, action, entityType, entityId, changes) {
+  return tx.auditLog.create({ data: { propertyId, userId: actorId, action, entityType, entityId, changes } })
 }
 
 function publicTask(task) {
@@ -200,7 +200,7 @@ export async function createHousekeepingTask(prisma, context, input) {
       createdBy: resolved.actorId,
       statusHistory: { create: { fromStatus: null, toStatus: status, changedBy: resolved.actorId, reason: parsed.reason } },
     } })
-    await audit(tx, resolved.actorId, 'HOUSEKEEPING_TASK_CREATED', 'housekeepingTask', task.id, {
+    await audit(tx, resolved.propertyId, resolved.actorId, 'HOUSEKEEPING_TASK_CREATED', 'housekeepingTask', task.id, {
       propertyId: resolved.propertyId, roomId: task.roomId, status, priority: task.priority, reason: parsed.reason,
     })
     await recordDomainEvent(tx, { propertyId: resolved.propertyId, eventType: 'HOUSEKEEPING_TASK_CREATED', aggregateType: 'housekeepingTask', aggregateId: task.id, actorUserId: resolved.actorId, metadata: { roomId: task.roomId, status } })
@@ -220,7 +220,7 @@ export async function assignHousekeepingTask(prisma, context, input) {
     const data = { assignedToUserId: parsed.assignedToUserId, status: nextStatus }
     if (nextStatus !== task.status) data.statusHistory = { create: { fromStatus: task.status, toStatus: nextStatus, changedBy: resolved.actorId, reason: parsed.reason } }
     const updated = await tx.housekeepingTask.update({ where: { id: task.id }, data })
-    await audit(tx, resolved.actorId, 'HOUSEKEEPING_TASK_ASSIGNED', 'housekeepingTask', task.id, { propertyId: resolved.propertyId, assignedToUserId: parsed.assignedToUserId, reason: parsed.reason })
+    await audit(tx, resolved.propertyId, resolved.actorId, 'HOUSEKEEPING_TASK_ASSIGNED', 'housekeepingTask', task.id, { propertyId: resolved.propertyId, assignedToUserId: parsed.assignedToUserId, reason: parsed.reason })
     await recordDomainEvent(tx, { propertyId: resolved.propertyId, eventType: 'HOUSEKEEPING_TASK_ASSIGNED', aggregateType: 'housekeepingTask', aggregateId: task.id, actorUserId: resolved.actorId, metadata: { status: nextStatus, assigned: Boolean(parsed.assignedToUserId) } })
     return publicTask(updated)
   })
@@ -241,7 +241,7 @@ export async function transitionHousekeepingTask(prisma, context, input) {
       completedAt,
       statusHistory: { create: { fromStatus: task.status, toStatus: parsed.status, changedBy: resolved.actorId, reason: parsed.reason } },
     } })
-    await audit(tx, resolved.actorId, 'HOUSEKEEPING_TASK_STATUS_CHANGED', 'housekeepingTask', task.id, { propertyId: resolved.propertyId, fromStatus: task.status, toStatus: parsed.status, reason: parsed.reason })
+    await audit(tx, resolved.propertyId, resolved.actorId, 'HOUSEKEEPING_TASK_STATUS_CHANGED', 'housekeepingTask', task.id, { propertyId: resolved.propertyId, fromStatus: task.status, toStatus: parsed.status, reason: parsed.reason })
     await recordDomainEvent(tx, { propertyId: resolved.propertyId, eventType: 'HOUSEKEEPING_TASK_STATUS_CHANGED', aggregateType: 'housekeepingTask', aggregateId: task.id, actorUserId: resolved.actorId, metadata: { fromStatus: task.status, toStatus: parsed.status } })
     return publicTask(updated)
   })
@@ -274,7 +274,7 @@ export async function createHousekeepingIssue(prisma, context, input) {
       assignedToUserId: parsed.assignedToUserId || null, reportedBy: resolved.actorId,
       statusHistory: { create: { fromStatus: null, toStatus: 'OPEN', changedBy: resolved.actorId, reason: parsed.reason } },
     } })
-    await audit(tx, resolved.actorId, 'HOUSEKEEPING_ISSUE_CREATED', 'housekeepingIssue', issue.id, { propertyId: resolved.propertyId, roomId: issue.roomId, severity: issue.severity, reason: parsed.reason })
+    await audit(tx, resolved.propertyId, resolved.actorId, 'HOUSEKEEPING_ISSUE_CREATED', 'housekeepingIssue', issue.id, { propertyId: resolved.propertyId, roomId: issue.roomId, severity: issue.severity, reason: parsed.reason })
     await recordDomainEvent(tx, { propertyId: resolved.propertyId, eventType: 'HOUSEKEEPING_ISSUE_CREATED', aggregateType: 'housekeepingIssue', aggregateId: issue.id, actorUserId: resolved.actorId, metadata: { roomId: issue.roomId, severity: issue.severity } })
     return publicIssue(issue)
   })
@@ -297,7 +297,7 @@ export async function transitionHousekeepingIssue(prisma, context, input) {
       resolvedAt,
       statusHistory: { create: { fromStatus: issue.status, toStatus: parsed.status, changedBy: resolved.actorId, reason: parsed.reason } },
     } })
-    await audit(tx, resolved.actorId, 'HOUSEKEEPING_ISSUE_STATUS_CHANGED', 'housekeepingIssue', issue.id, { propertyId: resolved.propertyId, fromStatus: issue.status, toStatus: parsed.status, severity: issue.severity, reason: parsed.reason })
+    await audit(tx, resolved.propertyId, resolved.actorId, 'HOUSEKEEPING_ISSUE_STATUS_CHANGED', 'housekeepingIssue', issue.id, { propertyId: resolved.propertyId, fromStatus: issue.status, toStatus: parsed.status, severity: issue.severity, reason: parsed.reason })
     await recordDomainEvent(tx, { propertyId: resolved.propertyId, eventType: 'HOUSEKEEPING_ISSUE_STATUS_CHANGED', aggregateType: 'housekeepingIssue', aggregateId: issue.id, actorUserId: resolved.actorId, metadata: { fromStatus: issue.status, toStatus: parsed.status, severity: issue.severity } })
     return publicIssue(updated)
   })

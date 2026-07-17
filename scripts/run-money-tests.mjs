@@ -51,8 +51,16 @@ function paymentFixture({ status = 'OPEN', balanceSatang = 10_000n, failSerializ
   const charges = [{ id: 'charge-1', folioId: folio.id, total: 100, totalSatang: 10_000n, void: false }]
 
   const prisma = {
+    property: {
+      findUnique: async ({ where }) => where.id === 'property-1' || where.code === 'SANDBOX'
+        ? { id: 'property-1', code: 'SANDBOX' }
+        : null,
+    },
     folio: {
       findUnique: async ({ where }) => where.id === folio.id ? { ...folio } : null,
+      findFirst: async ({ where }) => where.id === folio.id && where.reservation?.propertyId === folio.reservation.propertyId
+        ? { ...folio }
+        : null,
       update: async ({ where, data }) => {
         assert.equal(where.id, folio.id)
         Object.assign(folio, data)
@@ -64,6 +72,12 @@ function paymentFixture({ status = 'OPEN', balanceSatang = 10_000n, failSerializ
     },
     payment: {
       findUnique: async ({ where }) => {
+        if (where.propertyId_idempotencyKey) {
+          return payments.find((payment) => payment.propertyId === where.propertyId_idempotencyKey.propertyId && payment.idempotencyKey === where.propertyId_idempotencyKey.idempotencyKey) || null
+        }
+        if (where.propertyId_referenceFingerprint) {
+          return payments.find((payment) => payment.propertyId === where.propertyId_referenceFingerprint.propertyId && payment.referenceFingerprint === where.propertyId_referenceFingerprint.referenceFingerprint) || null
+        }
         if (where.idempotencyKey) return payments.find((payment) => payment.idempotencyKey === where.idempotencyKey) || null
         if (where.referenceFingerprint) return payments.find((payment) => payment.referenceFingerprint === where.referenceFingerprint) || null
         if (where.sourceEmailEventId) return payments.find((payment) => payment.sourceEmailEventId === where.sourceEmailEventId) || null
