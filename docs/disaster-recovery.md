@@ -10,6 +10,8 @@ This document defines the owner actions required before production launch sign-o
 - Latest health-checked live deploy recorded before the 2026-07-06 owner-decision update: `dep-d95qsnvavr4c73aqics0`, commit `ce13cf6d3d1880b776a90e9f2e75db62ffef8ab0`.
 - Render Postgres point-in-time recovery status: `AVAILABLE`, with recovery starting at 2026-06-03T21:59:41Z during the 2026-06-07 provider check.
 - Disposable restore test: passed on 2026-06-07 using temporary restored database `dpg-d8ip6rdckfvc73c2qirg-a`, then deleted.
+- Verified latest recovery point in the authenticated Render dashboard: `2026-07-07 15:29:56` UTC+07:00 (`2026-07-07T08:29:56Z`), with point-in-time restore available for the past 3 days.
+- Render export retention: at least 7 days for database export files.
 - Automated public health check: `npm run live:check`.
 - Local release gate: `npm run launch:check`.
 
@@ -26,12 +28,11 @@ The confirmed Render workspace owner from CLI is `nakalastravels@gmail.com`; do 
 
 ## Backup Evidence
 
-Latest known owner answer as of 2026-07-06: the current backup/recovery point is unknown. Set up or freshly verify recovery proof before migrations, seed changes, or launch sign-off:
+Latest verified owner answer as of 2026-07-07: the current backup/recovery point is `2026-07-07 15:29:56` UTC+07:00 (`2026-07-07T08:29:56Z`). The Render dashboard recovery page shows point-in-time restores from any timestamp in the past 3 days, and exports are retained for at least 7 days:
 
 1. Open the Render PostgreSQL dashboard for `sandbox-hotel-pms-db-v43m`.
-2. Record the latest available recovery point and retention window in [live-environment-proof.md](live-environment-proof.md) and `docs/launch/evidence/SECRETS_AND_RECOVERY_PROOF.md`.
-3. Confirm the database is `available`.
-4. Do not paste database URLs, passwords, or raw backup metadata containing secrets into tracked files.
+2. Confirm the database is `available`.
+3. Do not paste database URLs, passwords, or raw backup metadata containing secrets into tracked files.
 
 ## Restore Test
 

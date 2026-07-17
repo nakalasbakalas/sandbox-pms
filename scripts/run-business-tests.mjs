@@ -28,7 +28,8 @@ import { bookingEmailNoiseFixtures, bookingEmailParserFixtures } from './fixture
 import { approvedBookingEmailProviderQuery, primaryMailboxBookingEmailQuery } from './booking-email-query.mjs'
 import { buildGmailAuthorizationUrl, exchangeAuthorizationCode, gmailOauthScopes, readGoogleOauthClientCredentials, resolveGmailOauthClient, startAuthorizationCodeListener } from './prepare-gmail-oauth-render.mjs'
 import { maskLoginIdentifier, normalizeProofHost, summarizePublicUserForProof, validateDenialProbe } from './prove-auth-rbac-production.mjs'
-import { parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { assertCloudflareWafProofRequirements, buildCloudflareWafProof, parseCloudflareEnvFileContent, summarizeRuleset, zoneNameCandidates } from './prove-cloudflare-waf-rules.mjs'
+import { ensureSandboxCloudflareWafRules, sandboxCloudflareWafDesiredRules } from './ensure-cloudflare-waf-rules.mjs'
 
 const databaseFailure = databaseHealthFailure(new Error('postgresql://user:secret@database.internal/prod'))
 assert.deepEqual(databaseFailure, {
@@ -949,15 +950,202 @@ assert.deepEqual(
   ['book.sandboxhotel.com', 'sandboxhotel.com'],
   'Cloudflare WAF proof can discover parent zone names from a protected hostname',
 )
+
+const cloudflareJsonResponse = (status, payload) => new Response(JSON.stringify(payload), {
+  status,
+  headers: {
+    'content-type': 'application/json',
+  },
+})
+const runWithMockedCloudflareFetch = async (fetchImpl, callback) => {
+  const previousFetch = global.fetch
+  global.fetch = fetchImpl
+  try {
+    return await callback()
+  } finally {
+    global.fetch = previousFetch
+  }
+}
+
+const cloudflareAccountInspectionFailureProof = await runWithMockedCloudflareFetch(async (url) => {
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  if (normalized === '/zones/zone-account-fixture') {
+    return cloudflareJsonResponse(200, { result: { id: 'zone-account-fixture', name: 'book.sandboxhotel.com', status: 'active' } })
+  }
+  if (normalized === '/zones/zone-account-fixture/rulesets') {
+    return cloudflareJsonResponse(200, {
+      result: [{ id: 'zone-level-ruleset', phase: 'http_ratelimit' }],
+    })
+  }
+  if (normalized === '/zones/zone-account-fixture/rulesets/zone-level-ruleset') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'zone-level-ruleset',
+        name: 'zone-level-ruleset',
+        phase: 'http_ratelimit',
+        rules: [
+          {
+            id: 'zone-level-rule',
+            ref: 'sandbox_pms_login_rate_limit',
+            action: 'block',
+            enabled: true,
+            expression: '(http.host eq "book.sandboxhotel.com" and http.request.method eq "POST")',
+            ratelimit: {
+              period: 10,
+              requests_per_period: 10,
+              mitigation_timeout: 10,
+              characteristics: ['cf.colo.id', 'ip.src'],
+            },
+          },
+        ],
+      },
+    })
+  }
+  if (normalized === '/accounts/account-fixture/rulesets') {
+    return cloudflareJsonResponse(403, { success: false, errors: [{ message: 'forbidden' }] })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => buildCloudflareWafProof({
+  token: 'token-fixture',
+  targetZoneId: 'zone-account-fixture',
+  targetAccountId: 'account-fixture',
+  targetAccountInspectionRequested: true,
+  targetHostname: 'book.sandboxhotel.com',
+}))
+assert.equal(cloudflareAccountInspectionFailureProof.summary.requireOwnerReview, true, 'Cloudflare WAF proof flags owner review when requested account inspection fails')
+assert.equal(cloudflareAccountInspectionFailureProof.target.account.requested, true, 'Cloudflare WAF proof tracks requested account inspection in target.account.requested')
+assert.equal(cloudflareAccountInspectionFailureProof.target.account.inspected, false, 'Cloudflare WAF proof tracks failed account inspection state as not inspected')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.accountInspectionRequested, true, 'Cloudflare WAF proof summary tracks requested account inspection state')
+assert.equal(cloudflareAccountInspectionFailureProof.summary.accountInspectionInspected, false, 'Cloudflare WAF proof summary tracks inspected state for account-level rulesets')
+assert.throws(
+  () => assertCloudflareWafProofRequirements({ proof: cloudflareAccountInspectionFailureProof }),
+  /Account-level inspection was requested but could not be completed/,
+  'Cloudflare WAF proof requires owner review and --require-rules throws on requested account inspection failure',
+)
+
+const cloudflareEnsureAmbiguousDescriptionLog = []
+const cloudflareEnsureAmbiguousDescription = await runWithMockedCloudflareFetch(async (url, init = {}) => {
+  const method = init.method || 'GET'
+  const normalized = String(url).replace('https://api.cloudflare.com/client/v4', '')
+  cloudflareEnsureAmbiguousDescriptionLog.push({ method, path: normalized })
+  if (normalized === '/zones/zone-ensure-fixture') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'zone-ensure-fixture',
+        name: 'book.sandboxhotel.com',
+        status: 'active',
+      },
+    })
+  }
+  if (normalized === '/zones/zone-ensure-fixture/rulesets/phases/http_request_firewall_custom/entrypoint') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'entrypoint-custom',
+        phase: 'http_request_firewall_custom',
+        name: 'custom-firewall',
+        rules: [
+          {
+            id: 'custom-ambiguous-a',
+            ref: 'other-rule-a',
+            description: 'Sandbox PMS common probe block',
+            expression: '(http.host eq "book.sandboxhotel.com" and starts_with(http.request.uri.path, "/blocked"))',
+            enabled: true,
+            action: 'block',
+          },
+          {
+            id: 'custom-ambiguous-b',
+            ref: 'other-rule-b',
+            description: 'Sandbox PMS common probe block',
+            expression: '(http.host eq "book.sandboxhotel.com" and starts_with(http.request.uri.path, "/legacy"))',
+            enabled: true,
+            action: 'block',
+          },
+        ],
+      },
+    })
+  }
+  if (normalized === '/zones/zone-ensure-fixture/rulesets/phases/http_ratelimit/entrypoint') {
+    return cloudflareJsonResponse(200, {
+      result: {
+        id: 'entrypoint-ratelimit',
+        phase: 'http_ratelimit',
+        name: 'ratelimits',
+        rules: [
+          {
+            id: 'rate-limit-existing',
+            ref: 'sandbox_pms_login_rate_limit',
+            description: 'Sandbox PMS login rate limit',
+            expression: '(http.host in {"book.sandboxhotel.com"} and http.request.method eq "POST" and http.request.uri.path eq "/api/auth/login")',
+            enabled: true,
+            action: 'block',
+            ratelimit: {
+              period: 10,
+              requests_per_period: 10,
+              mitigation_timeout: 10,
+              characteristics: ['ip.src', 'cf.colo.id'],
+              action_parameters: { response: { content: 'fixture body' } },
+              extra_provider_metadata: 'ignored',
+            },
+          },
+        ],
+      },
+    })
+  }
+  return cloudflareJsonResponse(404, { success: false, errors: [{ message: 'unexpected fixture path' }] })
+}, async () => ensureSandboxCloudflareWafRules({
+  token: 'token-fixture',
+  targetZoneId: 'zone-ensure-fixture',
+  dryRun: false,
+  hostnames: ['book.sandboxhotel.com'],
+}))
+const ambiguousCommonRuleResult = cloudflareEnsureAmbiguousDescription.results.find((result) => result.ruleRef === 'sandbox_pms_common_probe_block')
+assert.equal(ambiguousCommonRuleResult.operation, 'blocked-ambiguous-description-match', 'Cloudflare WAF ensure blocks ambiguous description-only matches')
+assert.equal(ambiguousCommonRuleResult.ruleId, null, 'Cloudflare WAF ensure does not mutate when description is ambiguous')
+assert.equal(ambiguousCommonRuleResult.blockReason, 'multiple rules matched description "Sandbox PMS common probe block"', 'Cloudflare WAF ensure explains ambiguous-description block reason')
+const loginRateLimitResult = cloudflareEnsureAmbiguousDescription.results.find((result) => result.ruleRef === 'sandbox_pms_login_rate_limit')
+assert.equal(loginRateLimitResult.operation, 'unchanged', 'Cloudflare WAF ensure treats reordered ratelimit characteristics and extra metadata as unchanged')
+assert.equal(cloudflareEnsureAmbiguousDescription.ready, false, 'Cloudflare WAF ensure blocks ready when ambiguous-description rule matching is non-mutating')
+assert.equal(
+  cloudflareEnsureAmbiguousDescriptionLog.every((entry) => entry.method === 'GET'),
+  true,
+  'Cloudflare WAF ensure performs no write requests when ambiguous matches force a block operation',
+)
+
 const cloudflareEnvFixture = parseCloudflareEnvFileContent(`
 # local fixture
 CLOUDFLARE_API_TOKEN="token-fixture"
 IGNORED_KEY=ignored
 CF_ZONE_ID=zone-fixture
+CLOUDFLARE_ACCOUNT_ID=account-fixture
 `)
 assert.equal(cloudflareEnvFixture.parsed.CLOUDFLARE_API_TOKEN, 'token-fixture', 'Cloudflare WAF proof parses allowed local env keys')
 assert.equal(cloudflareEnvFixture.parsed.CF_ZONE_ID, 'zone-fixture', 'Cloudflare WAF proof parses zone id from local env file')
+assert.equal(cloudflareEnvFixture.parsed.CLOUDFLARE_ACCOUNT_ID, 'account-fixture', 'Cloudflare WAF proof can parse account id without inspecting account-level rulesets by default')
 assert.deepEqual(cloudflareEnvFixture.skippedKeys, ['IGNORED_KEY'], 'Cloudflare WAF proof skips unrelated local env keys')
+
+const sandboxCloudflareDesiredRules = sandboxCloudflareWafDesiredRules(['book.sandboxhotel.com', 'staff.sandboxhotel.com'])
+assert.equal(sandboxCloudflareDesiredRules.length, 2, 'Cloudflare WAF ensure defaults to Free-plan-compatible custom probe and login rate-limit rules')
+assert.deepEqual(
+  sandboxCloudflareDesiredRules.map((desired) => desired.rule.ref),
+  ['sandbox_pms_common_probe_block', 'sandbox_pms_login_rate_limit'],
+  'Cloudflare WAF ensure uses stable rule refs',
+)
+assert.ok(
+  sandboxCloudflareDesiredRules.every((desired) => desired.rule.expression.includes('book.sandboxhotel.com') && desired.rule.expression.includes('staff.sandboxhotel.com')),
+  'Cloudflare WAF ensure scopes all rules to protected hostnames',
+)
+assert.equal(sandboxCloudflareDesiredRules[0].phase, 'http_request_firewall_custom', 'Cloudflare WAF ensure creates the custom rule in the custom firewall phase')
+assert.equal(sandboxCloudflareDesiredRules[0].rule.action, 'block', 'Cloudflare WAF ensure blocks common probe paths')
+assert.equal(sandboxCloudflareDesiredRules[1].phase, 'http_ratelimit', 'Cloudflare WAF ensure creates login limit in the rate-limit phase')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.action, 'block', 'Cloudflare WAF ensure uses Free-plan-compatible block action for login rate limiting')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.requests_per_period, 10, 'Cloudflare WAF ensure records the login rate-limit threshold')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.period, 10, 'Cloudflare WAF ensure uses the Free-plan-compatible login rate-limit period')
+assert.equal(sandboxCloudflareDesiredRules[1].rule.ratelimit.mitigation_timeout, 10, 'Cloudflare WAF ensure uses a short login rate-limit mitigation timeout')
+assert.deepEqual(sandboxCloudflareDesiredRules[1].rule.ratelimit.characteristics, ['cf.colo.id', 'ip.src'], 'Cloudflare WAF ensure keys rate limits by colo and source IP')
+const sandboxCloudflarePaidQuotaRules = sandboxCloudflareWafDesiredRules(['book.sandboxhotel.com'], { includeApiBurstRateLimit: true })
+assert.equal(sandboxCloudflarePaidQuotaRules.length, 3, 'Cloudflare WAF ensure can include the optional API burst rule when rate-limit quota allows')
+assert.equal(sandboxCloudflarePaidQuotaRules[2].rule.ref, 'sandbox_pms_api_burst_rate_limit', 'Cloudflare WAF ensure keeps the optional API burst rule ref stable')
+assert.equal(sandboxCloudflarePaidQuotaRules[2].rule.ratelimit.requests_per_period, 300, 'Cloudflare WAF ensure records the optional API burst threshold')
 
 const opsEmailNotification = {
   id: 'ops-notification-email-1',

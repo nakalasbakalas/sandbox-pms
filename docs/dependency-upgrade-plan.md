@@ -9,12 +9,13 @@ The low-risk dependency batch has been upgraded and validated locally:
 - Tailwind CSS, `@tailwindcss/vite`, and `@tailwindcss/postcss` to `4.3.0`
 - `@vitejs/plugin-react-swc` to `4.3.1`
 - Zod to `4.4.3`
+- `js-yaml` is pinned through an npm override to `4.2.0` to avoid the transitive ESLint config advisory in `4.1.1`.
 
 ## Held Back Deliberately
 
 ### Vite 8
 
-`vite@8.0.14` installs, but `@github/spark@0.46.2` currently declares peer support for Vite `^7.0.0 || ^6.4.1`. Keep Vite on `7.3.3` until the Spark plugin publishes Vite 8 peer support or the app removes that plugin dependency.
+`vite@8.0.14` installs, but `@github/spark@0.46.3` currently declares peer support for Vite `^7.0.0 || ^6.4.1`. Keep Vite on `7.3.5` until the Spark plugin publishes Vite 8 peer support or the app removes that plugin dependency.
 
 ### Prisma 7
 

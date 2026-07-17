@@ -53,9 +53,64 @@ function zoneId() {
 }
 
 function accountId() {
-  return argValue('--account-id')
-    || nullableEnv('CLOUDFLARE_ACCOUNT_ID')
+  const explicitAccountId = argValue('--account-id')
+  if (explicitAccountId) return explicitAccountId
+  return nullableEnv('CLOUDFLARE_ACCOUNT_ID')
     || nullableEnv('CF_ACCOUNT_ID')
+}
+
+function accountInspectionRequested() {
+  return hasFlag('--account-id') || hasFlag('--use-env-account-id')
+}
+
+function isCloudflareWafProofAccountInspected({
+  targetAccountId,
+  targetAccountInspectionRequested,
+  accountRulesetInspectionError,
+}) {
+  return Boolean(targetAccountId)
+    && Boolean(targetAccountInspectionRequested)
+    && !accountRulesetInspectionError
+}
+
+function evaluateCloudflareWafProofReadiness({
+  rulesCount,
+  targetHostnameCoveredRules,
+  accountInspectionRequested = false,
+  accountInspectionInspected = false,
+}) {
+  return !(
+    rulesCount === 0
+    || targetHostnameCoveredRules === 0
+    || (accountInspectionRequested && !accountInspectionInspected)
+  )
+}
+
+export function isCloudflareWafProofReady({
+  rulesCount,
+  targetHostnameCoveredRules,
+  rateLimitRulesCount,
+  accountInspectionRequested = false,
+  accountInspectionInspected = false,
+}) {
+  return evaluateCloudflareWafProofReadiness({
+    rulesCount,
+    targetHostnameCoveredRules,
+    rateLimitRulesCount,
+    accountInspectionRequested,
+    accountInspectionInspected,
+  })
+}
+
+export function assertCloudflareWafProofRequirements({ proof }) {
+  if (!proof?.summary) {
+    throw new Error('Cloudflare WAF proof output is missing summary metadata.')
+  }
+  if (!proof.summary.requireOwnerReview) return
+  const reason = proof.summary.accountInspectionRequested && !proof.summary.accountInspectionInspected
+    ? 'Account-level inspection was requested but could not be completed.'
+    : 'Required hostname-covered WAF coverage and rate-limit rule metadata were not found.'
+  throw new Error(`Cloudflare WAF/rate-limit proof is incomplete. ${reason}`)
 }
 
 function normalizeHostname(value = DEFAULT_HOSTNAME) {
@@ -131,7 +186,7 @@ CLOUDFLARE_API_TOKEN=
 # Optional if the token can read zones. The helper can discover this from --hostname.
 CLOUDFLARE_ZONE_ID=
 
-# Optional. Include only when account-level rulesets should be inspected.
+# Optional. Include only when account-level rulesets should be inspected with --use-env-account-id.
 CLOUDFLARE_ACCOUNT_ID=
 `
   await writeFile(resolvedPath, template, { encoding: 'utf8', flag: 'wx' })
@@ -167,6 +222,7 @@ Optional:
   --probe-url <https_url>         Run a bounded unauthenticated GET probe and omit response body.
   --probe-count <0-5>             Number of times to request --probe-url. Default: 1 when probe-url is set.
   --require-rules                 Exit non-zero if no WAF/rate-limit rules are found.
+  --use-env-account-id            Inspect account-level WAF/rate-limit rulesets using CLOUDFLARE_ACCOUNT_ID/CF_ACCOUNT_ID from the environment.
 `
 }
 
@@ -318,10 +374,11 @@ export async function buildCloudflareWafProof({
   token,
   targetZoneId,
   targetAccountId = null,
+  targetAccountInspectionRequested = false,
   targetHostname = DEFAULT_HOSTNAME,
   includeExpressions = false,
   probeUrl = null,
-  probeCount = 0,
+  probeCount = null,
 } = {}) {
   if (!token) fail('Cloudflare API token is required. Set CLOUDFLARE_API_TOKEN or CF_API_TOKEN.')
   const hostname = normalizeHostname(targetHostname)
@@ -331,14 +388,35 @@ export async function buildCloudflareWafProof({
   if (!discoveredZone.id) fail(`Cloudflare zone id is required. Set CLOUDFLARE_ZONE_ID or CF_ZONE_ID, pass --zone-id, or grant the token Zone Read for hostname discovery. Discovery source: ${discoveredZone.source}.`)
   const zone = await requestJson(`/zones/${encodeURIComponent(discoveredZone.id)}`, token)
   const zoneRulesets = await fetchRulesets({ level: 'zone', id: discoveredZone.id, token })
-  const accountRulesets = targetAccountId
-    ? await fetchRulesets({ level: 'account', id: targetAccountId, token })
-    : []
+  let accountRulesets = []
+  let accountRulesetInspectionError = null
+  if (targetAccountId && targetAccountInspectionRequested) {
+    try {
+      accountRulesets = await fetchRulesets({ level: 'account', id: targetAccountId, token })
+    } catch (error) {
+      accountRulesetInspectionError = redactProviderMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
   const summarizedZoneRulesets = zoneRulesets.map((ruleset) => summarizeRuleset(ruleset, { targetHostname: hostname, includeExpressions }))
   const summarizedAccountRulesets = accountRulesets.map((ruleset) => summarizeRuleset(ruleset, { targetHostname: hostname, includeExpressions }))
   const allRulesets = [...summarizedZoneRulesets, ...summarizedAccountRulesets]
   const rulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.rulesCount, 0)
   const coveredRulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.targetHostnameCoveredRules, 0)
+  const rateLimitRulesCount = allRulesets.reduce((sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.ratelimit).length, 0)
+  const accountInspectionInspected = isCloudflareWafProofAccountInspected(
+    {
+      targetAccountId,
+      targetAccountInspectionRequested,
+      accountRulesetInspectionError,
+    },
+  )
+  const isReady = evaluateCloudflareWafProofReadiness({
+    rulesCount,
+    targetHostnameCoveredRules: coveredRulesCount,
+    rateLimitRulesCount,
+    accountInspectionRequested: Boolean(targetAccountInspectionRequested),
+    accountInspectionInspected,
+  })
 
   return {
     generatedAt: new Date().toISOString(),
@@ -353,11 +431,14 @@ export async function buildCloudflareWafProof({
       },
       account: {
         idPresent: Boolean(targetAccountId),
+        requested: Boolean(targetAccountInspectionRequested),
+        inspected: accountInspectionInspected,
+        inspectionError: accountRulesetInspectionError,
       },
     },
     cloudflareApi: {
       baseUrl: API_BASE,
-      rulesetLevels: targetAccountId ? ['zone', 'account'] : ['zone'],
+      rulesetLevels: targetAccountId && targetAccountInspectionRequested ? ['zone', 'account'] : ['zone'],
       phases: [...SECURITY_PHASES],
     },
     summary: {
@@ -365,9 +446,11 @@ export async function buildCloudflareWafProof({
       rulesCount,
       enabledRulesCount: allRulesets.reduce((sum, ruleset) => sum + ruleset.enabledRulesCount, 0),
       targetHostnameCoveredRules: coveredRulesCount,
-      rateLimitRulesCount: allRulesets.reduce((sum, ruleset) => sum + ruleset.rules.filter((rule) => rule.ratelimit).length, 0),
+      rateLimitRulesCount,
       actions: [...new Set(allRulesets.flatMap((ruleset) => ruleset.actions))].sort(),
-      requireOwnerReview: rulesCount === 0 || coveredRulesCount === 0,
+      accountInspectionRequested: Boolean(targetAccountInspectionRequested),
+      accountInspectionInspected,
+      requireOwnerReview: !isReady,
     },
     rulesets: {
       zone: summarizedZoneRulesets,
@@ -412,6 +495,8 @@ async function main() {
   const token = bearerToken()
   const targetZoneId = zoneId()
   const hostname = normalizeHostname(argValue('--hostname') || DEFAULT_HOSTNAME)
+  const targetAccountId = accountId()
+  const targetAccountInspectionRequested = accountInspectionRequested()
   const outputBase = {
     generatedAt: new Date().toISOString(),
     purpose: 'read-only Cloudflare WAF and rate-limit ruleset proof',
@@ -419,7 +504,7 @@ async function main() {
     target: {
       hostname,
       zoneIdPresent: Boolean(targetZoneId),
-      accountIdPresent: Boolean(accountId()),
+      accountIdPresent: Boolean(targetAccountId),
     },
     envFile: envFile ? {
       used: true,
@@ -452,17 +537,18 @@ async function main() {
   const proof = await buildCloudflareWafProof({
     token,
     targetZoneId,
-    targetAccountId: accountId(),
+    targetAccountId,
+    targetAccountInspectionRequested,
     targetHostname: hostname,
     includeExpressions: hasFlag('--include-expressions'),
     probeUrl: argValue('--probe-url') || null,
     probeCount: argValue('--probe-count'),
   })
   proof.envFile = outputBase.envFile
-  proof.ready = proof.summary.rulesCount > 0
+  proof.ready = !proof.summary.requireOwnerReview
   console.log(JSON.stringify(proof, null, 2))
 
-  if (hasFlag('--require-rules') && proof.summary.rulesCount === 0) fail('No Cloudflare WAF/rate-limit rules were found.')
+  if (hasFlag('--require-rules')) assertCloudflareWafProofRequirements({ proof })
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
