@@ -12,6 +12,13 @@ import { isSameDay } from 'date-fns'
 
 export const SERVER_API_ENABLED = SERVER_AUTH_ENABLED
 
+export function createPmsIdempotencyKey(scope: string) {
+  const randomPart = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${scope}:${randomPart}`.slice(0, 200)
+}
+
 export async function pmsApi<T>(path: string, _legacyToken: string | null | undefined, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,

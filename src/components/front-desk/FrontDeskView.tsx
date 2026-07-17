@@ -21,7 +21,7 @@ import {
   buildRoomReadinessSummary,
   toInHouseItem,
 } from '@/lib/front-desk-workflow'
-import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { Calendar, EnvelopeSimple, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
 import { toast } from 'sonner'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
@@ -575,6 +575,7 @@ export function FrontDeskView() {
         }
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
+          headers: data.payment ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-in:${selectedArrival.reservationId}`) } : undefined,
           body: JSON.stringify({
             guest: {
               nationality: data.nationality,
@@ -658,6 +659,7 @@ export function FrontDeskView() {
       try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
+          headers: data.paymentAmount ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-out:${selectedDeparture.reservationId}`) } : undefined,
           body: JSON.stringify({
             payment: data.paymentAmount ? {
               amount: data.paymentAmount,

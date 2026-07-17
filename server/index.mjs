@@ -1511,7 +1511,14 @@ async function handleApi(request, response, url) {
   if (url.pathname === '/api/front-desk/walk-in' && request.method === 'POST') {
     requirePermission(user, 'create:reservation')
     requirePermission(user, 'check-in:guest')
-    const reservation = await createWalkInCheckIn(db, await readJson(request), user)
+    const body = await readJson(request)
+    const reservation = await createWalkInCheckIn(db, body.payment ? {
+      ...body,
+      payment: {
+        ...body.payment,
+        idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
+      },
+    } : body, user)
     sendJson(response, 201, { ok: true, data: reservation, message: `Walk-in checked in to Room ${reservation.assignedRoom?.number}.` })
     return true
   }
@@ -1726,7 +1733,14 @@ async function handleApi(request, response, url) {
   params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/check-in$/)
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-in:guest')
-    const reservation = await checkInReservation(db, params.id, user, await readJson(request))
+    const body = await readJson(request)
+    const reservation = await checkInReservation(db, params.id, user, body.payment ? {
+      ...body,
+      payment: {
+        ...body.payment,
+        idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
+      },
+    } : body)
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-in complete. Room is now occupied.' })
     return true
   }
@@ -1735,7 +1749,13 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'check-out:guest')
     const body = await readJson(request)
-    const reservation = await checkOutReservation(db, params.id, user, body)
+    const reservation = await checkOutReservation(db, params.id, user, body.payment ? {
+      ...body,
+      payment: {
+        ...body.payment,
+        idempotencyKey: body.payment.idempotencyKey || context.idempotencyKey,
+      },
+    } : body)
     sendJson(response, 200, { ok: true, data: reservation, message: 'Check-out complete. Room has been sent to housekeeping.' })
     return true
   }

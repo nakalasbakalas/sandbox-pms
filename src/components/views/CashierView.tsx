@@ -21,7 +21,7 @@ import { AccountingDashboard } from '@/components/cashier/AccountingDashboard'
 import { CashReconciliation } from '@/components/cashier/CashReconciliation'
 import { useRoomSync } from '@/hooks/use-room-sync'
 import { nightsBetween } from '@/lib/hotel/business-rules'
-import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { escapeHtml } from '@/lib/html-escape'
 import { toast } from 'sonner'
 import type { BoardRoomCard } from '@/types/board'
@@ -542,6 +542,7 @@ export function CashierView() {
       if (SERVER_API_ENABLED) {
         await pmsApi('/api/payments', authToken, {
           method: 'POST',
+          headers: { 'x-idempotency-key': createPmsIdempotencyKey(`payment:${paymentFolio.id}`) },
           body: JSON.stringify({
             folioId: paymentFolio.id,
             amount,

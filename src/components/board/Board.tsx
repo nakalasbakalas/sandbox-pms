@@ -59,7 +59,7 @@ import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem } from '@/ty
 import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import {
   emailReservationDocument,
   getReservationDocumentLabel,
@@ -1300,6 +1300,7 @@ export function Board() {
         }
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
+          headers: data.payment ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-in:${selectedArrival.reservationId}`) } : undefined,
           body: JSON.stringify({
             guest: {
               nationality: data.nationality,
@@ -1403,6 +1404,7 @@ export function Board() {
       try {
         const payload = await pmsApi<{ ok: true; message?: string }>(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
+          headers: data.paymentAmount ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-out:${selectedDeparture.reservationId}`) } : undefined,
           body: JSON.stringify({
             payment: data.paymentAmount ? {
               amount: data.paymentAmount,

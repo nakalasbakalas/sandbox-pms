@@ -932,6 +932,7 @@ try {
     payment: {
       amount: assigned.folio.balance,
       method: 'CASH',
+      idempotencyKey: `check-in-payment-${reservation.id}`,
     },
   })
   assert.equal(checkedIn.status, 'CHECKED_IN', 'check-in persists')

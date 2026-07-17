@@ -44,7 +44,7 @@ import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
 import type { BookingEmailEvent } from '@/types/booking-email'
@@ -982,6 +982,7 @@ export function ReservationsView() {
         }
         await pmsApi(`/api/reservations/${selectedArrival.reservationId}/check-in`, authToken, {
           method: 'POST',
+          headers: data.payment ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-in:${selectedArrival.reservationId}`) } : undefined,
           body: JSON.stringify({
             guest: {
               nationality: data.nationality,
@@ -1066,6 +1067,7 @@ export function ReservationsView() {
       try {
         await pmsApi(`/api/reservations/${selectedDeparture.reservationId}/check-out`, authToken, {
           method: 'POST',
+          headers: data.paymentAmount ? { 'x-idempotency-key': createPmsIdempotencyKey(`check-out:${selectedDeparture.reservationId}`) } : undefined,
           body: JSON.stringify({
             payment: data.paymentAmount ? {
               amount: data.paymentAmount,
