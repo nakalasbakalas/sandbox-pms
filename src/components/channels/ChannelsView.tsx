@@ -169,57 +169,61 @@ function redactStoredIcalBearer(value?: string) {
   return value?.replace(/(\/ical\/)[a-zA-Z0-9_-]{16,200}(\.ics)/g, '$1[REDACTED]$2')
 }
 
+const DEFAULT_CHANNELS: Channel[] = [
+  {
+    id: 'booking',
+    name: 'Booking.com',
+    provider: 'BOOKING_COM',
+    connectionMode: 'ICAL',
+    enabled: false,
+    connected: false,
+    status: 'DISCONNECTED',
+    stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
+  },
+  {
+    id: 'agoda',
+    name: 'Agoda',
+    provider: 'AGODA',
+    connectionMode: 'ICAL',
+    enabled: false,
+    connected: false,
+    status: 'DISCONNECTED',
+    stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
+  },
+  {
+    id: 'expedia',
+    name: 'Expedia',
+    provider: 'EXPEDIA',
+    connectionMode: 'ICAL',
+    enabled: false,
+    connected: false,
+    status: 'DISCONNECTED',
+    stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
+  },
+  {
+    id: 'airbnb',
+    name: 'Airbnb',
+    provider: 'AIRBNB',
+    connectionMode: 'ICAL',
+    enabled: false,
+    connected: false,
+    status: 'DISCONNECTED',
+    stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
+  }
+]
+
 export function ChannelsView() {
-  const [channels, setChannels] = useKV<Channel[]>('channels', [
-    {
-      id: 'booking',
-      name: 'Booking.com',
-      provider: 'BOOKING_COM',
-      connectionMode: 'ICAL',
-      enabled: false,
-      connected: false,
-      status: 'DISCONNECTED',
-      stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
-    },
-    {
-      id: 'agoda',
-      name: 'Agoda',
-      provider: 'AGODA',
-      connectionMode: 'ICAL',
-      enabled: false,
-      connected: false,
-      status: 'DISCONNECTED',
-      stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
-    },
-    {
-      id: 'expedia',
-      name: 'Expedia',
-      provider: 'EXPEDIA',
-      connectionMode: 'ICAL',
-      enabled: false,
-      connected: false,
-      status: 'DISCONNECTED',
-      stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
-    },
-    {
-      id: 'airbnb',
-      name: 'Airbnb',
-      provider: 'AIRBNB',
-      connectionMode: 'ICAL',
-      enabled: false,
-      connected: false,
-      status: 'DISCONNECTED',
-      stats: { totalBookings: 0, monthlyRevenue: 0, occupancyRate: 0 }
-    }
-  ])
+  const [demoChannels, setDemoChannels] = useKV<Channel[]>('channels', DEFAULT_CHANNELS)
   const [reservations, setReservations] = useKV<ChannelReservation[]>('channel-reservations', [])
-  const [syncLogs, setSyncLogs] = useKV<SyncLog[]>('channel-sync-logs', [])
+  const [demoSyncLogs, setDemoSyncLogs] = useKV<SyncLog[]>('channel-sync-logs', [])
   const [roomTypes] = useKV<RoomTypeOption[]>('room-types-config', [])
   const [setupRoomTypes] = useKV<RoomTypeOption[]>('onboarding-room-types', [])
   const [boardRooms] = useKV<BoardRoomCard[]>('pms-rooms', [])
   const [setupRooms] = useKV<Array<{ id: string; number: string; roomTypeId: string; floor?: number; status?: string }>>('onboarding-rooms', [])
   const [demoChannelMappings, setDemoChannelMappings] = useKV<ChannelRoomMapping[]>('channel-room-mappings', [])
   const [serverChannelMappings, setServerChannelMappings] = useState<ChannelRoomMapping[]>([])
+  const [serverChannels, setServerChannels] = useState<Channel[]>(DEFAULT_CHANNELS)
+  const [serverSyncLogs, setServerSyncLogs] = useState<SyncLog[]>([])
   const [pmsReservations, setPmsReservations] = useKV<any[]>('reservations', [])
   const [, setReservationData] = useKV<any[]>('reservations-data', [])
   const [unassignedReservations, setUnassignedReservations] = useKV<any[]>('unassigned-reservations', [])
@@ -237,6 +241,22 @@ export function ChannelsView() {
 
   const [importUrl, setImportUrl] = useState('')
   const [icalText, setIcalText] = useState('')
+  const channels = SERVER_API_ENABLED ? serverChannels : demoChannels || []
+  const syncLogs = SERVER_API_ENABLED ? serverSyncLogs : demoSyncLogs || []
+  const setChannels = useCallback((updater: Channel[] | ((current: Channel[]) => Channel[])) => {
+    if (SERVER_API_ENABLED) {
+      setServerChannels((current) => typeof updater === 'function' ? updater(current) : updater)
+      return
+    }
+    setDemoChannels((current) => typeof updater === 'function' ? updater(current || []) : updater)
+  }, [setDemoChannels])
+  const setSyncLogs = useCallback((updater: SyncLog[] | ((current: SyncLog[]) => SyncLog[])) => {
+    if (SERVER_API_ENABLED) {
+      setServerSyncLogs((current) => typeof updater === 'function' ? updater(current) : updater)
+      return
+    }
+    setDemoSyncLogs((current) => typeof updater === 'function' ? updater(current || []) : updater)
+  }, [setDemoSyncLogs])
   const channelMappings = SERVER_API_ENABLED ? serverChannelMappings : demoChannelMappings || []
   const applyChannelMappings = (updater: ChannelRoomMapping[] | ((current: ChannelRoomMapping[]) => ChannelRoomMapping[])) => {
     if (SERVER_API_ENABLED) {
