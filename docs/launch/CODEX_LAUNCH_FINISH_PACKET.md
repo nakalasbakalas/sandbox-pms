@@ -1,10 +1,17 @@
 # Codex Launch Finish Packet
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 Release status must use the four levels in `RELEASE_EVIDENCE_MODEL.md`: engineering-ready, staging-proven, owner-approved, and provider-proven. Do not infer one from another. The current posture is owner-accepted pilot / launch-hardening, not full production sign-off.
 
-PR #174 head `4c1659d` passed both required GitHub checks on 2026-07-16. A later property-scope/acceptance remediation is not covered by that result and must rerun both checks before merge. The release-foundation Blueprint now specifies migration-only predeploy; confirm the active Render service command before deployment because historical live evidence records migration plus `prod-safe` seed.
+Current merged baseline is `origin/main` `9208621ea81d5cf60c2fd09d5eee7c61f4ca0659` after PRs #175/#176. PR #177 head `60c4be7` and stacked PR #178 head `965f52f` (base `codex/authoritative-booking-board`) are clean with both required jobs green, but both are unmerged and undeployed; PR #177 is awaiting independent approval. The release-foundation Blueprint specifies migration-only predeploy, but active Render services still run older commits and provider predeploy still includes `db:seed`. Do not infer a deploy, provider alignment, or launch approval from CI or local health `200`.
+
+## 2026-07-18 Current handoff boundary
+
+- Preserve the four-level evidence model, historical evidence, disabled feature flags, and Lite/salvage isolation; do not flatten historical owner acceptance into current approval.
+- Canonical Gmail refresh-token tuple exists, but current end-to-end booking capture/parse/staff-acceptance evidence is absent. Keep Booking Email review-only and do not claim automatic booking application.
+- Fresh Cloudflare proof inputs are absent locally. Historical zone/WAF evidence remains dated provider evidence only.
+- Required before a release assertion: independent approval and merge of the intended candidate; active Render predeploy reconciliation to committed migration-only behavior; exact-commit deployment and fresh post-deploy proof; staging restored-copy migration, rollback, recovery, and staff drills; and owner/provider proof.
 
 Use this as the first instruction packet for the next Codex run in `nakalasbakalas/sandbox-pms`. It is scoped to prevent another long, overloaded session. The repo already has launch-hardening evidence through 2026-06-15, but current launch sign-off still depends on proof-heavy operational work and a fresh green gate in the current checkout.
 

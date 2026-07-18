@@ -6,16 +6,21 @@ Verdict: **owner-accepted pilot / launch-hardening; full production sign-off rem
 
 | Evidence level | Current status |
 | --- | --- |
-| Engineering-ready | Merged `main` commit `7844409` is the current primary source. Prior PR #174 evidence is historical; fresh CI and launch evidence must be rerun for any new correction commit. |
+| Engineering-ready | `origin/main` is `9208621ea81d5cf60c2fd09d5eee7c61f4ca0659` (PRs #175/#176). PR #177 (`60c4be7`) and stacked PR #178 (`965f52f`, base `codex/authoritative-booking-board`) have green required CI but are unmerged and undeployed; neither is a live or approved candidate. |
 | Staging-proven | Open; local disposable database evidence is not staging proof. |
 | Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
 | Provider-proven | Partial per capability. Historical 2026-07-07 Cloudflare WAF/rate-limit and Render recovery evidence is preserved, but it is not current-candidate proof and must not be generalized into OTA, payment, secret-rotation, or credentialed RBAC proof. |
 
-The committed release-foundation Blueprint is migration-only at predeploy (`npm run db:migrate`). Historical provider records that include seeding remain historical evidence and are not current deployment proof. Current server-mode browser coverage is intentionally limited while legacy browser-backed messaging routes are capability-gated.
+The committed release-foundation Blueprint is migration-only at predeploy (`npm run db:migrate`). Active Render services are still on older commits and provider predeploy still includes `db:seed`; historical provider records that include seeding remain historical evidence and are not current deployment proof. Local health `200` is not deployment proof. Current server-mode browser coverage is intentionally limited while legacy browser-backed messaging routes are capability-gated.
 
-### 2026-07-18 housekeeping correction
+### 2026-07-18 current-source reconciliation
 
-- Canonical source: `D:\sandbox-pms.local`, branch `main`, commit `7844409`.
+- Canonical merged source: `origin/main` at `9208621ea81d5cf60c2fd09d5eee7c61f4ca0659` (PRs #175/#176).
+- PR #177 head `60c4be7` is clean with both required jobs green, but is awaiting independent approval and remains unmerged/undeployed.
+- Stacked PR #178 head `965f52f` is clean with both required jobs green, is based on `codex/authoritative-booking-board`, and remains unmerged/undeployed.
+- Canonical Gmail refresh-token tuple exists; current end-to-end booking evidence does not. Keep Booking Email review/acceptance-gated.
+- Fresh Cloudflare proof inputs are absent locally. Existing Cloudflare evidence remains historical, not fresh provider proof.
+- Staging restored-copy migration/rollback/recovery/staff drills and owner/provider proof remain open.
 - WAF/evidence salvage remains on `codex/local-waf-proof-salvage` at `a6e43fd`.
 - PR151 audit edits are preserved on `codex/pr151-salvage` at `307cf13`.
 - Lite PRs #172/#173 remain isolated and are not part of primary main.

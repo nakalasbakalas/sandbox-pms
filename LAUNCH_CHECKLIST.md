@@ -2,7 +2,18 @@
 
 Checked command-based items reflect point-in-time evidence recorded in `docs/launch/evidence/` and `docs/live-environment-proof.md`. Items that require account-owner action, live credentials, production data ownership, provider dashboards, or role-by-role manual sign-off may be closed only by proof or explicit owner accepted-risk sign-off.
 
-Current release posture (2026-07-17): **owner-accepted pilot / launch-hardening**. Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof. PR #174 head `4c1659d` passed both required GitHub jobs on 2026-07-16, but the subsequent property-scope acceptance remediation must pass the same jobs at its own exact commit before merge.
+Current release posture (2026-07-18): **not approved for launch; owner-accepted pilot / launch-hardening remains the historical posture.** Full production sign-off is open. Apply the four evidence levels in `docs/launch/RELEASE_EVIDENCE_MODEL.md`; a checked historical item proves only the exact commit, environment, and capability named by its evidence. Owner-accepted risk is not staging or provider proof.
+
+## Current 2026-07-18 Release Reconciliation
+
+- [x] `origin/main` is `9208621ea81d5cf60c2fd09d5eee7c61f4ca0659`, incorporating PRs #175 and #176. This establishes the current merged source baseline only; it is not a deployment or launch approval.
+- [x] PR #177 head `60c4be7` is clean and both required GitHub jobs are green. It remains unmerged, undeployed, and awaiting independent approval; CI does not transfer approval or provider proof.
+- [x] Stacked PR #178 head `965f52f` is clean and both required GitHub jobs are green. Its base is `codex/authoritative-booking-board`; it remains unmerged and undeployed, so it is not a `main` or live-service candidate.
+- [x] The locally observed health check returned `200`. This is point-in-time health evidence only and does not prove the active provider services run either PR head.
+- [ ] Before any candidate deploy, reconcile the active Render services with the committed migration-only `preDeployCommand: npm run db:migrate`. Provider-side services still run older commits and provider predeploy still includes `db:seed`; no provider command change or deploy is evidenced here.
+- [ ] Booking Email remains review/acceptance-gated: the canonical Gmail refresh-token tuple exists, but no current end-to-end booking capture, parse, staff approval, or applied-reservation evidence is recorded.
+- [ ] Fresh Cloudflare provider-proof inputs are absent locally. Do not treat old zone/WAF evidence or health `200` as fresh WAF/rate-limit proof.
+- [ ] Staging restored-copy migration, rollback, recovery, and staff workflow drills remain open, as do owner/provider proof and independent approval for a deployable candidate.
 
 ## Historical 2026-07-04 to 2026-07-07 Evidence Refresh
 

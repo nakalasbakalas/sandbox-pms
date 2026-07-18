@@ -1,7 +1,16 @@
 # Live Environment Proof Register
 
-Latest repository release-candidate refresh: 2026-07-17.
-Latest external provider evidence refresh: 2026-07-07T15:29+07:00.
+## 2026-07-18 Current Reconciliation (not a new provider-proof run)
+
+- Source: `origin/main` is `9208621ea81d5cf60c2fd09d5eee7c61f4ca0659` after PRs #175/#176. PR #177 head `60c4be7` and stacked PR #178 head `965f52f` (base `codex/authoritative-booking-board`) are clean with both required GitHub jobs green, but remain unmerged and undeployed; PR #177 awaits independent approval.
+- Local health returned `200`. This confirms only the observed health response; it does not establish the deployed commit or provider configuration.
+- Active Render services still run older commits. Provider predeploy still includes `db:seed`, while committed `render.yaml` is migration-only. No provider-side reconciliation, deploy, or post-deploy proof was performed in this refresh.
+- The canonical Gmail refresh-token tuple exists, but current end-to-end booking capture, parsing, staff acceptance, and applied workflow evidence is absent. Booking Email remains review/acceptance-gated.
+- Fresh Cloudflare proof inputs are absent locally. Historical Cloudflare/WAF proof below remains preserved but is not fresh current-candidate proof.
+- Staging restored-copy migration, rollback, recovery, and staff drills remain open, along with owner/provider proof. This register does not approve launch.
+
+Previous repository release-candidate refresh: 2026-07-17.
+Previous external provider evidence refresh: 2026-07-07T15:29+07:00.
 
 This register records point-in-time external evidence gathered from the live Render workspace, public HTTPS endpoints, DNS, and provider documentation. It must not contain secret values. Use the Render dashboard or CLI for the current deploy ID after later documentation-only releases.
 
