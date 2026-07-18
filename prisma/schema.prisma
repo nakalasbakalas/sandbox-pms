@@ -59,6 +59,16 @@ model Property {
   houseAccounts HouseAccount[]
   journalEntries JournalEntry[]
   publicBookingQuotes PublicBookingQuote[]
+  channels Channel[]
+  autonomyPolicies AutonomyPolicy[]
+  externalProviderEvents ExternalProviderEvent[]
+  providerSyncCursors ProviderSyncCursor[]
+  providerSnapshots ProviderSnapshot[]
+  autonomyRuns AutonomyRun[]
+  agentDecisions AgentDecision[]
+  actionExecutions ActionExecution[]
+  reconciliationIssues ReconciliationIssue[]
+  deadLetterEvents DeadLetterEvent[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -1233,10 +1243,12 @@ model RateCalendar {
 model Channel {
   id            String        @id @default(cuid())
   propertyId    String
+  property      Property      @relation(fields: [propertyId], references: [id], onDelete: Restrict)
   provider      ChannelProvider
   name          String
   hotelId       String?
-  credentials   Json
+  credentialRef String?
+  credentialStatus Json?
   active        Boolean       @default(false)
   sandboxMode   Boolean       @default(true)
   lastSync      DateTime?
@@ -1245,6 +1257,12 @@ model Channel {
   config        Json?
   mappings      ChannelMapping[]
   logs          ChannelSyncLog[]
+  autonomyPolicies AutonomyPolicy[]
+  externalProviderEvents ExternalProviderEvent[]
+  syncCursors ProviderSyncCursor[]
+  snapshots ProviderSnapshot[]
+  reconciliationIssues ReconciliationIssue[]
+  deadLetterEvents DeadLetterEvent[]
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   
@@ -1570,4 +1588,354 @@ model DomainEvent {
   @@index([propertyId, id])
   @@index([propertyId, eventType, createdAt])
   @@index([aggregateType, aggregateId, id])
+}
+
+enum AutonomyMode {
+  OBSERVE
+  SHADOW
+  PROHIBITED
+}
+
+enum ProviderSourceTrust {
+  SIGNED_OTA_WEBHOOK
+  AUTHENTICATED_CHANNEL_WEBHOOK
+  AUTHENTICATED_OTA_API
+  PROVIDER_ACKNOWLEDGEMENT
+  STRUCTURED_OTA_EMAIL
+  VALIDATED_PROVIDER_ATTACHMENT
+  FREE_TEXT_GUEST_EMAIL
+  STAFF_COMMAND
+  AI_INTERPRETATION
+}
+
+enum ExternalProviderEventStatus {
+  RECEIVED
+  NORMALIZED
+  SHADOW_EVALUATED
+  REJECTED
+  DEAD_LETTERED
+}
+
+enum AutonomyRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+enum AgentDecisionOutcome {
+  OBSERVED
+  SHADOW_ELIGIBLE
+  BLOCKED
+  NEEDS_REVIEW
+}
+
+enum ActionExecutionMode {
+  SHADOW_NOOP
+}
+
+enum ActionExecutionStatus {
+  RECORDED
+  BLOCKED
+  FAILED
+}
+
+enum ReconciliationIssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReconciliationIssueStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  IGNORED
+}
+
+enum DeadLetterStatus {
+  OPEN
+  RETRY_SCHEDULED
+  RESOLVED
+  DISCARDED
+}
+
+model AutonomyPolicy {
+  id                           String              @id @default(cuid())
+  propertyId                   String
+  property                     Property            @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId                    String?
+  channel                      Channel?            @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  provider                     String
+  taskType                     String
+  mode                         AutonomyMode        @default(OBSERVE)
+  enabled                      Boolean             @default(false)
+  minimumSourceTrust           ProviderSourceTrust
+  minimumConfidenceBasisPoints Int                 @default(10000)
+  limits                       Json
+  requiredProof                Json?
+  rollbackMethod               String?
+  approvalRole                 UserRole?
+  quietHours                   Json?
+  emergencyStopCovered         Boolean             @default(true)
+  version                      Int                 @default(1)
+  createdBy                    String
+  reason                       String
+  runs                         AutonomyRun[]
+  decisions                    AgentDecision[]
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+
+  @@unique([propertyId, provider, taskType, version])
+  @@index([propertyId, enabled, mode])
+  @@index([channelId, enabled])
+}
+
+model ExternalProviderEvent {
+  id                   String                      @id @default(cuid())
+  propertyId           String
+  property             Property                    @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId            String?
+  channel              Channel?                    @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  provider             String
+  providerEventId      String
+  providerReferenceId  String?
+  eventVersion         String
+  eventType            String
+  sourceTrust          ProviderSourceTrust
+  status               ExternalProviderEventStatus @default(RECEIVED)
+  idempotencyKey       String
+  correlationId        String
+  payloadHash          String
+  normalizedPayload    Json
+  sanitizedEvidence    Json?
+  sourceTimestamp      DateTime
+  receivedAt           DateTime                    @default(now())
+  retryCount           Int                         @default(0)
+  snapshots            ProviderSnapshot[]
+  runs                 AutonomyRun[]
+  decisions            AgentDecision[]
+  reconciliationIssues ReconciliationIssue[]
+  deadLetter           DeadLetterEvent?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  @@unique([propertyId, provider, providerEventId, eventVersion])
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, status, receivedAt])
+  @@index([channelId, sourceTimestamp])
+  @@index([correlationId])
+}
+
+model ProviderSyncCursor {
+  id                      String   @id @default(cuid())
+  propertyId              String
+  property                Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId               String
+  channel                 Channel  @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  provider                String
+  cursor                  String?
+  cursorHash              String?
+  lastSourceTimestamp     DateTime?
+  lastSuccessfulSyncAt    DateTime?
+  lastAttemptAt           DateTime?
+  consecutiveFailureCount Int      @default(0)
+  lastErrorCode           String?
+  lastErrorSummary        String?
+  updatedBy               String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([propertyId, channelId])
+  @@index([propertyId, lastSuccessfulSyncAt])
+}
+
+model ProviderSnapshot {
+  id                   String   @id @default(cuid())
+  propertyId           String
+  property             Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId            String?
+  channel              Channel? @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  externalEventId      String?
+  externalEvent        ExternalProviderEvent? @relation(fields: [externalEventId], references: [id], onDelete: Restrict)
+  provider             String
+  snapshotType         String
+  providerReferenceId  String?
+  correlationId        String
+  idempotencyKey       String
+  contentHash          String
+  snapshot             Json
+  sanitizedEvidence    Json?
+  sourceTimestamp      DateTime
+  capturedAt           DateTime @default(now())
+  reconciliationIssues ReconciliationIssue[]
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, provider, snapshotType, capturedAt])
+  @@index([channelId, sourceTimestamp])
+  @@index([externalEventId])
+  @@index([correlationId])
+}
+
+model AutonomyRun {
+  id                String            @id @default(cuid())
+  propertyId        String
+  property          Property          @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  policyId          String?
+  policy            AutonomyPolicy?   @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  externalEventId   String?
+  externalEvent     ExternalProviderEvent? @relation(fields: [externalEventId], references: [id], onDelete: Restrict)
+  runType           String
+  triggerType       String
+  mode              AutonomyMode      @default(OBSERVE)
+  status            AutonomyRunStatus @default(PENDING)
+  correlationId     String
+  idempotencyKey    String
+  triggeredBy       String
+  managementSummary Json?
+  errorSummary      String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  decisions         AgentDecision[]
+  actions           ActionExecution[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, status, createdAt])
+  @@index([externalEventId])
+  @@index([correlationId])
+}
+
+model AgentDecision {
+  id                    String               @id @default(cuid())
+  propertyId            String
+  property              Property             @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  runId                 String
+  run                   AutonomyRun          @relation(fields: [runId], references: [id], onDelete: Restrict)
+  policyId              String?
+  policy                AutonomyPolicy?      @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  externalEventId       String?
+  externalEvent         ExternalProviderEvent? @relation(fields: [externalEventId], references: [id], onDelete: Restrict)
+  agentType             String
+  decisionType          String
+  outcome               AgentDecisionOutcome
+  confidenceBasisPoints Int
+  rationale             String
+  proposedAction        Json?
+  policyEvaluation      Json
+  correlationId         String
+  idempotencyKey        String
+  actions               ActionExecution[]
+  createdAt             DateTime             @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, outcome, createdAt])
+  @@index([runId, createdAt])
+  @@index([externalEventId])
+  @@index([correlationId])
+}
+
+model ActionExecution {
+  id                  String                @id @default(cuid())
+  propertyId          String
+  property            Property              @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  runId               String
+  run                 AutonomyRun           @relation(fields: [runId], references: [id], onDelete: Restrict)
+  decisionId          String
+  decision            AgentDecision         @relation(fields: [decisionId], references: [id], onDelete: Restrict)
+  provider            String?
+  actionType          String
+  targetType          String?
+  targetId            String?
+  mode                ActionExecutionMode   @default(SHADOW_NOOP)
+  status              ActionExecutionStatus @default(RECORDED)
+  candidatePayload    Json?
+  result              Json?
+  providerRequestSent Boolean               @default(false)
+  retryCount          Int                   @default(0)
+  correlationId       String
+  idempotencyKey      String
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, status, createdAt])
+  @@index([runId, createdAt])
+  @@index([decisionId])
+  @@index([correlationId])
+}
+
+model ReconciliationIssue {
+  id                  String                      @id @default(cuid())
+  propertyId          String
+  property            Property                    @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId           String?
+  channel             Channel?                    @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  externalEventId     String?
+  externalEvent       ExternalProviderEvent?      @relation(fields: [externalEventId], references: [id], onDelete: Restrict)
+  snapshotId          String?
+  snapshot            ProviderSnapshot?           @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  provider            String
+  issueType           String
+  fingerprint         String
+  severity            ReconciliationIssueSeverity
+  status              ReconciliationIssueStatus   @default(OPEN)
+  pmsAggregateType    String?
+  pmsAggregateId      String?
+  providerReferenceId String?
+  summary             String
+  sanitizedEvidence   Json?
+  correlationId       String
+  detectedAt          DateTime                    @default(now())
+  acknowledgedAt      DateTime?
+  acknowledgedBy      String?
+  resolvedAt          DateTime?
+  resolvedBy          String?
+  resolutionReason    String?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  @@unique([propertyId, fingerprint])
+  @@index([propertyId, status, severity, detectedAt])
+  @@index([channelId, status])
+  @@index([externalEventId])
+  @@index([snapshotId])
+  @@index([correlationId])
+}
+
+model DeadLetterEvent {
+  id                  String           @id @default(cuid())
+  propertyId          String
+  property            Property         @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  channelId           String?
+  channel             Channel?         @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  externalEventId     String?           @unique
+  externalEvent       ExternalProviderEvent? @relation(fields: [externalEventId], references: [id], onDelete: Restrict)
+  provider            String
+  providerEventId     String?
+  providerReferenceId String?
+  eventVersion        String?
+  failureStage        String
+  errorCode           String
+  errorSummary        String
+  sanitizedPayload    Json?
+  sanitizedEvidence   Json?
+  retryCount          Int              @default(0)
+  nextRetryAt         DateTime?
+  status              DeadLetterStatus @default(OPEN)
+  correlationId       String
+  idempotencyKey      String
+  resolvedAt          DateTime?
+  resolvedBy          String?
+  resolutionReason    String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([propertyId, status, nextRetryAt])
+  @@index([channelId, status])
+  @@index([correlationId])
 }

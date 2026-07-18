@@ -12,6 +12,10 @@ The PMS property context, rate service, and domain-event stream do not expand ad
 
 Frontend auth identity, onboarding drafts, browser-KV accounting entries, and cash counts are never adapter input or evidence. In server mode, identity comes from the authenticated backend request context and legacy browser-backed accounting surfaces remain capability-gated.
 
+The autonomy shadow layer does not expand adapter capability. It may normalize sanitized provider evidence, persist a cursor, evaluate a property/provider/task policy, and record a `SHADOW_NOOP` candidate. Provider snapshots are schema-reserved and have no capture service in this phase. The shadow layer must not import or invoke this adapter layer. `ProviderAcknowledgement` and compensation records are deferred until a real credentialed provider write supports acknowledgement and read-back; schema presence must never be used as provider proof.
+
+`Channel.credentialRef` is the only channel-level secret locator. `Channel.credentialStatus` may contain non-secret readiness metadata; raw provider credentials must not be persisted in channel rows, normalized events, snapshots, policies, agent input, decisions, evidence, logs, or dead letters.
+
 Exact monetary fields use base-10 satang strings at JSON boundaries. Adapters must not convert a satang string through floating-point arithmetic. During the compatibility window, any legacy baht field is informational compatibility data; the validated typed task remains authoritative for the specific dry-run request.
 
 The AI and manager UI never control the browser directly. They create controlled task records. The backend validates and approves those records, then calls a typed OTA worker payload.

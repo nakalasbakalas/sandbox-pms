@@ -26,6 +26,8 @@ Last reviewed: 2026-07-18
 - Accounting V2: additive one-to-many accounting folios, append-only reversals/refunds, cash shifts, house accounts/A/R, journals, and exact-satang trial balance are implemented behind `ACCOUNTING_V2_ENABLED=false`. The legacy browser-KV accounting dashboard and cash reconciliation workflow are demo-only and render a truthful unavailable state in server mode.
 - Direct booking: versioned availability, immutable quote, 15-minute hold, and atomic booking services/routes are implemented behind `DIRECT_BOOKING_ENABLED=false`; no card data is accepted.
 - Bounded intelligence: deterministic demand, cancellation-risk, housekeeping, and rate-opportunity analyzers return explainable, suggest-only Hotel Ops recommendations and perform no mutations.
+- Autonomy shadow foundation: SYSTEM-only canonical provider-event ingestion, durable cursors, property/provider/task policies, PostgreSQL advisory locking, agent-run/decision evidence, and `SHADOW_NOOP` action records are implemented as an additive engineering foundation. Snapshot, reconciliation-issue, and dead-letter tables are schema foundations only; no service yet creates or presents them. Only `OBSERVE`, `SHADOW`, and `PROHIBITED` modes exist, and no provider or PMS operational write path is exposed.
+- Channel secret boundary: the autonomy migration replaces `Channel.credentials` JSON with `credentialRef` plus non-secret `credentialStatus` and adds a first-class Property foreign key. The migration aborts if any legacy row contains non-empty credential JSON so an operator must quarantine and rotate it instead of silently copying or deleting secrets.
 
 ## Relevant Implementation Files
 
@@ -53,6 +55,7 @@ Last reviewed: 2026-07-18
 - iCal bearer-token storage: `server/ical-feed.mjs` and `prisma/migrations/20260717141000_ical_token_hash_backfill`.
 - Server-backed operational services: `server/rate-service.mjs`, `server/settings-service.mjs`, `server/housekeeping-service.mjs`, `server/night-audit-service.mjs`, and `prisma/migrations/20260716140000_operations_foundation`.
 - Gated foundations: `server/accounting-service.mjs`, `server/direct-booking-service.mjs`, `server/ops-analyzers.mjs`, and migrations `20260716150000_accounting_v2_foundation` and `20260716160000_direct_booking_foundation`.
+- Shadow autonomy: `server/autonomy/contracts.mjs`, `policy-engine.mjs`, `action-planner.mjs`, `distributed-lock.mjs`, `retry-policy.mjs`, `shadow-service.mjs`, and migration `20260718120000_autonomy_shadow_foundation`.
 
 ## Implemented Surface
 
@@ -97,6 +100,7 @@ Last reviewed: 2026-07-18
 - The SSE client bridge currently translates a bounded set of reservation, room, payment, and charge events into legacy client refresh events. Other server event types remain durable and streamable but require view-specific refetch wiring.
 - In server mode, Settings, housekeeping, and Night Audit use backend persistence; disposable-browser coverage is engineering evidence and does not replace staff workflow acceptance on the exact release candidate.
 - Accounting V2 and direct-booking foundations are implemented but capability-gated and not production-enabled. Online card payments and a live guest-messaging provider are not implemented by this foundation.
+- Autonomous provider execution is not implemented. Provider acknowledgements, read-back verification, compensation actions, credentialed webhooks/APIs, external durable scheduling, canary proof, and provider/owner approval remain later phases.
 
 ## Validation Evidence
 

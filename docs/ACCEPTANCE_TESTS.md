@@ -193,6 +193,37 @@ Acceptance requires:
 
 The SSE reconnect test must prove an authoritative refetch after disconnection. Receiving an event is not sufficient evidence that a UI view persisted or refreshed correctly.
 
+## Autonomous Operations Shadow Foundation
+
+Run:
+
+```powershell
+npm.cmd run test:autonomy
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
+npm.cmd run test:e2e:autonomy
+```
+
+Acceptance requires:
+
+- only `OBSERVE`, `SHADOW`, and `PROHIBITED` policies are accepted;
+- room, date-range, rate percentage/absolute/floor/ceiling, hourly/daily volume, quiet-hours, confidence, source-trust, proof, and emergency-stop rules are deterministic;
+- the same provider event/version/content returns the original canonical event, while changed content under the same identity fails closed;
+- concurrent evaluation of one property/event/policy/version creates one run, one decision, and one `SHADOW_NOOP` action;
+- every shadow action records `providerRequestSent=false`, and the database constraint rejects the opposite;
+- two-property event, cursor, policy, run, decision, and action isolation is enforced; snapshot, issue, and dead-letter services remain deferred;
+- only a SYSTEM backend context may ingest trusted provider evidence or invoke shadow evaluation; staff roles cannot assert source trust;
+- disabled policies fail closed with `POLICY_DISABLED`;
+- normalized payloads, proposed commands, explanations, audit evidence, and events reject credential-shaped or direct-contact content;
+- no autonomy source imports OTA workers, browser adapters, provider credentials, or authoritative booking/finance/rate/inventory mutation services;
+- shadow evaluation creates no reservation, payment, charge, rate, availability, or provider request;
+- cursor updates are atomic with canonical event persistence, reject credential-shaped/direct-contact values, and are never exposed in public results;
+- legacy non-empty `Channel.credentials` blocks migration instead of being copied or silently deleted;
+- `Channel.propertyId` has an enforced property foreign key; and
+- audit plus property-filtered DomainEvent evidence is recorded for ingestion, replay, policy, and decision activity.
+
+Empty-database migration success, a sanitized restored-staging-copy migration, app rollback/PITR proof, external scheduler locking, shadow accuracy comparison, staff workflow acceptance, credentialed provider certification, canary observation, and owner approval remain separate gates. This foundation is not autonomous provider-write readiness.
+
 ## iCal Token Storage And Disclosure
 
 Acceptance requires:

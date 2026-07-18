@@ -260,7 +260,12 @@ export async function configureIcalFeedChannel(prisma, context, input, origin) {
     provider,
     name: existing?.name || labelForProvider(provider),
     hotelId: existing?.hotelId || null,
-    credentials: {},
+    credentialRef: null,
+    credentialStatus: {
+      state: 'not_required',
+      provider: 'ical',
+      secretStored: false,
+    },
     active: true,
     sandboxMode: false,
     syncEnabled: Boolean(importUrl),

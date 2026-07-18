@@ -278,6 +278,18 @@ Notifications are backend records:
 - Live writes require all three conditions: `OTA_LIVE_WRITES_ENABLED=true`, an implemented live-write path, and verified provider proof. Current adapters intentionally declare the latter two as false.
 - Worker proof remains untrusted; provider evidence is bounded, kind-normalized, URL-sanitized, and blocked when redaction status is not safe.
 
+## Autonomous Operations Shadow Foundation
+
+- `ExternalProviderEvent` is an immutable, property-scoped normalized envelope keyed by provider event identity/version and a property-scoped idempotency key. It stores sanitized normalized payloads and hashes; it is not the SSE `DomainEvent` outbox.
+- `ProviderSyncCursor` preserves restart-safe opaque cursor state without becoming execution authority. `ProviderSnapshot` is an additive schema reservation only; snapshot capture and read services are not implemented in this phase.
+- `AutonomyPolicy` is scoped by property/provider/task/version. The current schema permits only `OBSERVE`, `SHADOW`, and `PROHIBITED`; policy validation enforces source trust, confidence basis points, room/date/rate/volume limits, quiet hours, proof requirements, and emergency-stop coverage.
+- `AutonomyRun`, `AgentDecision`, and `ActionExecution` preserve the event-to-decision evidence chain. `SHADOW_NOOP` is the only execution mode, and a database constraint requires `providerRequestSent=false`.
+- `ReconciliationIssue` and `DeadLetterEvent` are additive schema reservations for later drift and terminal-failure services. No current service creates, retries, or presents those records.
+- The shadow service writes canonical events, policies, cursor state, audit rows, domain events, decisions, and `SHADOW_NOOP` evidence only. Source guards prohibit OTA worker/browser imports and authoritative reservation, payment, charge, rate, or inventory writes.
+- PostgreSQL transaction-scoped advisory locks serialize the same property/job/source occurrence across instances. The retry module only classifies bounded shadow-ingestion retries; it contains no timer or provider execution loop.
+- `Channel.credentials` is removed. `credentialRef` may point to a backend secret manager/environment contract while `credentialStatus` contains non-secret readiness metadata only.
+- Provider acknowledgements and compensation actions are intentionally deferred until a real provider write/read-back lifecycle exists. The OpenAI Agents SDK is also deferred; any future agent tool may read sanitized snapshots or submit typed candidates, never execute or mutate policy.
+
 ## Exact-Money Compatibility Contract
 
 - Money is represented internally as integer satang. JSON-facing exact fields such as `amountSatang`, `rateSatang`, and `totalSatang` are base-10 integer strings so JavaScript JSON never serializes a `BigInt` directly.

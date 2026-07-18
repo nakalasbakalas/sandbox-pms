@@ -26,6 +26,8 @@ Authenticated session identity is not property authority by itself. PMS routes r
 
 Domain events are an internal synchronization boundary, not an audit substitute or execution command. They are written transactionally, read only within the authenticated property, and exposed over SSE without metadata or actor identity. Clients may use them to trigger an authoritative refetch; they must not apply financial or operational state directly from an event payload.
 
+Autonomy shadow records are evidence, not execution authority. GPT or a future agent may receive sanitized snapshots and propose a strict candidate; deterministic policy evaluation owns scope, trust, limits, quiet hours, proof, emergency-stop, and the permanent no-write decision in the shadow phase. No autonomy module may import an OTA worker, browser adapter, credential source, or authoritative reservation/payment/rate/inventory mutation service.
+
 ## Credential Handling
 
 - No OTA credentials, OpenAI keys, session tokens, or mailbox passwords belong in frontend code.
@@ -47,6 +49,17 @@ Domain events are an internal synchronization boundary, not an audit substitute 
 - Property settings must not be used as a secret store. The settings schemas reject credential-shaped keys/values, URL user information, and sensitive URL query parameters; OTA, Gmail, worker, and OpenAI secrets remain backend environment secrets.
 - SSE responses must remain session-authenticated, `view:board` authorized, property-scoped, `no-store`, and free of guest, financial, credential, and audit metadata.
 - iCal export tokens are bearer credentials. New and rotated tokens are stored only as SHA-256 base64url hashes; the full feed URL may be shown only in the issue/rotation response and must not be returned by later channel reads. Deploy migration `20260717141000_ical_token_hash_backfill` converts and removes legacy raw token fields atomically.
+- Channel rows contain only `credentialRef` and non-secret `credentialStatus`; they are not a secret store. Migration `20260718120000_autonomy_shadow_foundation` aborts when legacy `Channel.credentials` contains non-empty JSON, requiring operator quarantine/rotation before the column is removed.
+
+## Autonomous Operations Safety
+
+- Only `OBSERVE`, `SHADOW`, and `PROHIBITED` policies are valid in the current phase.
+- `ActionExecution.mode` can only be `SHADOW_NOOP`, and the database rejects a shadow row that claims `providerRequestSent=true`.
+- Provider-event identity, idempotency, cursor, policy, run, decision, action, issue, and dead-letter records are property-scoped.
+- Normalized event payloads, proposed commands, explanations, audit evidence, and domain-event metadata reject credential-shaped keys/values and direct contact data.
+- Email, staff commands, and AI interpretation remain below authenticated provider evidence in the source-trust hierarchy and cannot establish a booking, cancellation, or cleared-payment fact.
+- A PostgreSQL advisory lock coordinates identical property/job/source shadow work across instances. Process-local scheduler booleans remain development compatibility only.
+- Provider acknowledgement, read-back, compensation, autonomous external writes, and Agents SDK execution tools do not exist in this phase.
 
 ## Exact-Money And Financial Integrity
 

@@ -453,3 +453,36 @@ The legacy Accounting Dashboard and Cash Reconciliation tabs must remain unavail
 Direct booking does not accept card data. Enabled staging also requires a backend-only `DIRECT_BOOKING_TOKEN_SECRET` with at least 32 characters. Run `node scripts/run-direct-booking-tests.mjs`, then prove concurrent last-room holds, idempotent replay, expiry, recovery, WAF/rate limiting, and staff handling against the exact release candidate before owner approval. Never print or persist the raw hold token after its issue response.
 
 Deterministic analyzers are read-only. Run `node scripts/run-ops-analyzer-tests.mjs`; staff must submit any accepted recommendation through `/api/ops/commands`, where the existing permission, approval, reason, audit, idempotency, and emergency-stop controls apply.
+
+## Autonomy Shadow Foundation
+
+Keep every provider write and near-live automation gate disabled. The autonomy foundation accepts only `OBSERVE`, `SHADOW`, and `PROHIBITED` policy records and produces only `SHADOW_NOOP` action evidence.
+
+Before applying migration `20260718120000_autonomy_shadow_foundation` to a restored staging copy, record counts only:
+
+```sql
+SELECT count(*) AS nonempty_legacy_channel_credentials
+FROM "Channel"
+WHERE "credentials" IS NOT NULL
+  AND "credentials" <> '{}'::jsonb;
+
+SELECT count(*) AS orphaned_channel_properties
+FROM "Channel" c
+LEFT JOIN "Property" p ON p.id = c."propertyId"
+WHERE p.id IS NULL;
+```
+
+Both counts must be zero. A non-zero credential count requires backend secret-reference migration, credential rotation, and owner-approved reconciliation. Do not print the JSON, silently copy it, or weaken the migration guard. A non-zero orphan count requires property-ownership reconciliation.
+
+Run:
+
+```powershell
+npm.cmd run test:autonomy
+$env:ALLOW_DB_E2E='true'
+$env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
+npm.cmd run test:e2e:autonomy
+```
+
+The guarded database test proves replay idempotency, concurrent locking, property isolation, emergency-stop blocking, audit/domain evidence, secret-column removal, and no reservation/payment/provider mutation. It remains engineering evidence only. Production scheduling must use an external durable trigger and exact-release staging proof; the in-process scheduler is not autonomy proof.
+
+Do not add provider acknowledgement or compensation records until a credentialed adapter implements write, acknowledgement, read-back, retry, reconciliation, and rollback semantics. Do not add Agents SDK execution tools; future agent tools may read sanitized snapshots or submit candidates only.
