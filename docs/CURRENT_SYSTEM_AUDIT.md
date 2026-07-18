@@ -1,6 +1,6 @@
 # Current System Audit - Sandbox PMS And Hotel Ops
 
-Last reviewed: 2026-07-17
+Last reviewed: 2026-07-18
 
 ## Repository Overview
 
@@ -8,7 +8,7 @@ Last reviewed: 2026-07-17
 - Backend/runtime: Node HTTP server in `server/index.mjs`.
 - Package manager: npm, use `npm.cmd` and `npx.cmd` on Windows.
 - Database: Prisma with Postgres-compatible schema.
-- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`, persistent three-failure account lockout cleared by admin password reset, and redacted owner-run production proof collection through `npm.cmd run auth-rbac:proof`.
+- Auth: backend session auth in server mode, role permissions in `server/rbac.mjs`, persistent three-failure account lockout cleared by admin password reset, and redacted owner-run production proof collection through `npm.cmd run auth-rbac:proof`. Server identity remains in React memory only, legacy browser identity keys are removed, and request generations prevent a stale `/api/auth/me` response from clearing a newer interactive login.
 - Deployment: Render-oriented server build with local and GitHub CI launch checks.
 - Hotel Ops AI mode: deterministic controlled parser by default, with optional backend-only OpenAI Responses parsing when explicitly configured; all parsed tasks are strict-schema validated before permission decisions.
 - Queue/worker: backend-owned task queue state with signed OTA worker boundary and local dry-run fallback.
@@ -23,7 +23,7 @@ Last reviewed: 2026-07-17
 - Server synchronization: selected PMS mutations write property-scoped `DomainEvent` rows in the same transaction. Authenticated `/api/events` SSE exposes only event id, type, aggregate type/id, and timestamp with bounded catch-up.
 - Rates and settings: property-scoped backend rate rules/calendar/effective-rate/recommendation endpoints and property/tax/status endpoints are implemented with strict schemas, permissions, audit records, and domain events.
 - Operations foundation: persistent housekeeping tasks/issues/status histories and an idempotent backend night-audit close service are implemented. Server-mode housekeeping and Night Audit screens now use these APIs; browser-local workflow state is demo-only.
-- Accounting V2: additive one-to-many accounting folios, append-only reversals/refunds, cash shifts, house accounts/A/R, journals, and exact-satang trial balance are implemented behind `ACCOUNTING_V2_ENABLED=false`.
+- Accounting V2: additive one-to-many accounting folios, append-only reversals/refunds, cash shifts, house accounts/A/R, journals, and exact-satang trial balance are implemented behind `ACCOUNTING_V2_ENABLED=false`. The legacy browser-KV accounting dashboard and cash reconciliation workflow are demo-only and render a truthful unavailable state in server mode.
 - Direct booking: versioned availability, immutable quote, 15-minute hold, and atomic booking services/routes are implemented behind `DIRECT_BOOKING_ENABLED=false`; no card data is accepted.
 - Bounded intelligence: deterministic demand, cancellation-risk, housekeeping, and rate-opportunity analyzers return explainable, suggest-only Hotel Ops recommendations and perform no mutations.
 

@@ -56,7 +56,7 @@ function startServer(port) {
       SESSION_SECRET: `server-browser-session-${runId}-01234567890123456789`,
       VITE_PMS_API_MODE: 'server',
       SSE_ENABLED: 'true',
-      ACCOUNTING_V2_ENABLED: 'false',
+      ACCOUNTING_V2_ENABLED: 'true',
       DIRECT_BOOKING_ENABLED: 'false',
       OTA_LIVE_WRITES_ENABLED: 'false',
       BOOKING_EMAIL_NEAR_LIVE_ENABLED: 'false',
@@ -204,6 +204,57 @@ try {
   assert.equal(unauthenticatedSse.status, 401, 'SSE requires an authenticated session')
 
   browser = await chromium.launch({ headless: true })
+
+  const authRaceContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  const authRacePage = await authRaceContext.newPage()
+  let releaseStaleBootstrap
+  let resolveBootstrapIntercepted
+  let resolveBootstrapCompleted
+  const staleBootstrapRelease = new Promise((resolveRelease) => {
+    releaseStaleBootstrap = resolveRelease
+  })
+  const bootstrapIntercepted = new Promise((resolveIntercepted) => {
+    resolveBootstrapIntercepted = resolveIntercepted
+  })
+  const bootstrapCompleted = new Promise((resolveCompleted) => {
+    resolveBootstrapCompleted = resolveCompleted
+  })
+  await authRacePage.route('**/api/auth/me', async (route) => {
+    resolveBootstrapIntercepted()
+    await staleBootstrapRelease
+    await route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Delayed stale bootstrap response' }),
+    })
+    resolveBootstrapCompleted()
+  })
+  await authRacePage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await bootstrapIntercepted
+  await authRacePage.locator('[data-slot="card-title"]', { hasText: 'Sign In' }).waitFor({ state: 'visible' })
+  await authRacePage.getByLabel('Username or email').fill(username)
+  await authRacePage.getByLabel('Password').fill(password)
+  const interactiveLogin = authRacePage.waitForResponse((response) =>
+    response.url().endsWith('/api/auth/login') && response.request().method() === 'POST',
+  )
+  await authRacePage.getByRole('button', { name: 'Sign In', exact: true }).click()
+  assert.equal((await interactiveLogin).status(), 200, 'interactive server login succeeds while the bootstrap request is pending')
+  releaseStaleBootstrap()
+  await bootstrapCompleted
+  await authRacePage.waitForTimeout(100)
+  await authRacePage.getByText('Booking Board', { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(
+    await authRacePage.locator('[data-slot="card-title"]', { hasText: 'Sign In' }).count(),
+    0,
+    'a delayed failed bootstrap response cannot clear a newer interactive login',
+  )
+  assert.equal(
+    await authRacePage.evaluate(() => window.localStorage.getItem('auth:current-user')),
+    null,
+    'interactive server login keeps identity out of browser storage',
+  )
+  await authRaceContext.close()
+
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
   await context.addInitScript(({ fakeRoomNumber, fakeGuestName }) => {
     window.localStorage.clear()
@@ -246,6 +297,53 @@ try {
   }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
+
+  const credentialContext = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1280, height: 800 } })
+  await credentialContext.addInitScript(() => {
+    const credentialFixture = {
+      completed: false,
+      currentStep: 5,
+      data: {
+        adminUser: {
+          name: 'Legacy Admin',
+          email: 'legacy-admin@example.test',
+          password: 'BrowserStorageMustBeRemoved!',
+          confirmPassword: 'BrowserStorageMustBeRemoved!',
+        },
+      },
+    }
+    window.localStorage.setItem('onboarding:state', JSON.stringify(credentialFixture))
+    window.localStorage.setItem('onboarding:server-state', JSON.stringify(credentialFixture))
+    window.localStorage.setItem('onboarding:admin-user', JSON.stringify(credentialFixture.data.adminUser))
+    window.localStorage.setItem('onboarding-admin-user', JSON.stringify(credentialFixture.data.adminUser))
+    window.localStorage.setItem('auth:current-user', JSON.stringify({
+      id: 'browser-stored-user',
+      email: 'browser-user@example.test',
+      role: 'admin',
+    }))
+  })
+  const credentialLogin = await credentialContext.request.post('/api/auth/login', { data: { identity: username, password } })
+  assert.equal(credentialLogin.status(), 200, `credential-cleanup login failed: ${await credentialLogin.text()}`)
+  const credentialPage = await credentialContext.newPage()
+  await credentialPage.goto('/board', { waitUntil: 'domcontentloaded' })
+  await credentialPage.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
+  const removedCredentialKeys = await credentialPage.evaluate(() => Object.fromEntries(
+    ['onboarding:state', 'onboarding:admin-user', 'onboarding-admin-user', 'auth:current-user']
+      .map((key) => [key, window.localStorage.getItem(key)]),
+  ))
+  assert.deepEqual(removedCredentialKeys, {
+    'onboarding:state': null,
+    'onboarding:admin-user': null,
+    'onboarding-admin-user': null,
+    'auth:current-user': null,
+  }, 'server mode removes legacy onboarding credentials and browser-stored auth identity')
+  const sanitizedServerDraft = await credentialPage.evaluate(() => {
+    const raw = window.localStorage.getItem('onboarding:server-state')
+    return raw ? JSON.parse(raw) : null
+  })
+  assert.equal(sanitizedServerDraft?.data?.adminUser?.password, '', 'server onboarding draft removes the password field value')
+  assert.equal(sanitizedServerDraft?.data?.adminUser?.confirmPassword, '', 'server onboarding draft removes the confirmation field value')
+  await credentialContext.close()
 
   const boardReservationOne = await apiJson(context.request, 'POST', '/api/reservations', {
     confirmationCode: `BOARD-A-${runId}`,
@@ -320,6 +418,8 @@ try {
         'internal-messages', 'guest-messages', 'messages', 'message-templates',
         'channels', 'channel-reservations', 'channel-sync-logs', 'channel-room-mappings',
         'onboarding-property', 'onboarding-room-types', 'onboarding-rooms',
+        'onboarding:state', 'onboarding:admin-user', 'onboarding-admin-user',
+        'auth:current-user', 'accounting-entries', 'cash-reconciliations',
       ])
       return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
     })
@@ -470,6 +570,13 @@ try {
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
     await assertNoOperationalBrowserStorage(path)
   }
+
+  await page.goto('/cashier', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Accounting', exact: true }).click()
+  await page.getByText('Accounting dashboard unavailable in server mode', { exact: true }).waitFor({ state: 'visible' })
+  await page.getByRole('tab', { name: 'Reconciliation', exact: true }).click()
+  await page.getByText('Cash reconciliation unavailable in server mode', { exact: true }).waitFor({ state: 'visible' })
+  await assertNoOperationalBrowserStorage('server-mode accounting capability gate')
 
   await page.keyboard.press('Control+K')
   await page.getByPlaceholder('Type a command or search...').waitFor({ state: 'visible' })

@@ -226,6 +226,8 @@ Staff account lockout:
 1. Staff accounts lock after three failed login attempts.
 2. A locked user cannot authenticate until an admin resets that user's password from user management.
 3. Password reset clears `failedLoginAttempts` and `lockedAt`. Do not unlock by editing production database rows directly unless emergency recovery is explicitly approved and recorded.
+4. If a server-mode login appears to revert to the sign-in screen, capture redacted request status and correlation ids for `/api/auth/login` and `/api/auth/me`. Do not restore access by writing `auth:current-user` or a token into browser storage.
+5. Run `npm.cmd run test:server-auth-authority` and the guarded `npm.cmd run test:e2e:server` before accepting an auth-bootstrap correction. The browser test deliberately delivers a stale failed `/api/auth/me` after a successful interactive login.
 4. Do not paste passwords, hashes, cookies, or session tokens into issue comments, screenshots, docs, or chat.
 
 Hotel Ops notification center:
@@ -445,6 +447,8 @@ Passing the focused checks proves service behavior against fixtures. It does not
 ## Accounting V2 And Direct Booking Gates
 
 Keep `ACCOUNTING_V2_ENABLED=false` and `DIRECT_BOOKING_ENABLED=false` until their acceptance matrices pass. Accounting uses append-only exact-satang corrections; never delete a posted financial row. Run `node scripts/run-accounting-v2-tests.mjs` before any staging exercise.
+
+The legacy Accounting Dashboard and Cash Reconciliation tabs must remain unavailable in server mode until they use the Accounting V2 APIs. Run `npm.cmd run test:cashier-accounting-mode`; never treat browser-KV entries or cash counts as operational evidence.
 
 Direct booking does not accept card data. Enabled staging also requires a backend-only `DIRECT_BOOKING_TOKEN_SECRET` with at least 32 characters. Run `node scripts/run-direct-booking-tests.mjs`, then prove concurrent last-room holds, idempotent replay, expiry, recovery, WAF/rate limiting, and staff handling against the exact release candidate before owner approval. Never print or persist the raw hold token after its issue response.
 

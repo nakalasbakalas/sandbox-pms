@@ -1,4 +1,4 @@
-import { createContext, useContext, ReactNode, useEffect, useState } from 'react'
+import { createContext, useContext, ReactNode, useEffect, useRef, useState } from 'react'
 import { useKV } from '@github/spark/hooks'
 import type { User, AuthState, Permission } from '@/types/auth'
 import { ROLE_PERMISSIONS } from '@/types/auth'
@@ -55,19 +55,25 @@ function sameAuthUser(currentUser: User | null, nextUser: User) {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser, deleteCurrentUser] = useKV<User | null>('auth:current-user', null)
+  const [localCurrentUser, setLocalCurrentUser, deleteLocalCurrentUser] = useKV<User | null>('auth:current-user', null)
+  const [serverCurrentUser, setServerCurrentUser] = useState<User | null>(null)
   const [customUsers] = useKV<StoredUser[]>('system:users', [])
   const [serverSessionReady, setServerSessionReady] = useState(!SERVER_AUTH_ENABLED)
+  const serverAuthGeneration = useRef(0)
+  const currentUser = SERVER_AUTH_ENABLED ? serverCurrentUser : localCurrentUser
   const isAuthenticated = Boolean(currentUser && (!SERVER_AUTH_ENABLED || serverSessionReady))
 
   const login = async (identity: string, password: string): Promise<boolean> => {
     const normalizedIdentity = normalizeAuthEmail(identity)
 
     if (SERVER_AUTH_ENABLED) {
+      const generation = serverAuthGeneration.current + 1
+      serverAuthGeneration.current = generation
       const result = await serverLogin(normalizedIdentity, password)
-      setCurrentUser(result.user)
+      if (generation !== serverAuthGeneration.current) return false
+      setServerCurrentUser(result.user)
       setServerSessionReady(true)
-      writeBrowserStorage(AUTH_USER_STORAGE_KEY, result.user)
+      removeBrowserStorage(AUTH_USER_STORAGE_KEY)
       removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
       return true
     }
@@ -90,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         displayName: customUser.displayName,
         createdAt: customUser.createdAt,
       }
-      setCurrentUser(user)
+      setLocalCurrentUser(user)
       writeBrowserStorage(AUTH_USER_STORAGE_KEY, user)
       return true
     }
@@ -100,62 +106,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     if (SERVER_AUTH_ENABLED) {
+      serverAuthGeneration.current += 1
       void serverLogout()
       setServerSessionReady(false)
+      setServerCurrentUser(null)
+    } else {
+      deleteLocalCurrentUser()
     }
-    deleteCurrentUser()
     removeBrowserStorage(AUTH_USER_STORAGE_KEY)
     removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
   }
 
   useEffect(() => {
-    if (SERVER_AUTH_ENABLED) {
-      removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
+    if (!SERVER_AUTH_ENABLED) return
 
-      if (!currentUser) {
-        const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
+    removeBrowserStorage(AUTH_USER_STORAGE_KEY)
+    removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
 
-        if (storedUser) {
-          setCurrentUser(storedUser)
-        }
-      }
+    const generation = serverAuthGeneration.current + 1
+    serverAuthGeneration.current = generation
+    let active = true
+    serverMe()
+      .then((user) => {
+        if (!active || generation !== serverAuthGeneration.current) return
+        setServerCurrentUser((existingUser) => sameAuthUser(existingUser, user) ? existingUser : user)
+        setServerSessionReady(true)
+        removeBrowserStorage(AUTH_USER_STORAGE_KEY)
+      })
+      .catch(() => {
+        if (!active || generation !== serverAuthGeneration.current) return
+        setServerSessionReady(false)
+        setServerCurrentUser(null)
+        removeBrowserStorage(AUTH_USER_STORAGE_KEY)
+        removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
+      })
 
-      let cancelled = false
-      serverMe()
-        .then((user) => {
-          if (!cancelled) {
-            setCurrentUser((existingUser) => sameAuthUser(existingUser, user) ? existingUser : user)
-            setServerSessionReady(true)
-            writeBrowserStorage(AUTH_USER_STORAGE_KEY, user)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setServerSessionReady(false)
-            deleteCurrentUser()
-            removeBrowserStorage(AUTH_USER_STORAGE_KEY)
-            removeBrowserStorage(LEGACY_AUTH_TOKEN_STORAGE_KEY)
-          }
-        })
-
-      return () => {
-        cancelled = true
-      }
+    return () => {
+      active = false
     }
-
-    if (currentUser) return
-
-    const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
-
-    if (storedUser) {
-      setCurrentUser(storedUser)
-    }
-  }, [currentUser?.id, deleteCurrentUser, setCurrentUser])
+  }, [])
 
   useEffect(() => {
-    if (!currentUser) return
-    writeBrowserStorage(AUTH_USER_STORAGE_KEY, currentUser)
-  }, [currentUser])
+    if (SERVER_AUTH_ENABLED || localCurrentUser) return
+
+    const storedUser = readBrowserStorage<User>(AUTH_USER_STORAGE_KEY)
+    if (storedUser) setLocalCurrentUser(storedUser)
+  }, [localCurrentUser, setLocalCurrentUser])
+
+  useEffect(() => {
+    if (SERVER_AUTH_ENABLED || !localCurrentUser) return
+    writeBrowserStorage(AUTH_USER_STORAGE_KEY, localCurrentUser)
+  }, [localCurrentUser])
 
   const hasPermission = (permission: Permission): boolean => {
     if (!currentUser) return false

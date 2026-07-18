@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useKV } from '@github/spark/hooks'
+import { SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -81,7 +82,30 @@ function calculateCashCount(count: CashCount): number {
   return billTotal + coinTotal
 }
 
+function CashReconciliationUnavailable() {
+  return (
+    <Card className="border-amber-300 bg-amber-50/50">
+      <CardHeader>
+        <CardTitle>Cash reconciliation unavailable in server mode</CardTitle>
+        <CardDescription>
+          This reconciliation workflow is not yet backed by the Accounting V2 cash-shift APIs.
+          Browser-stored counts and reconciliation history are intentionally not shown or changed here.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="text-sm text-muted-foreground">
+        No cash count can be started or completed from this screen until a server-backed reconciliation workflow is available.
+      </CardContent>
+    </Card>
+  )
+}
+
 export function CashReconciliation() {
+  // The legacy workflow persists through Spark KV. Keep it only for explicit
+  // demo mode; server mode must never present a local reconciliation as saved.
+  return SERVER_API_ENABLED ? <CashReconciliationUnavailable /> : <CashReconciliationDemo />
+}
+
+function CashReconciliationDemo() {
   const [reconciliations, setReconciliations] = useKV<CashReconciliationRecord[]>('cash-reconciliations', [])
   const [entries] = useKV<any[]>('accounting-entries', [])
   const [selectedDate, setSelectedDate] = useState(new Date())

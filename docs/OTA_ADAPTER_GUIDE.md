@@ -10,6 +10,8 @@ Proof artifacts must pass `sanitizeProviderEvidence()` before they cross a provi
 
 The PMS property context, rate service, and domain-event stream do not expand adapter authority. An adapter receives an already authorized typed task through the Hotel Ops worker boundary. It must not select a property from client input, read property settings as a secret store, or treat a rate recommendation/domain event as permission to write provider inventory.
 
+Frontend auth identity, onboarding drafts, browser-KV accounting entries, and cash counts are never adapter input or evidence. In server mode, identity comes from the authenticated backend request context and legacy browser-backed accounting surfaces remain capability-gated.
+
 Exact monetary fields use base-10 satang strings at JSON boundaries. Adapters must not convert a satang string through floating-point arithmetic. During the compatibility window, any legacy baht field is informational compatibility data; the validated typed task remains authoritative for the specific dry-run request.
 
 The AI and manager UI never control the browser directly. They create controlled task records. The backend validates and approves those records, then calls a typed OTA worker payload.

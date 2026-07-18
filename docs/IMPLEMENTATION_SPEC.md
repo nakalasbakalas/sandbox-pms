@@ -101,6 +101,8 @@ Auth proof operator CLI:
 - `npm.cmd run auth-rbac:proof -- --users-file <local-untracked-json>` performs credentialed login, `/api/auth/me`, optional owner-approved denial probes, logout, and post-logout `/api/auth/me` checks against the configured host.
 - The helper masks login identifiers, prints initials instead of display names, keeps cookies in memory only, omits passwords/tokens/raw response bodies, and defaults denial probes to GET/HEAD only. Mutating denial probes require explicit `--allow-mutating-denial-probes` and an owner-approved no-op or invalid payload.
 - Staff login policy is three failed attempts followed by persistent account lockout. Admin password reset through the user-management service clears `failedLoginAttempts` and `lockedAt`; normal successful login clears prior failed attempts.
+- Server-mode authentication treats the HTTP-only backend session as the sole identity authority. It removes legacy `auth:current-user` / `auth:pms-token` browser values, keeps the resolved user only in React memory, and ignores superseded `/api/auth/me` responses after a newer login or logout.
+- Server onboarding persists only a credential-free draft under `onboarding:server-state`. Admin password and confirmation values remain transient in memory; legacy credential-bearing onboarding keys are removed before and after setup attempts.
 
 Booking-email operator CLI:
 
@@ -285,6 +287,7 @@ Notifications are backend records:
 - Payments and legacy folio charges run in serializable transactions, re-read property-scoped folio ownership, require property-scoped idempotency keys, and retry serialization or unique-key races. A same-intent retry returns the original financial row without duplicating audit/domain evidence; reuse with a different payment or charge fingerprint returns `409`. Posted charges remain append-only.
 - The database uniqueness contract is `(propertyId, idempotencyKey)` for both `Payment` and `Charge`; a key used by one property cannot replay or block a different property's write. Charge intent fingerprints include folio, optional explicit date, description, category, exact amount, quantity, and optional booking-email source.
 - Server-mode cashier, front-desk, reservation, and booking-board submissions use `DurableAttemptKeyManager`. It retains only a fingerprint and opaque key in application memory, reuses the key for an unchanged uncertain attempt, rotates when material input changes, and removes it only after confirmed success. It deliberately does not use browser storage and therefore does not promise key recovery after a page reload.
+- The legacy Accounting Dashboard and Cash Reconciliation components use browser KV only in explicit demo mode. Server mode displays a non-operational capability boundary until the Accounting V2 read/write UI is wired and proven.
 - Satang authority must not be enabled in production until row-level null and variance checks plus aggregate reconciliation pass on a restored staging copy. This branch does not remove legacy columns.
 
 ## Property Request Context

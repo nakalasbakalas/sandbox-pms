@@ -169,6 +169,10 @@ Acceptance requires:
 - one serialization conflict is retried without double-posting.
 - server-mode financial surfaces reuse one opaque in-memory attempt key for unchanged uncertain retries, rotate it when material input changes, clear it after confirmed success, and never write the attempt/key to `localStorage` or `sessionStorage`;
 - a full page reload is not asserted to recover an uncertain financial attempt key, so reload recovery must reconcile the authoritative folio before another write.
+- server mode never writes authenticated user identity or legacy auth tokens to browser storage;
+- a delayed failed `/api/auth/me` response cannot clear a newer successful interactive login or override logout;
+- server onboarding persists no password or confirmation value and removes legacy credential-bearing draft keys; and
+- enabling Accounting V2 on the backend does not expose the legacy browser-KV Accounting Dashboard or Cash Reconciliation workflow in server mode.
 
 Migration acceptance additionally requires an empty-database migration and a restored sanitized staging-copy migration, zero unresolved null/variance rows, exact aggregate reconciliation, rollback proof using `MONEY_READ_AUTHORITY=legacy_float`, and one full operating cycle on satang reads. Fixture tests alone do not satisfy migration acceptance.
 
