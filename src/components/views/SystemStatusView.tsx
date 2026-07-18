@@ -66,6 +66,7 @@ const CAPABILITY_NAMES: Record<string, string> = {
   nightAudit: 'Night audit',
   messaging: 'Messaging',
   realtime: 'Real-time server events',
+  legacyFolioCharges: 'Folio charges',
   accountingV2: 'Accounting V2',
   onlinePayments: 'Online payments',
   bookingEmail: 'Booking Email',

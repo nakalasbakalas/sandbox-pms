@@ -18,6 +18,8 @@ const prisma = createPrismaClient()
 const runId = randomUUID().replaceAll('-', '').slice(0, 12)
 const username = `server-browser-${runId}`
 const password = `Server-Browser-${runId}-Pass!`
+const limitedUsername = `server-browser-limited-${runId}`
+const limitedPassword = `Server-Browser-Limited-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
 const boardRoomNumber = `B-${runId.slice(0, 8)}`
@@ -208,6 +210,18 @@ await prisma.user.create({
     lastName: 'Browser',
     role: 'ADMIN',
     propertyMemberships: { create: { propertyId: property.id, role: 'ADMIN', active: true } },
+  },
+})
+
+await prisma.user.create({
+  data: {
+    username: limitedUsername,
+    email: `${limitedUsername}@example.test`,
+    passwordHash: await createPasswordHash(limitedPassword),
+    firstName: 'Membership',
+    lastName: 'Limited',
+    role: 'ADMIN',
+    propertyMemberships: { create: { propertyId: property.id, role: 'HOUSEKEEPING', active: true } },
   },
 })
 
@@ -416,6 +430,34 @@ try {
   assert.notEqual(boardReservationOne.data.id, boardReservationTwo.data.id, 'same-room board stays persist as distinct reservations')
   assert.equal(boardReservationOne.data.assignedRoomId, boardRoom.id, 'first board stay is assigned to the dedicated server room')
   assert.equal(boardReservationTwo.data.assignedRoomId, boardRoom.id, 'second board stay is assigned to the dedicated server room')
+  const limitedContext = await browser.newContext({ baseURL: baseUrl })
+  const limitedLogin = await limitedContext.request.post('/api/auth/login', {
+    data: { identity: limitedUsername, password: limitedPassword },
+  })
+  assert.equal(limitedLogin.status(), 200, 'membership-limited user authenticates')
+  const deniedGuestUpdate = await limitedContext.request.patch(`/api/reservations/${boardReservationOne.data.id}/guest`, {
+    data: { firstName: 'Forbidden membership edit' },
+    headers: { 'x-idempotency-key': `membership-denied-guest-${runId}` },
+  })
+  assert.equal(deniedGuestUpdate.status(), 403, 'property membership role denies reservation guest editing despite a broader legacy user role')
+  const deniedCancellation = await limitedContext.request.post(`/api/reservations/${boardReservationOne.data.id}/cancel`, {
+    data: { reason: 'Forbidden membership cancellation.' },
+    headers: { 'x-idempotency-key': `membership-denied-cancel-${runId}` },
+  })
+  assert.equal(deniedCancellation.status(), 403, 'property membership role denies reservation cancellation despite a broader legacy user role')
+  const deniedNoShow = await limitedContext.request.post(`/api/reservations/${boardReservationOne.data.id}/no-show`, {
+    data: { reason: 'Forbidden membership no-show.' },
+    headers: { 'x-idempotency-key': `membership-denied-no-show-${runId}` },
+  })
+  assert.equal(deniedNoShow.status(), 403, 'property membership role denies reservation no-show despite a broader legacy user role')
+  await limitedContext.close()
+  const afterDeniedCommands = await prisma.reservation.findUnique({
+    where: { id: boardReservationOne.data.id },
+    include: { guest: true },
+  })
+  assert.equal(afterDeniedCommands.status, 'CONFIRMED', 'denied lifecycle commands leave reservation status unchanged')
+  assert.notEqual(afterDeniedCommands.guest.firstName, 'Forbidden membership edit', 'denied guest command leaves profile unchanged')
+
   const boardReservationThree = await apiJson(context.request, 'POST', '/api/reservations', {
     confirmationCode: `BOARD-C-${runId}`,
     guest: {
@@ -515,6 +557,126 @@ try {
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
 
+  // The command drawer must commit through the PMS, then show the same truth after a reload.
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByLabel('Guest first name', { exact: true }).fill('Board Updated')
+  await page.getByLabel('VIP guest', { exact: true }).check()
+  const guestSaveResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationOne.data.id}/guest`)
+      && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: 'Save guest', exact: true }).click()
+  assert.equal((await guestSaveResponse).status(), 200, 'command drawer saves guest and VIP state through the server')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  assert.equal(await page.getByLabel('Guest first name', { exact: true }).inputValue(), 'Board Updated', 'command drawer guest edit survives reload')
+  assert.equal(await page.getByLabel('VIP guest', { exact: true }).isChecked(), true, 'command drawer VIP edit survives reload')
+  const persistedDrawerReservation = await prisma.reservation.findUnique({
+    where: { id: boardReservationOne.data.id },
+    select: { guestId: true },
+  })
+  assert.ok(persistedDrawerReservation, 'the drawer reservation remains available for guest verification')
+  const persistedDrawerGuest = await prisma.guest.findUnique({ where: { id: persistedDrawerReservation.guestId } })
+  assert.ok(persistedDrawerGuest, 'the drawer guest remains available for verification')
+  assert.equal(persistedDrawerGuest.firstName, 'Board Updated', 'guest edit is stored by the authoritative PMS')
+  assert.equal(persistedDrawerGuest.vipStatus, true, 'VIP state is stored by the authoritative PMS')
+
+  await page.getByLabel('Extra description', { exact: true }).fill(`Laundry ${runId}`)
+  await page.getByLabel('Extra amount in baht', { exact: true }).fill('12.34')
+  await page.getByLabel('Extra quantity', { exact: true }).fill('2')
+  await page.getByLabel('Extra quantity', { exact: true }).press('Tab')
+  const postExtraButton = page.getByRole('button', { name: 'Post to folio', exact: true })
+  await page.waitForFunction(() => {
+    const description = document.querySelector('[aria-label="Extra description"]')
+    const amount = document.querySelector('[aria-label="Extra amount in baht"]')
+    const quantity = document.querySelector('[aria-label="Extra quantity"]')
+    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes('Post to folio'))
+    return description?.value && amount?.value === '12.34' && quantity?.value === '2' && button && !button.disabled
+  })
+  const [postExtraResult] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/charges') && response.request().method() === 'POST'),
+    postExtraButton.click(),
+  ])
+  assert.equal(postExtraResult.status(), 201, 'command drawer posts a new extra through the server')
+  assert.equal(await page.getByLabel('Extra description', { exact: true }).inputValue(), '', 'confirmed charge clears the description to prevent an accidental duplicate post')
+  assert.equal(await page.getByLabel('Extra amount in baht', { exact: true }).inputValue(), '', 'confirmed charge clears the amount to prevent an accidental duplicate post')
+  assert.equal(await page.getByLabel('Extra quantity', { exact: true }).inputValue(), '1', 'confirmed charge resets quantity after success')
+  const persistedExtra = await prisma.charge.findFirst({
+    where: { propertyId: property.id, description: `Laundry ${runId}` },
+    orderBy: { createdAt: 'desc' },
+  })
+  assert.ok(persistedExtra, 'posted extra is persisted')
+  assert.equal(persistedExtra.amountSatang, 1234n, 'posted extra retains the exact satang unit amount')
+  assert.equal(persistedExtra.totalSatang, 2468n, 'posted extra retains the exact satang total')
+
+  let lostChargeKey = null
+  await page.getByLabel('Extra description', { exact: true }).fill(`Lost response laundry ${runId}`)
+  await page.getByLabel('Extra amount in baht', { exact: true }).fill('1.11')
+  await page.getByLabel('Extra quantity', { exact: true }).fill('1')
+  await page.getByLabel('Extra quantity', { exact: true }).press('Tab')
+  await page.route('**/api/charges', async (route) => {
+    lostChargeKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await route.fetch()
+    assert.equal(upstream.status(), 201, 'the ambiguous charge reaches the authoritative PMS before its response is lost')
+    await route.abort('failed').catch((error) => {
+      if (!/already handled/i.test(error instanceof Error ? error.message : String(error))) throw error
+    })
+  })
+  await page.getByRole('button', { name: 'Post to folio', exact: true }).click()
+  await page.waitForTimeout(100)
+  assert.ok(lostChargeKey, 'the ambiguous charge captured an idempotency key')
+  await page.unroute('**/api/charges')
+  const chargeRetryResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/charges') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Post to folio', exact: true }).click()
+  const chargeRetry = await chargeRetryResponse
+  assert.equal(chargeRetry.status(), 200, 'command drawer safely replays a charge whose first response was lost')
+  assert.equal(chargeRetry.request().headers()['x-idempotency-key'], lostChargeKey, 'ambiguous charge retry reuses the exact logical attempt key')
+  assert.equal(await prisma.charge.count({ where: { propertyId: property.id, description: `Lost response laundry ${runId}` } }), 1, 'ambiguous charge retry persists one append-only charge')
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+
+  // A stale-write response cannot claim success or retain an unpersisted guest draft.
+  await page.route(`**/api/reservations/${boardReservationOne.data.id}/guest`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative stale guest conflict.' }),
+    })
+  })
+  await page.getByLabel('Guest first name', { exact: true }).fill('Rejected Browser Draft')
+  await page.getByRole('button', { name: 'Save guest', exact: true }).click()
+  await page.getByText('Injected authoritative stale guest conflict.', { exact: false }).waitFor({ state: 'visible' })
+  await page.unroute(`**/api/reservations/${boardReservationOne.data.id}/guest`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationOne.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationOne.data.id}"]`).waitFor({ state: 'visible' })
+  assert.equal(await page.getByLabel('Guest first name', { exact: true }).inputValue(), 'Board Updated', 'failed drawer mutation refetches and retains authoritative guest state')
+
+  // Cancellation is reason-gated in the UI and is persisted only after the authoritative server accepts it.
+  await page.locator(`[data-board-reservation-id="${boardReservationTwo.data.id}"]`).click()
+  await page.locator(`[data-board-command-drawer="${boardReservationTwo.data.id}"]`).waitFor({ state: 'visible' })
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  const confirmCancellation = page.getByRole('button', { name: 'Confirm cancellation', exact: true })
+  assert.equal(await confirmCancellation.isDisabled(), true, 'command drawer requires a cancellation reason')
+  await page.getByLabel('Reason required', { exact: true }).fill('Guest requested cancellation in browser proof.')
+  const cancellationResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationTwo.data.id}/cancel`)
+      && response.request().method() === 'POST',
+  )
+  await confirmCancellation.click()
+  assert.equal((await cancellationResponse).status(), 200, 'reasoned command drawer cancellation succeeds')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  const persistedCancelledReservation = await prisma.reservation.findUnique({ where: { id: boardReservationTwo.data.id } })
+  assert.equal(persistedCancelledReservation.status, 'CANCELLED', 'reasoned cancellation survives reload')
+  assert.match(persistedCancelledReservation.notes || '', /Guest requested cancellation in browser proof\./, 'cancellation reason is retained by the PMS')
+  await assertNoOperationalBrowserStorage('server-mode booking board command drawer mutations')
+
   let lostAssignmentKey = null
   await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
     lostAssignmentKey = route.request().headers()['x-idempotency-key'] || null
@@ -533,17 +695,27 @@ try {
   })
   await page.locator(`[data-board-reservation-select="${boardReservationThree.data.id}"]`).click()
   await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
-  await page.waitForTimeout(100)
   assert.ok(lostAssignmentKey, 'the ambiguous assignment captured an idempotency key')
   await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
-  const assignmentResponse = page.waitForResponse((response) =>
-    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
-      && response.request().method() === 'POST',
-  )
-  await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
-  const assignmentRetry = await assignmentResponse
-  assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the lost assignment safely')
-  assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after a lost response reuses the exact logical assignment key')
+  const assignmentRetryButton = page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`)
+  let alreadyAppliedAssignment = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  for (let attempt = 0; attempt < 40 && alreadyAppliedAssignment.assignedRoomId !== boardMoveRoom.id && !(await assignmentRetryButton.isEnabled()); attempt += 1) {
+    await page.waitForTimeout(50)
+    alreadyAppliedAssignment = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  }
+  if (alreadyAppliedAssignment.assignedRoomId !== boardMoveRoom.id) {
+    assert.equal(await assignmentRetryButton.isEnabled(), true, 'an unapplied ambiguous assignment becomes available for an idempotent retry')
+    const assignmentResponse = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
+        && response.request().method() === 'POST',
+    )
+    await assignmentRetryButton.click()
+    const assignmentRetry = await assignmentResponse
+    assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the lost assignment safely')
+    assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after a lost response reuses the exact logical assignment key')
+  } else {
+    assert.equal(alreadyAppliedAssignment.assignedRoomId, boardMoveRoom.id, 'a fast authoritative refresh makes a redundant lost-response retry unnecessary')
+  }
   await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })

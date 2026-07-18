@@ -928,10 +928,21 @@ export function ReservationsView() {
 
     if (SERVER_API_ENABLED) {
       try {
+        const attempt = {
+          operation: action === 'cancel' ? 'reservation-cancel' as const : 'reservation-no-show' as const,
+          entityId: reservation.id,
+          material: { reason, expectedUpdatedAt: reservation.updatedAt.toISOString() },
+        }
+        const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
         const payload = await pmsApi<{ ok: true; data: any; message?: string }>(`/api/reservations/${reservation.id}/${endpoint}`, authToken, {
           method: 'POST',
-          body: JSON.stringify({ reason }),
+          headers: {
+            'x-idempotency-key': idempotencyKey,
+            'x-reservation-expected-updated-at': reservation.updatedAt.toISOString(),
+          },
+          body: JSON.stringify({ reason, expectedUpdatedAt: reservation.updatedAt.toISOString() }),
         })
+        await durableAttemptKeys.confirmSuccess(attempt)
         const updated = reservationFromServer(payload.data)
         setReservations((current) => current.map((item) => item.id === updated.id ? updated : item))
         setSelectedReservation(updated)

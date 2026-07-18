@@ -35,6 +35,21 @@ export interface ServerBookingBoardReservation {
   adults: number
   children: number
   balance: number | null
+  guest: {
+    id: string
+    firstName: string
+    lastName: string
+    email: string | null
+    phone: string | null
+    vipStatus: boolean
+    updatedAt: string
+  }
+  folio: {
+    id: string
+    status: string
+    balanceSatang: string | null
+    balance: number | null
+  } | null
 }
 
 export interface ServerBookingBoardData {

@@ -10,8 +10,10 @@ import {
   createPayment,
   createReservation,
   assignRoom,
+  cancelReservation,
   getBookingEmailEvent,
   listGuests,
+  updateReservationGuest,
   updateHousekeepingStatus,
   updateReservation,
 } from '../server/pms-service.mjs'
@@ -481,6 +483,132 @@ try {
     'a rejected stale attempt rolls back its idempotency claim',
   )
 
+  const commandReservation = await createReservationFixture(fixtureA, 'COMMAND-DRAWER')
+  const futureNoShowReservation = await createReservationFixture(fixtureA, 'FUTURE-NO-SHOW')
+  const commandAuditBefore = await prisma.auditLog.count({ where: { entityId: commandReservation.reservation.id } })
+  const commandHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: commandReservation.reservation.id } })
+  const commandEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: commandReservation.reservation.id } })
+  const cancelKey = `command-cancel-${runId}`
+  const cancelledCommandReservation = await cancelReservation(
+    prisma,
+    commandReservation.reservation.id,
+    actorA,
+    'CANCELLED',
+    'Guest requested cancellation through the authoritative board workflow.',
+    { idempotencyKey: cancelKey },
+  )
+  const replayedCommandCancellation = await cancelReservation(
+    prisma,
+    commandReservation.reservation.id,
+    actorA,
+    'CANCELLED',
+    'Guest requested cancellation through the authoritative board workflow.',
+    { idempotencyKey: cancelKey },
+  )
+  assert.equal(replayedCommandCancellation.id, cancelledCommandReservation.id, 'same cancellation intent replays the authoritative reservation')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: commandReservation.reservation.id } }), commandAuditBefore + 1, 'cancellation replay does not duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: commandReservation.reservation.id } }), commandHistoryBefore + 1, 'cancellation replay does not duplicate reservation history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: commandReservation.reservation.id } }), commandEventsBefore + 1, 'cancellation replay does not duplicate domain events')
+  await assert.rejects(
+    cancelReservation(
+      prisma,
+      commandReservation.reservation.id,
+      actorA,
+      'CANCELLED',
+      'A changed cancellation reason must not reuse the completed command.',
+      { idempotencyKey: cancelKey },
+    ),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'cancellation idempotency keys cannot be reused for a changed intent',
+  )
+  await assert.rejects(
+    cancelReservation(
+      prisma,
+      commandReservation.reservation.id,
+      actorA,
+      'CANCELLED',
+      'A stale board command must be rejected before changing status.',
+      {
+        idempotencyKey: `command-cancel-stale-${runId}`,
+        expectedUpdatedAt: commandReservation.reservation.updatedAt.toISOString(),
+      },
+    ),
+    (error) => error?.statusCode === 409 && /changed after the booking board loaded it/.test(error.message),
+    'stale cancellation commands cannot overwrite the authoritative reservation',
+  )
+  await assert.rejects(
+    cancelReservation(prisma, futureNoShowReservation.reservation.id, actorA, 'NO_SHOW', 'Future no-show fixture.', {
+      idempotencyKey: `command-future-no-show-${runId}`,
+    }),
+    (error) => error?.statusCode === 400 && /future arrival/.test(error.message),
+    'future arrivals cannot be marked as no-shows',
+  )
+  await assert.rejects(
+    cancelReservation(prisma, reservationB.reservation.id, actorA, 'CANCELLED', 'Forged property cancellation.', {
+      idempotencyKey: `command-foreign-cancel-${runId}`,
+    }),
+    (error) => error?.statusCode === 404,
+    'forged reservation cancellation is property scoped',
+  )
+  await assert.rejects(
+    cancelReservation(prisma, futureNoShowReservation.reservation.id, actorA, 'NO_SHOW', undefined, {
+      idempotencyKey: `command-missing-reason-${runId}`,
+    }),
+    (error) => error?.statusCode === 400 && /reason is required/.test(error.message),
+    'cancellation and no-show commands require an operational reason',
+  )
+
+  const guestCommandReservation = await createReservationFixture(fixtureA, 'GUEST-COMMAND')
+  const guestAuditBefore = await prisma.auditLog.count({ where: { entityId: guestCommandReservation.reservation.id } })
+  const guestHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: guestCommandReservation.reservation.id } })
+  const guestEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: guestCommandReservation.reservation.id } })
+  const guestUpdateKey = `command-guest-update-${runId}`
+  const guestUpdateInput = {
+    email: null,
+    phone: '+66 81 555 0101',
+    vipStatus: true,
+    expectedGuestUpdatedAt: guestCommandReservation.guest.updatedAt.toISOString(),
+  }
+  const updatedGuestReservation = await updateReservationGuest(prisma, guestCommandReservation.reservation.id, guestUpdateInput, actorA, { idempotencyKey: guestUpdateKey })
+  const replayedGuestReservation = await updateReservationGuest(prisma, guestCommandReservation.reservation.id, guestUpdateInput, actorA, { idempotencyKey: guestUpdateKey })
+  assert.equal(replayedGuestReservation.id, updatedGuestReservation.id, 'same guest command replays the authoritative reservation')
+  const persistedGuest = await prisma.guest.findUnique({ where: { id: guestCommandReservation.guest.id } })
+  assert.equal(persistedGuest.email, null, 'guest commands can explicitly clear a stored email')
+  assert.equal(persistedGuest.phone, '+66 81 555 0101')
+  assert.equal(persistedGuest.vipStatus, true)
+  assert.equal(await prisma.auditLog.count({ where: { entityId: guestCommandReservation.reservation.id } }), guestAuditBefore + 1, 'guest command replay does not duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: guestCommandReservation.reservation.id } }), guestHistoryBefore + 1, 'guest command replay does not duplicate reservation history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: guestCommandReservation.reservation.id } }), guestEventsBefore + 1, 'guest command replay does not duplicate domain events')
+  await assert.rejects(
+    updateReservationGuest(
+      prisma,
+      guestCommandReservation.reservation.id,
+      { ...guestUpdateInput, phone: '+66 81 555 0102' },
+      actorA,
+      { idempotencyKey: guestUpdateKey },
+    ),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'guest command idempotency keys cannot be reused for a changed intent',
+  )
+  await assert.rejects(
+    updateReservationGuest(
+      prisma,
+      guestCommandReservation.reservation.id,
+      { phone: '+66 81 555 0103', expectedGuestUpdatedAt: guestCommandReservation.guest.updatedAt.toISOString() },
+      actorA,
+      { idempotencyKey: `command-guest-stale-${runId}` },
+    ),
+    (error) => error?.statusCode === 409 && /guest changed after the booking board loaded it/.test(error.message),
+    'stale guest commands cannot overwrite newer contact details',
+  )
+  await assert.rejects(
+    updateReservationGuest(prisma, reservationB.reservation.id, { phone: '+66 81 555 0199' }, actorA, {
+      idempotencyKey: `command-foreign-guest-${runId}`,
+    }),
+    (error) => error?.statusCode === 404,
+    'forged reservation guest updates are property scoped',
+  )
+
   const finalRoom = await prisma.room.create({
     data: {
       propertyId: fixtureB.property.id,
@@ -545,6 +673,36 @@ try {
     createCharge(prisma, { ...chargeInput, idempotencyKey: undefined }, actorA),
     (error) => error?.statusCode === 400 && /idempotency key is required/.test(error.message),
     'every charge write requires an explicit idempotency key',
+  )
+  await assert.rejects(
+    createCharge(prisma, {
+      ...chargeInput,
+      amountSatang: '9007199254740992',
+      quantity: 1,
+      idempotencyKey: `charge-oversized-amount-${runId}`,
+    }, actorA),
+    (error) => error?.statusCode === 400 && /too large|supported exact-money range/.test(error.message),
+    'charge amounts above the exact compatibility range fail before reaching PostgreSQL',
+  )
+  await assert.rejects(
+    createCharge(prisma, {
+      ...chargeInput,
+      amountSatang: '9007199254740991',
+      quantity: 2,
+      idempotencyKey: `charge-oversized-total-${runId}`,
+    }, actorA),
+    (error) => error?.statusCode === 400 && /total exceeds/.test(error.message),
+    'charge unit amount times quantity cannot overflow the exact compatibility range',
+  )
+  await assert.rejects(
+    createCharge(prisma, {
+      ...chargeInput,
+      amountSatang: '1',
+      quantity: 2_147_483_648,
+      idempotencyKey: `charge-oversized-quantity-${runId}`,
+    }, actorA),
+    (error) => error?.statusCode === 400 && /supported exact-money range/.test(error.message),
+    'charge quantity cannot exceed the PostgreSQL integer range',
   )
   const firstCharge = await createCharge(prisma, chargeInput, actorA)
   const replayedCharge = await createCharge(prisma, chargeInput, actorA)

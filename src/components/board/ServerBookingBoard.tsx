@@ -29,9 +29,11 @@ import { NewReservationDialog, type NewReservationData } from '@/components/boar
 import { useAuth } from '@/hooks/use-auth'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
+import { capabilityEnabled, useSystemCapabilities } from '@/hooks/use-system-capabilities'
 import { getBangkokDateKey } from '@/lib/hotel/business-rules'
 import { createPmsIdempotencyKey, PmsApiError, pmsApi } from '@/lib/pms-api-client'
 import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
+import { BoardReservationCommandDrawer } from '@/components/board/BoardReservationCommandDrawer'
 import type {
   BookingBoardRangeDays,
   ServerBookingBoardReservation,
@@ -143,9 +145,16 @@ export function ServerBookingBoard() {
   const [mutationInFlight, setMutationInFlight] = useState(false)
   const { data, loading, error, reload, range } = useServerBookingBoard(startDate, days)
   const { hasPermission, hasAnyPermission } = useAuth()
+  const { registry, loading: capabilitiesLoading } = useSystemCapabilities()
   const { navigate } = useNavigation()
   const canCreate = hasPermission('create:reservation')
   const canEdit = hasPermission('edit:reservation')
+  const canCancel = hasPermission('cancel:reservation')
+  const canEditGuest = hasPermission('edit:reservation') && hasPermission('view:guests')
+  const canPostCharge = hasPermission('post:charges')
+  const canUseReservationCommands = !capabilitiesLoading && capabilityEnabled(registry?.operations.reservations)
+  const canUseAccountingCommands = !capabilitiesLoading && capabilityEnabled(registry?.finance.legacyFolioCharges)
+  const canSelectCommand = canEdit || canCancel || canEditGuest || canPostCharge
   const dayWidth = days === 30 ? 56 : days === 14 ? 76 : 96
   const dateColumns = useMemo(
     () => Array.from({ length: days }, (_, index) => addDays(range.start, index)),
@@ -287,6 +296,7 @@ export function ServerBookingBoard() {
       setDateDraftDirty(false)
       toast.success(successMessage)
       reload()
+      return true
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : 'The server could not apply that booking-board change.')
       if (caught instanceof PmsApiError) {
@@ -297,6 +307,7 @@ export function ServerBookingBoard() {
         // A lost response is ambiguous. Keep this in-memory key so the operator's retry is idempotent.
         toast.message('Connection outcome is unknown. Retry the same action to reuse its protected request key.')
       }
+      return false
     } finally {
       setMutationInFlight(false)
     }
@@ -455,7 +466,7 @@ export function ServerBookingBoard() {
           ))}
         </nav>
 
-        {canEdit && selectedReservation && (
+        {selectedReservation && canSelectCommand && (
           <section className="mt-4 rounded-lg border bg-muted/30 p-3" aria-label="Selected reservation actions">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
@@ -482,6 +493,21 @@ export function ServerBookingBoard() {
               </Button>
             </div>
           </section>
+        )}
+
+        {selectedReservation && canSelectCommand && (
+          <BoardReservationCommandDrawer
+            key={selectedReservation.id}
+            reservation={selectedReservation}
+            mutationInFlight={mutationInFlight}
+            canCancel={canCancel}
+            canEditGuest={canEditGuest}
+            canPostCharge={canPostCharge}
+            operationsAvailable={canUseReservationCommands}
+            accountingAvailable={canUseAccountingCommands}
+            onClose={() => { setSelectedReservationId(null); setDateDraftDirty(false) }}
+            onMutation={runBoardMutation}
+          />
         )}
 
         {canEdit && data && unassignedCount > 0 && (
@@ -642,7 +668,7 @@ export function ServerBookingBoard() {
                           }
                           const title = `${reservation.guestName} · ${format(parseISO(reservation.checkIn), 'd MMM')} to ${format(parseISO(reservation.checkOut), 'd MMM')} · ${reservation.status.replaceAll('_', ' ')}`
 
-                          return canEdit ? (
+                          return canSelectCommand ? (
                             <button
                               key={reservation.id}
                               type="button"

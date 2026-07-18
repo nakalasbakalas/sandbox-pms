@@ -11,6 +11,10 @@ export type DurableAttemptOperation =
   | 'check-out-payment'
   | 'reservation-assign-room'
   | 'reservation-resize-stay'
+  | 'reservation-cancel'
+  | 'reservation-no-show'
+  | 'reservation-update-guest'
+  | 'folio-post-charge'
 
 export interface DurableAttemptDescriptor {
   operation: DurableAttemptOperation
@@ -37,6 +41,10 @@ const ALLOWED_OPERATIONS = new Set<DurableAttemptOperation>([
   'check-out-payment',
   'reservation-assign-room',
   'reservation-resize-stay',
+  'reservation-cancel',
+  'reservation-no-show',
+  'reservation-update-guest',
+  'folio-post-charge',
 ])
 
 class MemoryAttemptStorage implements AttemptStorage {

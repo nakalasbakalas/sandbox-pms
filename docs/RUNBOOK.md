@@ -450,13 +450,22 @@ Run:
 
 ```powershell
 npm.cmd run test:booking-board-operations
+npm.cmd run test:reservation-commands
 ```
 
 In server mode, select an unassigned stay or an assigned timeline segment before choosing a compatible target room or editing stay dates. The PMS validates room type, room operational status, inventory blocks, overlapping reservations, capacity, and property ownership before accepting the command. Do not interpret a disabled button as proof of availability; the backend response is authoritative.
 
-The Board deliberately performs no optimistic move or resize. After success or failure it refetches the Board range. The PMS requires a per-attempt idempotency key and records the property-scoped command fingerprint; retry the same request only with its original key. If a request times out or returns an error, refresh and inspect the reservation before retrying. A full reload must show the persisted server room and dates.
+The Board deliberately performs no optimistic move, resize, lifecycle, guest, or charge success. After a known success or failure it refetches the Board range. The PMS records property-scoped command fingerprints; retry an unchanged ambiguous request only with its original in-memory key. A full reload must show the persisted server state.
 
-Room-block creation/clearing, cancellation, no-show, guest/VIP/extras editing, and deletion policy are not yet Board timeline commands. Use the existing permissioned Reservations, Front Desk, Housekeeping, or Cashier surface until those actions are separately wired and tested.
+Use the selected-reservation command drawer for:
+
+- cancellation or no-show only with a recorded reason; future arrivals cannot be marked no-show and checked-in stays must be checked out;
+- guest name/contact/VIP changes only with both reservation-edit and guest-view permissions; stale guest timestamps fail with `409`;
+- extras only with `post:charges`, an open folio, and backend `legacyFolioCharges` capability evidence. Enter baht with at most two decimals; the browser converts the string to integer satang without Float arithmetic.
+
+If a lifecycle or guest request returns `409`, inspect the refetched reservation before trying a new command. If an extra request has an unknown network outcome, reconcile the folio before changing any material field. Never repost an extra with a new key merely because the first response was lost.
+
+Room-block creation/clearing and destructive deletion policy are not yet Board timeline commands. Use the existing permissioned inventory/settings flow until those actions are separately wired and tested.
 
 ## Accounting V2 And Direct Booking Gates
 

@@ -59,9 +59,30 @@ const calls = {}
 const reservations = [
   {
     id: 'segment-a',
+    confirmationCode: 'CONF-001',
+    propertyId: property.id,
+    guestId: 'guest-1',
+    roomTypeId: 'type-family',
     assignedRoomId: 'room-101',
     checkIn: new Date('2026-07-18T00:00:00.000Z'),
     checkOut: new Date('2026-07-20T00:00:00.000Z'),
+    status: 'CONFIRMED',
+    adults: 2,
+    children: 0,
+    childAges: [],
+    source: 'DIRECT',
+    channelRef: null,
+    notes: null,
+    specialRequests: null,
+    updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+    guest: {
+      id: 'guest-1', firstName: 'Ada', lastName: 'Guest', vipStatus: true,
+      email: 'ada@example.test', phone: '+6612345678', nationality: 'TH', idType: 'PASSPORT', idNumber: 'P-123', notes: 'Private', updatedAt: new Date('2026-07-17T00:00:00.000Z'),
+    },
+    roomType: { id: 'type-family', code: 'FAMILY', name: 'Family Suite', standardOcc: 2, maxOccupancy: 4 },
+    assignedRoom: { id: 'room-101', number: '101', floor: 1, currentStatus: 'VACANT_CLEAN', operationalStatus: 'AVAILABLE' },
+    ratePerNight: 2400, ratePerNightSatang: 240000n, totalAmount: 4800, totalAmountSatang: 480000n, depositAmount: 1440, depositAmountSatang: 144000n, depositPaid: false,
+    folio: { id: 'folio-1', status: 'OPEN', total: 4800, totalSatang: 480000n, paid: 0, paidSatang: 0n, balance: 4800, balanceSatang: 480000n },
   },
   {
     id: 'segment-b',
@@ -217,9 +238,30 @@ assert.equal(legacyBoard.inventoryBlocks.length, 0, 'legacy board responses add 
 assert.equal(legacyInventoryQueried, false, 'legacy requests do not trigger an unbounded inventory scan')
 assert.equal('checkIn' in calls.reservations.where, false, 'legacy reservation queries remain unbounded')
 
+const housekeepingBoard = await getFrontDeskBoard(fixture, { id: 'housekeeping-1', role: 'HOUSEKEEPING', propertyId: property.id }, { from: '2026-07-18', to: '2026-08-01' })
+assert.deepEqual(
+  housekeepingBoard.reservations[0].guest,
+  { id: 'guest-1', firstName: 'Ada', lastName: 'Guest', vipStatus: true, updatedAt: new Date('2026-07-17T00:00:00.000Z') },
+  'housekeeping board responses expose only guest identity and VIP state, not contact or profile PII',
+)
+assert.equal('folio' in housekeepingBoard.reservations[0], false, 'housekeeping board responses do not expose folio data')
+assert.equal('totalAmountSatang' in housekeepingBoard.reservations[0], false, 'housekeeping board responses do not expose exact financial values')
+assert.equal('notes' in housekeepingBoard.reservations[0], false, 'housekeeping board responses do not expose reservation notes')
+assert.equal('channelRef' in housekeepingBoard.reservations[0], false, 'housekeeping board responses do not expose channel references')
+
+const frontDeskBoard = await getFrontDeskBoard(fixture, { id: 'front-desk-1', role: 'FRONT_DESK', propertyId: property.id }, { from: '2026-07-18', to: '2026-08-01' })
+assert.equal(frontDeskBoard.reservations[0].guest.email, 'ada@example.test', 'front desk can receive guest contact details')
+assert.equal(frontDeskBoard.reservations[0].folio.id, 'folio-1', 'cashier-capable front desk receives the minimal folio balance DTO')
+assert.equal(frontDeskBoard.reservations[0].folio.balanceSatang, '480000', 'folio exact money is serialized as base-10 satang')
+
 const openApi = createOpenApiDocument({ serverUrl: 'https://pms.example.test' })
 const boardParameters = openApi.paths['/api/front-desk/board'].get.parameters
 assert.deepEqual(boardParameters.map((parameter) => parameter.name), ['from', 'to'], 'OpenAPI publishes both board range parameters')
 assert.equal(boardParameters[0].schema.format, 'date', 'OpenAPI declares the board range as ISO dates')
+const cancelParameters = openApi.paths['/api/reservations/{id}/cancel'].post.parameters
+assert.equal(cancelParameters.some((parameter) => parameter.name === 'x-idempotency-key'), true, 'OpenAPI publishes retry protection for cancellation')
+assert.equal(cancelParameters.some((parameter) => parameter.name === 'x-reservation-expected-updated-at'), true, 'OpenAPI publishes stale-write protection for cancellation')
+const guestParameters = openApi.paths['/api/reservations/{id}/guest'].patch.parameters
+assert.equal(guestParameters.some((parameter) => parameter.name === 'x-guest-expected-updated-at'), true, 'OpenAPI publishes stale-write protection for reservation guest updates')
 
 console.log('Front desk board range contract tests passed.')

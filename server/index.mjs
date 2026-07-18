@@ -167,6 +167,7 @@ import {
   deleteSetupRoom,
   updateBookingEmailSource,
   updateReservation,
+  updateReservationGuest,
   updateGuest,
   updateHousekeepingStatus,
   updateRoomOperationalStatus,
@@ -183,7 +184,7 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, x-reservation-expected-updated-at, x-reservation-expected-version, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
+const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, x-reservation-expected-updated-at, x-reservation-expected-version, x-guest-expected-updated-at, x-guest-expected-version, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
 const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
@@ -1742,6 +1743,27 @@ async function handleApi(request, response, url) {
     return true
   }
 
+  params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/guest$/)
+  if (params && request.method === 'PATCH') {
+    requirePermission(user, 'edit:reservation')
+    requirePermission(user, 'view:guests')
+    const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedGuestUpdatedAt,
+      firstHeaderValue(request.headers['x-guest-expected-updated-at']),
+      firstHeaderValue(request.headers['x-guest-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Guest update tokens do not match.')
+    }
+    const reservation = await updateReservationGuest(db, params.id, {
+      ...body,
+      ...(expectedTokens.length ? { expectedGuestUpdatedAt: String(expectedTokens[0]) } : {}),
+    }, user, { idempotencyKey: context.idempotencyKey })
+    sendJson(response, 200, { ok: true, data: reservation, message: 'Guest profile updated.' })
+    return true
+  }
+
   params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)\/assign-room$/)
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
@@ -1787,7 +1809,18 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
-    const reservation = await cancelReservation(db, params.id, user, 'CANCELLED', body.reason || body.notes)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await cancelReservation(db, params.id, user, 'CANCELLED', body.reason || body.notes, {
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation cancelled.' })
     return true
   }
@@ -1796,7 +1829,18 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'cancel:reservation')
     const body = await readJson(request)
-    const reservation = await cancelReservation(db, params.id, user, 'NO_SHOW', body.reason || body.notes)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await cancelReservation(db, params.id, user, 'NO_SHOW', body.reason || body.notes, {
+      idempotencyKey: context.idempotencyKey,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Reservation marked as no-show.' })
     return true
   }

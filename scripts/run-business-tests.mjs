@@ -52,6 +52,7 @@ const systemCapabilities = getSystemCapabilities({
 })
 assert.equal(systemCapabilities.sourceOfTruth, 'server', 'capability registry declares the backend source of truth')
 assert.equal(systemCapabilities.operations.nightAudit.status, 'available', 'persistent night audit is presented as an operational backend capability')
+assert.equal(systemCapabilities.finance.legacyFolioCharges.status, 'available', 'exact-satang legacy folio charge posting is separately capability-gated from disabled Accounting V2')
 assert.equal(systemCapabilities.operations.nightAudit.writeMode, 'controlled', 'night audit writes remain controlled')
 assert.equal(systemCapabilities.operations.rates.status, 'available', 'persistent rate services are presented as operational')
 assert.equal(systemCapabilities.integrations.ota.writeMode, 'dry-run', 'OTA live writes remain dry-run by default')

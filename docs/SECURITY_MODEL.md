@@ -66,11 +66,18 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 - Exact values are stored as PostgreSQL `BIGINT` satang and serialized as base-10 strings. Percentages and tax rates use integer basis points.
 - Legacy Float columns remain during the compatibility window. Dual-write disagreement is rejected, and `MONEY_READ_AUTHORITY` defaults to `legacy_float` until a staged reconciliation authorizes satang reads.
 - Payment and legacy charge creation re-read the folio inside serializable transactions and require property-scoped idempotency keys. Payments reject closed folios and unapproved overpayments; charges reject closed folios and remain append-only.
-- A duplicate payment or charge key may return only the original same-intent result. Charge intent is fingerprinted from folio, optional explicit date, description, category, exact satang amount, quantity, and booking-email source; changed intent fails closed with `409`. Serialization and unique-key races are retried through the same validation path without duplicating audit or domain-event evidence.
+- A duplicate payment or charge key may return only the original same-intent result. Charge intent is fingerprinted from folio, optional explicit date, description, category, exact satang amount, quantity, and booking-email source; changed intent fails closed with `409`. Serialization and unique-key races are retried through the same validation path without duplicating audit or domain-event evidence. Unit amount, quantity, and calculated total are bounded before persistence so oversized input cannot degrade into PostgreSQL integer overflow or a generic database error.
 - Payment and charge uniqueness is scoped by `(propertyId, idempotencyKey)`. A foreign folio or booking-email source is rejected before the financial write, audit row, or event can be created.
 - Server-mode financial forms retain opaque attempt keys only in application memory. The same unchanged attempt reuses its key through uncertain retries and rerenders, and confirmed success clears it. No attempt material or key is written to browser storage; after a full reload, staff must reconcile authoritative folio state rather than assume the previous key can be recovered.
+- The Booking Board gates legacy folio extras on the dedicated `legacyFolioCharges` server capability, not the disabled Accounting V2 flag. It sends exact `amountSatang` strings to the same serializable, property-scoped charge service; this does not enable Accounting V2 or online payments.
 - Browser-KV accounting entries and cash counts are demo data only. Server mode must capability-gate those legacy screens until server-backed Accounting V2 reads and writes have passed reconciliation and staff acceptance.
 - No migration or environment flag is proof of financial correctness. Production satang authority requires restored-staging reconciliation, zero unresolved variance, recovery proof, staff workflow acceptance, and owner approval.
+
+## Booking Board Command And PII Boundary
+
+- Cancel/no-show and reservation-scoped guest updates execute only through typed PMS services with property scope, permission checks, serializable reservation locks, stale-write tokens, idempotent intent fingerprints, audit/history/domain evidence, and truthful `409` conflicts. Cancellation/no-show always requires a reason.
+- `GET /api/front-desk/board` is an allowlisted operational DTO, not a raw Prisma relation graph. Guest contact/profile fields require `view:guests`; channel references and reservation notes require `view:reservations`; folio and exact-money fields require a cashier/charge/payment permission. `view:board` alone does not grant those fields.
+- Guest-change audit and domain evidence records only the guest identifier and changed field names, never the submitted email, phone, identity number, notes, or other profile values.
 
 ## Approval Controls
 

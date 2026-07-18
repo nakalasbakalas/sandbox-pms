@@ -54,11 +54,18 @@ type RawReservation = {
   adults?: unknown
   children?: unknown
   guest?: {
+    id?: unknown
     firstName?: unknown
     lastName?: unknown
+    email?: unknown
+    phone?: unknown
     vipStatus?: unknown
+    updatedAt?: unknown
   } | null
   folio?: {
+    id?: unknown
+    status?: unknown
+    balanceSatang?: unknown
     balance?: unknown
   } | null
 }
@@ -157,11 +164,16 @@ function normalizeReservation(reservation: RawReservation): ServerBookingBoardRe
 
   const firstName = text(reservation.guest?.firstName)
   const lastName = text(reservation.guest?.lastName)
+  const guestId = text(reservation.guest?.id)
+  const guestUpdatedAt = text(reservation.guest?.updatedAt)
   const balanceValue = reservation.folio?.balance
   const roomTypeId = text(reservation.roomType?.id)
   const roomTypeCode = text(reservation.roomType?.code)
   const roomTypeName = text(reservation.roomType?.name)
-  if (!roomTypeId || !roomTypeCode || !roomTypeName) return null
+  if (!roomTypeId || !roomTypeCode || !roomTypeName || !guestId || !guestUpdatedAt) return null
+
+  const balanceSatang = text(reservation.folio?.balanceSatang)
+  const folioId = text(reservation.folio?.id)
 
   return {
     id,
@@ -180,6 +192,21 @@ function normalizeReservation(reservation: RawReservation): ServerBookingBoardRe
     adults: number(reservation.adults),
     children: number(reservation.children),
     balance: balanceValue === null || balanceValue === undefined ? null : number(balanceValue),
+    guest: {
+      id: guestId,
+      firstName,
+      lastName,
+      email: text(reservation.guest?.email) || null,
+      phone: text(reservation.guest?.phone) || null,
+      vipStatus: Boolean(reservation.guest?.vipStatus),
+      updatedAt: guestUpdatedAt,
+    },
+    folio: folioId ? {
+      id: folioId,
+      status: text(reservation.folio?.status, 'OPEN'),
+      balanceSatang: /^-?\d+$/.test(balanceSatang) ? balanceSatang : null,
+      balance: balanceValue === null || balanceValue === undefined ? null : number(balanceValue),
+    } : null,
   }
 }
 

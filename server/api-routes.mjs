@@ -41,6 +41,23 @@ const optionalReservationVersionParameters = [
   },
 ]
 
+const optionalGuestVersionParameters = [
+  {
+    name: 'x-guest-expected-updated-at',
+    in: 'header',
+    required: false,
+    description: 'Optional ISO-8601 guest update token. A stale token returns 409 instead of overwriting a later edit.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+  {
+    name: 'x-guest-expected-version',
+    in: 'header',
+    required: false,
+    description: 'Compatibility alias for x-guest-expected-updated-at.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+]
+
 const API_ROUTE_CONTRACTS = [
   route('/api/health', ['GET'], { tag: 'System', summary: 'Service health', public: true }),
   route('/api/openapi.json', ['GET'], { tag: 'System', summary: 'Authenticated API contract' }),
@@ -148,8 +165,21 @@ const API_ROUTE_CONTRACTS = [
   }),
   route('/api/reservations/{id}/check-in', ['POST'], { tag: 'Reservations' }),
   route('/api/reservations/{id}/check-out', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/cancel', ['POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/no-show', ['POST'], { tag: 'Reservations' }),
+  route('/api/reservations/{id}/guest', ['PATCH'], {
+    tag: 'Reservations',
+    summary: 'Update the guest attached to a property-scoped reservation',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalGuestVersionParameters],
+  }),
+  route('/api/reservations/{id}/cancel', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Cancel a reservation with an operational reason',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/no-show', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Mark a reservation no-show with an operational reason',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
   route('/api/housekeeping/rooms/{id}/status', ['POST'], { tag: 'Housekeeping' }),
   route('/api/housekeeping/tasks', ['GET', 'POST'], { tag: 'Housekeeping' }),
   route('/api/housekeeping/tasks/{id}/assign', ['POST'], { tag: 'Housekeeping' }),

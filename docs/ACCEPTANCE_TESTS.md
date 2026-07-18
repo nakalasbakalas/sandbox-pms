@@ -295,6 +295,11 @@ Acceptance requires:
 - room assignment and room moves call the authenticated server command with a per-attempt idempotency header;
 - the server persists one property-scoped `ReservationMutationAttempt` per idempotency key; a same-intent replay returns the authoritative reservation without duplicate audit, history, or domain-event evidence, while a changed intent returns `409`;
 - stay-date resizing sends both calendar dates to the authenticated PATCH route;
+- cancel and no-show require `cancel:reservation`, an operational reason, an idempotency key, and a matching reservation update token; future no-show and checked-in/terminal lifecycle changes are rejected;
+- same-intent lifecycle replay creates no duplicate history, audit, or domain event, while changed intent, stale state, forged property identifiers, and superseded outcomes return a truthful error;
+- reservation-scoped guest/VIP editing requires both `edit:reservation` and `view:guests`, supports explicit contact-field clearing, rejects stale guest state, and stores only changed field names in evidence;
+- folio extras require `post:charges`, an open folio, the `legacyFolioCharges` capability, and exact base-10 satang input; an unchanged ambiguous retry reuses the original charge key;
+- a housekeeping Board response omits contact/profile PII, channel references, reservation notes, folio identifiers, and financial values while retaining the minimum guest identity/VIP state required for operations;
 - incompatible room types and non-operational rooms are disabled in the UI and rejected definitively by the backend;
 - successful assignment, move, and resize operations survive a full browser reload and rewrite authoritative `RoomDateInventory`;
 - two simultaneous attempts to assign the final compatible room result in exactly one success and one `409`, with inventory owned only by the successful reservation;
@@ -302,7 +307,7 @@ Acceptance requires:
 - controls are disabled while a command is pending and no optimistic timeline success state is shown; and
 - dynamic room types, property scope, permission denial, inventory blocks, and overlap rules remain backend-enforced.
 
-Run `npm.cmd run test:booking-board-operations`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
+Run `npm.cmd run test:booking-board-operations`, `npm.cmd run test:reservation-commands`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
 
 ## Accounting V2, Direct Booking, And Analyzers
 
