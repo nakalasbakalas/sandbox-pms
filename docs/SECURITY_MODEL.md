@@ -49,7 +49,7 @@ Autonomy shadow records are evidence, not execution authority. GPT or a future a
 - Property settings must not be used as a secret store. The settings schemas reject credential-shaped keys/values, URL user information, and sensitive URL query parameters; OTA, Gmail, worker, and OpenAI secrets remain backend environment secrets.
 - SSE responses must remain session-authenticated, `view:board` authorized, property-scoped, `no-store`, and free of guest, financial, credential, and audit metadata.
 - iCal export tokens are bearer credentials. New and rotated tokens are stored only as SHA-256 base64url hashes; the full feed URL may be shown only in the issue/rotation response and must not be returned by later channel reads. Deploy migration `20260717141000_ical_token_hash_backfill` converts and removes legacy raw token fields atomically.
-- Channel rows contain only `credentialRef` and non-secret `credentialStatus`; they are not a secret store. Migration `20260718120000_autonomy_shadow_foundation` aborts when legacy `Channel.credentials` contains non-empty JSON, requiring operator quarantine/rotation before the column is removed.
+- Channel secret state uses only `credentialRef` and non-secret `credentialStatus`; Channel rows are not a secret store. Migration `20260718120000_autonomy_shadow_foundation` aborts when legacy `Channel.credentials` contains non-empty JSON, requiring operator quarantine/rotation. The deprecated column remains only for old-app rollback compatibility, is ignored by the new Prisma client, defaults to `{}`, and has a database constraint rejecting every non-empty value.
 
 ## Autonomous Operations Safety
 

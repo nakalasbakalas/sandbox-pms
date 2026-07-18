@@ -287,7 +287,7 @@ Notifications are backend records:
 - `ReconciliationIssue` and `DeadLetterEvent` are additive schema reservations for later drift and terminal-failure services. No current service creates, retries, or presents those records.
 - The shadow service writes canonical events, policies, cursor state, audit rows, domain events, decisions, and `SHADOW_NOOP` evidence only. Source guards prohibit OTA worker/browser imports and authoritative reservation, payment, charge, rate, or inventory writes.
 - PostgreSQL transaction-scoped advisory locks serialize the same property/job/source occurrence across instances. The retry module only classifies bounded shadow-ingestion retries; it contains no timer or provider execution loop.
-- `Channel.credentials` is removed. `credentialRef` may point to a backend secret manager/environment contract while `credentialStatus` contains non-secret readiness metadata only.
+- `Channel.credentials` remains temporarily as an `@ignore`d rollback-compatibility column so the previous application build can still select Channel rows after the additive migration. Its database default is `{}` and `Channel_credentials_must_be_empty` rejects every non-empty value. New services do not read or write it. `credentialRef` may point to a backend secret manager/environment contract while `credentialStatus` contains non-secret readiness metadata only.
 - Provider acknowledgements and compensation actions are intentionally deferred until a real provider write/read-back lifecycle exists. The OpenAI Agents SDK is also deferred; any future agent tool may read sanitized snapshots or submit typed candidates, never execute or mutate policy.
 
 ## Exact-Money Compatibility Contract

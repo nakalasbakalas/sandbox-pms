@@ -36,4 +36,29 @@ assert.doesNotMatch(
   'shadow service cannot mutate authoritative booking, finance, rate, or inventory rows',
 )
 
+const schema = await readFile(new URL('../prisma/schema.prisma', import.meta.url), 'utf8')
+const migration = await readFile(new URL('../prisma/migrations/20260718120000_autonomy_shadow_foundation/migration.sql', import.meta.url), 'utf8')
+assert.match(
+  schema,
+  /credentials\s+Json\s+@default\("\{\}"\)\s+@ignore/,
+  'new Prisma clients ignore the rollback-only legacy credential column',
+)
+assert.doesNotMatch(
+  migration,
+  /DROP COLUMN\s+"credentials"/i,
+  'autonomy migration does not break old-app rollback by dropping the legacy column',
+)
+assert.match(
+  migration,
+  /ADD CONSTRAINT "Channel_credentials_must_be_empty"[\s\S]*?CHECK \("credentials" = '\{\}'::jsonb\)/,
+  'autonomy migration constrains the legacy credential column to an empty object',
+)
+for (const { name, source } of files) {
+  assert.doesNotMatch(
+    source,
+    /(?:channel|data)\??\.credentials\b|credentials\s*:/i,
+    `${name} does not read or write the rollback-only Channel.credentials field`,
+  )
+}
+
 console.log('Autonomy shadow no-provider/no-operational-write source guards passed.')

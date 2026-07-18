@@ -219,6 +219,7 @@ Acceptance requires:
 - shadow evaluation creates no reservation, payment, charge, rate, availability, or provider request;
 - cursor updates are atomic with canonical event persistence, reject credential-shaped/direct-contact values, and are never exposed in public results;
 - legacy non-empty `Channel.credentials` blocks migration instead of being copied or silently deleted;
+- the deprecated `Channel.credentials` column remains readable as `{}` by an old application build, defaults to `{}`, is ignored by the new Prisma client, and rejects every non-empty insert or update through a PostgreSQL check constraint;
 - `Channel.propertyId` has an enforced property foreign key; and
 - audit plus property-filtered DomainEvent evidence is recorded for ingestion, replay, policy, and decision activity.
 

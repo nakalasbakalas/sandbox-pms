@@ -329,13 +329,36 @@ try {
   )
 
   const legacyColumn = await prisma.$queryRaw`
-    SELECT column_name
+    SELECT column_name, column_default, is_nullable
     FROM information_schema.columns
     WHERE table_schema = 'public'
       AND table_name = 'Channel'
       AND column_name = 'credentials'
   `
-  assert.equal(legacyColumn.length, 0, 'legacy channel credential JSON column is removed')
+  assert.equal(legacyColumn.length, 1, 'legacy channel credential column remains available for an old-app rollback')
+  assert.match(legacyColumn[0].column_default || '', /\{\}/, 'legacy channel credential column defaults to an empty object')
+  assert.equal(legacyColumn[0].is_nullable, 'NO', 'legacy channel credential compatibility remains non-null')
+  const legacyCredentialValue = await prisma.$queryRawUnsafe(
+    'SELECT "credentials" FROM "Channel" WHERE "id" = $1',
+    channelA.id,
+  )
+  assert.deepEqual(legacyCredentialValue[0]?.credentials, {}, 'new channel writes use the database empty-object default')
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      'UPDATE "Channel" SET "credentials" = $1::jsonb WHERE "id" = $2',
+      JSON.stringify({ password: 'must-be-rejected' }),
+      channelA.id,
+    ),
+    (error) => error?.code === 'P2010' && error?.meta?.code === '23514',
+    'database constraint rejects any legacy channel credential secret',
+  )
+  const credentialConstraint = await prisma.$queryRaw`
+    SELECT pg_get_constraintdef(oid) AS definition
+    FROM pg_constraint
+    WHERE conname = 'Channel_credentials_must_be_empty'
+  `
+  assert.equal(credentialConstraint.length, 1, 'empty-only credential constraint is installed')
+  assert.match(credentialConstraint[0].definition, /credentials.*'\{\}'::jsonb/i)
 
   console.log('Autonomy shadow PostgreSQL isolation, idempotency, lock, and no-write gates passed.')
 } finally {

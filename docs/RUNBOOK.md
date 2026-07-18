@@ -474,6 +474,8 @@ WHERE p.id IS NULL;
 
 Both counts must be zero. A non-zero credential count requires backend secret-reference migration, credential rotation, and owner-approved reconciliation. Do not print the JSON, silently copy it, or weaken the migration guard. A non-zero orphan count requires property-ownership reconciliation.
 
+After migration, `Channel.credentials` deliberately remains as a deprecated old-app rollback compatibility column. New Prisma clients ignore it. PostgreSQL defaults it to `{}` and constraint `Channel_credentials_must_be_empty` rejects every non-empty insert or update. Do not remove this column during the rollback window and do not weaken or bypass the constraint.
+
 Run:
 
 ```powershell
@@ -483,6 +485,6 @@ $env:E2E_DATABASE_URL='<disposable PostgreSQL URL>'
 npm.cmd run test:e2e:autonomy
 ```
 
-The guarded database test proves replay idempotency, concurrent locking, property isolation, emergency-stop blocking, audit/domain evidence, secret-column removal, and no reservation/payment/provider mutation. It remains engineering evidence only. Production scheduling must use an external durable trigger and exact-release staging proof; the in-process scheduler is not autonomy proof.
+The guarded database test proves replay idempotency, concurrent locking, property isolation, emergency-stop blocking, audit/domain evidence, empty-only rollback-column enforcement, and no reservation/payment/provider mutation. It remains engineering evidence only. Production scheduling must use an external durable trigger and exact-release staging proof; the in-process scheduler is not autonomy proof.
 
 Do not add provider acknowledgement or compensation records until a credentialed adapter implements write, acknowledgement, read-back, retry, reconciliation, and rollback semantics. Do not add Agents SDK execution tools; future agent tools may read sanitized snapshots or submit candidates only.

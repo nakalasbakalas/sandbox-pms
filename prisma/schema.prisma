@@ -1247,6 +1247,8 @@ model Channel {
   provider      ChannelProvider
   name          String
   hotelId       String?
+  /// Deprecated rollback-only compatibility column. The database constrains this to an empty JSON object.
+  credentials   Json          @default("{}") @ignore
   credentialRef String?
   credentialStatus Json?
   active        Boolean       @default(false)

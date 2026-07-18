@@ -31,7 +31,13 @@ SET "credentialStatus" = jsonb_build_object(
 )
 WHERE "credentials" = '{}'::jsonb;
 
-ALTER TABLE "Channel" DROP COLUMN "credentials";
+-- Keep the legacy column available only so the previous application build can
+-- be used for an emergency app rollback after this additive migration. New
+-- Prisma clients ignore it, and the database rejects every non-empty value.
+ALTER TABLE "Channel"
+  ALTER COLUMN "credentials" SET DEFAULT '{}'::jsonb,
+  ADD CONSTRAINT "Channel_credentials_must_be_empty"
+    CHECK ("credentials" = '{}'::jsonb);
 
 ALTER TABLE "Channel"
   ADD CONSTRAINT "Channel_propertyId_fkey"
