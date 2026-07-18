@@ -220,6 +220,7 @@ try {
       'pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations',
       'guests', 'guests-data', 'folios', 'cashier-folios', 'housekeeping-tasks',
       'night-audit-logs', 'room-types-config', 'rates', 'rate-rules',
+      'internal-messages', 'guest-messages', 'messages', 'message-templates',
     ])
     return Object.keys(window.localStorage).filter((key) => forbidden.has(key))
   })
@@ -247,11 +248,14 @@ try {
   await page.getByRole('tab', { name: /Rules/ }).click()
   await page.getByText(ruleName, { exact: false }).waitFor({ state: 'visible' })
 
-  for (const path of ['/settings', '/night-audit', '/system-status']) {
+  for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
+    if (path === '/internal-comms' || path === '/guest-communications') {
+      assert.match(body, /browser-backed|unavailable/i, `${path} reports its server capability boundary`)
+    }
   }
 
   const lastEvent = await prisma.domainEvent.findFirst({ orderBy: { id: 'desc' }, select: { id: true } })

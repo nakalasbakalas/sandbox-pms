@@ -1,17 +1,25 @@
 # Launch Current Status Index
 
-Status date: 2026-07-17.
+Status date: 2026-07-18.
 
 Verdict: **owner-accepted pilot / launch-hardening; full production sign-off remains open.** Use [RELEASE_EVIDENCE_MODEL.md](RELEASE_EVIDENCE_MODEL.md) for the four non-interchangeable levels: engineering-ready, staging-proven, owner-approved, and provider-proven. The 2026-07-07 owner-directed completion applies only to its exact historical deploy and accepted-risk decision; it does not prove the current release-foundation candidate or close the V2 gates in `LAUNCH_PROOF_PACK_V2.md`.
 
 | Evidence level | Current status |
 | --- | --- |
-| Engineering-ready | PR #174 head `4c1659d` passed fast CI and ephemeral PostgreSQL migration/seed/E2E CI on 2026-07-16. Property-scope and expanded acceptance remediation passed the local disposable-PostgreSQL, exact combined DB E2E, server-mode build, reload/error-truth, and SSE gates on 2026-07-17; the replacement exact commit must still rerun both required GitHub jobs before merge. |
+| Engineering-ready | Merged `main` commit `7844409` is the current primary source. Prior PR #174 evidence is historical; fresh CI and launch evidence must be rerun for any new correction commit. |
 | Staging-proven | Open; local disposable database evidence is not staging proof. |
 | Owner-approved | Open for the current candidate; historical approval remains attached to deploy `dep-d966aj9kh4rs73d9h10g`. |
 | Provider-proven | Partial per capability. Historical 2026-07-07 Cloudflare WAF/rate-limit and Render recovery evidence is preserved, but it is not current-candidate proof and must not be generalized into OTA, payment, secret-rotation, or credentialed RBAC proof. |
 
-The committed release-foundation Blueprint is migration-only at predeploy. The active Render service must be checked before deployment because historical live deploy evidence still records `npm run db:migrate && npm run db:seed`. This repository change is not proof that the provider-side command has changed.
+The committed release-foundation Blueprint is migration-only at predeploy (`npm run db:migrate`). Historical provider records that include seeding remain historical evidence and are not current deployment proof. Current server-mode browser coverage is intentionally limited while legacy browser-backed messaging routes are capability-gated.
+
+### 2026-07-18 housekeeping correction
+
+- Canonical source: `D:\sandbox-pms.local`, branch `main`, commit `7844409`.
+- WAF/evidence salvage remains on `codex/local-waf-proof-salvage` at `a6e43fd`.
+- PR151 audit edits are preserved on `codex/pr151-salvage` at `307cf13`.
+- Lite PRs #172/#173 remain isolated and are not part of primary main.
+- Local-only internal and guest communications workspaces are unavailable in server mode; persisted drafts use the Communication Center.
 
 ## Latest Slice
 

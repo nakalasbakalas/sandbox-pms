@@ -277,6 +277,8 @@ export function CashierView() {
   const paymentReferenceRequired = ['CARD', 'BANK_TRANSFER', 'ONLINE'].includes(paymentMethod)
 
   const postAccountingReceipt = useCallback((folio: Folio, amount: number, method: FolioPayment['method'], reference?: string) => {
+    if (SERVER_API_ENABLED) return null
+
     const recordedAt = new Date()
     const entry: AccountingEntry = {
       id: `ACC-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -306,8 +308,6 @@ export function CashierView() {
       const payload = await pmsApi<{ ok: true; data: any[] }>('/api/reservations', authToken)
       const nextFolios = payload.data.map(folioFromServerReservation).filter(Boolean) as Folio[]
       setServerFolios(nextFolios)
-      setFoliosRaw(nextFolios)
-      setCanonicalFolios(nextFolios)
       return nextFolios
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load cashier folios.'
@@ -316,7 +316,7 @@ export function CashierView() {
     } finally {
       setIsLoadingFolios(false)
     }
-  }, [authToken, setCanonicalFolios, setFoliosRaw])
+  }, [authToken])
 
   useEffect(() => {
     void refreshServerFolios()
@@ -339,6 +339,11 @@ export function CashierView() {
   }, [authToken, canonicalFoliosRaw, foliosRaw, rooms, serverFolios])
   
   const setFolios = (updater: Folio[] | ((current: Folio[]) => Folio[])) => {
+    if (SERVER_API_ENABLED) {
+      setServerFolios((current) => typeof updater === 'function' ? updater(current) : updater)
+      return
+    }
+
     setFoliosRaw((current) => {
       const base = current?.length ? current : canonicalFoliosRaw || []
       const deserialized = base.map(deserializeFolio)
@@ -588,7 +593,9 @@ export function CashierView() {
           return updated
         }))
       }
-      postAccountingReceipt(paymentFolio, amount, paymentMethod, paymentReference.trim() || undefined)
+      if (!SERVER_API_ENABLED) {
+        postAccountingReceipt(paymentFolio, amount, paymentMethod, paymentReference.trim() || undefined)
+      }
       toast.success(`Payment recorded for folio ${paymentFolio.id}.`)
       setPaymentFolio(null)
     } catch (error) {

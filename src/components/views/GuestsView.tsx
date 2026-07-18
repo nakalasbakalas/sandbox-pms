@@ -234,8 +234,6 @@ export function GuestsView() {
       const payload = await pmsApi<{ ok: true; data: any[] }>('/api/guests', authToken)
       const nextGuests = payload.data.map(guestFromServer)
       setServerGuests(nextGuests)
-      setGuestsRaw(nextGuests)
-      setCanonicalGuests(nextGuests)
       return nextGuests
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load guest profiles.'
@@ -244,7 +242,7 @@ export function GuestsView() {
     } finally {
       setIsLoadingGuests(false)
     }
-  }, [authToken, setCanonicalGuests, setGuestsRaw])
+  }, [authToken])
   
   useEffect(() => {
     if (SERVER_API_ENABLED) {

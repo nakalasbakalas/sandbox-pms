@@ -206,8 +206,14 @@ function AppRouter() {
     case 'messaging':
       return <CommunicationCenterView />
     case 'internal-comms':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Internal staff messaging is unavailable" detail="This legacy workspace is browser-backed. Use the server-backed Communication Center for persisted drafts and provider-gated delivery." />
+      }
       return <InternalCommunicationsView />
     case 'guest-communications':
+      if (SERVER_API_ENABLED) {
+        return <CapabilityUnavailable title="Guest communications are unavailable" detail="This legacy workspace is browser-backed. Use the server-backed Communication Center for persisted drafts and provider-gated delivery." />
+      }
       return <GuestCommunicationsView />
     case 'daily-summary':
       return <DailySummaryReportView />
