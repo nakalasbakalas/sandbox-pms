@@ -548,6 +548,8 @@ function parseDateFromText(label, text) {
   return undefined
 }
 
+// Retained for future provider formats that expose labeled stay ranges with typographic dash separators.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function parseDateRangeFromText(labels, text) {
   for (const label of Array.isArray(labels) ? labels : [labels]) {
     const normalizedLabel = String(label || '')
@@ -626,7 +628,6 @@ export function parseBookingEmailDetails(input = {}) {
   const rawText = String(input.rawText || input.body || input.snippet || '')
   const subject = String(input.subject || '')
   const combined = `${subject}\n${rawText}`
-  const lower = combined.toLowerCase()
   const stayDateRange = parseDateRangeFromNormalizedText(['stay', 'stay dates', 'travel dates', 'dates'], combined)
   const channelRef = normalizeNullableString(input.channelRef || parsedInput.channelRef || parsedInput.confirmationCode)
     || firstMatch([
