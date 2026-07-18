@@ -758,7 +758,7 @@ export function FrontDeskView() {
               nationality: reservation.guest.nationality || undefined,
               vipStatus: reservation.guest.vipStatus,
             },
-            roomTypeCode: roomTypeFromReservation(reservation),
+            roomTypeCode: reservation.roomTypeCode,
             assignedRoomId: reservation.assignedRoomId || undefined,
             checkIn: getBangkokDateKey(reservation.checkIn),
             checkOut: getBangkokDateKey(reservation.checkOut),

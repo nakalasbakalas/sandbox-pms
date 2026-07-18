@@ -10,6 +10,7 @@ function route(path, methods, options = {}) {
     methods,
     tag: options.tag || 'PMS',
     summary: options.summary || `${methods.join('/')} ${path}`,
+    parameters: options.parameters || [],
     public: options.public === true,
     internal: options.internal === true,
   }
@@ -65,7 +66,26 @@ const API_ROUTE_CONTRACTS = [
   route('/api/ops/analyzers', ['POST'], { tag: 'Hotel Ops', summary: 'Run deterministic suggest-only operational analyzers' }),
   route('/api/internal/ops/worker/tasks', ['POST'], { tag: 'Internal', internal: true, public: true }),
   route('/api/today', ['GET'], { tag: 'Operations' }),
-  route('/api/front-desk/board', ['GET'], { tag: 'Front Desk' }),
+  route('/api/front-desk/board', ['GET'], {
+    tag: 'Front Desk',
+    summary: 'Property-scoped booking board with an optional bounded date window',
+    parameters: [
+      {
+        name: 'from',
+        in: 'query',
+        required: false,
+        description: 'Inclusive board window start. Must be supplied with to.',
+        schema: { type: 'string', format: 'date' },
+      },
+      {
+        name: 'to',
+        in: 'query',
+        required: false,
+        description: 'Exclusive board window end, at most 93 days after from. Must be supplied with from.',
+        schema: { type: 'string', format: 'date' },
+      },
+    ],
+  }),
   route('/api/front-desk/walk-in', ['POST'], { tag: 'Front Desk' }),
   route('/api/booking-email/status', ['GET'], { tag: 'Booking Inbox' }),
   route('/api/booking-email/sync', ['POST'], { tag: 'Booking Inbox' }),
@@ -132,6 +152,7 @@ export function listApiRouteContracts({ includeInternal = false } = {}) {
       methods: [...contract.methods],
       tag: contract.tag,
       summary: contract.summary,
+      parameters: contract.parameters.map((parameter) => ({ ...parameter })),
       public: contract.public,
       internal: contract.internal,
     }))
@@ -146,6 +167,7 @@ export function resolveApiRouteContract(pathname) {
     allow: contract.methods.join(', '),
     tag: contract.tag,
     summary: contract.summary,
+    parameters: contract.parameters.map((parameter) => ({ ...parameter })),
     public: contract.public,
     internal: contract.internal,
   }

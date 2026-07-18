@@ -692,7 +692,7 @@ export function ReservationsView() {
             nationality: reservation.guest.nationality,
             vipStatus: reservation.guest.vipStatus,
           },
-          roomTypeCode: /twin/i.test(reservation.roomTypeName) ? 'TWIN' : 'DOUBLE',
+          roomTypeCode: reservation.roomTypeCode,
           checkIn: getBangkokDateKey(reservation.checkIn),
           checkOut: getBangkokDateKey(reservation.checkOut),
           adults: reservation.adults,

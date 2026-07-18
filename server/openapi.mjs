@@ -38,6 +38,7 @@ function operation(contract, method) {
     operationId: `${method.toLowerCase()}_${contract.path.replace(/^\/api\//, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '')}`,
     summary: contract.summary,
     tags: [contract.tag],
+    ...(contract.parameters?.length ? { parameters: contract.parameters } : {}),
     security: contract.public ? [] : [{ cookieSession: [] }],
     responses: {
       200: successResponse,

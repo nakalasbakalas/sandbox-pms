@@ -3233,7 +3233,7 @@ export function Board() {
                   phone: reservation.guest.phone || undefined,
                   nationality: reservation.guest.nationality || undefined,
                 },
-                roomTypeCode: /twin/i.test(reservation.roomTypeName) ? 'TWIN' : 'DOUBLE',
+                roomTypeCode: reservation.roomTypeCode,
                 assignedRoomId: reservation.assignedRoomId || undefined,
                 checkIn: reservation.checkIn,
                 checkOut: reservation.checkOut,

@@ -24,6 +24,7 @@ import { capabilityEnabled, useSystemCapabilities } from './hooks/use-system-cap
 
 const TodayView = lazy(() => import('./components/today/TodayView').then((module) => ({ default: module.TodayView })))
 const Board = lazy(() => import('./components/board/Board').then((module) => ({ default: module.Board })))
+const ServerBookingBoard = lazy(() => import('./components/board/ServerBookingBoard').then((module) => ({ default: module.ServerBookingBoard })))
 const RoomsView = lazy(() => import('./components/rooms/RoomsView').then((module) => ({ default: module.RoomsView })))
 const BookingInboxView = lazy(() => import('./components/booking-email/BookingInboxView').then((module) => ({ default: module.BookingInboxView })))
 const FrontDeskView = lazy(() => import('./components/front-desk/FrontDeskView').then((module) => ({ default: module.FrontDeskView })))
@@ -167,7 +168,7 @@ function AppRouter() {
     case 'today':
       return <TodayView />
     case 'board':
-      return SERVER_API_ENABLED ? <FrontDeskView /> : <Board />
+      return SERVER_API_ENABLED ? <ServerBookingBoard /> : <Board />
     case 'rooms':
       return <RoomsView />
     case 'booking-inbox':

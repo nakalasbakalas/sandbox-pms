@@ -1504,7 +1504,13 @@ async function handleApi(request, response, url) {
 
   if (url.pathname === '/api/front-desk/board' && request.method === 'GET') {
     requirePermission(user, 'view:board')
-    sendJson(response, 200, { ok: true, data: await getFrontDeskBoard(db, user) })
+    sendJson(response, 200, {
+      ok: true,
+      data: await getFrontDeskBoard(db, user, {
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+      }),
+    })
     return true
   }
 

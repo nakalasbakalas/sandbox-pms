@@ -20,6 +20,18 @@ const username = `server-browser-${runId}`
 const password = `Server-Browser-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
+const boardRoomNumber = `B-${runId.slice(0, 8)}`
+const boardGuestOne = `Board Alpha ${runId}`
+const boardGuestTwo = `Board Bravo ${runId}`
+const fakeBoardRoomNumber = `LOCAL-${runId}`
+const fakeBoardGuest = `Browser Shadow ${runId}`
+
+function dateKeyWithOffset(offset) {
+  const date = new Date()
+  date.setUTCHours(12, 0, 0, 0)
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
+}
 
 function availablePort() {
   return new Promise((resolvePort, reject) => {
@@ -145,6 +157,16 @@ assert.ok(property, 'the guarded E2E seed must provide the SANDBOX property')
 const roomType = await prisma.roomType.findFirst({ where: { propertyId: property.id }, orderBy: { code: 'asc' } })
 const room = await prisma.room.findFirst({ where: { propertyId: property.id }, orderBy: { number: 'asc' } })
 assert.ok(roomType && room, 'the guarded E2E seed must provide room inventory')
+const boardRoom = await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: roomType.id,
+    number: boardRoomNumber,
+    floor: 99,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'VACANT_CLEAN',
+  },
+})
 
 await prisma.user.create({
   data: {
@@ -183,9 +205,78 @@ try {
 
   browser = await chromium.launch({ headless: true })
   const context = await browser.newContext({ baseURL: baseUrl, viewport: { width: 1440, height: 1000 } })
-  await context.addInitScript(() => window.localStorage.clear())
+  await context.addInitScript(({ fakeRoomNumber, fakeGuestName }) => {
+    window.localStorage.clear()
+    if (window.location.pathname !== '/board') return
+    window.localStorage.setItem('pms-rooms', JSON.stringify([{
+      id: 'browser-shadow-room',
+      number: fakeRoomNumber,
+      floor: 88,
+      type: 'DOUBLE',
+      roomTypeCode: 'DOUBLE',
+      status: 'OCCUPIED_CLEAN',
+      cleanStatus: 'CLEAN',
+    }]))
+    window.localStorage.setItem('reservations', JSON.stringify([{
+      id: 'browser-shadow-reservation',
+      confirmationCode: 'LOCAL-SHADOW',
+      guestName: fakeGuestName,
+      roomId: 'browser-shadow-room',
+      roomNumber: fakeRoomNumber,
+      checkIn: '2020-01-01',
+      checkOut: '2099-12-31',
+      status: 'CONFIRMED',
+    }]))
+    window.localStorage.setItem('reservations-data', JSON.stringify([{
+      id: 'browser-shadow-reservation',
+      guestName: fakeGuestName,
+      roomNumber: fakeRoomNumber,
+    }]))
+    window.localStorage.setItem('unassigned-reservations', JSON.stringify([{
+      id: 'browser-shadow-unassigned',
+      guestName: fakeGuestName,
+    }]))
+  }, { fakeRoomNumber: fakeBoardRoomNumber, fakeGuestName: fakeBoardGuest })
   const login = await context.request.post('/api/auth/login', { data: { identity: username, password } })
   assert.equal(login.status(), 200, `server login failed: ${await login.text()}`)
+
+  const boardReservationOne = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-A-${runId}`,
+    guest: {
+      firstName: 'Board Alpha',
+      lastName: runId,
+      email: `board-alpha-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    assignedRoomId: boardRoom.id,
+    checkIn: dateKeyWithOffset(1),
+    checkOut: dateKeyWithOffset(3),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  })
+  const boardReservationTwo = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-B-${runId}`,
+    guest: {
+      firstName: 'Board Bravo',
+      lastName: runId,
+      email: `board-bravo-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    assignedRoomId: boardRoom.id,
+    checkIn: dateKeyWithOffset(4),
+    checkOut: dateKeyWithOffset(6),
+    adults: 2,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  })
+  assert.notEqual(boardReservationOne.data.id, boardReservationTwo.data.id, 'same-room board stays persist as distinct reservations')
+  assert.equal(boardReservationOne.data.assignedRoomId, boardRoom.id, 'first board stay is assigned to the dedicated server room')
+  assert.equal(boardReservationTwo.data.assignedRoomId, boardRoom.id, 'second board stay is assigned to the dedicated server room')
 
   const housekeeping = await apiJson(context.request, 'POST', '/api/housekeeping/tasks', {
     roomId: room.id,
@@ -228,6 +319,40 @@ try {
     assert.deepEqual(operationalStorageKeys, [], `${label} does not write operational workflow state to browser storage`)
   }
 
+  await page.route('**/api/front-desk/board?*', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative booking board failure.' }),
+    })
+  })
+  await page.goto('/board', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('heading', { name: 'Booking board unavailable' }).waitFor({ state: 'visible' })
+  await page.getByText('Injected authoritative booking board failure.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByTestId('server-booking-board').count(), 0, 'an initial board failure renders no operational board rows')
+  assert.equal(await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).count(), 0, 'an initial board failure does not retain server room rows')
+  assert.equal(await page.getByText(fakeBoardRoomNumber, { exact: false }).count(), 0, 'the server board ignores fake browser room state')
+  assert.equal(await page.getByText(fakeBoardGuest, { exact: false }).count(), 0, 'the server board ignores fake browser reservation state')
+  const injectedBoardStorage = await page.evaluate((keys) => Object.fromEntries(
+    keys.map((key) => [key, window.localStorage.getItem(key)]),
+  ), ['pms-rooms', 'reservations', 'reservations-data', 'unassigned-reservations'])
+  assert.match(injectedBoardStorage['pms-rooms'] || '', new RegExp(fakeBoardRoomNumber), 'the fake room fixture existed while the board ignored it')
+  assert.match(injectedBoardStorage.reservations || '', new RegExp(fakeBoardGuest), 'the fake reservation fixture existed while the board ignored it')
+  await page.unroute('**/api/front-desk/board?*')
+  await page.evaluate((keys) => {
+    for (const key of keys) window.localStorage.removeItem(key)
+  }, Object.keys(injectedBoardStorage))
+  await assertNoOperationalBrowserStorage('server-mode booking board before retry')
+  await page.getByRole('button', { name: 'Retry' }).click()
+  await page.getByTestId('server-booking-board').waitFor({ state: 'visible' })
+  await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardGuestTwo, { exact: true }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByText(boardGuestOne, { exact: true }).count(), 1, 'the first same-room stay renders as one distinct segment')
+  assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
+  assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
+  await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
   await page.goto('/housekeeping', { waitUntil: 'domcontentloaded' })
   await page.getByText(taskTitle, { exact: false }).waitFor({ state: 'visible' })
   await assertNoOperationalBrowserStorage('server-mode housekeeping')
@@ -256,6 +381,7 @@ try {
 
   for (const path of ['/settings', '/night-audit', '/system-status', '/internal-comms', '/guest-communications']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)
@@ -267,6 +393,7 @@ try {
 
   for (const path of ['/reservations', '/guests', '/cashier', '/rooms', '/channels', '/messaging', '/reports']) {
     await page.goto(path, { waitUntil: 'domcontentloaded' })
+    await page.getByText('Loading PMS workspace...', { exact: true }).waitFor({ state: 'hidden' })
     const body = await page.locator('body').innerText()
     assert.equal(body.includes('Access restricted'), false, `${path} remains available in authenticated server mode`)
     assert.equal(body.includes('Something went wrong'), false, `${path} does not render the error boundary`)

@@ -189,6 +189,47 @@ function nextDateKey(key) {
   return date.toISOString().slice(0, 10)
 }
 
+const FRONT_DESK_BOARD_MAX_RANGE_DAYS = 93
+
+function validCalendarDateKey(value, label) {
+  const key = normalizeNullableString(value)
+  if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    throw new PmsValidationError(`${label} must use YYYY-MM-DD format.`)
+  }
+  const date = dateFromKey(key)
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) {
+    throw new PmsValidationError(`${label} must be a valid calendar date.`)
+  }
+  return { key, date }
+}
+
+export function resolveFrontDeskBoardRange(input = {}) {
+  const fromInput = normalizeNullableString(input?.from)
+  const toInput = normalizeNullableString(input?.to)
+  if (!fromInput && !toInput) return null
+  if (!fromInput || !toInput) {
+    throw new PmsValidationError('Board range requires both from and to dates.')
+  }
+
+  const from = validCalendarDateKey(fromInput, 'Board from date')
+  const to = validCalendarDateKey(toInput, 'Board to date')
+  const durationDays = Math.round((to.date.getTime() - from.date.getTime()) / 86_400_000)
+  if (durationDays <= 0) {
+    throw new PmsValidationError('Board to date must be after from date.')
+  }
+  if (durationDays > FRONT_DESK_BOARD_MAX_RANGE_DAYS) {
+    throw new PmsValidationError(`Board date range cannot exceed ${FRONT_DESK_BOARD_MAX_RANGE_DAYS} days.`)
+  }
+
+  return {
+    from: from.key,
+    to: to.key,
+    fromDate: from.date,
+    toDate: to.date,
+    durationDays,
+  }
+}
+
 function isOperationallySellableRoom(room) {
   return Boolean(
     String(room?.number || '').trim() &&
@@ -3625,20 +3666,80 @@ export async function getTodayData(prisma, actor) {
   }
 }
 
-export async function getFrontDeskBoard(prisma, actor) {
+export async function getFrontDeskBoard(prisma, actor, rangeInput = {}) {
   const property = await getProperty(prisma, actor)
-  const [rooms, reservations] = await Promise.all([
+  const range = resolveFrontDeskBoardRange(rangeInput)
+  const reservationWhere = {
+    propertyId: property.id,
+    status: { in: activeReservationStatuses() },
+    ...(range ? {
+      checkIn: { lt: range.toDate },
+      checkOut: { gt: range.fromDate },
+    } : {}),
+  }
+  const inventoryBlockWhere = range ? {
+    propertyId: property.id,
+    date: { gte: range.fromDate, lt: range.toDate },
+    status: { in: ['BLOCKED', 'OUT_OF_SERVICE'] },
+  } : null
+
+  const [roomTypes, rooms, reservations, inventoryBlocks] = await Promise.all([
+    prisma.roomType.findMany({
+      where: { propertyId: property.id },
+      orderBy: [{ name: 'asc' }, { code: 'asc' }],
+    }),
     prisma.room.findMany({
       where: { propertyId: property.id },
       include: { roomType: true },
       orderBy: [{ floor: 'asc' }, { number: 'asc' }],
     }),
     prisma.reservation.findMany({
-      where: { propertyId: property.id, status: { in: activeReservationStatuses() } },
+      where: reservationWhere,
       include: reservationInclude,
-      orderBy: [{ checkIn: 'asc' }],
+      orderBy: [{ checkIn: 'asc' }, { checkOut: 'asc' }, { id: 'asc' }],
     }),
+    inventoryBlockWhere
+      ? prisma.roomDateInventory.findMany({
+          where: inventoryBlockWhere,
+          select: {
+            id: true,
+            roomId: true,
+            date: true,
+            status: true,
+            notes: true,
+            updatedAt: true,
+          },
+          orderBy: [{ date: 'asc' }, { roomId: 'asc' }],
+        })
+      : Promise.resolve([]),
   ])
 
-  return { property, rooms, reservations }
+  return {
+    property,
+    rooms,
+    reservations,
+    propertyDisplay: {
+      id: property.id,
+      code: property.code,
+      name: property.name,
+      timezone: property.timezone,
+      currency: property.currency,
+      defaultCheckIn: property.defaultCheckIn,
+      defaultCheckOut: property.defaultCheckOut,
+      extraGuestFee: property.extraGuestFee,
+      extraGuestFeeSatang: satangToApiString(readMoneySatang(property, 'extraGuestFee')),
+      childFee: property.childFee,
+      childFeeSatang: satangToApiString(readMoneySatang(property, 'childFee')),
+      taxRate: property.taxRate,
+      taxRateBasisPoints: property.taxRateBasisPoints ?? Math.round(Number(property.taxRate || 0) * 100),
+    },
+    roomTypes,
+    inventoryBlocks,
+    range: range ? {
+      from: range.from,
+      to: range.to,
+      durationDays: range.durationDays,
+      semantics: 'FROM_INCLUSIVE_TO_EXCLUSIVE',
+    } : null,
+  }
 }
