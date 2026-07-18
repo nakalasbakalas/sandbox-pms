@@ -42,8 +42,15 @@ type RawReservation = {
   status?: unknown
   checkIn?: unknown
   checkOut?: unknown
+  updatedAt?: unknown
+  version?: unknown
   assignedRoomId?: unknown
   assignedRoom?: { id?: unknown } | null
+  roomType?: {
+    id?: unknown
+    code?: unknown
+    name?: unknown
+  } | null
   adults?: unknown
   children?: unknown
   guest?: {
@@ -145,11 +152,16 @@ function normalizeReservation(reservation: RawReservation): ServerBookingBoardRe
   const id = text(reservation.id)
   const checkIn = text(reservation.checkIn)
   const checkOut = text(reservation.checkOut)
-  if (!id || !checkIn || !checkOut) return null
+  const updatedAt = text(reservation.updatedAt)
+  if (!id || !checkIn || !checkOut || !updatedAt) return null
 
   const firstName = text(reservation.guest?.firstName)
   const lastName = text(reservation.guest?.lastName)
   const balanceValue = reservation.folio?.balance
+  const roomTypeId = text(reservation.roomType?.id)
+  const roomTypeCode = text(reservation.roomType?.code)
+  const roomTypeName = text(reservation.roomType?.name)
+  if (!roomTypeId || !roomTypeCode || !roomTypeName) return null
 
   return {
     id,
@@ -157,7 +169,12 @@ function normalizeReservation(reservation: RawReservation): ServerBookingBoardRe
     status: text(reservation.status, 'UNKNOWN'),
     checkIn,
     checkOut,
+    updatedAt,
+    version: text(reservation.version, updatedAt),
     assignedRoomId: text(reservation.assignedRoomId ?? reservation.assignedRoom?.id) || null,
+    roomTypeId,
+    roomTypeCode,
+    roomTypeName,
     guestName: `${firstName} ${lastName}`.trim() || 'Guest',
     isVip: Boolean(reservation.guest?.vipStatus),
     adults: number(reservation.adults),

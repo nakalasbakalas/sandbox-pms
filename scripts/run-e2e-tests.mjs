@@ -885,6 +885,7 @@ const {
   checkInReservation,
   checkOutReservation,
   createReservation,
+  updateReservation,
 } = await import('../server/pms-service.mjs')
 const {
   approveOpsTask,
@@ -897,7 +898,7 @@ const {
 const prisma = createPrismaClient()
 
 try {
-  const twinRoom = await prisma.room.findFirst({
+  const twinRooms = await prisma.room.findMany({
     where: {
       roomType: { code: 'TWIN' },
       operationalStatus: 'AVAILABLE',
@@ -905,8 +906,10 @@ try {
     },
     include: { roomType: true },
     orderBy: { number: 'asc' },
+    take: 2,
   })
-  assert.ok(twinRoom, 'a sellable twin room must exist')
+  assert.equal(twinRooms.length, 2, 'two sellable twin rooms must exist for board move proof')
+  const [initialTwinRoom, movedTwinRoom] = twinRooms
 
   const reservation = await createReservation(prisma, {
     guest: {
@@ -924,8 +927,35 @@ try {
     source: 'DIRECT',
   }, admin)
 
-  const assigned = await assignRoom(prisma, reservation.id, twinRoom.id, frontDesk)
-  assert.equal(assigned.assignedRoomId, twinRoom.id, 'room assignment persists')
+  const assigned = await assignRoom(prisma, reservation.id, initialTwinRoom.id, frontDesk)
+  assert.equal(assigned.assignedRoomId, initialTwinRoom.id, 'board room assignment persists')
+
+  const resized = await updateReservation(prisma, reservation.id, {
+    checkIn: '2027-01-11',
+    checkOut: '2027-01-14',
+  }, frontDesk)
+  assert.equal(resized.checkIn.toISOString().slice(0, 10), '2027-01-11', 'board stay start resize persists')
+  assert.equal(resized.checkOut.toISOString().slice(0, 10), '2027-01-14', 'board stay end resize persists')
+  assert.equal(resized.assignedRoomId, initialTwinRoom.id, 'stay resize retains a valid room assignment')
+
+  const moved = await assignRoom(prisma, reservation.id, movedTwinRoom.id, frontDesk)
+  assert.equal(moved.assignedRoomId, movedTwinRoom.id, 'board room move persists')
+  const movedInventory = await prisma.roomDateInventory.findMany({
+    where: { reservationId: reservation.id },
+    orderBy: { date: 'asc' },
+  })
+  assert.deepEqual(
+    movedInventory.map((row) => ({
+      roomId: row.roomId,
+      date: row.date.toISOString().slice(0, 10),
+    })),
+    [
+      { roomId: movedTwinRoom.id, date: '2027-01-11' },
+      { roomId: movedTwinRoom.id, date: '2027-01-12' },
+      { roomId: movedTwinRoom.id, date: '2027-01-13' },
+    ],
+    'board room move and stay resize rewrite authoritative inventory dates',
+  )
 
   const checkedIn = await checkInReservation(prisma, reservation.id, admin, {
     allowDateOverride: true,
@@ -936,7 +966,7 @@ try {
       idType: 'ID',
     },
     payment: {
-      amount: assigned.folio.balance,
+      amount: moved.folio.balance,
       method: 'CASH',
       idempotencyKey: `check-in-payment-${reservation.id}`,
     },

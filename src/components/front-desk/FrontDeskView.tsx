@@ -21,7 +21,7 @@ import {
   buildRoomReadinessSummary,
   toInHouseItem,
 } from '@/lib/front-desk-workflow'
-import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { Calendar, EnvelopeSimple, MagnifyingGlass, Plus, SignOut, Users } from '@phosphor-icons/react'
 import { toast } from 'sonner'
@@ -591,6 +591,7 @@ export function FrontDeskView() {
         if (selectedArrival.assignedRoomId !== data.roomId) {
           await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
             method: 'POST',
+            headers: { 'x-idempotency-key': createPmsIdempotencyKey('front-desk-check-in-assign-room') },
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }

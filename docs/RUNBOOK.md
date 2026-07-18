@@ -444,6 +444,20 @@ node scripts/run-operations-foundation-tests.mjs
 
 Passing the focused checks proves service behavior against fixtures. It does not prove migrations against real data, production scheduling, live staff acceptance, recovery, or provider readiness.
 
+## Server Booking Board Operations
+
+Run:
+
+```powershell
+npm.cmd run test:booking-board-operations
+```
+
+In server mode, select an unassigned stay or an assigned timeline segment before choosing a compatible target room or editing stay dates. The PMS validates room type, room operational status, inventory blocks, overlapping reservations, capacity, and property ownership before accepting the command. Do not interpret a disabled button as proof of availability; the backend response is authoritative.
+
+The Board deliberately performs no optimistic move or resize. After success or failure it refetches the Board range. The PMS requires a per-attempt idempotency key and records the property-scoped command fingerprint; retry the same request only with its original key. If a request times out or returns an error, refresh and inspect the reservation before retrying. A full reload must show the persisted server room and dates.
+
+Room-block creation/clearing, cancellation, no-show, guest/VIP/extras editing, and deletion policy are not yet Board timeline commands. Use the existing permissioned Reservations, Front Desk, Housekeeping, or Cashier surface until those actions are separately wired and tested.
+
 ## Accounting V2 And Direct Booking Gates
 
 Keep `ACCOUNTING_V2_ENABLED=false` and `DIRECT_BOOKING_ENABLED=false` until their acceptance matrices pass. Accounting uses append-only exact-satang corrections; never delete a posted financial row. Run `node scripts/run-accounting-v2-tests.mjs` before any staging exercise.

@@ -69,6 +69,7 @@ model Property {
   actionExecutions ActionExecution[]
   reconciliationIssues ReconciliationIssue[]
   deadLetterEvents DeadLetterEvent[]
+  reservationMutationAttempts ReservationMutationAttempt[]
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 }
@@ -209,6 +210,7 @@ model Reservation {
   bookingEmailEvents BookingEmailEvent[] @relation("BookingEmailEventReservation")
   documents         GuestDocument[]
   publicHold         InventoryHold?
+  mutationAttempts   ReservationMutationAttempt[]
   
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -240,6 +242,22 @@ enum BookingSource {
   EXPEDIA
   AIRBNB
   OTHER
+}
+
+model ReservationMutationAttempt {
+  id                String      @id @default(cuid())
+  propertyId        String
+  property          Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  reservationId     String
+  reservation       Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  operation         String
+  idempotencyKey    String
+  intentFingerprint String
+  resultFingerprint String?
+  createdAt         DateTime    @default(now())
+
+  @@unique([propertyId, idempotencyKey])
+  @@index([reservationId, createdAt])
 }
 
 model RoomDateInventory {

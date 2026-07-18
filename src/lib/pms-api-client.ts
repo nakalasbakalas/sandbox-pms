@@ -19,6 +19,16 @@ export function createPmsIdempotencyKey(scope: string) {
   return `${scope}:${randomPart}`.slice(0, 200)
 }
 
+export class PmsApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'PmsApiError'
+    this.status = status
+  }
+}
+
 export async function pmsApi<T>(path: string, _legacyToken: string | null | undefined, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -30,7 +40,7 @@ export async function pmsApi<T>(path: string, _legacyToken: string | null | unde
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new Error(payload?.error || 'PMS request failed.')
+    throw new PmsApiError(payload?.error || 'PMS request failed.', response.status)
   }
   return payload as T
 }

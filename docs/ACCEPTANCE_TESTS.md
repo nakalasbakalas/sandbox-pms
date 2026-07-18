@@ -287,6 +287,23 @@ Night-audit acceptance requires:
 
 Backend fixture acceptance is not staff workflow acceptance. The server-mode housekeeping and Night Audit screens are cut over to these APIs, but must still pass disposable-DB reload, error rollback, RBAC, and staff workflow checks before operational sign-off.
 
+## Server Booking Board Operations
+
+Acceptance requires:
+
+- unassigned and assigned stays are selectable without reading browser-KV data;
+- room assignment and room moves call the authenticated server command with a per-attempt idempotency header;
+- the server persists one property-scoped `ReservationMutationAttempt` per idempotency key; a same-intent replay returns the authoritative reservation without duplicate audit, history, or domain-event evidence, while a changed intent returns `409`;
+- stay-date resizing sends both calendar dates to the authenticated PATCH route;
+- incompatible room types and non-operational rooms are disabled in the UI and rejected definitively by the backend;
+- successful assignment, move, and resize operations survive a full browser reload and rewrite authoritative `RoomDateInventory`;
+- two simultaneous attempts to assign the final compatible room result in exactly one success and one `409`, with inventory owned only by the successful reservation;
+- an injected mutation conflict displays the backend failure, refetches, and preserves the prior room/dates;
+- controls are disabled while a command is pending and no optimistic timeline success state is shown; and
+- dynamic room types, property scope, permission denial, inventory blocks, and overlap rules remain backend-enforced.
+
+Run `npm.cmd run test:booking-board-operations`, guarded `npm.cmd run test:e2e:db`, and `npm.cmd run test:e2e:server`. These are engineering evidence, not credentialed front-desk staff acceptance.
+
 ## Accounting V2, Direct Booking, And Analyzers
 
 Run:

@@ -16,6 +16,31 @@ function route(path, methods, options = {}) {
   }
 }
 
+const optionalIdempotencyKeyParameter = {
+  name: 'x-idempotency-key',
+  in: 'header',
+  required: false,
+  description: 'Optional retry key. Reuse the same value when retrying the same reservation mutation after an uncertain response.',
+  schema: { type: 'string', maxLength: 200 },
+}
+
+const optionalReservationVersionParameters = [
+  {
+    name: 'x-reservation-expected-updated-at',
+    in: 'header',
+    required: false,
+    description: 'Optional ISO-8601 reservation update token. A stale token returns 409 instead of overwriting a later edit.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+  {
+    name: 'x-reservation-expected-version',
+    in: 'header',
+    required: false,
+    description: 'Compatibility alias for x-reservation-expected-updated-at.',
+    schema: { type: 'string', format: 'date-time' },
+  },
+]
+
 const API_ROUTE_CONTRACTS = [
   route('/api/health', ['GET'], { tag: 'System', summary: 'Service health', public: true }),
   route('/api/openapi.json', ['GET'], { tag: 'System', summary: 'Authenticated API contract' }),
@@ -111,8 +136,16 @@ const API_ROUTE_CONTRACTS = [
   route('/api/settings/rooms', ['POST'], { tag: 'Settings' }),
   route('/api/settings/rooms/{id}', ['PATCH', 'DELETE'], { tag: 'Settings' }),
   route('/api/reservations', ['GET', 'POST'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}', ['PATCH'], { tag: 'Reservations' }),
-  route('/api/reservations/{id}/assign-room', ['POST'], { tag: 'Reservations' }),
+  route('/api/reservations/{id}', ['PATCH'], {
+    tag: 'Reservations',
+    summary: 'Update a property-scoped reservation; expectedUpdatedAt may be supplied for optimistic concurrency',
+    parameters: [optionalIdempotencyKeyParameter, ...optionalReservationVersionParameters],
+  }),
+  route('/api/reservations/{id}/assign-room', ['POST'], {
+    tag: 'Reservations',
+    summary: 'Assign or move a reservation room',
+    parameters: [optionalIdempotencyKeyParameter],
+  }),
   route('/api/reservations/{id}/check-in', ['POST'], { tag: 'Reservations' }),
   route('/api/reservations/{id}/check-out', ['POST'], { tag: 'Reservations' }),
   route('/api/reservations/{id}/cancel', ['POST'], { tag: 'Reservations' }),

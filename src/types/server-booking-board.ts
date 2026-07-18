@@ -24,7 +24,12 @@ export interface ServerBookingBoardReservation {
   status: string
   checkIn: string
   checkOut: string
+  updatedAt: string
+  version: string
   assignedRoomId: string | null
+  roomTypeId: string
+  roomTypeCode: string
+  roomTypeName: string
   guestName: string
   isVip: boolean
   adults: number

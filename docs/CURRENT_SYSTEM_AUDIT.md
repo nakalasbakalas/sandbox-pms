@@ -23,6 +23,7 @@ Last reviewed: 2026-07-18
 - Server synchronization: selected PMS mutations write property-scoped `DomainEvent` rows in the same transaction. Authenticated `/api/events` SSE exposes only event id, type, aggregate type/id, and timestamp with bounded catch-up.
 - Rates and settings: property-scoped backend rate rules/calendar/effective-rate/recommendation endpoints and property/tax/status endpoints are implemented with strict schemas, permissions, audit records, and domain events.
 - Operations foundation: persistent housekeeping tasks/issues/status histories and an idempotent backend night-audit close service are implemented. Server-mode housekeeping and Night Audit screens now use these APIs; browser-local workflow state is demo-only.
+- Booking Board operations: the server-authoritative timeline now selects unassigned or assigned stays and submits room assignment/move and stay-date resize commands through authenticated reservation APIs. It sends per-attempt idempotency headers, never mutates booking state optimistically, and refetches authoritative state after success or rejection. Room blocks remain display-only on the Board, while cancellation, no-show, guest/VIP/extras editing, and deletion policy remain on their existing operational surfaces until separately wired.
 - Accounting V2: additive one-to-many accounting folios, append-only reversals/refunds, cash shifts, house accounts/A/R, journals, and exact-satang trial balance are implemented behind `ACCOUNTING_V2_ENABLED=false`. The legacy browser-KV accounting dashboard and cash reconciliation workflow are demo-only and render a truthful unavailable state in server mode.
 - Direct booking: versioned availability, immutable quote, 15-minute hold, and atomic booking services/routes are implemented behind `DIRECT_BOOKING_ENABLED=false`; no card data is accepted.
 - Bounded intelligence: deterministic demand, cancellation-risk, housekeeping, and rate-opportunity analyzers return explainable, suggest-only Hotel Ops recommendations and perform no mutations.
@@ -48,7 +49,7 @@ Last reviewed: 2026-07-18
 - Notification bridge: `src/hooks/use-ops-notifications.ts`, `src/lib/ops-notification-display.ts`, and `src/components/notifications/NotificationCenter.tsx`.
 - LINE Ops intake bridge: `server/line-ops-intake.mjs`.
 - Email Ops intake bridge: `server/email-ops-intake.mjs`.
-- Business and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-e2e-tests.mjs`.
+- Business, Board, and route smoke tests: `scripts/run-business-tests.mjs`, `scripts/run-front-desk-board-tests.mjs`, `scripts/run-booking-board-ui-source-tests.mjs`, `scripts/run-e2e-tests.mjs`, and `scripts/run-server-mode-browser-tests.mjs`.
 - Exact-money and payment safety: `server/money.mjs`, `scripts/run-money-tests.mjs`, and `prisma/migrations/20260716120000_exact_money_foundation`.
 - Property context and events: `server/request-context.mjs`, `server/domain-events.mjs`, and `prisma/migrations/20260716130000_property_context_domain_events`.
 - Legacy finance ownership and retry safety: `server/charge-idempotency.mjs`, `src/lib/durable-attempt-key.ts`, and migrations `20260717120000_property_scope_legacy_records` and `20260717140000_charge_idempotency`.

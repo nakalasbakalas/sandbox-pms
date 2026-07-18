@@ -14,7 +14,7 @@ import { useRoomSync } from '@/hooks/use-room-sync'
 import type { BoardRoomCard } from '@/types/board'
 import type { AuditRecord } from '@/lib/hotel/operations'
 import { getBangkokDateKey, nightsBetween } from '@/lib/hotel/business-rules'
-import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { createAIAssistedAuditRecord } from '@/lib/assistant/audit'
 import { parseFrontDeskIntent } from '@/lib/assistant/intents'
 import { FRONT_DESK_ASSISTANT_PROMPTS, FRONT_DESK_ASSISTANT_SHORTCUTS } from '@/lib/assistant/prompts'
@@ -334,6 +334,7 @@ function FrontDeskAssistantRuntime({ open, onOpenChange, request, onRequestHandl
         if (actionToRun.type === 'ASSIGN_BEST_ROOM' || actionToRun.type === 'ASSIGN_SPECIFIC_ROOM') {
           await pmsApi(`/api/reservations/${reservationId}/assign-room`, authToken, {
             method: 'POST',
+            headers: { 'x-idempotency-key': createPmsIdempotencyKey('front-desk-assistant-assign-room') },
             body: JSON.stringify({ roomId }),
           })
         } else if (actionToRun.type === 'COMPLETE_EXPRESS_CHECK_IN') {

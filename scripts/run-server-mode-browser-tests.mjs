@@ -1,4 +1,4 @@
-/* global AbortController, clearTimeout, console, fetch, process, setTimeout, TextDecoder, window */
+/* global AbortController, clearTimeout, console, document, fetch, process, setTimeout, TextDecoder, window */
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -21,8 +21,10 @@ const password = `Server-Browser-${runId}-Pass!`
 const taskTitle = `Server reload task ${runId}`
 const ruleName = `Server reload rate ${runId}`
 const boardRoomNumber = `B-${runId.slice(0, 8)}`
+const boardMoveRoomNumber = `M-${runId.slice(0, 8)}`
 const boardGuestOne = `Board Alpha ${runId}`
 const boardGuestTwo = `Board Bravo ${runId}`
+const boardGuestThree = `Board Charlie ${runId}`
 const fakeBoardRoomNumber = `LOCAL-${runId}`
 const fakeBoardGuest = `Browser Shadow ${runId}`
 
@@ -84,6 +86,25 @@ function stopProcessTree(child) {
     const killer = spawn('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
     killer.on('exit', () => resolveStop())
     killer.on('error', () => resolveStop())
+  })
+}
+
+function boundedSignal(signal, label, timeoutMs = 15_000) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new Error(`${label} timed out. Confirm the frontend was built with VITE_PMS_API_MODE=server.`)),
+      timeoutMs,
+    )
+    signal.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    )
   })
 }
 
@@ -167,6 +188,16 @@ const boardRoom = await prisma.room.create({
     currentStatus: 'VACANT_CLEAN',
   },
 })
+const boardMoveRoom = await prisma.room.create({
+  data: {
+    propertyId: property.id,
+    roomTypeId: roomType.id,
+    number: boardMoveRoomNumber,
+    floor: 99,
+    operationalStatus: 'AVAILABLE',
+    currentStatus: 'VACANT_CLEAN',
+  },
+})
 
 await prisma.user.create({
   data: {
@@ -230,7 +261,7 @@ try {
     resolveBootstrapCompleted()
   })
   await authRacePage.goto('/board', { waitUntil: 'domcontentloaded' })
-  await bootstrapIntercepted
+  await boundedSignal(bootstrapIntercepted, 'Server-auth bootstrap interception')
   await authRacePage.locator('[data-slot="card-title"]', { hasText: 'Sign In' }).waitFor({ state: 'visible' })
   await authRacePage.getByLabel('Username or email').fill(username)
   await authRacePage.getByLabel('Password').fill(password)
@@ -240,7 +271,7 @@ try {
   await authRacePage.getByRole('button', { name: 'Sign In', exact: true }).click()
   assert.equal((await interactiveLogin).status(), 200, 'interactive server login succeeds while the bootstrap request is pending')
   releaseStaleBootstrap()
-  await bootstrapCompleted
+  await boundedSignal(bootstrapCompleted, 'Delayed server-auth bootstrap completion')
   await authRacePage.waitForTimeout(100)
   await authRacePage.getByText('Booking Board', { exact: true }).waitFor({ state: 'visible' })
   assert.equal(
@@ -259,7 +290,10 @@ try {
   await context.addInitScript(({ fakeRoomNumber, fakeGuestName }) => {
     window.localStorage.clear()
     const requestedFixturePath = window.sessionStorage.getItem('inject-local-operational-fixture')
-    if (window.location.pathname !== '/board' && window.location.pathname !== requestedFixturePath) return
+    const isBoardFixture = window.location.pathname === '/board'
+    if (!isBoardFixture && window.location.pathname !== requestedFixturePath) return
+    if (isBoardFixture && window.sessionStorage.getItem('board-local-fixture-injected') === 'true') return
+    if (isBoardFixture) window.sessionStorage.setItem('board-local-fixture-injected', 'true')
     window.localStorage.setItem('pms-rooms', JSON.stringify([{
       id: 'browser-shadow-room',
       number: fakeRoomNumber,
@@ -382,6 +416,23 @@ try {
   assert.notEqual(boardReservationOne.data.id, boardReservationTwo.data.id, 'same-room board stays persist as distinct reservations')
   assert.equal(boardReservationOne.data.assignedRoomId, boardRoom.id, 'first board stay is assigned to the dedicated server room')
   assert.equal(boardReservationTwo.data.assignedRoomId, boardRoom.id, 'second board stay is assigned to the dedicated server room')
+  const boardReservationThree = await apiJson(context.request, 'POST', '/api/reservations', {
+    confirmationCode: `BOARD-C-${runId}`,
+    guest: {
+      firstName: 'Board Charlie',
+      lastName: runId,
+      email: `board-charlie-${runId}@example.test`,
+    },
+    roomTypeCode: roomType.code,
+    checkIn: dateKeyWithOffset(7),
+    checkOut: dateKeyWithOffset(9),
+    adults: 1,
+    children: 0,
+    childAges: [],
+    ratePerNight: Math.max(100, Number(roomType.baseRate) || 1_000),
+    source: 'DIRECT',
+  })
+  assert.equal(boardReservationThree.data.assignedRoomId, null, 'third board stay begins in the authoritative unassigned queue')
 
   const housekeeping = await apiJson(context.request, 'POST', '/api/housekeeping/tasks', {
     roomId: room.id,
@@ -458,10 +509,115 @@ try {
   await page.getByText(`Room ${boardRoomNumber}`, { exact: true }).waitFor({ state: 'visible' })
   await page.getByText(boardGuestOne, { exact: true }).waitFor({ state: 'visible' })
   await page.getByText(boardGuestTwo, { exact: true }).waitFor({ state: 'visible' })
+  await page.getByText(boardGuestThree, { exact: false }).waitFor({ state: 'visible' })
   assert.equal(await page.getByText(boardGuestOne, { exact: true }).count(), 1, 'the first same-room stay renders as one distinct segment')
   assert.equal(await page.getByText(boardGuestTwo, { exact: true }).count(), 1, 'the second same-room stay renders as one distinct segment')
   assert.equal(await page.getByRole('alert').count(), 0, 'retry replaces the truthful error with authoritative board data')
   await assertNoOperationalBrowserStorage('server-mode booking board after retry')
+
+  let lostAssignmentKey = null
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
+    lostAssignmentKey = route.request().headers()['x-idempotency-key'] || null
+    const upstream = await context.request.fetch(route.request().url(), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': lostAssignmentKey,
+      },
+      data: JSON.parse(route.request().postData() || '{}'),
+    })
+    assert.equal(upstream.status(), 200, 'the first assignment reaches the authoritative PMS before its response is lost')
+    await route.abort('failed').catch((error) => {
+      if (!/already handled/i.test(error instanceof Error ? error.message : String(error))) throw error
+    })
+  })
+  await page.locator(`[data-board-reservation-select="${boardReservationThree.data.id}"]`).click()
+  await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
+  await page.waitForTimeout(100)
+  assert.ok(lostAssignmentKey, 'the ambiguous assignment captured an idempotency key')
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
+  const assignmentResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}/assign-room`)
+      && response.request().method() === 'POST',
+  )
+  await page.locator(`[data-board-room-action="${boardMoveRoom.id}"]`).click()
+  const assignmentRetry = await assignmentResponse
+  assert.equal(assignmentRetry.status(), 200, 'server Booking Board replays the lost assignment safely')
+  assert.equal(assignmentRetry.request().headers()['x-idempotency-key'], lostAssignmentKey, 'retry after a lost response reuses the exact logical assignment key')
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  let persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.assignedRoomId, boardMoveRoom.id, 'Board assignment survives a full browser reload')
+
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  await page.getByLabel('Check-in', { exact: true }).fill(dateKeyWithOffset(8))
+  await page.getByLabel('Check-out', { exact: true }).fill(dateKeyWithOffset(11))
+  const resizeResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/reservations/${boardReservationThree.data.id}`)
+      && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: 'Update stay dates', exact: true }).click()
+  assert.equal((await resizeResponse).status(), 200, 'server Booking Board stay resize succeeds')
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.checkIn.toISOString().slice(0, 10), dateKeyWithOffset(8), 'Board check-in resize survives reload')
+  assert.equal(persistedBoardReservation.checkOut.toISOString().slice(0, 10), dateKeyWithOffset(11), 'Board check-out resize survives reload')
+
+  const staleExpectedUpdatedAt = persistedBoardReservation.updatedAt.toISOString()
+  const secondClient = await browser.newContext({ baseURL: baseUrl })
+  const secondLogin = await secondClient.request.post('/api/auth/login', { data: { identity: username, password } })
+  assert.equal(secondLogin.status(), 200, 'second booking-board client authenticates independently')
+  const secondClientUpdate = await secondClient.request.fetch(`/api/reservations/${boardReservationThree.data.id}`, {
+    method: 'PATCH',
+    data: { checkIn: dateKeyWithOffset(12), checkOut: dateKeyWithOffset(15) },
+    headers: {
+      'content-type': 'application/json',
+      'x-idempotency-key': `browser-second-client-resize-${runId}`,
+    },
+  })
+  assert.equal(secondClientUpdate.status(), 200, 'second client updates the reservation before the stale board submit')
+  await secondClient.close()
+
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  let staleResizeHeaders = null
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}`, async (route) => {
+    staleResizeHeaders = route.request().headers()
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected stale two-client booking-board conflict.' }),
+    })
+  })
+  await page.getByLabel('Check-in', { exact: true }).fill(dateKeyWithOffset(13))
+  await page.getByLabel('Check-out', { exact: true }).fill(dateKeyWithOffset(16))
+  await page.getByRole('button', { name: 'Update stay dates', exact: true }).click()
+  await page.getByText('Injected stale two-client booking-board conflict.', { exact: false }).waitFor({ state: 'visible' })
+  assert.equal(staleResizeHeaders['x-reservation-expected-updated-at'], staleExpectedUpdatedAt, 'stale board editor sends its original authoritative update token')
+  assert.ok(staleResizeHeaders['x-reservation-expected-version'], 'stale board editor sends an authoritative version token')
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}`)
+  await page.getByLabel('Check-in', { exact: true }).waitFor({ state: 'visible' })
+  await page.waitForFunction((value) => document.querySelector('input[type="date"]')?.value === value, dateKeyWithOffset(12))
+  assert.equal(await page.getByLabel('Check-in', { exact: true }).inputValue(), dateKeyWithOffset(12), '409 refetch resets the stale check-in draft to the second client truth')
+  assert.equal(await page.getByLabel('Check-out', { exact: true }).inputValue(), dateKeyWithOffset(15), '409 refetch resets the stale check-out draft to the second client truth')
+
+  await page.route(`**/api/reservations/${boardReservationThree.data.id}/assign-room`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: false, error: 'Injected authoritative room-move conflict.' }),
+    })
+  })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).click()
+  await page.locator(`[data-board-room-action="${boardRoom.id}"]`).click()
+  await page.getByText('Injected authoritative room-move conflict.', { exact: false }).waitFor({ state: 'visible' })
+  await page.unroute(`**/api/reservations/${boardReservationThree.data.id}/assign-room`)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.locator(`[data-board-reservation-id="${boardReservationThree.data.id}"]`).waitFor({ state: 'visible' })
+  persistedBoardReservation = await prisma.reservation.findUnique({ where: { id: boardReservationThree.data.id } })
+  assert.equal(persistedBoardReservation.assignedRoomId, boardMoveRoom.id, 'rejected Board move preserves authoritative room assignment')
+  await assertNoOperationalBrowserStorage('server-mode booking board mutations')
 
   await page.evaluate(() => window.sessionStorage.setItem('inject-local-operational-fixture', '/front-desk'))
   await page.route('**/api/front-desk/board*', async (route) => {

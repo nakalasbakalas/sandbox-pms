@@ -59,7 +59,7 @@ import type { ArrivalItem, CheckInData, CheckOutData, DepartureItem } from '@/ty
 import { useI18n, formatBangkokDate, formatBangkokTime } from '@/lib/i18n'
 import { useFrontDeskAssistant } from '@/components/front-desk-assistant/FrontDeskAssistantProvider'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, mapServerBoardRooms, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import {
   emailReservationDocument,
@@ -1296,6 +1296,7 @@ export function Board() {
         if (selectedArrival.assignedRoomId !== data.roomId) {
           await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
             method: 'POST',
+            headers: { 'x-idempotency-key': createPmsIdempotencyKey('legacy-board-check-in-assign-room') },
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }

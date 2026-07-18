@@ -352,3 +352,14 @@ Notifications are backend records:
 - The PostgreSQL suite must prove two-property isolation, membership-role enforcement, first-class audit ownership, property-scoped payment/charge idempotency, replay conflicts, concurrent overpayment/charge retry behavior, exact reconciliation, and simultaneous last-room hold serialization.
 - The browser suite must prove persisted state survives reload, injected failures remain truthful, recovery refetches authoritative state, and SSE catch-up filters foreign-property events.
 - CI success is engineering evidence only. Restored-staging migrations, rollback/recovery, staff workflows, provider credentials/results, WAF, and owner approval require separate evidence.
+
+## Server Booking Board Command Contract
+
+- The server-mode Booking Board reads one property-scoped range from `GET /api/front-desk/board`; the legacy browser-KV Board remains demo-only.
+- Staff with `edit:reservation` may select an unassigned stay or an assigned timeline segment, then submit a compatible-room assignment/move through `POST /api/reservations/{id}/assign-room` or a stay-date resize through `PATCH /api/reservations/{id}`.
+- The UI uses server-provided room-type identity to disable incompatible targets, while backend room type, overlap, room-status, block, capacity, and property validation remains authoritative.
+- Mutation attempts carry `x-idempotency-key`, disable repeat interaction while pending, and never move or resize a timeline segment optimistically. Both accepted and rejected responses trigger an authoritative Board refetch.
+- `PATCH /api/reservations/{id}` and `POST /api/reservations/{id}/assign-room` require that header. The server fingerprints the operation and intent in a property-scoped `ReservationMutationAttempt`; matching replays return current authoritative state, and a reused key with another reservation, operation, or intent returns `409`.
+- Assignment and resize use serializable transactions, transaction-scoped PostgreSQL advisory locks for the reservation and affected room dates, bounded serialization retry, and create-only inventory claims. A conflict can never update another reservation's inventory row.
+- The Board does not silently convert a failed command into success. The previous persisted room and dates remain visible after a rejection and full reload.
+- This slice does not claim room-block authoring, cancellation, no-show, VIP/guest/extras editing, or destructive deletion from the timeline; those actions remain separately permissioned operational work.

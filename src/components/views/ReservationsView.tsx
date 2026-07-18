@@ -44,7 +44,7 @@ import { useBookingEmailInbox } from '@/hooks/use-booking-email-inbox'
 import { useNavigation } from '@/hooks/use-navigation'
 import { getBangkokDateKey, nightsBetween, reservationsOverlap } from '@/lib/hotel/business-rules'
 import { isRoomReadyForArrival } from '@/lib/hotel/rooms'
-import { pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, pmsApi, SERVER_API_ENABLED } from '@/lib/pms-api-client'
 import { durableAttemptKeys } from '@/lib/durable-attempt-key'
 import { emailReservationDocument, printReservationDocument } from '@/lib/reservation-document-actions'
 import type { BoardRoomCard } from '@/types/board'
@@ -859,6 +859,7 @@ export function ReservationsView() {
       try {
         const payload = await pmsApi<{ ok: true; data: any; message?: string }>(`/api/reservations/${reservation.id}/assign-room`, authToken, {
           method: 'POST',
+          headers: { 'x-idempotency-key': createPmsIdempotencyKey('reservations-assign-room') },
           body: JSON.stringify({ roomId }),
         })
         const updated = reservationFromServer(payload.data)
@@ -983,6 +984,7 @@ export function ReservationsView() {
         if (selectedArrival.assignedRoomId !== data.roomId) {
           await pmsApi(`/api/reservations/${selectedArrival.reservationId}/assign-room`, authToken, {
             method: 'POST',
+            headers: { 'x-idempotency-key': createPmsIdempotencyKey('reservations-check-in-assign-room') },
             body: JSON.stringify({ roomId: data.roomId }),
           })
         }

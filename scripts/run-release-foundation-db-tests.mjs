@@ -9,6 +9,7 @@ import {
   createCharge,
   createPayment,
   createReservation,
+  assignRoom,
   getBookingEmailEvent,
   listGuests,
   updateHousekeepingStatus,
@@ -362,6 +363,158 @@ try {
   const refreshedFolioA = await prisma.folio.findUnique({ where: { id: reservationA.folio.id } })
   assert.equal(refreshedFolioA.paidSatang, 6_000n)
   assert.equal(refreshedFolioA.balanceSatang, 4_000n)
+
+  const boardMutationReservation = await createReservationFixture(fixtureA, 'BOARD-MUTATION')
+  const boardAssignmentKey = `board-assign-replay-${runId}`
+  const boardAuditBefore = await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } })
+  const boardHistoryBefore = await prisma.reservationLog.count({ where: { reservationId: boardMutationReservation.reservation.id } })
+  const boardEventsBefore = await prisma.domainEvent.count({ where: { aggregateId: boardMutationReservation.reservation.id } })
+  const assignedBoardReservation = await assignRoom(
+    prisma,
+    boardMutationReservation.reservation.id,
+    fixtureA.room.id,
+    actorA,
+    { idempotencyKey: boardAssignmentKey },
+  )
+  const replayedBoardAssignment = await assignRoom(
+    prisma,
+    boardMutationReservation.reservation.id,
+    fixtureA.room.id,
+    actorA,
+    { idempotencyKey: boardAssignmentKey },
+  )
+  assert.equal(replayedBoardAssignment.id, assignedBoardReservation.id, 'same room-assignment intent returns the current authoritative reservation')
+  const storedBoardAssignmentAttempt = await prisma.reservationMutationAttempt.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId: fixtureA.property.id, idempotencyKey: boardAssignmentKey } },
+  })
+  assert.ok(storedBoardAssignmentAttempt?.resultFingerprint, 'room-assignment attempts retain a non-sensitive immutable result fingerprint')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } }), boardAuditBefore + 1, 'room-assignment replay does not duplicate audit evidence')
+  assert.equal(await prisma.reservationLog.count({ where: { reservationId: boardMutationReservation.reservation.id } }), boardHistoryBefore + 1, 'room-assignment replay does not duplicate reservation history')
+  assert.equal(await prisma.domainEvent.count({ where: { aggregateId: boardMutationReservation.reservation.id } }), boardEventsBefore + 1, 'room-assignment replay does not duplicate domain events')
+  await assert.rejects(
+    assignRoom(prisma, boardMutationReservation.reservation.id, `missing-room-${runId}`, actorA, { idempotencyKey: boardAssignmentKey }),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'room-assignment idempotency keys cannot be reused for a different target',
+  )
+
+  const boardResizeKey = `board-resize-replay-${runId}`
+  const boardResizeAuditBefore = await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } })
+  const resizedBoardReservation = await updateReservation(
+    prisma,
+    boardMutationReservation.reservation.id,
+    { checkIn: '2030-02-03', checkOut: '2030-02-05' },
+    actorA,
+    { idempotencyKey: boardResizeKey },
+  )
+  const replayedBoardResize = await updateReservation(
+    prisma,
+    boardMutationReservation.reservation.id,
+    { checkOut: '2030-02-05', checkIn: '2030-02-03' },
+    actorA,
+    { idempotencyKey: boardResizeKey },
+  )
+  assert.equal(replayedBoardResize.id, resizedBoardReservation.id, 'same stay-resize intent replays the current authoritative reservation')
+  const storedBoardResizeAttempt = await prisma.reservationMutationAttempt.findUnique({
+    where: { propertyId_idempotencyKey: { propertyId: fixtureA.property.id, idempotencyKey: boardResizeKey } },
+  })
+  assert.ok(storedBoardResizeAttempt?.resultFingerprint, 'stay-resize attempts retain a non-sensitive immutable result fingerprint')
+  assert.equal(await prisma.auditLog.count({ where: { entityId: boardMutationReservation.reservation.id } }), boardResizeAuditBefore + 1, 'stay-resize replay does not duplicate audit evidence')
+  await assert.rejects(
+    updateReservation(prisma, boardMutationReservation.reservation.id, { checkIn: '2030-02-04', checkOut: '2030-02-06' }, actorA, { idempotencyKey: boardResizeKey }),
+    (error) => error?.statusCode === 409 && /different command/.test(error.message),
+    'stay-resize idempotency keys cannot be reused for a different date range',
+  )
+  await assert.rejects(
+    assignRoom(
+      prisma,
+      boardMutationReservation.reservation.id,
+      fixtureA.room.id,
+      actorA,
+      { idempotencyKey: boardAssignmentKey },
+    ),
+    (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
+    'a replay after a later reservation mutation never returns the later state as the original assignment result',
+  )
+
+  const supersedingBoardMutation = await updateReservation(
+    prisma,
+    boardMutationReservation.reservation.id,
+    { notes: `Superseding board edit ${runId}`, expectedUpdatedAt: resizedBoardReservation.updatedAt.toISOString() },
+    actorA,
+    { idempotencyKey: `board-superseding-edit-${runId}` },
+  )
+  await assert.rejects(
+    updateReservation(
+      prisma,
+      boardMutationReservation.reservation.id,
+      { checkOut: '2030-02-05', checkIn: '2030-02-03' },
+      actorA,
+      { idempotencyKey: boardResizeKey },
+    ),
+    (error) => error?.statusCode === 409 && /superseded by a later change/.test(error.message),
+    'a stay-resize replay after a later edit never returns the later state as the original result',
+  )
+  await assert.rejects(
+    updateReservation(
+      prisma,
+      boardMutationReservation.reservation.id,
+      {
+        checkIn: '2030-02-04',
+        checkOut: '2030-02-06',
+        expectedUpdatedAt: resizedBoardReservation.updatedAt.toISOString(),
+      },
+      actorA,
+      { idempotencyKey: `board-stale-edit-${runId}` },
+    ),
+    (error) => error?.statusCode === 409 && /changed after the booking board loaded it/.test(error.message),
+    'a stale booking-board version cannot overwrite a later reservation edit',
+  )
+  const afterRejectedStaleEdit = await prisma.reservation.findUnique({ where: { id: boardMutationReservation.reservation.id } })
+  assert.equal(afterRejectedStaleEdit.updatedAt.toISOString(), supersedingBoardMutation.updatedAt.toISOString(), 'stale rejection preserves the later authoritative reservation version')
+  assert.equal(afterRejectedStaleEdit.checkIn.toISOString().slice(0, 10), '2030-02-03')
+  assert.equal(afterRejectedStaleEdit.checkOut.toISOString().slice(0, 10), '2030-02-05')
+  assert.equal(
+    await prisma.reservationMutationAttempt.count({
+      where: { propertyId: fixtureA.property.id, idempotencyKey: `board-stale-edit-${runId}` },
+    }),
+    0,
+    'a rejected stale attempt rolls back its idempotency claim',
+  )
+
+  const finalRoom = await prisma.room.create({
+    data: {
+      propertyId: fixtureB.property.id,
+      roomTypeId: fixtureB.roomType.id,
+      number: `G-B-FINAL-${runId}`,
+      floor: 2,
+      operationalStatus: 'AVAILABLE',
+      currentStatus: 'VACANT_CLEAN',
+    },
+  })
+  const [finalReservationOne, finalReservationTwo] = await Promise.all([
+    createReservationFixture(fixtureB, 'FINAL-A'),
+    createReservationFixture(fixtureB, 'FINAL-B'),
+  ])
+  const simultaneousAssignments = await Promise.allSettled([
+    assignRoom(prisma, finalReservationOne.reservation.id, finalRoom.id, actorB, { idempotencyKey: `board-final-a-${runId}` }),
+    assignRoom(prisma, finalReservationTwo.reservation.id, finalRoom.id, actorB, { idempotencyKey: `board-final-b-${runId}` }),
+  ])
+  assert.equal(simultaneousAssignments.filter((result) => result.status === 'fulfilled').length, 1, 'exactly one concurrent final-room assignment succeeds')
+  assert.equal(simultaneousAssignments.filter((result) => result.status === 'rejected').length, 1, 'one concurrent final-room assignment is rejected')
+  const rejectedFinalAssignment = simultaneousAssignments.find((result) => result.status === 'rejected')
+  assert.equal(rejectedFinalAssignment.reason?.statusCode, 409, 'the rejected final-room assignment is a truthful conflict')
+  const finalReservations = await prisma.reservation.findMany({
+    where: { id: { in: [finalReservationOne.reservation.id, finalReservationTwo.reservation.id] } },
+    select: { id: true, assignedRoomId: true },
+  })
+  assert.equal(finalReservations.filter((reservation) => reservation.assignedRoomId === finalRoom.id).length, 1, 'only one reservation keeps the final room assignment')
+  const finalInventory = await prisma.roomDateInventory.findMany({
+    where: { roomId: finalRoom.id },
+    select: { reservationId: true, date: true },
+    orderBy: { date: 'asc' },
+  })
+  assert.deepEqual(finalInventory.map((row) => row.date.toISOString().slice(0, 10)), ['2030-02-01', '2030-02-02'])
+  assert.equal(new Set(finalInventory.map((row) => row.reservationId)).size, 1, 'final-room inventory belongs to the one successful reservation only')
 
   const sharedIdempotencyKey = `shared-property-${runId}`
   await createPayment(prisma, {

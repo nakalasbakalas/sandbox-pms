@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   addDays,
   differenceInCalendarDays,
@@ -24,12 +24,14 @@ import {
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { NewReservationDialog, type NewReservationData } from '@/components/board/NewReservationDialog'
 import { useAuth } from '@/hooks/use-auth'
 import { useNavigation } from '@/hooks/use-navigation'
 import { useServerBookingBoard } from '@/hooks/use-server-booking-board'
 import { getBangkokDateKey } from '@/lib/hotel/business-rules'
-import { createPmsIdempotencyKey, pmsApi } from '@/lib/pms-api-client'
+import { createPmsIdempotencyKey, PmsApiError, pmsApi } from '@/lib/pms-api-client'
+import { durableAttemptKeys, type DurableAttemptDescriptor } from '@/lib/durable-attempt-key'
 import type {
   BookingBoardRangeDays,
   ServerBookingBoardReservation,
@@ -134,6 +136,11 @@ export function ServerBookingBoard() {
   const [days, setDays] = useState<BookingBoardRangeDays>(14)
   const [startDate, setStartDate] = useState(hotelToday)
   const [newReservationOpen, setNewReservationOpen] = useState(false)
+  const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null)
+  const [plannedCheckIn, setPlannedCheckIn] = useState('')
+  const [plannedCheckOut, setPlannedCheckOut] = useState('')
+  const [dateDraftDirty, setDateDraftDirty] = useState(false)
+  const [mutationInFlight, setMutationInFlight] = useState(false)
   const { data, loading, error, reload, range } = useServerBookingBoard(startDate, days)
   const { hasPermission, hasAnyPermission } = useAuth()
   const { navigate } = useNavigation()
@@ -175,6 +182,16 @@ export function ServerBookingBoard() {
   }, [data])
 
   const unassignedCount = data?.reservations.filter((reservation) => !reservation.assignedRoomId).length || 0
+  const selectedReservation = useMemo(
+    () => data?.reservations.find((reservation) => reservation.id === selectedReservationId) || null,
+    [data, selectedReservationId],
+  )
+
+  useEffect(() => {
+    if (!selectedReservation || dateDraftDirty) return
+    setPlannedCheckIn(format(parseISO(selectedReservation.checkIn), 'yyyy-MM-dd'))
+    setPlannedCheckOut(format(parseISO(selectedReservation.checkOut), 'yyyy-MM-dd'))
+  }, [dateDraftDirty, selectedReservation?.checkIn, selectedReservation?.checkOut, selectedReservation?.id, selectedReservation?.updatedAt, selectedReservation?.version])
   const visibleReservationCount = data?.reservations.filter((reservation) => {
     const checkIn = startOfDay(parseISO(reservation.checkIn))
     const checkOut = startOfDay(parseISO(reservation.checkOut))
@@ -252,6 +269,87 @@ export function ServerBookingBoard() {
     toast.success(response.message || 'Reservation created.')
     setNewReservationOpen(false)
     reload()
+  }
+
+  const selectReservation = (reservation: ServerBookingBoardReservation) => {
+    setSelectedReservationId(reservation.id)
+    setDateDraftDirty(false)
+    setPlannedCheckIn(format(parseISO(reservation.checkIn), 'yyyy-MM-dd'))
+    setPlannedCheckOut(format(parseISO(reservation.checkOut), 'yyyy-MM-dd'))
+  }
+
+  const runBoardMutation = async (attempt: DurableAttemptDescriptor, successMessage: string, request: (idempotencyKey: string) => Promise<unknown>) => {
+    const idempotencyKey = await durableAttemptKeys.getOrCreate(attempt)
+    setMutationInFlight(true)
+    try {
+      await request(idempotencyKey)
+      await durableAttemptKeys.confirmSuccess(attempt)
+      setDateDraftDirty(false)
+      toast.success(successMessage)
+      reload()
+    } catch (caught) {
+      toast.error(caught instanceof Error ? caught.message : 'The server could not apply that booking-board change.')
+      if (caught instanceof PmsApiError) {
+        // Known HTTP outcomes can safely refetch. A 409 also discards stale local date drafts.
+        if (caught.status === 409) setDateDraftDirty(false)
+        reload()
+      } else {
+        // A lost response is ambiguous. Keep this in-memory key so the operator's retry is idempotent.
+        toast.message('Connection outcome is unknown. Retry the same action to reuse its protected request key.')
+      }
+    } finally {
+      setMutationInFlight(false)
+    }
+  }
+
+  const assignSelectedReservation = async (room: ServerBookingBoardRoom) => {
+    if (!selectedReservation) return
+    const action = selectedReservation.assignedRoomId ? 'move' : 'assign'
+    const attempt = {
+      operation: 'reservation-assign-room' as const,
+      entityId: selectedReservation.id,
+      material: { action, roomId: room.id, version: selectedReservation.version },
+    }
+    await runBoardMutation(
+      attempt,
+      action === 'move' ? `Moved to Room ${room.number}.` : `Assigned to Room ${room.number}.`,
+      (idempotencyKey) => pmsApi(`/api/reservations/${encodeURIComponent(selectedReservation.id)}/assign-room`, null, {
+        method: 'POST',
+        headers: { 'x-idempotency-key': idempotencyKey },
+        body: JSON.stringify({ roomId: room.id }),
+      }),
+    )
+  }
+
+  const resizeSelectedStay = async () => {
+    if (!selectedReservation) return
+    if (!plannedCheckIn || !plannedCheckOut || plannedCheckIn >= plannedCheckOut) {
+      toast.error('Check-out must be after check-in.')
+      return
+    }
+    const attempt = {
+      operation: 'reservation-resize-stay' as const,
+      entityId: selectedReservation.id,
+      material: {
+        checkIn: plannedCheckIn,
+        checkOut: plannedCheckOut,
+        expectedUpdatedAt: selectedReservation.updatedAt,
+        version: selectedReservation.version,
+      },
+    }
+    await runBoardMutation(
+      attempt,
+      'Stay dates updated.',
+      (idempotencyKey) => pmsApi(`/api/reservations/${encodeURIComponent(selectedReservation.id)}`, null, {
+        method: 'PATCH',
+        headers: {
+          'x-idempotency-key': idempotencyKey,
+          'x-reservation-expected-updated-at': selectedReservation.updatedAt,
+          'x-reservation-expected-version': selectedReservation.version,
+        },
+        body: JSON.stringify({ checkIn: plannedCheckIn, checkOut: plannedCheckOut }),
+      }),
+    )
   }
 
   return (
@@ -356,6 +454,56 @@ export function ServerBookingBoard() {
             </Button>
           ))}
         </nav>
+
+        {canEdit && selectedReservation && (
+          <section className="mt-4 rounded-lg border bg-muted/30 p-3" aria-label="Selected reservation actions">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">{selectedReservation.guestName}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedReservation.confirmationCode} · Select a compatible available room below to {selectedReservation.assignedRoomId ? 'move' : 'assign'}.
+                </p>
+              </div>
+              <Button type="button" size="sm" variant="ghost" onClick={() => { setSelectedReservationId(null); setDateDraftDirty(false) }} disabled={mutationInFlight}>
+                Clear selection
+              </Button>
+            </div>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-xs font-medium">
+                Check-in
+                <Input type="date" value={plannedCheckIn} onChange={(event) => { setPlannedCheckIn(event.target.value); setDateDraftDirty(true) }} disabled={mutationInFlight} />
+              </label>
+              <label className="grid gap-1 text-xs font-medium">
+                Check-out
+                <Input type="date" value={plannedCheckOut} onChange={(event) => { setPlannedCheckOut(event.target.value); setDateDraftDirty(true) }} disabled={mutationInFlight} />
+              </label>
+              <Button type="button" size="sm" variant="outline" onClick={() => void resizeSelectedStay()} disabled={mutationInFlight}>
+                Update stay dates
+              </Button>
+            </div>
+          </section>
+        )}
+
+        {canEdit && data && unassignedCount > 0 && (
+          <section className="mt-3" aria-label="Unassigned reservations">
+            <p className="mb-1 text-xs font-medium text-muted-foreground">Unassigned stays — select one, then choose a room on the board.</p>
+            <div className="flex flex-wrap gap-2">
+              {data.reservations.filter((reservation) => !reservation.assignedRoomId).map((reservation) => (
+                <Button
+                  key={reservation.id}
+                  type="button"
+                  size="sm"
+                  variant={selectedReservationId === reservation.id ? 'default' : 'outline'}
+                  data-board-reservation-select={reservation.id}
+                  onClick={() => selectReservation(reservation)}
+                  disabled={mutationInFlight}
+                >
+                  {reservation.guestName} · {format(parseISO(reservation.checkIn), 'd MMM')}
+                </Button>
+              ))}
+            </div>
+          </section>
+        )}
       </header>
 
       {loading && !data ? (
@@ -413,10 +561,14 @@ export function ServerBookingBoard() {
                   const roomBlocks = blocksByRoom.get(room.id) || []
                   const lanes = Math.max(1, ...positioned.map((reservation) => reservation.lane + 1))
                   const rowHeight = Math.max(54, 12 + lanes * 34)
+                  const selectedRoomTypeMatches = !selectedReservation
+                    || selectedReservation.roomTypeId === room.roomType.id
+                    || selectedReservation.roomTypeCode === room.roomType.code
 
                   return (
                     <div
                       key={room.id}
+                      data-board-room-id={room.id}
                       className="grid border-b bg-background hover:bg-muted/20"
                       style={{
                         gridTemplateColumns: `${ROOM_COLUMN_WIDTH}px ${days * dayWidth}px`,
@@ -431,6 +583,27 @@ export function ServerBookingBoard() {
                         <span className={`max-w-[78px] rounded border px-1.5 py-0.5 text-right text-[9px] font-medium uppercase leading-tight ${roomStatusTone(room)}`}>
                           {roomStatusLabel(room)}
                         </span>
+                        {canEdit && selectedReservation && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-[10px]"
+                            data-board-room-action={room.id}
+                            disabled={
+                              mutationInFlight
+                              || selectedReservation.assignedRoomId === room.id
+                              || !selectedRoomTypeMatches
+                              || room.operationalStatus !== 'AVAILABLE'
+                            }
+                            onClick={() => void assignSelectedReservation(room)}
+                            title={selectedRoomTypeMatches
+                              ? 'The PMS validates availability, inventory blocks, and concurrent changes before saving.'
+                              : `${selectedReservation.roomTypeName} cannot be assigned to this ${room.roomType.name} room.`}
+                          >
+                            {selectedReservation.assignedRoomId ? 'Move here' : 'Assign'}
+                          </Button>
+                        )}
                       </div>
                       <div
                         className="relative"
@@ -460,7 +633,8 @@ export function ServerBookingBoard() {
                               <span className="hidden truncate opacity-80 lg:inline">· {reservation.confirmationCode}</span>
                             </>
                           )
-                          const className = `absolute z-[2] flex h-7 items-center gap-1 overflow-hidden rounded border px-2 text-[11px] shadow-sm ${reservationColor(reservation.status)}`
+                          const selected = reservation.id === selectedReservationId
+                          const className = `absolute z-[2] flex h-7 items-center gap-1 overflow-hidden rounded border px-2 text-[11px] shadow-sm ${reservationColor(reservation.status)} ${selected ? 'ring-2 ring-primary ring-offset-1' : ''}`
                           const style = {
                             left: reservation.left + 2,
                             top: 6 + reservation.lane * 34,
@@ -473,9 +647,11 @@ export function ServerBookingBoard() {
                               key={reservation.id}
                               type="button"
                               className={`${className} cursor-pointer text-left ring-offset-background hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                              data-board-reservation-id={reservation.id}
                               style={style}
-                              title={`${title}. Open Reservations to edit.`}
-                              onClick={() => navigate('reservations')}
+                              title={`${title}. Select to change dates or move rooms.`}
+                              aria-pressed={selected}
+                              onClick={() => selectReservation(reservation)}
                             >
                               {content}
                             </button>
@@ -496,7 +672,7 @@ export function ServerBookingBoard() {
       )}
 
       <footer className="border-t bg-background px-4 py-2 text-xs text-muted-foreground">
-        Room moves and stay-date resizing are disabled on this timeline until their server transactions are available.
+        Booking Board changes are validated and persisted by the PMS. Room availability, blocks, room type, and concurrency conflicts are verified by the server before a change is accepted.
       </footer>
 
       <NewReservationDialog

@@ -12,6 +12,7 @@ import { createPrismaClient } from './prisma-client.mjs'
 import { databaseHealthFailure } from './health-response.mjs'
 import { createOpenApiDocument } from './openapi.mjs'
 import { listDomainEvents } from './domain-events.mjs'
+import { PmsValidationError } from './pms-domain.mjs'
 import {
   createMessageDraft,
   createMessageTemplate,
@@ -182,7 +183,7 @@ const port = Number(process.env.PORT || 10000)
 const host = process.env.HOST || '0.0.0.0'
 const MAX_JSON_BODY_BYTES = 1_000_000
 const CORS_ALLOW_METHODS = 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
-const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
+const CORS_ALLOW_HEADERS = `content-type, authorization, x-setup-token, x-request-id, x-idempotency-key, x-reservation-expected-updated-at, x-reservation-expected-version, ${OPS_WORKER_SIGNATURE_HEADER}, ${OPS_WORKER_TIMESTAMP_HEADER}, ${OPS_WORKER_NONCE_HEADER}`
 const PRODUCTION = process.env.NODE_ENV === 'production'
 
 let prisma
@@ -1722,7 +1723,21 @@ async function handleApi(request, response, url) {
   params = routeParam(url.pathname, /^\/api\/reservations\/(?<id>[^/]+)$/)
   if (params && request.method === 'PATCH') {
     requirePermission(user, 'edit:reservation')
-    const reservation = await updateReservation(db, params.id, await readJson(request), user)
+    const body = await readJson(request)
+    const expectedTokens = [
+      body.expectedUpdatedAt,
+      firstHeaderValue(request.headers['x-reservation-expected-updated-at']),
+      firstHeaderValue(request.headers['x-reservation-expected-version']),
+    ].filter((value) => value !== undefined && value !== null && value !== '')
+    if (new Set(expectedTokens.map(String)).size > 1) {
+      throw new PmsValidationError('Reservation update tokens do not match.')
+    }
+    const reservation = await updateReservation(db, params.id, {
+      ...body,
+      ...(expectedTokens.length ? { expectedUpdatedAt: String(expectedTokens[0]) } : {}),
+    }, user, {
+      idempotencyKey: context.idempotencyKey,
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: `Reservation ${reservation.confirmationCode} updated.` })
     return true
   }
@@ -1731,7 +1746,9 @@ async function handleApi(request, response, url) {
   if (params && request.method === 'POST') {
     requirePermission(user, 'edit:reservation')
     const body = await readJson(request)
-    const reservation = await assignRoom(db, params.id, body.roomId, user)
+    const reservation = await assignRoom(db, params.id, body.roomId, user, {
+      idempotencyKey: context.idempotencyKey,
+    })
     sendJson(response, 200, { ok: true, data: reservation, message: 'Room assigned successfully.' })
     return true
   }
